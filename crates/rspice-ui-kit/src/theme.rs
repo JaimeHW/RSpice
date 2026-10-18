@@ -7,7 +7,7 @@
 
 use egui::{
     Color32, Context, CornerRadius, FontFamily, FontId, Stroke, TextStyle,
-    style::{ScrollStyle, Selection, TextCursorStyle, WidgetVisuals, Widgets},
+    style::{ScrollFadeStyle, ScrollStyle, Selection, TextCursorStyle, WidgetVisuals, Widgets},
 };
 use serde::{Deserialize, Serialize};
 
@@ -403,6 +403,17 @@ fn build_style(t: &Tokens) -> egui::Style {
         handle_min_length: 30.0,
         bar_inner_margin: 3.0,
         bar_outer_margin: 0.0,
+        // A solid bar keeps its width whether or not the pointer is over the
+        // list, so its thumb shows too, as a desktop list's does: egui's
+        // solid style leaves an empty gutter until the pointer arrives.
+        dormant_handle_opacity: 0.6,
+        // egui fades the content at a scrolled edge by default, which greys
+        // the last visible row of a table or line of a log as if it were
+        // disabled. The thumb is the sign that more is there.
+        fade: ScrollFadeStyle {
+            strength: 0.0,
+            ..ScrollFadeStyle::default()
+        },
         ..ScrollStyle::solid()
     };
 
