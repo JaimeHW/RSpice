@@ -32,6 +32,19 @@ fn showing_supplementary(
         .unwrap()
 }
 
+/// A new sheet held upright, with a binding margin when `bound`, showing
+/// every field of the supplementary strip.
+fn upright(standard: DrawingSheetStandard, bound: bool) -> SchematicSheetFormat {
+    SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Portrait)
+        .try_update(|draft| {
+            draft.binding_margin = bound;
+            for field in ASME_Y14_1_SUPPLEMENTARY_FIELDS {
+                draft.title_block.fields.get_mut(&field).unwrap().visible = true;
+            }
+        })
+        .unwrap()
+}
+
 fn layout_of(format: &SchematicSheetFormat) -> DrawingSheetTitleLayout {
     drawing_sheet_title_layout(format, &format.geometry().unwrap())
         .expect("the sheet carries a title block")
@@ -94,19 +107,21 @@ fn a_new_ansi_or_arch_sheet_starts_on_the_asme_form_and_an_iso_sheet_on_iso_7200
 
 #[test]
 fn the_block_takes_fig_5_1_on_a_to_c_and_fig_5_2_on_d_and_larger() {
-    // Fig 5-1: 6.25 x 2.00 in. Fig 5-2: 7.62 x 2.50 in.
+    // Fig 5-1, 6.25 x 2.00 in, widened to 7.50 in for its values; Fig 5-2,
+    // 7.62 x 2.50 in, widened to 8.87 in. Held upright, an ANSI A sheet's
+    // drawing area is 7.50 in across and holds Fig 5-1 exactly.
     for (standard, expected) in [
-        (DrawingSheetStandard::AnsiA, (inch(625), inch(200))),
-        (DrawingSheetStandard::AnsiB, (inch(625), inch(200))),
-        (DrawingSheetStandard::AnsiC, (inch(625), inch(200))),
-        (DrawingSheetStandard::AnsiD, (inch(762), inch(250))),
-        (DrawingSheetStandard::AnsiE, (inch(762), inch(250))),
+        (DrawingSheetStandard::AnsiA, (inch(750), inch(200))),
+        (DrawingSheetStandard::AnsiB, (inch(750), inch(200))),
+        (DrawingSheetStandard::AnsiC, (inch(750), inch(200))),
+        (DrawingSheetStandard::AnsiD, (inch(887), inch(250))),
+        (DrawingSheetStandard::AnsiE, (inch(887), inch(250))),
         // ARCH: widened at the left by what `ARCH C` (3 mm) and `ARCH E1`
         // (6 mm) need in SIZE.
-        (DrawingSheetStandard::ArchA, (inch(657), inch(200))),
-        (DrawingSheetStandard::ArchC, (inch(657), inch(200))),
-        (DrawingSheetStandard::ArchD, (inch(885), inch(250))),
-        (DrawingSheetStandard::ArchE1, (inch(885), inch(250))),
+        (DrawingSheetStandard::ArchA, (inch(782), inch(200))),
+        (DrawingSheetStandard::ArchC, (inch(782), inch(200))),
+        (DrawingSheetStandard::ArchD, (inch(1010), inch(250))),
+        (DrawingSheetStandard::ArchE1, (inch(1010), inch(250))),
     ] {
         for orientation in [
             SchematicPageOrientation::Landscape,
@@ -115,6 +130,10 @@ fn the_block_takes_fig_5_1_on_a_to_c_and_fig_5_2_on_d_and_larger() {
             // A new sheet shows Cell / view and Document status, which the
             // strip above the block carries.
             let format = SchematicSheetFormat::from_standard(standard, orientation);
+            assert!(
+                !format.asme_title_block_form().unwrap().figure_minimum,
+                "{standard:?} {orientation:?}"
+            );
             let geometry = format.geometry().unwrap();
             let block = geometry.title_block.expect("the sheet carries a block");
             assert_eq!(
@@ -144,31 +163,52 @@ fn the_template_is_named_with_the_size_of_the_block_the_sheet_carries() {
     };
     assert_eq!(
         label(DrawingSheetStandard::AnsiB),
-        "ASME Y14.1 · 6.25 × 2.00 in"
+        "ASME Y14.1 · 7.50 × 2.00 in"
     );
     assert_eq!(
         label(DrawingSheetStandard::AnsiD),
-        "ASME Y14.1 · 7.62 × 2.50 in"
+        "ASME Y14.1 · 8.87 × 2.50 in"
     );
     // ASME Y14.1 does not define the ARCH series, so its block is named for
     // the format rather than claimed as the standard's.
     assert_eq!(
         label(DrawingSheetStandard::ArchB),
-        "ASME Y14.1 format · 6.57 × 2.00 in"
+        "ASME Y14.1 format · 7.82 × 2.00 in"
     );
     assert_eq!(
         label(DrawingSheetStandard::ArchD),
-        "ASME Y14.1 format · 8.85 × 2.50 in"
+        "ASME Y14.1 format · 10.10 × 2.50 in"
     );
+    // Every label names the block it reports.
+    for size in [AsmeY141TitleBlockSize::Small, AsmeY141TitleBlockSize::Large] {
+        for architectural in [false, true] {
+            for figure_minimum in [false, true] {
+                let form = AsmeY141TitleBlockForm {
+                    size,
+                    architectural,
+                    supplementary: false,
+                    figure_minimum,
+                };
+                let (width, height) = form.dimensions_um();
+                let named = format!(
+                    "{:.2} × {:.2} in",
+                    width as f64 / 25_400.0,
+                    height as f64 / 25_400.0
+                );
+                assert!(form.label().ends_with(&named), "{form:?} {named}");
+            }
+        }
+    }
 }
 
 #[test]
-fn fig_5_1_cells_stand_at_the_figures_dimensions() {
+fn fig_5_1_cells_right_of_e_stand_at_the_figures_dimensions() {
     let layout = layout_of(&sheet(DrawingSheetStandard::AnsiB));
-    assert_eq!((layout.width_um, layout.height_um), (inch(625), inch(200)));
-    // Block E 2.00 in; A 0.62, B (TITLE) 0.76, the number row 0.37 and the
-    // bottom row 0.25 in high, every division measured from the right edge.
-    let x0 = inch(200);
+    assert_eq!((layout.width_um, layout.height_um), (inch(750), inch(200)));
+    // Block E 3.25 in, widened from the figure's 2.00 for its names; A 0.62,
+    // B (TITLE) 0.76, the number row 0.37 and the bottom row 0.25 in high,
+    // every division measured from the right edge.
+    let x0 = inch(325);
     assert_eq!(
         bounds(cell(&layout, "TITLE")),
         (x0, inch(62), inch(425), inch(76))
@@ -210,20 +250,22 @@ fn fig_5_1_cells_stand_at_the_figures_dimensions() {
 }
 
 #[test]
-fn fig_5_2_cells_stand_at_the_figures_dimensions() {
+fn fig_5_2_widens_dwg_no_leftward_and_keeps_rev_and_the_bottom_row_in_place() {
     let layout = layout_of(&sheet(DrawingSheetStandard::AnsiD));
-    assert_eq!((layout.width_um, layout.height_um), (inch(762), inch(250)));
-    let x0 = inch(250);
+    assert_eq!((layout.width_um, layout.height_um), (inch(887), inch(250)));
+    // Block E 3.25 in and the part right of it 5.62, the figure's 5.12 and
+    // what DWG NO gains.
+    let x0 = inch(325);
     assert_eq!(
         bounds(cell(&layout, "TITLE")),
-        (x0, inch(62), inch(512), inch(113))
+        (x0, inch(62), inch(562), inch(113))
     );
     let row3 = inch(62 + 113);
     for (heading, x, width) in [
         ("SIZE", 0, 37),
         ("DAI", 37, 125),
-        ("DWG NO", 162, 300),
-        ("REV", 462, 50),
+        ("DWG NO", 162, 350),
+        ("REV", 512, 50),
     ] {
         assert_eq!(
             bounds(cell(&layout, heading)),
@@ -232,13 +274,35 @@ fn fig_5_2_cells_stand_at_the_figures_dimensions() {
         );
     }
     let row4 = row3 + inch(50);
-    for (heading, x, width) in [("SCALE", 0, 137), ("WEIGHT", 137, 200), ("SHEET", 337, 175)] {
+    for (heading, x, width) in [("SCALE", 0, 187), ("WEIGHT", 187, 200), ("SHEET", 387, 175)] {
         assert_eq!(
             bounds(cell(&layout, heading)),
             (x0 + inch(x), row4, inch(width), inch(25)),
             "{heading}"
         );
     }
+    // Each rule's distance from the right edge, against the figure's: REV
+    // and the bottom row's rules stand where the figure puts them, and the
+    // rules left of DWG NO move left by what it gains.
+    let from_right = |heading: &str| layout.width_um - cell(&layout, heading).x_um;
+    for (heading, rule, figure) in [
+        ("REV", 50, 50),
+        ("DWG NO", 400, 350),
+        ("DAI", 525, 475),
+        ("SIZE", 562, 512),
+        ("SHEET", 175, 175),
+        ("WEIGHT", 375, 375),
+        ("SCALE", 562, 512),
+    ] {
+        assert_eq!(
+            from_right(heading),
+            inch(rule),
+            "{heading}, figure {figure}"
+        );
+    }
+    // DWG NO's rule stands a quarter inch clear of the WEIGHT | SCALE rule
+    // below it, as the figure's stands.
+    assert_eq!(from_right("DWG NO") - from_right("WEIGHT"), inch(25));
 }
 
 #[test]
@@ -428,14 +492,14 @@ fn the_fields_map_onto_the_blocks_the_audit_assigns() {
 fn the_outline_and_main_divisions_are_thick_and_the_subdivisions_thin() {
     let layout = layout_of(&sheet(DrawingSheetStandard::AnsiB));
     assert_eq!(layout.outline_um, 600);
-    let x0 = inch(200);
+    let x0 = inch(325);
     let thick = layout
         .rules
         .iter()
         .filter(|rule| rule.width_um == 600)
         .map(|rule| (rule.from_x_um, rule.from_y_um, rule.to_x_um, rule.to_y_um))
         .collect::<Vec<_>>();
-    let right = inch(625);
+    let right = inch(750);
     assert_eq!(
         thick,
         [
@@ -455,13 +519,24 @@ fn the_outline_and_main_divisions_are_thick_and_the_subdivisions_thin() {
 
 #[test]
 fn every_line_of_the_form_stays_inside_its_cell() {
-    for standard in [
+    for (standard, format) in [
         DrawingSheetStandard::AnsiA,
         DrawingSheetStandard::AnsiD,
         DrawingSheetStandard::ArchB,
         DrawingSheetStandard::ArchE1,
-    ] {
-        let format = showing_supplementary(standard, &ASME_Y14_1_SUPPLEMENTARY_FIELDS);
+    ]
+    .map(|standard| {
+        (
+            standard,
+            showing_supplementary(standard, &ASME_Y14_1_SUPPLEMENTARY_FIELDS),
+        )
+    })
+    .into_iter()
+    .chain(
+        // The figure's own block, on a bound sheet held upright.
+        [DrawingSheetStandard::AnsiA, DrawingSheetStandard::ArchA]
+            .map(|standard| (standard, upright(standard, true))),
+    ) {
         let layout = layout_of(&format);
         let long = "WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE";
         let values = ASME_Y14_1_FORM_FIELDS
@@ -496,9 +571,13 @@ fn every_line_of_the_form_stays_inside_its_cell() {
 
 #[test]
 fn the_form_steps_down_to_fig_5_1_where_fig_5_2_does_not_fit() {
-    // A custom size started from ANSI, long enough to take Fig 5-2's block
-    // but too narrow for its 7.62 in: 200 mm less two 0.5 in margins leaves
-    // 174.6 mm across, under Fig 5-2's 193.55 mm, over Fig 5-1's 158.75 mm.
+    // A custom size started from ANSI, long enough to take Fig 5-2's block,
+    // narrowed in steps. Less its two 0.5 in margins, each width leaves a
+    // drawing area across that holds the next block down and no wider one:
+    // Fig 5-2 widened, 225.30 mm; Fig 5-2 at the figure's own dimensions,
+    // 193.55 mm; Fig 5-1 widened, 190.50 mm; Fig 5-1 at the figure's own,
+    // 158.75 mm.
+    use AsmeY141TitleBlockSize::{Large, Small};
     let narrow = |width_um| {
         crate::sheet_authoring::custom_format(
             "Narrow",
@@ -512,12 +591,23 @@ fn the_form_steps_down_to_fig_5_1_where_fig_5_2_does_not_fit() {
         })
         .unwrap()
     };
-    let narrowed = narrow(200_000);
-    let form = narrowed.asme_title_block_form().unwrap();
-    assert_eq!(form.size, AsmeY141TitleBlockSize::Small);
-    assert!(!narrowed.title_block_substituted());
-    // Narrower still, 154.6 mm across, neither fits, and the sheet carries
-    // no block.
+    for (width_um, size, figure_minimum) in [
+        (260_000, Large, false),
+        (230_000, Large, true),
+        (217_000, Small, false),
+        (200_000, Small, true),
+    ] {
+        let narrowed = narrow(width_um);
+        let form = narrowed.asme_title_block_form().unwrap();
+        assert_eq!(
+            (form.size, form.figure_minimum),
+            (size, figure_minimum),
+            "{width_um}"
+        );
+        assert!(!narrowed.title_block_substituted());
+    }
+    // Narrower still, 154.6 mm across, none fits, and the sheet carries no
+    // block.
     let too_narrow = narrow(180_000);
     assert_eq!(too_narrow.asme_title_block_form(), None);
     assert_eq!(
@@ -552,9 +642,10 @@ fn a_saved_ansi_sheet_keeps_the_block_it_was_saved_with() {
 
 #[test]
 fn block_e_is_a_name_and_date_grid_under_the_contract_number() {
+    // Twenty characters of a name at 3 mm, the length ISO 7200 recommends.
     for (standard, name_chars) in [
-        (DrawingSheetStandard::AnsiB, 8),
-        (DrawingSheetStandard::AnsiD, 13),
+        (DrawingSheetStandard::AnsiB, 20),
+        (DrawingSheetStandard::AnsiD, 20),
     ] {
         let layout = layout_of(&sheet(standard));
         let block_e = layout
@@ -595,6 +686,200 @@ fn block_e_is_a_name_and_date_grid_under_the_contract_number() {
         }
         assert_eq!(bottom, layout.height_um);
     }
+}
+
+/// A sheet's title values as an ordinary drawing fills them in.
+const FILLED: [(DrawingSheetTitleFieldId, &str); 21] = [
+    (Field::Project, "MyCircuit"),
+    (Field::CellView, "mycircuit/top/schematic"),
+    (Field::SheetTitle, "Bandgap reference core"),
+    (Field::Page, "1 of 3"),
+    (Field::Revision, "B"),
+    (Field::DrawnBy, "J. Whitfield"),
+    (Field::CheckedBy, "R. Okafor"),
+    (Field::ApprovedBy, "A. Moreau"),
+    (Field::Engineer, "M. Lindqvist"),
+    (Field::DocumentStatus, "Under approval"),
+    (Field::Organization, "Whitfield Analog Devices"),
+    (Field::DocumentId, "RS-0001-SCH-0042"),
+    (Field::Classification, "Company confidential"),
+    (Field::Language, "en"),
+    (Field::CageCode, "1ABC2"),
+    (Field::DrawnDate, "2026-10-12"),
+    (Field::CheckedDate, "2026-10-14"),
+    (Field::EngineerDate, "2026-10-15"),
+    (Field::ApprovedDate, "2026-10-18"),
+    (Field::ContractNumber, "N00024-26-C-0001"),
+    (Field::Date, "2026-10-18"),
+];
+
+#[test]
+fn the_form_holds_ordinary_values_whole_at_the_y14_2_heights() {
+    // Characters each cell holds at its height: names twenty and the
+    // drawing number sixteen, as ISO 7200 recommends, a classification
+    // twenty, a CAGE code five, and a cell / view path 24.
+    use DrawingSheetStandard::{AnsiB, AnsiD};
+    for (standard, held) in [
+        (
+            AnsiB,
+            [
+                ("DRAWN", 20),
+                ("CHECKED", 20),
+                ("ENGR", 20),
+                ("APPROVED", 20),
+                ("DWG NO", 22),
+                ("DAI", 10),
+                ("PROJECT", 9),
+                ("CELL / VIEW", 24),
+                ("STATUS", 14),
+                ("CLASSIFICATION", 20),
+                ("LANG", 2),
+            ],
+        ),
+        (
+            AnsiD,
+            [
+                ("DRAWN", 20),
+                ("CHECKED", 20),
+                ("ENGR", 20),
+                ("APPROVED", 20),
+                ("DWG NO", 16),
+                ("DAI", 5),
+                ("PROJECT", 11),
+                ("CELL / VIEW", 33),
+                ("STATUS", 14),
+                ("CLASSIFICATION", 20),
+                ("LANG", 4),
+            ],
+        ),
+    ] {
+        let format = showing_supplementary(standard, &ASME_Y14_1_SUPPLEMENTARY_FIELDS);
+        let layout = layout_of(&format);
+        for (heading, chars) in held {
+            let cell = cell(&layout, heading);
+            assert_eq!(cell.values[0].capacity(), chars, "{standard:?} {heading}");
+            assert_eq!(cell.letter_caption(), heading, "{standard:?}");
+        }
+        // Every value of an ordinary drawing is lettered whole: the date of
+        // issue stands in no cell of its own on the form.
+        let fields = resolved(&format, &FILLED);
+        assert!(layout.cut_fields(&fields).is_empty(), "{standard:?}");
+        let text = lettered(&layout, &fields);
+        for (field, value) in FILLED
+            .into_iter()
+            .filter(|(field, _)| *field != Field::Date)
+        {
+            assert!(
+                text.iter().any(|line| line.eq_ignore_ascii_case(value)),
+                "{standard:?} {field:?}: {text:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn fig_5_1_fills_an_upright_ansi_a_drawing_area_and_a_bound_one_keeps_the_figures_block() {
+    // Held upright, ANSI A's drawing area is 8.5 in less two 0.5 in margins,
+    // 7.50 in across, and holds the widened Fig 5-1 with nothing to spare;
+    // ARCH A's 8.00 in holds its 7.82 in block.
+    for (standard, area, block) in [
+        (DrawingSheetStandard::AnsiA, inch(750), inch(750)),
+        (DrawingSheetStandard::ArchA, inch(800), inch(782)),
+    ] {
+        let format = upright(standard, false);
+        let geometry = format.geometry().unwrap();
+        assert_eq!(geometry.drawing_area.width_um, area, "{standard:?}");
+        assert_eq!(
+            geometry.title_block.unwrap().width_um,
+            block,
+            "{standard:?}"
+        );
+        assert!(!format.asme_title_block_form().unwrap().figure_minimum);
+    }
+    // A binding margin leaves 7.25 and 7.75 in, which hold only the
+    // figure's own block: still the standard's, as its sizes are minimums,
+    // with the figure's eight-character names.
+    for (standard, label, block) in [
+        (
+            DrawingSheetStandard::AnsiA,
+            "ASME Y14.1 · 6.25 × 2.00 in",
+            inch(625),
+        ),
+        (
+            DrawingSheetStandard::ArchA,
+            "ASME Y14.1 format · 6.57 × 2.00 in",
+            inch(657),
+        ),
+    ] {
+        let format = upright(standard, true);
+        assert!(!format.title_block_substituted(), "{standard:?}");
+        assert!(format.asme_title_block_form().unwrap().figure_minimum);
+        assert_eq!(
+            format.title_block_template_label(format.title_block.template),
+            label
+        );
+        let layout = layout_of(&format);
+        assert_eq!(layout.width_um, block, "{standard:?}");
+        assert_eq!(cell(&layout, "TITLE").x_um, inch(200), "{standard:?}");
+        assert_eq!(cell(&layout, "DRAWN").values[0].capacity(), 8);
+        let strip = ["PROJECT", "CELL / VIEW", "STATUS", "CLASSIFICATION", "LANG"]
+            .map(|heading| cell(&layout, heading).width_um);
+        assert_eq!(
+            strip,
+            [100, 200 + (block - inch(625)) / 254, 150, 125, 50].map(inch),
+            "{standard:?}"
+        );
+    }
+}
+
+#[test]
+fn a_cell_view_path_too_long_for_its_cell_keeps_its_cell_and_view() {
+    let format = showing_supplementary(
+        DrawingSheetStandard::AnsiB,
+        &ASME_Y14_1_SUPPLEMENTARY_FIELDS,
+    );
+    let layout = layout_of(&format);
+    let path = layout.value(Field::CellView).unwrap();
+    assert_eq!(
+        path.letter("mycircuit/top/schematic"),
+        ["mycircuit/top/schematic"]
+    );
+    // Cut at its start, at the separator before the cell.
+    assert_eq!(
+        path.letter("analog_reference_library/top/schematic"),
+        ["…/top/schematic"]
+    );
+    assert!(path.elides("analog_reference_library/top/schematic"));
+    // A cell name too long to keep whole keeps as much of its end as fits.
+    assert_eq!(
+        path.letter("lib/bandgap_reference_core_trimmed/schematic"),
+        ["…_core_trimmed/schematic"]
+    );
+}
+
+#[test]
+fn a_value_the_form_still_cuts_short_is_reported_for_the_sheet_to_say_so() {
+    let format = sheet(DrawingSheetStandard::AnsiB);
+    let layout = layout_of(&format);
+    let long_name = "Maximilian Featherstonehaugh-Smythe";
+    let fields = resolved(
+        &format,
+        &[
+            (Field::DrawnBy, long_name),
+            (Field::CheckedBy, "R. Okafor"),
+            (Field::DocumentId, "RS-0001-SCH-0042"),
+        ],
+    );
+    assert_eq!(layout.cut_fields(&fields), [Field::DrawnBy]);
+    assert!(
+        lettered(&layout, &fields)
+            .iter()
+            .any(|line| line.ends_with('…') && long_name.starts_with(line.trim_end_matches('…')))
+    );
+    assert_eq!(
+        DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY,
+        "Longer than its cell in this sheet's title block holds; it prints cut short."
+    );
 }
 
 #[test]
@@ -695,8 +980,8 @@ fn fields_with_no_asme_block_stand_in_a_strip_above_it_never_inside_it() {
     use DrawingSheetStandard::{AnsiB, AnsiD, ArchD};
     let every = ASME_Y14_1_SUPPLEMENTARY_FIELDS;
     for (standard, widths) in [
-        (AnsiB, [100, 200, 150, 125, 50]),
-        (AnsiD, [125, 312, 150, 125, 50]),
+        (AnsiB, [100, 252, 150, 211, 37]),
+        (AnsiD, [125, 351, 150, 211, 50]),
     ] {
         let layout = layout_of(&showing_supplementary(standard, &every));
         let figure = layout_of(&sheet(standard));
@@ -749,7 +1034,7 @@ fn fields_with_no_asme_block_stand_in_a_strip_above_it_never_inside_it() {
     }
     // An ARCH block's strip widens CELL / VIEW by what SIZE gained.
     let arch = layout_of(&showing_supplementary(ArchD, &every));
-    assert_eq!(cell(&arch, "CELL / VIEW").width_um, inch(312 + 123));
+    assert_eq!(cell(&arch, "CELL / VIEW").width_um, inch(351 + 123));
 }
 
 #[test]
@@ -766,18 +1051,18 @@ fn a_hidden_supplementary_field_gives_its_cell_to_its_neighbour() {
     ));
     assert_eq!(
         bounds(cell(&new, "CELL / VIEW")),
-        (0, 0, inch(300), inch(37))
+        (0, 0, inch(352), inch(37))
     );
     assert_eq!(
         bounds(cell(&new, "STATUS")),
-        (inch(300), 0, inch(325), inch(37))
+        (inch(352), 0, inch(398), inch(37))
     );
     assert_eq!(
         new,
         layout_showing(&[Field::CellView, Field::DocumentStatus])
     );
     let alone = layout_showing(&[Field::Language]);
-    assert_eq!(bounds(cell(&alone, "LANG")), (0, 0, inch(625), inch(37)));
+    assert_eq!(bounds(cell(&alone, "LANG")), (0, 0, inch(750), inch(37)));
     // A sheet showing none of them carries no strip at all.
     let none = layout_showing(&[]);
     assert_eq!(none.height_um, inch(200));

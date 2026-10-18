@@ -24,12 +24,38 @@
 //! sheet. The blocks F and G the figures dash in as optional are absorbed
 //! into E, as 6.2 allows.
 //!
+//! 5.3 makes every block size a minimum, and ASME Y14.2's heights are
+//! minimums too, so where the figures' cells cut an ordinary value short at
+//! those heights the block is widened rather than its lettering shrunk. It
+//! grows at its left, so REV, the bottom row and the right edge stand where
+//! the figures put them. Block E's NAME column is 2.15 in on both figures,
+//! twenty characters at 3 mm, the length ISO 7200 recommends for a name:
+//! Fig 5-1 is then 7.50 in, as wide as an ANSI A sheet's drawing area held
+//! upright. Fig 5-2's DWG NO is 3.50 in, which holds at 6 mm the sixteen
+//! characters ISO 7200 recommends for an identifier and keeps its rule a
+//! quarter inch clear of the WEIGHT | SCALE rule below it, as the figure
+//! keeps it; DAI and SIZE move left with it. Fig 5-1's 2.37 in DWG NO
+//! already holds 22 at 3 mm.
+//!
+//! ```text
+//! Fig 5-1, 7.50 x 2.00 in                   Fig 5-2, 8.87 x 2.50 in
+//! |<- 3.25 ->|<-------- 4.25 -------->|     |<- 3.25 ->|<-------- 5.62 -------->|
+//! |NAME|DATE | SIZE|DAI |DWG NO |REV  |     |NAME|DATE | SIZE|DAI |DWG NO |REV  |
+//! |2.15|1.10 | .38 |1.12| 2.37  |.38  |     |2.15|1.10 | .37 |1.25| 3.50  |.50  |
+//! |          | SCALE|WEIGHT|SHEET     |     |          | SCALE|WEIGHT|SHEET     |
+//! |          | 1.00 | 1.50 | 1.75     |     |          | 1.87 | 2.00 | 1.75     |
+//! ```
+//!
+//! Where a sheet's drawing area cannot hold the widened block, a bound A
+//! size held upright, say, the block keeps the figure's own dimensions,
+//! which every sheet of its size holds: a minimum, so still the standard's.
+//!
 //! An ARCH sheet's size designation, such as `ARCH D`, does not fit the
 //! figures' 0.38 in SIZE block at the height ASME Y14.2 letters it. ASME
 //! Y14.1 does not define the ARCH series; RSpice draws its sheets in the
 //! format with the block widened at its left by what the designation needs,
 //! taken by SIZE and SCALE, so every division the figures measure from the
-//! right edge stands where they put it. 5.3 makes every block size a minimum.
+//! right edge stands where they put it.
 //!
 //! The fields RSpice carries that have no ASME block (project, cell / view,
 //! document status, classification and language) stand in a strip of their
@@ -72,12 +98,12 @@ const ENTRY_UM: u64 = 3_000;
 /// The title, size, DAI, drawing number and revision on D and larger sizes,
 /// 0.24 in.
 const KEY_LARGE_UM: u64 = 6_000;
-/// Space between a rule and the entry beside it. Block E's 0.90 in name
-/// column holds eight characters only at this padding.
+/// Space between a rule and the entry beside it.
 const PADDING_UM: u64 = 1_000;
 /// Space between a rule and the heading beside it: Fig 5-2's 0.37 in SIZE
-/// block holds its four-letter heading at 2.5 mm only this close to its
-/// rules. The face's own side bearings keep the capitals off them.
+/// block, and Fig 5-1's LANG cell as wide, hold a four-letter heading at
+/// 2.5 mm only this close to their rules. The face's own side bearings keep
+/// the capitals off them.
 const HEADING_PADDING_UM: u64 = 400;
 /// Least space between a rule and the capitals below it, and between the
 /// descenders of a line and the rule under it.
@@ -87,20 +113,22 @@ const FOOT_CLEAR_UM: u64 = 500;
 /// Which of the two figures a sheet's block follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AsmeY141TitleBlockSize {
-    /// Fig 5-1, for A, B and C sizes: 6.25 × 2.00 in.
+    /// Fig 5-1, for A, B and C sizes: 6.25 × 2.00 in, widened to 7.50 in.
     Small,
-    /// Fig 5-2, for D and larger sizes: 7.62 × 2.50 in.
+    /// Fig 5-2, for D and larger sizes: 7.62 × 2.50 in, widened to 8.87 in.
     Large,
 }
 
 /// The ASME form a sheet carries: its figure, whether its SIZE block is
-/// widened for an ARCH designation, and whether the supplementary strip
-/// stands above it.
+/// widened for an ARCH designation, whether the supplementary strip stands
+/// above it, and whether it keeps the figure's own dimensions because the
+/// drawing area cannot hold the block widened for its values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AsmeY141TitleBlockForm {
     pub size: AsmeY141TitleBlockSize,
     pub architectural: bool,
     pub supplementary: bool,
+    pub figure_minimum: bool,
 }
 
 impl AsmeY141TitleBlockForm {
@@ -116,7 +144,7 @@ impl AsmeY141TitleBlockForm {
     }
 
     /// What an ARCH sheet's SIZE block adds to the figure's width.
-    const fn widened_um(self) -> u64 {
+    const fn arch_widening_um(self) -> u64 {
         let figure = AsmeY141TitleBlockForm {
             architectural: false,
             ..self
@@ -124,22 +152,29 @@ impl AsmeY141TitleBlockForm {
         self.size_block_um() - figure.size_block_um()
     }
 
-    /// Width of block E, the approvals.
-    const fn approvals_um(self) -> u64 {
-        match self.size {
-            AsmeY141TitleBlockSize::Small => hundredths(200),
-            AsmeY141TitleBlockSize::Large => hundredths(250),
+    /// What DWG NO adds to the figure's width: Fig 5-2's 3.00 in holds
+    /// fourteen characters at 6 mm, and 3.50 in holds sixteen.
+    const fn number_widening_um(self) -> u64 {
+        match (self.size, self.figure_minimum) {
+            (AsmeY141TitleBlockSize::Large, false) => hundredths(50),
+            _ => 0,
         }
     }
 
-    /// Width of the part of the block right of E: 4.25 or 5.12 in, and an
-    /// ARCH sheet's widening.
+    /// Width of block E, the approvals.
+    const fn approvals_um(self) -> u64 {
+        let [name_um, date_um] = self.approval_columns_um();
+        name_um + date_um
+    }
+
+    /// Width of the part of the block right of E: 4.25 or 5.12 in, and what
+    /// DWG NO and an ARCH sheet's SIZE add.
     const fn right_part_um(self) -> u64 {
         let figure = match self.size {
             AsmeY141TitleBlockSize::Small => hundredths(425),
             AsmeY141TitleBlockSize::Large => hundredths(512),
         };
-        figure + self.widened_um()
+        figure + self.number_widening_um() + self.arch_widening_um()
     }
 
     #[must_use]
@@ -184,11 +219,16 @@ impl AsmeY141TitleBlockForm {
     /// named for the format rather than claimed as the standard's.
     #[must_use]
     pub const fn label(self) -> &'static str {
-        match (self.size, self.architectural) {
-            (AsmeY141TitleBlockSize::Small, false) => "ASME Y14.1 · 6.25 × 2.00 in",
-            (AsmeY141TitleBlockSize::Large, false) => "ASME Y14.1 · 7.62 × 2.50 in",
-            (AsmeY141TitleBlockSize::Small, true) => "ASME Y14.1 format · 6.57 × 2.00 in",
-            (AsmeY141TitleBlockSize::Large, true) => "ASME Y14.1 format · 8.85 × 2.50 in",
+        use AsmeY141TitleBlockSize::{Large, Small};
+        match (self.size, self.architectural, self.figure_minimum) {
+            (Small, false, false) => "ASME Y14.1 · 7.50 × 2.00 in",
+            (Large, false, false) => "ASME Y14.1 · 8.87 × 2.50 in",
+            (Small, true, false) => "ASME Y14.1 format · 7.82 × 2.00 in",
+            (Large, true, false) => "ASME Y14.1 format · 10.10 × 2.50 in",
+            (Small, false, true) => "ASME Y14.1 · 6.25 × 2.00 in",
+            (Large, false, true) => "ASME Y14.1 · 7.62 × 2.50 in",
+            (Small, true, true) => "ASME Y14.1 format · 6.57 × 2.00 in",
+            (Large, true, true) => "ASME Y14.1 format · 8.85 × 2.50 in",
         }
     }
 
@@ -231,35 +271,36 @@ impl AsmeY141TitleBlockForm {
             AsmeY141TitleBlockSize::Large => [
                 self.size_block_um(),
                 hundredths(125),
-                hundredths(300),
+                hundredths(300) + self.number_widening_um(),
                 hundredths(50),
             ],
         }
     }
 
-    /// Widths of SCALE, WEIGHT and SHEET.
+    /// Widths of SCALE, WEIGHT and SHEET. SCALE takes what the row above
+    /// adds, so WEIGHT and SHEET stand where the figure puts them.
     const fn bottom_row_um(self) -> [u64; 3] {
+        let added_um = self.number_widening_um() + self.arch_widening_um();
         match self.size {
-            AsmeY141TitleBlockSize::Small => [
-                hundredths(100) + self.widened_um(),
-                hundredths(150),
-                hundredths(175),
-            ],
-            AsmeY141TitleBlockSize::Large => [
-                hundredths(137) + self.widened_um(),
-                hundredths(200),
-                hundredths(175),
-            ],
+            AsmeY141TitleBlockSize::Small => {
+                [hundredths(100) + added_um, hundredths(150), hundredths(175)]
+            }
+            AsmeY141TitleBlockSize::Large => {
+                [hundredths(137) + added_um, hundredths(200), hundredths(175)]
+            }
         }
     }
 
-    /// Widths of block E's NAME and DATE columns. A date column of 1.10 in
-    /// holds `YYYY-MM-DD` at 3 mm.
+    /// Widths of block E's NAME and DATE columns: a 2.15 in name holds
+    /// twenty characters at 3 mm, the figure's own eight on Fig 5-1 and
+    /// thirteen on Fig 5-2. A date column of 1.10 in holds `YYYY-MM-DD`.
     const fn approval_columns_um(self) -> [u64; 2] {
-        match self.size {
-            AsmeY141TitleBlockSize::Small => [hundredths(90), hundredths(110)],
-            AsmeY141TitleBlockSize::Large => [hundredths(140), hundredths(110)],
-        }
+        let name_um = match (self.size, self.figure_minimum) {
+            (_, false) => hundredths(215),
+            (AsmeY141TitleBlockSize::Small, true) => hundredths(90),
+            (AsmeY141TitleBlockSize::Large, true) => hundredths(140),
+        };
+        [name_um, hundredths(110)]
     }
 
     /// Height of each of block E's four signature rows: what is left of the
@@ -270,20 +311,31 @@ impl AsmeY141TitleBlockForm {
     }
 
     /// Widths of the supplementary strip's PROJECT, CELL / VIEW, STATUS,
-    /// CLASSIFICATION and LANG cells. STATUS holds the longest status at
-    /// 3 mm, CLASSIFICATION its heading at 2.5 mm, LANG an ISO 639 code;
-    /// CELL / VIEW takes the rest, and an ARCH block's widening.
+    /// CLASSIFICATION and LANG cells, at 3 mm. PROJECT holds nine
+    /// characters on Fig 5-1 and eleven on Fig 5-2, STATUS the longest
+    /// status, CLASSIFICATION twenty and LANG an ISO 639 code: on Fig 5-1
+    /// ISO 7200's two letters, which leaves the 7.50 in strip room for a
+    /// cell / view path of 24, and four elsewhere. CELL / VIEW takes the
+    /// rest. A block kept at the figure's own dimensions keeps
+    /// CLASSIFICATION as wide as its heading and LANG at 0.50 in.
     const fn supplementary_cells_um(self) -> [u64; 5] {
-        let [project, cell_view] = match self.size {
-            AsmeY141TitleBlockSize::Small => [hundredths(100), hundredths(200)],
-            AsmeY141TitleBlockSize::Large => [hundredths(125), hundredths(312)],
+        let project_um = match self.size {
+            AsmeY141TitleBlockSize::Small => hundredths(100),
+            AsmeY141TitleBlockSize::Large => hundredths(125),
         };
+        let (classification_um, language_um) = match (self.size, self.figure_minimum) {
+            (_, true) => (hundredths(125), hundredths(50)),
+            (AsmeY141TitleBlockSize::Small, false) => (hundredths(211), hundredths(37)),
+            (AsmeY141TitleBlockSize::Large, false) => (hundredths(211), hundredths(50)),
+        };
+        let status_um = hundredths(150);
+        let fixed_um = project_um + status_um + classification_um + language_um;
         [
-            project,
-            cell_view + self.widened_um(),
-            hundredths(150),
-            hundredths(125),
-            hundredths(50),
+            project_um,
+            self.width_um() - fixed_um,
+            status_um,
+            classification_um,
+            language_um,
         ]
     }
 }
@@ -466,28 +518,38 @@ impl SchematicSheetFormat {
             supplementary: ASME_Y14_1_SUPPLEMENTARY_FIELDS
                 .into_iter()
                 .any(|field| self.title_field_shown(field)),
+            figure_minimum: false,
         }
     }
 
-    /// The ASME form the sheet carries: its size's figure, or Fig 5-1 where
-    /// the drawing area cannot hold Fig 5-2, upright in the lower right
-    /// corner either way. `None` when the drawing area holds neither.
+    /// The ASME form the sheet carries, upright in the lower right corner:
+    /// its size's figure, widened for its values where the drawing area
+    /// holds that and at the figure's own dimensions where it does not, and
+    /// then Fig 5-1 the same way where the area cannot hold Fig 5-2. `None`
+    /// when the drawing area holds none of them.
     #[must_use]
     pub fn asme_title_block_form(&self) -> Option<AsmeY141TitleBlockForm> {
         let preferred = self.preferred_asme_title_block();
+        let small = AsmeY141TitleBlockForm {
+            size: AsmeY141TitleBlockSize::Small,
+            ..preferred
+        };
         let (area_width_um, area_height_um) = self.drawing_area_extent_um()?;
-        [
-            preferred,
-            AsmeY141TitleBlockForm {
-                size: AsmeY141TitleBlockSize::Small,
-                ..preferred
-            },
-        ]
-        .into_iter()
-        .find(|form| {
-            let (width_um, height_um) = form.dimensions_um();
-            width_um <= area_width_um && height_um <= area_height_um
-        })
+        [preferred, small]
+            .into_iter()
+            .flat_map(|form| {
+                [
+                    form,
+                    AsmeY141TitleBlockForm {
+                        figure_minimum: true,
+                        ..form
+                    },
+                ]
+            })
+            .find(|form| {
+                let (width_um, height_um) = form.dimensions_um();
+                width_um <= area_width_um && height_um <= area_height_um
+            })
     }
 
     /// The template's name as this sheet's Page Setup offers it: the ASME
