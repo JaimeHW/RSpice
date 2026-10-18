@@ -531,6 +531,9 @@ struct FrameTimes {
     name: &'static str,
     budget_ms: f64,
     frames_ms: Vec<f64>,
+    /// Whether every frame is held to the budget rather than the median: a
+    /// gesture's frames each make the user wait.
+    every_frame: bool,
 }
 
 impl FrameTimes {
@@ -638,6 +641,7 @@ fn time_scenario_in(
         name,
         budget_ms,
         frames_ms,
+        every_frame: false,
     }
 }
 
@@ -756,6 +760,110 @@ fn operating_point_overlay_legible() -> FrameTimes {
             );
         },
     )
+}
+
+/// A part dragged across the sheet at 100 %, one grid step a frame, each
+/// frame timed: the press and every move, then the drop on its own. Each move
+/// changes the drag's delta, so each one moves the part, rubber-bands its
+/// wires and re-judges the open pins. The drop is the one frame that commits
+/// the edit: it records the undo step, cleans the sheet's wires up and syncs
+/// the workspace, so it is held to one display frame rather than to the move
+/// budget.
+fn part_drag() -> [FrameTimes; 2] {
+    let fixture = fixture_without_overlay();
+    let mut state = fixture.state;
+    // A resistor in the middle of the open sheet's lattice.
+    let part = fixture.components[0][COLUMNS * (ROWS / 2) + COLUMNS / 2];
+    let at = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == part)
+        .map(|component| component.pos)
+        .expect("the part is on the sheet");
+    let grid = state.schematic.document().grid_size;
+    let editor = &mut state.schematic.session.editor;
+    editor.needs_fit = false;
+    editor.zoom = 1.0;
+    editor.pan = (
+        f64::from(SCREEN.x) * 0.5 - f64::from(at.x),
+        f64::from(SCREEN.y) * 0.5 - f64::from(at.y),
+    );
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
+    let mut clock = 0.0;
+    let mut frame = |state: &mut AppState, event: egui::Event| {
+        clock += 1.0 / 60.0;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            events: vec![event],
+            time: Some(clock),
+            ..Default::default()
+        };
+        let started = crate::time_compat::Instant::now();
+        let output = ctx.run_ui(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    super::render_schematic_view(ui, state, symbols.as_ref())
+                });
+        });
+        let elapsed = started.elapsed().as_secs_f64() * 1_000.0;
+        std::hint::black_box(output.shapes.len());
+        elapsed
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+
+    let mut pointer = egui::pos2(SCREEN.x * 0.5, SCREEN.y * 0.5);
+    for _ in 0..WARM_UP_FRAMES {
+        frame(&mut state, egui::Event::PointerMoved(pointer));
+    }
+    let mut moves_ms = vec![frame(&mut state, button(pointer, true))];
+    for _ in 0..TIMED_FRAMES {
+        pointer.x += grid as f32;
+        moves_ms.push(frame(&mut state, egui::Event::PointerMoved(pointer)));
+    }
+    let drop_ms = frame(&mut state, button(pointer, false));
+
+    let steps = i32::try_from(TIMED_FRAMES).expect("a few frames");
+    let dropped = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == part)
+        .map(|component| component.pos);
+    assert_eq!(
+        dropped,
+        Some(Point::new(at.x + steps * grid, at.y)),
+        "the part follows the pointer and drops where it was released"
+    );
+    assert!(
+        !state.schematic_drag_in_progress(),
+        "the drop ends the drag"
+    );
+    [
+        FrameTimes {
+            name: "part drag at 100 %: each move",
+            budget_ms: 8.0,
+            frames_ms: moves_ms,
+            every_frame: true,
+        },
+        FrameTimes {
+            name: "part drag at 100 %: the drop",
+            // One display frame at 60 Hz.
+            budget_ms: 16.7,
+            frames_ms: vec![drop_ms],
+            every_frame: true,
+        },
+    ]
 }
 
 /// One suspected site's cost on its own: the median of seven calls, in
@@ -1055,8 +1163,10 @@ fn idle_frame_circles_and_tessellation() -> (usize, f64) {
 
 /// Release budgets, on desktop and in the browser alike: idle hover under
 /// 4 ms; the move preview, Stretch and the operating-point overlay under
-/// 8 ms. Every scenario is printed
-/// before any budget is asserted, so a failing run still reports them all.
+/// 8 ms; a part drag's press and every one of its moves under 8 ms, and its
+/// drop under one 60 Hz frame, each by its slowest frame and not only its
+/// median. Every scenario is printed before any budget is asserted, so a
+/// failing run still reports them all.
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[ignore = "frame-cost probe"]
@@ -1064,7 +1174,7 @@ fn canvas_frame_cost_at_scale() {
     use std::fmt::Write as _;
 
     report(&site_cost_table());
-    let scenarios = [
+    let mut scenarios = vec![
         idle_hover(),
         move_preview(),
         junction_hover(),
@@ -1072,6 +1182,7 @@ fn canvas_frame_cost_at_scale() {
         operating_point_overlay(),
         operating_point_overlay_legible(),
     ];
+    scenarios.extend(part_drag());
     let mut table =
         String::from("scenario                            min ms  median ms     max ms   budget\n");
     for scenario in &scenarios {
@@ -1087,11 +1198,15 @@ fn canvas_frame_cost_at_scale() {
     }
     report(&table);
     for scenario in &scenarios {
+        let (measured, which) = if scenario.every_frame {
+            (scenario.max(), "its slowest frame")
+        } else {
+            (scenario.median(), "a frame")
+        };
         assert!(
-            scenario.median() < scenario.budget_ms,
-            "{} takes {:.2} ms a frame against a {:.1} ms budget",
+            measured < scenario.budget_ms,
+            "{} takes {measured:.2} ms {which} against a {:.1} ms budget",
             scenario.name,
-            scenario.median(),
             scenario.budget_ms
         );
     }
