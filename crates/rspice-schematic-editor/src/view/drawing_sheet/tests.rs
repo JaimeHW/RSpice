@@ -356,6 +356,94 @@ fn title_block_rotation_preserves_center_and_swaps_complete_block_extent() {
     assert!((bounds.height() - target.height()).abs() < f32::EPSILON);
 }
 
+/// Every shape the canvas paints for `sheet`'s title block at one world unit
+/// per point, lettering `fields`.
+fn painted_title_block(
+    sheet: &ActiveDrawingSheet,
+    fields: &[ResolvedDrawingSheetTitleField],
+) -> Vec<Shape> {
+    let world = sheet
+        .geometry
+        .title_block
+        .expect("the sheet carries a title block");
+    let block = Rect::from_min_max(
+        pos2(world.min_x as f32, world.min_y as f32),
+        pos2(world.max_x as f32, world.max_y as f32),
+    );
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let frame = || {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(2_000.0, 2_000.0))),
+                ..Default::default()
+            },
+            |ui| {
+                draw_title_block(
+                    &ui.ctx().layer_painter(egui::LayerId::background()),
+                    block,
+                    DrawingSheetLod::resolve(1.0, 1.0, DRAWING_SHEET_TITLE_BLOCK_LETTERING),
+                    1.0,
+                    DrawingSheetPalette::resolve(&Tokens::get(ui.ctx())),
+                    || fields.to_vec(),
+                    sheet,
+                );
+            },
+        )
+    };
+    // Fonts are built on the first pass and laid out from the second.
+    drop(frame());
+    frame()
+        .shapes
+        .into_iter()
+        .map(|clipped| clipped.shape)
+        .collect()
+}
+
+/// The text of every line `shapes` letter, in paint order.
+fn lettered_text(shapes: &[Shape]) -> Vec<String> {
+    shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_automatic_field_is_lettered_like_any_other() {
+    // ISO 7200 marks no field as filled in by the system, so the canvas
+    // neither marks such a cell nor letters its caption any differently.
+    let sheet = test_sheet();
+    let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
+        &sheet.format,
+        &[(
+            rspice_design_model::design_management::DrawingSheetTitleFieldId::Page,
+            "1 of 1".to_owned(),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    assert!(fields.iter().any(|field| {
+        field.authority
+            == rspice_design_model::design_management::DrawingSheetTitleFieldValueAuthority::Automatic
+    }));
+    let shapes = painted_title_block(&sheet, &fields);
+    assert!(
+        !shapes.iter().any(|shape| matches!(shape, Shape::Circle(_))),
+        "an automatic cell carries no marker"
+    );
+    let text = lettered_text(&shapes);
+    for field in &fields {
+        assert!(
+            text.iter().any(|line| line == field.id.display_label()),
+            "{:?} must be captioned with its own wording: {text:?}",
+            field.id
+        );
+    }
+}
+
 #[test]
 fn title_block_text_uses_an_ellipsis_instead_of_a_clipped_final_glyph() {
     assert_eq!(truncate_title_text("ABCDEFG", 5), "ABCD…");

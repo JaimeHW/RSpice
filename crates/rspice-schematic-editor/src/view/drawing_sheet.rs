@@ -29,9 +29,9 @@ use rspice_design_model::design_management::{
     DRAWING_SHEET_TITLE_CAPTION_POSITION, DRAWING_SHEET_TITLE_CELL_PADDING_UM,
     DRAWING_SHEET_TITLE_VALUE_POSITION, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
-    DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldValueAuthority, DrawingSheetZoneEdges,
-    DrawingSheetZoneGrid, DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField,
-    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_zone_lettering_um,
+    DrawingSheetTitleBlockRotation, DrawingSheetZoneEdges, DrawingSheetZoneGrid,
+    DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField, SchematicSheetFormat,
+    drawing_sheet_mono_em_um, drawing_sheet_zone_lettering_um,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -1314,7 +1314,7 @@ fn draw_title_block(
     let angle = title_block_rotation_angle(rotation);
     // Domain geometry exposes the rotated bounding box. Author the complete
     // block in its natural orientation, then rotate every primitive around
-    // the shared center so the outline, grid, markers, and text cannot drift.
+    // the shared center so the outline, grid, and text cannot drift.
     let authored_block = if angle == 0.0 {
         block
     } else {
@@ -1451,21 +1451,6 @@ fn draw_title_block(
             palette.block_label,
             rotation,
         );
-        if field.authority == DrawingSheetTitleFieldValueAuthority::Automatic {
-            // The marker is a canvas affordance rather than paper geometry —
-            // hardcopy prefixes the caption instead — so it keeps a readable
-            // screen radius while sitting at a fixed physical corner of the
-            // cell, clear of the grid rules on either side of it.
-            let marker_inset = authored_title_cell_padding() * 0.5 * zoom;
-            clipped.circle_filled(
-                transform(pos2(
-                    authored_cell.right() - marker_inset,
-                    authored_cell.top() + marker_inset,
-                )),
-                1.25 * zoom.max(1.0),
-                palette.block_label,
-            );
-        }
         paint_title_text(
             &clipped,
             transform(pos2(

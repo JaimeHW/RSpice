@@ -91,18 +91,13 @@ impl SemanticSceneCompiler<'_> {
             .title_block_rows(template)
             .map(|rows| rows as u64)
             .ok_or_else(|| conversion_error("title block has no authored grid"))?;
-        let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(format, automatic_values)
-            .into_iter()
-            .map(|field| {
-                (
-                    field.id.display_label().to_owned(),
-                    field.value,
-                    field.authority
-                        == rspice_design_model::design_management::DrawingSheetTitleFieldValueAuthority::Automatic,
-                    field.id.emphasised(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
+            format,
+            automatic_values,
+        )
+        .into_iter()
+        .map(|field| (field.id.display_label(), field.value, field.id.emphasised()))
+        .collect::<Vec<_>>();
         // A block with no field to show is plotted as its outline alone, as
         // the canvas draws it, rather than with fields the sheet does not
         // carry.
@@ -151,14 +146,9 @@ impl SemanticSceneCompiler<'_> {
         let lettering = rspice_design_model::design_management::DRAWING_SHEET_TITLE_BLOCK_LETTERING;
         let value_chars = capacity(lettering.data_um)?;
         let caption_chars = capacity(lettering.caption_um)?;
-        for (index, (label, value, automatic, emphasised)) in fields.into_iter().enumerate() {
+        for (index, (label, value, emphasised)) in fields.into_iter().enumerate() {
             let row = index as u64 / columns;
             let column = index as u64 % columns;
-            let label = if automatic {
-                format!("• {label}")
-            } else {
-                label
-            };
             // Caption and value sit on the shared fractions of the cell that
             // the canvas also places them on. The canvas centres a line on
             // that point while publication places a baseline on it, so each
@@ -180,7 +170,10 @@ impl SemanticSceneCompiler<'_> {
                         + at(DRAWING_SHEET_TITLE_CAPTION_POSITION)
                         + drawing_sheet_mono_baseline_offset_um(lettering.caption_um) as i64,
                 )?,
-                &truncate_title_block_text(&label, caption_chars),
+                // The field's own wording and nothing else, as the canvas
+                // letters it: ISO 7200 marks no field as filled in by the
+                // system, and a reader of the print has no use for knowing.
+                &truncate_title_block_text(label, caption_chars),
                 SceneFont::Monospace,
                 drawing_sheet_mono_em_um(lettering.caption_um),
                 stroke.color,

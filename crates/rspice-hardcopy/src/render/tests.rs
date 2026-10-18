@@ -1469,7 +1469,7 @@ fn a_plotted_title_block_declares_no_scale() {
         })
         .collect::<Vec<_>>();
     assert!(
-        text.contains(&"\u{2022} Page"),
+        text.contains(&"Page"),
         "the title block must still be plotted"
     );
     assert!(!text.iter().any(|line| line.contains("Scale")));

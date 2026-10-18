@@ -142,6 +142,27 @@ fn only_the_document_identifier_is_plotted_in_the_heavier_weight() {
 }
 
 #[test]
+fn a_plotted_caption_letters_the_field_name_and_nothing_else() {
+    // ISO 7200 marks no field as filled in by the system, so the caption of
+    // a field RSpice fills in reads exactly as an authored field's does.
+    let format = SchematicSheetFormat::default();
+    let caption_em = drawing_sheet_mono_em_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.caption_um);
+    let captions = plotted_title_lines(&format)
+        .into_iter()
+        .filter(|(_, em_um, _)| *em_um == caption_em)
+        .map(|(_, _, text)| text)
+        .collect::<Vec<_>>();
+    let expected = format
+        .title_block_field_order()
+        .into_iter()
+        .filter(|field| format.title_block.fields[field].visible)
+        .map(|field| field.display_label().to_owned())
+        .collect::<Vec<_>>();
+    assert!(expected.contains(&"Page".to_owned()));
+    assert_eq!(captions, expected);
+}
+
+#[test]
 fn plotted_title_capitals_stand_at_the_height_the_standard_names() {
     for (standard, template) in [
         (
