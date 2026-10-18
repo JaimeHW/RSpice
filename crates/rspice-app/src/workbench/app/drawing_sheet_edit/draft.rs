@@ -473,17 +473,16 @@ impl DrawingSheetDraft {
 
     /// A one-line note on an orientation ISO 5457 does not use.
     pub(crate) fn orientation_advisory(&self) -> Option<&'static str> {
-        let landscape_only = matches!(
-            self.size.standard(),
-            Some(
-                DrawingSheetStandard::IsoA0
-                    | DrawingSheetStandard::IsoA1
-                    | DrawingSheetStandard::IsoA2
-                    | DrawingSheetStandard::IsoA3
-            )
-        );
-        (landscape_only && self.orientation == SchematicPageOrientation::Portrait)
-            .then_some("ISO 5457 uses A0–A3 in landscape.")
+        let standard = self.size.standard()?;
+        standard_orientation_advisory(
+            &AuthoredDrawingSheetSize::Standard { standard },
+            self.orientation,
+        )
+    }
+
+    /// The title block the draft's sheet asks for.
+    pub(crate) fn title_block_template(&self) -> DrawingSheetTitleBlockTemplate {
+        title_template_to_model(self.title_block)
     }
 
     /// The margins the draft's sheet takes from its standard, or none when it
@@ -891,6 +890,25 @@ pub(crate) fn format_um(value_um: u64, unit: SheetDisplayUnit) -> String {
         .to_owned()
 }
 
+/// A one-line note when `size` stands in an orientation its standard does
+/// not use: ISO 5457 draws A0 to A3 in landscape only.
+pub(crate) fn standard_orientation_advisory(
+    size: &AuthoredDrawingSheetSize,
+    orientation: SchematicPageOrientation,
+) -> Option<&'static str> {
+    let landscape_only = matches!(
+        size,
+        AuthoredDrawingSheetSize::Standard {
+            standard: DrawingSheetStandard::IsoA0
+                | DrawingSheetStandard::IsoA1
+                | DrawingSheetStandard::IsoA2
+                | DrawingSheetStandard::IsoA3
+        }
+    );
+    (landscape_only && orientation == SchematicPageOrientation::Portrait)
+        .then_some("ISO 5457 uses A0–A3 in landscape.")
+}
+
 /// The size menu's label for `standard` on the sheet `format` describes: its
 /// designation and oriented size in that sheet's unit. Every surface offering
 /// the same choice names it exactly so.
@@ -939,6 +957,20 @@ pub(crate) fn format_choice_label(
         format_um(height, unit),
         unit.suffix()
     )
+}
+
+/// `value_um` written in the sheet's `unit`, to the micrometre it is stored
+/// to and no further.
+pub(crate) fn format_sheet_length(value_um: u64, unit: DrawingSheetDisplayUnit) -> String {
+    format_um(value_um, display_unit_from_model(unit))
+}
+
+/// A length typed in the sheet's `unit`, in micrometres.
+pub(crate) fn parse_sheet_length(
+    value: &str,
+    unit: DrawingSheetDisplayUnit,
+) -> Result<u64, String> {
+    parse_length_um(value, display_unit_from_model(unit))
 }
 
 fn display_unit_from_model(unit: DrawingSheetDisplayUnit) -> SheetDisplayUnit {

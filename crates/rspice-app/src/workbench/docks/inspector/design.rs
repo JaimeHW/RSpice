@@ -355,7 +355,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     if inspected != DesignSubject::Sheet {
-        sheet::commit_pending_title_field(ui.ctx(), &mut app.state);
+        sheet::commit_pending_sheet_text(ui.ctx(), &mut app.state);
     }
 
     match inspected {

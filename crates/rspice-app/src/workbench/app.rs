@@ -76,7 +76,7 @@ thread_local! {
 pub(in crate::workbench) mod actions;
 mod command_palette;
 mod dialogs;
-mod drawing_sheet_edit;
+pub(in crate::workbench) mod drawing_sheet_edit;
 #[cfg(target_arch = "wasm32")]
 mod pack_persistence;
 #[cfg(target_arch = "wasm32")]
@@ -127,11 +127,8 @@ pub(crate) use dialogs::drawing_sheet_support::{
     DrawingSheetSupportState, open_sheet_format_manager, open_title_block_fields,
 };
 pub(crate) use drawing_sheet_edit::{
-    DrawingSheetEdit, DrawingSheetSetupState, apply_drawing_sheet_edit, current_size_choice_label,
-    drawing_sheet_setup_available, drawing_sheet_setup_available_for_state,
-    open_drawing_sheet_setup, open_drawing_sheet_setup_for_custom_size,
+    DrawingSheetSetupState, drawing_sheet_setup_available, open_drawing_sheet_setup,
     open_drawing_sheet_setup_for_state, open_drawing_sheet_setup_with_preset,
-    standard_size_choice_label,
 };
 
 pub(crate) use dialogs::connectivity_manager::{

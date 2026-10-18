@@ -1,10 +1,13 @@
 //! Authority capture and atomic publication for drawing-sheet setup.
 
 use crate::state::{
-    DrawingSheetDocumentControl, DrawingSheetReleaseStatus, DrawingSheetStandard,
-    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTransactionKind,
-    DrawingSheetTransactionReceipt, DrawingSheetTransactionSkip, SchematicPageOrientation,
-    SchematicSheetFormat, SheetId, ViewType,
+    AuthoredDrawingSheetSize, DRAWING_SHEET_MIXED_SIZES_ADVISORY, DrawingSheetBorderTemplate,
+    DrawingSheetDisplayUnit, DrawingSheetDocumentControl, DrawingSheetFrameConvention,
+    DrawingSheetInheritance, DrawingSheetPreset, DrawingSheetPresetScope,
+    DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
+    DrawingSheetTitleFieldId, DrawingSheetTransactionKind, DrawingSheetTransactionReceipt,
+    DrawingSheetTransactionSkip, SchematicPageOrientation, SchematicSheetFormat, SheetId, ViewType,
+    drawing_sheet_sizes_mixed,
 };
 use crate::workbench::SurfaceId;
 use crate::workbench::app::RSpiceApp;
@@ -12,8 +15,9 @@ use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::Workspace;
 
 use super::draft::{
-    DrawingSheetAuthority, DrawingSheetDraft, DrawingSheetSetupState,
-    GovernedDrawingSheetAuthority, PageSetupScope, SheetSizeChoice, ValidatedDrawingSheetDraft,
+    BorderTemplateChoice, DrawingSheetAuthority, DrawingSheetDraft, DrawingSheetSetupState,
+    GovernedDrawingSheetAuthority, PageSetupScope, SheetDisplayUnit, SheetSizeChoice,
+    TitleBlockTemplateChoice, ValidatedDrawingSheetDraft, ZoneModeChoice, format_um,
     title_template_from_model,
 };
 
@@ -152,36 +156,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
         })
         .unwrap_or_default();
     let writable_sheet_count = sheet_count.saturating_sub(managed_sheet_names.len());
-    // Every other sheet's paper, as each is drawn: a sheet that follows the
-    // project default is drawn on its paper.
-    let settings = state
-        .workspace
-        .content
-        .design_management
-        .drawing_sheet_settings();
-    let other_sheet_sizes = governed
-        .as_ref()
-        .and_then(|governed| {
-            let catalog = state
-                .workspace
-                .content
-                .design_management
-                .sheet_catalog(&governed.cell_view_key)?;
-            Some(
-                catalog
-                    .sheets()
-                    .iter()
-                    .filter(|sheet| sheet.id() != governed.sheet_id)
-                    .map(|sheet| match sheet.page_format().inheritance {
-                        crate::state::DrawingSheetInheritance::ProjectDefault => {
-                            settings.default_format.authored_size.clone()
-                        }
-                        _ => sheet.page_format().authored_size.clone(),
-                    })
-                    .collect(),
-            )
-        })
-        .unwrap_or_default();
+    let other_sheet_sizes = other_sheet_sizes(state);
     state.dialogs.drawing_sheet_setup = DrawingSheetSetupState {
         open: true,
         document_name: state.workspace.content.active_display_path().to_owned(),
@@ -217,6 +192,45 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
         ..DrawingSheetSetupState::default()
     };
     true
+}
+
+/// The paper every other sheet of the active schematic is drawn on: a sheet
+/// that follows the project default is drawn on the default's.
+fn other_sheet_sizes(state: &AppState) -> Vec<AuthoredDrawingSheetSize> {
+    let designs = &state.workspace.content.design_management;
+    let default_size = &designs
+        .drawing_sheet_settings()
+        .default_format
+        .authored_size;
+    designs
+        .sheet_catalog(&state.workspace.content.active_key())
+        .map(|catalog| {
+            let active = catalog.active_sheet_id();
+            catalog
+                .sheets()
+                .iter()
+                .filter(|sheet| Some(sheet.id()) != active)
+                .map(|sheet| match sheet.page_format().inheritance {
+                    DrawingSheetInheritance::ProjectDefault => default_size.clone(),
+                    _ => sheet.page_format().authored_size.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// ASME Y14.1's advice when the active sheet, drawn as `format`, leaves an
+/// ANSI or ARCH schematic's sheets on more than one size. ISO 5457 makes no
+/// such recommendation.
+pub(crate) fn mixed_size_advisory(
+    state: &AppState,
+    format: &SchematicSheetFormat,
+) -> Option<&'static str> {
+    (format.frame_convention() == DrawingSheetFrameConvention::AsmeY141
+        && drawing_sheet_sizes_mixed(
+            std::iter::once(&format.authored_size).chain(&other_sheet_sizes(state)),
+        ))
+    .then_some(DRAWING_SHEET_MIXED_SIZES_ADVISORY)
 }
 
 pub(crate) fn validate_drawing_sheet_authority(
@@ -396,14 +410,47 @@ pub(crate) fn apply_drawing_sheet_setup(state: &mut AppState) -> Result<String, 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DrawingSheetEdit {
     Size(DrawingSheetStandard),
+    /// A one-off size the standard list does not hold, its edges as the sheet
+    /// stands in its orientation. It keeps the frame of the size it started
+    /// from.
+    CustomSize {
+        width_um: u64,
+        height_um: u64,
+    },
+    /// The name a one-off custom size is known and saved by.
+    CustomSizeName(String),
+    /// A saved custom size, the project's or the person's own. A personal
+    /// one is copied into the project when the sheet takes it.
+    Preset(DrawingSheetPreset),
+    /// Save the sheet's one-off custom size to the project's custom sizes or
+    /// the person's own, and put the sheet on the saved size.
+    SaveCustomSize(DrawingSheetPresetScope),
     Orientation(SchematicPageOrientation),
+    /// Take the project default's format and follow it, or keep the format
+    /// the sheet has as its own.
+    FollowProjectDefault(bool),
+    /// The frame of the sheet's standard, or none.
+    Frame(DrawingSheetBorderTemplate),
+    /// The standard's zones along the frame, or none.
+    Zones(bool),
+    /// ISO 5457's centring marks, or ASME Y14.1's microfilm arrows.
+    CentringMarks(bool),
+    /// ASME Y14.1 4.1.3's binding margin.
+    BindingMargin(bool),
+    /// The unit the sheet's sizes are stated in.
+    Units(DrawingSheetDisplayUnit),
     TitleBlock(DrawingSheetTitleBlockTemplate),
+    /// Whether the title block shows a box its form leaves optional.
+    BoxShown(DrawingSheetTitleFieldId, bool),
     /// A typed title-block value, kept where its field keeps it: on this
     /// sheet, on the project for the values every sheet shares, or in the
     /// document control for the revision and its date.
     TitleField(DrawingSheetTitleFieldId, String),
     /// Where the document stands in its release.
     Status(DrawingSheetReleaseStatus),
+    /// The change order, ticket or release record the document's revision
+    /// answers to.
+    ChangeReference(String),
 }
 
 /// Apply one property of the active sheet without showing Page Setup.
@@ -422,23 +469,155 @@ pub(crate) fn apply_drawing_sheet_edit(
     if !open_drawing_sheet_setup_for_state(state) {
         return Err("The sheet can only be edited on a writable schematic.".to_owned());
     }
-    let draft = &mut state.dialogs.drawing_sheet_setup.draft;
+    let outcome = stage_edit(state, edit).and_then(|()| apply_drawing_sheet_setup(state));
+    state.dialogs.drawing_sheet_setup.close();
+    outcome
+}
+
+/// Stage `edit` in the open draft, or refuse it in words the panel shows.
+fn stage_edit(state: &mut AppState, edit: DrawingSheetEdit) -> Result<(), String> {
+    let setup = &mut state.dialogs.drawing_sheet_setup;
+    let draft = &mut setup.draft;
     match edit {
         DrawingSheetEdit::Size(standard) => {
             draft.apply_size_choice(SheetSizeChoice::Standard(standard));
         }
+        DrawingSheetEdit::CustomSize {
+            width_um,
+            height_um,
+        } => {
+            if draft.size != SheetSizeChoice::Custom {
+                draft.apply_size_choice(SheetSizeChoice::Custom);
+            }
+            draft.width = format_um(width_um, draft.display_unit);
+            draft.height = format_um(height_um, draft.display_unit);
+            // The edges are typed as the sheet is drawn, so a width under
+            // its height stands the sheet upright, and one over it lays the
+            // sheet down.
+            if width_um != height_um {
+                draft.orientation = if width_um > height_um {
+                    SchematicPageOrientation::Landscape
+                } else {
+                    SchematicPageOrientation::Portrait
+                };
+            }
+        }
+        DrawingSheetEdit::CustomSizeName(name) => {
+            if draft.size != SheetSizeChoice::Custom {
+                return Err("Only a one-off custom size is named here.".to_owned());
+            }
+            draft.custom_name = name;
+        }
+        DrawingSheetEdit::Preset(preset) => {
+            let mut replacement = DrawingSheetDraft::from_format(&preset.format);
+            replacement.scope = draft.scope;
+            replacement.title_fields = std::mem::take(&mut draft.title_fields);
+            replacement.size = SheetSizeChoice::CapturedPreset {
+                id: preset.id,
+                name: preset.name,
+                scope: preset.scope,
+            };
+            replacement.enforce_managed_authority(&setup.baseline);
+            *draft = replacement;
+        }
+        DrawingSheetEdit::SaveCustomSize(scope) => {
+            if draft.size != SheetSizeChoice::Custom {
+                return Err("Only a one-off custom size can be saved to custom sizes.".to_owned());
+            }
+            draft.save_custom_preset = true;
+            draft.custom_preset_scope = scope;
+        }
         DrawingSheetEdit::Orientation(orientation) => draft.set_orientation(orientation),
+        DrawingSheetEdit::FollowProjectDefault(true) => {
+            let mut replacement = DrawingSheetDraft::from_format(&setup.project_default);
+            replacement.inheritance = DrawingSheetInheritance::ProjectDefault;
+            replacement.scope = draft.scope;
+            replacement.title_fields = std::mem::take(&mut draft.title_fields);
+            replacement.enforce_managed_authority(&setup.baseline);
+            *draft = replacement;
+        }
+        DrawingSheetEdit::FollowProjectDefault(false) => {
+            draft.inheritance = DrawingSheetInheritance::Explicit;
+        }
+        DrawingSheetEdit::Frame(border) => draft.set_border_template(match border {
+            DrawingSheetBorderTemplate::Standard => BorderTemplateChoice::Standard,
+            DrawingSheetBorderTemplate::None => BorderTemplateChoice::None,
+        }),
+        DrawingSheetEdit::Zones(on) => {
+            if on && !draft.standard_frame() {
+                return Err("A sheet without a frame has no zones.".to_owned());
+            }
+            draft.zone_mode = if on {
+                ZoneModeChoice::Automatic
+            } else {
+                ZoneModeChoice::None
+            };
+        }
+        DrawingSheetEdit::CentringMarks(on) => {
+            if on && !draft.standard_frame() {
+                return Err("A sheet without a frame has no centring marks.".to_owned());
+            }
+            draft.centring_marks = on;
+        }
+        DrawingSheetEdit::BindingMargin(on) => {
+            if on
+                && !(draft.standard_frame()
+                    && draft.frame_convention() == DrawingSheetFrameConvention::AsmeY141)
+            {
+                return Err(
+                    "Only a framed ASME Y14.1 sheet takes ASME Y14.1's binding margin.".to_owned(),
+                );
+            }
+            draft.binding_margin = on;
+        }
+        DrawingSheetEdit::Units(unit) => draft.set_display_unit(match unit {
+            DrawingSheetDisplayUnit::Millimetres => SheetDisplayUnit::Millimetres,
+            DrawingSheetDisplayUnit::Centimetres => SheetDisplayUnit::Centimetres,
+            DrawingSheetDisplayUnit::Inches => SheetDisplayUnit::Inches,
+        })?,
         DrawingSheetEdit::TitleBlock(template) => {
             draft.set_title_block_template(title_template_from_model(template));
         }
-        DrawingSheetEdit::TitleField(field, value) => stage_title_value(state, field, value),
+        DrawingSheetEdit::BoxShown(field, shown) => {
+            refuse_organization_locked(draft, field)?;
+            let template = draft.title_block_template();
+            if !shown && template.requires_field(field) {
+                return Err(template.required_field_note().to_owned());
+            }
+            draft.title_fields.entry(field).or_default().visible = shown;
+        }
+        DrawingSheetEdit::TitleField(field, value) => {
+            refuse_organization_locked(draft, field)?;
+            stage_title_value(state, field, value);
+        }
         DrawingSheetEdit::Status(status) => {
             stage_document_control(state, |control| control.status = status);
         }
+        DrawingSheetEdit::ChangeReference(reference) => {
+            stage_document_control(state, |control| control.change_reference = reference);
+        }
     }
-    let outcome = apply_drawing_sheet_setup(state);
-    state.dialogs.drawing_sheet_setup.close();
-    outcome
+    Ok(())
+}
+
+/// Refuse an edit to `field` when the organization's block on the sheet
+/// fixes it.
+fn refuse_organization_locked(
+    draft: &DrawingSheetDraft,
+    field: DrawingSheetTitleFieldId,
+) -> Result<(), String> {
+    let locked = draft.title_block == TitleBlockTemplateChoice::Organization
+        && draft
+            .managed_title_template
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.locks_field(field));
+    if locked {
+        return Err(format!(
+            "The organization-managed {} value cannot be edited.",
+            field.display_label().to_lowercase()
+        ));
+    }
+    Ok(())
 }
 
 /// Stage one title-block value in the open Page Setup transaction, where the
@@ -512,20 +691,6 @@ fn stage_document_control(
         .clone();
     change(&mut control);
     state.dialogs.drawing_sheet_setup.staged_document_control = Some(control);
-}
-
-/// Open Page Setup on a one-off custom size, its width and height ready to
-/// type — where a size the standard list does not hold is entered.
-pub(crate) fn open_drawing_sheet_setup_for_custom_size(state: &mut AppState) -> bool {
-    if !open_drawing_sheet_setup_for_state(state) {
-        return false;
-    }
-    state
-        .dialogs
-        .drawing_sheet_setup
-        .draft
-        .apply_size_choice(SheetSizeChoice::Custom);
-    true
 }
 
 fn apply_governed_sheet_setup(

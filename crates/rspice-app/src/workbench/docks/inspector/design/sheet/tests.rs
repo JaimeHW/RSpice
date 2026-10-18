@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use super::super::tests::{accesskit_nodes, painted_panel};
 use super::*;
-use crate::state::{DrawingSheetStandard, SheetDefinition, SheetPortPolicy, SheetTemplate};
+use crate::state::{
+    DrawingSheetStandard, SchematicPageOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 
@@ -32,7 +34,7 @@ impl SheetPanel {
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(320.0, 720.0),
+                    egui::vec2(320.0, 1_400.0),
                 )),
                 events,
                 ..Default::default()
@@ -122,12 +124,13 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
 }
 
 /// With nothing selected the panel is the sheet's property editor: its size,
-/// orientation and title block, and every value its title block shows that
-/// someone types, editable where they stand — this sheet's own, then the
-/// document's, each in the order ISO 7200's form is read and named as the
-/// form names it. An empty value shows what the block letters instead. The
-/// toolbar's Check cellview and the File menu's Page setup are not repeated
-/// as buttons, and a check never run adds no section.
+/// orientation, where its format comes from, its frame and units, its title
+/// block and the optional boxes it shows, and every value its title block
+/// shows that someone types, editable where they stand — this sheet's own,
+/// then the document's, each in the order ISO 7200's form is read and named
+/// as the form names it. An empty value shows what the block letters
+/// instead. The toolbar's Check cellview is not repeated as a button, and a
+/// check never run adds no section.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
@@ -137,10 +140,13 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
     assert_eq!(
         painted,
         "Sheet\nSize\nISO A4 · 297 × 210 mm\nOrientation\nLandscape\n\
-         Title block\nTemplate\nISO 7200 · 180 × 45 mm\n\
+         Format from\nProject default\nFrame\nISO 5457 frame\nZones\n6 × 4\n\
+         Centring marks\nDrawn\nUnits\nMillimetres\n\
+         Title block\nTemplate\nISO 7200 · 180 × 45 mm\nOptional boxes\n3 of 6 shown\n\
          Created by\n\nApproved by\n\nDocument type\nCircuit diagram\n\nTitle\ntop\n\n\
          Document\nAll sheets\nLegal owner\n\nDocument status\nIn preparation\n\
          Identification number\n\nRevision\n\nDate of issue\nYYYY-MM-DD\n\n\
+         Change reference\nECO, ticket or release record\n\n\
          Schematic\nGrid\n2.5 mm\nNet names\nASCII letters, digits, _.$:/![]<>-\n"
     );
 }
@@ -491,7 +497,7 @@ fn escape_abandons_a_typed_title_value() {
 fn a_value_still_being_typed_lands_when_the_panel_moves_on() {
     let mut panel = SheetPanel::new();
     panel.type_into("Created by", "J. Whitfield");
-    commit_pending_title_field(&panel.ctx, &mut panel.app.state);
+    commit_pending_sheet_text(&panel.ctx, &mut panel.app.state);
     assert_eq!(
         panel.title_value(DrawingSheetTitleFieldId::DrawnBy),
         "J. Whitfield"
@@ -534,7 +540,7 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
         .unwrap()
         .set_active(second)
         .unwrap();
-    commit_pending_title_field(&panel.ctx, &mut panel.app.state);
+    commit_pending_sheet_text(&panel.ctx, &mut panel.app.state);
 
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
     assert!(!panel.app.state.can_undo_project_design());
@@ -603,4 +609,299 @@ fn checks_appear_only_for_findings_on_this_sheet() {
     assert!(painted.contains("Checks\n"), "{painted}");
     assert!(painted.contains("Connectivity\n"), "{painted}");
     assert!(!painted.contains("Check cellview"), "{painted}");
+}
+
+fn sheet_format(state: &AppState) -> SchematicSheetFormat {
+    resolve_active_drawing_sheet(state).format
+}
+
+/// A size the standard list does not hold is typed where the size is: the
+/// sheet turns to a one-off size of its own edges, each edge lands as one
+/// undo step, the edges stand the sheet the way they are typed, and the size
+/// is named and saved to the project's custom sizes from the same rows.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_custom_size_is_typed_in_the_panel_and_saved_to_custom_sizes() {
+    let mut panel = SheetPanel::new();
+    let (width_um, height_um) = sheet_format(&panel.app.state).oriented_dimensions_um();
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::CustomSize {
+            width_um,
+            height_um,
+        },
+    )
+    .unwrap();
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(
+        painted.contains(
+            "Size\nOne-off custom size · 297 × 210 mm\nWidth (mm)\n297\nHeight (mm)\n210\n\
+             Size name\nOne-off custom size\nSave as project size\nSave as personal size\n"
+        ),
+        "{painted}"
+    );
+
+    panel.enter("Width (mm)", "250");
+    panel.enter("Height (mm)", "400");
+    let format = sheet_format(&panel.app.state);
+    assert_eq!(format.oriented_dimensions_um(), (250_000, 400_000));
+    assert_eq!(format.orientation, SchematicPageOrientation::Portrait);
+    assert!(panel.app.state.undo_project_design().unwrap().is_some());
+    assert_eq!(
+        sheet_format(&panel.app.state).oriented_dimensions_um(),
+        (250_000, 210_000)
+    );
+    panel.enter("Height (mm)", "400");
+
+    panel.enter("Size name", "Lab panel");
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::SaveCustomSize(crate::state::DrawingSheetPresetScope::Project),
+    )
+    .unwrap();
+    let settings = panel
+        .app
+        .state
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .clone();
+    assert_eq!(settings.presets.len(), 1);
+    assert_eq!(settings.presets[0].name, "Lab panel");
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(
+        painted.contains("Size\nLab panel · 250 × 400 mm\nOrientation\nPortrait\n"),
+        "{painted}"
+    );
+    assert!(!painted.contains("Width (mm)"), "{painted}");
+}
+
+/// An edge the sheet cannot have is refused in the words that say why, and
+/// changes nothing.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_edge_the_sheet_cannot_have_is_refused_in_its_words() {
+    let mut panel = SheetPanel::new();
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::CustomSize {
+            width_um: 297_000,
+            height_um: 210_000,
+        },
+    )
+    .unwrap();
+    let before = sheet_format(&panel.app.state);
+    panel.enter("Width (mm)", "twelve");
+    assert_eq!(
+        panel.app.state.prompt_text(),
+        Some("Use a decimal physical dimension.")
+    );
+    panel.enter("Width (mm)", "3000");
+    assert_eq!(
+        panel.app.state.prompt_text(),
+        Some("Sheet edges must be between 50.8 mm and 2540 mm.")
+    );
+    assert_eq!(sheet_format(&panel.app.state), before);
+}
+
+/// The frame of the sheet's standard, its zones, its marks and the unit its
+/// sizes are stated in are chosen in the panel, each as one undo step. A
+/// sheet without a frame offers neither zones nor marks.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_frame_its_zones_its_marks_and_the_units_are_chosen_in_the_panel() {
+    let mut app = RSpiceApp::test_instance();
+    for edit in [
+        DrawingSheetEdit::Zones(false),
+        DrawingSheetEdit::CentringMarks(false),
+        DrawingSheetEdit::Units(crate::state::DrawingSheetDisplayUnit::Inches),
+    ] {
+        apply_drawing_sheet_edit(&mut app.state, edit).unwrap();
+    }
+    let format = sheet_format(&app.state);
+    assert_eq!(format.zones.mode, crate::state::DrawingSheetZoneMode::None);
+    assert!(!format.marks.centring);
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    assert!(
+        painted
+            .contains("Frame\nISO 5457 frame\nZones\nNone\nCentring marks\nNone\nUnits\nInches\n"),
+        "{painted}"
+    );
+    assert!(
+        painted.contains("Size\nISO A4 · 11.69291 × 8.26772 in\n"),
+        "{painted}"
+    );
+
+    apply_drawing_sheet_edit(
+        &mut app.state,
+        DrawingSheetEdit::Frame(crate::state::DrawingSheetBorderTemplate::None),
+    )
+    .unwrap();
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    assert!(painted.contains("Frame\nNone\nUnits\n"), "{painted}");
+    assert!(!painted.contains("Zones"), "{painted}");
+    assert!(
+        apply_drawing_sheet_edit(&mut app.state, DrawingSheetEdit::Zones(true)).is_err(),
+        "a sheet without a frame has no zones"
+    );
+
+    for _ in 0..4 {
+        assert!(app.state.undo_project_design().unwrap().is_some());
+    }
+    assert_eq!(
+        sheet_format(&app.state).zones.mode,
+        crate::state::DrawingSheetZoneMode::Automatic
+    );
+}
+
+/// An ANSI sheet takes ASME Y14.1's frame: its marks are microfilm arrows,
+/// and the binding margin its standard allows is chosen beside them.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_asme_sheet_offers_its_arrows_and_its_binding_margin() {
+    let mut app = RSpiceApp::test_instance();
+    apply_drawing_sheet_edit(
+        &mut app.state,
+        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
+    )
+    .unwrap();
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    assert!(
+        painted.contains(
+            "Frame\nASME Y14.1 border\nZones\n4 × 2\nMicrofilm arrows\nNone\n\
+             Binding margin\nNone\n"
+        ),
+        "{painted}"
+    );
+    apply_drawing_sheet_edit(&mut app.state, DrawingSheetEdit::BindingMargin(true)).unwrap();
+    let format = sheet_format(&app.state);
+    assert!(format.binding_margin);
+    assert_eq!(format.margins().left_um, 19_050);
+}
+
+/// A sheet follows the project default until it is given a format of its
+/// own, and can be put back on the default from the same row.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_sheet_follows_the_project_default_until_it_takes_its_own_format() {
+    let mut app = RSpiceApp::test_instance();
+    apply_drawing_sheet_edit(
+        &mut app.state,
+        DrawingSheetEdit::Size(DrawingSheetStandard::IsoA3),
+    )
+    .unwrap();
+    let format = sheet_format(&app.state);
+    assert_eq!(
+        format.inheritance,
+        crate::state::DrawingSheetInheritance::Explicit
+    );
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    assert!(painted.contains("Format from\nThis sheet\n"), "{painted}");
+
+    apply_drawing_sheet_edit(&mut app.state, DrawingSheetEdit::FollowProjectDefault(true)).unwrap();
+    let format = sheet_format(&app.state);
+    assert_eq!(
+        format.inheritance,
+        crate::state::DrawingSheetInheritance::ProjectDefault
+    );
+    assert_eq!(format.authored_size.label(), "ISO A4");
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    assert!(
+        painted.contains("Format from\nProject default\n"),
+        "{painted}"
+    );
+}
+
+/// The boxes a form leaves optional are shown and hidden from one row, and a
+/// box shown offers its value where its kind of value is typed: Checked by
+/// on the sheet, the language on the document. A box the form requires
+/// stays.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_optional_boxes_are_shown_and_hidden_in_the_panel() {
+    let mut panel = SheetPanel::new();
+    for edit in [
+        DrawingSheetEdit::BoxShown(DrawingSheetTitleFieldId::CheckedBy, true),
+        DrawingSheetEdit::BoxShown(DrawingSheetTitleFieldId::Language, true),
+        DrawingSheetEdit::BoxShown(DrawingSheetTitleFieldId::Revision, false),
+    ] {
+        apply_drawing_sheet_edit(&mut panel.app.state, edit).unwrap();
+    }
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(
+        painted.contains("Optional boxes\n4 of 6 shown\nCreated by\n\nChecked by\n\n"),
+        "{painted}"
+    );
+    assert!(
+        painted.contains("Date of issue\nYYYY-MM-DD\n\nLanguage\n\n"),
+        "{painted}"
+    );
+    assert!(!painted.contains("Revision"), "{painted}");
+
+    panel.enter("Language", "en");
+    assert_eq!(
+        panel.document_value(DrawingSheetTitleFieldId::Language),
+        "en"
+    );
+    assert_eq!(
+        apply_drawing_sheet_edit(
+            &mut panel.app.state,
+            DrawingSheetEdit::BoxShown(DrawingSheetTitleFieldId::DrawnBy, false),
+        )
+        .unwrap_err(),
+        "ISO 7200 makes this field mandatory on its form."
+    );
+}
+
+/// The change order a revision answers to is the document's, typed with the
+/// rest of its values.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_change_reference_is_typed_with_the_documents_values() {
+    let mut panel = SheetPanel::new();
+    panel.enter("Change reference", "ECO-1042");
+    assert_eq!(
+        panel
+            .app
+            .state
+            .workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .document_control
+            .change_reference,
+        "ECO-1042"
+    );
+    assert!(panel.app.state.undo_project_design().unwrap().is_some());
+}
+
+/// What a size leaves outside the drawing area is counted under the size,
+/// with the way to the first object and to the review of them all.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn content_outside_the_drawing_area_is_counted_under_the_size() {
+    let mut app = RSpiceApp::test_instance();
+    // 12 mm from the left edge: on the paper, outside ISO 5457's 20 mm
+    // filing border.
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .push(crate::state::Wire::new(
+            31,
+            vec![
+                crate::state::Point::new(-92, 100),
+                crate::state::Point::new(-88, 100),
+            ],
+        ));
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    assert!(
+        painted.contains(
+            "Size\nISO A4 · 297 × 210 mm\n\
+             1 object outside the drawing area: 1 outside the border\n"
+        ),
+        "{painted}"
+    );
+    assert!(painted.contains("Review all…\nOrientation\n"), "{painted}");
 }
