@@ -1216,8 +1216,18 @@ fn include_search_paths(
         )),
         None,
         |ui| {
+            // The chain goes on into the library folders set in Preferences,
+            // so a list that ended here would misstate where a name is found.
+            let library_folders = !state.library_folders().is_empty();
             if authored.is_empty() {
-                muted_inspector_copy(ui, &messages.text(MessageId::NetlistIncludeSearchPathEmpty));
+                muted_inspector_copy(
+                    ui,
+                    &messages.text(if library_folders {
+                        MessageId::NetlistIncludeSearchPathEmptyWithLibraryFolders
+                    } else {
+                        MessageId::NetlistIncludeSearchPathEmpty
+                    }),
+                );
             }
             let inset = panel_inset(ui);
             for (index, entry) in chain.entries().iter().enumerate() {
@@ -1298,6 +1308,12 @@ fn include_search_paths(
                 if response.clicked() {
                     state.ui.code_workspace.include_search_selected = Some(index);
                 }
+            }
+            if library_folders && !authored.is_empty() {
+                muted_inspector_copy(
+                    ui,
+                    &messages.text(MessageId::NetlistIncludeSearchPathThenLibraryFolders),
+                );
             }
             if unsaved && !authored.is_empty() {
                 muted_inspector_copy(

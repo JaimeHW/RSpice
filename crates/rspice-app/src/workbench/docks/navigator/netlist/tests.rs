@@ -616,6 +616,32 @@ fn an_include_row_states_the_chain_stage_it_resolved_through() {
     }
 }
 
+/// The chain holds the project's own search paths first and the library
+/// folders after them, so a configured path past the project's is a library
+/// folder, and says so rather than counting on.
+#[test]
+fn a_search_path_past_the_projects_own_is_named_a_library_folder() {
+    use rspice_core::netlist::IncludeSearchStage;
+
+    let messages = english();
+    assert_eq!(
+        chain_stage_text(messages, IncludeSearchStage::LibraryPath(1), 2),
+        "via search path 2"
+    );
+    assert_eq!(
+        chain_stage_text(messages, IncludeSearchStage::LibraryPath(2), 2),
+        "via library folder"
+    );
+    assert_eq!(
+        chain_stage_text(messages, IncludeSearchStage::LibraryPath(0), 0),
+        "via library folder"
+    );
+    assert_eq!(
+        chain_stage_text(messages, IncludeSearchStage::TopLevel, 0),
+        "via top-level dir"
+    );
+}
+
 #[test]
 fn a_shadowed_include_row_carries_a_warning_marker_and_names_the_other_file() {
     let source = "shadow deck\n.include models.lib\n.end\n";

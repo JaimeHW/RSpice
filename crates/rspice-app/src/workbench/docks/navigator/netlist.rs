@@ -694,11 +694,28 @@ fn include_stage_text(
     }
 }
 
+/// [`include_stage_text`] for a stage of the chain this session resolves
+/// through, which holds the project's `project_paths` own search paths first
+/// and the library folders set in Preferences after them.
+fn chain_stage_text(
+    messages: MessageCatalog,
+    stage: rspice_core::netlist::IncludeSearchStage,
+    project_paths: usize,
+) -> String {
+    match stage {
+        rspice_core::netlist::IncludeSearchStage::LibraryPath(index) if index >= project_paths => {
+            messages.text(MessageId::NetlistIncludeViaLibraryFolder)
+        }
+        stage => include_stage_text(messages, stage),
+    }
+}
+
 /// The whole ordered chain, winner marked, for a row's tooltip.
 fn include_chain_text(
     messages: MessageCatalog,
     locator: &str,
     resolution: &rspice_core::netlist::IncludeResolution,
+    project_paths: usize,
 ) -> String {
     let mut lines =
         vec![messages.format(MessageId::NetlistIncludeChainHeader, &[("name", locator)])];
@@ -714,7 +731,7 @@ fn include_chain_text(
         };
         lines.push(format!(
             "{}  {}  \u{2014} {verdict}",
-            include_stage_text(messages, candidate.stage()),
+            chain_stage_text(messages, candidate.stage(), project_paths),
             candidate.path().display()
         ));
     }
@@ -844,6 +861,7 @@ pub(super) fn retained_include_facts(
     state: &crate::workbench::AppState,
     messages: MessageCatalog,
 ) -> Vec<IncludeRowFacts> {
+    let project_paths = state.workspace.content.project.include_search_paths().len();
     active_canonical_netlist_document(state).map_or_else(Vec::new, |document| {
         document
             .dependencies()
@@ -863,10 +881,12 @@ pub(super) fn retained_include_facts(
                             dependency_authority_message(dependency.authority())
                         }
                     },
-                    via: resolution
-                        .map(|resolution| include_stage_text(messages, resolution.stage())),
-                    chain: resolution
-                        .map(|resolution| include_chain_text(messages, &locator, resolution)),
+                    via: resolution.map(|resolution| {
+                        chain_stage_text(messages, resolution.stage(), project_paths)
+                    }),
+                    chain: resolution.map(|resolution| {
+                        include_chain_text(messages, &locator, resolution, project_paths)
+                    }),
                     shadowed_by: resolution.and_then(|resolution| {
                         resolution
                             .shadowed()
