@@ -100,7 +100,10 @@ struct Envelope {
     unread: BTreeMap<&'static str, Value>,
 }
 
-/// The settings the file holds, borrowed from the running session.
+/// The settings the file holds, borrowed from the running session. The
+/// change check hashes this same struct, so the two cannot disagree on what
+/// the file holds.
+#[derive(serde::Serialize)]
 struct Values<'a> {
     theme: Theme,
     autosave_minutes: u8,
@@ -298,19 +301,31 @@ fn read_setting<T>(
     }
 }
 
-/// A hash of every value the file holds, and of the shortcut library beside
-/// them, cheap enough to take on a frame that carried input. A change to the
-/// shortcuts alone moves it too; the write that follows then finds the bytes
-/// it would write unchanged and writes nothing.
-fn fingerprint(ui: &UiSessionState) -> u64 {
-    #[derive(serde::Serialize)]
-    struct Observed<'a> {
-        theme: &'a Theme,
-        autosave_minutes: u8,
-        browser_spoken_feedback: bool,
-        preferences: &'a UserPreferences,
-    }
+/// Whether a frame's input could have changed a setting: a key, text, a
+/// press or release, a wheel, a paste, the end of a touch, or an action from
+/// assistive technology. Pointer movement alone cannot, and a canvas drag or a
+/// hover is nothing but that, frame after frame; the once-a-second look
+/// catches anything that changes a setting some other way.
+fn input_can_change_a_setting(events: &[egui::Event]) -> bool {
+    events.iter().any(|event| match event {
+        egui::Event::Key { .. }
+        | egui::Event::Text(_)
+        | egui::Event::Ime(_)
+        | egui::Event::Paste(_)
+        | egui::Event::Cut
+        | egui::Event::PointerButton { .. }
+        | egui::Event::MouseWheel { .. }
+        | egui::Event::AccessKitActionRequest(_) => true,
+        egui::Event::Touch { phase, .. } => *phase == egui::TouchPhase::End,
+        _ => false,
+    })
+}
 
+/// A hash of every value the file holds, taken on a frame whose input could
+/// have changed one. The shortcut library rides inside the preferences but is
+/// not in the file, and its own store owns its durability, so it is swapped
+/// out for the duration rather than serialized every time.
+fn fingerprint(ui: &mut UiSessionState) -> u64 {
     struct HashWriter(std::hash::DefaultHasher);
 
     impl std::io::Write for HashWriter {
@@ -324,18 +339,12 @@ fn fingerprint(ui: &UiSessionState) -> u64 {
         }
     }
 
+    let shortcuts = std::mem::take(ui.preferences.shortcut_profiles_mut());
     let mut writer = HashWriter(std::hash::DefaultHasher::new());
     // A value that will not serialize cannot be written either, so whatever
     // was hashed before the failure is as good an observation as any.
-    let _ = serde_json::to_writer(
-        &mut writer,
-        &Observed {
-            theme: &ui.theme,
-            autosave_minutes: ui.autosave_minutes,
-            browser_spoken_feedback: ui.browser_spoken_feedback,
-            preferences: &ui.preferences,
-        },
-    );
+    let _ = serde_json::to_writer(&mut writer, &Values::of(ui));
+    *ui.preferences.shortcut_profiles_mut() = shortcuts;
     writer.0.finish()
 }
 
@@ -479,6 +488,9 @@ pub(crate) struct PreferencesFileRuntime {
     failing: bool,
     #[cfg(test)]
     writes: usize,
+    /// How many times the settings were hashed.
+    #[cfg(test)]
+    looks: usize,
 }
 
 /// A settings file that passed every check, waiting for its shortcut library
@@ -552,7 +564,7 @@ impl AppState {
                 );
             }
         }
-        self.preferences_file.observed = fingerprint(&self.ui);
+        self.preferences_file.observed = fingerprint(&mut self.ui);
     }
 
     fn set_aside_preferences_file(&mut self, store: &PreferencesStore, bytes: &[u8], reason: &str) {
@@ -606,10 +618,11 @@ impl AppState {
 
     /// Notice a preference change and write it once it settles.
     ///
-    /// Runs every frame. The settings are hashed only on a frame that carried
-    /// input, while a write is pending, or once a second otherwise.
+    /// Runs every frame. The settings are hashed only on a frame whose input
+    /// could have changed one, while a write is pending, or once a second
+    /// otherwise.
     pub(in crate::workbench) fn persist_preferences_file(&mut self, ctx: &egui::Context) {
-        let had_input = ctx.input(|input| !input.events.is_empty());
+        let had_input = ctx.input(|input| input_can_change_a_setting(&input.events));
         if let Some(wait) = self.persist_preferences_file_at(Instant::now(), had_input) {
             ctx.request_repaint_after(wait);
         }
@@ -629,7 +642,11 @@ impl AppState {
                 .is_none_or(|at| now.saturating_duration_since(at) >= IDLE_LOOK);
         if look {
             runtime.observed_at = Some(now);
-            let observed = fingerprint(&self.ui);
+            #[cfg(test)]
+            {
+                runtime.looks += 1;
+            }
+            let observed = fingerprint(&mut self.ui);
             if observed != runtime.observed {
                 runtime.observed = observed;
                 runtime.write_due = Some(now + WRITE_DELAY);
@@ -647,7 +664,7 @@ impl AppState {
     /// Write any change not yet in the file now, rather than when it settles.
     pub(in crate::workbench) fn flush_preferences_file(&mut self) {
         self.preferences_file.write_due = None;
-        self.preferences_file.observed = fingerprint(&self.ui);
+        self.preferences_file.observed = fingerprint(&mut self.ui);
         self.write_preferences_file();
     }
 

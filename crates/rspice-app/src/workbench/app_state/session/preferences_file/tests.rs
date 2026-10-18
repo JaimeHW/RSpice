@@ -321,6 +321,59 @@ fn a_change_is_written_once_after_it_settles_not_every_frame() {
 }
 
 #[test]
+fn pointer_movement_alone_never_hashes_the_settings() {
+    let (_path, store) = temp_store("pointer-move");
+    let mut state = bound(&store);
+    let start = Instant::now();
+    let at = |ms: u64| start + Duration::from_millis(ms);
+    let _ = state.persist_preferences_file_at(at(0), false);
+    let looks = state.preferences_file.looks;
+
+    // A canvas drag or a hover: nothing but movement, every frame, for
+    // under the idle second.
+    let hover = [
+        egui::Event::PointerMoved(egui::pos2(10.0, 20.0)),
+        egui::Event::MouseMoved(egui::vec2(1.0, 0.0)),
+    ];
+    for frame in 1..60_u64 {
+        let _ =
+            state.persist_preferences_file_at(at(frame * 16), input_can_change_a_setting(&hover));
+    }
+    assert_eq!(
+        state.preferences_file.looks, looks,
+        "movement hashed nothing"
+    );
+
+    let release = [egui::Event::PointerButton {
+        pos: egui::pos2(10.0, 20.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::default(),
+    }];
+    let _ = state.persist_preferences_file_at(at(960), input_can_change_a_setting(&release));
+    assert_eq!(
+        state.preferences_file.looks,
+        looks + 1,
+        "a release is looked at"
+    );
+
+    // The shortcut library is not in the file, so it is not in the hash, and
+    // it comes back from the hash exactly as it went in.
+    let before = fingerprint(&mut state.ui);
+    state
+        .ui
+        .preferences
+        .shortcut_profiles_mut()
+        .active_mut()
+        .unwrap()
+        .policies_mut()
+        .set_chord_timeout(crate::workbench::ChordTimeoutPolicy::ThreeSeconds);
+    let edited = state.ui.preferences.shortcut_profiles().clone();
+    assert_eq!(fingerprint(&mut state.ui), before);
+    assert_eq!(state.ui.preferences.shortcut_profiles(), &edited);
+}
+
+#[test]
 fn a_failed_write_is_reported_once_and_retried_on_the_next_change() {
     let (path, store) = temp_store("write-failure");
     let mut state = bound(&store);
