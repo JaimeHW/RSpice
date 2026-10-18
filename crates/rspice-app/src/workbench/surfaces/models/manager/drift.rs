@@ -404,6 +404,7 @@ pub(super) fn resolve_dialog(ui: &mut Ui, app: &ManagerRenderContext<'_>, librar
         }
         ScrollArea::vertical()
             .id_salt("models-drift-findings")
+            .auto_shrink([false, true])
             .max_height(260.0)
             .show(ui, |ui| {
                 for finding in &findings {

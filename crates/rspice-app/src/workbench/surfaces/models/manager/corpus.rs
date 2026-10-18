@@ -82,6 +82,7 @@ pub(super) fn pack_catalog(
         );
         ScrollArea::vertical()
             .id_salt("models-pack-table")
+            .auto_shrink([false, true])
             .max_height(table_h)
             .show(ui, |ui| {
                 if visible.is_empty() {

@@ -173,6 +173,7 @@ fn corner_matrix(
         table_header(ui, &columns);
         ScrollArea::vertical()
             .id_salt("models-corner-matrix")
+            .auto_shrink([false, true])
             .max_height(table_h)
             .show(ui, |ui| {
                 for row in rows {

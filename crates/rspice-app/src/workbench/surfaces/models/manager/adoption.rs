@@ -114,6 +114,7 @@ fn what_changed(ui: &mut Ui, diff: &ReleaseDiff) {
     );
     ScrollArea::vertical()
         .id_salt("models-hub-release-diff")
+        .auto_shrink([false, true])
         .max_height(84.0)
         .show(ui, |ui| {
             for added in &diff.added {

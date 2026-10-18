@@ -1025,6 +1025,7 @@ fn family_table(
         );
         ScrollArea::vertical()
             .id_salt("models-bin-families")
+            .auto_shrink([false, true])
             .max_height((height - 60.0).max(ROW_H * 2.0))
             .show_rows(ui, ROW_H, families.len(), |ui, range| {
                 let t = Tokens::get(ui.ctx());
@@ -1244,6 +1245,7 @@ fn geometry_instance_table(
         );
         ScrollArea::vertical()
             .id_salt("models-bin-instances")
+            .auto_shrink([false, true])
             .max_height((ui.available_height() - ROW_H).max(ROW_H * 3.0))
             .show_rows(ui, ROW_H, matches.len(), |ui, range| {
                 let t = Tokens::get(ui.ctx());

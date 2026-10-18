@@ -247,6 +247,7 @@ fn symbol_registry(
     let mut clicked = None;
     ScrollArea::vertical()
         .id_salt("models-symbol-registry")
+        .auto_shrink([false, true])
         .max_height(height)
         .show_viewport(ui, |ui, viewport| {
             // The offsets below are exact heights, so the pitch must be the
@@ -491,6 +492,7 @@ fn symbol_detail(
     app.state.workbench.models_view.selected_symbol = Some(symbol_key(&row.reference));
     ScrollArea::vertical()
         .id_salt("models-symbol-detail")
+        .auto_shrink([false, true])
         .show(ui, |ui| {
             let t = Tokens::get(ui.ctx());
             egui::Frame::NONE

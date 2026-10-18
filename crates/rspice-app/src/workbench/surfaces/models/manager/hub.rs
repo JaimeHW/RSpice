@@ -1270,6 +1270,7 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fil
         table_header(ui, &LEDGER_COLUMNS);
         ScrollArea::vertical()
             .id_salt("models-hub-pack-table")
+            .auto_shrink([false, true])
             .max_height(table_h)
             .show(ui, |ui| {
                 if visible.is_empty() {
@@ -1587,6 +1588,7 @@ fn releases_pane(
         |ui| {
             ScrollArea::vertical()
                 .id_salt("models-hub-releases")
+                .auto_shrink([false, true])
                 .max_height(150.0)
                 .show(ui, |ui| {
                     for release in &row.releases {

@@ -342,6 +342,7 @@ pub(super) fn parts_catalog(
         table_header(ui, &headings);
         ScrollArea::vertical()
             .id_salt("models-parts-table")
+            .auto_shrink([false, true])
             .max_height(table_h)
             .show(ui, |ui| {
                 if rows.is_empty() {

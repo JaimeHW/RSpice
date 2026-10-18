@@ -246,6 +246,7 @@ pub(super) fn unresolved_card(
         let height = (diagnostics.len() as f32 * UNRESOLVED_ROW_H).min(190.0);
         ScrollArea::vertical()
             .id_salt("models-unresolved-bindings")
+            .auto_shrink([false, true])
             .max_height(height.max(UNRESOLVED_ROW_H))
             .show_rows(ui, UNRESOLVED_ROW_H, diagnostics.len(), |ui, range| {
                 for diagnostic in &diagnostics[range] {

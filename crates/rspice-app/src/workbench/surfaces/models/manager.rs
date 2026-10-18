@@ -945,6 +945,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
         }
         let table = ScrollArea::vertical()
             .id_salt("models-project-table")
+            .auto_shrink([false, true])
             .max_height(table_h);
         if rows.is_empty() {
             table.show(ui, |ui| {
@@ -1266,21 +1267,24 @@ fn compare_models(
             ("State", 0.14),
         ],
     );
-    ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-        for row in &rows {
-            selectable_data_row(
-                ui,
-                false,
-                &[
-                    (&row.key, 0.26, true),
-                    (row.left.as_deref().unwrap_or("not set"), 0.25, true),
-                    (row.right.as_deref().unwrap_or("not set"), 0.25, true),
-                    (row.kind, 0.10, false),
-                    (row.state, 0.14, true),
-                ],
-            );
-        }
-    });
+    ScrollArea::vertical()
+        .auto_shrink([false, true])
+        .max_height(360.0)
+        .show(ui, |ui| {
+            for row in &rows {
+                selectable_data_row(
+                    ui,
+                    false,
+                    &[
+                        (&row.key, 0.26, true),
+                        (row.left.as_deref().unwrap_or("not set"), 0.25, true),
+                        (row.right.as_deref().unwrap_or("not set"), 0.25, true),
+                        (row.kind, 0.10, false),
+                        (row.state, 0.14, true),
+                    ],
+                );
+            }
+        });
 }
 
 struct ModelComparisonRow {

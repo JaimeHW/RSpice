@@ -642,6 +642,7 @@ fn include_definition_table(
         }
         ScrollArea::vertical()
             .id_salt("models-include-definitions")
+            .auto_shrink([false, true])
             .max_height(ui.available_height().max(140.0))
             .show_rows(ui, ROW_H, matching.len(), |ui, range| {
                 for row in &matching[range] {
