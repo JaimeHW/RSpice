@@ -295,9 +295,10 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
                 height,
             );
             ids.push(response.id);
+            // A pointer press opens a page without taking keyboard focus, so
+            // the focus ring appears only for a reader who is using the keys.
             if response.clicked() {
                 requested = Some(page);
-                focus = Some(index);
             }
             if response.has_focus() {
                 let key = ui.input_mut(|input| {

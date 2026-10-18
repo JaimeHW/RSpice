@@ -849,6 +849,80 @@ fn the_task_status_column_fits_every_status() {
     });
 }
 
+/// A press on a console tab opens its page and leaves keyboard focus where it
+/// was. Taking focus on a press drew the keyboard focus ring all the way
+/// around the tab the pointer chose, over its underline. The keys still move
+/// focus along the strip, and only they draw the ring.
+#[test]
+fn a_pressed_console_tab_opens_its_page_without_taking_keyboard_focus() {
+    fn label_center(shapes: &[egui::epaint::ClippedShape], label: &str) -> Option<egui::Pos2> {
+        shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::epaint::Shape::Text(text) if text.galley.job.text == label => {
+                Some(text.pos + text.galley.rect.center().to_vec2())
+            }
+            _ => None,
+        })
+    }
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+    fn press(at: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    let mut frame = |events: Vec<egui::Event>| {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900.0, 200.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let problems = active_problem_count(&app.state, ui.ctx().cumulative_pass_nr());
+                    console_tabs(ui, &mut app, problems, CONSOLE_TAB_HEIGHT);
+                });
+            },
+        );
+        (output.shapes, app.state.workbench.console_page)
+    };
+
+    let (shapes, page) = frame(Vec::new());
+    assert_eq!(page, ConsolePage::Console);
+    let at = label_center(&shapes, ConsolePage::Problems.label()).expect("the Problems tab");
+    frame(vec![egui::Event::PointerMoved(at), press(at, true)]);
+    frame(vec![press(at, false)]);
+    let (_, page) = frame(Vec::new());
+    assert_eq!(page, ConsolePage::Problems);
+    assert_eq!(ctx.memory(|memory| memory.focused()), None);
+
+    // Tab reaches the open page's tab, and the arrow keys carry focus on.
+    frame(vec![key(egui::Key::Tab)]);
+    frame(Vec::new());
+    assert!(ctx.memory(|memory| memory.focused()).is_some());
+    frame(vec![key(egui::Key::ArrowRight)]);
+    let (_, page) = frame(Vec::new());
+    assert_eq!(page, ConsolePage::Measurements);
+    assert!(ctx.memory(|memory| memory.focused()).is_some());
+}
+
 #[test]
 fn console_tab_lane_reserves_every_visible_trailing_action() {
     use crate::workbench::state::ConsoleChannel;
