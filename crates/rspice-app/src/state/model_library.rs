@@ -52,7 +52,6 @@ pub(crate) use manager::model_library_source_digest;
 pub use manager::{
     ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
 };
-pub(crate) use rspice_model_library::BinFamily;
 pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::ProjectModelRevisionDefinition;
 pub(crate) use rspice_model_library::first_unreachable_source;
@@ -77,6 +76,7 @@ pub use rspice_model_library::qualification::{
     MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
     QualificationPlatformVectorOutcome,
 };
+pub(crate) use rspice_model_library::{BinFamily, BindableModel};
 pub use rspice_model_library::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use rspice_model_library::{
     ModelConsumerScope, ModelResolutionRecord, ModelValidationFinding,

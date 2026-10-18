@@ -28,7 +28,7 @@ mod types;
 mod validation;
 
 pub use authoring::*;
-pub use bin_family::{BinFamily, model_bin_family};
+pub use bin_family::{BinFamily, BindableModel, model_bin_family};
 pub use binding::CornerModelBinding;
 #[cfg(any(test, feature = "catalog-test-observation"))]
 pub use catalog::CATALOG_LIBRARY_SERIALIZATIONS;

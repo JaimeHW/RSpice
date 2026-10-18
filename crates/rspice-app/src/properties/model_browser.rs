@@ -25,15 +25,15 @@
 //! Opened without an instance, the same surface browses every loaded model.
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use egui::{Align, Context, Key, Layout, Modifiers, Rect, Sense, Ui, vec2};
 
 use crate::quantity::{EngineeringPrecision, engineering};
 use crate::state::ComponentType;
 use crate::state::model_library::{
-    BinFamily, DeviceModel, ModelConsumerScope, ModelLevel, ModelLibrary, ModelLibraryManager,
-    ModelType, validate_component_model_compatibility,
+    BinFamily, BindableModel, DeviceModel, ModelConsumerScope, ModelLevel, ModelLibrary,
+    ModelLibraryManager, ModelType, validate_component_model_compatibility,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -304,17 +304,13 @@ fn catalog<'a>(
 /// What a library offers to bind: each family it provides, and each card
 /// that is not a bin of one.
 fn entries_of(library: &ModelLibrary) -> Vec<Entry<'_>> {
-    let families = library.bin_families();
-    let bins: HashSet<&str> = families
-        .iter()
-        .flat_map(|family| family.bins.iter().map(|bin| bin.name.as_str()))
-        .collect();
     library
-        .models
-        .values()
-        .filter(|model| !bins.contains(model.name.as_str()))
-        .map(Entry::Card)
-        .chain(families.into_iter().map(Entry::Family))
+        .bindable_models()
+        .into_iter()
+        .map(|model| match model {
+            BindableModel::Card(card) => Entry::Card(card),
+            BindableModel::Family(family) => Entry::Family(family),
+        })
         .collect()
 }
 

@@ -56,6 +56,34 @@ impl<'a> BinFamily<'a> {
     }
 }
 
+/// What an instance binds from one library: a card, or a binned family whose
+/// bin the simulator chooses from the instance's geometry.
+#[derive(Debug, Clone)]
+pub enum BindableModel<'a> {
+    Card(&'a DeviceModel),
+    Family(BinFamily<'a>),
+}
+
+impl<'a> BindableModel<'a> {
+    /// The name an instance binds it by.
+    #[must_use]
+    pub fn name(&self) -> &'a str {
+        match *self {
+            Self::Card(model) => &model.name,
+            Self::Family(ref family) => family.name,
+        }
+    }
+
+    /// Every card an instance binding it can run.
+    #[must_use]
+    pub fn cards(&self) -> &[&'a DeviceModel] {
+        match self {
+            Self::Card(model) => std::slice::from_ref(model),
+            Self::Family(family) => &family.bins,
+        }
+    }
+}
+
 /// A bin card's window as the engine reads it.
 fn bin_geometry(model: &DeviceModel) -> rspice_core::engine::ModelBinCardGeometry {
     use rspice_core::engine::{ModelBinAxisRange, ModelBinCardGeometry};
@@ -164,18 +192,42 @@ impl ModelLibrary {
     /// that name, or every bin of the family it names. Empty when it runs none.
     #[must_use]
     pub fn executable_cards(&self, name: &str) -> Vec<&DeviceModel> {
+        self.bindable_model(name)
+            .map(|model| model.cards().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// What an instance naming `name` binds in this library: the card of that
+    /// name, or the family it names.
+    #[must_use]
+    pub fn bindable_model(&self, name: &str) -> Option<BindableModel<'_>> {
         let name = name.trim();
         match self
             .models
             .values()
             .find(|model| model.name.eq_ignore_ascii_case(name))
         {
-            Some(card) => vec![card],
-            None => self
-                .bin_family(name)
-                .map(|family| family.bins)
-                .unwrap_or_default(),
+            Some(card) => Some(BindableModel::Card(card)),
+            None => self.bin_family(name).map(BindableModel::Family),
         }
+    }
+
+    /// Everything an instance can bind from this library: each family it
+    /// provides, and each card that is not a bin of one. A bin is reached
+    /// through its family, as the simulator reaches it.
+    #[must_use]
+    pub fn bindable_models(&self) -> Vec<BindableModel<'_>> {
+        let families = self.bin_families();
+        let bins: HashSet<&str> = families
+            .iter()
+            .flat_map(|family| family.bins.iter().map(|bin| bin.name.as_str()))
+            .collect();
+        self.models
+            .values()
+            .filter(|model| !bins.contains(model.name.as_str()))
+            .map(BindableModel::Card)
+            .chain(families.into_iter().map(BindableModel::Family))
+            .collect()
     }
 }
 
@@ -241,6 +293,37 @@ mod tests {
         let cards = library.executable_cards("nch");
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].name, "nch");
+    }
+
+    /// A family is offered once, by its name, and its bins are not offered
+    /// beside it; a card of the family's own name keeps its bins as cards.
+    #[test]
+    fn a_library_offers_each_family_once_and_no_bin_of_one() {
+        let mut library = kit();
+        let names = |library: &ModelLibrary| {
+            let mut names: Vec<String> = library
+                .bindable_models()
+                .iter()
+                .map(|model| model.name().to_owned())
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(names(&library), ["nch", "nch_25", "rpoly"]);
+        let family = library.bindable_model("NCH").expect("the family binds");
+        assert!(matches!(family, BindableModel::Family(_)));
+        assert_eq!((family.name(), family.cards().len()), ("nch", 3));
+        assert!(matches!(
+            library.bindable_model("nch.2"),
+            Some(BindableModel::Card(card)) if card.name == "nch.2"
+        ));
+        assert!(library.bindable_model("pch").is_none());
+
+        library.add_model(DeviceModel::new("nch", ModelType::Nmos));
+        assert_eq!(
+            names(&library),
+            ["nch", "nch.1", "nch.10", "nch.2", "nch_25", "rpoly"]
+        );
     }
 
     /// Inclusive at both ends within the engine's 1 nm, first declared wins on
