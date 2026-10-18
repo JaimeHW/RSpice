@@ -433,6 +433,52 @@ fn gesture_returning_to_start_preserves_the_original_dirty_state() {
     }
 }
 
+/// The press copies the drag's undo baseline before the drag begins. An edit
+/// made while the button is held moves the document on from that copy, so
+/// the drag captures its own and undoing it keeps the edit.
+#[test]
+fn an_edit_while_the_button_is_held_survives_undoing_the_drag() {
+    let mut fixture = Fixture::new(false);
+    fixture.frame(
+        vec![
+            egui::Event::PointerMoved(fixture.origin + egui::vec2(100.0, 100.0)),
+            fixture.button(100.0, true),
+        ],
+        true,
+    );
+    let add_wire = |schematic: &mut SchematicState| {
+        schematic.document_mut_for_test().wires.push(Wire::new(
+            9,
+            vec![Point::new(300, 300), Point::new(340, 300)],
+        ));
+    };
+    assert!(fixture.app.state.schematic.with_undo("add wire", add_wire));
+    let edited = fixture.app.state.schematic.document().wires.clone();
+    for x in [110.0, 170.0] {
+        fixture.frame(
+            vec![egui::Event::PointerMoved(
+                fixture.origin + egui::vec2(x, 100.0),
+            )],
+            true,
+        );
+    }
+    assert!(fixture.app.state.schematic_drag_in_progress());
+    fixture.frame(vec![fixture.button(170.0, false)], true);
+    assert_ne!(
+        fixture.app.state.schematic.document().components[0].pos,
+        Point::new(100, 100)
+    );
+
+    assert!(fixture.app.state.schematic.undo());
+    assert_eq!(
+        fixture.app.state.schematic.document().components[0].pos,
+        Point::new(100, 100)
+    );
+    assert_eq!(fixture.app.state.schematic.document().wires, edited);
+    assert!(fixture.app.state.schematic.undo());
+    assert!(!fixture.app.state.schematic.can_undo());
+}
+
 #[test]
 fn gesture_focus_loss_pointer_loss_and_touch_cancel_restore_the_baseline() {
     for cause in 0..3 {

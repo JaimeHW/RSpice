@@ -39,6 +39,11 @@ pub(super) fn handle_select_dragging(
     state.dialogs.interaction.hover_wire_vertex =
         selection_drag::hover_wire_vertex(response, &view(state, ui.ctx()), viewport, symbols)
             .map(|point| (point.x, point.y));
+    if response.is_pointer_button_down_on()
+        && ui.input(|input| input.pointer.primary_pressed() && input.pointer.primary_down())
+    {
+        state.prepare_schematic_drag();
+    }
     if response.drag_started_by(egui::PointerButton::Primary)
         && !select_drag_can_start(primary_pan_gesture_active(ui, response))
     {

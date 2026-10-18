@@ -175,6 +175,33 @@ impl Schematic {
         self.history.begin(&self.document, description)
     }
 
+    /// Copy the baseline [`Self::begin_operation`] would capture, ahead of an
+    /// edit that may follow, for [`Self::begin_prepared_operation`].
+    pub fn prepare_operation(&self) -> PreparedBaseline {
+        PreparedBaseline {
+            stamp: self.content_stamp(),
+            snapshot: SchematicSnapshot::capture(&self.document),
+        }
+    }
+
+    /// [`Self::begin_operation`], taking its baseline from `prepared` while
+    /// the document still carries the stamp it was copied under. Equal stamps
+    /// are equal content, so that copy is the one `begin_operation` would
+    /// capture now; a baseline the document has moved on from is dropped and
+    /// the document captured afresh.
+    pub fn begin_prepared_operation(
+        &mut self,
+        prepared: Option<PreparedBaseline>,
+        description: impl Into<String>,
+    ) -> u64 {
+        match prepared {
+            Some(prepared) if prepared.stamp == self.content_stamp() => {
+                self.history.begin_from(prepared.snapshot, description)
+            }
+            _ => self.begin_operation(description),
+        }
+    }
+
     /// Begin a scope using a baseline captured by a live property-edit session.
     pub fn begin_operation_from(
         &mut self,
@@ -254,6 +281,17 @@ impl Schematic {
     pub fn document_mut_for_test(&mut self) -> &mut SchematicDocument {
         &mut self.document
     }
+}
+
+/// A document's undo baseline, copied before the edit it is for has begun:
+/// at the press of a pointer gesture, so the gesture's first move does not
+/// pay for the copy. It keeps the stamp of the content it copied, and
+/// [`Schematic::begin_prepared_operation`] uses it only while the document
+/// still carries that stamp.
+#[derive(Debug, Clone)]
+pub struct PreparedBaseline {
+    stamp: u64,
+    snapshot: SchematicSnapshot,
 }
 
 /// Identifies the editor baseline to restore and any runtime repair to reconcile.

@@ -1,7 +1,7 @@
 use super::EditHistory;
 use crate::schematic::{
     component::Component, component_type::ComponentType, document::SchematicDocument,
-    history::SchematicSnapshot,
+    history::SchematicSnapshot, owned::Schematic,
 };
 use rspice_design_model::Point;
 fn document_with(n: usize) -> SchematicDocument {
@@ -87,6 +87,51 @@ fn nested_begin_joins_the_outer_atomic_transaction() {
     assert_eq!(history.committed.undo_description(), Some("First"));
     let (restored, _) = history.committed.undo(snapshot_with(2)).unwrap();
     assert!(restored.is_equal(&snapshot_with(0)));
+}
+
+/// A baseline copied before its operation began stands in for the capture
+/// only while the document is unchanged since: an edit in between leaves the
+/// copy behind, and undo returns to the document the operation began on.
+#[test]
+fn a_prepared_baseline_stands_in_only_for_the_document_it_copied() {
+    let one_part = || {
+        Schematic::from_document(SchematicDocument {
+            grid_size: 10,
+            components: vec![Component::new(1, ComponentType::Resistor, Point::new(0, 0))],
+            ..SchematicDocument::default()
+        })
+    };
+
+    let mut unchanged = one_part();
+    let prepared = unchanged.prepare_operation();
+    unchanged.begin_prepared_operation(Some(prepared), "Move R1");
+    unchanged.document.components[0].pos = Point::new(50, 0);
+    assert!(unchanged.end_operation());
+    assert!(unchanged.undo().is_some());
+    assert_eq!(unchanged.document().components[0].pos, Point::new(0, 0));
+
+    let mut changed = one_part();
+    let prepared = changed.prepare_operation();
+    changed.document.components.push(Component::new(
+        2,
+        ComponentType::Resistor,
+        Point::new(70, 0),
+    ));
+    changed.begin_prepared_operation(Some(prepared), "Move R1");
+    changed.document.components[0].pos = Point::new(50, 0);
+    assert!(changed.end_operation());
+    assert!(changed.undo().is_some());
+    let parts: Vec<_> = changed
+        .document()
+        .components
+        .iter()
+        .map(|component| (component.id, component.pos))
+        .collect();
+    assert_eq!(
+        parts,
+        [(1, Point::new(0, 0)), (2, Point::new(70, 0))],
+        "undo keeps the part added after the copy was made"
+    );
 }
 
 #[test]

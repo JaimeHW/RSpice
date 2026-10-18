@@ -96,6 +96,12 @@ pub struct DragState {
 
     /// Type of drag operation
     pub drag_type: DragType,
+
+    /// The document's undo baseline, copied when the button went down on
+    /// the canvas, for the drag that press may start. Copying it then keeps
+    /// the copy off the drag's first move frame.
+    #[serde(skip)]
+    prepared: Option<rspice_design::schematic::owned::PreparedBaseline>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +139,16 @@ impl DragState {
 }
 
 impl super::AppState {
+    /// A press on the canvas copies the undo baseline of the drag it may
+    /// start, so that drag's first move frame does not pay for the copy. A
+    /// drag that begins once the document has changed captures its own.
+    pub(crate) fn prepare_schematic_drag(&mut self) {
+        if self.schematic.has_pending_operation() || self.schematic_edit_read_only() {
+            return;
+        }
+        self.dialogs.interaction.drag.prepared = Some(self.schematic.prepare_operation());
+    }
+
     pub(crate) fn begin_schematic_drag(
         &mut self,
         position: (i32, i32),
@@ -147,10 +163,12 @@ impl super::AppState {
             DragType::WireVertex => "drag wire vertex",
             _ => return false,
         };
+        let prepared = self.dialogs.interaction.drag.prepared.take();
         // A new pointer edit cannot leave another window's transaction
         // orphaned when it takes over the shared gesture owner.
         self.cancel_schematic_drag();
-        self.schematic.begin_operation(description);
+        self.schematic
+            .begin_prepared_operation(prepared, description);
         let owner = SchematicDragOwner {
             project: self.workspace.content.project.id(),
             document: self.workspace.content.active_schematic_reference(),
@@ -279,6 +297,10 @@ impl super::AppState {
         ctx: &egui::Context,
         after_canvas: bool,
     ) -> bool {
+        // A press let go without starting a drag lets its baseline go.
+        if !ctx.input(|input| input.pointer.primary_down()) {
+            self.dialogs.interaction.drag.prepared = None;
+        }
         let Some(owner) = &self.dialogs.interaction.drag.owner else {
             return false;
         };
