@@ -455,10 +455,7 @@ impl RSpiceApp {
             .map(crate::workbench::WorkspacePreferences::preset)
             .unwrap_or_default();
         state.workbench.set_workspace_preset(workspace_preset);
-        // The waveform viewer starts from Results ▸ Waveform defaults. Its
-        // own toggles change both afterwards.
-        state.ui.results.session.phase_continuous = state.ui.preferences.unwrapped_phase();
-        state.start_waveform_view_from_preferences();
+        state.start_waveform_viewer_session();
         state.workbench.window_session.normalize_after_restore();
         state.workspace.content.migrate_owned_netlist_deck_ids();
 

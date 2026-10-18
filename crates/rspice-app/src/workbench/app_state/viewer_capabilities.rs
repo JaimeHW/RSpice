@@ -57,6 +57,14 @@ impl AppState {
         );
     }
 
+    /// Start the session's waveform viewer from Results ▸ Waveform defaults:
+    /// wrapped or unwrapped phase, and the minor grid. Its own toggles change
+    /// both afterwards.
+    pub(crate) fn start_waveform_viewer_session(&mut self) {
+        self.ui.results.session.phase_continuous = self.ui.preferences.unwrapped_phase();
+        self.start_waveform_view_from_preferences();
+    }
+
     /// Give a cleared waveform view the minor grid Results ▸ Waveform
     /// defaults asks for; clearing alone would always start it without.
     pub(crate) fn start_waveform_view_from_preferences(&mut self) {
