@@ -728,16 +728,19 @@ fn drawing_sheet_geometry_is_canonical_and_bounded() {
 
 #[test]
 fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
-    // A5 portrait's 118 mm drawing space cannot hold ISO 7200's 180 mm block.
-    // On a sheet ISO 5457 frames, a block that does not fit gives way to none;
-    // on another, to the compact block. Either way the request stays.
-    for (standard, printed) in [
+    // A5 portrait's 118 mm drawing space cannot hold ISO 7200's 180 mm block,
+    // nor can ANSI A portrait's given 20 mm side margins. On a sheet ISO 5457
+    // frames, a block that does not fit gives way to none; on another, to the
+    // compact block. Either way the request stays.
+    for (standard, side_margin_um, printed) in [
         (
             DrawingSheetStandard::IsoA5,
+            None,
             DrawingSheetTitleBlockTemplate::None,
         ),
         (
             DrawingSheetStandard::AnsiA,
+            Some(20_000),
             DrawingSheetTitleBlockTemplate::Compact,
         ),
     ] {
@@ -745,8 +748,13 @@ fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
             SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Portrait)
                 .try_update(|draft| {
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+                    if let Some(margin_um) = side_margin_um {
+                        draft.margins.left_um = margin_um;
+                        draft.margins.right_um = margin_um;
+                    }
                 })
                 .unwrap();
+        assert!(format.geometry().unwrap().drawing_area.width_um < 180_000);
 
         assert_eq!(
             format.title_block.template,
