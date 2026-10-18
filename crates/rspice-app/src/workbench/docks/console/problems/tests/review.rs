@@ -350,15 +350,14 @@ fn problems_page_review_renders() {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     let default = crate::workbench::state::WorkbenchState::default().console_height;
-    let mut renders: Vec<(&str, RSpiceApp, Vec<(f32, f32)>)> = states()
+    let renders = states()
         .into_iter()
         .map(|(name, app)| (name, app, SIZES.to_vec()))
-        .collect();
-    renders.extend(
-        pages()
-            .into_iter()
-            .map(|(name, app)| (name, app, vec![(1280.0, 320.0), (1280.0, default)])),
-    );
+        .chain(
+            pages()
+                .into_iter()
+                .map(|(name, app)| (name, app, vec![(1280.0, 320.0), (1280.0, default)])),
+        );
     for (name, mut app, sizes) in renders {
         for (width, height) in sizes {
             app.state.workbench.console_height = height;
