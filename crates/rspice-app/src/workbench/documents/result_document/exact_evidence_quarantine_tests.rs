@@ -22,7 +22,7 @@ fn corrupted_waveform_keeps_identity_but_quarantines_every_exact_value_route() {
             .contains("cannot be copied or exported")
     );
     assert!(
-        exact_result_signal_last_sample(&waveform, &[run.clone()])
+        exact_result_signal_last_sample(&waveform, &[run.clone()], Default::default())
             .expect_err("last-sample copy must fail closed")
             .contains("cannot be copied or exported")
     );

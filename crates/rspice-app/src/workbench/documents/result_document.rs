@@ -370,13 +370,70 @@ pub(crate) fn result_signal_stable_path(
     ))
 }
 
+/// A signal's last retained sample as "Copy value" puts it on the clipboard:
+/// its name, then x and y with their units in the format Copied values
+/// chose, at full precision.
 pub(crate) fn exact_result_signal_last_sample(
     key: &SourceWaveformPresentationKey,
     runs: &[SimulationRun],
+    policy: crate::quantity::QuantityPresentationPolicy,
 ) -> Result<String, String> {
     let (_, analysis, waveform) = resolved_result_signal(key, runs)?;
     validate_exact_analysis_evidence(analysis)?;
-    rspice_formats::result_csv::encode_exact_sample(waveform.as_ref())
+    let y_unit = browser_signal_unit(
+        &waveform.name,
+        waveform.unit.as_deref(),
+        analysis_default_unit(analysis.analysis_type),
+    );
+    rspice_formats::result_csv::encode_exact_sample(
+        waveform.as_ref(),
+        &sample_x_unit(analysis),
+        y_unit,
+        |value, unit| copied_sample_value(policy, value, unit),
+    )
+}
+
+/// The unit of a signal's abscissa: an imported coordinate's own, the swept
+/// source's for a DC sweep, otherwise the analysis's sweep axis.
+fn sample_x_unit(analysis: &AnalysisResult) -> String {
+    if let Some(coordinate) = analysis.imported_coordinate() {
+        return coordinate.unit.clone().unwrap_or_default();
+    }
+    if let Some(crate::state::AnalysisResultPayload::DcSweep { evidence }) =
+        &analysis.result_payload
+    {
+        // A SPICE source's leading letter is its element type, so it is
+        // also the quantity swept; a swept parameter states no unit.
+        let unit = match evidence.source.chars().next() {
+            Some('V' | 'v') => "V",
+            Some('I' | 'i') => "A",
+            _ => "",
+        };
+        return unit.to_owned();
+    }
+    analysis.analysis_type.axis_info().1.to_owned()
+}
+
+/// One copied value with its unit, as Copied values writes it. A frequency
+/// and an angle follow Frequency and Angle display; a unit that names its
+/// own decade or carries a power takes no SI prefix; a value with no unit is
+/// written as it stands, since a prefix with nothing after it reads as one.
+fn copied_sample_value(
+    policy: crate::quantity::QuantityPresentationPolicy,
+    value: f64,
+    unit: &str,
+) -> String {
+    match unit {
+        "" => format!("{value:.17e}"),
+        "Hz" => policy.copy_frequency(value),
+        "°" => policy.copy_angle(value.to_radians()),
+        "rad" => policy.copy_angle(value),
+        unit if rspice_results_ui::waves::unit_carries_its_decade(unit) => {
+            policy.copy_scaled_unit_value(value, unit)
+        }
+        unit if unit.contains(['^', '²']) => format!("{value:.17e} {unit}"),
+        unit => policy.copy_si_value(value, unit),
+    }
 }
 
 pub(crate) fn exact_result_signal_tsv(

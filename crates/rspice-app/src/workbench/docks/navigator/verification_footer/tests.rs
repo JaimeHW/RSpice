@@ -1029,11 +1029,24 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
     assert!(tsv.contains("sample\tx\ty\n"));
     assert!(tsv.contains("1\t1.00000000000000000e0\t1.00000000000000000e0"));
 
-    let last = super::exact_result_signal_last_sample(&key, &app.state.simulation.retained.runs)
-        .expect("last retained sample exists");
+    // "Copy value" states the x unit and follows Copied values, at full
+    // precision either way.
+    use rspice_app_types::quantity::{CopiedValueFormat, QuantityPresentationPolicy};
+    let last = |copied_value_format| {
+        let policy = QuantityPresentationPolicy {
+            copied_value_format,
+            ..QuantityPresentationPolicy::default()
+        };
+        super::exact_result_signal_last_sample(&key, &app.state.simulation.retained.runs, policy)
+            .expect("last retained sample exists")
+    };
     assert_eq!(
-        last,
-        "V(out)\tx=1.00000000000000000e0\ty=1.00000000000000000e0"
+        last(CopiedValueFormat::EngineeringNotationWithUnit),
+        "V(out)\tx=1.00000000000000000 s\ty=1.00000000000000000 V"
+    );
+    assert_eq!(
+        last(CopiedValueFormat::ScientificNotationWithSiUnit),
+        "V(out)\tx=1.00000000000000000e0 s\ty=1.00000000000000000e0 V"
     );
 }
 

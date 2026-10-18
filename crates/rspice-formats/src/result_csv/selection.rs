@@ -9,8 +9,18 @@ use rspice_results::{
     waveform::RetainedWaveform,
 };
 
-/// Encode the final real and optional complex sample at full precision.
-pub fn encode_exact_sample(waveform: &RetainedWaveform) -> Result<String, String> {
+/// Encode the final real and optional complex sample as one
+/// `name<TAB>x=…<TAB>y=…` record.
+///
+/// `copied` writes one value with its unit in the notation the host chose,
+/// at full precision; `x_unit` is the abscissa's unit and `y_unit` the
+/// sample's, which its complex parts share.
+pub fn encode_exact_sample(
+    waveform: &RetainedWaveform,
+    x_unit: &str,
+    y_unit: &str,
+    copied: impl Fn(f64, &str) -> String,
+) -> Result<String, String> {
     use std::fmt::Write as _;
 
     validate_result_waveform_vectors(waveform)?;
@@ -20,14 +30,17 @@ pub fn encode_exact_sample(waveform: &RetainedWaveform) -> Result<String, String
         .checked_sub(1)
         .ok_or_else(|| "The selected quantity retains no samples.".to_owned())?;
     let mut exact = format!(
-        "{}\tx={:.17e}\ty={:.17e}",
-        waveform.name, waveform.x[index], waveform.y[index]
+        "{}\tx={}\ty={}",
+        waveform.name,
+        copied(waveform.x[index], x_unit),
+        copied(waveform.y[index], y_unit)
     );
     if let Some(complex) = &waveform.complex {
         write!(
             exact,
-            "\treal={:.17e}\timag={:.17e}",
-            complex.real[index], complex.imag[index]
+            "\treal={}\timag={}",
+            copied(complex.real[index], y_unit),
+            copied(complex.imag[index], y_unit)
         )
         .expect("writing to a String cannot fail");
     }

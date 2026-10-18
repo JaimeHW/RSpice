@@ -5574,7 +5574,11 @@ fn result_signal_context_menu(
             copy_last.clone().on_disabled_hover_text(error);
         }
         if copy_last.clicked() {
-            match exact_result_signal_last_sample(&key, &app.state.simulation.retained.runs) {
+            match exact_result_signal_last_sample(
+                &key,
+                &app.state.simulation.retained.runs,
+                app.state.ui.preferences.quantity_presentation_policy(),
+            ) {
                 Ok(value) => ui.ctx().copy_text(value),
                 Err(error) => app.state.prompt(error),
             }
