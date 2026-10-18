@@ -53,12 +53,26 @@ impl RSpiceApp {
             return;
         }
 
-        // A checkpoint that was written is not an event: only its failure is.
-        if let Err(e) = crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(
+        // A checkpoint that was written is not an event: only its failure is,
+        // and only when it starts. A failure that persists would otherwise
+        // raise an error at every interval, and an error stays until answered;
+        // the recovery is recorded instead, so the Console shows the span.
+        let was_failing = self.state.ui.autosave_failing;
+        let written = crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(
             &path,
             &self.state.schematic,
-        ) {
-            self.state.report_failure("Autosave failed", e.to_string());
+        );
+        self.state.ui.autosave_failing = written.is_err();
+        match written {
+            Err(e) if !was_failing => self.state.report_failure("Autosave failed", e.to_string()),
+            Ok(_) if was_failing => {
+                self.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    "Autosave is writing checkpoints again.",
+                );
+            }
+            Err(_) | Ok(_) => {}
         }
         self.autosave_last = Some(now);
     }
@@ -235,11 +249,21 @@ mod tests {
         app.autosave_last =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(2 * 60));
         app.autosave_tick(&egui::Context::default());
-        let _ = std::fs::remove_file(&blocker);
+        {
+            let activity = app.state.ui.toasts.activity();
+            assert_eq!(activity.len(), 1);
+            assert_eq!(activity[0].title(), "Autosave failed");
+            assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+        }
 
-        let activity = app.state.ui.toasts.activity();
-        assert_eq!(activity.len(), 1);
-        assert_eq!(activity[0].title(), "Autosave failed");
-        assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+        // The failure persists through the next interval: it was said when
+        // it started, and an error that stays until answered is not raised
+        // again for every checkpoint it goes on preventing.
+        app.autosave_last =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(2 * 60));
+        app.autosave_tick(&egui::Context::default());
+        let _ = std::fs::remove_file(&blocker);
+        assert_eq!(app.state.ui.toasts.activity().len(), 1);
+        assert!(app.state.ui.autosave_failing);
     }
 }

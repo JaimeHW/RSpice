@@ -281,6 +281,9 @@ pub struct UiSessionState {
     /// workflow that holds no frame (a save, an open) is still toasted on the
     /// frame clock. Set once when the shell starts. Transient.
     pub(crate) toast_context: egui::Context,
+    /// The last autosave checkpoint could not be written. A failure is said
+    /// when it starts, not again at every interval it persists. Transient.
+    pub(crate) autosave_failing: bool,
     /// A retained result document asked to be taken back to the plan that
     /// produced it.
     ///
