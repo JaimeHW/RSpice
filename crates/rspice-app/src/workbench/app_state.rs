@@ -223,8 +223,9 @@ pub struct AppState {
     /// Project/workspace model for active design context and open LCV views.
     pub(crate) workspace: crate::state::ProjectWorkspace,
     /// Transactional document registry, accepted project baseline, and
-    /// canonical persistence identity. Runtime-only; session recovery keeps
-    /// the working set separately and reconstructs this boundary at startup.
+    /// canonical persistence identity. Runtime-only apart from whether a
+    /// project is open; session recovery keeps the working set separately and
+    /// reconstructs this boundary at startup.
     pub(crate) project_lifecycle:
         Box<crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState>,
     /// Pending cell deletion (library, cell_name)

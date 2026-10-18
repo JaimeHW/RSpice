@@ -307,8 +307,16 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
     }
 }
 
+/// Bind the project the restored session holds. A session saved with no
+/// project open restores onto the no-project landing: its workspace is the
+/// placeholder Close Project left behind, and it is never bound or opened.
 pub(crate) fn initialize_from_session(state: &mut AppState) {
-    state.project_lifecycle.authority.open_session();
+    if !state.project_lifecycle.is_open() {
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Project);
+        return;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     {
         let restored_path = state.workspace.content.project.path.clone();

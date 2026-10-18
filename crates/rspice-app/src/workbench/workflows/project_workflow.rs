@@ -1010,7 +1010,8 @@ fn closing_loses_nothing(state: &AppState) -> bool {
 
 /// Bind the project the restored session holds, then apply Projects and
 /// files ▸ On startup. Called once the session and preferences are restored,
-/// because the choice is read from them.
+/// because the choice is read from them. A session saved after Close Project
+/// starts with no project whichever is chosen.
 pub(crate) fn open_session_project(state: &mut AppState) {
     crate::workbench::lifecycle::project_lifecycle::initialize_from_session(state);
     #[cfg(not(target_arch = "wasm32"))]

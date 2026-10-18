@@ -218,6 +218,104 @@ fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+/// File ▸ Close Project, then a restart. The workspace still holds the
+/// placeholder the close left behind; the session says no project was open,
+/// so that placeholder is never opened as an untitled project, whichever On
+/// startup says.
+#[test]
+fn a_session_saved_after_close_project_restarts_with_no_project() {
+    use crate::workbench::ChoicePreference;
+
+    let mut state = AppState::default();
+    state
+        .workbench
+        .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
+    assert!(close_project_discard(&mut state));
+    let session = ron::to_string(&state).expect("the session serializes");
+
+    for choice in [0, 1] {
+        let mut restored = ron::from_str::<Box<AppState>>(&session).expect("the session restores");
+        restored
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::StartupProject, choice)
+            .expect("the startup choice has two options");
+        open_session_project(&mut restored);
+        assert!(
+            !restored.project_lifecycle.is_open(),
+            "On startup choice {choice} opened a project"
+        );
+        assert!(!restored.workbench.project_launcher_open);
+        assert_eq!(
+            restored.workbench.workspace,
+            crate::workbench::state::Workspace::Project
+        );
+    }
+}
+
+/// A saved project survives the restart through its session: Reopen last
+/// project binds its file again, and Start with no project keeps it open
+/// when it carries an edit the file does not have, and says why.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_saved_project_comes_back_through_its_session() {
+    use crate::state::{ComponentType, Point};
+    use crate::workbench::ChoicePreference;
+    use crate::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
+
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-startup-session-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&folder).expect("create the test folder");
+    let session = |name: &str, edited: bool| {
+        let mut state = Box::new(AppState::default());
+        save_native(
+            state.as_mut(),
+            SaveScope::AllDocuments,
+            &folder.join(name),
+            DestinationAuthority::UserSelected,
+        )
+        .expect("save the project");
+        if edited {
+            state
+                .schematic
+                .add_component(ComponentType::Resistor, Point::new(3, 8));
+            state.workspace.save_active_schematic(&state.schematic);
+        }
+        ron::to_string(state.as_ref()).expect("the session serializes")
+    };
+    let restart = |session: &str, choice: usize| {
+        let mut state = ron::from_str::<Box<AppState>>(session).expect("the session restores");
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::StartupProject, choice)
+            .expect("the startup choice has two options");
+        open_session_project(&mut state);
+        state
+    };
+
+    let reopened = restart(&session("reopened.rspiceproj", false), 0);
+    assert!(reopened.project_lifecycle.is_open(), "Reopen last project");
+    assert!(reopened.project_lifecycle.accepted().is_some());
+    assert!(reopened.project_lifecycle.canonical_native_path().is_some());
+
+    let edited = restart(&session("edited.rspiceproj", true), 1);
+    assert!(edited.project_lifecycle.is_open(), "unsaved changes stay");
+    assert_eq!(edited.schematic.document().components.len(), 1);
+    assert!(edited.log_buffer.entries().any(|entry| {
+        entry.message == "The last project was reopened because it has unsaved changes."
+    }));
+
+    drop((reopened, edited));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// Closing the project while an edit settles drops the edit with everything
 /// else the design held: nothing is checked afterwards, and nothing says a
 /// check failed.

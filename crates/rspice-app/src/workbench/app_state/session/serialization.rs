@@ -134,7 +134,11 @@ impl serde::Serialize for AppState {
             .map(serde_json::to_value)
             .transpose()
             .map_err(<S::Error as serde::ser::Error>::custom)?;
-        let field_count = if simulation_results.is_empty() { 9 } else { 10 };
+        let field_count = if simulation_results.is_empty() {
+            10
+        } else {
+            11
+        };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         let mut committed_workspace;
         let workspace = if self
@@ -167,6 +171,10 @@ impl serde::Serialize for AppState {
             &self.native_project_binding_receipt,
         )?;
         state.serialize_field("browser_project_binding_receipt", &browser_receipt)?;
+        // After Close Project the workspace still holds a placeholder project.
+        // Without this field a restart would open that placeholder as an
+        // untitled project.
+        state.serialize_field("no_project_open", &!self.project_lifecycle.is_open())?;
         if !simulation_results.is_empty() {
             state.serialize_field("simulation_results", &simulation_results)?;
         }
@@ -220,6 +228,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
             native_project_binding_receipt: Option<serde_json::Value>,
             #[serde(default)]
             browser_project_binding_receipt: Option<serde_json::Value>,
+            // Sessions written before this field always had a project open.
+            #[serde(default)]
+            no_project_open: bool,
         }
 
         // Decode every persisted domain directly into its bounded wire type.
@@ -329,6 +340,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt,
             ..Default::default()
         };
+        if de.no_project_open {
+            state.project_lifecycle.authority.close_project();
+        }
         let annotation_outcome = match annotation_restoration {
             Ok(0) => None,
             Ok(count) => Some((
@@ -829,6 +843,28 @@ mod tests {
             messages
                 .iter()
                 .any(|message| message.contains("browser project binding receipt"))
+        );
+    }
+
+    #[test]
+    fn the_session_records_whether_a_project_is_open() {
+        let mut closed = AppState::default();
+        closed.project_lifecycle.authority.close_project();
+        let ron = ron::to_string(&closed).expect("eframe RON session serializes");
+        let restored = ron::from_str::<Box<AppState>>(&ron).expect("the session restores");
+        assert!(!restored.project_lifecycle.is_open());
+
+        let mut session = serde_json::to_value(AppState::default()).expect("session serializes");
+        let field = session
+            .as_object_mut()
+            .expect("session object")
+            .remove("no_project_open");
+        assert_eq!(field, Some(serde_json::Value::Bool(false)));
+        let older: AppState =
+            serde_json::from_value(session).expect("a session without the field restores");
+        assert!(
+            older.project_lifecycle.is_open(),
+            "sessions written before the field always had a project open"
         );
     }
 
