@@ -1906,7 +1906,13 @@ impl SchematicSheetFormat {
     pub fn title_block_field_order(&self) -> Vec<DrawingSheetTitleFieldId> {
         match self.title_block.template {
             DrawingSheetTitleBlockTemplate::Standard => return ISO_7200_FORM_FIELDS.to_vec(),
-            DrawingSheetTitleBlockTemplate::AsmeY141 => return ASME_Y14_1_FORM_FIELDS.to_vec(),
+            DrawingSheetTitleBlockTemplate::AsmeY141 => {
+                // The supplementary strip stands above the block.
+                return ASME_Y14_1_SUPPLEMENTARY_FIELDS
+                    .into_iter()
+                    .chain(ASME_Y14_1_FORM_FIELDS)
+                    .collect();
+            }
             _ => {}
         }
         self.title_block

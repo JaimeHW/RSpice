@@ -672,8 +672,8 @@ fn an_asme_sheet_plots_the_form_the_canvas_draws_in_its_line_weights() {
         assert_eq!(plotted, laid_out, "{standard:?}");
         assert_eq!(
             plotted.iter().filter(|width| **width == 600).count(),
-            4,
-            "{standard:?}: three rules across the block and the one beside E"
+            5,
+            "{standard:?}: the strip's foot, three rules across the block and the one beside E"
         );
         let text = plotted_title_lines(&format)
             .into_iter()

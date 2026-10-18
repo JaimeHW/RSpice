@@ -314,7 +314,10 @@ impl SchematicSheetFormat {
         let template = self.title_block.template;
         let on_form = match template {
             DrawingSheetTitleBlockTemplate::Standard => ISO_7200_FORM_FIELDS.contains(&field),
-            DrawingSheetTitleBlockTemplate::AsmeY141 => ASME_Y14_1_FORM_FIELDS.contains(&field),
+            DrawingSheetTitleBlockTemplate::AsmeY141 => {
+                ASME_Y14_1_FORM_FIELDS.contains(&field)
+                    || ASME_Y14_1_SUPPLEMENTARY_FIELDS.contains(&field)
+            }
             _ => true,
         };
         if !on_form {

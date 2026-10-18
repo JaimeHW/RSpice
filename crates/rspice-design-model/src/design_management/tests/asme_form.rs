@@ -11,8 +11,25 @@ const fn inch(hundredths: u64) -> u64 {
     hundredths * 254
 }
 
+/// A new landscape sheet showing none of the fields the supplementary strip
+/// carries, so its block is the figure's alone.
 fn sheet(standard: DrawingSheetStandard) -> SchematicSheetFormat {
+    showing_supplementary(standard, &[])
+}
+
+/// A new landscape sheet showing exactly `fields` of the supplementary
+/// strip's.
+fn showing_supplementary(
+    standard: DrawingSheetStandard,
+    fields: &[DrawingSheetTitleFieldId],
+) -> SchematicSheetFormat {
     SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape)
+        .try_update(|draft| {
+            for field in ASME_Y14_1_SUPPLEMENTARY_FIELDS {
+                draft.title_block.fields.get_mut(&field).unwrap().visible = fields.contains(&field);
+            }
+        })
+        .unwrap()
 }
 
 fn layout_of(format: &SchematicSheetFormat) -> DrawingSheetTitleLayout {
@@ -95,12 +112,14 @@ fn the_block_takes_fig_5_1_on_a_to_c_and_fig_5_2_on_d_and_larger() {
             SchematicPageOrientation::Landscape,
             SchematicPageOrientation::Portrait,
         ] {
+            // A new sheet shows Cell / view and Document status, which the
+            // strip above the block carries.
             let format = SchematicSheetFormat::from_standard(standard, orientation);
             let geometry = format.geometry().unwrap();
             let block = geometry.title_block.expect("the sheet carries a block");
             assert_eq!(
                 (block.width_um, block.height_um),
-                expected,
+                (expected.0, expected.1 + inch(37)),
                 "{standard:?} {orientation:?}"
             );
             // ASME Y14.1 6.1: the lower right corner of the format, upright.
@@ -446,11 +465,16 @@ fn every_line_of_the_form_stays_inside_its_cell() {
         DrawingSheetStandard::ArchB,
         DrawingSheetStandard::ArchE1,
     ] {
-        let format = sheet(standard);
+        let format = showing_supplementary(standard, &ASME_Y14_1_SUPPLEMENTARY_FIELDS);
         let layout = layout_of(&format);
         let long = "WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE WIDE";
-        let values = ASME_Y14_1_FORM_FIELDS.map(|field| (field, long));
+        let values = ASME_Y14_1_FORM_FIELDS
+            .into_iter()
+            .chain(ASME_Y14_1_SUPPLEMENTARY_FIELDS)
+            .map(|field| (field, long))
+            .collect::<Vec<_>>();
         let fields = resolved(&format, &values);
+        assert_eq!(fields.len(), values.len(), "{standard:?}");
         for line in layout.lettering(&fields) {
             let cell = &layout.cells[line.cell];
             let em = drawing_sheet_mono_em_um(line.lettering_um);
@@ -678,4 +702,142 @@ fn a_project_saved_before_the_cage_code_and_contract_number_loads_without_them()
     }
     let loaded: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
     assert_eq!(loaded, SchematicSheetFormat::default());
+}
+
+#[test]
+fn fields_with_no_asme_block_stand_in_a_strip_above_it_never_inside_it() {
+    use DrawingSheetStandard::{AnsiB, AnsiD, ArchD};
+    let every = ASME_Y14_1_SUPPLEMENTARY_FIELDS;
+    for (standard, widths) in [
+        (AnsiB, [100, 200, 150, 125, 50]),
+        (AnsiD, [125, 312, 150, 125, 50]),
+    ] {
+        let layout = layout_of(&showing_supplementary(standard, &every));
+        let figure = layout_of(&sheet(standard));
+        let strip = inch(37);
+        assert_eq!(layout.height_um, figure.height_um + strip);
+        let mut x = 0;
+        for ((heading, width), field) in
+            ["PROJECT", "CELL / VIEW", "STATUS", "CLASSIFICATION", "LANG"]
+                .into_iter()
+                .zip(widths)
+                .zip(every)
+        {
+            let cell = cell(&layout, heading);
+            assert_eq!(
+                bounds(cell),
+                (x, 0, inch(width), strip),
+                "{standard:?} {heading}"
+            );
+            assert_eq!(cell.field(), Some(field));
+            assert_eq!(cell.letter_caption(), heading, "the heading fits");
+            x += inch(width);
+        }
+        // Blocks A to L stand under the strip exactly as the figure draws
+        // them, and the strip's foot is the block's thick outline.
+        for heading in [
+            "TITLE", "SIZE", "DAI", "DWG NO", "REV", "SCALE", "SHEET", "DRAWN",
+        ] {
+            let (x, y, width, height) = bounds(cell(&figure, heading));
+            assert_eq!(
+                bounds(cell(&layout, heading)),
+                (x, y + strip, width, height)
+            );
+        }
+        assert!(layout.rules.iter().any(|rule| {
+            (
+                rule.from_x_um,
+                rule.from_y_um,
+                rule.to_x_um,
+                rule.to_y_um,
+                rule.width_um,
+            ) == (0, strip, layout.width_um, strip, 600)
+        }));
+        assert!(
+            layout
+                .rules
+                .iter()
+                .filter(|rule| rule.to_y_um <= strip && rule.from_x_um == rule.to_x_um)
+                .all(|rule| rule.width_um == 300)
+        );
+    }
+    // An ARCH block's strip widens CELL / VIEW by what SIZE gained.
+    let arch = layout_of(&showing_supplementary(ArchD, &every));
+    assert_eq!(cell(&arch, "CELL / VIEW").width_um, inch(312 + 123));
+}
+
+#[test]
+fn a_hidden_supplementary_field_gives_its_cell_to_its_neighbour() {
+    let layout_showing = |fields: &[DrawingSheetTitleFieldId]| {
+        layout_of(&showing_supplementary(DrawingSheetStandard::AnsiB, fields))
+    };
+    // A new sheet shows Cell / view and the status: Project's width goes to
+    // Cell / view on its right, Classification's and Language's to the
+    // status on their left.
+    let new = layout_of(&SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiB,
+        SchematicPageOrientation::Landscape,
+    ));
+    assert_eq!(
+        bounds(cell(&new, "CELL / VIEW")),
+        (0, 0, inch(300), inch(37))
+    );
+    assert_eq!(
+        bounds(cell(&new, "STATUS")),
+        (inch(300), 0, inch(325), inch(37))
+    );
+    assert_eq!(
+        new,
+        layout_showing(&[Field::CellView, Field::DocumentStatus])
+    );
+    let alone = layout_showing(&[Field::Language]);
+    assert_eq!(bounds(cell(&alone, "LANG")), (0, 0, inch(625), inch(37)));
+    // A sheet showing none of them carries no strip at all.
+    let none = layout_showing(&[]);
+    assert_eq!(none.height_um, inch(200));
+    assert!(
+        none.cells
+            .iter()
+            .all(|cell| cell.caption.is_none_or(|caption| caption.text != "LANG"))
+    );
+}
+
+#[test]
+fn the_asme_form_letters_no_document_type_and_the_status_in_capitals() {
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiB,
+        SchematicPageOrientation::Landscape,
+    )
+    .try_update(|draft| {
+        let document_type = draft
+            .title_block
+            .fields
+            .get_mut(&Field::DocumentType)
+            .unwrap();
+        document_type.visible = true;
+        document_type.value = "Schematic diagram".to_owned();
+    })
+    .unwrap();
+    assert!(
+        !format
+            .title_block_field_order()
+            .contains(&Field::DocumentType)
+    );
+    assert!(!format.title_field_shown(Field::DocumentType));
+    let text = lettered(
+        &layout_of(&format),
+        &resolved(
+            &format,
+            &[
+                (Field::DocumentStatus, "Under approval"),
+                (Field::CellView, "lib/top/schematic"),
+            ],
+        ),
+    );
+    assert!(text.iter().any(|line| line == "UNDER APPROVAL"), "{text:?}");
+    assert!(
+        text.iter().any(|line| line == "lib/top/schematic"),
+        "{text:?}"
+    );
+    assert!(!text.iter().any(|line| line.contains("Schematic diagram")));
 }

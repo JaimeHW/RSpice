@@ -31,6 +31,13 @@
 //! taken by SIZE and SCALE, so every division the figures measure from the
 //! right edge stands where they put it. 5.3 makes every block size a minimum.
 //!
+//! The fields RSpice carries that have no ASME block (project, cell / view,
+//! document status, classification and language) stand in a strip of their
+//! own directly above the block, as 10 places additional data blocks, and
+//! never inside blocks A to L. The strip appears only while the sheet shows
+//! one of them. The figures have no document type, and neither does the
+//! form.
+//!
 //! Lettering follows ASME Y14.2 (the heights are known from secondary
 //! restatements of its Table 1): headings 0.10 in (2.5 mm), entries 0.12 in
 //! (3 mm), and the title, size, DAI, drawing number and revision 0.12 in on
@@ -86,12 +93,14 @@ pub enum AsmeY141TitleBlockSize {
     Large,
 }
 
-/// The ASME form a sheet carries: its figure, and whether its SIZE block is
-/// widened for an ARCH designation.
+/// The ASME form a sheet carries: its figure, whether its SIZE block is
+/// widened for an ARCH designation, and whether the supplementary strip
+/// stands above it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AsmeY141TitleBlockForm {
     pub size: AsmeY141TitleBlockSize,
     pub architectural: bool,
+    pub supplementary: bool,
 }
 
 impl AsmeY141TitleBlockForm {
@@ -138,12 +147,31 @@ impl AsmeY141TitleBlockForm {
         self.approvals_um() + self.right_part_um()
     }
 
+    /// Height of the figure's block: 2.00 or 2.50 in.
     #[must_use]
-    pub const fn height_um(self) -> u64 {
+    pub const fn figure_height_um(self) -> u64 {
         match self.size {
             AsmeY141TitleBlockSize::Small => hundredths(200),
             AsmeY141TitleBlockSize::Large => hundredths(250),
         }
+    }
+
+    /// Height of the supplementary strip, when it stands above the block:
+    /// the drawing number row's 0.37 in, which seats a heading over an
+    /// entry at 3 mm.
+    #[must_use]
+    pub const fn supplementary_um(self) -> u64 {
+        if self.supplementary {
+            hundredths(37)
+        } else {
+            0
+        }
+    }
+
+    /// Height of the block and the strip above it.
+    #[must_use]
+    pub const fn height_um(self) -> u64 {
+        self.figure_height_um() + self.supplementary_um()
     }
 
     #[must_use]
@@ -238,9 +266,50 @@ impl AsmeY141TitleBlockForm {
     /// block below the contract number and the column headings, which
     /// together stand as tall as block A beside them.
     const fn signature_row_um(self) -> u64 {
-        (self.height_um() - hundredths(62)) / 4
+        (self.figure_height_um() - hundredths(62)) / 4
+    }
+
+    /// Widths of the supplementary strip's PROJECT, CELL / VIEW, STATUS,
+    /// CLASSIFICATION and LANG cells. STATUS holds the longest status at
+    /// 3 mm, CLASSIFICATION its heading at 2.5 mm, LANG an ISO 639 code;
+    /// CELL / VIEW takes the rest, and an ARCH block's widening.
+    const fn supplementary_cells_um(self) -> [u64; 5] {
+        let [project, cell_view] = match self.size {
+            AsmeY141TitleBlockSize::Small => [hundredths(100), hundredths(200)],
+            AsmeY141TitleBlockSize::Large => [hundredths(125), hundredths(312)],
+        };
+        [
+            project,
+            cell_view + self.widened_um(),
+            hundredths(150),
+            hundredths(125),
+            hundredths(50),
+        ]
     }
 }
+
+/// The fields with no ASME block, which the form letters in a strip of their
+/// own directly above the block, as ASME Y14.1 10 places additional data,
+/// with each heading over its entry. Each is optional; a hidden one gives
+/// its width to the cell on its left, or on its right when it starts the
+/// strip, so the rules that remain stand where the strip puts them.
+pub const ASME_Y14_1_SUPPLEMENTARY_FIELDS: [DrawingSheetTitleFieldId; 5] = [
+    Field::Project,
+    Field::CellView,
+    Field::DocumentStatus,
+    Field::Classification,
+    Field::Language,
+];
+
+/// Each supplementary field's heading, and whether RSpice's wording for it
+/// is lettered in capitals.
+const SUPPLEMENTARY_HEADINGS: [(&str, bool); 5] = [
+    ("PROJECT", false),
+    ("CELL / VIEW", false),
+    ("STATUS", true),
+    ("CLASSIFICATION", false),
+    ("LANG", false),
+];
 
 /// The fields on the ASME form, in the order it is read: block E, then A,
 /// B, the drawing number's row and the bottom row.
@@ -334,6 +403,9 @@ impl SchematicSheetFormat {
         AsmeY141TitleBlockForm {
             size,
             architectural: series == Some(DrawingSheetStandardSeries::Architectural),
+            supplementary: ASME_Y14_1_SUPPLEMENTARY_FIELDS
+                .into_iter()
+                .any(|field| self.title_field_shown(field)),
         }
     }
 
@@ -666,22 +738,89 @@ pub(super) fn asme_y14_1_form_layout(
         x_um += width_um;
     }
 
-    let main_divisions = [a_um, a_um + b_um, bottom_y_um];
+    // The block stands under the supplementary strip, whose foot is the
+    // block's outline.
+    let top_um = form.supplementary_um();
+    let mut all = supplementary_cells(format, form);
+    all.extend(cells.into_iter().map(|cell| lowered(cell, top_um)));
+    let main_divisions = [a_um, a_um + b_um, bottom_y_um].map(|y_um| top_um + y_um);
     DrawingSheetTitleLayout::from_weighted_cells(
         form.width_um(),
         form.height_um(),
-        cells,
+        all,
         THICK_UM,
         HEADING_PADDING_UM,
         |rule| {
             let main = if rule.from_y_um == rule.to_y_um {
-                rule.from_x_um >= x0_um && main_divisions.contains(&rule.from_y_um)
+                rule.from_y_um == top_um
+                    || (rule.from_x_um >= x0_um && main_divisions.contains(&rule.from_y_um))
             } else {
-                rule.from_x_um == x0_um
+                rule.from_x_um == x0_um && rule.from_y_um >= top_um
             };
             if main { THICK_UM } else { THIN_UM }
         },
     )
+}
+
+/// `cell` moved `by_um` down the block, with everything it letters.
+fn lowered(mut cell: DrawingSheetTitleCell, by_um: u64) -> DrawingSheetTitleCell {
+    cell.y_um += by_um;
+    if let Some(caption) = &mut cell.caption {
+        caption.seat_um += by_um;
+    }
+    for value in &mut cell.values {
+        value.seat_um += by_um;
+    }
+    cell
+}
+
+/// The supplementary strip's cells for the fields the sheet shows: each
+/// hidden field gives its width to the shown cell on its left, or on its
+/// right when it starts the strip. None when the sheet shows none.
+fn supplementary_cells(
+    format: &SchematicSheetFormat,
+    form: AsmeY141TitleBlockForm,
+) -> Vec<DrawingSheetTitleCell> {
+    if !form.supplementary {
+        return Vec::new();
+    }
+    let shown = ASME_Y14_1_SUPPLEMENTARY_FIELDS.map(|field| format.title_field_shown(field));
+    let mut widths = form.supplementary_cells_um();
+    for index in 0..widths.len() {
+        if shown[index] {
+            continue;
+        }
+        let given = std::mem::take(&mut widths[index]);
+        let neighbour = (0..index)
+            .rev()
+            .find(|left| shown[*left])
+            .or_else(|| (index + 1..widths.len()).find(|right| shown[*right]));
+        if let Some(neighbour) = neighbour {
+            widths[neighbour] += given;
+        }
+    }
+    let mut x_um = 0;
+    let mut cells = Vec::new();
+    for (index, field) in ASME_Y14_1_SUPPLEMENTARY_FIELDS.into_iter().enumerate() {
+        if !shown[index] {
+            continue;
+        }
+        let (heading, upper_case) = SUPPLEMENTARY_HEADINGS[index];
+        let cell = Cell {
+            x_um,
+            y_um: 0,
+            width_um: widths[index],
+            height_um: form.supplementary_um(),
+        };
+        let caption = cell.heading_over(heading);
+        let value = DrawingSheetTitleValue {
+            upper_case,
+            ..cell.value_under_heading(DrawingSheetTitleText::Field(field), ENTRY_UM)
+        };
+        x_um += cell.width_um;
+        cells.push(cell.finish(Some(caption), vec![value]));
+    }
+    cells
 }
 
 /// Block E: the contract number, the NAME and DATE headings, and a row for
