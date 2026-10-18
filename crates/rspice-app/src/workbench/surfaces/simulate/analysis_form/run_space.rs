@@ -146,7 +146,11 @@ pub(super) fn temperature_form(
     let declared = context
         .run_set
         .declared_temperatures_celsius(context.reference);
-    property_row(ui, "Run-set axis", &axis_state(context, setup, &declared));
+    property_row(
+        ui,
+        "Run-set axis",
+        &axis_state(context, setup, &declared, policy),
+    );
     // Under the axis row, because it is that row's cost and it is the same in
     // both modes: inheriting authors the temperatures once, it does not move
     // who walks them, so this instance owns a point expansion either way.
@@ -221,6 +225,7 @@ fn axis_state(
     context: &RunSpaceContext<'_>,
     setup: &rspice_simulation_contract::temp_draft::TempDialogState,
     declared: &Option<Vec<f64>>,
+    policy: crate::quantity::QuantityPresentationPolicy,
 ) -> String {
     use rspice_simulation_contract::temp_draft::TempAxisMode;
 
@@ -230,18 +235,14 @@ fn axis_state(
     let plan_declares_axis = context.run_set.dimensions.iter().any(|dimension| {
         dimension.kind == RunSetDimensionKind::Temperature && !dimension.values.is_empty()
     });
-    let stated = declared
-        .iter()
-        .map(|celsius| format!("{celsius}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let stated = crate::quantity::temperature_list_label(declared, policy);
 
     match setup.axis_mode() {
         TempAxisMode::InheritRunSetAxis if plan_declares_axis => {
-            format!("inherits · {stated} °C")
+            format!("inherits · {stated}")
         }
         TempAxisMode::InheritRunSetAxis => {
-            format!("no axis declared · runs at the reference, {stated} °C")
+            format!("no axis declared · runs at the reference, {stated}")
         }
         TempAxisMode::Explicit if plan_declares_axis => {
             let here = setup
@@ -251,7 +252,7 @@ fn axis_state(
                     |config| format!("{} here", config.num_temps()),
                 );
             format!(
-                "overrides run-set axis · {here} vs {} declared ({stated} °C)",
+                "overrides run-set axis · {here} vs {} declared ({stated})",
                 declared.len(),
             )
         }
@@ -267,6 +268,7 @@ pub(super) fn corner_form(
     context: &RunSpaceContext<'_>,
     route: &mut Option<SimulationPage>,
     study_bases: &[(crate::product::AnalysisInstanceId, String)],
+    policy: crate::quantity::QuantityPresentationPolicy,
 ) {
     super::study_base_row(
         ui,
@@ -314,9 +316,9 @@ pub(super) fn corner_form(
         "Nominal point",
         &context.nominal_point_label().unwrap_or_else(|| {
             format!(
-                "none · no declared point sits on {} · {} °C",
+                "none · no declared point sits on {} · {}",
                 context.reference.process.short_name(),
-                context.reference.temperature_celsius,
+                crate::quantity::temperature_label(context.reference.temperature_celsius, policy),
             )
         }),
     );

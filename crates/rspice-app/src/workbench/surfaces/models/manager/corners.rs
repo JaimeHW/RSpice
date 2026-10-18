@@ -65,7 +65,11 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         );
         return;
     }
-    temperature_validity_findings(ui, &rows);
+    temperature_validity_findings(
+        ui,
+        &rows,
+        app.state.ui.preferences.quantity_presentation_policy(),
+    );
     // Four bands share the body, so each is budgeted against the room actually
     // left rather than against a constant: the page carries no scroll of its
     // own, and a band that took a fixed height pushed the pane below it off the
@@ -160,8 +164,13 @@ fn corner_matrix(
     // it would have to give back mid-frame.
     let mut select = None;
     let mut bind = None;
+    // The temperature column is headed with the unit its cells are read in.
+    let policy = app.state.ui.preferences.quantity_presentation_policy();
+    let temperature_heading = format!("Temp {}", policy.celsius_display_transform().2);
+    let mut columns = MATRIX_COLUMNS;
+    columns[7].0 = &temperature_heading;
     card(ui, |ui| {
-        table_header(ui, &MATRIX_COLUMNS);
+        table_header(ui, &columns);
         ScrollArea::vertical()
             .id_salt("models-corner-matrix")
             .max_height(table_h)
@@ -207,7 +216,10 @@ fn corner_matrix(
                                 true,
                             ),
                             (
-                                &engineering_value(row.corner.temperature),
+                                &crate::quantity::temperature_number(
+                                    row.corner.temperature,
+                                    policy,
+                                ),
                                 MATRIX_COLUMNS[7].1,
                                 true,
                             ),
@@ -880,7 +892,11 @@ const TEMPERATURE_FINDING_ROWS: usize = 3;
 /// judgement rather than a verdict the tool can reach. The page's job is that
 /// the judgement is made knowingly. It renders only when there is something to
 /// say — a project whose corners cover its run set sees nothing here.
-fn temperature_validity_findings(ui: &mut Ui, rows: &[CornerRow]) {
+fn temperature_validity_findings(
+    ui: &mut Ui,
+    rows: &[CornerRow],
+    policy: crate::quantity::QuantityPresentationPolicy,
+) {
     let findings = rows
         .iter()
         .filter(|row| !row.unqualified_temperatures.is_empty())
@@ -900,8 +916,8 @@ fn temperature_validity_findings(ui: &mut Ui, rows: &[CornerRow]) {
                 let line = format!(
                     "{} is qualified {}; this run set requests {}",
                     row.corner.name.to_uppercase(),
-                    row.corner.qualified_range_label(),
-                    crate::state::model_library::stated_temperatures(&row.unqualified_temperatures)
+                    qualified_range(&row.corner, policy),
+                    stated_temperatures(&row.unqualified_temperatures, policy)
                 );
                 ui.horizontal_wrapped(|ui| {
                     let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
@@ -1172,7 +1188,42 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
     rows
 }
 
+/// A corner's qualified temperature range, in the unit Temperature display
+/// chose.
+fn qualified_range(
+    corner: &ProcessCorner,
+    policy: crate::quantity::QuantityPresentationPolicy,
+) -> String {
+    let unit = policy.celsius_display_transform().2;
+    let number = |celsius| crate::quantity::temperature_number(celsius, policy);
+    match (corner.minimum_temperature_c, corner.maximum_temperature_c) {
+        (Some(minimum), Some(maximum)) => {
+            format!("{} to {} {unit}", number(minimum), number(maximum))
+        }
+        (Some(minimum), None) => format!("{} {unit} and above", number(minimum)),
+        (None, Some(maximum)) => format!("{} {unit} and below", number(maximum)),
+        (None, None) => "not declared".to_owned(),
+    }
+}
+
+/// Requested temperatures, as a sentence names them, in the display unit.
+fn stated_temperatures(
+    celsius: &[f64],
+    policy: crate::quantity::QuantityPresentationPolicy,
+) -> String {
+    let stated = celsius
+        .iter()
+        .map(|value| crate::quantity::temperature_label(*value, policy))
+        .collect::<Vec<_>>();
+    match stated.as_slice() {
+        [] => "nothing".to_owned(),
+        [only] => only.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
+    let policy = app.state.ui.preferences.quantity_presentation_policy();
     let mut open_editor = false;
     let mut duplicate = false;
     let mut make_default = false;
@@ -1336,21 +1387,19 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
             property(
                 ui,
                 "Temperature",
-                &engineering_quantity(row.corner.temperature, " °C"),
+                &crate::quantity::temperature_label(row.corner.temperature, policy),
                 "environment axis",
             );
             property(
                 ui,
                 "Qualified range",
-                &row.corner.qualified_range_label(),
+                &qualified_range(&row.corner, policy),
                 &if row.unqualified_temperatures.is_empty() {
                     "temperature validity".to_owned()
                 } else {
                     format!(
                         "excludes {}, which this run set requests",
-                        crate::state::model_library::stated_temperatures(
-                            &row.unqualified_temperatures
-                        )
+                        stated_temperatures(&row.unqualified_temperatures, policy)
                     )
                 },
             );

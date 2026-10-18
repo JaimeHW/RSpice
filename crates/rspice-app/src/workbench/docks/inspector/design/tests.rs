@@ -1510,7 +1510,10 @@ fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
             (OpLabel::TEMP, 85.0),
         ],
     );
-    let rows = operating_point_rows(&entry);
+    let rows = operating_point_rows(
+        &entry,
+        crate::quantity::QuantityPresentationPolicy::default(),
+    );
     let rows = rows
         .iter()
         .map(|(label, value)| (label.as_str(), value.as_str()))

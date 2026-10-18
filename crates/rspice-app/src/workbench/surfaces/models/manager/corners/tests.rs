@@ -541,7 +541,11 @@ fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
                         pending_actions: &mut pending,
                     };
                     let rows = corner_rows(&app);
-                    temperature_validity_findings(ui, &rows);
+                    temperature_validity_findings(
+                        ui,
+                        &rows,
+                        crate::quantity::QuantityPresentationPolicy::default(),
+                    );
                     let _ = &mut app;
                 });
             },
@@ -561,7 +565,7 @@ fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
         labels
             .iter()
             .any(|label| label
-                == "HOT is qualified -40.000 to 125.000 °C; this run set requests 150 °C"),
+                == "HOT is qualified \u{2212}40 to 125 °C; this run set requests 150 °C"),
         "{labels:?}"
     );
 

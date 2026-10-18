@@ -23,6 +23,7 @@ use super::*;
 use kit::{ColumnTrack, SplitColumn, TableColumn, TableRow};
 use records::{PlanCatalogRecord, plan_catalog_records};
 
+use crate::quantity::QuantityPresentationPolicy;
 use crate::ui::accessibility::plural_suffix;
 use crate::workbench::app_state::ReferencePvtPoint;
 use crate::workbench::state::SimulationPlanScope;
@@ -259,7 +260,12 @@ pub(super) fn plan_manager_dialog(
     }
 
     let action = match draft.mode {
-        SimulationPlanManagerMode::Browse => browse_dialog(ctx, &mut draft, &records),
+        SimulationPlanManagerMode::Browse => browse_dialog(
+            ctx,
+            &mut draft,
+            &records,
+            app.state.ui.preferences.quantity_presentation_policy(),
+        ),
         SimulationPlanManagerMode::Create => create::dialog(ctx, &mut draft, &records),
         SimulationPlanManagerMode::Rename | SimulationPlanManagerMode::ConfirmArchive => {
             lifecycle::dialog(ctx, &mut draft, &records)
@@ -282,6 +288,7 @@ fn browse_dialog(
     ctx: &egui::Context,
     draft: &mut SimulationPlanManagerDraft,
     records: &[PlanCatalogRecord],
+    policy: QuantityPresentationPolicy,
 ) -> Option<PlanManagerAction> {
     let can_open = records
         .iter()
@@ -296,7 +303,7 @@ fn browse_dialog(
         .ghost("Close")
         .primary_enabled(can_open)
         .show(ctx, |ui| {
-            plan_manager_body(ui, draft, records, &mut action);
+            plan_manager_body(ui, draft, records, &mut action, policy);
         });
     match choice {
         DialogChoice::Primary => action = Some(PlanManagerAction::OpenSelected),
@@ -348,6 +355,7 @@ fn plan_manager_body(
     draft: &mut SimulationPlanManagerDraft,
     records: &[PlanCatalogRecord],
     action: &mut Option<PlanManagerAction>,
+    policy: QuantityPresentationPolicy,
 ) {
     plan_manager_toolbar(ui, draft, records, action);
     let query = draft.filter.trim().to_ascii_lowercase();
@@ -380,7 +388,7 @@ fn plan_manager_body(
         }
         SplitColumn::Aside => {
             if let Some(selected) = selected.as_ref() {
-                selected_plan_aside(ui, selected, stacked, action);
+                selected_plan_aside(ui, selected, stacked, action, policy);
             }
         }
     });
@@ -616,11 +624,12 @@ fn selected_plan_aside(
     selected: &PlanCatalogRecord,
     stacked: bool,
     action: &mut Option<PlanManagerAction>,
+    policy: QuantityPresentationPolicy,
 ) {
     // Stacked, the aside has the whole dialog width and spends it on columns
     // rather than on height, because stacking has already spent the height on
     // the records column above.
-    selected_plan_properties(ui, selected, if stacked { 2 } else { 1 });
+    selected_plan_properties(ui, selected, if stacked { 2 } else { 1 }, policy);
     plan_selection_actions(ui, selected, action);
 }
 
@@ -719,7 +728,10 @@ struct PlanDetailRow {
 /// The declared scale and its modelled cost are two rows rather than one because
 /// the combined value did not fit the aside's value column and was elided at
 /// every gated width; each half paints whole.
-fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
+fn plan_detail_rows(
+    selected: &PlanCatalogRecord,
+    policy: QuantityPresentationPolicy,
+) -> Vec<PlanDetailRow> {
     let stated = |label, value: String| PlanDetailRow {
         label,
         value,
@@ -730,7 +742,7 @@ fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
         stated("Revision", selected.revision.to_string()),
         stated(
             "Reference PVT corner",
-            reference_pvt_label(selected.reference_pvt),
+            reference_pvt_label(selected.reference_pvt, policy),
         ),
         match (selected.point_count(), selected.task_count()) {
             (Some(points), Some(tasks)) => stated(
@@ -794,9 +806,14 @@ fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
 /// most of — so there it pays the height of half the rows instead of all of
 /// them. One row list feeds both arrangements, so the two cannot come to state
 /// different things.
-fn selected_plan_properties(ui: &mut Ui, selected: &PlanCatalogRecord, columns: usize) {
+fn selected_plan_properties(
+    ui: &mut Ui,
+    selected: &PlanCatalogRecord,
+    columns: usize,
+    policy: QuantityPresentationPolicy,
+) {
     kit::section_band(ui, "Selected plan", Some(selected.lifecycle_label()));
-    let rows = plan_detail_rows(selected);
+    let rows = plan_detail_rows(selected, policy);
     if columns <= 1 {
         for row in &rows {
             plan_detail_row(ui, row);
@@ -823,11 +840,11 @@ fn plan_detail_row(ui: &mut Ui, row: &PlanDetailRow) {
 
 /// The plan's nominal point, corner first, the way the workbench chrome's own
 /// PVT control reads it.
-fn reference_pvt_label(point: ReferencePvtPoint) -> String {
+fn reference_pvt_label(point: ReferencePvtPoint, policy: QuantityPresentationPolicy) -> String {
     format!(
-        "{} · {:.1} °C",
+        "{} · {}",
         point.process.short_name(),
-        point.temperature_celsius
+        crate::quantity::temperature_label(point.temperature_celsius, policy)
     )
 }
 

@@ -1118,6 +1118,7 @@ fn op_quantity_set(device_kind: &str) -> Option<OpQuantitySet> {
 /// solved it at. A quantity the report does not carry has no row.
 pub(super) fn operating_point_rows(
     entry: &rspice_core::circuit::DeviceOpEntry,
+    policy: crate::quantity::QuantityPresentationPolicy,
 ) -> Vec<(String, String)> {
     use super::super::compact_readout;
 
@@ -1164,13 +1165,7 @@ pub(super) fn operating_point_rows(
     if let Some(temperature) = value("temp") {
         rows.push((
             "Temperature".to_owned(),
-            format!(
-                "{} °C",
-                crate::quantity::engineering::format_engineering_display_with(
-                    temperature,
-                    crate::quantity::EngineeringPrecision::Adaptive,
-                )
-            ),
+            crate::quantity::temperature_label(temperature, policy),
         ));
     }
     rows
@@ -1224,7 +1219,8 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
             ),
         );
     }
-    for (label, value) in operating_point_rows(entry) {
+    let policy = app.state.ui.preferences.quantity_presentation_policy();
+    for (label, value) in operating_point_rows(entry, policy) {
         property_row(ui, &label, &value);
     }
 }

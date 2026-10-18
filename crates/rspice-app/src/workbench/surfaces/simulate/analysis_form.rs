@@ -1156,7 +1156,7 @@ pub(super) fn form(
         // behind them, would be a second owner of the same fact, and the
         // two would eventually disagree about how many points run.
         AnalysisDraft::Corner(setup) => {
-            run_space::corner_form(ui, setup, run_space, route, study_bases)
+            run_space::corner_form(ui, setup, run_space, route, study_bases, policy)
         }
         AnalysisDraft::Envelope(setup) => {
             envelope::fields(ui, setup, envelope_modulation_sources, policy, locale)

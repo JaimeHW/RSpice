@@ -125,7 +125,13 @@ fn rendered_body(
                         // the height the content wanted.
                         used = ui
                             .vertical(|ui| {
-                                plan_manager_body(ui, draft, &records, &mut action);
+                                plan_manager_body(
+                                    ui,
+                                    draft,
+                                    &records,
+                                    &mut action,
+                                    QuantityPresentationPolicy::default(),
+                                );
                             })
                             .response
                             .rect
@@ -1092,7 +1098,14 @@ fn rendered_aside(app: &RSpiceApp, plan_id: SimulationPlanId) -> RenderedAside {
                 .frame(egui::Frame::NONE)
                 // One column, so the eight rows land in one reading order
                 // for the assertions below to be about.
-                .show(root, |ui| selected_plan_properties(ui, selected, 1));
+                .show(root, |ui| {
+                    selected_plan_properties(
+                        ui,
+                        selected,
+                        1,
+                        QuantityPresentationPolicy::default(),
+                    );
+                });
         },
     );
     let announced = output
@@ -1216,7 +1229,10 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
         aside_value(&rows, "Revision"),
         plan.revision().get().to_string()
     );
-    assert_eq!(aside_value(&rows, "Reference PVT corner"), "FF · -40.0 °C");
+    assert_eq!(
+        aside_value(&rows, "Reference PVT corner"),
+        "FF · \u{2212}40 °C"
+    );
 
     // The declared workload is the forecast's, named as points and tasks.
     let points = record.point_count().expect("the default run set validates");
@@ -1319,7 +1335,10 @@ fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
     assert_eq!(aside_value(&rows, "Name"), plan_name_of(&app, plan_id));
     assert_eq!(
         aside_value(&rows, "Reference PVT corner"),
-        reference_pvt_label(app.state.sim_setup.reference_pvt)
+        reference_pvt_label(
+            app.state.sim_setup.reference_pvt,
+            QuantityPresentationPolicy::default()
+        )
     );
 }
 
@@ -1370,7 +1389,7 @@ fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
     );
     assert_eq!(
         aside_value(&clone_rows, "Reference PVT corner"),
-        "SS · 125.0 °C"
+        "SS · 125 °C"
     );
 
     let source_rows = rendered_aside(&app, source_id).rows;
@@ -1380,7 +1399,7 @@ fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
     );
     assert_eq!(
         aside_value(&source_rows, "Reference PVT corner"),
-        reference_pvt_label(source_corner),
+        reference_pvt_label(source_corner, QuantityPresentationPolicy::default()),
         "the retained source reports the corner it was cloned at, not the \
          active plan's and not 'unknown'"
     );

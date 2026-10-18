@@ -234,7 +234,14 @@ fn corner_form_height(run_set: &rspice_simulation_contract::run_set::RunSetState
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
                     let top = ui.cursor().top();
-                    run_space::corner_form(ui, &mut corner, &context, &mut None, &[]);
+                    run_space::corner_form(
+                        ui,
+                        &mut corner,
+                        &context,
+                        &mut None,
+                        &[],
+                        crate::quantity::QuantityPresentationPolicy::default(),
+                    );
                     height = ui.cursor().top() - top;
                 });
         },
