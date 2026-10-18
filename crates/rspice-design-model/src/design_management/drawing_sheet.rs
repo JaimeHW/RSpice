@@ -578,9 +578,13 @@ impl Default for DrawingSheetMarks {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DrawingSheetTitleBlockTemplate {
+    /// A 130 mm block that predates ISO 7200's form. It holds a title of a
+    /// dozen characters, against the standard's 25, so it is offered only
+    /// to a sheet already on it, and a sheet saved on it loads and draws as
+    /// it always did.
     #[default]
     Compact,
-    /// ISO 7200's 180 mm block.
+    /// ISO 7200's 180 mm block, drawn as the standard's form.
     ///
     /// A sheet, default, preset or package saved naming the retired `wide`
     /// block loads as this one. That block was 230 mm wide, past ISO 7200's
@@ -1701,8 +1705,10 @@ impl SchematicSheetFormat {
     ///
     /// The requested choice is never silently rewritten. A block that does
     /// not fit, turned as the sheet turns it, inside the drawing area it sits
-    /// in gives way to the compact block, and `title_block_substituted`
-    /// reports that fact to Page Setup and inspection surfaces.
+    /// in gives way, and `title_block_substituted` reports that fact to Page
+    /// Setup and inspection surfaces. ISO 7200's block is the same on every
+    /// sheet ISO 5457 frames, so there it gives way to no block at all;
+    /// elsewhere a block gives way to the compact one.
     #[must_use]
     pub fn effective_title_block_template(&self) -> DrawingSheetTitleBlockTemplate {
         let requested = self.title_block.template;
@@ -1721,6 +1727,9 @@ impl SchematicSheetFormat {
             });
         if fits {
             requested
+        } else if requested == DrawingSheetTitleBlockTemplate::Standard && self.framed_by_iso_5457()
+        {
+            DrawingSheetTitleBlockTemplate::None
         } else {
             DrawingSheetTitleBlockTemplate::Compact
         }
@@ -1779,8 +1788,14 @@ impl SchematicSheetFormat {
         }
     }
 
+    /// The fields the sheet's title block can carry, in its order: ISO
+    /// 7200's form in the order it is read, an organization's block in the
+    /// order it was sealed with, and any other block every field.
     #[must_use]
     pub fn title_block_field_order(&self) -> Vec<DrawingSheetTitleFieldId> {
+        if self.title_block.template == DrawingSheetTitleBlockTemplate::Standard {
+            return ISO_7200_FORM_FIELDS.to_vec();
+        }
         self.title_block
             .managed_template
             .as_ref()
@@ -1960,26 +1975,35 @@ impl SchematicSheetFormat {
 
     /// Start a new sheet on ISO 7200's 180 mm title block, which holds the
     /// standard's 25-character title and 16-character document identifier.
-    /// A sheet whose drawing area cannot hold it keeps the compact block,
-    /// rather than requesting one that Page Setup would then report as
-    /// substituted.
+    /// On a sheet ISO 5457 frames it is the block, whether or not the
+    /// drawing area holds it: one that cannot carries no block, and Page
+    /// Setup says why. A sheet of another series whose drawing area cannot
+    /// hold it keeps the compact block, rather than requesting one that Page
+    /// Setup would then report as substituted.
     fn start_on_iso_7200_title_block(&mut self) {
         let fallback = self.title_block.template;
         self.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
-        if self.title_block_substituted() || self.geometry().is_err() {
+        if (self.title_block_substituted() && !self.framed_by_iso_5457())
+            || self.geometry().is_err()
+        {
             self.title_block.template = fallback;
         }
     }
 
+    /// Give a block the sheet's drawing area cannot place a way to fit: turn
+    /// it on its side, or else carry none. ISO 5457 has the drawing read the
+    /// way its title block does, so ISO 7200's block is never turned.
     fn fit_default_title_block(&mut self) {
         if self.title_block.template == DrawingSheetTitleBlockTemplate::None
             || self.geometry().is_ok()
         {
             return;
         }
-        self.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
-        if self.geometry().is_ok() {
-            return;
+        if self.title_block.template != DrawingSheetTitleBlockTemplate::Standard {
+            self.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
+            if self.geometry().is_ok() {
+                return;
+            }
         }
         self.title_block = DrawingSheetTitleBlock::none();
     }
@@ -2309,3 +2333,9 @@ pub use title_layout::*;
 
 pub(super) mod zones;
 pub use zones::*;
+
+pub(super) mod title_flow;
+use title_flow::flowed_title_layout;
+
+pub(super) mod iso_7200_form;
+pub use iso_7200_form::*;

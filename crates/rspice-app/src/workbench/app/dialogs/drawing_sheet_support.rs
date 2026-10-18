@@ -867,10 +867,14 @@ fn document_control_editor(ui: &mut Ui, state: &mut TitleBlockFieldsState) {
                         ui.end_row();
                     });
             }
+            if let Some(advisory) = state.draft_document_control.revision_advisory() {
+                ui.add_space(7.0);
+                ui.colored_label(t.color.warn, advisory);
+            }
             ui.add_space(7.0);
             ui.label(
                 RichText::new(
-                    "Revision and date are project-owned publication values. Released and obsolete documents require a dated, non-DRAFT revision.",
+                    "Revision and date are project-owned publication values. Released and withdrawn documents require a dated, non-DRAFT revision.",
                 )
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(t.color.text_dim),
@@ -986,6 +990,10 @@ fn title_field_table(
     locked_fields: &[DrawingSheetTitleFieldId],
 ) {
     let t = Tokens::get(ui.ctx());
+    let template = state
+        .format
+        .as_ref()
+        .map(|format| format.title_block.template);
     let table_width = ui.available_width().max(TITLE_FIELD_TABLE_MIN_WIDTH);
     ScrollArea::horizontal()
         .id_salt("title-block-fields-table-horizontal")
@@ -1034,6 +1042,20 @@ fn title_field_table(
                                         ui.add_enabled(
                                             false,
                                             egui::Checkbox::without_text(&mut visible),
+                                        );
+                                    } else if template
+                                        .is_some_and(|template| template.requires_field(id))
+                                    {
+                                        // The form shows the field whatever
+                                        // the sheet saved, so the choice is
+                                        // locked rather than rewritten.
+                                        let mut visible = true;
+                                        ui.add_enabled(
+                                            false,
+                                            egui::Checkbox::without_text(&mut visible),
+                                        )
+                                        .on_disabled_hover_text(
+                                            "ISO 7200 makes this field mandatory on its form.",
                                         );
                                     } else {
                                         ui.checkbox(&mut field.visible, "");
@@ -1569,7 +1591,9 @@ fn title_field_owner(id: DrawingSheetTitleFieldId) -> &'static str {
         DrawingSheetTitleFieldId::Revision => "working revision",
         DrawingSheetTitleFieldId::Scale => "retired",
         DrawingSheetTitleFieldId::Date | DrawingSheetTitleFieldId::DocumentStatus => "document",
-        DrawingSheetTitleFieldId::Organization | DrawingSheetTitleFieldId::DocumentId => "project",
+        DrawingSheetTitleFieldId::Organization
+        | DrawingSheetTitleFieldId::DocumentId
+        | DrawingSheetTitleFieldId::Language => "project",
         DrawingSheetTitleFieldId::Classification => "project policy",
     }
 }

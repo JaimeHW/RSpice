@@ -217,13 +217,16 @@ fn drawing_sheet_series_margins_and_border_mark_defaults_are_normative() {
 #[test]
 fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility() {
     let format = SchematicSheetFormat::default();
-    for field in [
-        DrawingSheetTitleFieldId::CellView,
-        DrawingSheetTitleFieldId::Page,
-        DrawingSheetTitleFieldId::Revision,
+    // Every block shows the sheet number; the cell / view, ISO 7200's
+    // supplementary title, and the revision index are optional, and shown
+    // until a sheet hides them.
+    for (field, required) in [
+        (DrawingSheetTitleFieldId::CellView, false),
+        (DrawingSheetTitleFieldId::Page, true),
+        (DrawingSheetTitleFieldId::Revision, false),
     ] {
         let policy = field.policy();
-        assert!(policy.required_visible);
+        assert_eq!(policy.required_visible, required, "{field:?}");
         assert_eq!(
             policy.value_authority,
             DrawingSheetTitleFieldValueAuthority::Automatic
@@ -263,7 +266,8 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
         "210 × 297 mm"
     );
 
-    // A sheet that asks for the project name letters it.
+    // A sheet that asks for the project name letters it on a block that has
+    // a place for it. ISO 7200's form has no project field.
     let with_project = format
         .try_update(|draft| {
             draft
@@ -274,22 +278,23 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
                 .visible = true;
         })
         .expect("a sheet may show the project name");
-    assert!(
-        resolve_drawing_sheet_title_fields(&with_project, &BTreeMap::new())
+    let resolves_project = |format: &SchematicSheetFormat| {
+        resolve_drawing_sheet_title_fields(format, &BTreeMap::new())
             .iter()
             .any(|field| field.id == DrawingSheetTitleFieldId::Project)
-    );
-    assert!(
-        !resolve_drawing_sheet_title_fields(&format, &BTreeMap::new())
-            .iter()
-            .any(|field| field.id == DrawingSheetTitleFieldId::Project)
-    );
+    };
+    assert!(!resolves_project(&with_project));
+    let compact_with_project = with_project
+        .try_update(|draft| draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact)
+        .unwrap();
+    assert!(resolves_project(&compact_with_project));
+    assert!(!resolves_project(&format));
 
     let hidden = format.try_update(|draft| {
         draft
             .title_block
             .fields
-            .get_mut(&DrawingSheetTitleFieldId::CellView)
+            .get_mut(&DrawingSheetTitleFieldId::Page)
             .unwrap()
             .visible = false;
     });
@@ -318,8 +323,10 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
 
 #[test]
 fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
+    // On the compact block, where every field is the sheet's to show or hide.
     let format = SchematicSheetFormat::default()
         .try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
             draft
                 .title_block
                 .fields
@@ -391,7 +398,7 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
     );
     assert_eq!(
         DrawingSheetTitleFieldId::SheetTitle.display_label(),
-        "Sheet title"
+        "Title"
     );
 }
 
@@ -502,10 +509,17 @@ fn managed_title_templates_are_versioned_digest_verified_and_layout_authoritativ
         drawing_sheet_title_layout(&without_logo, &without_logo.geometry().unwrap()).unwrap();
     assert_eq!(with_logo_layout.grid_x_um, 40_000);
     assert_eq!(without_logo_layout.grid_x_um, 0);
-    let first = with_logo_layout.cells[0];
+    let first = &with_logo_layout.cells[0];
     assert_eq!(first.x_um, 40_000);
-    assert_eq!(without_logo_layout.cells[0].id, first.id);
+    assert_eq!(without_logo_layout.cells[0].field(), first.field());
     assert!(first.width_um < without_logo_layout.cells[0].width_um);
+    // The logo carries its own rule, so no cell rule doubles it.
+    assert!(
+        !with_logo_layout
+            .rules
+            .iter()
+            .any(|rule| rule.from_x_um == 40_000 && rule.to_x_um == 40_000)
+    );
     // A managed template governs the order fields resolve in; sheet-owned
     // visibility decides which of them appear, and the two compose.
     let resolved_order = resolve_drawing_sheet_title_fields(&custom, &BTreeMap::new())
@@ -715,40 +729,55 @@ fn drawing_sheet_geometry_is_canonical_and_bounded() {
 #[test]
 fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
     // A5 portrait's 118 mm drawing space cannot hold ISO 7200's 180 mm block.
-    let format = SchematicSheetFormat::from_standard(
-        DrawingSheetStandard::IsoA5,
-        SchematicPageOrientation::Portrait,
-    )
-    .try_update(|draft| {
-        draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
-    })
-    .unwrap();
+    // On a sheet ISO 5457 frames, a block that does not fit gives way to none;
+    // on another, to the compact block. Either way the request stays.
+    for (standard, printed) in [
+        (
+            DrawingSheetStandard::IsoA5,
+            DrawingSheetTitleBlockTemplate::None,
+        ),
+        (
+            DrawingSheetStandard::AnsiA,
+            DrawingSheetTitleBlockTemplate::Compact,
+        ),
+    ] {
+        let format =
+            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Portrait)
+                .try_update(|draft| {
+                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+                })
+                .unwrap();
 
-    assert_eq!(
-        format.title_block.template,
-        DrawingSheetTitleBlockTemplate::Standard,
-        "the requested template remains authored"
-    );
-    assert_eq!(
-        format.effective_title_block_template(),
-        DrawingSheetTitleBlockTemplate::Compact
-    );
-    assert!(format.title_block_substituted());
-    assert_eq!(
-        format.geometry().unwrap().effective_title_block_template,
-        DrawingSheetTitleBlockTemplate::Compact
-    );
+        assert_eq!(
+            format.title_block.template,
+            DrawingSheetTitleBlockTemplate::Standard,
+            "the requested template remains authored"
+        );
+        assert_eq!(format.effective_title_block_template(), printed);
+        assert!(format.title_block_substituted());
+        assert_eq!(
+            format.geometry().unwrap().effective_title_block_template,
+            printed
+        );
 
-    let landscape = format
-        .try_update(|draft| {
-            draft.orientation = SchematicPageOrientation::Landscape;
-        })
-        .unwrap();
-    assert!(!landscape.title_block_substituted());
-    assert_eq!(
-        landscape.geometry().unwrap().effective_title_block_template,
-        DrawingSheetTitleBlockTemplate::Standard
-    );
+        // Paper with room for it draws the block asked for.
+        let roomier = format
+            .try_update(|draft| {
+                draft.orientation = SchematicPageOrientation::Landscape;
+                draft.authored_size = AuthoredDrawingSheetSize::Standard {
+                    standard: match standard {
+                        DrawingSheetStandard::IsoA5 => DrawingSheetStandard::IsoA4,
+                        other => other,
+                    },
+                };
+            })
+            .unwrap();
+        assert!(!roomier.title_block_substituted());
+        assert_eq!(
+            roomier.geometry().unwrap().effective_title_block_template,
+            DrawingSheetTitleBlockTemplate::Standard
+        );
+    }
 }
 
 #[test]
@@ -2553,12 +2582,15 @@ fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
         Some(upright_layout.clone()),
         "rotating the complete block must not change a field's cell or text budget"
     );
-    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
     for cell in &upright_layout.cells {
-        assert!(
-            cell.capacity(lettering.caption_um) > cell.capacity(lettering.data_um),
-            "smaller caption lettering must buy more characters in the same cell"
-        );
+        let caption = cell.caption.unwrap();
+        for value in &cell.values {
+            assert_eq!(caption.width_um, value.width_um);
+            assert!(
+                caption.capacity() > value.capacity(),
+                "smaller caption lettering must buy more characters in the same cell"
+            );
+        }
     }
 }
 
@@ -2647,6 +2679,7 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
     let gained = [
         DrawingSheetTitleFieldId::DocumentType,
         DrawingSheetTitleFieldId::DocumentStatus,
+        DrawingSheetTitleFieldId::Language,
     ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()
@@ -2654,6 +2687,7 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
         .collect::<Vec<_>>();
     expected.extend(gained);
     assert_eq!(restored.title_block_field_order(), expected);
+    assert!(!restored.title_block.fields[&DrawingSheetTitleFieldId::Language].visible);
     assert!(
         !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
             .iter()
@@ -2718,13 +2752,15 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
         );
     }
     // Checked by is not one of the standard's fields, Classification is set
-    // by a release policy, Paper size restates the sheet in hand, and the
-    // project's name already leads Cell / view.
+    // by a release policy, the language code is optional, Paper size
+    // restates the sheet in hand, and the project's name already leads
+    // Cell / view.
     let hidden = [
         DrawingSheetTitleFieldId::Project,
         DrawingSheetTitleFieldId::CheckedBy,
         DrawingSheetTitleFieldId::Classification,
         DrawingSheetTitleFieldId::PaperSize,
+        DrawingSheetTitleFieldId::Language,
     ];
     for field in hidden {
         assert!(
@@ -2741,8 +2777,8 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
         DrawingSheetTitleFieldId::ALL.len() - hidden.len()
     );
 
-    // A field a sheet does not spend is width the others keep, so more of
-    // each value survives.
+    // A field a sheet does not spend is width the cells beside it keep, so
+    // more of each value survives.
     let crowded = format
         .try_update(|draft| {
             for field in hidden {
@@ -2753,7 +2789,7 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
     let width = |format: &SchematicSheetFormat| {
         drawing_sheet_title_layout(format, &format.geometry().unwrap())
             .unwrap()
-            .cell(DrawingSheetTitleFieldId::CellView)
+            .cell(DrawingSheetTitleFieldId::ApprovedBy)
             .unwrap()
             .width_um
     };
@@ -2835,9 +2871,9 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
         })
         .unwrap();
     let layout = drawing_sheet_title_layout(&format, &format.geometry().unwrap()).unwrap();
-    assert_eq!(layout.cells.len(), DrawingSheetTitleFieldId::ALL.len());
+    assert_eq!(layout.cells.len(), 13, "every cell of ISO 7200's form");
     for cell in layout.cells {
-        let caption = cell.id.display_label();
+        let caption = cell.caption.unwrap().text;
         assert_eq!(
             cell.letter_caption(),
             caption,

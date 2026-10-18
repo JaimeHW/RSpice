@@ -28,13 +28,13 @@ use rspice_design::schematic::{
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{
     DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_BLOCK_LETTERING,
-    DRAWING_SHEET_TITLE_CAPTION_POSITION, DRAWING_SHEET_TITLE_CELL_PADDING_UM,
-    DRAWING_SHEET_TITLE_VALUE_POSITION, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
+    DRAWING_SHEET_TITLE_CELL_PADDING_UM, DRAWING_SHEET_TITLE_OUTLINE_UM,
+    DRAWING_SHEET_TITLE_RULE_UM, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
     DrawingSheetFrameArtwork, DrawingSheetFrameLayer, DrawingSheetFrameMark,
     DrawingSheetFramePlacement, DrawingSheetGeometry as AuthoredDrawingSheetGeometry,
     DrawingSheetLettering, DrawingSheetRect, DrawingSheetTitleBlockRotation,
-    DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField, SchematicSheetFormat,
-    drawing_sheet_mono_em_um, drawing_sheet_title_layout,
+    DrawingSheetTitleLetteringRole, DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField,
+    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_layout,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -1309,12 +1309,22 @@ fn draw_title_block(
         transform(authored_block.right_bottom()),
         transform(authored_block.left_bottom()),
     ];
+    // The plot's line widths, magnified with the sheet as its lettering is.
+    let pixels_per_point = painter.ctx().pixels_per_point();
+    let outline_stroke = Stroke::new(
+        title_line_width(DRAWING_SHEET_TITLE_OUTLINE_UM, zoom, pixels_per_point),
+        palette.border,
+    );
+    let rule_stroke = Stroke::new(
+        title_line_width(DRAWING_SHEET_TITLE_RULE_UM, zoom, pixels_per_point),
+        palette.zone,
+    );
     painter.add(Shape::convex_polygon(
         outline.to_vec(),
         palette.block,
-        Stroke::new(1.25, palette.border),
+        outline_stroke,
     ));
-    // The grid hardcopy and Page Setup draw too, in physical units on the
+    // The form hardcopy and Page Setup draw too, in physical units on the
     // upright block; the authored block maps those onto the screen.
     let Some(layout) = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical) else {
         return;
@@ -1322,9 +1332,8 @@ fn draw_title_block(
     let x_at = |x_um: u64| {
         authored_block.left() + authored_block.width() * x_um as f32 / layout.width_um as f32
     };
-    let y_at = |row: usize| {
-        authored_block.top()
-            + authored_block.height() * layout.row_top_um(row) as f32 / layout.height_um as f32
+    let y_at = |y_um: u64| {
+        authored_block.top() + authored_block.height() * y_um as f32 / layout.height_um as f32
     };
     let effective_template = sheet.geometry.physical.effective_title_block_template;
     let mut field_grid = authored_block;
@@ -1335,7 +1344,7 @@ fn draw_title_block(
                 transform(pos2(field_grid.left(), authored_block.top())),
                 transform(pos2(field_grid.left(), authored_block.bottom())),
             ],
-            Stroke::new(0.8, palette.zone),
+            rule_stroke,
         );
         draw_managed_title_logo(
             painter,
@@ -1355,92 +1364,69 @@ fn draw_title_block(
     if fields.is_empty() {
         return;
     }
-    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
-    for row in 1..layout.rows {
-        let y = y_at(row);
+    // Each cell's own rules, each drawn once.
+    for rule in &layout.rules {
         painter.line_segment(
             [
-                transform(pos2(field_grid.left(), y)),
-                transform(pos2(field_grid.right(), y)),
+                transform(pos2(x_at(rule.from_x_um), y_at(rule.from_y_um))),
+                transform(pos2(x_at(rule.to_x_um), y_at(rule.to_y_um))),
             ],
-            Stroke::new(0.8, palette.zone),
+            rule_stroke,
         );
     }
-    for (layout_cell, field) in layout.cells.iter().zip(fields) {
-        debug_assert_eq!(layout_cell.id, field.id);
-        let (left, right) = (
-            x_at(layout_cell.x_um),
-            x_at(layout_cell.x_um + layout_cell.width_um),
-        );
-        let (top, bottom) = (y_at(layout_cell.row), y_at(layout_cell.row + 1));
-        if layout_cell.x_um > layout.grid_x_um {
-            painter.line_segment(
-                [transform(pos2(left, top)), transform(pos2(left, bottom))],
-                Stroke::new(0.8, palette.zone),
-            );
-        }
-        let authored_cell = Rect::from_min_max(pos2(left, top), pos2(right, bottom))
-            .shrink2(vec2(authored_title_cell_padding() * zoom, 0.0));
-        let cell = Rect::from_two_pos(
+    let padding = authored_title_cell_padding() * zoom;
+    for line in layout.lettering(&fields) {
+        let cell = &layout.cells[line.cell];
+        let authored_cell = Rect::from_min_max(
+            pos2(x_at(cell.x_um), y_at(cell.y_um)),
+            pos2(
+                x_at(cell.x_um + cell.width_um),
+                y_at(cell.y_um + cell.height_um),
+            ),
+        )
+        .shrink2(vec2(padding, 0.0));
+        let clip = Rect::from_two_pos(
             transform(authored_cell.left_top()),
             transform(authored_cell.right_bottom()),
         );
-        // Caption and value sit on the shared fractions of the cell that
-        // hardcopy also places them on. Anchoring each line on its own centre
-        // leaves the vertical placement to the font's real metrics rather
-        // than to a guessed line box.
-        let at = |(numerator, denominator): (u64, u64)| {
-            authored_cell.top() + authored_cell.height() * numerator as f32 / denominator as f32
+        // Each line sits on the seat hardcopy also places it on. Anchoring a
+        // line on its own centre leaves the vertical placement to the font's
+        // real metrics rather than to a guessed line box. The text is the
+        // form's own wording, cut to the cell's physical budget, so zoom and
+        // monitor DPI cannot disagree with Page Setup or the plot.
+        let (color, weight) = match line.role {
+            DrawingSheetTitleLetteringRole::Caption => {
+                (palette.block_label, theme::FontWeight::Regular)
+            }
+            // Only the document identifier is set in the heavier weight; the
+            // plot letters it the same way.
+            DrawingSheetTitleLetteringRole::Value if line.emphasised => {
+                (palette.block_ink, theme::FontWeight::Medium)
+            }
+            DrawingSheetTitleLetteringRole::Value => {
+                (palette.block_ink, theme::FontWeight::Regular)
+            }
         };
-        let clipped = painter.with_clip_rect(cell);
         paint_title_text(
-            &clipped,
-            transform(pos2(
-                authored_cell.left(),
-                at(DRAWING_SHEET_TITLE_CAPTION_POSITION),
-            )),
+            &painter.with_clip_rect(clip),
+            transform(pos2(x_at(line.x_um), y_at(line.seat_um))),
             Align2::LEFT_CENTER,
-            // The field's own wording, in the case the plot and the dialogs
-            // letter it in, so a caption reads the same on screen and on paper.
-            layout_cell.letter_caption(),
+            line.text,
             theme::mono(
-                drawing_sheet_font_size(zoom, authored_lettering(lettering.caption_um)),
-                theme::FontWeight::Regular,
+                drawing_sheet_font_size(zoom, authored_lettering(line.lettering_um)),
+                weight,
             ),
-            palette.block_label,
-            rotation,
-        );
-        // An authored field nobody has filled in is a box to fill in or sign
-        // on the print, lettered with its caption alone.
-        if field.value.is_empty() {
-            continue;
-        }
-        paint_title_text(
-            &clipped,
-            transform(pos2(
-                authored_cell.left(),
-                at(DRAWING_SHEET_TITLE_VALUE_POSITION),
-            )),
-            Align2::LEFT_CENTER,
-            // Cut to the cell's physical budget, so zoom and monitor DPI
-            // cannot disagree with Page Setup or the plot.
-            layout_cell.letter_value(&field.value),
-            // A value stands a step of the series above its caption, which is
-            // what makes it read as the field's content; only the document
-            // identifier is set in the heavier weight. The plot letters both
-            // the same way.
-            theme::mono(
-                drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
-                if field.id.emphasised() {
-                    theme::FontWeight::Medium
-                } else {
-                    theme::FontWeight::Regular
-                },
-            ),
-            palette.block_ink,
+            color,
             rotation,
         );
     }
+}
+
+/// Screen width of a title-block line `width_um` wide on paper: magnified
+/// with the sheet, and never thinner than one physical pixel.
+fn title_line_width(width_um: u64, zoom: f32, pixels_per_point: f32) -> f32 {
+    let points = width_um as f32 / 1_000.0 * DRAWING_SHEET_UNITS_PER_MM as f32 * zoom.max(0.0);
+    points.max(1.0 / pixels_per_point.max(0.5))
 }
 
 /// Horizontal padding between a title-grid rule and its lettering, in world

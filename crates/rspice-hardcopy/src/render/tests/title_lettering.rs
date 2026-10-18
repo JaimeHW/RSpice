@@ -4,8 +4,9 @@
 use super::*;
 use rspice_design_model::design_management::{
     DRAWING_SHEET_TITLE_BLOCK_LETTERING, DrawingSheetBorderTemplate,
-    DrawingSheetTitleFieldValueAuthority, drawing_sheet_mono_em_um,
-    drawing_sheet_zone_lettering_um,
+    DrawingSheetTitleFieldValueAuthority, DrawingSheetTitleLettering,
+    DrawingSheetTitleLetteringRole, drawing_sheet_mono_em_um, drawing_sheet_title_layout,
+    drawing_sheet_zone_lettering_um, resolve_drawing_sheet_title_fields,
 };
 
 /// Every line the title block plots, with the face and em it is set in.
@@ -92,11 +93,9 @@ fn plotted_lines_of(source: &ResolvedHardcopyDocument) -> Vec<(SceneFont, u64, S
         .collect()
 }
 
-/// Em of every caption and every value the title block plots. The block
-/// letters each field's caption and then its value, so with every field
-/// filled in the two alternate.
-fn plotted_title_ems(format: &SchematicSheetFormat) -> (Vec<u64>, Vec<u64>) {
-    let filled = format
+/// `format` with every authored field it shows filled in.
+fn filled_in(format: &SchematicSheetFormat) -> SchematicSheetFormat {
+    format
         .try_update(|draft| {
             for (field, state) in &mut draft.title_block.fields {
                 if field.policy().value_authority == DrawingSheetTitleFieldValueAuthority::Authored
@@ -106,16 +105,45 @@ fn plotted_title_ems(format: &SchematicSheetFormat) -> (Vec<u64>, Vec<u64>) {
                 }
             }
         })
-        .unwrap();
-    let lines = plotted_title_lines(&filled);
-    assert!(
-        lines.len().is_multiple_of(2),
-        "every caption is followed by its value"
+        .unwrap()
+}
+
+/// Every line the title block of `format` letters by the layout, with the
+/// values a blank schematic supplies, as `resolved_blank_schematic`
+/// captures them.
+fn laid_out_lettering(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleLettering> {
+    let layout = drawing_sheet_title_layout(format, &format.geometry().unwrap()).unwrap();
+    let identity = HardcopySourceIdentity::try_new(
+        "test-schematic",
+        HardcopyDocumentId::try_from_uuid(Uuid::from_u128(0x5343_4845_4d41)).unwrap(),
+        ObjectRevision::INITIAL,
+        "Test schematic",
+    )
+    .unwrap();
+    let fields = resolve_drawing_sheet_title_fields(
+        format,
+        &drawing_sheet_title_values(&identity, format, None, None),
     );
-    lines
-        .chunks(2)
-        .map(|field| (field[0].1, field[1].1))
-        .unzip()
+    layout.lettering(&fields)
+}
+
+/// Every line the title block of `format` letters by the layout, with the
+/// em and weight it is set in and its text, in the order it is lettered.
+fn laid_out_title_lines(format: &SchematicSheetFormat) -> Vec<(SceneFont, u64, String)> {
+    laid_out_lettering(format)
+        .into_iter()
+        .map(|line| {
+            (
+                if line.emphasised {
+                    SceneFont::MonospaceMedium
+                } else {
+                    SceneFont::Monospace
+                },
+                drawing_sheet_mono_em_um(line.lettering_um),
+                line.text,
+            )
+        })
+        .collect()
 }
 
 #[test]
@@ -177,8 +205,11 @@ fn only_the_document_identifier_is_plotted_in_the_heavier_weight() {
             .any(|face| face.ends_with("IBMPlexMono-Medium")),
         "the identifier must be set in the Medium cut: {shown:?}"
     );
+    // ISO 7200's form always carries the identifier, so the sheet that does
+    // not show it is one on the compact block.
     let hidden = format
         .try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
             draft
                 .title_block
                 .fields
@@ -205,7 +236,8 @@ fn only_the_document_identifier_is_plotted_in_the_heavier_weight() {
 #[test]
 fn a_plotted_caption_letters_the_field_name_and_nothing_else() {
     // ISO 7200 marks no field as filled in by the system, so the caption of
-    // a field RSpice fills in reads exactly as an authored field's does.
+    // a field RSpice fills in reads exactly as an authored field's does, in
+    // the standard's own words.
     let format = SchematicSheetFormat::default();
     let caption_em = drawing_sheet_mono_em_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.caption_um);
     let captions = plotted_title_lines(&format)
@@ -213,19 +245,94 @@ fn a_plotted_caption_letters_the_field_name_and_nothing_else() {
         .filter(|(_, em_um, _)| *em_um == caption_em)
         .map(|(_, _, text)| text)
         .collect::<Vec<_>>();
-    let expected = format
-        .title_block_field_order()
-        .into_iter()
-        .filter(|field| format.title_block.fields[field].visible)
-        .map(|field| field.display_label().to_owned())
+    assert_eq!(
+        captions,
+        [
+            "Created by",
+            "Approved by",
+            "Legal owner",
+            "Document type",
+            "Document status",
+            "Title",
+            "Identification number",
+            "Rev.",
+            "Date of issue",
+            "Sheet",
+        ]
+    );
+}
+
+#[test]
+fn the_plot_letters_exactly_the_lines_the_layout_letters() {
+    for template in [
+        DrawingSheetTitleBlockTemplate::Standard,
+        DrawingSheetTitleBlockTemplate::Compact,
+        DrawingSheetTitleBlockTemplate::OrganizationManaged,
+    ] {
+        let format = filled_in(
+            &SchematicSheetFormat::default()
+                .try_update(|draft| draft.title_block.template = template)
+                .unwrap(),
+        );
+        assert_eq!(
+            plotted_title_lines(&format),
+            laid_out_title_lines(&format),
+            "{template:?}"
+        );
+    }
+}
+
+#[test]
+fn the_title_block_is_outlined_wide_and_ruled_narrow() {
+    // ISO 128-20's wide and narrow lines: a 0.7 mm outline and 0.35 mm rules
+    // between the cells, each rule plotted once.
+    let format = SchematicSheetFormat::default();
+    let source = resolved_blank_schematic(&format);
+    let schematic = SchematicHardcopySetup::new(
+        SchematicHardcopyExtent::AuthoredDrawingSheet,
+        OutsideSheetContentPolicy::Ask,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+    );
+    let scene = scene_from_resolved(
+        &source,
+        source.default_print_mapping(),
+        schematic,
+        resolved_metadata(),
+    )
+    .unwrap();
+    let outlines = scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Rect {
+                stroke: Some(stroke),
+                ..
+            } => Some(stroke.width.micrometres()),
+            _ => None,
+        })
         .collect::<Vec<_>>();
-    assert!(expected.contains(&"Page".to_owned()));
-    assert_eq!(captions, expected);
+    assert_eq!(outlines, [700]);
+    let rules = scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Line { stroke, .. } => Some(stroke.width.micrometres()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let layout = drawing_sheet_title_layout(&format, &format.geometry().unwrap()).unwrap();
+    assert_eq!(rules.len(), layout.rules.len());
+    assert!(rules.iter().all(|width| *width == 350), "{rules:?}");
 }
 
 #[test]
 fn an_empty_authored_field_plots_its_caption_alone() {
-    // A title block is a form: Drawn by and Approved by start on a sheet
+    // A title block is a form: Created by and Approved by start on a sheet
     // empty, boxes to sign on the print, with no dash in them.
     let lines = plotted_title_lines(&SchematicSheetFormat::default());
     let value_em = drawing_sheet_mono_em_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um);
@@ -240,7 +347,7 @@ fn an_empty_authored_field_plots_its_caption_alone() {
             .unwrap_or_else(|| panic!("{caption} is plotted: {lines:?}"));
         lines.get(at + 1).cloned()
     };
-    for caption in ["Drawn by", "Approved by"] {
+    for caption in ["Created by", "Approved by"] {
         assert!(
             after(caption).is_none_or(|(_, em_um, _)| em_um != value_em),
             "{caption} plots a value: {:?}",
@@ -248,7 +355,10 @@ fn an_empty_authored_field_plots_its_caption_alone() {
         );
     }
     // A date RSpice does not have yet still reads as not yet known.
-    assert_eq!(after("Date").map(|(_, _, text)| text).as_deref(), Some("—"));
+    assert_eq!(
+        after("Date of issue").map(|(_, _, text)| text).as_deref(),
+        Some("—")
+    );
 }
 
 #[test]
@@ -265,23 +375,20 @@ fn a_new_sheet_plots_typical_title_values_whole() {
         (DrawingSheetTitleFieldId::ApprovedBy, "J. Whitfield"),
     ];
     let supplied = [
-        (DrawingSheetTitleFieldId::Project, "MyCircuit"),
         (
             DrawingSheetTitleFieldId::CellView,
             "mycircuit/top/schematic",
         ),
         (DrawingSheetTitleFieldId::Page, "12 of 12"),
-        (DrawingSheetTitleFieldId::Revision, "C"),
+        (DrawingSheetTitleFieldId::Revision, "B"),
         (DrawingSheetTitleFieldId::Date, "2026-10-18"),
-        (DrawingSheetTitleFieldId::DocumentStatus, "In review"),
-        (
-            DrawingSheetTitleFieldId::Organization,
-            "Whitfield Analog Devices",
-        ),
+        (DrawingSheetTitleFieldId::DocumentStatus, "Under approval"),
         (DrawingSheetTitleFieldId::DocumentId, "RS-0001-SCH-0042"),
     ];
     let format = SchematicSheetFormat::default()
         .try_update(|draft| {
+            // ISO 7200's form has no project field, so asking for one
+            // letters nothing.
             draft
                 .title_block
                 .fields
@@ -297,6 +404,13 @@ fn a_new_sheet_plots_typical_title_values_whole() {
         &format,
         supplied
             .into_iter()
+            .chain([
+                (DrawingSheetTitleFieldId::Project, "MyCircuit"),
+                (
+                    DrawingSheetTitleFieldId::Organization,
+                    "Whitfield Analog Devices",
+                ),
+            ])
             .map(|(field, value)| (field, value.to_owned()))
             .collect(),
     );
@@ -312,6 +426,14 @@ fn a_new_sheet_plots_typical_title_values_whole() {
         assert!(text.iter().any(|line| line == value), "{value:?}: {text:?}");
     }
     assert!(text.iter().any(|line| line == "Circuit diagram"));
+    assert!(!text.iter().any(|line| line == "MyCircuit"));
+    // The legal owner's cell is large so that its name wraps rather than
+    // being cut.
+    let owner = text
+        .iter()
+        .position(|line| line == "Whitfield Analog")
+        .expect("the legal owner is plotted");
+    assert_eq!(text[owner + 1], "Devices");
 }
 
 #[test]
@@ -339,30 +461,40 @@ fn plotted_title_capitals_stand_at_the_height_the_standard_names() {
                 .try_update(|draft| draft.title_block.template = template)
                 .unwrap();
         // ISO 7200 uses one title block for every paper size, so an A0 block
-        // letters what an A4 one does.
-        let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
-        let (captions, values) = plotted_title_ems(&format);
+        // letters what an A4 one does: 1.8 mm captions, 2.5 mm values, and on
+        // the form a 3.5 mm identification number.
+        let filled = filled_in(&format);
+        let laid_out = laid_out_lettering(&filled);
+        let plotted = plotted_title_lines(&filled);
+        assert_eq!(plotted.len(), laid_out.len(), "{standard:?} {template:?}");
         assert!(
-            !values.is_empty() && captions.len() == values.len(),
-            "{standard:?} {template:?} must plot one caption per value"
+            laid_out
+                .iter()
+                .any(|line| line.role == DrawingSheetTitleLetteringRole::Value),
+            "{standard:?} {template:?} plots values"
         );
-        for (ems, height_um, role) in [
-            (&captions, lettering.caption_um, "caption"),
-            (&values, lettering.data_um, "value"),
-        ] {
-            for &em_um in ems {
-                // The canvas sets the same em, so the two agree exactly.
-                assert_eq!(
-                    em_um,
-                    drawing_sheet_mono_em_um(height_um),
-                    "{standard:?} {template:?} plots a {role} at the wrong em"
-                );
-                // IBM Plex Mono's capitals are 698/1000 of the em.
-                assert!(
-                    em_um * 698 / 1_000 >= height_um - 1,
-                    "{standard:?} {template:?} plots {role} capitals below {height_um} um"
-                );
-            }
+        let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
+        for ((_, em_um, text), line) in plotted.iter().zip(&laid_out) {
+            let height_um = match line.role {
+                DrawingSheetTitleLetteringRole::Caption => lettering.caption_um,
+                DrawingSheetTitleLetteringRole::Value
+                    if line.emphasised && template == DrawingSheetTitleBlockTemplate::Standard =>
+                {
+                    3_500
+                }
+                DrawingSheetTitleLetteringRole::Value => lettering.data_um,
+            };
+            // The canvas sets the same em, so the two agree exactly.
+            assert_eq!(
+                *em_um,
+                drawing_sheet_mono_em_um(height_um),
+                "{standard:?} {template:?} plots {text:?} at the wrong em"
+            );
+            // IBM Plex Mono's capitals are 698/1000 of the em.
+            assert!(
+                em_um * 698 / 1_000 >= height_um - 1,
+                "{standard:?} {template:?} plots {text:?} capitals below {height_um} um"
+            );
         }
     }
 }

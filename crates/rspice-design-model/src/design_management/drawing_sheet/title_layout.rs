@@ -1,223 +1,311 @@
-//! Where each field of a title block sits, and how wide its cell is.
+//! Where a title block letters each field: the cells its template draws, the
+//! rules between them, and every line of lettering placed and cut to its
+//! cell.
 //!
-//! A title block is a form of fixed size: each template has its dimensions
-//! and its number of rows. The canvas, the plot and the Page Setup preview
-//! all draw the cells laid out here rather than working out a grid of their
-//! own, so a field cannot sit in one place on screen and another on paper,
-//! or be cut short on one and whole on the other.
+//! A template's layout is a set of cells. Each is a rectangle in the block's
+//! upright frame — it may span rows — with an optional caption, lettered over
+//! its value or inline before it, and the values it letters, each at its own
+//! ISO 3098 height. The canvas, the plot and the Page Setup preview all draw
+//! the cells laid out here rather than working out a grid of their own, so a
+//! field cannot sit in one place on screen and another on paper, or be cut
+//! short on one and whole on the other.
 //!
-//! # What a cell needs
-//!
-//! Each field needs the width that holds what it typically holds, lettered at
-//! [`DRAWING_SHEET_TITLE_BLOCK_LETTERING`]: its typical value at the value
-//! height or its caption at the caption height, whichever is wider, plus
-//! [`DRAWING_SHEET_TITLE_CELL_PADDING_UM`] on either side. A field whose
-//! value has a fixed form needs all of it — Page `12 of 12`, a `YYYY-MM-DD`
-//! date, the longest release status, a paper size such as `ANSI B` — so a
-//! cell given its need never cuts one short. A free-text field needs a
-//! typical length chosen for it, and a longer value is elided.
-//!
-//! # How the grid is drawn
-//!
-//! The cells form columns whose rules run straight down the block. Fields
-//! keep the order the sheet lists them in and fill the rows from the top,
-//! left to right, as many to a row as it takes to seat them all, while
-//! leaving every row at least one: a sheet showing fewer fields than the
-//! template has rows gives each its own row. The last cell of a row reaches
-//! the block's edge, across any columns a short row leaves unfilled.
-//!
-//! The columns are as even as they can be while each is as wide as its cells
-//! need, so a block with room for everything its fields typically hold is an
-//! even grid. A block without that room gives way a step at a time: each
-//! column keeps its fixed-form values, its document type and its captions
-//! whole; then its fixed-form values and captions; then its captions alone —
-//! a page number, a date or a status cut short says nothing, where long free
-//! text cut short still names what it is. The columns are as even as those
-//! floors allow, and only a block too narrow even for its captions shares its
-//! width in proportion to them. The last column takes what integer rounding
-//! leaves, so every full row spans the grid exactly.
+//! The rules are the cells' own edges: every edge that is not the block's
+//! outline is ruled once, and edges that meet end to end are one rule. No
+//! rule runs across the block on its own.
 //!
 //! The layout depends on which fields a sheet shows and never on what they
 //! hold, so a cell does not move while a value is typed into it, and a
-//! preview that has no values draws the same grid the sheet does.
-//!
-//! Lettering never shrinks to fit: a value or caption longer than its cell
-//! holds is cut with an ellipsis.
+//! preview that has no values draws the same form the sheet does. Lettering
+//! never shrinks to fit: a value or caption longer than its cell holds is cut
+//! with an ellipsis.
 
 use super::*;
 
-impl DrawingSheetTitleFieldId {
-    /// Characters of the value this field typically holds.
-    const fn typical_value_chars(self) -> u64 {
-        match self {
-            // Fixed forms, held whole.
-            Self::Page => 8,
-            Self::Revision => 3,
-            // The longest designation, ARCH E1.
-            Self::PaperSize => 7,
-            Self::Date => 10,
-            Self::DocumentStatus => longest_release_status_chars(),
-            Self::Classification => 12,
-            // Free text. A project name is a short identifier, and in a
-            // single-library workspace it also leads `Cell / view`.
-            Self::Project => 10,
-            Self::CellView | Self::SheetTitle => 14,
-            Self::DocumentType => DRAWING_SHEET_DEFAULT_DOCUMENT_TYPE.len() as u64,
-            Self::DrawnBy | Self::CheckedBy | Self::ApprovedBy => 16,
-            Self::Organization => 16,
-            // ISO 7200's document identifier is 16 characters.
-            Self::DocumentId => 16,
-            Self::Scale => 3,
-        }
-    }
+/// Width of a title block's outline on paper: ISO 128-20's wide line, the
+/// width ISO 5457 gives the frame around the drawing.
+pub const DRAWING_SHEET_TITLE_OUTLINE_UM: u64 = 700;
 
-    /// Whether the field's value has a fixed form, held whole by a cell given
-    /// its need, rather than free text a long value overruns.
-    const fn has_fixed_form(self) -> bool {
-        matches!(
-            self,
-            Self::Page
-                | Self::Revision
-                | Self::PaperSize
-                | Self::Date
-                | Self::DocumentStatus
-                | Self::Classification
-        )
-    }
+/// Width of the rules between a title block's cells on paper: ISO 128-20's
+/// narrow line, half the outline's width.
+pub const DRAWING_SHEET_TITLE_RULE_UM: u64 = 350;
 
-    /// Width of the cell that holds this field's typical value and its
-    /// caption whole, padding included, as the module documentation sets
-    /// out.
-    #[must_use]
-    pub const fn title_cell_need_um(self) -> u64 {
-        let value_um = self.typical_value_chars()
-            * drawing_sheet_mono_advance_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um)
-            + DRAWING_SHEET_TITLE_CELL_PADDING_UM * 2;
-        let caption_um = self.title_caption_need_um();
-        if value_um > caption_um {
-            value_um
-        } else {
-            caption_um
-        }
-    }
-
-    /// Width of the cell that holds this field's caption whole, padding
-    /// included.
-    const fn title_caption_need_um(self) -> u64 {
-        // Every caption is ASCII, so its length is its character count.
-        self.display_label().len() as u64
-            * drawing_sheet_mono_advance_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.caption_um)
-            + DRAWING_SHEET_TITLE_CELL_PADDING_UM * 2
-    }
-}
-
-const fn longest_release_status_chars() -> u64 {
-    let mut longest = 0;
-    let mut index = 0;
-    while index < DrawingSheetReleaseStatus::ALL.len() {
-        let chars = DrawingSheetReleaseStatus::ALL[index].label().len();
-        if chars > longest {
-            longest = chars;
-        }
-        index += 1;
-    }
-    longest as u64
-}
-
-/// One visible field's cell, in the block's upright, authored frame.
+/// What a value line of a title cell letters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DrawingSheetTitleCell {
-    pub id: DrawingSheetTitleFieldId,
-    /// The row it sits in, counted from the top from zero.
-    pub row: usize,
-    /// Distance from the block's left edge to the cell's left rule.
-    pub x_um: u64,
-    pub width_um: u64,
+pub enum DrawingSheetTitleText {
+    /// The field's resolved value.
+    Field(DrawingSheetTitleFieldId),
+    /// Wording the form prints itself, whatever the sheet holds.
+    Fixed(&'static str),
 }
 
-impl DrawingSheetTitleCell {
-    /// Characters lettered at `lettering_um` that fit between the cell's
-    /// padding. IBM Plex Mono advances every glyph alike, so this is a
-    /// measurement, and it holds on every renderer that letters the height.
+/// Where a cell letters its caption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawingSheetTitleCaptionPlacement {
+    /// On a line of its own above the value.
+    Over,
+    /// On the value's line, before it.
+    Inline,
+}
+
+/// A cell's caption, placed in the block's upright frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawingSheetTitleCaption {
+    pub text: &'static str,
+    pub placement: DrawingSheetTitleCaptionPlacement,
+    /// Where the lettering starts, from the block's left edge.
+    pub x_um: u64,
+    /// The point the line is seated on, from the block's top edge: the
+    /// canvas centres the line on it and the plot puts the baseline 3/8 of
+    /// an em below it (see [`drawing_sheet_mono_baseline_offset_um`]).
+    pub seat_um: u64,
+    /// How far the lettering may run.
+    pub width_um: u64,
+    /// ISO 3098 height of the capitals.
+    pub lettering_um: u64,
+}
+
+impl DrawingSheetTitleCaption {
+    /// Characters the caption's width holds at its height.
     #[must_use]
-    pub const fn capacity(self, lettering_um: u64) -> usize {
-        let lettered_um = self
-            .width_um
-            .saturating_sub(DRAWING_SHEET_TITLE_CELL_PADDING_UM * 2);
-        let chars = lettered_um / drawing_sheet_mono_advance_um(lettering_um);
-        if chars == 0 { 1 } else { chars as usize }
+    pub const fn capacity(self) -> usize {
+        chars_across(self.width_um, self.lettering_um)
     }
 
-    /// The field's caption as the cell letters it.
+    /// The caption as the cell letters it.
     #[must_use]
-    pub fn letter_caption(self) -> String {
-        elide_title_text(
-            self.id.display_label(),
-            self.capacity(DRAWING_SHEET_TITLE_BLOCK_LETTERING.caption_um),
-        )
+    pub fn letter(self) -> String {
+        elide_title_text(self.text, self.capacity())
+    }
+}
+
+/// A value a cell letters, placed in the block's upright frame. A long value
+/// wraps at its spaces onto up to `max_lines` lines, each `line_pitch_um`
+/// below the last, and what the last line cannot hold is cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawingSheetTitleValue {
+    pub text: DrawingSheetTitleText,
+    /// Where the lettering starts, from the block's left edge.
+    pub x_um: u64,
+    /// The point the first line is seated on, from the block's top edge.
+    pub seat_um: u64,
+    /// How far each line may run.
+    pub width_um: u64,
+    /// ISO 3098 height of the capitals.
+    pub lettering_um: u64,
+    /// Whether the value is set in the heavier weight.
+    pub emphasised: bool,
+    pub max_lines: u8,
+    pub line_pitch_um: u64,
+}
+
+impl DrawingSheetTitleValue {
+    /// The field the value letters, if it letters one.
+    #[must_use]
+    pub const fn field(self) -> Option<DrawingSheetTitleFieldId> {
+        match self.text {
+            DrawingSheetTitleText::Field(field) => Some(field),
+            DrawingSheetTitleText::Fixed(_) => None,
+        }
     }
 
-    /// `value` as the cell letters it: whole when it fits, and otherwise cut
-    /// with an ellipsis to the characters the cell holds.
+    /// Characters one line holds at the value's height. IBM Plex Mono
+    /// advances every glyph alike, so this is a measurement, and it holds on
+    /// every renderer that letters the height.
     #[must_use]
-    pub fn letter_value(self, value: &str) -> String {
-        elide_title_text(
-            value,
-            self.capacity(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um),
-        )
+    pub const fn capacity(self) -> usize {
+        chars_across(self.width_um, self.lettering_um)
+    }
+
+    /// `value` as the cell letters it, line by line: whole when it fits, and
+    /// otherwise wrapped at its spaces and cut with an ellipsis where the
+    /// last line runs out.
+    #[must_use]
+    pub fn letter(self, value: &str) -> Vec<String> {
+        self.wrap(value).0
     }
 
     /// Whether the cell cuts `value` short.
     #[must_use]
     pub fn elides(self, value: &str) -> bool {
-        value.chars().count() > self.capacity(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um)
+        self.wrap(value).1
+    }
+
+    fn wrap(self, value: &str) -> (Vec<String>, bool) {
+        wrap_title_text(value, self.capacity(), usize::from(self.max_lines.max(1)))
     }
 }
 
-fn elide_title_text(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_owned();
-    }
-    let mut kept = text
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
-    kept.push('…');
-    kept
+/// One cell of a title block, in the block's upright frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrawingSheetTitleCell {
+    /// Distance from the block's left edge to the cell's left rule.
+    pub x_um: u64,
+    /// Distance from the block's top edge to the cell's top rule.
+    pub y_um: u64,
+    pub width_um: u64,
+    pub height_um: u64,
+    pub caption: Option<DrawingSheetTitleCaption>,
+    /// What the cell letters, top to bottom. A cell with none is a box the
+    /// form leaves to be filled in by hand, or empty.
+    pub values: Vec<DrawingSheetTitleValue>,
 }
 
-/// A title block's field grid: its rows, and the cell of every field the
-/// sheet shows. Distances are from the top-left corner of the block in its
-/// upright, authored frame; a rotated block is laid out upright and turned
-/// whole.
+impl DrawingSheetTitleCell {
+    /// The field the cell is for: the one its first value letters.
+    #[must_use]
+    pub fn field(&self) -> Option<DrawingSheetTitleFieldId> {
+        self.values.first().and_then(|value| value.field())
+    }
+
+    /// The value that letters `field`.
+    #[must_use]
+    pub fn value(&self, field: DrawingSheetTitleFieldId) -> Option<DrawingSheetTitleValue> {
+        self.values
+            .iter()
+            .copied()
+            .find(|value| value.field() == Some(field))
+    }
+
+    /// The caption as the cell letters it, or nothing for a cell without one.
+    #[must_use]
+    pub fn letter_caption(&self) -> String {
+        self.caption
+            .map(DrawingSheetTitleCaption::letter)
+            .unwrap_or_default()
+    }
+}
+
+/// A rule between cells: a straight segment in the block's upright frame,
+/// horizontal or vertical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DrawingSheetTitleRule {
+    pub from_x_um: u64,
+    pub from_y_um: u64,
+    pub to_x_um: u64,
+    pub to_y_um: u64,
+}
+
+/// What a line of title-block lettering is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawingSheetTitleLetteringRole {
+    Caption,
+    Value,
+}
+
+/// One line of lettering a title block draws, placed in the block's upright
+/// frame and already cut to its cell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrawingSheetTitleLettering {
+    pub text: String,
+    pub x_um: u64,
+    /// See [`DrawingSheetTitleCaption::seat_um`].
+    pub seat_um: u64,
+    pub lettering_um: u64,
+    pub role: DrawingSheetTitleLetteringRole,
+    pub emphasised: bool,
+    /// Index of the cell in [`DrawingSheetTitleLayout::cells`] it is
+    /// lettered in, and clipped to.
+    pub cell: usize,
+}
+
+/// A title block's form: its cells and the rules between them. Distances are
+/// from the top-left corner of the block in its upright, authored frame; a
+/// rotated block is laid out upright and turned whole.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingSheetTitleLayout {
     pub width_um: u64,
     pub height_um: u64,
-    /// Where the field grid starts: the width a managed logo reserves at the
-    /// block's left edge, or zero.
+    /// Where the cells start: the width a managed logo reserves at the
+    /// block's left edge, or zero. The logo's own rule is the reserve's.
     pub grid_x_um: u64,
-    pub rows: usize,
-    /// Every visible field's cell, in the order the sheet's fields resolve.
     pub cells: Vec<DrawingSheetTitleCell>,
+    /// Every rule between cells, each drawn once.
+    pub rules: Vec<DrawingSheetTitleRule>,
 }
 
 impl DrawingSheetTitleLayout {
+    pub(super) fn from_cells(
+        width_um: u64,
+        height_um: u64,
+        grid_x_um: u64,
+        cells: Vec<DrawingSheetTitleCell>,
+    ) -> Self {
+        let rules = cell_rules(&cells, width_um, height_um, grid_x_um);
+        Self {
+            width_um,
+            height_um,
+            grid_x_um,
+            cells,
+            rules,
+        }
+    }
+
     #[must_use]
     pub const fn grid_width_um(&self) -> u64 {
         self.width_um.saturating_sub(self.grid_x_um)
     }
 
-    /// The rule above `row`, from the block's top edge; the rule above row
-    /// `rows` is the block's foot.
+    /// The cell that letters `field`.
     #[must_use]
-    pub const fn row_top_um(&self, row: usize) -> u64 {
-        self.height_um * row as u64 / self.rows as u64
+    pub fn cell(&self, field: DrawingSheetTitleFieldId) -> Option<&DrawingSheetTitleCell> {
+        self.cells.iter().find(|cell| cell.value(field).is_some())
     }
 
+    /// The value line that letters `field`.
     #[must_use]
-    pub fn cell(&self, id: DrawingSheetTitleFieldId) -> Option<DrawingSheetTitleCell> {
-        self.cells.iter().copied().find(|cell| cell.id == id)
+    pub fn value(&self, field: DrawingSheetTitleFieldId) -> Option<DrawingSheetTitleValue> {
+        self.cells.iter().find_map(|cell| cell.value(field))
+    }
+
+    /// Every line the block letters with `fields`, the resolved values of the
+    /// sheet, in cell order: each cell's caption, then its values. A field
+    /// with no value letters nothing, so its cell is a box to fill in.
+    #[must_use]
+    pub fn lettering(
+        &self,
+        fields: &[ResolvedDrawingSheetTitleField],
+    ) -> Vec<DrawingSheetTitleLettering> {
+        let mut lettering = Vec::new();
+        for (index, cell) in self.cells.iter().enumerate() {
+            if let Some(caption) = cell.caption {
+                lettering.push(DrawingSheetTitleLettering {
+                    text: caption.letter(),
+                    x_um: caption.x_um,
+                    seat_um: caption.seat_um,
+                    lettering_um: caption.lettering_um,
+                    role: DrawingSheetTitleLetteringRole::Caption,
+                    emphasised: false,
+                    cell: index,
+                });
+            }
+            for value in &cell.values {
+                let text = match value.text {
+                    DrawingSheetTitleText::Fixed(text) => text,
+                    DrawingSheetTitleText::Field(field) => fields
+                        .iter()
+                        .find(|resolved| resolved.id == field)
+                        .map_or("", |resolved| resolved.value.as_str()),
+                };
+                if text.trim().is_empty() {
+                    continue;
+                }
+                let mut seat_um = value.seat_um;
+                for line in value.letter(text) {
+                    lettering.push(DrawingSheetTitleLettering {
+                        text: line,
+                        x_um: value.x_um,
+                        seat_um,
+                        lettering_um: value.lettering_um,
+                        role: DrawingSheetTitleLetteringRole::Value,
+                        emphasised: value.emphasised,
+                        cell: index,
+                    });
+                    seat_um += value.line_pitch_um;
+                }
+            }
+        }
+        lettering
     }
 }
 
@@ -230,153 +318,136 @@ pub fn drawing_sheet_title_layout(
 ) -> Option<DrawingSheetTitleLayout> {
     let block = geometry.title_block?;
     let template = geometry.effective_title_block_template;
-    let rows = format.title_block_rows(template)?.max(1);
     let (width_um, height_um) = match format.title_block.rotation {
         DrawingSheetTitleBlockRotation::Upright => (block.width_um, block.height_um),
         DrawingSheetTitleBlockRotation::Clockwise90
         | DrawingSheetTitleBlockRotation::CounterClockwise90 => (block.height_um, block.width_um),
     };
-    let grid_x_um = format
-        .title_block_logo(template)
-        .map_or(0, DrawingSheetManagedLogo::reserved_width_um)
-        .min(width_um);
-    let grid_width_um = width_um - grid_x_um;
-    let fields = format
-        .title_block_field_order()
+    match template {
+        DrawingSheetTitleBlockTemplate::Standard => {
+            Some(iso_7200_form_layout(format, width_um, height_um))
+        }
+        DrawingSheetTitleBlockTemplate::Compact
+        | DrawingSheetTitleBlockTemplate::OrganizationManaged => {
+            flowed_title_layout(format, template, width_um, height_um)
+        }
+        DrawingSheetTitleBlockTemplate::None => None,
+    }
+}
+
+/// Characters lettered at `lettering_um` that fit across `width_um`, and at
+/// least one: lettering never shrinks to fit, so a cell too narrow for one
+/// character still letters an ellipsis rather than smaller text.
+const fn chars_across(width_um: u64, lettering_um: u64) -> usize {
+    let chars = width_um / drawing_sheet_mono_advance_um(lettering_um);
+    if chars == 0 { 1 } else { chars as usize }
+}
+
+pub(super) fn elide_title_text(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_owned();
+    }
+    let mut kept = text
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    kept.push('…');
+    kept
+}
+
+/// `text` broken at its spaces into at most `max_lines` lines of at most
+/// `max_chars` characters, and whether any of it is cut. A word longer than
+/// a line is broken where the line ends, and what the last line cannot hold
+/// is cut with an ellipsis.
+fn wrap_title_text(text: &str, max_chars: usize, max_lines: usize) -> (Vec<String>, bool) {
+    let cut = |text: &str| text.chars().count() > max_chars;
+    if max_lines <= 1 || !cut(text) {
+        return (vec![elide_title_text(text, max_chars)], cut(text));
+    }
+    let mut lines = Vec::new();
+    let mut rest = text.trim();
+    while !rest.is_empty() {
+        if lines.len() + 1 == max_lines || !cut(rest) {
+            lines.push(elide_title_text(rest, max_chars));
+            return (lines, cut(rest));
+        }
+        // Break at the last space the line holds, or where it is full.
+        let fits = rest
+            .char_indices()
+            .nth(max_chars)
+            .map_or(rest.len(), |(at, _)| at);
+        let head = &rest[..fits];
+        let next = &rest[fits..];
+        let (line, after) = if next.starts_with(' ') {
+            (head, next)
+        } else {
+            head.rfind(' ')
+                .map_or((head, next), |space| (&rest[..space], &rest[space..]))
+        };
+        lines.push(line.trim_end().to_owned());
+        rest = after.trim_start();
+    }
+    (lines, false)
+}
+
+/// The rules of `cells`: every edge that is not the outline of the block or
+/// of its field area, merged so that edges meeting end to end, or shared by
+/// two cells, are one rule drawn once.
+fn cell_rules(
+    cells: &[DrawingSheetTitleCell],
+    width_um: u64,
+    height_um: u64,
+    grid_x_um: u64,
+) -> Vec<DrawingSheetTitleRule> {
+    // (position across, start, end) for each orientation.
+    let mut horizontal = Vec::new();
+    let mut vertical = Vec::new();
+    for cell in cells {
+        let (left, top) = (cell.x_um, cell.y_um);
+        let (right, bottom) = (left + cell.width_um, top + cell.height_um);
+        for y in [top, bottom] {
+            if y > 0 && y < height_um {
+                horizontal.push((y, left, right));
+            }
+        }
+        for x in [left, right] {
+            if x > grid_x_um && x < width_um {
+                vertical.push((x, top, bottom));
+            }
+        }
+    }
+    let mut rules = merge_runs(horizontal)
         .into_iter()
-        .filter(|id| {
-            format
-                .title_block
-                .fields
-                .get(id)
-                .is_some_and(|field| field.visible)
+        .map(|(y, from, to)| DrawingSheetTitleRule {
+            from_x_um: from,
+            from_y_um: y,
+            to_x_um: to,
+            to_y_um: y,
         })
         .collect::<Vec<_>>();
-    let places = grid_places(fields.len(), rows);
-    let columns = places
-        .iter()
-        .map(|&(_, column)| column + 1)
-        .max()
-        .unwrap_or(1);
-    let widths = column_widths(&fields, &places, columns, grid_width_um);
-    let cells = fields
-        .iter()
-        .zip(&places)
-        .enumerate()
-        .map(|(index, (&id, &(row, column)))| {
-            let x_um = grid_x_um + widths[..column].iter().sum::<u64>();
-            // The last cell of a row reaches the block's edge, across any
-            // columns a short row leaves unfilled.
-            let ends_row = places.get(index + 1).is_none_or(|&(next, _)| next != row);
-            DrawingSheetTitleCell {
-                id,
-                row,
-                x_um,
-                width_um: if ends_row {
-                    width_um - x_um
-                } else {
-                    widths[column]
-                },
-            }
-        })
-        .collect();
-    Some(DrawingSheetTitleLayout {
-        width_um,
-        height_um,
-        grid_x_um,
-        rows,
-        cells,
-    })
+    rules.extend(
+        merge_runs(vertical)
+            .into_iter()
+            .map(|(x, from, to)| DrawingSheetTitleRule {
+                from_x_um: x,
+                from_y_um: from,
+                to_x_um: x,
+                to_y_um: to,
+            }),
+    );
+    rules
 }
 
-/// The row and column of each of `count` fields on a grid of `rows` rows,
-/// by the rule the module documentation sets out.
-fn grid_places(count: usize, rows: usize) -> Vec<(usize, usize)> {
-    let columns = count.div_ceil(rows).max(1);
-    let mut places = Vec::with_capacity(count);
-    let mut remaining = count;
-    for row in 0..rows {
-        // As many as a row holds, while leaving each row below one of its own.
-        let taken = columns
-            .min(remaining.saturating_sub(rows - row - 1))
-            .max(1)
-            .min(remaining);
-        places.extend((0..taken).map(|column| (row, column)));
-        remaining -= taken;
-    }
-    places
-}
-
-/// The width a column keeps for `id` at `step` of giving way: from 0, all
-/// it typically holds, down to 3, its caption alone.
-fn kept_um(id: DrawingSheetTitleFieldId, step: usize) -> u64 {
-    let whole = match step {
-        0 => true,
-        // Document type is a term from a short list, such as IEC 61082's
-        // "Circuit diagram", and the first a crowded block lets go.
-        1 => id.has_fixed_form() || id == DrawingSheetTitleFieldId::DocumentType,
-        2 => id.has_fixed_form(),
-        _ => false,
-    };
-    if whole {
-        id.title_cell_need_um()
-    } else {
-        id.title_caption_need_um()
-    }
-}
-
-/// The width of each column, by the rule the module documentation sets out.
-fn column_widths(
-    fields: &[DrawingSheetTitleFieldId],
-    places: &[(usize, usize)],
-    columns: usize,
-    grid_width_um: u64,
-) -> Vec<u64> {
-    let floors_at = |step| {
-        let mut floors = vec![0_u64; columns];
-        for (&id, &(_, column)) in fields.iter().zip(places) {
-            floors[column] = floors[column].max(kept_um(id, step));
+/// Collinear segments merged wherever they overlap or meet.
+fn merge_runs(mut runs: Vec<(u64, u64, u64)>) -> Vec<(u64, u64, u64)> {
+    runs.retain(|&(_, from, to)| to > from);
+    runs.sort_unstable();
+    let mut merged: Vec<(u64, u64, u64)> = Vec::with_capacity(runs.len());
+    for (at, from, to) in runs {
+        match merged.last_mut() {
+            Some(last) if last.0 == at && from <= last.2 => last.2 = last.2.max(to),
+            _ => merged.push((at, from, to)),
         }
-        floors
-    };
-    let floors = (0..3)
-        .map(floors_at)
-        .find(|floors| floors.iter().sum::<u64>() <= grid_width_um)
-        .unwrap_or_else(|| floors_at(3));
-    level_widths(&floors, grid_width_um)
-}
-
-/// Widths that span `total_um` exactly and are as even as they can be while
-/// none is narrower than its floor: every column below a common level is
-/// raised to it. Floors that overrun `total_um` share it in proportion.
-fn level_widths(floors: &[u64], total_um: u64) -> Vec<u64> {
-    let floor_um = floors.iter().sum::<u64>();
-    let mut widths = if floor_um > total_um {
-        floors
-            .iter()
-            .map(|floor| total_um * floor / floor_um)
-            .collect::<Vec<_>>()
-    } else {
-        // Columns whose floor stands above the level keep it; the rest share
-        // what is left alike.
-        let mut descending = floors.to_vec();
-        descending.sort_unstable_by(|left, right| right.cmp(left));
-        let (mut remaining_um, mut sharing) = (total_um, floors.len() as u64);
-        for floor in descending {
-            if floor * sharing <= remaining_um {
-                break;
-            }
-            remaining_um -= floor;
-            sharing -= 1;
-        }
-        let level_um = remaining_um / sharing.max(1);
-        floors
-            .iter()
-            .map(|floor| (*floor).max(level_um))
-            .collect::<Vec<_>>()
-    };
-    if let Some((last, others)) = widths.split_last_mut() {
-        *last = total_um - others.iter().sum::<u64>();
     }
-    widths
+    merged
 }

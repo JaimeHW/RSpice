@@ -536,19 +536,32 @@ fn an_automatic_field_is_lettered_like_any_other() {
         "an automatic cell carries no marker"
     );
     let text = lettered_text(&shapes);
+    let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
+        .expect("the sheet carries a title block");
     for field in &fields {
+        let caption = layout.cell(field.id).unwrap().letter_caption();
         assert!(
-            text.iter().any(|line| line == field.id.display_label()),
-            "{:?} must be captioned with its own wording: {text:?}",
+            text.contains(&caption),
+            "{:?} must be captioned with its form's wording: {text:?}",
             field.id
         );
+    }
+    // ISO 7200's own terms, as the plot letters them.
+    for caption in [
+        "Rev.",
+        "Date of issue",
+        "Sheet",
+        "Title",
+        "Identification number",
+    ] {
+        assert!(text.iter().any(|line| line == caption), "{text:?}");
     }
 }
 
 #[test]
 fn an_empty_authored_field_is_painted_as_its_caption_alone() {
-    // Drawn by and Approved by start on a new sheet empty: boxes to sign on
-    // the print, with no dash or empty line of text in them.
+    // Created by and Approved by start on a new sheet empty: boxes to sign
+    // on the print, with no dash or empty line of text in them.
     let sheet = test_sheet();
     let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
         &sheet.format,
@@ -561,10 +574,48 @@ fn an_empty_authored_field_is_painted_as_its_caption_alone() {
         text.iter().all(|line| !line.trim().is_empty()),
         "an empty value paints no text: {text:?}"
     );
-    assert_eq!(text.len(), fields.len() * 2 - blank);
-    for caption in ["Drawn by", "Approved by"] {
+    let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
+        .expect("the sheet carries a title block");
+    assert_eq!(text.len(), layout.cells.len() + fields.len() - blank);
+    for caption in ["Created by", "Approved by"] {
         assert!(text.iter().any(|line| line == caption), "{text:?}");
     }
+}
+
+#[test]
+fn title_block_lines_are_the_plots_widths_magnified_with_the_sheet() {
+    // 0.7 mm outline and 0.35 mm rules at four world units per millimetre.
+    assert!((title_line_width(DRAWING_SHEET_TITLE_OUTLINE_UM, 1.0, 1.0) - 2.8).abs() < 1e-4);
+    assert!((title_line_width(DRAWING_SHEET_TITLE_RULE_UM, 1.0, 1.0) - 1.4).abs() < 1e-4);
+    assert!((title_line_width(DRAWING_SHEET_TITLE_RULE_UM, 2.0, 1.0) - 2.8).abs() < 1e-4);
+    // Never thinner than one physical pixel.
+    assert!((title_line_width(DRAWING_SHEET_TITLE_RULE_UM, 0.1, 2.0) - 0.5).abs() < 1e-4);
+
+    let sheet = test_sheet();
+    let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
+        &sheet.format,
+        &std::collections::BTreeMap::new(),
+    );
+    let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical).unwrap();
+    let shapes = painted_title_block(&sheet, &fields);
+    let rules = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::LineSegment { stroke, .. } => Some(stroke.width),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    // Each cell's own rules, each painted once, at the narrow width.
+    assert_eq!(rules.len(), layout.rules.len());
+    assert!(rules.iter().all(|width| (width - 1.4).abs() < 1e-4));
+    let outline = shapes
+        .iter()
+        .find_map(|shape| match shape {
+            Shape::Path(path) => Some(path.stroke.width),
+            _ => None,
+        })
+        .expect("the outline is painted");
+    assert!((outline - 2.8).abs() < 1e-4);
 }
 
 #[test]
@@ -579,7 +630,7 @@ fn the_canvas_letters_each_field_in_the_cell_the_sheet_lays_out() {
         (Field::Page, "12 of 12"),
         (Field::Revision, "C"),
         (Field::Date, "2026-10-18"),
-        (Field::DocumentStatus, "In review"),
+        (Field::DocumentStatus, "Under approval"),
     ]
     .into_iter()
     .map(|(id, value)| (id, value.to_owned()))
@@ -591,13 +642,16 @@ fn the_canvas_letters_each_field_in_the_cell_the_sheet_lays_out() {
     let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
         .expect("the sheet carries a title block");
     let text = lettered_text(&painted_title_block(&sheet, &fields));
-    for (cell, field) in layout.cells.iter().zip(&fields) {
-        assert!(text.contains(&cell.letter_caption()), "{text:?}");
-        if !field.value.is_empty() {
-            assert!(text.contains(&cell.letter_value(&field.value)), "{text:?}");
-        }
-    }
-    for whole in ["12 of 12", "2026-10-18", "In review"] {
+    let lettering = layout.lettering(&fields);
+    assert_eq!(
+        text,
+        lettering
+            .iter()
+            .map(|line| line.text.clone())
+            .collect::<Vec<_>>(),
+        "the canvas paints exactly the lines the layout letters"
+    );
+    for whole in ["12 of 12", "2026-10-18", "Under approval"] {
         assert!(
             text.iter().any(|line| line == whole),
             "{whole} is cut: {text:?}"

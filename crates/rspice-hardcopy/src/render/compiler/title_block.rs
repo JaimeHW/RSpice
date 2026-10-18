@@ -19,6 +19,17 @@ impl SemanticSceneCompiler<'_> {
             stroke: Some(stroke),
             fill: None,
         });
+        // The outline is ISO 128-20's wide line; the rules inside it, and a
+        // managed logo's artwork, are the narrow line at half its width,
+        // whatever width a print mapping gives the outline.
+        let rule = StrokeStyle {
+            width: Length::from_micrometres(
+                stroke.width.micrometres()
+                    * rspice_design_model::design_management::DRAWING_SHEET_TITLE_RULE_UM
+                    / rspice_design_model::design_management::DRAWING_SHEET_TITLE_OUTLINE_UM,
+            ),
+            ..stroke
+        };
         let rotation = format.title_block.rotation;
         let authored_block = authored_title_block_rect(block, rotation)?;
         let transform = |this: &Self, x: i64, y: i64| {
@@ -31,7 +42,7 @@ impl SemanticSceneCompiler<'_> {
                 SceneTextRotation::CounterClockwise90
             }
         };
-        // The grid the canvas and Page Setup draw too: every rule and every
+        // The form the canvas and Page Setup draw too: every rule and every
         // cell's width come from the one layout, so a field is cut short on
         // paper exactly where it is on screen.
         let geometry = format
@@ -63,7 +74,7 @@ impl SemanticSceneCompiler<'_> {
                     field_grid_x,
                     authored_block.y_um + authored_block.height_um as i64,
                 )?,
-                stroke,
+                stroke: rule,
             });
             let inset = 3_000u64
                 .min(logo_reserved_width_um / 10)
@@ -94,7 +105,7 @@ impl SemanticSceneCompiler<'_> {
                 self.primitives.push(ScenePrimitive::Polyline {
                     points,
                     closed: primitive.closed(),
-                    stroke,
+                    stroke: rule,
                     fill: primitive.filled().then_some(SceneFill::solid(stroke.color)),
                 });
             }
@@ -109,72 +120,37 @@ impl SemanticSceneCompiler<'_> {
         if fields.is_empty() {
             return Ok(());
         }
-        let grid_right = at_x(layout.width_um)?;
-        for row in 1..layout.rows {
-            let y = at_y(layout.row_top_um(row))?;
+        // Each cell's own rules, each drawn once.
+        for cell_rule in &layout.rules {
             self.primitives.push(ScenePrimitive::Line {
-                from: transform(self, field_grid_x, y)?,
-                to: transform(self, grid_right, y)?,
-                stroke,
+                from: transform(self, at_x(cell_rule.from_x_um)?, at_y(cell_rule.from_y_um)?)?,
+                to: transform(self, at_x(cell_rule.to_x_um)?, at_y(cell_rule.to_y_um)?)?,
+                stroke: rule,
             });
         }
-        let lettering = rspice_design_model::design_management::DRAWING_SHEET_TITLE_BLOCK_LETTERING;
-        for (cell, field) in layout.cells.iter().zip(fields) {
-            debug_assert_eq!(cell.id, field.id, "the layout lays out the resolved fields");
-            let row_top_um = layout.row_top_um(cell.row);
-            let row_height = layout.row_top_um(cell.row + 1) - row_top_um;
-            let row_y = at_y(row_top_um)?;
-            let cell_x = at_x(cell.x_um)?;
-            if cell.x_um > layout.grid_x_um {
-                self.primitives.push(ScenePrimitive::Line {
-                    from: transform(self, cell_x, row_y)?,
-                    to: transform(self, cell_x, row_y + row_height as i64)?,
-                    stroke,
-                });
-            }
-            // Caption and value sit on the shared fractions of the cell that
-            // the canvas also places them on. The canvas centres a line on
-            // that point while publication places a baseline on it, so each
-            // is converted to a baseline here and a field's ink lands in the
-            // same place on screen and on paper. Each is set at the em whose
-            // capitals stand at its ISO 3098 height, as the canvas sets it.
-            let at = |(numerator, denominator): (u64, u64)| {
-                (row_height * numerator / denominator) as i64
-            };
-            let text_x = cell_x + DRAWING_SHEET_TITLE_CELL_PADDING_UM as i64;
+        // Every line sits on the seat the canvas also places it on. The
+        // canvas centres a line on that point while publication places a
+        // baseline on it, so each is converted to a baseline here and a
+        // field's ink lands in the same place on screen and on paper. Each is
+        // set at the em whose capitals stand at its ISO 3098 height, as the
+        // canvas sets it. A caption is the form's own wording and nothing
+        // else: ISO 7200 marks no field as filled in by the system, and a
+        // reader of the print has no use for knowing. An empty value plots
+        // nothing: the cell is a box to fill in.
+        for line in layout.lettering(&fields) {
             self.add_text_rotated(
                 transform(
                     self,
-                    text_x,
-                    row_y
-                        + at(DRAWING_SHEET_TITLE_CAPTION_POSITION)
-                        + drawing_sheet_mono_baseline_offset_um(lettering.caption_um) as i64,
+                    at_x(line.x_um)?,
+                    at_y(line.seat_um + drawing_sheet_mono_baseline_offset_um(line.lettering_um))?,
                 )?,
-                // The field's own wording and nothing else, as the canvas
-                // letters it: ISO 7200 marks no field as filled in by the
-                // system, and a reader of the print has no use for knowing.
-                &cell.letter_caption(),
-                SceneFont::Monospace,
-                drawing_sheet_mono_em_um(lettering.caption_um),
-                stroke.color,
-                text_rotation,
-            )?;
-            self.add_text_rotated(
-                transform(
-                    self,
-                    text_x,
-                    row_y
-                        + at(DRAWING_SHEET_TITLE_VALUE_POSITION)
-                        + drawing_sheet_mono_baseline_offset_um(lettering.data_um) as i64,
-                )?,
-                // An empty value plots nothing: the cell is a box to fill in.
-                &cell.letter_value(&field.value),
-                if field.id.emphasised() {
+                &line.text,
+                if line.emphasised {
                     SceneFont::MonospaceMedium
                 } else {
                     SceneFont::Monospace
                 },
-                drawing_sheet_mono_em_um(lettering.data_um),
+                drawing_sheet_mono_em_um(line.lettering_um),
                 stroke.color,
                 text_rotation,
             )?;

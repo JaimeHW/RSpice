@@ -535,9 +535,8 @@ fn paint_title_block(
     ));
     let x_at =
         |x_um: u64| authored.left() + authored.width() * x_um as f32 / layout.width_um as f32;
-    let y_at = |row: usize| {
-        authored.top() + authored.height() * layout.row_top_um(row) as f32 / layout.height_um as f32
-    };
+    let y_at =
+        |y_um: u64| authored.top() + authored.height() * y_um as f32 / layout.height_um as f32;
     let mut field_grid = authored;
     field_grid.min.x = x_at(layout.grid_x_um);
     if let Some(logo) = format.title_block_logo(template) {
@@ -588,37 +587,32 @@ fn paint_title_block(
         }
     }
 
-    for row in 1..layout.rows {
-        let y = y_at(row);
+    for rule in &layout.rules {
         ui.painter().line_segment(
             [
-                transform(pos2(field_grid.left(), y)),
-                transform(pos2(field_grid.right(), y)),
+                transform(pos2(x_at(rule.from_x_um), y_at(rule.from_y_um))),
+                transform(pos2(x_at(rule.to_x_um), y_at(rule.to_y_um))),
             ],
             line_stroke,
         );
     }
     // At preview scale, field text would become an illegible grey smear.
-    // Short ruled silhouettes still communicate the populated title-grid
-    // structure without claiming values the preview cannot resolve.
-    for (field_index, cell) in layout.cells.iter().enumerate() {
+    // A short stroke on each value's line still communicates the populated
+    // form without claiming values the preview cannot resolve.
+    for (value_index, (cell, value)) in layout
+        .cells
+        .iter()
+        .flat_map(|cell| cell.values.iter().map(move |value| (cell, value)))
+        .enumerate()
+    {
         let (cell_left, cell_right) = (x_at(cell.x_um), x_at(cell.x_um + cell.width_um));
-        let (cell_top, cell_bottom) = (y_at(cell.row), y_at(cell.row + 1));
-        if cell.x_um > layout.grid_x_um {
-            ui.painter().line_segment(
-                [
-                    transform(pos2(cell_left, cell_top)),
-                    transform(pos2(cell_left, cell_bottom)),
-                ],
-                line_stroke,
-            );
-        }
-        let (cell_width, cell_height) = (cell_right - cell_left, cell_bottom - cell_top);
+        let cell_width = cell_right - cell_left;
+        let cell_height = y_at(cell.y_um + cell.height_um) - y_at(cell.y_um);
         if cell_width >= 7.0 && cell_height >= 4.0 {
             let inset = (cell_width * 0.12).clamp(1.0, 4.0);
-            let width_ratio = 0.42 + (field_index % 3) as f32 * 0.12;
+            let width_ratio = 0.42 + (value_index % 3) as f32 * 0.12;
             let end_x = (cell_left + cell_width * width_ratio).min(cell_right - inset);
-            let y = cell_top + cell_height * 0.58;
+            let y = y_at(value.seat_um);
             ui.painter().line_segment(
                 [
                     transform(pos2(cell_left + inset, y)),

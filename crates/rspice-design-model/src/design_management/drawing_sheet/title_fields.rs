@@ -43,6 +43,10 @@ pub enum DrawingSheetTitleFieldId {
     /// carry an index and a date; the status is lettered here instead of in
     /// either of them.
     DocumentStatus,
+    /// ISO 7200's *Language code*: the ISO 639 code of the language the
+    /// document is written in, such as `en`. Optional, and kept by the
+    /// project, since every sheet of a document is written in one language.
+    Language,
 }
 
 /// What a schematic sheet is, in the name IEC 61082 gives it: the Document
@@ -50,7 +54,7 @@ pub enum DrawingSheetTitleFieldId {
 pub const DRAWING_SHEET_DEFAULT_DOCUMENT_TYPE: &str = "Circuit diagram";
 
 impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
@@ -66,6 +70,7 @@ impl DrawingSheetTitleFieldId {
         Self::Organization,
         Self::DocumentId,
         Self::Classification,
+        Self::Language,
     ];
 
     /// Fields withdrawn from the product that older sheets may still carry.
@@ -79,39 +84,65 @@ impl DrawingSheetTitleFieldId {
     /// one sheet. Visibility remains sheet-owned, but the value is resolved
     /// from [`DrawingSheetProjectSettings::title_block_field_values`] on every
     /// canvas and hardcopy page.
-    pub const PROJECT_OWNED: [Self; 3] =
-        [Self::Organization, Self::DocumentId, Self::Classification];
+    pub const PROJECT_OWNED: [Self; 4] = [
+        Self::Organization,
+        Self::DocumentId,
+        Self::Classification,
+        Self::Language,
+    ];
 
     #[must_use]
     pub const fn is_project_owned(self) -> bool {
         matches!(
             self,
-            Self::Organization | Self::DocumentId | Self::Classification
+            Self::Organization | Self::DocumentId | Self::Classification | Self::Language
         )
     }
 
-    /// Canonical human-facing wording shared by canvas, dialogs, preview,
-    /// and hardcopy. Every renderer letters it exactly as written, case
-    /// included, so a caption reads the same wherever the sheet is shown.
+    /// The field's name wherever RSpice offers it for editing — the
+    /// inspector, Page Setup and the title-block fields dialog — in the term
+    /// ISO 7200 gives it, so the panel names a field as the printed form
+    /// does. The ISO form's own captions are the same terms, abbreviated
+    /// where its figures abbreviate them (`Rev.`, `Lang.`).
     #[must_use]
     pub const fn display_label(self) -> &'static str {
         match self {
             Self::Project => "Project",
             Self::CellView => "Cell / view",
-            Self::SheetTitle => "Sheet title",
-            Self::Page => "Page",
+            Self::SheetTitle => "Title",
+            Self::Page => "Sheet",
             Self::Revision => "Revision",
             Self::PaperSize => "Paper size",
             Self::Scale => "Scale",
-            Self::DrawnBy => "Drawn by",
+            Self::DrawnBy => "Created by",
             Self::CheckedBy => "Checked by",
             Self::ApprovedBy => "Approved by",
-            Self::Date => "Date",
-            Self::Organization => "Organization",
-            Self::DocumentId => "Document ID",
+            Self::Date => "Date of issue",
+            Self::Organization => "Legal owner",
+            Self::DocumentId => "Identification number",
             Self::Classification => "Classification",
             Self::DocumentType => "Document type",
             Self::DocumentStatus => "Document status",
+            Self::Language => "Language",
+        }
+    }
+
+    /// The caption a flowed grid — the compact and organization blocks —
+    /// letters over the field. These blocks keep the wording they were
+    /// drawn with before the ISO 7200 form, so a saved sheet on one of them
+    /// prints as it always did, and an organization's sealed block keeps
+    /// the labels it was released with. Every renderer letters it exactly
+    /// as written, case included.
+    #[must_use]
+    pub const fn grid_caption(self) -> &'static str {
+        match self {
+            Self::SheetTitle => "Sheet title",
+            Self::Page => "Page",
+            Self::DrawnBy => "Drawn by",
+            Self::Date => "Date",
+            Self::Organization => "Organization",
+            Self::DocumentId => "Document ID",
+            other => other.display_label(),
         }
     }
 
@@ -135,10 +166,17 @@ impl DrawingSheetTitleFieldId {
         }
     }
 
+    /// Who supplies the field's value, and whether every block must show it.
+    ///
+    /// Only the sheet number and the title must stand on every block. ISO
+    /// 7200's form adds its own mandatory fields while a sheet is on it (see
+    /// [`DrawingSheetTitleBlockTemplate::requires_field`]); the cell / view
+    /// is the form's supplementary title and the revision index is optional
+    /// there, so neither is required of a block.
     #[must_use]
     pub const fn policy(self) -> DrawingSheetTitleFieldPolicy {
         match self {
-            Self::CellView | Self::Page | Self::Revision => DrawingSheetTitleFieldPolicy {
+            Self::Page => DrawingSheetTitleFieldPolicy {
                 required_visible: true,
                 value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
             },
@@ -149,19 +187,24 @@ impl DrawingSheetTitleFieldId {
             // The project name is the leading segment of `Cell / view` in a
             // single-library workspace, so the sheet must be free to carry
             // one or the other rather than always both.
-            Self::Project | Self::Date | Self::DocumentStatus | Self::Scale | Self::PaperSize => {
-                DrawingSheetTitleFieldPolicy {
-                    required_visible: false,
-                    value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
-                }
-            }
+            Self::CellView
+            | Self::Revision
+            | Self::Project
+            | Self::Date
+            | Self::DocumentStatus
+            | Self::Scale
+            | Self::PaperSize => DrawingSheetTitleFieldPolicy {
+                required_visible: false,
+                value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
+            },
             Self::DrawnBy
             | Self::CheckedBy
             | Self::ApprovedBy
             | Self::Organization
             | Self::DocumentId
             | Self::Classification
-            | Self::DocumentType => DrawingSheetTitleFieldPolicy {
+            | Self::DocumentType
+            | Self::Language => DrawingSheetTitleFieldPolicy {
                 required_visible: false,
                 value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
             },
@@ -171,19 +214,24 @@ impl DrawingSheetTitleFieldId {
     /// Whether a new sheet shows this field.
     ///
     /// ISO 7200 makes the creator and the approval person mandatory, so
-    /// Drawn by and Approved by start on the sheet, empty until someone
+    /// Created by and Approved by start on the sheet, empty until someone
     /// signs. Checked by is not one of the standard's fields, Classification
-    /// is set by a release policy, Paper size is optional and restates the
-    /// sheet the reader is holding, and in a single-library workspace the
-    /// project's name is already the leading segment of Cell / view, so a
-    /// sheet showing Project as well letters that name twice. Those wait in
-    /// Page Setup until a sheet asks for them: every cell a sheet does not
-    /// spend is width the remaining cells keep.
+    /// is set by a release policy, the language code is optional, Paper size
+    /// is optional and restates the sheet the reader is holding, and in a
+    /// single-library workspace the project's name is already the leading
+    /// segment of Cell / view, so a sheet showing Project as well letters
+    /// that name twice. Those wait in Page Setup until a sheet asks for
+    /// them: every cell a sheet does not spend is width the cells beside it
+    /// keep.
     #[must_use]
     pub const fn visible_by_default(self) -> bool {
         !matches!(
             self,
-            Self::Project | Self::CheckedBy | Self::Classification | Self::PaperSize
+            Self::Project
+                | Self::CheckedBy
+                | Self::Classification
+                | Self::PaperSize
+                | Self::Language
         )
     }
 }
@@ -225,7 +273,7 @@ pub fn resolve_drawing_sheet_title_fields(
         .into_iter()
         .filter_map(|id| {
             let authored = format.title_block.fields.get(&id)?;
-            authored.visible.then(|| {
+            format.title_field_shown(id).then(|| {
                 let authority = id.policy().value_authority;
                 let governed = authority_values
                     .get(&id)

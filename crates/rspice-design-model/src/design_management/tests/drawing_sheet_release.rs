@@ -70,7 +70,7 @@ fn drawing_sheet_document_control_is_backward_compatible_and_calendar_strict() {
     };
     assert_eq!(
         released_draft.validate().unwrap_err().to_string(),
-        "A released or obsolete document needs a revision."
+        "A released or withdrawn document needs a revision."
     );
     let undated = DrawingSheetDocumentControl {
         revision: "B".to_owned(),
@@ -79,7 +79,7 @@ fn drawing_sheet_document_control_is_backward_compatible_and_calendar_strict() {
     };
     assert_eq!(
         undated.validate().unwrap_err().to_string(),
-        "A released or obsolete document needs a date."
+        "A released or withdrawn document needs a date."
     );
 
     let released = DrawingSheetDocumentControl {

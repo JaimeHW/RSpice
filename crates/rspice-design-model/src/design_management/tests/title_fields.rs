@@ -122,7 +122,7 @@ fn document_status_holds_the_release_state_revision_and_date_used_to() {
             .find(|resolved| resolved.id == id)
             .map(|resolved| resolved.value.as_str())
     };
-    assert_eq!(value(field), Some("Draft"));
+    assert_eq!(value(field), Some("In preparation"));
     assert_eq!(value(DrawingSheetTitleFieldId::Revision), Some("—"));
     assert_eq!(value(DrawingSheetTitleFieldId::Date), Some("—"));
 }
@@ -206,30 +206,52 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     // ISO 7200 recommends 25 characters for a title and 16 for the document
     // identifier, and the default block's cells hold both.
     let layout = drawing_sheet_title_layout(&format, &geometry).unwrap();
-    let data_um = DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um;
     for (field, chars) in [
         (DrawingSheetTitleFieldId::SheetTitle, 25),
         (DrawingSheetTitleFieldId::DocumentId, 16),
     ] {
-        let held = layout.cell(field).unwrap().capacity(data_um);
+        let held = layout.value(field).unwrap().capacity();
         assert!(held >= chars, "{field:?} holds {held} characters");
     }
 
-    // A sheet whose drawing area cannot hold that block starts on the compact
-    // one, rather than requesting a block Page Setup would report as
-    // substituted; one whose drawing area holds it starts on it, whatever
-    // its paper is called.
-    for narrow in [
-        SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::IsoA5,
+    // Every sheet ISO 5457 frames starts on the block, in either
+    // orientation; the compact block is offered to no new one.
+    for standard in DrawingSheetStandard::ALL.into_iter().filter(|standard| {
+        matches!(
+            standard.series(),
+            DrawingSheetStandardSeries::Iso | DrawingSheetStandardSeries::Jis
+        )
+    }) {
+        for orientation in [
+            SchematicPageOrientation::Landscape,
             SchematicPageOrientation::Portrait,
-        ),
-        SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::JisB5,
-            SchematicPageOrientation::Portrait,
-        ),
-        crate::custom_format("Panel", 200_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
-    ] {
+        ] {
+            let sheet = SchematicSheetFormat::from_standard(standard, orientation);
+            assert_eq!(
+                sheet.title_block.template,
+                DrawingSheetTitleBlockTemplate::Standard,
+                "{standard:?} {orientation:?}"
+            );
+            assert_eq!(
+                sheet.title_block.rotation,
+                DrawingSheetTitleBlockRotation::Upright,
+                "{standard:?} {orientation:?} turns ISO 7200's block"
+            );
+            assert_ne!(
+                sheet.geometry().unwrap().effective_title_block_template,
+                DrawingSheetTitleBlockTemplate::Compact,
+                "{standard:?} {orientation:?}"
+            );
+        }
+    }
+
+    // A sheet of another series whose drawing area cannot hold that block
+    // keeps the compact one, rather than requesting a block Page Setup would
+    // report as substituted; one whose drawing area holds it starts on it,
+    // whatever its paper is called.
+    for narrow in
+        [crate::custom_format("Panel", 200_000, 400_000, crate::StartingFrame::IsoA).unwrap()]
+    {
         assert!(narrow.geometry().unwrap().drawing_area.width_um < 180_000);
         assert_eq!(
             narrow.title_block.template,
@@ -302,30 +324,38 @@ fn each_title_block_template_goes_by_one_name() {
 
 #[test]
 fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
-    // A4 portrait with a 30 mm filing margin and 10 mm opposite leaves a
-    // 170 mm drawing space: too narrow for ISO 7200's 180 mm block, which
-    // gives way to the compact one.
-    let a4_portrait = SchematicSheetFormat::from_standard(
-        DrawingSheetStandard::IsoA4,
+    // A5 portrait's drawing area is 118 mm across, too narrow for ISO 7200's
+    // 180 mm block. On a sheet ISO 5457 frames the block is the same on every
+    // size, so it gives way to no block at all, never to the compact one,
+    // and it is not turned: the drawing reads the way its title block does.
+    let a5_portrait = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA5,
         SchematicPageOrientation::Portrait,
-    )
-    .try_update(|draft| draft.margins.left_um = 30_000)
-    .unwrap();
-    assert_eq!(
-        a4_portrait.geometry().unwrap().drawing_area.width_um,
-        170_000
     );
-    let asked = a4_portrait
-        .try_update(|draft| draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard)
-        .unwrap();
-    assert!(asked.title_block_substituted());
     assert_eq!(
-        asked.geometry().unwrap().effective_title_block_template,
-        DrawingSheetTitleBlockTemplate::Compact
+        a5_portrait.geometry().unwrap().drawing_area.width_um,
+        118_000
     );
+    assert_eq!(
+        a5_portrait.title_block.template,
+        DrawingSheetTitleBlockTemplate::Standard
+    );
+    assert_eq!(
+        a5_portrait.title_block.rotation,
+        DrawingSheetTitleBlockRotation::Upright
+    );
+    assert!(a5_portrait.title_block_substituted());
+    let geometry = a5_portrait.geometry().unwrap();
+    assert_eq!(
+        geometry.effective_title_block_template,
+        DrawingSheetTitleBlockTemplate::None
+    );
+    assert_eq!(geometry.title_block, None);
+    assert!(drawing_sheet_title_layout(&a5_portrait, &geometry).is_none());
 
-    // Turned on its side the same block stands 45 mm across, and fits.
-    let turned = asked
+    // A sheet may still turn the block itself; turned on its side it stands
+    // 45 mm across, and fits.
+    let turned = a5_portrait
         .try_update(|draft| {
             draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90
         })
@@ -336,9 +366,30 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
         45_000
     );
 
-    // What decides is the drawing area, not the paper: narrower margins make
-    // room for the block upright on the same sheet.
-    let narrow_margins = asked
+    // What decides is the drawing area, not the paper: wider margins leave
+    // ANSI A portrait too narrow for the block, and narrower ones make room
+    // for it upright again.
+    let ansi_portrait = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiA,
+        SchematicPageOrientation::Portrait,
+    )
+    .try_update(|draft| {
+        draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+        draft.margins.left_um = 20_000;
+        draft.margins.right_um = 20_000;
+    })
+    .unwrap();
+    assert!(ansi_portrait.geometry().unwrap().drawing_area.width_um < 180_000);
+    assert!(ansi_portrait.title_block_substituted());
+    // Off ISO 5457's sheets the compact block still stands in for it.
+    assert_eq!(
+        ansi_portrait
+            .geometry()
+            .unwrap()
+            .effective_title_block_template,
+        DrawingSheetTitleBlockTemplate::Compact
+    );
+    let narrow_margins = ansi_portrait
         .try_update(|draft| {
             draft.margins = DrawingSheetMargins {
                 top_um: 10_000,
@@ -348,10 +399,7 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
             };
         })
         .unwrap();
-    assert_eq!(
-        narrow_margins.geometry().unwrap().drawing_area.width_um,
-        200_000
-    );
+    assert!(narrow_margins.geometry().unwrap().drawing_area.width_um >= 180_000);
     assert!(!narrow_margins.title_block_substituted());
 
     // A drawing area too short for the block gives way as well.
@@ -361,12 +409,175 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
             draft.margins.bottom_um = 85_000;
         })
         .unwrap();
-    assert_eq!(short.geometry().unwrap().drawing_area.height_um, 40_000);
+    assert!(short.geometry().unwrap().drawing_area.height_um < 45_000);
     assert!(short.title_block_substituted());
     assert_eq!(
         short.geometry().unwrap().effective_title_block_template,
-        DrawingSheetTitleBlockTemplate::Compact
+        DrawingSheetTitleBlockTemplate::None
     );
+}
+
+/// ISO 5457 sets A4's frame 20 mm from the filing edge and 10 mm from the
+/// others, which leaves exactly the 180 mm ISO 7200's block is sized for.
+#[test]
+fn a4_portrait_carries_the_whole_iso_7200_block() {
+    let a4_portrait = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Portrait,
+    );
+    let geometry = a4_portrait.geometry().unwrap();
+    assert_eq!(geometry.drawing_area.width_um, 180_000);
+    assert!(!a4_portrait.title_block_substituted());
+    assert_eq!(
+        geometry.effective_title_block_template,
+        DrawingSheetTitleBlockTemplate::Standard
+    );
+    assert_eq!(geometry.title_block.unwrap().width_um, 180_000);
+    assert_eq!(
+        a4_portrait.title_block.rotation,
+        DrawingSheetTitleBlockRotation::Upright
+    );
+}
+
+#[test]
+fn a_sheet_saved_on_the_compact_block_loads_and_draws_as_it_did() {
+    // A sheet saved before title blocks were stored, and one saved on the
+    // compact block, keep it: nothing rewrites what they chose, and it is
+    // laid out as the flowed grid it always was, in its own wording.
+    let format = SchematicSheetFormat::default();
+    let mut legacy = serde_json::to_value(&format).unwrap();
+    legacy.as_object_mut().unwrap().remove("title_block");
+    let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
+    let mut saved = serde_json::to_value(&format).unwrap();
+    saved["title_block"]["template"] = serde_json::json!("compact");
+    let reopened: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
+    for sheet in [restored, reopened] {
+        assert_eq!(
+            sheet.title_block.template,
+            DrawingSheetTitleBlockTemplate::Compact
+        );
+        let geometry = sheet.geometry().unwrap();
+        assert_eq!(
+            geometry.effective_title_block_template,
+            DrawingSheetTitleBlockTemplate::Compact
+        );
+        let layout = drawing_sheet_title_layout(&sheet, &geometry).unwrap();
+        assert_eq!((layout.width_um, layout.height_um), (130_000, 32_000));
+        let captions = layout
+            .cells
+            .iter()
+            .map(DrawingSheetTitleCell::letter_caption)
+            .collect::<Vec<_>>();
+        for caption in ["Sheet title", "Page", "Drawn by", "Document ID", "Date"] {
+            assert!(
+                captions.iter().any(|lettered| lettered == caption),
+                "{captions:?}"
+            );
+        }
+        assert!(!captions.iter().any(|lettered| lettered == "Lang."));
+    }
+}
+
+#[test]
+fn the_language_code_is_an_optional_project_field() {
+    let field = DrawingSheetTitleFieldId::Language;
+    assert!(DrawingSheetTitleFieldId::ALL.contains(&field));
+    assert!(DrawingSheetTitleFieldId::PROJECT_OWNED.contains(&field));
+    assert!(field.is_project_owned());
+    assert!(!field.visible_by_default());
+    assert!(!field.policy().required_visible);
+    assert_eq!(
+        field.policy().value_authority,
+        DrawingSheetTitleFieldValueAuthority::Authored
+    );
+    assert_eq!(field.display_label(), "Language");
+    assert_eq!(
+        serde_json::to_value(field).unwrap(),
+        serde_json::json!("language")
+    );
+
+    // A sheet saved before the field existed loads with it hidden.
+    let format = SchematicSheetFormat::default();
+    let mut wire = serde_json::to_value(&format).unwrap();
+    wire["title_block"]["fields"]
+        .as_object_mut()
+        .unwrap()
+        .remove("language");
+    let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
+    assert!(!restored.title_block.fields[&field].visible);
+    assert_eq!(restored, format);
+
+    // So does a project that kept three values of its own.
+    let settings = DrawingSheetProjectSettings::default();
+    let mut wire = serde_json::to_value(&settings).unwrap();
+    wire["title_block_field_values"]
+        .as_object_mut()
+        .unwrap()
+        .remove("language");
+    let restored: DrawingSheetProjectSettings = serde_json::from_value(wire).unwrap();
+    assert_eq!(restored.title_block_field_values[&field], "");
+    restored.validate().unwrap();
+
+    // Shown, the form letters it in its own cell beside the sheet number.
+    let shown = format
+        .try_update(|draft| draft.title_block.fields.get_mut(&field).unwrap().visible = true)
+        .unwrap();
+    let layout = drawing_sheet_title_layout(&shown, &shown.geometry().unwrap()).unwrap();
+    assert_eq!(
+        layout.cell(field).unwrap().letter_caption(),
+        "Lang.",
+        "ISO 7200's figures abbreviate it"
+    );
+    assert!(!layout.value(field).unwrap().elides("en"));
+}
+
+#[test]
+fn the_document_status_reads_in_iso_7200s_words() {
+    assert_eq!(
+        DrawingSheetReleaseStatus::ALL.map(DrawingSheetReleaseStatus::label),
+        ["In preparation", "Under approval", "Released", "Withdrawn"]
+    );
+    // Stored under the names it was saved with.
+    assert_eq!(
+        serde_json::to_value(DrawingSheetReleaseStatus::ALL).unwrap(),
+        serde_json::json!(["draft", "in-review", "released", "obsolete"])
+    );
+    for status in DrawingSheetReleaseStatus::ALL {
+        assert!(status.label().chars().count() <= 20, "ISO 7200 gives it 20");
+    }
+}
+
+#[test]
+fn a_revision_index_iso_7200_advises_against_is_flagged_not_refused() {
+    for advised in ["A", "B", "12", "AB", ""] {
+        assert_eq!(drawing_sheet_revision_advisory(advised), None, "{advised}");
+    }
+    for letter in ["I", "O", "AO", "i"] {
+        assert_eq!(
+            drawing_sheet_revision_advisory(letter),
+            Some("ISO 7200 advises against I and O in a revision index: they read as 1 and 0."),
+            "{letter}"
+        );
+    }
+    assert_eq!(
+        drawing_sheet_revision_advisory("ABC"),
+        Some("ISO 7200 gives a revision index two characters.")
+    );
+    // Advice, not a refusal: a document issued under such an index keeps it.
+    let control = DrawingSheetDocumentControl {
+        revision: "O".to_owned(),
+        revision_date_utc: "2026-10-18".to_owned(),
+        status: DrawingSheetReleaseStatus::Released,
+        change_reference: String::new(),
+    };
+    control.validate().unwrap();
+    assert!(control.revision_advisory().is_some());
+    // The placeholder older builds stored reads as no index, and no advice.
+    let draft = DrawingSheetDocumentControl {
+        revision: "DRAFT".to_owned(),
+        ..DrawingSheetDocumentControl::default()
+    };
+    assert_eq!(draft.revision_advisory(), None);
 }
 
 #[test]
@@ -452,6 +663,7 @@ fn an_organization_template_sealed_while_paper_size_was_withdrawn_still_loads() 
         DrawingSheetTitleFieldId::DocumentType,
         DrawingSheetTitleFieldId::PaperSize,
         DrawingSheetTitleFieldId::DocumentStatus,
+        DrawingSheetTitleFieldId::Language,
     ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()

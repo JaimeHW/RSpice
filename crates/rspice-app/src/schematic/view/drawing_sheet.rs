@@ -115,7 +115,8 @@ fn default_title_field_value(
             .to_owned(),
         DrawingSheetTitleFieldId::Organization
         | DrawingSheetTitleFieldId::DocumentId
-        | DrawingSheetTitleFieldId::Classification => state
+        | DrawingSheetTitleFieldId::Classification
+        | DrawingSheetTitleFieldId::Language => state
             .workspace
             .content
             .design_management

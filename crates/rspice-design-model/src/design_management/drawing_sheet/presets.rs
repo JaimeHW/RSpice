@@ -607,14 +607,34 @@ pub enum DrawingSheetReleaseStatus {
 impl DrawingSheetReleaseStatus {
     pub const ALL: [Self; 4] = [Self::Draft, Self::InReview, Self::Released, Self::Obsolete];
 
+    /// The status in ISO 7200's words, wherever RSpice letters or offers it.
+    /// The stored names are the ones the states were saved under before.
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Draft => "Draft",
-            Self::InReview => "In review",
+            Self::Draft => "In preparation",
+            Self::InReview => "Under approval",
             Self::Released => "Released",
-            Self::Obsolete => "Obsolete",
+            Self::Obsolete => "Withdrawn",
         }
+    }
+}
+
+/// What ISO 7200 advises against in a revision index, if `revision` does
+/// it: the letters I and O, which read as the digits 1 and 0, or more than
+/// the two characters it gives the index. An advisory, not a refusal: a
+/// document already issued under such an index keeps it.
+#[must_use]
+pub fn drawing_sheet_revision_advisory(revision: &str) -> Option<&'static str> {
+    if revision
+        .chars()
+        .any(|letter| matches!(letter, 'I' | 'O' | 'i' | 'o'))
+    {
+        Some("ISO 7200 advises against I and O in a revision index: they read as 1 and 0.")
+    } else if revision.chars().count() > 2 {
+        Some("ISO 7200 gives a revision index two characters.")
+    } else {
+        None
     }
 }
 
@@ -682,12 +702,12 @@ impl DrawingSheetDocumentControl {
         ) {
             if self.revision_index().is_empty() {
                 return Err(DesignManagementError::DocumentControl(
-                    "A released or obsolete document needs a revision.",
+                    "A released or withdrawn document needs a revision.",
                 ));
             }
             if self.revision_date_utc.is_empty() {
                 return Err(DesignManagementError::DocumentControl(
-                    "A released or obsolete document needs a date.",
+                    "A released or withdrawn document needs a date.",
                 ));
             }
         }
@@ -705,6 +725,13 @@ impl DrawingSheetDocumentControl {
         } else {
             &self.revision
         }
+    }
+
+    /// What ISO 7200 advises against in the revision index, if anything
+    /// (see [`drawing_sheet_revision_advisory`]).
+    #[must_use]
+    pub fn revision_advisory(&self) -> Option<&'static str> {
+        drawing_sheet_revision_advisory(self.revision_index())
     }
 }
 
@@ -851,7 +878,7 @@ impl<'de> Deserialize<'de> for DrawingSheetProjectSettings {
             .map(DrawingSheetPreset::normalized_for_storage)
             .collect::<Result<Vec<_>, _>>()
             .map_err(D::Error::custom)?;
-        let title_block_field_values = wire.title_block_field_values.0.unwrap_or_else(|| {
+        let mut title_block_field_values = wire.title_block_field_values.0.unwrap_or_else(|| {
             let mut migrated = default_project_title_block_field_values();
             for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
                 if let Some(field) = default_format.title_block.fields.get(&id) {
@@ -860,6 +887,11 @@ impl<'de> Deserialize<'de> for DrawingSheetProjectSettings {
             }
             migrated
         });
+        // A project saved before it kept a field, such as the language
+        // code, holds no value for it yet.
+        for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
+            title_block_field_values.entry(id).or_default();
+        }
         clear_project_owned_title_values(&mut default_format);
         let mut last_explicit_format = wire.last_explicit_format;
         if let Some(format) = &mut last_explicit_format {
