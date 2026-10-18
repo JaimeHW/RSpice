@@ -731,6 +731,11 @@ fn result_navigator_preserves_desktop_density_and_expands_touch_controls() {
         responsive_result_control_height(SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT),
         TOUCH_TARGET_HEIGHT
     );
+    // A 48 px target chosen in Accessibility is the height, not the floor.
+    assert_eq!(
+        responsive_result_control_height(SIGNAL_ROW_HEIGHT, 48.0),
+        48.0
+    );
 }
 
 fn result_navigator_app() -> RSpiceApp {

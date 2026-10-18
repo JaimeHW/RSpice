@@ -10,7 +10,7 @@ use egui::{Color32, Context, Id, Order, Rect, Response, Sense, Stroke, Ui, Vec2}
 
 use crate::requests::EditorRequestSource;
 use rspice_ui_kit::panels::WorkbenchIcon;
-use rspice_ui_kit::tokens::{TOUCH_TARGET, Tokens};
+use rspice_ui_kit::tokens::Tokens;
 
 const STRIP_RIGHT_INSET: f32 = 8.0;
 const STRIP_PADDING: f32 = 4.0;
@@ -20,9 +20,7 @@ const STRIP_GAP: f32 = 4.0;
 /// Between two groups: a 1 pt rule with this much space either side.
 const STRIP_RULE: f32 = 1.0;
 const STRIP_RULE_SPACE: f32 = 4.0;
-const STRIP_BUTTON: f32 = TOUCH_TARGET;
 const STRIP_ICON: f32 = 20.0;
-const STRIP_WIDTH: f32 = STRIP_BUTTON + (STRIP_PADDING + STRIP_BORDER) * 2.0;
 /// A canvas at least this tall carries the tablet strip; a shorter one, a
 /// phone held in landscape, carries the five-button phone strip.
 pub const TABLET_STRIP_MIN_CANVAS_HEIGHT: f32 = 420.0;
@@ -118,11 +116,12 @@ impl StripLayout {
         }
     }
 
-    fn height(self) -> f32 {
+    /// The strip's height with buttons `button` on a side.
+    fn height(self, button: f32) -> f32 {
         let groups = self.groups(false);
         let buttons: f32 = groups
             .iter()
-            .map(|group| group.len() as f32 * STRIP_BUTTON + (group.len() - 1) as f32 * STRIP_GAP)
+            .map(|group| group.len() as f32 * button + (group.len() - 1) as f32 * STRIP_GAP)
             .sum();
         let rules = (groups.len() - 1) as f32 * (STRIP_RULE + 2.0 * STRIP_RULE_SPACE);
         buttons + rules + (STRIP_PADDING + STRIP_BORDER) * 2.0
@@ -200,10 +199,20 @@ pub struct MobileCanvasRequest {
     pub action: MobileCanvasAction,
 }
 
+/// The side of a strip button: the theme's touch target, which
+/// Accessibility can raise past the 44 pt floor.
+fn strip_button_side(ctx: &Context) -> f32 {
+    Tokens::get(ctx).metrics.touch_target()
+}
+
 /// The strip's rectangle in a canvas: against the right edge, inset 8 pt,
-/// vertically centred, and kept inside the canvas.
-pub fn strip_rect(content_rect: Rect) -> Rect {
-    let size = Vec2::new(STRIP_WIDTH, StripLayout::for_canvas(content_rect).height());
+/// vertically centred, and kept inside the canvas. `button` is the side of
+/// one strip button.
+pub fn strip_rect(content_rect: Rect, button: f32) -> Rect {
+    let size = Vec2::new(
+        button + (STRIP_PADDING + STRIP_BORDER) * 2.0,
+        StripLayout::for_canvas(content_rect).height(button),
+    );
     let top = (content_rect.center().y - size.y * 0.5).max(content_rect.top());
     Rect::from_min_size(
         egui::pos2(content_rect.right() - STRIP_RIGHT_INSET - size.x, top),
@@ -222,7 +231,8 @@ pub fn show(
 ) -> Option<MobileCanvasRequest> {
     let layout = StripLayout::for_canvas(content_rect);
     let groups = layout.groups(capabilities.cancel);
-    let rect = strip_rect(content_rect);
+    let button = strip_button_side(ctx);
+    let rect = strip_rect(content_rect, button);
     let t = Tokens::get(ctx);
     let mut latches = touch_latches(ctx);
     let mut pending_request = None;
@@ -242,14 +252,12 @@ pub fn show(
                 .shadow(t.shadow())
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
-                    ui.set_width(STRIP_BUTTON);
+                    ui.set_width(button);
                     for (index, group) in groups.iter().enumerate() {
                         if index > 0 {
                             ui.add_space(STRIP_RULE_SPACE);
-                            let (rule, _) = ui.allocate_exact_size(
-                                Vec2::new(STRIP_BUTTON, STRIP_RULE),
-                                Sense::hover(),
-                            );
+                            let (rule, _) = ui
+                                .allocate_exact_size(Vec2::new(button, STRIP_RULE), Sense::hover());
                             ui.painter().rect_filled(rule, 0.0, t.color.border);
                             ui.add_space(STRIP_RULE_SPACE);
                         }
@@ -308,7 +316,8 @@ const STRIP_LABEL: &str = "Touch editing controls";
 
 fn strip_button(ui: &mut Ui, action: MobileCanvasAction, latched: bool) -> Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(STRIP_BUTTON), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::splat(strip_button_side(ui.ctx())), Sense::click());
     let label = action.label();
     response.widget_info(|| {
         if action.latch() {

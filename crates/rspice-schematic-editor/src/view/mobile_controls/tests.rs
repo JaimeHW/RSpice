@@ -165,6 +165,27 @@ fn the_tablet_strip_is_eight_thumb_buttons_in_four_groups() {
     assert_eq!(buttons[0].1.y0 - strip.bounds.y0, 5.0, "padding and border");
 }
 
+/// A 48 pt touch target chosen in Accessibility makes every strip button
+/// 48 pt, and the strip grows around them by the same spacing.
+#[test]
+fn a_raised_touch_target_sizes_the_strip_buttons() {
+    let ctx = context();
+    rspice_ui_kit::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(48.0));
+    let strip = frame(
+        &ctx,
+        Vec2::new(1024.0, 768.0),
+        EVERYTHING,
+        vec![],
+        &mut None,
+    );
+    assert_eq!(strip.bounds.x1 - strip.bounds.x0, 58.0);
+    assert_eq!(strip.bounds.y1 - strip.bounds.y0, 437.0);
+    for (label, bounds, _) in &strip.buttons {
+        assert_eq!(bounds.x1 - bounds.x0, 48.0, "{label}");
+        assert_eq!(bounds.y1 - bounds.y0, 48.0, "{label}");
+    }
+}
+
 /// A phone in landscape: five buttons, 246 pt, one group. Mirror and Redo
 /// go to the long-press menu, and the box latch gives way to Cancel while
 /// an operation is live.

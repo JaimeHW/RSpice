@@ -63,7 +63,7 @@ const RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT: usize = 8_000_000;
 /// exactly the band, so they sit hard against the toolbar rule above them.
 const RESULT_BROWSER_BAND_PAD_Y: f32 = 3.0;
 const RESULT_MANIFEST_ROW_HEIGHT: f32 = 26.0;
-const TOUCH_TARGET_HEIGHT: f32 = 44.0;
+const TOUCH_TARGET_HEIGHT: f32 = crate::ui::tokens::TOUCH_TARGET;
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
 /// The right inset a filter field keeps while it holds a query, so its text
 /// column ends before the control that empties it.
@@ -125,9 +125,11 @@ fn result_browser_facets_stack(available_width: f32) -> bool {
     available_width < RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
 }
 
+/// A result control's height: its own desktop height, or in a touch
+/// composition the theme's touch target, which Accessibility may raise.
 fn responsive_result_control_height(desktop_height: f32, control_height: f32) -> f32 {
     if control_height >= TOUCH_TARGET_HEIGHT {
-        control_height.max(TOUCH_TARGET_HEIGHT)
+        control_height
     } else {
         desktop_height
     }

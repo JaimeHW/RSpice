@@ -404,7 +404,7 @@ fn panel_contents(
 
     // The foot, with the browser's alert switch over it where there is one.
     let alerts_shown = alerts != BackgroundAlerts::Unavailable;
-    let below = band_height(FOOT_HEIGHT, large) * if alerts_shown { 2.0 } else { 1.0 };
+    let below = band_height(ui, FOOT_HEIGHT, large) * if alerts_shown { 2.0 } else { 1.0 };
     let used = ui.cursor().top() - top + below;
     let visible: Vec<&NotificationRecord> = records
         .iter()
@@ -433,9 +433,9 @@ fn panel_contents(
 
 /// A band's height: its authored height on a pointer, room for a touch target
 /// plus the band's own breathing space under a finger.
-fn band_height(authored: f32, large: bool) -> f32 {
+fn band_height(ui: &Ui, authored: f32, large: bool) -> f32 {
     if large {
-        tokens::TOUCH_TARGET + 8.0
+        Tokens::get(ui.ctx()).metrics.touch_target() + 8.0
     } else {
         authored
     }
@@ -444,7 +444,7 @@ fn band_height(authored: f32, large: bool) -> f32 {
 fn head(ui: &mut Ui, unread: usize, large: bool, intents: &mut Vec<Intent>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), band_height(HEAD_HEIGHT, large)),
+        vec2(ui.available_width(), band_height(ui, HEAD_HEIGHT, large)),
         Sense::hover(),
     );
     let inner_radius = PANEL_RADIUS - 1;
@@ -502,7 +502,7 @@ fn quiet_action(
         Color32::PLACEHOLDER,
     );
     let height = if large {
-        tokens::TOUCH_TARGET
+        t.metrics.touch_target()
     } else {
         QUIET_ACTION_HEIGHT
     };
@@ -563,7 +563,7 @@ fn filters(ui: &mut Ui, view: &mut PanelView, records: &[NotificationRecord], la
     // the same at every size and only what answers a finger grows, into the
     // padding the band already has.
     let hit_height = if large {
-        tokens::TOUCH_TARGET
+        t.metrics.touch_target()
     } else {
         SEGMENT_HEIGHT
     };
@@ -1038,7 +1038,7 @@ fn notice_row(
     let message =
         (!record.message().is_empty()).then(|| message_galley(ui, record.message(), body_width));
     let offer_height = if large {
-        tokens::TOUCH_TARGET
+        t.metrics.touch_target()
     } else {
         notice::OFFER_HEIGHT
     };
@@ -1187,7 +1187,7 @@ fn notice_row(
     }
     if dismiss_shown {
         let side = if large {
-            tokens::TOUCH_TARGET
+            t.metrics.touch_target()
         } else {
             notice::DISMISS_SIDE
         };
@@ -1330,7 +1330,7 @@ fn background_alerts_band(
 ) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), band_height(FOOT_HEIGHT, large)),
+        vec2(ui.available_width(), band_height(ui, FOOT_HEIGHT, large)),
         Sense::hover(),
     );
     ui.painter().hline(
@@ -1408,7 +1408,7 @@ fn background_alerts_band(
 fn foot(ui: &mut Ui, held: usize, has_read: bool, large: bool, intents: &mut Vec<Intent>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), band_height(FOOT_HEIGHT, large)),
+        vec2(ui.available_width(), band_height(ui, FOOT_HEIGHT, large)),
         Sense::hover(),
     );
     let inner_radius = PANEL_RADIUS - 1;

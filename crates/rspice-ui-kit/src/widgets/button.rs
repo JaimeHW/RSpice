@@ -191,7 +191,7 @@ impl<'a> Button<'a> {
                 unconstrained_width.min(max_width)
             })
             .max(if t.metrics.is_touch() {
-                tokens::TOUCH_TARGET
+                t.metrics.touch_target()
             } else {
                 0.0
             });
@@ -396,10 +396,8 @@ impl<'a> IconButton<'a> {
         let t = Tokens::get(ui.ctx());
         let c = &t.color;
         let size = if t.metrics.is_touch() {
-            vec2(
-                self.size.x.max(tokens::TOUCH_TARGET),
-                self.size.y.max(tokens::TOUCH_TARGET),
-            )
+            let side = t.metrics.touch_target();
+            vec2(self.size.x.max(side), self.size.y.max(side))
         } else {
             self.size
         };

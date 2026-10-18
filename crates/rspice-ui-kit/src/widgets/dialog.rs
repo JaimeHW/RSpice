@@ -441,7 +441,6 @@ const WORKFLOW_FOOTER_VERTICAL_MARGIN: i8 = 10;
 const TOUCH_FOOTER_VERTICAL_MARGIN: i8 = 8;
 const DIALOG_CLOSE_TARGET_WIDTH: f32 = 28.0;
 const DIALOG_CLOSE_TARGET_HEIGHT: f32 = 27.0;
-const TOUCH_TARGET_SIDE: f32 = 44.0;
 /// The surface's own border, drawn inside the resolved surface rect. The
 /// header, body, and footer share the rect less this measure on every side.
 const SURFACE_BORDER_WIDTH: f32 = 1.0;
@@ -1163,12 +1162,15 @@ impl<'a> Dialog<'a> {
         // the resolved height while body content scrolls beneath the fixed
         // footer, including when the requested height is clamped to the screen.
         let fill_surface_height = layout.fills_surface_height(self.fixed_height);
-        let large_targets = (layout.narrow && self.size != DialogSize::ComponentEditor)
+        // The side of a finger-sized control, when this dialog is laid out for
+        // one: the theme's own touch target, so a raised Accessibility target
+        // reaches the close button and the footer actions too.
+        let large_targets = ((layout.narrow && self.size != DialogSize::ComponentEditor)
             || (self.size == DialogSize::AnalysisCatalog && screen.width() <= 820.0)
-            || ctx.input(|input| input.has_touch_screen());
+            || ctx.input(|input| input.has_touch_screen()))
+        .then(|| t.metrics.touch_target());
         let hide_close_only_footer = self.size == DialogSize::CapabilityReview;
-        let _control_height_override =
-            ControlHeightOverride::new(ctx, large_targets.then_some(TOUCH_TARGET_SIDE));
+        let _control_height_override = ControlHeightOverride::new(ctx, large_targets);
         let focus_id = id.with("move");
         let focus_state_id = id.with("focus-state");
 
@@ -1553,7 +1555,7 @@ impl<'a> Dialog<'a> {
     }
 
     /// Header strip; returns `true` when the close control fired.
-    fn header(&self, ui: &mut Ui, t: &Tokens, large_targets: bool) -> DialogHeaderOutput {
+    fn header(&self, ui: &mut Ui, t: &Tokens, large_targets: Option<f32>) -> DialogHeaderOutput {
         let c = t.color;
         let mut closed = false;
         let mut close_id = None;
@@ -1590,8 +1592,8 @@ impl<'a> Dialog<'a> {
                         // pass will draw.
                         ui.set_min_height(HEADER_MIN_HEIGHT);
                         ui.spacing_mut().item_spacing.x = 10.0;
-                        let close_size = if large_targets {
-                            vec2(TOUCH_TARGET_SIDE, TOUCH_TARGET_SIDE)
+                        let close_size = if let Some(side) = large_targets {
+                            vec2(side, side)
                         } else {
                             vec2(DIALOG_CLOSE_TARGET_WIDTH, DIALOG_CLOSE_TARGET_HEIGHT)
                         };
@@ -1650,7 +1652,7 @@ impl<'a> Dialog<'a> {
     fn footer_height(
         &self,
         hide_close_only_footer: bool,
-        large_targets: bool,
+        large_targets: Option<f32>,
         surface_width: f32,
     ) -> f32 {
         if self.note_only_footer {
@@ -1663,20 +1665,14 @@ impl<'a> Dialog<'a> {
             return 48.0;
         }
         if !self.footer_stacks(surface_width) {
-            return if large_targets {
-                TOUCH_TARGET_SIDE + 2.0 * f32::from(TOUCH_FOOTER_VERTICAL_MARGIN)
-            } else {
-                48.0
-            };
+            return large_targets.map_or(48.0, |side| {
+                side + 2.0 * f32::from(TOUCH_FOOTER_VERTICAL_MARGIN)
+            });
         }
 
         let action_count =
             1 + usize::from(self.secondary.is_some()) + usize::from(self.ghost.is_some());
-        let action_height = if large_targets {
-            TOUCH_TARGET_SIDE
-        } else {
-            29.0
-        };
+        let action_height = large_targets.unwrap_or(29.0);
         let hint_height = if self.hint.is_some() { 19.0 } else { 0.0 };
         let row_count = action_count + usize::from(self.hint.is_some());
         20.0 + action_count as f32 * action_height
@@ -1792,7 +1788,7 @@ impl<'a> Dialog<'a> {
         ui: &mut Ui,
         t: &Tokens,
         hide_close_only_footer: bool,
-        large_targets: bool,
+        large_targets: Option<f32>,
         surface_width: f32,
     ) -> DialogFooterOutput {
         if self.note_only_footer {
@@ -1858,7 +1854,7 @@ impl<'a> Dialog<'a> {
         } else {
             WORKFLOW_FOOTER_HORIZONTAL_MARGIN
         };
-        let vertical_margin = if large_targets {
+        let vertical_margin = if large_targets.is_some() {
             TOUCH_FOOTER_VERTICAL_MARGIN
         } else {
             WORKFLOW_FOOTER_VERTICAL_MARGIN
@@ -1897,11 +1893,7 @@ impl<'a> Dialog<'a> {
                         });
                     }
                     let action_width = ui.available_width();
-                    let action_height = if large_targets {
-                        TOUCH_TARGET_SIDE
-                    } else {
-                        29.0
-                    };
+                    let action_height = large_targets.unwrap_or(29.0);
                     let primary = crate::widgets::Button::new(&self.primary)
                         .accent()
                         .destructive(self.destructive)

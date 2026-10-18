@@ -40,10 +40,10 @@ const NARROW_GUTTER: f32 = 6.0;
 
 const SEARCH_HEIGHT: f32 = 48.0;
 const SCOPE_HEIGHT: f32 = 37.0;
-// 44 px coarse-pointer chip + 7 px block padding on both sides + 1 px rule.
-const SCOPE_TOUCH_HEIGHT: f32 = 59.0;
+/// Around a coarse-pointer chip, which is the theme's touch target: 7 px of
+/// block padding on both sides and the 1 px rule.
+const SCOPE_TOUCH_PADDING: f32 = 15.0;
 const SCOPE_CHIP_HEIGHT: f32 = 22.0;
-const TOUCH_TARGET: f32 = 44.0;
 const FOOTER_HEIGHT: f32 = 31.0;
 const RESULT_ROW_HEIGHT: f32 = 40.0;
 const RESULT_ICON_COLUMN: f32 = 28.0;
@@ -61,7 +61,8 @@ struct PaletteLayout {
 }
 
 impl PaletteLayout {
-    fn resolve(viewport: Rect, has_touch_screen: bool) -> Self {
+    /// `touch_target` is the theme's side for a finger-sized control.
+    fn resolve(viewport: Rect, has_touch_screen: bool, touch_target: f32) -> Self {
         let narrow = viewport.width() <= NARROW_MAX_WIDTH;
         let coarse = narrow || has_touch_screen;
         let surface = if narrow {
@@ -88,7 +89,7 @@ impl PaletteLayout {
             narrow,
             coarse,
             scope_height: if coarse {
-                SCOPE_TOUCH_HEIGHT
+                touch_target + SCOPE_TOUCH_PADDING
             } else {
                 SCOPE_HEIGHT
             },
@@ -843,9 +844,13 @@ impl RSpiceApp {
         let _opening_input = crate::ui::input::InputScope::enter(ctx, palette_id());
 
         let viewport = ctx.content_rect();
-        let layout = PaletteLayout::resolve(viewport, ctx.input(|input| input.has_touch_screen()));
-        let regions = layout.regions();
         let t = Tokens::get(ctx);
+        let layout = PaletteLayout::resolve(
+            viewport,
+            ctx.input(|input| input.has_touch_screen()),
+            t.metrics.touch_target(),
+        );
+        let regions = layout.regions();
         let c = t.color;
         let area_id = palette_id();
         let focus_state_id = area_id.with("focus-state");
@@ -1161,7 +1166,7 @@ fn render_scope_row(
         });
 
     let chip_height = if coarse {
-        TOUCH_TARGET
+        t.metrics.touch_target()
     } else {
         SCOPE_CHIP_HEIGHT
     };

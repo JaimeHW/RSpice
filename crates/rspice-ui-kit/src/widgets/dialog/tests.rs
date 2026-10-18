@@ -425,7 +425,7 @@ fn catalog_body_and_note_footer_are_explicit_opt_ins() {
         .hint("Catalog classification note");
     assert!(dialog.manual_body_scroll);
     assert!(dialog.note_only_footer);
-    assert_eq!(dialog.footer_height(false, false, 760.0), 48.0);
+    assert_eq!(dialog.footer_height(false, None, 760.0), 48.0);
 }
 
 #[test]
@@ -521,9 +521,9 @@ fn long_footer_actions_stack_inside_a_phone_surface() {
         .hint("3 validated records");
 
     assert!(dialog.footer_stacks(390.0));
-    assert!(dialog.footer_height(false, true, 390.0) > 48.0);
+    assert!(dialog.footer_height(false, Some(crate::tokens::TOUCH_TARGET), 390.0) > 48.0);
     assert!(!dialog.footer_stacks(1_440.0));
-    assert_eq!(dialog.footer_height(false, false, 1_440.0), 48.0);
+    assert_eq!(dialog.footer_height(false, None, 1_440.0), 48.0);
 }
 
 #[test]
@@ -589,14 +589,20 @@ fn transaction_state_is_absent_when_idle_and_exposes_an_assertive_strip_on_error
 fn close_only_workflow_hides_redundant_footer() {
     let dialog = Dialog::new(TEST_TITLE, "Close").size(DialogSize::CapabilityReview);
 
-    assert_eq!(dialog.footer_height(true, false, 1_040.0), 0.0);
+    assert_eq!(dialog.footer_height(true, None, 1_040.0), 0.0);
     assert!(dialog.hides_close_only_footer(true));
 }
 
-#[test]
-fn capability_review_phone_footer_stays_horizontal_and_compact() {
+/// A phone capability review's footer actions and close control, painted with
+/// the theme's touch target, or the plain theme when there is none.
+fn phone_capability_review_targets(
+    touch_target: Option<f32>,
+) -> ([egui::accesskit::Rect; 3], egui::accesskit::Rect) {
     let ctx = Context::default();
     crate::Theme::default().apply(&ctx);
+    if touch_target.is_some() {
+        crate::Theme::default().apply_responsive_metrics_with_target(&ctx, touch_target);
+    }
     ctx.enable_accesskit();
     let input = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0))),
@@ -627,15 +633,6 @@ fn capability_review_phone_footer_stays_horizontal_and_compact() {
             .and_then(|(_, node)| node.bounds())
             .unwrap_or_else(|| panic!("missing bounds for {label}"))
     });
-    for bounds in &bounds {
-        assert_eq!(bounds.y1 - bounds.y0, TOUCH_TARGET_SIDE as f64);
-    }
-    assert_eq!(bounds[0].y0, bounds[1].y0);
-    assert_eq!(bounds[1].y0, bounds[2].y0);
-    assert!(bounds[0].x0 < bounds[1].x0);
-    assert!(bounds[1].x0 < bounds[2].x0);
-    assert!(bounds[2].x1 >= 377.0, "actions must be trailing-grouped");
-
     let close_bounds = nodes
         .iter()
         .find(|(_, node)| {
@@ -643,8 +640,36 @@ fn capability_review_phone_footer_stays_horizontal_and_compact() {
         })
         .and_then(|(_, node)| node.bounds())
         .expect("missing workflow close control bounds");
-    assert_eq!(close_bounds.x1 - close_bounds.x0, TOUCH_TARGET_SIDE as f64);
-    assert_eq!(close_bounds.y1 - close_bounds.y0, TOUCH_TARGET_SIDE as f64);
+    (bounds, close_bounds)
+}
+
+#[test]
+fn capability_review_phone_footer_stays_horizontal_and_compact() {
+    let (bounds, close_bounds) = phone_capability_review_targets(None);
+    let side = f64::from(crate::tokens::TOUCH_TARGET);
+    for bounds in &bounds {
+        assert_eq!(bounds.y1 - bounds.y0, side);
+    }
+    assert_eq!(bounds[0].y0, bounds[1].y0);
+    assert_eq!(bounds[1].y0, bounds[2].y0);
+    assert!(bounds[0].x0 < bounds[1].x0);
+    assert!(bounds[1].x0 < bounds[2].x0);
+    assert!(bounds[2].x1 >= 377.0, "actions must be trailing-grouped");
+
+    assert_eq!(close_bounds.x1 - close_bounds.x0, side);
+    assert_eq!(close_bounds.y1 - close_bounds.y0, side);
+}
+
+/// A larger touch target chosen in Accessibility reaches the dialog's own
+/// close control and footer actions, not only the controls in its body.
+#[test]
+fn a_raised_touch_target_sizes_the_close_control_and_footer_actions() {
+    let (bounds, close_bounds) = phone_capability_review_targets(Some(48.0));
+    for bounds in &bounds {
+        assert_eq!(bounds.y1 - bounds.y0, 48.0);
+    }
+    assert_eq!(close_bounds.x1 - close_bounds.x0, 48.0);
+    assert_eq!(close_bounds.y1 - close_bounds.y0, 48.0);
 }
 
 #[test]
@@ -1554,7 +1579,7 @@ fn settled_flush_body_geometry(size: DialogSize, rows: usize) -> (Rect, Rect, f3
     (
         viewport,
         content,
-        dialog().footer_height(false, false, content.width()),
+        dialog().footer_height(false, None, content.width()),
     )
 }
 

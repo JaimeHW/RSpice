@@ -186,6 +186,14 @@ impl Metrics {
         self.ctl_h >= TOUCH_TARGET
     }
 
+    /// The side a control takes when it is sized for a finger: the theme's
+    /// own target in a touch composition, which Accessibility can raise past
+    /// [`TOUCH_TARGET`], and never less than that floor elsewhere.
+    #[must_use]
+    pub fn touch_target(&self) -> f32 {
+        self.ctl_h.max(TOUCH_TARGET)
+    }
+
     fn for_selection(_direction: Direction, density: Density) -> Self {
         match density {
             Density::Compact => Metrics {

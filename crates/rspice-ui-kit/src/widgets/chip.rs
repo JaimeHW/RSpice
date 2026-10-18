@@ -20,9 +20,10 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
         )
     });
     let touch = t.metrics.is_touch();
+    let side = t.metrics.touch_target();
     let size = vec2(
-        (galley.size().x + 18.0).max(if touch { tokens::TOUCH_TARGET } else { 0.0 }),
-        if touch { tokens::TOUCH_TARGET } else { 22.0 },
+        (galley.size().x + 18.0).max(if touch { side } else { 0.0 }),
+        if touch { side } else { 22.0 },
     );
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| {

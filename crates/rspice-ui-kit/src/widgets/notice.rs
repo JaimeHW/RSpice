@@ -106,7 +106,7 @@ pub fn offer_link(ui: &mut Ui, label: &str, subject: &str, large_target: bool) -
         .painter()
         .layout_no_wrap(label.to_owned(), font, t.color.accent);
     let height = if large_target {
-        tokens::TOUCH_TARGET
+        t.metrics.touch_target()
     } else {
         OFFER_HEIGHT
     };

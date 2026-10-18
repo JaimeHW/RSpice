@@ -108,8 +108,9 @@ pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
     let popup_id = ui.id().with("more-tools");
     let open = Popup::is_id_open(ui.ctx(), popup_id);
     let response = icon_button(ui, WorkbenchIcon::More, "More tools", open, size);
-    let row_height = if Tokens::get(ui.ctx()).metrics.is_touch() {
-        tokens::TOUCH_TARGET
+    let metrics = Tokens::get(ui.ctx()).metrics;
+    let row_height = if metrics.is_touch() {
+        metrics.touch_target()
     } else {
         28.0
     };

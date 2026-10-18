@@ -853,7 +853,7 @@ fn launcher_header(
                     close = Some(
                         IconButton::new(Icon::Close)
                             .side(if large_targets {
-                                LAUNCHER_TOUCH_TARGET
+                                Tokens::get(ui.ctx()).metrics.touch_target()
                             } else {
                                 28.0
                             })

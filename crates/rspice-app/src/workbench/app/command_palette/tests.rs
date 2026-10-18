@@ -25,6 +25,7 @@ fn desktop_and_phone_layouts_match_the_mockup_contract() {
     let desktop = PaletteLayout::resolve(
         Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0)),
         false,
+        44.0,
     );
     assert_eq!(desktop.surface.width(), 650.0);
     assert_eq!(desktop.surface.height(), 560.0);
@@ -40,6 +41,7 @@ fn desktop_and_phone_layouts_match_the_mockup_contract() {
     let phone = PaletteLayout::resolve(
         Rect::from_min_size(pos2(0.0, 0.0), vec2(390.0, 844.0)),
         true,
+        44.0,
     );
     assert!(phone.narrow);
     assert_eq!(
@@ -51,9 +53,18 @@ fn desktop_and_phone_layouts_match_the_mockup_contract() {
     let touch_desktop = PaletteLayout::resolve(
         Rect::from_min_size(pos2(0.0, 0.0), vec2(1024.0, 768.0)),
         true,
+        44.0,
     );
     assert!(!touch_desktop.narrow);
     assert_eq!(touch_desktop.scope_height, 59.0);
+
+    // A 48 px target chosen in Accessibility grows the scope band with it.
+    let larger = PaletteLayout::resolve(
+        Rect::from_min_size(pos2(0.0, 0.0), vec2(1024.0, 768.0)),
+        true,
+        48.0,
+    );
+    assert_eq!(larger.scope_height, 63.0);
 }
 
 #[test]
@@ -842,6 +853,7 @@ fn accesskit_exposes_modal_combobox_scopes_listbox_and_options() {
     let expected_scope = PaletteLayout::resolve(
         Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0)),
         false,
+        44.0,
     )
     .regions()
     .scope;
