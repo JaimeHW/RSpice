@@ -33,6 +33,8 @@ pub struct StackOptions {
     pub readout: ReadoutPolicy,
     pub quantity: QuantityPresentationPolicy,
     pub display_decimation: DisplayDecimation,
+    /// Stroke of the active run's traces, in points.
+    pub trace_width: f32,
 }
 
 /// Source qualification, expression evaluation and persistent transactions stay
@@ -740,6 +742,7 @@ fn show_unit_pane(
         quantity: quantity_policy,
         display_decimation: options.display_decimation,
         minor_grid: host.session().show_minor_grid,
+        trace_width: options.trace_width,
         horizontal_cursor: host
             .session()
             .horizontal_cursor

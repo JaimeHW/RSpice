@@ -23,6 +23,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
             projection: ProjectionOptions {
                 phase_continuous: session.presented_phase_continuous(),
                 complex_display,
+                ac: session.ac_display,
                 selection: session.sample_selection.as_ref(),
                 hidden_family_traces: &session.hidden_family_traces,
             },
@@ -38,6 +39,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 t,
                 projection.phase_continuous,
                 projection.complex_display,
+                projection.ac,
                 projection.selection,
                 projection.hidden_family_traces,
             );

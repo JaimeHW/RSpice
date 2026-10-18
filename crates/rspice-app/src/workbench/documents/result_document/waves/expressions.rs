@@ -366,12 +366,14 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let hidden_family_traces = state.ui.results.session.hidden_family_traces.clone();
     let waveform_visibility = state.ui.results.session.waveform_visibility.clone();
     let phase_continuous = state.ui.results.session.presented_phase_continuous();
+    let ac = state.ui.results.session.ac_display;
     let mut models = build_models(
         &state.simulation,
         &mut state.ui.results.session.derived,
         &Tokens::default(),
         phase_continuous,
         presentation.complex_number_display(),
+        ac,
         sample_selection.as_ref(),
         &hidden_family_traces,
     );

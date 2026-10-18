@@ -234,6 +234,13 @@ pub fn plot_markers<'a>(
     projected
 }
 
+/// The stroke a run trace is drawn with unless the reader chose another.
+pub const DEFAULT_TRACE_WIDTH: f32 = 1.8;
+
+/// Overlays and expressions keep the shipped 1.4 : 1.8 proportion to the
+/// active run's traces whatever width those are drawn at.
+const SECONDARY_TRACE_RATIO: f32 = 1.4 / 1.8;
+
 /// Display inputs resolved by the host for one unit-scoped pane.
 pub struct PanePlot<'a> {
     pub x_range: (f64, f64),
@@ -245,6 +252,9 @@ pub struct PanePlot<'a> {
     pub quantity: QuantityPresentationPolicy,
     pub display_decimation: DisplayDecimation,
     pub minor_grid: bool,
+    /// Stroke of the active run's traces, in points. Overlays and
+    /// expressions are drawn proportionally thinner.
+    pub trace_width: f32,
     pub horizontal_cursor: Option<f64>,
     pub horizontal_cursor_interactive: bool,
     pub cursors: Option<CursorPair>,
@@ -396,19 +406,20 @@ pub fn show_plot<'a>(
         // branch fell outside one contiguous index window.
         let mut plot_trace = apply_family_trace_style(
             Trace::new(&trace.x, &trace.y, color)
+                .width(input.trace_width)
                 .cache_key(trace_key(model, trace))
                 .shape(&trace.shape),
             trace.family_style,
         );
         if trace.overlay {
-            plot_trace = plot_trace.thin();
+            plot_trace = plot_trace.width(input.trace_width * SECONDARY_TRACE_RATIO);
         }
         spec.traces.push(plot_trace);
     }
     for expr in exprs {
         spec.traces.push(apply_family_trace_style(
             Trace::new(&expr.x, &expr.y, expr.color)
-                .thin()
+                .width(input.trace_width * SECONDARY_TRACE_RATIO)
                 .cache_key(expr.cache_key)
                 .shape(&expr.shape),
             expr.family_style,

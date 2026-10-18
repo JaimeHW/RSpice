@@ -66,6 +66,7 @@ fn models_fingerprint(input: &ModelCacheInput<'_>, t: &Tokens) -> u64 {
     input.viewer.hash(&mut h);
     input.projection.phase_continuous.hash(&mut h);
     input.projection.complex_display.hash(&mut h);
+    input.projection.ac.hash(&mut h);
     input
         .projection
         .selection

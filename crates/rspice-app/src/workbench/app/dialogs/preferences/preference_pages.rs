@@ -9,6 +9,7 @@
 
 mod navigation;
 mod simulation;
+mod waveform_defaults;
 
 use egui::Ui;
 
@@ -732,6 +733,7 @@ fn results(ui: &mut Ui, state: &mut AppState) {
     // runs uniformly (which drops peaks) or not at all (which stalls). Every
     // pane now keeps each pixel column's extremes. The export format that
     // used to sit after it is asked by "Export dataset…" itself.
+    waveform_defaults::section(ui, state);
 }
 
 /// The settings file, and what saving a project does. The solver preset a new
@@ -1007,14 +1009,21 @@ pub(super) fn restore_defaults(
             state.ui.autosave_minutes = super::DEFAULT_AUTOSAVE_MINUTES;
             preferences.restore_defaults(&[], &[TogglePreference::RunDesignChecksOnSave], &[]);
         }
-        PreferenceCategory::Results => preferences.restore_defaults(
-            &[
-                ChoicePreference::CursorInterpolation,
-                ChoicePreference::ComplexNumberDisplay,
-            ],
-            &[],
-            &[ScalarPreference::DisplayedSignificantDigits],
-        ),
+        PreferenceCategory::Results => {
+            preferences.restore_defaults(
+                &[
+                    ChoicePreference::CursorInterpolation,
+                    ChoicePreference::ComplexNumberDisplay,
+                    ChoicePreference::WaveTraceWidth,
+                    ChoicePreference::AcMagnitude,
+                    ChoicePreference::AcFrequencyAxis,
+                    ChoicePreference::AcPhase,
+                ],
+                &[TogglePreference::WaveMinorGrid],
+                &[ScalarPreference::DisplayedSignificantDigits],
+            );
+            waveform_defaults::apply_to_viewer(state);
+        }
     }
 }
 
@@ -1036,6 +1045,7 @@ mod tests {
         [
             include_str!("preference_pages/navigation.rs"),
             include_str!("preference_pages/simulation.rs"),
+            include_str!("preference_pages/waveform_defaults.rs"),
             own,
         ]
         .concat()
@@ -1516,5 +1526,34 @@ mod tests {
             .find("\"Net name characters\"")
             .expect("net name characters row");
         assert!(selection < edit_in_place && edit_in_place < net_naming);
+    }
+
+    /// The waveform defaults reach the viewer: a viewer cleared for a new
+    /// project takes the minor grid the page asks for, and restoring the
+    /// page starts the open viewer wrapped and without it again.
+    #[test]
+    fn waveform_defaults_reach_the_viewer() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::AcPhase, 1)
+            .expect("phase may start unwrapped");
+        app.state
+            .ui
+            .preferences
+            .set_toggle(TogglePreference::WaveMinorGrid, true);
+        app.state
+            .replace_project_execution_context("Opened project.");
+        assert!(app.state.ui.results.session.show_minor_grid);
+
+        app.state.ui.results.session.phase_continuous = true;
+        restore_defaults(
+            PreferenceCategory::Results,
+            &mut app.state,
+            &mut PreferencePageActions::default(),
+        );
+        assert!(!app.state.ui.results.session.phase_continuous);
+        assert!(!app.state.ui.results.session.show_minor_grid);
     }
 }

@@ -49,11 +49,21 @@ impl AppState {
     pub(crate) fn replace_project_execution_context(&mut self, announcement: impl Into<String>) {
         self.clear_design_execution_context();
         self.ui.results.clear_project_scoped_state();
+        self.start_waveform_view_from_preferences();
         self.record(
             crate::diagnostics::LogSeverity::Info,
             crate::diagnostics::LogSource::Studio,
             announcement,
         );
+    }
+
+    /// Give a cleared waveform view the minor grid Results ▸ Waveform
+    /// defaults asks for; clearing alone would always start it without.
+    pub(crate) fn start_waveform_view_from_preferences(&mut self) {
+        self.ui.results.session.show_minor_grid = self
+            .ui
+            .preferences
+            .toggle(crate::workbench::TogglePreference::WaveMinorGrid);
     }
 
     /// Clear execution and viewer state tied to the previous design document.
@@ -85,6 +95,7 @@ impl AppState {
         self.workbench.netlist_open_documents.clear();
         self.ui.results_seen_version = 0;
         self.ui.results.clear_design_scoped_state();
+        self.start_waveform_view_from_preferences();
         self.workbench.specification_editor_route_pending = false;
         self.dialogs.drc_results = None;
         self.dialogs.drc_checked_version = 0;

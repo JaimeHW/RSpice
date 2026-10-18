@@ -86,6 +86,7 @@ pub(super) fn build_models(
     tokens: &Tokens,
     phase_continuous: bool,
     complex_display: ComplexNumberDisplay,
+    ac: rspice_results_ui::waves::AcDisplay,
     selection: Option<&SourceSampleSelection>,
     hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
 ) -> Vec<StripModel> {
@@ -98,6 +99,7 @@ pub(super) fn build_models(
         rspice_results_ui::waves::ProjectionOptions {
             phase_continuous,
             complex_display,
+            ac,
             selection,
             hidden_family_traces,
         },
@@ -462,6 +464,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     }
 
     let quantity = state.ui.preferences.quantity_presentation_policy();
+    let trace_width = state.ui.preferences.wave_trace_width();
     rspice_results_ui::waves::stack::show(
         ui,
         &mut stack_host::WaveStackHost(state),
@@ -473,6 +476,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
             // Every pane keeps each pixel column's extremes: uniform sampling
             // drops peaks, and drawing every point stalls on a long run.
             display_decimation: DisplayDecimation::EnvelopeExtrema,
+            trace_width,
         },
     );
 }

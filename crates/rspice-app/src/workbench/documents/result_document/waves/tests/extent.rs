@@ -247,6 +247,7 @@ fn family_envelopes_are_memoized_against_the_models_that_produced_them() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         Some(&selection),
         &HashSet::new(),
     );

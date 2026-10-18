@@ -30,7 +30,7 @@ pub use policy::{
     CursorInterpolation, DisplayedSignificantDigits, ReadoutPolicy, cursor_interpolation,
 };
 mod units;
-pub use projection::{ProjectionOptions, build_models, family_color};
+pub use projection::{AcDisplay, ProjectionOptions, build_models, family_color};
 use units::signal_unit;
 pub use units::{
     NOISE_DENSITY_UNIT, analysis_default_unit, browser_signal_is_current, browser_signal_unit,

@@ -164,6 +164,7 @@ fn imported_overlays_require_compatible_coordinate_units() {
             &Tokens::default(),
             false,
             ComplexNumberDisplay::MagnitudePhaseDegrees,
+            Default::default(),
             None,
             &HashSet::new(),
         );
@@ -221,6 +222,7 @@ fn overlays_require_matching_source_signal_units_before_display_projection() {
                 &Tokens::default(),
                 false,
                 ComplexNumberDisplay::MagnitudePhaseDegrees,
+                Default::default(),
                 None,
                 &HashSet::new(),
             );

@@ -63,6 +63,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // Touch target inflation is capability-driven. A fine-pointer browser
     // resized through tablet/phone widths retains the compact mockup metrics.
     let large_targets = app.state.workbench.coarse_pointer;
+    // How AC traces are drawn has no control but Preferences, so the viewer
+    // takes it from there on every frame and never drifts from the page.
+    app.state.ui.results.session.ac_display = app.state.ui.preferences.ac_display();
     let requested_target = app.state.ui.preferences.minimum_touch_target();
     app.state
         .ui

@@ -342,11 +342,22 @@ fn append_projected_traces(
     }
 }
 
+/// How AC results are drawn: the reader's choice, applied to every pane.
+/// The default is decibels over a decade frequency axis.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct AcDisplay {
+    /// Magnitude as the retained linear quantity rather than in decibels.
+    pub linear_magnitude: bool,
+    /// AC and noise frequency on a linear rather than a decade axis.
+    pub linear_frequency: bool,
+}
+
 /// Local projection choices; source selection and evidence status remain host-owned.
 #[derive(Clone, Copy)]
 pub struct ProjectionOptions<'a> {
     pub phase_continuous: bool,
     pub complex_display: ComplexNumberDisplay,
+    pub ac: AcDisplay,
     pub selection: Option<&'a SourceSampleSelection>,
     pub hidden_family_traces: &'a HashSet<FamilyTraceVisibilityKey>,
 }
@@ -368,9 +379,15 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
     let ProjectionOptions {
         phase_continuous,
         complex_display,
+        ac,
         selection,
         hidden_family_traces,
     } = options;
+    let frequency_scale = if ac.linear_frequency {
+        XScale::Linear
+    } else {
+        XScale::Log10
+    };
     let Some((&run, overlay_runs)) = display_runs.split_first() else {
         return Vec::new();
     };
@@ -409,19 +426,21 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
                     "Hz",
                 ),
                 kind if kind.is_bode_response() || kind.is_raw_frequency_curve() => {
-                    (XScale::Log10, "frequency", "f", "Hz")
+                    (frequency_scale, "frequency", "f", "Hz")
                 }
                 AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise => {
-                    (XScale::Log10, "frequency", "f", "Hz")
+                    (frequency_scale, "frequency", "f", "Hz")
                 }
                 kind if kind.is_time_domain() => (XScale::Linear, "time", "t", "s"),
                 AnalysisType::DcSweep => (XScale::Linear, "dc-sweep", "x", "V"),
                 _ => (XScale::Linear, "x", "x", ""),
             };
-        // Cartesian complex parts carry the source quantity, not the
-        // magnitude projection's decibels, so that one case overrides the
-        // analysis default.
-        let y_unit = if displays_cartesian_complex {
+        // Cartesian complex parts and a linear magnitude carry the source
+        // quantity, not the magnitude projection's decibels, so those cases
+        // override the analysis default.
+        let y_unit = if displays_cartesian_complex
+            || (ac.linear_magnitude && analysis.analysis_type.uses_complex_bode_projection())
+        {
             ""
         } else {
             analysis_default_unit(analysis.analysis_type)
@@ -545,7 +564,10 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
             {
                 // Drawn in degrees; the pane shows the reader's angle unit.
                 TraceKind::PhaseDeg
-            } else if analysis.analysis_type.uses_complex_bode_projection() && is_mag {
+            } else if analysis.analysis_type.uses_complex_bode_projection()
+                && is_mag
+                && !ac.linear_magnitude
+            {
                 TraceKind::MagnitudeDb
             } else if matches!(
                 analysis.analysis_type,

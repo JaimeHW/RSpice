@@ -566,6 +566,7 @@ fn a_marker_never_migrates_to_a_different_dataset_after_a_re_run() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -581,6 +582,7 @@ fn a_marker_never_migrates_to_a_different_dataset_after_a_re_run() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -817,6 +819,7 @@ fn mixed_units_on_one_analysis_become_separate_panes() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -849,6 +852,7 @@ fn one_unit_stays_one_pane() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -880,6 +884,7 @@ fn a_hidden_trace_keeps_its_unit_pane_available_for_reactivation() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -910,6 +915,7 @@ fn a_bode_pair_stacks_magnitude_over_phase() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -940,6 +946,7 @@ fn noise_analyses_project_psd_into_an_nv_sqrt_hz_pane() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -970,6 +977,7 @@ fn noise_input_units_use_current_density_without_a_second_si_prefix() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -994,6 +1002,7 @@ fn phase_panes_order_after_quantity_panes_regardless_of_waveform_order() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -1023,6 +1032,7 @@ fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -1051,6 +1061,7 @@ fn hbnoise_figure_keeps_decibels_in_a_separate_pane_from_density() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -1087,6 +1098,7 @@ fn family_selection_projects_exact_source_rows_without_mutating_the_run() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         Some(&selection),
         &HashSet::new(),
     );
@@ -1138,6 +1150,7 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         Some(&selection),
         &HashSet::new(),
     );
@@ -1214,6 +1227,7 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         Some(&selection),
         &results.session.hidden_family_traces,
     );
@@ -1301,6 +1315,7 @@ fn incompatible_family_overlay_is_visibly_rejected_without_drawing_native_x() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         Some(&selection),
         &HashSet::new(),
     );
@@ -1372,6 +1387,7 @@ fn filtered_overlay_uses_typed_ast_and_ignores_excluded_duplicate_x_rows() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         Some(&selection),
         &HashSet::new(),
     );
@@ -1438,6 +1454,7 @@ fn overlays_pair_two_same_kind_results_by_exact_source_instance() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -1470,6 +1487,7 @@ fn complex_display_policy_uses_original_components_or_radian_phase() {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::RealImaginary,
+        Default::default(),
         None,
         &HashSet::new(),
     );
@@ -1479,6 +1497,40 @@ fn complex_display_policy_uses_original_components_or_radian_phase() {
     assert_eq!(cartesian[0].traces[0].y.as_slice(), &[0.8, 6.0]);
     assert_eq!(cartesian[0].traces[1].name, "im(V(out))");
     assert_eq!(cartesian[0].traces[1].y.as_slice(), &[0.6, 8.0]);
+}
+
+/// Results ▸ Waveform defaults: an AC magnitude is drawn in decibels over a
+/// decade axis unless the reader chose the linear quantity or a linear
+/// frequency axis, and each choice changes only what it names.
+#[test]
+fn ac_magnitude_and_frequency_axis_follow_the_reader_choice() {
+    let magnitude = WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 10.0], "#fff");
+    let mut simulation = SimulationState::default();
+    simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![magnitude]),
+    );
+    let project = |ac| {
+        build_models(
+            &simulation,
+            &mut DerivedSeries::default(),
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            ac,
+            None,
+            &HashSet::new(),
+        )
+    };
+    let shipped = project(rspice_results_ui::waves::AcDisplay::default());
+    assert_eq!(shipped[0].x_scale, XScale::Log10);
+    assert_eq!(shipped[0].traces[0].y.as_slice(), &[0.0, 20.0]);
+
+    let linear = project(rspice_results_ui::waves::AcDisplay {
+        linear_magnitude: true,
+        linear_frequency: true,
+    });
+    assert_eq!(linear[0].x_scale, XScale::Linear);
+    assert_eq!(linear[0].traces[0].y.as_slice(), &[1.0, 10.0]);
 }
 
 /// A session that stored the retired radians mode reads back as magnitude

@@ -1091,6 +1091,7 @@ mod tests {
             crate::waves::ProjectionOptions {
                 phase_continuous: false,
                 complex_display: Default::default(),
+                ac: Default::default(),
                 selection: None,
                 hidden_family_traces: &Default::default(),
             },

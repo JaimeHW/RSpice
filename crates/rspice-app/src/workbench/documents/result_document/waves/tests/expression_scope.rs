@@ -32,6 +32,7 @@ fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Default::default(),
         state.ui.results.session.sample_selection.as_ref(),
         &HashSet::new(),
     );

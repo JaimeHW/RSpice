@@ -488,6 +488,9 @@ pub struct ResultViewerState {
     /// strips' phase traces; the margin math always reads the raw wrapped
     /// arrays. Transient — not persisted with the session.
     pub phase_continuous: bool,
+    /// Decibels or linear magnitude, decade or linear frequency: the
+    /// reader's preference, which the host keeps this in step with.
+    pub ac_display: crate::waves::AcDisplay,
     /// The digits and phase of the project result document being shown.
     /// They stand in for the reader's own while it is, and go when the
     /// workspace leaves it.
@@ -761,9 +764,11 @@ impl ResultViewerState {
     pub fn clear_project_scoped_state(&mut self) {
         let viewer = self.viewer;
         let phase_continuous = self.phase_continuous;
+        let ac_display = self.ac_display;
         *self = Self {
             viewer,
             phase_continuous,
+            ac_display,
             ..Self::default()
         };
     }

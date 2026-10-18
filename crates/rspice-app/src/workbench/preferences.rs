@@ -594,10 +594,18 @@ pub enum ChoicePreference {
     CanvasZoomSpeed,
     /// The button that pans a schematic or symbol canvas.
     CanvasPanButton,
+    /// Waveform trace stroke. Zero is Normal, then Thin, then Thick.
+    WaveTraceWidth,
+    /// AC magnitude in decibels, or linear.
+    AcMagnitude,
+    /// AC and noise frequency axis on a decade, or a linear, scale.
+    AcFrequencyAxis,
+    /// Phase traces wrapped to ±180°, or unwrapped, when a viewer starts.
+    AcPhase,
 }
 
 impl ChoicePreference {
-    pub(crate) const ALL: [Self; 54] = [
+    pub(crate) const ALL: [Self; 58] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
@@ -652,6 +660,10 @@ impl ChoicePreference {
         Self::CanvasWheel,
         Self::CanvasZoomSpeed,
         Self::CanvasPanButton,
+        Self::WaveTraceWidth,
+        Self::AcMagnitude,
+        Self::AcFrequencyAxis,
+        Self::AcPhase,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -710,6 +722,10 @@ impl ChoicePreference {
             Self::CanvasWheel => "canvas-wheel",
             Self::CanvasZoomSpeed => "canvas-zoom-speed",
             Self::CanvasPanButton => "canvas-pan-button",
+            Self::WaveTraceWidth => "wave-trace-width",
+            Self::AcMagnitude => "ac-magnitude",
+            Self::AcFrequencyAxis => "ac-frequency-axis",
+            Self::AcPhase => "ac-phase",
         }
     }
 
@@ -765,8 +781,12 @@ impl ChoicePreference {
             // Junction dots and wire routing are one bit each.
             Self::InterfaceScale | Self::DefaultSolverPreset | Self::WireJunctionBehavior => 3,
             Self::ImportedNetlistDialect => 5,
-            Self::CanvasWheel | Self::CanvasPanButton => 1,
-            Self::CanvasZoomSpeed => 2,
+            Self::CanvasWheel
+            | Self::CanvasPanButton
+            | Self::AcMagnitude
+            | Self::AcFrequencyAxis
+            | Self::AcPhase => 1,
+            Self::CanvasZoomSpeed | Self::WaveTraceWidth => 2,
         }
     }
 
@@ -802,10 +822,11 @@ pub enum TogglePreference {
     RunDesignChecksOnSave,
     InvertWheelZoom,
     CanvasEdgePan,
+    WaveMinorGrid,
 }
 
 impl TogglePreference {
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 13] = [
         Self::ReducedMotion,
         Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
@@ -818,6 +839,7 @@ impl TogglePreference {
         Self::RunDesignChecksOnSave,
         Self::InvertWheelZoom,
         Self::CanvasEdgePan,
+        Self::WaveMinorGrid,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -834,13 +856,15 @@ impl TogglePreference {
             Self::RunDesignChecksOnSave => "run-design-checks-on-save",
             Self::InvertWheelZoom => "invert-wheel-zoom",
             Self::CanvasEdgePan => "canvas-edge-pan",
+            Self::WaveMinorGrid => "wave-minor-grid",
         }
     }
 
     /// Off by default for the three that cost something the author did not
     /// ask for: an animation budget, a diagnostics upload, and a design-check
     /// pass on every save. An inverted wheel is off because it is the
-    /// exception, not the convention.
+    /// exception, not the convention, and the minor grid because a waveform
+    /// view has always started without it.
     const fn default_value(self) -> bool {
         !matches!(
             self,
@@ -848,6 +872,7 @@ impl TogglePreference {
                 | Self::AutomaticDiagnostics
                 | Self::RunDesignChecksOnSave
                 | Self::InvertWheelZoom
+                | Self::WaveMinorGrid
         )
     }
 }
@@ -1422,6 +1447,29 @@ impl UserPreferences {
             },
             edge_pan: self.toggle(TogglePreference::CanvasEdgePan),
         }
+    }
+
+    /// The stroke of a run's waveform traces, in points.
+    #[must_use]
+    pub fn wave_trace_width(&self) -> f32 {
+        let normal = rspice_results_ui::waves::pane::DEFAULT_TRACE_WIDTH;
+        // Normal, Thin, Thick: the stored order, whose zero is shipped.
+        [normal, 1.2, 2.6][self.choice(ChoicePreference::WaveTraceWidth)]
+    }
+
+    /// How AC magnitude and frequency are drawn in waveform panes.
+    #[must_use]
+    pub fn ac_display(&self) -> rspice_results_ui::waves::AcDisplay {
+        rspice_results_ui::waves::AcDisplay {
+            linear_magnitude: self.choice(ChoicePreference::AcMagnitude) == 1,
+            linear_frequency: self.choice(ChoicePreference::AcFrequencyAxis) == 1,
+        }
+    }
+
+    /// Whether a waveform viewer starts with phase unwrapped.
+    #[must_use]
+    pub fn unwrapped_phase(&self) -> bool {
+        self.choice(ChoicePreference::AcPhase) == 1
     }
 
     #[cfg(test)]
