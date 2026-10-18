@@ -91,19 +91,19 @@ fn parameters_contents(
 ) -> Option<Id> {
     let component_type = draft.component_type?;
     draft.present_numeric_drafts(sheet, quantity_policy, number_locale);
-    let properties = sheet
+    // The advanced fields are judged by the same rules as the rest before the
+    // two are told apart, so the section is offered only when opening it
+    // would show something. A resistor's advanced fields all wait on a model,
+    // and judging the schema alone offered a switch that showed nothing.
+    let (advanced, inline): (Vec<_>, Vec<_>) = sheet
         .iter()
         .filter(|definition| definition.name != "name")
         .filter(|definition| !(component_type.is_pwl_source() && definition.name == "pwl_data"))
-        .filter(|definition| match definition.display_mode {
-            DisplayMode::Hidden => false,
-            DisplayMode::Advanced if !draft.show_advanced => false,
-            _ => true,
-        })
+        .filter(|definition| definition.display_mode != DisplayMode::Hidden)
         .filter(|definition| property_is_visible(definition, draft))
         .cloned()
-        .collect::<Vec<_>>();
-    let groups = group_by_category(&properties);
+        .partition(|definition| definition.display_mode == DisplayMode::Advanced);
+    let groups = group_by_category(&inline);
 
     let mut first_control = None;
     egui::Frame::NONE
@@ -152,16 +152,33 @@ fn parameters_contents(
                 draft.sync_pwl_validation_error();
             }
 
-            let has_advanced = sheet
-                .iter()
-                .any(|definition| definition.display_mode == DisplayMode::Advanced);
-            if has_advanced {
-                ui.add_space(8.0);
-                rspice_ui_kit::widgets::switch_row(
-                    ui,
-                    "Show advanced properties",
-                    &mut draft.show_advanced,
-                );
+            // After everything else and opening downward, so showing the
+            // advanced fields moves nothing already on screen. They used to
+            // join their categories in schema order, which reflowed the grid
+            // and put whole groups between the switch and what it sat under.
+            if !advanced.is_empty() {
+                ui.add_space(12.0);
+                advanced_disclosure(ui, advanced.len(), &mut draft.show_advanced);
+                if draft.show_advanced {
+                    for (index, (category, definitions)) in
+                        group_by_category(&advanced).into_iter().enumerate()
+                    {
+                        // The disclosure row carries its own air; the groups
+                        // after the first are spaced as the ones above it are.
+                        ui.add_space(if index == 0 { 4.0 } else { 12.0 });
+                        property_group_heading(ui, &category);
+                        let control = property_grid(
+                            ui,
+                            &definitions,
+                            draft,
+                            advisories,
+                            quantity_policy,
+                            number_locale,
+                            browse,
+                        );
+                        first_control = first_control.or(control);
+                    }
+                }
             }
 
             // The whole-sheet failure, and only that. What the engine will do
@@ -722,6 +739,105 @@ fn property_group_heading(ui: &mut Ui, label: &str) {
     ui.add_space(5.0);
 }
 
+/// The head of the advanced section: a category rule that opens and closes
+/// the fields under it, with how many it holds.
+///
+/// It was a switch row reading "Show advanced properties" at the foot of the
+/// form, which turned on fields scattered through the categories above it.
+fn advanced_disclosure(ui: &mut Ui, count: usize, open: &mut bool) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let (rect, mut response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), t.metrics.row_h), Sense::click());
+    if response.clicked() {
+        *open = !*open;
+        response.mark_changed();
+        if *open {
+            // The fields open below the row, and a row near the foot of the
+            // pane would open them out of sight.
+            response.scroll_to_me(Some(Align::Min));
+        }
+    }
+    let label = if count == 1 {
+        "Advanced, 1 parameter".to_owned()
+    } else {
+        format!("Advanced, {count} parameters")
+    };
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, ui.is_enabled(), &label)
+    });
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_expanded(*open));
+    let focus_visible = theme::focus_is_visible(ui.ctx(), &response);
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+
+    let hover =
+        ui.ctx()
+            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
+    let painter = ui.painter();
+    if hover > 0.0 {
+        painter.rect_filled(
+            rect,
+            t.radius,
+            theme::mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
+        );
+    }
+    // Painted: the bundled faces have no disclosure triangles.
+    let cy = rect.center().y;
+    let center = pos2(rect.left() + 4.0, cy);
+    let r = 3.2;
+    let points = if *open {
+        vec![
+            center + vec2(-r, -r * 0.5),
+            center + vec2(r, -r * 0.5),
+            center + vec2(0.0, r * 0.9),
+        ]
+    } else {
+        vec![
+            center + vec2(-r * 0.5, -r),
+            center + vec2(r * 0.9, 0.0),
+            center + vec2(-r * 0.5, r),
+        ]
+    };
+    let ink = theme::mix(c.text_dim, c.text, hover);
+    painter.add(egui::Shape::convex_polygon(points, ink, Stroke::NONE));
+
+    let title = ui.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(
+            "Advanced".to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            ink,
+        )
+    });
+    let title_left = rect.left() + 14.0;
+    let title_right = title_left + title.size().x;
+    painter.galley(pos2(title_left, cy - title.size().y * 0.5), title, ink);
+    let tally = ui.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(
+            count.to_string(),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            c.text_faint,
+        )
+    });
+    let tally_left = title_right + 6.0;
+    let tally_right = tally_left + tally.size().x;
+    painter.galley(
+        pos2(tally_left, cy - tally.size().y * 0.5),
+        tally,
+        c.text_faint,
+    );
+    let rule_start = tally_right + 8.0;
+    if rule_start < rect.right() {
+        painter.hline(rule_start..=rect.right(), cy, Stroke::new(1.0, c.border));
+    }
+    if focus_visible {
+        theme::paint_focus_ring(ui, &response, rect);
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand);
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -812,6 +928,49 @@ mod tests {
             .collect()
     }
 
+    /// Pressed inside a disabled `Ui`, the head leaves the section as it was.
+    /// egui withholds the click from a disabled response; the head relies on
+    /// that rather than reading the enabled bit itself, and this holds it to it.
+    #[test]
+    fn a_disabled_advanced_head_does_not_open_when_pressed() {
+        fn press(enabled: bool) -> bool {
+            let (sheet, mut draft) = opened(ComponentType::VoltageSourceSin);
+            let ctx = egui::Context::default();
+            rspice_ui_kit::Theme::default().apply(&ctx);
+            drop(form_frame(&ctx, &sheet, &mut draft, enabled, Vec::new()));
+            let painted = texts(form_frame(&ctx, &sheet, &mut draft, enabled, Vec::new()));
+            let at = painted
+                .iter()
+                .find(|(text, _)| text == "Advanced")
+                .map(|(_, rect)| rect.center())
+                .expect("a source offers its advanced fields");
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            };
+            drop(form_frame(
+                &ctx,
+                &sheet,
+                &mut draft,
+                enabled,
+                vec![egui::Event::PointerMoved(at), button(true), button(false)],
+            ));
+            draft.show_advanced
+        }
+
+        assert!(press(true), "an enabled head opens on the press that asked");
+        assert!(!press(false), "a disabled one does not");
+    }
+
+    fn position_of(texts: &[(String, egui::Rect)], wanted: &str) -> Option<egui::Pos2> {
+        texts
+            .iter()
+            .find(|(text, _)| text == wanted)
+            .map(|(_, rect)| rect.min)
+    }
+
     /// Every grid on the form is as wide as the first.
     ///
     /// The model binding's row reserved 58 points for its Browse button, which
@@ -839,6 +998,62 @@ mod tests {
         assert!(
             (above - below).abs() < 0.5,
             "the right column ends at {above} above the model row and {below} below it"
+        );
+    }
+
+    /// A resistor's advanced fields all wait on a model. With none bound the
+    /// section is not offered, because opening it would show nothing; the
+    /// switch it replaced was offered anyway and did nothing when pressed.
+    #[test]
+    fn the_advanced_section_is_offered_only_when_it_has_a_field_to_show() {
+        let unbound = painted_texts(ComponentType::Resistor, |_| {});
+        assert!(
+            position_of(&unbound, "Advanced").is_none(),
+            "an unbound resistor offers an empty advanced section"
+        );
+
+        let bound = painted_texts(ComponentType::Resistor, |draft| {
+            draft.set_value("model", PropertyValue::String("rpoly".to_owned()));
+        });
+        assert!(
+            position_of(&bound, "Advanced").is_some(),
+            "a resistor bound to a model has self-heating fields to offer"
+        );
+    }
+
+    /// Opening the advanced section moves nothing that was already on screen,
+    /// and everything it shows lands below its head.
+    ///
+    /// The fields used to join their own categories in schema order, so a
+    /// source's Advanced AC and Distortion groups landed between AC and
+    /// Parasitics, and every field under them moved down.
+    #[test]
+    fn opening_the_advanced_section_moves_nothing_above_it() {
+        let closed = painted_texts(ComponentType::VoltageSourceSin, |_| {});
+        let open = painted_texts(ComponentType::VoltageSourceSin, |draft| {
+            draft.show_advanced = true;
+        });
+        let head = position_of(&closed, "Advanced").expect("a source offers its advanced fields");
+        assert_eq!(position_of(&open, "Advanced"), Some(head));
+
+        for (text, rect) in &closed {
+            assert!(
+                open.iter()
+                    .any(|(other, at)| other == text && (at.min - rect.min).length() < 0.01),
+                "{text:?} at {rect:?} moved when the section opened"
+            );
+        }
+        let revealed = open
+            .iter()
+            .filter(|(text, _)| !closed.iter().any(|(other, _)| other == text))
+            .collect::<Vec<_>>();
+        assert!(
+            revealed.iter().any(|(text, _)| text == "PAC Magnitude"),
+            "the section shows the source's periodic AC fields: {revealed:?}"
+        );
+        assert!(
+            revealed.iter().all(|(_, rect)| rect.min.y > head.y),
+            "every revealed field sits below the section's head: {revealed:?}"
         );
     }
 

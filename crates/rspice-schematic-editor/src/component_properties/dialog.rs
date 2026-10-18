@@ -462,6 +462,115 @@ mod tests {
         x(right) - x(left)
     }
 
+    /// Scroll a source's editor to its advanced head, as a reader has to, and
+    /// press it. Returns whether the section is open afterwards, and whether
+    /// its last field is on screen.
+    fn press_the_advanced_head() -> (bool, bool) {
+        let kind = ComponentType::VoltageSourceSin;
+        let catalog = PropertyCatalog::new();
+        let sheet = catalog.get(kind).expect("catalog sheet").clone();
+        let component = Component::new(1, kind, Point::origin());
+        let mut draft = ComponentPropertyDraft::default();
+        draft.reset(
+            kind,
+            &sheet,
+            collect_properties_with_sheet(&component, Some(&sheet)),
+        );
+        let context = ComponentEditorContext::default();
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let mut run = |events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100.0, 760.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    render_component_property_dialog(
+                        ui.ctx(),
+                        &mut draft,
+                        ComponentPropertyDialogView {
+                            component_name: Some("V1"),
+                            context: &context,
+                            sheet: &sheet,
+                            advisories: &[],
+                            session_error: None,
+                            model_browser_open: false,
+                            show_source_preview: true,
+                            quantity_policy: QuantityPresentationPolicy::default(),
+                            number_locale: UiNumberLocale::default(),
+                            commit_policy: PropertyCommitPolicy::default(),
+                        },
+                        &mut NoServices,
+                    );
+                },
+            )
+            .shapes
+        };
+        let find = |shapes: &[egui::epaint::ClippedShape], wanted: &str| {
+            shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() == wanted => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+        };
+        drop(run(Vec::new()));
+        let mut shapes = run(Vec::new());
+        // Far enough that the head is clear of the footer, and no further: a
+        // head pressed at the foot of the pane opens onto fields out of sight.
+        for _ in 0..20 {
+            if find(&shapes, "Advanced").is_some_and(|at| at.y < 560.0) {
+                break;
+            }
+            shapes = run(vec![
+                egui::Event::PointerMoved(egui::pos2(300.0, 400.0)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -40.0),
+                    modifiers: egui::Modifiers::default(),
+                    phase: egui::TouchPhase::Move,
+                },
+            ]);
+        }
+        // The wheel's own easing finishes before the reader presses.
+        for _ in 0..30 {
+            shapes = run(Vec::new());
+        }
+        let at = find(&shapes, "Advanced").expect("the head scrolls into view");
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        drop(run(vec![
+            egui::Event::PointerMoved(at),
+            button(true),
+            button(false),
+        ]));
+        // Time for the scroll it asked for to land.
+        for _ in 0..60 {
+            shapes = run(Vec::new());
+        }
+        (
+            draft.show_advanced,
+            find(&shapes, "Distortion F2 Phase").is_some(),
+        )
+    }
+
+    /// Pressing the advanced head opens it and brings what it opened into
+    /// view; the fields would otherwise open below the pane's foot, and the
+    /// press look like it had done nothing.
+    #[test]
+    fn pressing_the_advanced_head_opens_it_onto_its_fields() {
+        assert_eq!(press_the_advanced_head(), (true, true));
+    }
+
     /// A field is as wide in an editor that holds parameters alone as it is
     /// beside a source's waveform.
     ///

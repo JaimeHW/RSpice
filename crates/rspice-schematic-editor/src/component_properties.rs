@@ -14,7 +14,9 @@ pub use dialog::{
 pub use evidence::provenance_colour;
 pub use form::{PropertyBrowseRequest, render_component_parameters, section_band};
 
-use rspice_app_types::property::{PropertyDefinition, PropertySheet, PropertyType, PropertyValue};
+use rspice_app_types::property::{
+    DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
+};
 use rspice_app_types::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use rspice_design::schematic::component_type::ComponentType;
 use rspice_design::schematic::document_policy::PropertyCommitPolicy;
@@ -336,6 +338,14 @@ impl ComponentPropertyDraft {
                     .clone()
                     .unwrap_or_else(|| "PWL waveform data is invalid".to_owned()),
             );
+        }
+        // An Apply refused over an advanced field opens the section, so the
+        // field the footer counts is one the reader can see.
+        if sheet.iter().any(|def| {
+            def.display_mode == DisplayMode::Advanced
+                && self.validation_errors.contains_key(&def.name)
+        }) {
+            self.show_advanced = true;
         }
 
         self.refresh_validation_summary();
@@ -721,6 +731,27 @@ mod tests {
         assert_eq!(state.numeric_text_draft("gain"), Some("2"));
         assert_eq!(state.numeric_text_draft("offset"), Some("0"));
         assert!(!state.has_modifications());
+    }
+
+    /// An Apply refused over an advanced field opens the advanced section, so
+    /// the field the footer counts is on screen.
+    #[test]
+    fn a_refused_advanced_field_opens_the_advanced_section() {
+        let mut sheet = PropertySheet::new();
+        sheet.add(
+            PropertyDefinition::new("gain")
+                .with_type(PropertyType::Number)
+                .with_default(numeric(1.0))
+                .with_range(0.0, 10.0)
+                .advanced(),
+        );
+        let mut state = clean_draft(&sheet);
+        assert!(!state.show_advanced);
+
+        state.set_value("gain", numeric(20.0));
+        assert!(!state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
+        assert!(state.validation_errors.contains_key("gain"));
+        assert!(state.show_advanced);
     }
 
     #[test]
