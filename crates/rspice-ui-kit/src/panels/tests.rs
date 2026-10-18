@@ -253,6 +253,37 @@ fn overconstrained_section_header_wraps_instead_of_eliding_both_columns() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+/// A choice row's value and a typed row's value start on one edge, so a
+/// column of mixed controls reads as one column.
+#[test]
+fn choice_and_typed_rows_start_their_values_on_one_edge() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut typed = "Bias network".to_owned();
+    let mut selected = "a4".to_owned();
+    let options = vec![("a4".to_owned(), "ISO A4".to_owned())];
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(320.0);
+            property_row_combo(ui, "Size", "one-edge-size", &mut selected, &options, true);
+            property_row_input(ui, "Sheet title", &mut typed, false);
+        });
+    });
+    let find = |wanted: &str| {
+        output
+            .shapes
+            .iter()
+            .find_map(|clipped| painted_text_rect(&clipped.shape, wanted))
+            .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
+    };
+    let choice = find("ISO A4");
+    let typed = find("Bias network");
+    assert!(
+        (choice.left() - typed.left()).abs() < 0.5,
+        "choice text {choice:?}, typed text {typed:?}"
+    );
+}
+
 #[test]
 fn property_controls_and_section_headers_expose_their_full_accessible_names() {
     let ctx = egui::Context::default();
