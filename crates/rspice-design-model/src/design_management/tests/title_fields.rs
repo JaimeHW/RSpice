@@ -249,16 +249,14 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     // keeps the compact one, rather than requesting a block Page Setup would
     // report as substituted; one whose drawing area holds it starts on it,
     // whatever its paper is called.
-    for narrow in
-        [crate::custom_format("Panel", 200_000, 400_000, crate::StartingFrame::IsoA).unwrap()]
-    {
-        assert!(narrow.geometry().unwrap().drawing_area.width_um < 180_000);
-        assert_eq!(
-            narrow.title_block.template,
-            DrawingSheetTitleBlockTemplate::Compact
-        );
-        assert!(!narrow.title_block_substituted());
-    }
+    let narrow =
+        crate::custom_format("Panel", 200_000, 400_000, crate::StartingFrame::IsoA).unwrap();
+    assert!(narrow.geometry().unwrap().drawing_area.width_um < 180_000);
+    assert_eq!(
+        narrow.title_block.template,
+        DrawingSheetTitleBlockTemplate::Compact
+    );
+    assert!(!narrow.title_block_substituted());
     for wide in [
         SchematicSheetFormat::from_standard(
             DrawingSheetStandard::AnsiA,
