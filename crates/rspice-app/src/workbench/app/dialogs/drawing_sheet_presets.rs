@@ -297,8 +297,13 @@ impl RSpiceApp {
         if unavailable(&preset) {
             return Err("This custom size has an unavailable managed dependency.".to_owned());
         }
-        crate::workbench::app::open_drawing_sheet_setup_with_preset(self, preset)?;
+        // The sheet takes the size, then its properties show what it made.
+        crate::workbench::app::drawing_sheet_edit::apply_drawing_sheet_edit(
+            &mut self.state,
+            crate::workbench::app::drawing_sheet_edit::DrawingSheetEdit::Preset(Box::new(preset)),
+        )?;
         self.state.dialogs.drawing_sheet_presets.close();
+        crate::workbench::app::reveal_sheet_properties(&mut self.state);
         Ok(())
     }
 
@@ -346,7 +351,7 @@ impl RSpiceApp {
             .description(if draft.mode == PresetEditorMode::Edit {
                 "Rename the reusable custom size without changing its stable identity or any using sheet."
             } else {
-                "Create a reusable custom size without changing the current sheet. A sheet uses the preset only after it is selected in Page Setup."
+                "Create a reusable custom size without changing the current sheet. A sheet uses the preset only once its Size is set to it in Sheet properties."
             })
             .size(DialogSize::DrawingSheetWorkflow)
             // The body is one continuous page whose sections reach the
@@ -1351,6 +1356,38 @@ mod tests {
     use super::*;
 
     const DESKTOP: egui::Vec2 = egui::vec2(1440.0, 900.0);
+
+    /// Using a custom size from the library puts the open sheet on it, as one
+    /// sheet edit, closes the library and shows the sheet's properties.
+    #[test]
+    fn using_a_custom_size_puts_the_sheet_on_it_and_shows_its_properties() {
+        let mut app = RSpiceApp::test_instance();
+        let preset = DrawingSheetPreset {
+            id: "lab-panel".to_owned(),
+            name: "Lab panel".to_owned(),
+            scope: DrawingSheetPresetScope::Project,
+            format: model::custom_format("Lab panel", 250_000, 400_000, StartingFrame::IsoA)
+                .unwrap(),
+        };
+        let mut seeded = (*app.state.workspace.content.design_management).clone();
+        seeded
+            .publish_drawing_sheet_preset(seeded.revision(), preset.clone())
+            .unwrap();
+        app.state
+            .workspace
+            .content
+            .replace_design_management(seeded)
+            .unwrap();
+        assert!(open_custom_sheet_size_library(&mut app.state));
+
+        app.handle_preset_library_action(LibraryBodyAction::Use(PresetKey::from(&preset)));
+
+        let sheet = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(&app.state);
+        assert_eq!(sheet.format.authored_size.label(), "Lab panel");
+        assert!(!app.state.dialogs.drawing_sheet_presets.any_open());
+        assert!(app.state.workbench.reveal_sheet_section);
+        assert!(app.state.can_undo_project_design());
+    }
 
     /// The library and the custom-size editor, each over a project that owns
     /// one preset, at desktop and phone widths in both modes. Run with

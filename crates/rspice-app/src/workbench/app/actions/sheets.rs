@@ -74,6 +74,21 @@ pub(in crate::workbench) fn sheet_entries(state: &AppState) -> Vec<SheetEntry> {
         .collect()
 }
 
+/// Show the open sheet's properties: with nothing selected the inspector is
+/// the sheet's, so the selection is cleared, the inspector is opened where it
+/// is closed, and it is scrolled to its Sheet section. Only an editable sheet
+/// is shown so; anywhere else nothing changes.
+pub(crate) fn reveal_sheet_properties(state: &mut AppState) {
+    if !crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state) {
+        return;
+    }
+    state.schematic.session.editor.selection.clear();
+    state.schematic.session.editor.net_highlight.clear();
+    state.workbench.inspector_visible = true;
+    state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
+    state.workbench.reveal_sheet_section = true;
+}
+
 pub(in crate::workbench) fn active_sheet_id(state: &AppState) -> Option<SheetId> {
     active_sheet_catalog(state).and_then(SheetCatalog::active_sheet_id)
 }

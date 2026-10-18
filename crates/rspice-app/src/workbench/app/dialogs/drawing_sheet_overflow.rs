@@ -2,7 +2,7 @@
 //!
 //! This is an advisory surface. It never mutates schematic content itself;
 //! navigation selects an exact stable target, while the three resolution
-//! actions hand off to existing view, Page Setup, and hardcopy authorities.
+//! actions hand off to the view, the sheet's properties, and hardcopy.
 
 use egui::{Align, Context, Frame, Label, Layout, RichText, Stroke, Ui, vec2};
 
@@ -28,7 +28,7 @@ enum OverflowReviewAction {
     None,
     Show(DrawingSheetOverflowTarget),
     FitContent,
-    PageSetup,
+    SheetProperties,
     Hardcopy,
 }
 
@@ -90,9 +90,9 @@ impl RSpiceApp {
                 self.state.schematic.session.editor.needs_fit = true;
                 self.state.schematic.session.editor.needs_drawing_sheet_fit = false;
             }
-            OverflowReviewAction::PageSetup => {
+            OverflowReviewAction::SheetProperties => {
                 self.state.dialogs.drawing_sheet_overflow_open = false;
-                crate::workbench::app::open_drawing_sheet_setup(self);
+                crate::workbench::app::reveal_sheet_properties(&mut self.state);
             }
             OverflowReviewAction::Hardcopy => {
                 self.state.dialogs.drawing_sheet_overflow_open = false;
@@ -129,7 +129,7 @@ fn detection_contract(ui: &mut Ui) {
         .inner_margin(egui::Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.label(
-                "Detection is geometric and re-runs after a move, a paste, a format change or an orientation change, so no separate invalidation can leave the canvas, the inspector and Page Setup disagreeing. A conductor crossing the border counts once. Durable labels, junctions, design notes and documentation geometry are printable sheet content and are counted. Probe flags and transient interaction markers are view state and are never printed, so they are never counted. A title-block overlap is on the page but will print underneath the identity block, which is why it is reported apart from the rest.",
+                "Detection is geometric and re-runs after a move, a paste, a format change or an orientation change, so no separate invalidation can leave the canvas and the inspector disagreeing. A conductor crossing the border counts once. Durable labels, junctions, design notes and documentation geometry are printable sheet content and are counted. Probe flags and transient interaction markers are view state and are never printed, so they are never counted. A title-block overlap is on the page but will print underneath the identity block, which is why it is reported apart from the rest.",
             );
         })
         .response;
@@ -402,9 +402,9 @@ fn resolution_actions(ui: &mut Ui, action: &mut OverflowReviewAction) {
         resolution_card(
             &mut columns[1],
             "Grow the sheet",
-            "A larger format or the other orientation may be the honest answer; Page Setup previews the result before applying.",
-            "Page setup\u{2026}",
-            OverflowReviewAction::PageSetup,
+            "A larger format or the other orientation may be the honest answer; the sheet's properties count what each size leaves outside.",
+            "Sheet properties",
+            OverflowReviewAction::SheetProperties,
             action,
         );
         resolution_card(

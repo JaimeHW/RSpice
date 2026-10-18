@@ -258,7 +258,12 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// ever touched the application's state, so it and its three helpers take
 /// `AppState` now, and the sheet panel, which no longer dispatches toolbar
 /// commands, takes the state too.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 793;
+///
+/// 793 -> 789 on 2026-10-18, when the Page Setup dialog was deleted and its
+/// settings were left to the sheet panel. Its opener, its renderer, the
+/// title-block fields dialog only it reached, and its render tests' frame
+/// helpers took the application whole.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 789;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -1783,8 +1788,6 @@ const PAINTED_UI_CRATES: &[&str] = &[
 const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/app/dialogs/design_management/widgets.rs::schematic_preview",
     "rspice-app/src/workbench/app/dialogs/design_review_comments.rs::review_message",
-    "rspice-app/src/workbench/app/dialogs/drawing_sheet_setup/render.rs::measurement_strip",
-    "rspice-app/src/workbench/app/dialogs/drawing_sheet_support.rs::title_field_summary_facts",
     "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
     "rspice-app/src/workbench/app/dialogs/hierarchy/create.rs::table_row",
     "rspice-app/src/workbench/app/dialogs/library/cell_ops_dialogs.rs::process_copy_cell_dialog",

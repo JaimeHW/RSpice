@@ -210,7 +210,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             Some(Command::CreateHierarchy),
         ),
         ("Create symbol from schematic ports…", None),
-        ("Page setup…", Some(Command::PageSetup)),
+        ("Sheet properties", Some(Command::SheetProperties)),
         ("Fit schematic content", Some(Command::FitSchematicContent)),
         ("Show in netlist", Some(Command::ShowInNetlist)),
         ("Add voltage or current probe…", Some(Command::PlaceProbe)),

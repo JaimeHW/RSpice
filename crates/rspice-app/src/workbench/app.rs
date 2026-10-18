@@ -110,6 +110,7 @@ pub(crate) use dialogs::design_management::{
 
 pub(crate) use dialogs::rule_setup::open_rule_setup;
 
+pub(crate) use actions::sheets::reveal_sheet_properties;
 pub(crate) use dialogs::drawing_sheet_defaults::{
     DrawingSheetDefaultsDialogState, open_drawing_sheet_defaults,
 };
@@ -124,11 +125,7 @@ pub(crate) use dialogs::drawing_sheet_presets::{
     open_custom_sheet_size_library,
 };
 pub(crate) use dialogs::drawing_sheet_support::{
-    DrawingSheetSupportState, open_sheet_format_manager, open_title_block_fields,
-};
-pub(crate) use drawing_sheet_edit::{
-    DrawingSheetSetupState, drawing_sheet_setup_available, open_drawing_sheet_setup,
-    open_drawing_sheet_setup_for_state, open_drawing_sheet_setup_with_preset,
+    DrawingSheetSupportState, open_sheet_format_manager,
 };
 
 pub(crate) use dialogs::connectivity_manager::{
@@ -937,7 +934,6 @@ impl RSpiceApp {
         if dialogs::rule_setup::render_rule_setup_dialog(ctx, &mut self.state) {
             self.invalidate_simulation_preflight();
         }
-        self.render_drawing_sheet_setup_dialog(ctx);
         self.render_drawing_sheet_defaults_dialog(ctx);
         self.render_drawing_sheet_preset_dialogs(ctx);
         self.render_drawing_sheet_support_dialogs(ctx);

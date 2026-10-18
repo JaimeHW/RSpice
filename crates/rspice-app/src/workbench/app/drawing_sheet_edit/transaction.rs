@@ -1,31 +1,27 @@
-//! Authority capture and atomic publication for drawing-sheet setup.
+//! One edit to the active sheet, staged and published as one transaction.
 
+use std::collections::BTreeMap;
+
+use crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet;
 use crate::state::{
     AuthoredDrawingSheetSize, DRAWING_SHEET_MIXED_SIZES_ADVISORY, DrawingSheetBorderTemplate,
     DrawingSheetDisplayUnit, DrawingSheetDocumentControl, DrawingSheetFrameConvention,
     DrawingSheetInheritance, DrawingSheetPreset, DrawingSheetPresetScope,
     DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
     DrawingSheetTitleFieldId, DrawingSheetTransactionKind, DrawingSheetTransactionReceipt,
-    DrawingSheetTransactionSkip, SchematicPageOrientation, SchematicSheetFormat, SheetId, ViewType,
+    DrawingSheetZoneMode, SchematicPageOrientation, SchematicSheetFormat, SheetId, ViewType,
     drawing_sheet_sizes_mixed,
 };
 use crate::workbench::SurfaceId;
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::Workspace;
 
-use super::draft::{
-    BorderTemplateChoice, DrawingSheetAuthority, DrawingSheetDraft, DrawingSheetSetupState,
-    GovernedDrawingSheetAuthority, PageSetupScope, SheetDisplayUnit, SheetSizeChoice,
-    TitleBlockTemplateChoice, ValidatedDrawingSheetDraft, ZoneModeChoice, format_um,
-    title_template_from_model,
-};
+use super::draft::{DrawingSheetDraft, SheetSizeChoice};
 
-pub(crate) fn drawing_sheet_setup_available(app: &RSpiceApp) -> bool {
-    drawing_sheet_setup_available_for_state(&app.state)
-}
-
-pub(crate) fn drawing_sheet_setup_available_for_state(state: &AppState) -> bool {
+/// Whether the active sheet can be edited: a writable schematic or testbench
+/// on the design surface. Print and Export own output media and never stand
+/// in for the sheet.
+pub(crate) fn drawing_sheet_editable(state: &AppState) -> bool {
     state.workbench.workspace == Workspace::Design
         && state.workbench.current_route().surface_id() == SurfaceId::Design
         && !state.schematic_edit_read_only()
@@ -35,163 +31,346 @@ pub(crate) fn drawing_sheet_setup_available_for_state(state: &AppState) -> bool 
         )
 }
 
-pub(crate) fn open_drawing_sheet_setup(app: &mut RSpiceApp) {
-    let _ = open_drawing_sheet_setup_for_state(&mut app.state);
+/// One property of the active sheet, as the sheet panel edits it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DrawingSheetEdit {
+    Size(DrawingSheetStandard),
+    /// A one-off size the standard list does not hold, its edges as the sheet
+    /// stands in its orientation. It keeps the frame of the size it started
+    /// from.
+    CustomSize {
+        width_um: u64,
+        height_um: u64,
+    },
+    /// The name a one-off custom size is known and saved by.
+    CustomSizeName(String),
+    /// A saved custom size, the project's or the person's own. A personal
+    /// one is copied into the project when the sheet takes it.
+    Preset(Box<DrawingSheetPreset>),
+    /// Save the sheet's one-off custom size to the project's custom sizes or
+    /// the person's own, and put the sheet on the saved size.
+    SaveCustomSize(DrawingSheetPresetScope),
+    Orientation(SchematicPageOrientation),
+    /// Take the project default's format and follow it, or keep the format
+    /// the sheet has as its own.
+    FollowProjectDefault(bool),
+    /// The frame of the sheet's standard, or none.
+    Frame(DrawingSheetBorderTemplate),
+    /// The standard's zones along the frame, or none.
+    Zones(bool),
+    /// ISO 5457's centring marks, or ASME Y14.1's microfilm arrows.
+    CentringMarks(bool),
+    /// ASME Y14.1 4.1.3's binding margin.
+    BindingMargin(bool),
+    /// The unit the sheet's sizes are stated in.
+    Units(DrawingSheetDisplayUnit),
+    TitleBlock(DrawingSheetTitleBlockTemplate),
+    /// Whether the title block shows a box its form leaves optional.
+    BoxShown(DrawingSheetTitleFieldId, bool),
+    /// A typed title-block value, kept where its field keeps it: on this
+    /// sheet, on the project for the values every sheet shares, or in the
+    /// document control for the revision and its date.
+    TitleField(DrawingSheetTitleFieldId, String),
+    /// Where the document stands in its release.
+    Status(DrawingSheetReleaseStatus),
+    /// The change order, ticket or release record the document's revision
+    /// answers to.
+    ChangeReference(String),
 }
 
-pub(crate) fn open_drawing_sheet_setup_with_preset(
-    app: &mut RSpiceApp,
-    preset: crate::state::DrawingSheetPreset,
-) -> Result<(), String> {
-    if app.state.dialogs.drawing_sheet_setup.support_suspended {
-        resume_drawing_sheet_setup_after_support(&mut app.state)?;
-    } else if !open_drawing_sheet_setup_for_state(&mut app.state) {
-        return Err(
-            "Custom sheet sizes can only be used from a schematic or testbench drawing sheet."
-                .to_owned(),
-        );
+/// Apply one property of the active sheet as one transaction.
+///
+/// The sheet's draft is taken from what it draws, the edit is staged into
+/// it, the draft is validated whole, and the result is published with one
+/// undo entry. Nothing is left behind when the edit is refused.
+pub(crate) fn apply_drawing_sheet_edit(
+    state: &mut AppState,
+    edit: DrawingSheetEdit,
+) -> Result<String, String> {
+    if !drawing_sheet_editable(state) {
+        return Err("The sheet can only be edited on a writable schematic.".to_owned());
     }
-    let scope = app.state.dialogs.drawing_sheet_setup.draft.scope;
-    let title_fields = app
-        .state
-        .dialogs
-        .drawing_sheet_setup
-        .draft
-        .title_fields
-        .clone();
-    let mut draft = DrawingSheetDraft::from_format(&preset.format);
-    draft.scope = scope;
-    draft.title_fields = title_fields;
-    draft.size = super::draft::SheetSizeChoice::CapturedPreset {
-        id: preset.id,
-        name: preset.name,
-        scope: preset.scope,
-    };
-    if let Some(title) = draft
-        .title_fields
-        .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-        && title.value.trim().is_empty()
-    {
-        title
-            .value
-            .clone_from(&app.state.dialogs.drawing_sheet_setup.sheet_name);
-    }
-    let managed_authority = app.state.dialogs.drawing_sheet_setup.baseline.clone();
-    draft.enforce_managed_authority(&managed_authority);
-    app.state.dialogs.drawing_sheet_setup.draft = draft;
-    Ok(())
+    let mut transaction = SheetTransaction::open(state);
+    transaction.stage(state, edit)?;
+    transaction.commit(state)
 }
 
-/// Open the authored-sheet workflow from state-owned schematic surfaces such
-/// as the canvas context menu. Returns `false` outside schematic/testbench
-/// design routes. Print and export media are owned by their separate hardcopy
-/// workflows and must never be substituted for authored drawing-sheet setup.
-pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
-    if !drawing_sheet_setup_available_for_state(state) {
-        return false;
-    }
-    let cell_view_key = state.workspace.content.active_key();
-    let resolved_active =
-        crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state);
-    let governed = state
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(&cell_view_key)
-        .and_then(|catalog| catalog.active().map(|sheet| (catalog, sheet)));
-    let (governed, format, sheet_name, sheet_count) = if let Some((catalog, sheet)) = governed {
-        (
-            Some(GovernedDrawingSheetAuthority {
+/// The governed sheet an edit lands on, as it stood when the edit began.
+#[derive(Debug, Clone)]
+struct GovernedSheet {
+    cell_view_key: String,
+    sheet_id: SheetId,
+    sheet_revision: u64,
+}
+
+/// One edit to the active sheet, staged and not yet published.
+#[derive(Debug, Clone)]
+struct SheetTransaction {
+    /// None for a schematic whose first edit gives it its governed sheets.
+    governed: Option<GovernedSheet>,
+    sheet_name: String,
+    project_default: SchematicSheetFormat,
+    /// The sheet as it was, whose organization-managed block no edit
+    /// replaces.
+    baseline: DrawingSheetDraft,
+    draft: DrawingSheetDraft,
+    /// Project-owned title values, staged whole once one of them is edited.
+    staged_project_title_values: Option<BTreeMap<DrawingSheetTitleFieldId, String>>,
+    /// The project's document control, staged once part of it is edited.
+    staged_document_control: Option<DrawingSheetDocumentControl>,
+}
+
+impl SheetTransaction {
+    /// The active sheet's transaction, drafted from what the sheet draws.
+    fn open(state: &AppState) -> Self {
+        let cell_view_key = state.workspace.content.active_key();
+        let resolved = resolve_active_drawing_sheet(state);
+        let designs = &state.workspace.content.design_management;
+        let governed = designs
+            .sheet_catalog(&cell_view_key)
+            .and_then(|catalog| catalog.active())
+            .map(|sheet| GovernedSheet {
                 cell_view_key: cell_view_key.clone(),
-                catalog_revision: catalog.revision(),
                 sheet_id: sheet.id(),
                 sheet_revision: sheet.revision(),
-            }),
-            resolved_active.format,
-            sheet.name().to_owned(),
-            catalog.sheets().len(),
-        )
-    } else {
-        (
-            None,
-            resolved_active.format,
-            state.workspace.content.active_view.cell.clone(),
-            1,
-        )
-    };
-    let mut draft = DrawingSheetDraft::from_format(&format);
-    let sheet_title = draft
-        .title_fields
-        .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-        .expect("the canonical title-field set contains Sheet title");
-    if sheet_title.value.trim().is_empty() {
-        sheet_title.value.clone_from(&sheet_name);
+            });
+        let mut draft = DrawingSheetDraft::from_format(&resolved.format);
+        let sheet_title = draft
+            .title_fields
+            .entry(DrawingSheetTitleFieldId::SheetTitle)
+            .or_default();
+        if sheet_title.value.trim().is_empty() {
+            sheet_title.value.clone_from(&resolved.sheet_name);
+        }
+        Self {
+            governed,
+            sheet_name: resolved.sheet_name,
+            project_default: designs.drawing_sheet_settings().default_format.clone(),
+            baseline: draft.clone(),
+            draft,
+            staged_project_title_values: None,
+            staged_document_control: None,
+        }
     }
-    let mut available_presets = state
-        .workspace
-        .content
-        .design_management
-        .drawing_sheet_settings()
-        .presets
-        .clone();
-    available_presets.extend(
-        state
-            .ui
-            .preferences
-            .drawing_sheet_personal_preferences()
-            .presets,
-    );
-    let managed_sheet_names = state
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(&cell_view_key)
-        .map(|catalog| {
-            catalog
-                .sheets()
-                .iter()
-                .filter(|sheet| format_is_organization_managed(sheet.page_format()))
-                .map(|sheet| sheet.name().to_owned())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let writable_sheet_count = sheet_count.saturating_sub(managed_sheet_names.len());
-    let other_sheet_sizes = other_sheet_sizes(state);
-    state.dialogs.drawing_sheet_setup = DrawingSheetSetupState {
-        open: true,
-        document_name: state.workspace.content.active_display_path().to_owned(),
-        sheet_name,
-        sheet_count,
-        writable_sheet_count,
-        other_sheet_sizes,
-        managed_sheet_names,
-        available_presets,
-        project_default: state
+
+    /// Stage `edit` in the draft, or refuse it in words the panel shows.
+    fn stage(&mut self, state: &AppState, edit: DrawingSheetEdit) -> Result<(), String> {
+        let draft = &mut self.draft;
+        match edit {
+            DrawingSheetEdit::Size(standard) => {
+                draft.apply_size_choice(SheetSizeChoice::Standard(standard));
+            }
+            DrawingSheetEdit::CustomSize {
+                width_um,
+                height_um,
+            } => {
+                if draft.size != SheetSizeChoice::Custom {
+                    draft.apply_size_choice(SheetSizeChoice::Custom);
+                }
+                (draft.width_um, draft.height_um) = (width_um, height_um);
+                // The edges are typed as the sheet is drawn, so a width under
+                // its height stands the sheet upright, and one over it lays
+                // the sheet down.
+                if width_um != height_um {
+                    draft.orientation = if width_um > height_um {
+                        SchematicPageOrientation::Landscape
+                    } else {
+                        SchematicPageOrientation::Portrait
+                    };
+                }
+            }
+            DrawingSheetEdit::CustomSizeName(name) => {
+                if draft.size != SheetSizeChoice::Custom {
+                    return Err("Only a one-off custom size is named here.".to_owned());
+                }
+                draft.custom_name = name;
+            }
+            DrawingSheetEdit::Preset(preset) => {
+                let preset = *preset;
+                let mut replacement = DrawingSheetDraft::from_format(&preset.format);
+                replacement.title_fields = std::mem::take(&mut draft.title_fields);
+                replacement.size = SheetSizeChoice::CapturedPreset {
+                    id: preset.id,
+                    name: preset.name,
+                    scope: preset.scope,
+                };
+                replacement.enforce_managed_authority(&self.baseline);
+                *draft = replacement;
+            }
+            DrawingSheetEdit::SaveCustomSize(scope) => {
+                if draft.size != SheetSizeChoice::Custom {
+                    return Err(
+                        "Only a one-off custom size can be saved to custom sizes.".to_owned()
+                    );
+                }
+                draft.save_custom_preset = true;
+                draft.custom_preset_scope = scope;
+            }
+            DrawingSheetEdit::Orientation(orientation) => draft.set_orientation(orientation),
+            DrawingSheetEdit::FollowProjectDefault(true) => {
+                let mut replacement = DrawingSheetDraft::from_format(&self.project_default);
+                replacement.inheritance = DrawingSheetInheritance::ProjectDefault;
+                replacement.title_fields = std::mem::take(&mut draft.title_fields);
+                replacement.enforce_managed_authority(&self.baseline);
+                *draft = replacement;
+            }
+            DrawingSheetEdit::FollowProjectDefault(false) => {
+                draft.inheritance = DrawingSheetInheritance::Explicit;
+            }
+            DrawingSheetEdit::Frame(border) => draft.set_border_template(border),
+            DrawingSheetEdit::Zones(on) => {
+                if on && !draft.standard_frame() {
+                    return Err("A sheet without a frame has no zones.".to_owned());
+                }
+                draft.zone_mode = if on {
+                    DrawingSheetZoneMode::Automatic
+                } else {
+                    DrawingSheetZoneMode::None
+                };
+            }
+            DrawingSheetEdit::CentringMarks(on) => {
+                if on && !draft.standard_frame() {
+                    return Err("A sheet without a frame has no centring marks.".to_owned());
+                }
+                draft.centring_marks = on;
+            }
+            DrawingSheetEdit::BindingMargin(on) => {
+                if on
+                    && !(draft.standard_frame()
+                        && draft.frame_convention() == DrawingSheetFrameConvention::AsmeY141)
+                {
+                    return Err(
+                        "Only a framed ASME Y14.1 sheet takes ASME Y14.1's binding margin."
+                            .to_owned(),
+                    );
+                }
+                draft.binding_margin = on;
+            }
+            DrawingSheetEdit::Units(unit) => draft.display_unit = unit,
+            DrawingSheetEdit::TitleBlock(template) => draft.title_block = template,
+            DrawingSheetEdit::BoxShown(field, shown) => {
+                refuse_organization_locked(draft, field)?;
+                if !shown && draft.title_block.requires_field(field) {
+                    return Err(draft.title_block.required_field_note().to_owned());
+                }
+                draft.title_fields.entry(field).or_default().visible = shown;
+            }
+            DrawingSheetEdit::TitleField(field, value) => {
+                refuse_organization_locked(draft, field)?;
+                self.stage_title_value(state, field, value);
+            }
+            DrawingSheetEdit::Status(status) => {
+                self.stage_document_control(state, |control| control.status = status);
+            }
+            DrawingSheetEdit::ChangeReference(reference) => {
+                self.stage_document_control(state, |control| {
+                    control.change_reference = reference;
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Stage one title-block value where its field keeps it: the revision
+    /// and its date in the document control, the values every sheet shares
+    /// on the project, and the rest on this sheet.
+    fn stage_title_value(
+        &mut self,
+        state: &AppState,
+        field: DrawingSheetTitleFieldId,
+        value: String,
+    ) {
+        match field {
+            DrawingSheetTitleFieldId::Revision => {
+                self.stage_document_control(state, |control| control.revision = value);
+            }
+            DrawingSheetTitleFieldId::Date => {
+                self.stage_document_control(state, |control| control.revision_date_utc = value);
+            }
+            _ if field.is_project_owned() => {
+                // Every project-owned value staged is published, so the ones
+                // not being edited are staged as they stand, including a
+                // value an older build left on the sheet itself.
+                let mut values = state
+                    .workspace
+                    .content
+                    .design_management
+                    .drawing_sheet_settings()
+                    .title_block_field_values
+                    .clone();
+                values.insert(field, value);
+                for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
+                    let staged = values.entry(id).or_default();
+                    if id != field
+                        && staged.is_empty()
+                        && let Some(legacy) = self.draft.title_fields.get(&id)
+                    {
+                        staged.clone_from(&legacy.value);
+                    }
+                    self.draft
+                        .title_fields
+                        .entry(id)
+                        .or_default()
+                        .value
+                        .clone_from(staged);
+                }
+                self.staged_project_title_values = Some(values);
+            }
+            _ => {
+                if let Some(authored) = self.draft.title_fields.get_mut(&field) {
+                    authored.value = value;
+                }
+            }
+        }
+    }
+
+    /// Stage the project's document control with one change made to it.
+    fn stage_document_control(
+        &mut self,
+        state: &AppState,
+        change: impl FnOnce(&mut DrawingSheetDocumentControl),
+    ) {
+        let mut control = state
             .workspace
             .content
             .design_management
             .drawing_sheet_settings()
-            .default_format
-            .clone(),
-        authority: Some(DrawingSheetAuthority {
-            edit: crate::workbench::app::SchematicEditAuthority::capture(state),
-            cell_view_key,
-            design_management_revision: state.workspace.content.design_management.revision(),
-            personal_preferences_digest: Some(
-                state
-                    .ui
-                    .preferences
-                    .drawing_sheet_personal_preferences()
-                    .semantic_digest(),
-            ),
-            governed,
-        }),
-        baseline: draft.clone(),
-        last_valid_format: format,
-        draft,
-        ..DrawingSheetSetupState::default()
-    };
-    true
+            .document_control
+            .clone();
+        change(&mut control);
+        self.staged_document_control = Some(control);
+    }
+
+    /// Validate the draft whole and publish it as one undo entry.
+    fn commit(self, state: &mut AppState) -> Result<String, String> {
+        let mut draft = self.draft.clone();
+        draft.enforce_managed_authority(&self.baseline);
+        let format = draft.validate()?;
+        match &self.governed {
+            Some(governed) => apply_governed_sheet_edit(state, &self, governed, format),
+            None => apply_first_sheet_edit(state, &self, format),
+        }
+    }
+}
+
+/// Refuse an edit to `field` when the organization's block on the sheet
+/// fixes it.
+fn refuse_organization_locked(
+    draft: &DrawingSheetDraft,
+    field: DrawingSheetTitleFieldId,
+) -> Result<(), String> {
+    let locked = draft.title_block == DrawingSheetTitleBlockTemplate::OrganizationManaged
+        && draft
+            .managed_title_template
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.locks_field(field));
+    if locked {
+        return Err(format!(
+            "The organization-managed {} value cannot be edited.",
+            field.display_label().to_lowercase()
+        ));
+    }
+    Ok(())
 }
 
 /// The paper every other sheet of the active schematic is drawn on: a sheet
@@ -233,703 +412,170 @@ pub(crate) fn mixed_size_advisory(
     .then_some(DRAWING_SHEET_MIXED_SIZES_ADVISORY)
 }
 
-pub(crate) fn validate_drawing_sheet_authority(
-    state: &AppState,
-    authority: &DrawingSheetAuthority,
-) -> Result<(), String> {
-    if state.workspace.content.active_key() != authority.cell_view_key {
-        return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
-    }
-    authority.edit.validate(state, "Page Setup")?;
-    if state.workspace.content.design_management.revision() != authority.design_management_revision
-    {
-        return Err(
-            "Drawing-sheet project policy changed. Close and reopen this workflow.".to_owned(),
-        );
-    }
-    if authority
-        .personal_preferences_digest
-        .is_some_and(|expected| {
-            state
-                .ui
-                .preferences
-                .drawing_sheet_personal_preferences()
-                .semantic_digest()
-                != expected
-        })
-    {
-        return Err(
-            "Personal custom sheet sizes changed. Close and reopen Page Setup before applying."
-                .to_owned(),
-        );
-    }
-    let Some(governed) = &authority.governed else {
-        let active_governed_sheet = state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&state.workspace.content.active_key())
-            .and_then(|catalog| catalog.active_sheet_id());
-        return if active_governed_sheet.is_none() {
-            Ok(())
-        } else {
-            Err(
-                "The active schematic acquired governed sheet authority. Close and reopen Page Setup."
-                    .to_owned(),
-            )
-        };
+/// The format `transaction` writes to its sheet: the organization's block
+/// where the sheet carries one, the project's values moved to the project,
+/// following the project default only while it still matches it, and on a
+/// saved custom size where it takes or saves one.
+fn edited_sheet_format(
+    candidate: &mut crate::state::DesignManagementCatalog,
+    personal: &mut crate::workbench::DrawingSheetPersonalPreferences,
+    transaction: &SheetTransaction,
+    format: SchematicSheetFormat,
+    target_authority: Option<&SchematicSheetFormat>,
+) -> Result<SchematicSheetFormat, String> {
+    let mut sheet_format = match target_authority {
+        Some(authority) => enforce_managed_format_authority(format, authority)?,
+        None => format,
     };
-    if state.workspace.content.active_key() != governed.cell_view_key {
-        return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
-    }
-    let catalog = state
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(&governed.cell_view_key)
-        .ok_or_else(|| {
-            "The governed sheet catalog changed. Close and reopen Page Setup.".to_owned()
-        })?;
-    if catalog.revision() != governed.catalog_revision
-        || catalog.active_sheet_id() != Some(governed.sheet_id)
-        || catalog
-            .find(governed.sheet_id)
-            .is_none_or(|sheet| sheet.revision() != governed.sheet_revision)
-    {
-        return Err("The governed active sheet changed. Close and reopen Page Setup.".to_owned());
-    }
-    Ok(())
-}
-
-/// Rebase only the authority captured around an intentionally nested support
-/// workflow. The Page Setup working draft and its opened-value baseline stay
-/// byte-for-byte intact; current target title fields are still preserved by
-/// the eventual atomic apply.
-pub(crate) fn resume_drawing_sheet_setup_after_support(state: &mut AppState) -> Result<(), String> {
-    let previous = state
-        .dialogs
-        .drawing_sheet_setup
-        .authority
-        .clone()
-        .ok_or_else(|| "Page Setup lost its suspended authority.".to_owned())?;
-    if state.workspace.content.active_key() != previous.cell_view_key {
-        return Err(
-            "The active cell/view changed while Page Setup was suspended. Close and reopen it."
-                .to_owned(),
-        );
-    }
-    let governed = if let Some(previous_governed) = previous.governed {
-        let catalog = state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&previous_governed.cell_view_key)
-            .ok_or_else(|| {
-                "The governed sheet catalog changed while Page Setup was suspended.".to_owned()
-            })?;
-        if catalog.active_sheet_id() != Some(previous_governed.sheet_id) {
-            return Err(
-                "The active sheet changed while Page Setup was suspended. Close and reopen it."
-                    .to_owned(),
-            );
-        }
-        let sheet = catalog.find(previous_governed.sheet_id).ok_or_else(|| {
-            "The active sheet was removed while Page Setup was suspended.".to_owned()
-        })?;
-        Some(GovernedDrawingSheetAuthority {
-            cell_view_key: previous_governed.cell_view_key,
-            catalog_revision: catalog.revision(),
-            sheet_id: sheet.id(),
-            sheet_revision: sheet.revision(),
-        })
-    } else {
-        None
-    };
-    let personal = state.ui.preferences.drawing_sheet_personal_preferences();
-    let mut available_presets = state
-        .workspace
-        .content
-        .design_management
-        .drawing_sheet_settings()
-        .presets
-        .clone();
-    available_presets.extend(personal.presets.clone());
-    let authority = DrawingSheetAuthority {
-        edit: crate::workbench::app::SchematicEditAuthority::capture(state),
-        cell_view_key: previous.cell_view_key,
-        design_management_revision: state.workspace.content.design_management.revision(),
-        personal_preferences_digest: Some(personal.semantic_digest()),
-        governed,
-    };
-    let setup = &mut state.dialogs.drawing_sheet_setup;
-    setup.authority = Some(authority);
-    setup.available_presets = available_presets;
-    setup.project_default = state
-        .workspace
-        .content
-        .design_management
-        .drawing_sheet_settings()
-        .default_format
-        .clone();
-    setup.authority_error = None;
-    setup.support_suspended = false;
-    setup.open = true;
-    Ok(())
-}
-
-pub(crate) fn apply_drawing_sheet_setup(state: &mut AppState) -> Result<String, String> {
-    let authority = state
-        .dialogs
-        .drawing_sheet_setup
-        .authority
-        .clone()
-        .ok_or_else(|| "Page Setup has no active sheet authority.".to_owned())?;
-    validate_drawing_sheet_authority(state, &authority)?;
-    let mut draft = state.dialogs.drawing_sheet_setup.draft.clone();
-    let managed_authority = state.dialogs.drawing_sheet_setup.baseline.clone();
-    draft.enforce_managed_authority(&managed_authority);
-    let validated = draft.validate().map_err(|problems| {
-        problems
-            .into_iter()
-            .map(|problem| problem.message)
-            .collect::<Vec<_>>()
-            .join(" ")
-    })?;
-
-    let outcome = if let Some(governed) = &authority.governed {
-        apply_governed_sheet_setup(state, governed, validated)?
-    } else {
-        apply_legacy_sheet_setup(state, validated)?
-    };
-    state.dialogs.drawing_sheet_setup.close();
-    Ok(outcome)
-}
-
-/// One property of the active sheet, as the design inspector edits it in
-/// place.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DrawingSheetEdit {
-    Size(DrawingSheetStandard),
-    /// A one-off size the standard list does not hold, its edges as the sheet
-    /// stands in its orientation. It keeps the frame of the size it started
-    /// from.
-    CustomSize {
-        width_um: u64,
-        height_um: u64,
-    },
-    /// The name a one-off custom size is known and saved by.
-    CustomSizeName(String),
-    /// A saved custom size, the project's or the person's own. A personal
-    /// one is copied into the project when the sheet takes it.
-    Preset(DrawingSheetPreset),
-    /// Save the sheet's one-off custom size to the project's custom sizes or
-    /// the person's own, and put the sheet on the saved size.
-    SaveCustomSize(DrawingSheetPresetScope),
-    Orientation(SchematicPageOrientation),
-    /// Take the project default's format and follow it, or keep the format
-    /// the sheet has as its own.
-    FollowProjectDefault(bool),
-    /// The frame of the sheet's standard, or none.
-    Frame(DrawingSheetBorderTemplate),
-    /// The standard's zones along the frame, or none.
-    Zones(bool),
-    /// ISO 5457's centring marks, or ASME Y14.1's microfilm arrows.
-    CentringMarks(bool),
-    /// ASME Y14.1 4.1.3's binding margin.
-    BindingMargin(bool),
-    /// The unit the sheet's sizes are stated in.
-    Units(DrawingSheetDisplayUnit),
-    TitleBlock(DrawingSheetTitleBlockTemplate),
-    /// Whether the title block shows a box its form leaves optional.
-    BoxShown(DrawingSheetTitleFieldId, bool),
-    /// A typed title-block value, kept where its field keeps it: on this
-    /// sheet, on the project for the values every sheet shares, or in the
-    /// document control for the revision and its date.
-    TitleField(DrawingSheetTitleFieldId, String),
-    /// Where the document stands in its release.
-    Status(DrawingSheetReleaseStatus),
-    /// The change order, ticket or release record the document's revision
-    /// answers to.
-    ChangeReference(String),
-}
-
-/// Apply one property of the active sheet without showing Page Setup.
-///
-/// The edit goes through Page Setup's own draft, validation and atomic
-/// publication, with the same undo entry its Apply makes, so a property
-/// changed in the inspector and one changed in the dialog cannot disagree.
-/// No part of the dialog is left open, whether the edit lands or is refused.
-pub(crate) fn apply_drawing_sheet_edit(
-    state: &mut AppState,
-    edit: DrawingSheetEdit,
-) -> Result<String, String> {
-    if state.dialogs.drawing_sheet_setup.open {
-        return Err("Apply or cancel Page Setup before editing the sheet here.".to_owned());
-    }
-    if !open_drawing_sheet_setup_for_state(state) {
-        return Err("The sheet can only be edited on a writable schematic.".to_owned());
-    }
-    let outcome = stage_edit(state, edit).and_then(|()| apply_drawing_sheet_setup(state));
-    state.dialogs.drawing_sheet_setup.close();
-    outcome
-}
-
-/// Stage `edit` in the open draft, or refuse it in words the panel shows.
-fn stage_edit(state: &mut AppState, edit: DrawingSheetEdit) -> Result<(), String> {
-    let setup = &mut state.dialogs.drawing_sheet_setup;
-    let draft = &mut setup.draft;
-    match edit {
-        DrawingSheetEdit::Size(standard) => {
-            draft.apply_size_choice(SheetSizeChoice::Standard(standard));
-        }
-        DrawingSheetEdit::CustomSize {
-            width_um,
-            height_um,
-        } => {
-            if draft.size != SheetSizeChoice::Custom {
-                draft.apply_size_choice(SheetSizeChoice::Custom);
-            }
-            draft.width = format_um(width_um, draft.display_unit);
-            draft.height = format_um(height_um, draft.display_unit);
-            // The edges are typed as the sheet is drawn, so a width under
-            // its height stands the sheet upright, and one over it lays the
-            // sheet down.
-            if width_um != height_um {
-                draft.orientation = if width_um > height_um {
-                    SchematicPageOrientation::Landscape
-                } else {
-                    SchematicPageOrientation::Portrait
-                };
-            }
-        }
-        DrawingSheetEdit::CustomSizeName(name) => {
-            if draft.size != SheetSizeChoice::Custom {
-                return Err("Only a one-off custom size is named here.".to_owned());
-            }
-            draft.custom_name = name;
-        }
-        DrawingSheetEdit::Preset(preset) => {
-            let mut replacement = DrawingSheetDraft::from_format(&preset.format);
-            replacement.scope = draft.scope;
-            replacement.title_fields = std::mem::take(&mut draft.title_fields);
-            replacement.size = SheetSizeChoice::CapturedPreset {
-                id: preset.id,
-                name: preset.name,
-                scope: preset.scope,
-            };
-            replacement.enforce_managed_authority(&setup.baseline);
-            *draft = replacement;
-        }
-        DrawingSheetEdit::SaveCustomSize(scope) => {
-            if draft.size != SheetSizeChoice::Custom {
-                return Err("Only a one-off custom size can be saved to custom sizes.".to_owned());
-            }
-            draft.save_custom_preset = true;
-            draft.custom_preset_scope = scope;
-        }
-        DrawingSheetEdit::Orientation(orientation) => draft.set_orientation(orientation),
-        DrawingSheetEdit::FollowProjectDefault(true) => {
-            let mut replacement = DrawingSheetDraft::from_format(&setup.project_default);
-            replacement.inheritance = DrawingSheetInheritance::ProjectDefault;
-            replacement.scope = draft.scope;
-            replacement.title_fields = std::mem::take(&mut draft.title_fields);
-            replacement.enforce_managed_authority(&setup.baseline);
-            *draft = replacement;
-        }
-        DrawingSheetEdit::FollowProjectDefault(false) => {
-            draft.inheritance = DrawingSheetInheritance::Explicit;
-        }
-        DrawingSheetEdit::Frame(border) => draft.set_border_template(match border {
-            DrawingSheetBorderTemplate::Standard => BorderTemplateChoice::Standard,
-            DrawingSheetBorderTemplate::None => BorderTemplateChoice::None,
-        }),
-        DrawingSheetEdit::Zones(on) => {
-            if on && !draft.standard_frame() {
-                return Err("A sheet without a frame has no zones.".to_owned());
-            }
-            draft.zone_mode = if on {
-                ZoneModeChoice::Automatic
-            } else {
-                ZoneModeChoice::None
-            };
-        }
-        DrawingSheetEdit::CentringMarks(on) => {
-            if on && !draft.standard_frame() {
-                return Err("A sheet without a frame has no centring marks.".to_owned());
-            }
-            draft.centring_marks = on;
-        }
-        DrawingSheetEdit::BindingMargin(on) => {
-            if on
-                && !(draft.standard_frame()
-                    && draft.frame_convention() == DrawingSheetFrameConvention::AsmeY141)
-            {
-                return Err(
-                    "Only a framed ASME Y14.1 sheet takes ASME Y14.1's binding margin.".to_owned(),
-                );
-            }
-            draft.binding_margin = on;
-        }
-        DrawingSheetEdit::Units(unit) => draft.set_display_unit(match unit {
-            DrawingSheetDisplayUnit::Millimetres => SheetDisplayUnit::Millimetres,
-            DrawingSheetDisplayUnit::Centimetres => SheetDisplayUnit::Centimetres,
-            DrawingSheetDisplayUnit::Inches => SheetDisplayUnit::Inches,
-        })?,
-        DrawingSheetEdit::TitleBlock(template) => {
-            draft.set_title_block_template(title_template_from_model(template));
-        }
-        DrawingSheetEdit::BoxShown(field, shown) => {
-            refuse_organization_locked(draft, field)?;
-            let template = draft.title_block_template();
-            if !shown && template.requires_field(field) {
-                return Err(template.required_field_note().to_owned());
-            }
-            draft.title_fields.entry(field).or_default().visible = shown;
-        }
-        DrawingSheetEdit::TitleField(field, value) => {
-            refuse_organization_locked(draft, field)?;
-            stage_title_value(state, field, value);
-        }
-        DrawingSheetEdit::Status(status) => {
-            stage_document_control(state, |control| control.status = status);
-        }
-        DrawingSheetEdit::ChangeReference(reference) => {
-            stage_document_control(state, |control| control.change_reference = reference);
-        }
-    }
-    Ok(())
-}
-
-/// Refuse an edit to `field` when the organization's block on the sheet
-/// fixes it.
-fn refuse_organization_locked(
-    draft: &DrawingSheetDraft,
-    field: DrawingSheetTitleFieldId,
-) -> Result<(), String> {
-    let locked = draft.title_block == TitleBlockTemplateChoice::Organization
-        && draft
-            .managed_title_template
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.locks_field(field));
-    if locked {
-        return Err(format!(
-            "The organization-managed {} value cannot be edited.",
-            field.display_label().to_lowercase()
-        ));
-    }
-    Ok(())
-}
-
-/// Stage one title-block value in the open Page Setup transaction, where the
-/// Title block fields dialog would stage it: the revision and its date in the
-/// document control, the values every sheet shares on the project, and the
-/// rest on this sheet.
-fn stage_title_value(state: &mut AppState, field: DrawingSheetTitleFieldId, value: String) {
-    match field {
-        DrawingSheetTitleFieldId::Revision => {
-            stage_document_control(state, |control| control.revision = value);
-        }
-        DrawingSheetTitleFieldId::Date => {
-            stage_document_control(state, |control| control.revision_date_utc = value);
-        }
-        _ if field.is_project_owned() => {
-            // Page Setup publishes every project-owned value it stages, so
-            // the ones not being edited are staged as they stand, including
-            // a value an older build left on the sheet itself.
-            let mut values = state
-                .workspace
-                .content
-                .design_management
-                .drawing_sheet_settings()
-                .title_block_field_values
-                .clone();
-            values.insert(field, value);
-            let setup = &mut state.dialogs.drawing_sheet_setup;
-            for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
-                let staged = values.entry(id).or_default();
-                if id != field
-                    && staged.is_empty()
-                    && let Some(legacy) = setup.draft.title_fields.get(&id)
-                {
-                    staged.clone_from(&legacy.value);
-                }
-                setup
-                    .draft
-                    .title_fields
-                    .entry(id)
-                    .or_default()
-                    .value
-                    .clone_from(staged);
-            }
-            setup.staged_project_title_values = Some(values);
-        }
-        _ => {
-            if let Some(authored) = state
-                .dialogs
-                .drawing_sheet_setup
-                .draft
-                .title_fields
-                .get_mut(&field)
-            {
-                authored.value = value;
-            }
-        }
-    }
-}
-
-/// Stage the project's document control with one change made to it.
-fn stage_document_control(
-    state: &mut AppState,
-    change: impl FnOnce(&mut DrawingSheetDocumentControl),
-) {
-    let mut control = state
-        .workspace
-        .content
-        .design_management
-        .drawing_sheet_settings()
-        .document_control
-        .clone();
-    change(&mut control);
-    state.dialogs.drawing_sheet_setup.staged_document_control = Some(control);
-}
-
-fn apply_governed_sheet_setup(
-    state: &mut AppState,
-    authority: &GovernedDrawingSheetAuthority,
-    validated: ValidatedDrawingSheetDraft,
-) -> Result<String, String> {
-    let transaction = state.dialogs.drawing_sheet_setup.clone();
-    let scope = transaction.draft.scope;
-    let before = (*state.workspace.content.design_management).clone();
-    let source_catalog = before
-        .sheet_catalog(&authority.cell_view_key)
-        .ok_or_else(|| "The governed sheet catalog is unavailable.".to_owned())?;
-    let targets = match scope {
-        PageSetupScope::CurrentSheet | PageSetupScope::CurrentSheetAndDefault => {
-            vec![(authority.sheet_id, authority.sheet_revision)]
-        }
-        PageSetupScope::Document => source_catalog
-            .sheets()
-            .iter()
-            .map(|sheet| (sheet.id(), sheet.revision()))
-            .collect(),
-    };
-    let selected_sheet_ids = targets
-        .iter()
-        .map(|(sheet_id, _)| *sheet_id)
-        .collect::<Vec<_>>();
-    let mut candidate = before.clone();
-    let personal_before = state.ui.preferences.drawing_sheet_personal_preferences();
-    let mut personal = personal_before.clone();
-    let mut sheet_format = validated.page_format;
-    if scope != PageSetupScope::Document {
-        let target_authority = source_catalog
-            .find(authority.sheet_id)
-            .map(|sheet| sheet.page_format())
-            .ok_or_else(|| "The governed active sheet is unavailable.".to_owned())?;
-        sheet_format = enforce_managed_format_authority(sheet_format, target_authority)?;
-    }
-    publish_staged_document_control(&mut candidate, transaction.staged_document_control.as_ref())?;
+    publish_staged_document_control(candidate, transaction.staged_document_control.as_ref())?;
     migrate_and_canonicalize_project_title_values(
-        &mut candidate,
+        candidate,
         &mut sheet_format,
-        transaction.staged_project_title_values.is_some(),
+        target_authority.is_none() || transaction.staged_project_title_values.is_some(),
     )?;
-    if scope != PageSetupScope::CurrentSheet
-        || (sheet_format.inheritance != crate::state::DrawingSheetInheritance::Explicit
-            && !same_setup_ignoring_inheritance(
-                &sheet_format,
-                candidate.drawing_sheet_settings().default_format.clone(),
-            )?)
+    if sheet_format.inheritance != DrawingSheetInheritance::Explicit
+        && !same_setup_ignoring_inheritance(
+            &sheet_format,
+            candidate.drawing_sheet_settings().default_format.clone(),
+        )?
     {
         sheet_format = sheet_format
-            .try_update(|draft| {
-                draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
-            })
+            .try_update(|draft| draft.inheritance = DrawingSheetInheritance::Explicit)
             .map_err(|error| error.to_string())?;
     }
-
-    let mut preset_saved = false;
-    let mut personal_saved = false;
     capture_selected_personal_preset(
-        &mut candidate,
-        &personal,
+        candidate,
+        personal,
         &transaction.draft.size,
         &mut sheet_format,
     )?;
     if transaction.draft.save_custom_preset {
-        let result = save_one_off_custom_preset(
-            &mut candidate,
-            &mut personal,
+        save_one_off_custom_preset(
+            candidate,
+            personal,
             transaction.draft.custom_preset_scope,
             transaction.draft.custom_name.trim(),
             &mut sheet_format,
         )?;
-        preset_saved = true;
-        personal_saved = result;
     }
-    remember_explicit_format(&mut candidate, &sheet_format)?;
-    let mut personal_candidate = state.ui.preferences.clone();
-    if personal != personal_before {
-        personal_candidate.set_drawing_sheet_personal_preferences(personal)?;
-    }
+    remember_explicit_format(candidate, &sheet_format)?;
+    Ok(sheet_format)
+}
 
-    let mut default_changed = false;
-    if scope == PageSetupScope::CurrentSheetAndDefault {
-        let default_authority = candidate.drawing_sheet_settings().default_format.clone();
-        let default_format = enforce_managed_format_authority(
-            sheet_format
-                .as_drawing_sheet_default()
-                .try_update(|draft| {
-                    draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
-                })
-                .map_err(|error| error.to_string())?,
-            &default_authority,
-        )?;
-        if candidate.drawing_sheet_settings().default_format != default_format {
-            let revision = candidate.revision();
-            candidate
-                .update_drawing_sheet_default(revision, default_format)
-                .map_err(|error| error.to_string())?;
-            default_changed = true;
-        }
+fn apply_governed_sheet_edit(
+    state: &mut AppState,
+    transaction: &SheetTransaction,
+    governed: &GovernedSheet,
+    format: SchematicSheetFormat,
+) -> Result<String, String> {
+    let before = (*state.workspace.content.design_management).clone();
+    let target_authority = before
+        .sheet_catalog(&governed.cell_view_key)
+        .and_then(|catalog| catalog.find(governed.sheet_id))
+        .map(|sheet| sheet.page_format().clone())
+        .ok_or_else(|| "The governed active sheet is unavailable.".to_owned())?;
+    let mut candidate = before.clone();
+    let personal_before = state.ui.preferences.drawing_sheet_personal_preferences();
+    let mut personal = personal_before.clone();
+    let sheet_format = edited_sheet_format(
+        &mut candidate,
+        &mut personal,
+        transaction,
+        format,
+        Some(&target_authority),
+    )?;
+    let unchanged = target_authority == sheet_format
+        || inherited_sheet_owned_state_matches(&target_authority, &sheet_format);
+    let project_settings_changed =
+        candidate.drawing_sheet_settings() != before.drawing_sheet_settings();
+    if unchanged && !project_settings_changed {
+        return Ok("The sheet already had that format.".to_owned());
     }
+    if !unchanged {
+        candidate
+            .sheet_catalog_mut(&governed.cell_view_key)
+            .ok_or_else(|| "The governed sheet catalog is unavailable.".to_owned())?
+            .update_sheet_page_format(
+                governed.sheet_id,
+                governed.sheet_revision,
+                sheet_format.clone(),
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    let (applied, unchanged_ids) = if unchanged {
+        (Vec::new(), vec![governed.sheet_id])
+    } else {
+        (vec![governed.sheet_id], Vec::new())
+    };
+    record_drawing_sheet_transaction(
+        &mut candidate,
+        &governed.cell_view_key,
+        &sheet_format,
+        vec![governed.sheet_id],
+        applied,
+        unchanged_ids,
+        transaction.draft.save_custom_preset,
+        project_settings_changed,
+    )?;
+    commit_sheet_candidate(state, before, candidate, personal_before, personal)?;
+    Ok(format!("Sheet {} changed.", transaction.sheet_name))
+}
 
-    let mut changed = 0_usize;
-    let mut applied_sheet_ids = Vec::new();
-    let mut unchanged_sheet_ids = Vec::new();
-    let mut skipped = Vec::new();
-    {
-        let catalog = candidate
-            .sheet_catalog_mut(&authority.cell_view_key)
-            .ok_or_else(|| "The governed sheet catalog is unavailable.".to_owned())?;
-        for (sheet_id, sheet_revision) in targets {
-            let target_format = catalog
-                .find(sheet_id)
-                .map(|sheet| sheet.page_format().clone())
-                .ok_or_else(|| "A selected drawing sheet no longer exists.".to_owned())?;
-            if scope == PageSetupScope::Document && format_is_organization_managed(&target_format) {
-                let name = catalog
-                    .find(sheet_id)
-                    .map_or_else(|| sheet_id.to_string(), |sheet| sheet.name().to_owned());
-                skipped.push(DrawingSheetTransactionSkip {
-                    sheet_id,
-                    sheet_name: name,
-                    reason: "Organization-managed drawing-sheet format".to_owned(),
-                });
-                continue;
-            }
-            let applied_format = if scope == PageSetupScope::Document {
-                // A document-wide format operation must retain the authored
-                // identity and responsibility fields of every target sheet.
-                sheet_format.with_target_sheet_title_fields(&target_format)
-            } else {
-                // Current-sheet Page Setup owns the visible title-field edits
-                // in its draft as well as the physical format.
-                sheet_format.clone()
-            };
-            let already_matches = catalog.find(sheet_id).is_some_and(|sheet| {
-                sheet.page_format() == &applied_format
-                    || inherited_sheet_owned_state_matches(sheet.page_format(), &applied_format)
-            });
-            if already_matches {
-                unchanged_sheet_ids.push(sheet_id);
-                continue;
-            }
-            catalog
-                .update_sheet_page_format(sheet_id, sheet_revision, applied_format)
-                .map_err(|error| error.to_string())?;
-            changed += 1;
-            applied_sheet_ids.push(sheet_id);
-        }
+/// The first edit to a schematic's sheet gives it its governed sheet.
+fn apply_first_sheet_edit(
+    state: &mut AppState,
+    transaction: &SheetTransaction,
+    format: SchematicSheetFormat,
+) -> Result<String, String> {
+    let before = (*state.workspace.content.design_management).clone();
+    let mut candidate = before.clone();
+    let personal_before = state.ui.preferences.drawing_sheet_personal_preferences();
+    let mut personal = personal_before.clone();
+    let owner_key = state.workspace.content.active_key();
+    let sheet_id = candidate
+        .bootstrap_for_cell_view(
+            &owner_key,
+            transaction.sheet_name.clone(),
+            all_stable_object_ids(&state.schematic),
+        )
+        .map_err(|error| error.to_string())?;
+    let sheet_format =
+        edited_sheet_format(&mut candidate, &mut personal, transaction, format, None)?;
+    let (sheet_revision, current_page_format) = candidate
+        .sheet_catalog(&owner_key)
+        .and_then(|catalog| catalog.find(sheet_id))
+        .map(|sheet| (sheet.revision(), sheet.page_format().clone()))
+        .ok_or_else(|| "The newly governed drawing sheet is unavailable.".to_owned())?;
+    if current_page_format != sheet_format {
+        candidate
+            .sheet_catalog_mut(&owner_key)
+            .ok_or_else(|| "The newly governed drawing-sheet catalog is unavailable.".to_owned())?
+            .update_sheet_page_format(sheet_id, sheet_revision, sheet_format.clone())
+            .map_err(|error| error.to_string())?;
     }
     let project_settings_changed =
         candidate.drawing_sheet_settings() != before.drawing_sheet_settings();
-    if changed == 0 && !project_settings_changed {
-        if skipped.is_empty() {
-            return Ok("The drawing-sheet setup already matched the authored sheet.".to_owned());
-        }
-        let names = skipped
-            .iter()
-            .map(|entry| entry.sheet_name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        record_drawing_sheet_transaction(
-            &mut candidate,
-            DrawingSheetTransactionKind::PageSetup,
-            &authority.cell_view_key,
-            &sheet_format,
-            selected_sheet_ids,
-            applied_sheet_ids,
-            unchanged_sheet_ids,
-            skipped,
-            false,
-            false,
-            false,
-        )?;
-        commit_governed_page_setup_candidate(state, before, candidate, personal_candidate)?;
-        return Ok(format!(
-            "No sheets changed. Organization-managed sheets were preserved and recorded: {names}."
-        ));
-    }
-
     record_drawing_sheet_transaction(
         &mut candidate,
-        DrawingSheetTransactionKind::PageSetup,
-        &authority.cell_view_key,
+        &owner_key,
         &sheet_format,
-        selected_sheet_ids,
-        applied_sheet_ids,
-        unchanged_sheet_ids,
-        skipped.clone(),
-        default_changed,
-        preset_saved,
+        vec![sheet_id],
+        vec![sheet_id],
+        Vec::new(),
+        transaction.draft.save_custom_preset,
         project_settings_changed,
     )?;
-    candidate.validate().map_err(|error| error.to_string())?;
-    commit_governed_page_setup_candidate(state, before, candidate, personal_candidate)?;
-    let mut effects = vec![format!(
-        "{changed} {}",
-        if changed == 1 { "sheet" } else { "sheets" }
-    )];
-    if default_changed {
-        effects.push("project default".to_owned());
-    }
-    if preset_saved {
-        effects.push(if personal_saved {
-            "personal custom size plus a project copy".to_owned()
-        } else {
-            "project custom-size preset".to_owned()
-        });
-    } else if project_settings_changed && !default_changed {
-        effects.push("project drawing-sheet policy".to_owned());
-    }
-    if !skipped.is_empty() {
-        effects.push(format!(
-            "organization-managed sheets preserved: {}",
-            skipped
-                .iter()
-                .map(|entry| entry.sheet_name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    Ok(format!(
-        "Drawing-sheet setup applied to {}.",
-        effects.join(", ")
-    ))
+    commit_sheet_candidate(state, before, candidate, personal_before, personal)?;
+    Ok("The active schematic now has its own drawing sheet.".to_owned())
 }
 
 fn record_drawing_sheet_transaction(
     candidate: &mut crate::state::DesignManagementCatalog,
-    kind: DrawingSheetTransactionKind,
     owner_cell_view_key: &str,
     source_format: &SchematicSheetFormat,
     selected_sheet_ids: Vec<SheetId>,
     applied_sheet_ids: Vec<SheetId>,
     unchanged_sheet_ids: Vec<SheetId>,
-    skipped: Vec<DrawingSheetTransactionSkip>,
-    project_default_changed: bool,
     project_preset_saved: bool,
     project_settings_changed: bool,
 ) -> Result<(), String> {
@@ -939,7 +585,7 @@ fn record_drawing_sheet_transaction(
         .ok_or_else(|| "Drawing-sheet receipt revision space is exhausted.".to_owned())?;
     let receipt = DrawingSheetTransactionReceipt {
         catalog_revision,
-        kind,
+        kind: DrawingSheetTransactionKind::PageSetup,
         owner_cell_view_key: owner_cell_view_key.to_owned(),
         source_format_digest: source_format
             .content_digest()
@@ -947,8 +593,8 @@ fn record_drawing_sheet_transaction(
         selected_sheet_ids,
         applied_sheet_ids,
         unchanged_sheet_ids,
-        skipped,
-        project_default_changed,
+        skipped: Vec::new(),
+        project_default_changed: false,
         project_preset_saved,
         project_settings_changed,
     };
@@ -958,12 +604,18 @@ fn record_drawing_sheet_transaction(
     Ok(())
 }
 
-fn commit_governed_page_setup_candidate(
+/// Publish `candidate` and the person's custom sizes as one undo entry.
+fn commit_sheet_candidate(
     state: &mut AppState,
     before: crate::state::DesignManagementCatalog,
     candidate: crate::state::DesignManagementCatalog,
-    personal_candidate: crate::workbench::UserPreferences,
+    personal_before: crate::workbench::DrawingSheetPersonalPreferences,
+    personal: crate::workbench::DrawingSheetPersonalPreferences,
 ) -> Result<(), String> {
+    let mut preferences = state.ui.preferences.clone();
+    if personal != personal_before {
+        preferences.set_drawing_sheet_personal_preferences(personal)?;
+    }
     candidate.validate().map_err(|error| error.to_string())?;
     let schematic_tx = state.prepare_design_management_schematic_transaction(&candidate)?;
     let owner = state.workspace.content.active_schematic_reference();
@@ -984,12 +636,8 @@ fn commit_governed_page_setup_candidate(
         references: schematic_tx.references,
         committed_revision,
     });
-    state.ui.preferences = personal_candidate;
+    state.ui.preferences = preferences;
     Ok(())
-}
-
-fn format_is_organization_managed(format: &SchematicSheetFormat) -> bool {
-    format.title_block.template == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
 }
 
 fn enforce_managed_format_authority(
@@ -998,8 +646,7 @@ fn enforce_managed_format_authority(
 ) -> Result<SchematicSheetFormat, String> {
     candidate
         .try_update(|draft| {
-            if authority.title_block.template
-                == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
+            if authority.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged
             {
                 draft.title_block.template = authority.title_block.template;
             }
@@ -1020,14 +667,10 @@ fn same_setup_ignoring_inheritance(
         .fields
         .clone_from(&right.title_block.fields);
     let left = left
-        .try_update(|draft| {
-            draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
-        })
+        .try_update(|draft| draft.inheritance = DrawingSheetInheritance::Explicit)
         .map_err(|error| error.to_string())?;
     right = right
-        .try_update(|draft| {
-            draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
-        })
+        .try_update(|draft| draft.inheritance = DrawingSheetInheritance::Explicit)
         .map_err(|error| error.to_string())?;
     Ok(left == right)
 }
@@ -1041,8 +684,8 @@ fn inherited_sheet_owned_state_matches(
     left: &SchematicSheetFormat,
     right: &SchematicSheetFormat,
 ) -> bool {
-    left.inheritance == crate::state::DrawingSheetInheritance::ProjectDefault
-        && right.inheritance == crate::state::DrawingSheetInheritance::ProjectDefault
+    left.inheritance == DrawingSheetInheritance::ProjectDefault
+        && right.inheritance == DrawingSheetInheritance::ProjectDefault
         && left.title_block.fields == right.title_block.fields
 }
 
@@ -1096,28 +739,23 @@ fn preset_id_stem(name: &str) -> String {
 fn capture_selected_personal_preset(
     candidate: &mut crate::state::DesignManagementCatalog,
     personal: &crate::workbench::DrawingSheetPersonalPreferences,
-    choice: &super::draft::SheetSizeChoice,
+    choice: &SheetSizeChoice,
     sheet_format: &mut SchematicSheetFormat,
 ) -> Result<(), String> {
-    let super::draft::SheetSizeChoice::CapturedPreset {
+    let SheetSizeChoice::CapturedPreset {
         id,
-        scope: crate::state::DrawingSheetPresetScope::User,
+        scope: DrawingSheetPresetScope::User,
         ..
     } = choice
     else {
         return Ok(());
     };
-    let source = personal.find_preset(id).ok_or_else(|| {
-        format!("Personal custom size '{id}' is no longer available. Reopen Page Setup.")
-    })?;
+    let source = personal
+        .find_preset(id)
+        .ok_or_else(|| format!("Personal custom size '{id}' is no longer available."))?;
     if matches!(
         &source.format.authored_size,
-        crate::state::AuthoredDrawingSheetSize::Custom {
-            snapshot: crate::state::CustomDrawingSheetSnapshot {
-                source_preset_unavailable: true,
-                ..
-            }
-        }
+        AuthoredDrawingSheetSize::Custom { snapshot } if snapshot.source_preset_unavailable
     ) {
         return Err(format!(
             "Personal custom size '{}' has an unavailable dependency.",
@@ -1135,18 +773,30 @@ fn capture_selected_personal_preset(
 fn save_one_off_custom_preset(
     candidate: &mut crate::state::DesignManagementCatalog,
     personal: &mut crate::workbench::DrawingSheetPersonalPreferences,
-    scope: crate::state::DrawingSheetPresetScope,
+    scope: DrawingSheetPresetScope,
     name: &str,
     sheet_format: &mut SchematicSheetFormat,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     if !matches!(
         sheet_format.authored_size,
-        crate::state::AuthoredDrawingSheetSize::Custom { .. }
+        AuthoredDrawingSheetSize::Custom { .. }
     ) {
         return Err("Only a one-off custom size can be saved as a reusable preset.".to_owned());
     }
+    let named = |id: &str| {
+        sheet_format
+            .try_update(|draft| {
+                draft.inheritance = DrawingSheetInheritance::Explicit;
+                if let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size {
+                    snapshot.preset_id = Some(id.to_owned());
+                    snapshot.name = name.to_owned();
+                    snapshot.source_preset_unavailable = false;
+                }
+            })
+            .map_err(|error| error.to_string())
+    };
     match scope {
-        crate::state::DrawingSheetPresetScope::Project => {
+        DrawingSheetPresetScope::Project => {
             if candidate
                 .drawing_sheet_settings()
                 .presets
@@ -1158,31 +808,19 @@ fn save_one_off_custom_preset(
                 ));
             }
             let id = unique_preset_id(name, candidate);
-            let preset_format = sheet_format
-                .try_update(|draft| {
-                    draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
-                    if let crate::state::AuthoredDrawingSheetSize::Custom { snapshot } =
-                        &mut draft.authored_size
-                    {
-                        snapshot.preset_id = Some(id.clone());
-                        snapshot.name = name.to_owned();
-                        snapshot.source_preset_unavailable = false;
-                    }
-                })
-                .map_err(|error| error.to_string())?;
-            let preset = crate::state::DrawingSheetPreset {
+            let preset = DrawingSheetPreset {
+                format: named(&id)?.as_reusable_drawing_sheet_preset(),
                 id,
                 name: name.to_owned(),
-                scope: crate::state::DrawingSheetPresetScope::Project,
-                format: preset_format.as_reusable_drawing_sheet_preset(),
+                scope: DrawingSheetPresetScope::Project,
             };
             candidate
                 .publish_drawing_sheet_preset(candidate.revision(), preset.clone())
                 .map_err(|error| error.to_string())?;
             *sheet_format = attach_project_preset(sheet_format, &preset)?;
-            Ok(false)
+            Ok(())
         }
-        crate::state::DrawingSheetPresetScope::User => {
+        DrawingSheetPresetScope::User => {
             if personal
                 .presets
                 .iter()
@@ -1193,23 +831,11 @@ fn save_one_off_custom_preset(
                 ));
             }
             let id = unique_personal_preset_id(name, personal);
-            let format = sheet_format
-                .try_update(|draft| {
-                    draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
-                    if let crate::state::AuthoredDrawingSheetSize::Custom { snapshot } =
-                        &mut draft.authored_size
-                    {
-                        snapshot.preset_id = Some(id.clone());
-                        snapshot.name = name.to_owned();
-                        snapshot.source_preset_unavailable = false;
-                    }
-                })
-                .map_err(|error| error.to_string())?;
-            let source = crate::state::DrawingSheetPreset {
+            let source = DrawingSheetPreset {
+                format: named(&id)?.as_reusable_drawing_sheet_preset(),
                 id,
                 name: name.to_owned(),
-                scope: crate::state::DrawingSheetPresetScope::User,
-                format: format.as_reusable_drawing_sheet_preset(),
+                scope: DrawingSheetPresetScope::User,
             };
             personal.presets.push(source.clone());
             personal.validate()?;
@@ -1218,9 +844,9 @@ fn save_one_off_custom_preset(
                     candidate, &source,
                 )?;
             *sheet_format = attach_project_preset(sheet_format, &captured)?;
-            Ok(true)
+            Ok(())
         }
-        crate::state::DrawingSheetPresetScope::Organization => {
+        DrawingSheetPresetScope::Organization => {
             Err("Organization custom sizes are managed and cannot be created here.".to_owned())
         }
     }
@@ -1228,9 +854,9 @@ fn save_one_off_custom_preset(
 
 fn attach_project_preset(
     sheet_format: &SchematicSheetFormat,
-    preset: &crate::state::DrawingSheetPreset,
+    preset: &DrawingSheetPreset,
 ) -> Result<SchematicSheetFormat, String> {
-    let crate::state::AuthoredDrawingSheetSize::Custom {
+    let AuthoredDrawingSheetSize::Custom {
         snapshot: source_snapshot,
     } = &preset.format.authored_size
     else {
@@ -1241,135 +867,14 @@ fn attach_project_preset(
     };
     sheet_format
         .try_update(|draft| {
-            draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
+            draft.inheritance = DrawingSheetInheritance::Explicit;
             let mut snapshot = source_snapshot.clone();
             snapshot.preset_id = Some(preset.id.clone());
             snapshot.name.clone_from(&preset.name);
             snapshot.source_preset_unavailable = false;
-            draft.authored_size = crate::state::AuthoredDrawingSheetSize::Custom { snapshot };
+            draft.authored_size = AuthoredDrawingSheetSize::Custom { snapshot };
         })
         .map_err(|error| error.to_string())
-}
-
-fn apply_legacy_sheet_setup(
-    state: &mut AppState,
-    validated: ValidatedDrawingSheetDraft,
-) -> Result<String, String> {
-    let transaction = state.dialogs.drawing_sheet_setup.clone();
-    let before = (*state.workspace.content.design_management).clone();
-    let mut candidate = before.clone();
-    let personal_before = state.ui.preferences.drawing_sheet_personal_preferences();
-    let mut personal = personal_before.clone();
-    let owner_key = state.workspace.content.active_key();
-    let sheet_id = candidate
-        .bootstrap_for_cell_view(
-            &owner_key,
-            transaction.sheet_name.clone(),
-            all_stable_object_ids(&state.schematic),
-        )
-        .map_err(|error| error.to_string())?;
-    let mut format = validated.page_format;
-    publish_staged_document_control(&mut candidate, transaction.staged_document_control.as_ref())?;
-    migrate_and_canonicalize_project_title_values(&mut candidate, &mut format, true)?;
-    if transaction.draft.scope != PageSetupScope::CurrentSheet
-        || (format.inheritance != crate::state::DrawingSheetInheritance::Explicit
-            && !same_setup_ignoring_inheritance(
-                &format,
-                candidate.drawing_sheet_settings().default_format.clone(),
-            )?)
-    {
-        format = format
-            .try_update(|draft| {
-                draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
-            })
-            .map_err(|error| error.to_string())?;
-    }
-    capture_selected_personal_preset(
-        &mut candidate,
-        &personal,
-        &transaction.draft.size,
-        &mut format,
-    )?;
-    if transaction.draft.save_custom_preset {
-        save_one_off_custom_preset(
-            &mut candidate,
-            &mut personal,
-            transaction.draft.custom_preset_scope,
-            transaction.draft.custom_name.trim(),
-            &mut format,
-        )?;
-    }
-    remember_explicit_format(&mut candidate, &format)?;
-    let mut personal_candidate = state.ui.preferences.clone();
-    if personal != personal_before {
-        personal_candidate.set_drawing_sheet_personal_preferences(personal)?;
-    }
-    if transaction.draft.scope == PageSetupScope::CurrentSheetAndDefault {
-        let default_authority = candidate.drawing_sheet_settings().default_format.clone();
-        let default_format = enforce_managed_format_authority(
-            format
-                .as_drawing_sheet_default()
-                .try_update(|draft| {
-                    draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
-                })
-                .map_err(|error| error.to_string())?,
-            &default_authority,
-        )?;
-        let revision = candidate.revision();
-        candidate
-            .update_drawing_sheet_default(revision, default_format)
-            .map_err(|error| error.to_string())?;
-    }
-    let (sheet_revision, current_page_format) = candidate
-        .sheet_catalog(&owner_key)
-        .and_then(|catalog| catalog.find(sheet_id))
-        .map(|sheet| (sheet.revision(), sheet.page_format().clone()))
-        .ok_or_else(|| "The newly governed drawing sheet is unavailable.".to_owned())?;
-    let receipt_format = format.clone();
-    if current_page_format != format {
-        candidate
-            .sheet_catalog_mut(&owner_key)
-            .ok_or_else(|| "The newly governed drawing-sheet catalog is unavailable.".to_owned())?
-            .update_sheet_page_format(sheet_id, sheet_revision, format)
-            .map_err(|error| error.to_string())?;
-    }
-    let project_settings_changed =
-        candidate.drawing_sheet_settings() != before.drawing_sheet_settings();
-    record_drawing_sheet_transaction(
-        &mut candidate,
-        DrawingSheetTransactionKind::PageSetup,
-        &owner_key,
-        &receipt_format,
-        vec![sheet_id],
-        vec![sheet_id],
-        Vec::new(),
-        Vec::new(),
-        transaction.draft.scope == PageSetupScope::CurrentSheetAndDefault,
-        transaction.draft.save_custom_preset,
-        project_settings_changed,
-    )?;
-    candidate.validate().map_err(|error| error.to_string())?;
-    let schematic_tx = state.prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = state.workspace.content.active_schematic_reference();
-    let committed_revision = state
-        .workspace
-        .content
-        .replace_design_management(candidate)
-        .map_err(|error| error.to_string())?;
-    state.apply_design_management_schematic_transaction(&schematic_tx);
-    let after = (*state.workspace.content.design_management).clone();
-    state.record_design_management_transaction(DesignManagementHistoryEntry {
-        description: "Sheet format".to_owned(),
-        owner,
-        before,
-        after,
-        before_schematics: schematic_tx.before,
-        after_schematics: schematic_tx.after,
-        references: schematic_tx.references,
-        committed_revision,
-    });
-    state.ui.preferences = personal_candidate;
-    Ok("The active schematic now has its own drawing sheet.".to_owned())
 }
 
 fn migrate_and_canonicalize_project_title_values(
@@ -1379,7 +884,7 @@ fn migrate_and_canonicalize_project_title_values(
 ) -> Result<(), String> {
     let mut settings = candidate.drawing_sheet_settings().clone();
     let mut changed = false;
-    for id in crate::state::DrawingSheetTitleFieldId::PROJECT_OWNED {
+    for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
         let staged_value = format
             .title_block
             .fields
@@ -1404,7 +909,7 @@ fn migrate_and_canonicalize_project_title_values(
 
 fn publish_staged_document_control(
     candidate: &mut crate::state::DesignManagementCatalog,
-    document_control: Option<&crate::state::DrawingSheetDocumentControl>,
+    document_control: Option<&DrawingSheetDocumentControl>,
 ) -> Result<(), String> {
     let Some(document_control) = document_control else {
         return Ok(());
@@ -1429,7 +934,7 @@ fn remember_explicit_format(
 ) -> Result<(), String> {
     let settings = candidate.drawing_sheet_settings();
     if !settings.remember_last_explicit_format
-        || format.inheritance != crate::state::DrawingSheetInheritance::Explicit
+        || format.inheritance != DrawingSheetInheritance::Explicit
     {
         return Ok(());
     }
@@ -1446,950 +951,19 @@ fn remember_explicit_format(
 }
 
 fn all_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u64> {
+    let document = schematic.document();
     let mut ids = std::collections::BTreeSet::new();
-    ids.extend(
-        schematic
-            .document()
-            .components
-            .iter()
-            .map(|object| object.id),
-    );
-    ids.extend(schematic.document().wires.iter().map(|object| object.id));
-    ids.extend(schematic.document().buses.iter().map(|object| object.id));
-    ids.extend(schematic.document().bus_taps.iter().map(|object| object.id));
-    ids.extend(
-        schematic
-            .document()
-            .junctions
-            .iter()
-            .map(|object| object.id),
-    );
-    ids.extend(
-        schematic
-            .document()
-            .net_labels
-            .iter()
-            .map(|object| object.id),
-    );
-    ids.extend(
-        schematic
-            .document()
-            .design_notes
-            .iter()
-            .map(|object| object.id),
-    );
-    ids.extend(
-        schematic
-            .document()
-            .documentation_shapes
-            .iter()
-            .map(|object| object.id),
-    );
-    ids.extend(schematic.document().probes.iter().map(|object| object.id));
+    ids.extend(document.components.iter().map(|object| object.id));
+    ids.extend(document.wires.iter().map(|object| object.id));
+    ids.extend(document.buses.iter().map(|object| object.id));
+    ids.extend(document.bus_taps.iter().map(|object| object.id));
+    ids.extend(document.junctions.iter().map(|object| object.id));
+    ids.extend(document.net_labels.iter().map(|object| object.id));
+    ids.extend(document.design_notes.iter().map(|object| object.id));
+    ids.extend(document.documentation_shapes.iter().map(|object| object.id));
+    ids.extend(document.probes.iter().map(|object| object.id));
     ids.into_iter().collect()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::{DrawingSheetStandard, SheetDefinition, SheetPortPolicy, SheetTemplate};
-
-    fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<crate::state::SheetId>) {
-        let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.content.active_key();
-        let first = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .bootstrap_for_cell_view(&key, "Sheet 1", [])
-            .unwrap();
-        let mut ids = vec![first];
-        for index in 1..count {
-            let catalog = app
-                .state
-                .workspace
-                .content
-                .design_management
-                .sheet_catalog_mut(&key)
-                .unwrap();
-            let id = catalog
-                .create_sheet(
-                    SheetDefinition {
-                        name: format!("Sheet {}", index + 1),
-                        template: SheetTemplate::AnalogSchematic,
-                        port_policy: SheetPortPolicy::TypedOffSheetPorts,
-                        explicit_page_number: Some((index + 1) as u32),
-                    },
-                    ids.last().copied(),
-                )
-                .unwrap();
-            ids.push(id);
-        }
-        (app, key, ids)
-    }
-
-    #[test]
-    fn page_setup_is_owned_only_by_schematic_like_design_routes() {
-        let app = RSpiceApp::test_instance();
-        assert!(drawing_sheet_setup_available(&app));
-    }
-
-    #[test]
-    fn page_setup_availability_fails_closed_when_live_schematic_is_read_only() {
-        let mut app = RSpiceApp::test_instance();
-        assert!(drawing_sheet_setup_available(&app));
-
-        app.state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions {
-                open_project_read_only: true,
-                ..Default::default()
-            },
-            String::new(),
-        );
-
-        assert!(app.state.schematic_edit_read_only());
-        assert!(!drawing_sheet_setup_available(&app));
-        assert!(!open_drawing_sheet_setup_for_state(&mut app.state));
-        assert!(!app.state.dialogs.drawing_sheet_setup.open);
-        assert_eq!(
-            crate::workbench::commands::vocabulary::Command::PageSetup.availability(&app),
-            crate::workbench::commands::CommandAvailability::Disabled(
-                "the active schematic is read-only"
-            )
-        );
-    }
-
-    #[test]
-    fn stale_authority_rejects_active_document_drift() {
-        let mut state = AppState::default();
-        let authority = DrawingSheetAuthority {
-            edit: crate::workbench::app::SchematicEditAuthority::capture(&state),
-            cell_view_key: state.workspace.content.active_key(),
-            design_management_revision: state.workspace.content.design_management.revision(),
-            personal_preferences_digest: Some(
-                state
-                    .ui
-                    .preferences
-                    .drawing_sheet_personal_preferences()
-                    .semantic_digest(),
-            ),
-            governed: None,
-        };
-        state.schematic.document_mut_for_test().grid_size += 1;
-        assert!(validate_drawing_sheet_authority(&state, &authority).is_err());
-    }
-
-    #[test]
-    fn stale_authority_rejects_project_drawing_sheet_policy_drift() {
-        let mut app = RSpiceApp::test_instance();
-        open_drawing_sheet_setup(&mut app);
-        let authority = app
-            .state
-            .dialogs
-            .drawing_sheet_setup
-            .authority
-            .clone()
-            .unwrap();
-        let mut settings = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .clone();
-        settings.new_sheet_policy = crate::state::DrawingSheetNewSheetPolicy::Ask;
-        let revision = app.state.workspace.content.design_management.revision();
-        app.state
-            .workspace
-            .content
-            .design_management
-            .update_drawing_sheet_settings(revision, settings)
-            .unwrap();
-        assert!(validate_drawing_sheet_authority(&app.state, &authority).is_err());
-    }
-
-    #[test]
-    fn governed_apply_is_one_exact_undoable_presentation_transaction() {
-        let (mut app, key, ids) = governed_app_with_sheets(1);
-        let topology = app.state.schematic.topology_version();
-        let drc_version = app.state.dialogs.drc_checked_version;
-        let retained_runs = app.state.simulation.retained.runs.len();
-        open_drawing_sheet_setup(&mut app);
-        app.state.dialogs.drawing_sheet_setup.draft.zone_mode = ZoneModeChoice::None;
-        let expected = app
-            .state
-            .dialogs
-            .drawing_sheet_setup
-            .draft
-            .validate()
-            .unwrap()
-            .page_format
-            .try_update(|draft| {
-                draft.inheritance = crate::state::DrawingSheetInheritance::Explicit;
-            })
-            .unwrap();
-
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        assert_eq!(
-            app.state
-                .workspace
-                .content
-                .design_management
-                .sheet_catalog(&key)
-                .unwrap()
-                .find(ids[0])
-                .unwrap()
-                .page_format(),
-            &expected
-        );
-        assert!(app.state.can_undo_project_design());
-        assert!(app.state.workspace.content.project_metadata_dirty);
-        assert_eq!(app.state.schematic.topology_version(), topology);
-        assert_eq!(app.state.dialogs.drc_checked_version, drc_version);
-        assert_eq!(app.state.simulation.retained.runs.len(), retained_runs);
-        let receipt = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .transaction_receipts
-            .last()
-            .unwrap();
-        assert_eq!(receipt.kind, DrawingSheetTransactionKind::PageSetup);
-        assert_eq!(receipt.applied_sheet_ids, vec![ids[0]]);
-        assert!(app.state.undo_project_design().unwrap().is_some());
-        assert!(!app.state.can_undo_project_design());
-    }
-
-    /// An inspector edit is Page Setup's own transaction: the governed sheet
-    /// takes it whole, Page Setup is left closed, and one undo removes it.
-    #[test]
-    fn an_inline_sheet_edit_is_one_undoable_page_setup_transaction() {
-        let (mut app, key, ids) = governed_app_with_sheets(1);
-        let sheet_format = |app: &RSpiceApp| {
-            app.state
-                .workspace
-                .content
-                .design_management
-                .sheet_catalog(&key)
-                .unwrap()
-                .find(ids[0])
-                .unwrap()
-                .page_format()
-                .clone()
-        };
-        let before = sheet_format(&app);
-
-        apply_drawing_sheet_edit(
-            &mut app.state,
-            DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
-        )
-        .unwrap();
-        apply_drawing_sheet_edit(
-            &mut app.state,
-            DrawingSheetEdit::TitleField(DrawingSheetTitleFieldId::DrawnBy, "J. Whitfield".into()),
-        )
-        .unwrap();
-
-        let after = sheet_format(&app);
-        assert_eq!(
-            after.authored_size,
-            crate::state::AuthoredDrawingSheetSize::Standard {
-                standard: DrawingSheetStandard::AnsiB
-            }
-        );
-        assert_eq!(
-            after.title_block.fields[&DrawingSheetTitleFieldId::DrawnBy].value,
-            "J. Whitfield"
-        );
-        assert!(!app.state.dialogs.drawing_sheet_setup.open);
-        let receipt = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .transaction_receipts
-            .last()
-            .unwrap();
-        assert_eq!(receipt.kind, DrawingSheetTransactionKind::PageSetup);
-
-        assert!(app.state.undo_project_design().unwrap().is_some());
-        assert!(app.state.undo_project_design().unwrap().is_some());
-        assert_eq!(sheet_format(&app).authored_size, before.authored_size);
-        assert_eq!(
-            sheet_format(&app).title_block.fields[&DrawingSheetTitleFieldId::DrawnBy].value,
-            before.title_block.fields[&DrawingSheetTitleFieldId::DrawnBy].value
-        );
-    }
-
-    /// Page Setup's validation refuses an inline edit exactly as it refuses
-    /// the dialog's, and the refusal leaves no dialog behind.
-    #[test]
-    fn an_inline_sheet_edit_refused_by_page_setup_leaves_nothing_open() {
-        let (mut app, _, _) = governed_app_with_sheets(1);
-        let error = apply_drawing_sheet_edit(
-            &mut app.state,
-            DrawingSheetEdit::TitleField(DrawingSheetTitleFieldId::SheetTitle, String::new()),
-        )
-        .unwrap_err();
-        assert!(error.contains("Title is required"), "{error}");
-        assert!(!app.state.dialogs.drawing_sheet_setup.open);
-        assert!(!app.state.can_undo_project_design());
-    }
-
-    /// An open Page Setup owns the sheet's draft; an inline edit neither
-    /// discards it nor applies around it.
-    #[test]
-    fn an_inline_sheet_edit_waits_for_an_open_page_setup() {
-        let (mut app, _, _) = governed_app_with_sheets(1);
-        open_drawing_sheet_setup(&mut app);
-        app.state.dialogs.drawing_sheet_setup.draft.zone_mode = ZoneModeChoice::None;
-        let draft = app.state.dialogs.drawing_sheet_setup.draft.clone();
-
-        assert!(
-            apply_drawing_sheet_edit(
-                &mut app.state,
-                DrawingSheetEdit::Orientation(SchematicPageOrientation::Portrait),
-            )
-            .is_err()
-        );
-        assert!(app.state.dialogs.drawing_sheet_setup.open);
-        assert_eq!(app.state.dialogs.drawing_sheet_setup.draft, draft);
-        assert!(!app.state.can_undo_project_design());
-    }
-
-    #[test]
-    fn inherited_sheet_opens_with_the_effective_project_format_and_keeps_its_source() {
-        let (mut app, key, ids) = governed_app_with_sheets(1);
-        let catalog = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog_mut(&key)
-            .unwrap();
-        let revision = catalog.find(ids[0]).unwrap().revision();
-        let inherited = SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::AnsiD,
-            crate::state::SchematicPageOrientation::Portrait,
-        )
-        .try_update(|draft| {
-            draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
-            draft
-                .title_block
-                .fields
-                .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-                .unwrap()
-                .value = "Sheet 1".to_owned();
-        })
-        .unwrap();
-        catalog
-            .update_sheet_page_format(ids[0], revision, inherited)
-            .unwrap();
-
-        open_drawing_sheet_setup(&mut app);
-
-        let setup = &app.state.dialogs.drawing_sheet_setup;
-        assert_eq!(
-            setup.draft.inheritance,
-            crate::state::DrawingSheetInheritance::ProjectDefault
-        );
-        assert_eq!(
-            setup.draft.size,
-            super::super::draft::SheetSizeChoice::Standard(DrawingSheetStandard::IsoA4)
-        );
-        assert!(!setup.is_dirty());
-    }
-
-    #[test]
-    fn inherited_sheet_title_edit_is_committed_without_severing_inheritance() {
-        let (mut app, key, ids) = governed_app_with_sheets(1);
-        let inherited = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .default_format
-            .clone()
-            .try_update(|draft| {
-                draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
-                draft
-                    .title_block
-                    .fields
-                    .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-                    .expect("canonical title field")
-                    .value = "Original title".to_owned();
-            })
-            .unwrap();
-        let catalog = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog_mut(&key)
-            .unwrap();
-        let revision = catalog.find(ids[0]).unwrap().revision();
-        catalog
-            .update_sheet_page_format(ids[0], revision, inherited)
-            .unwrap();
-
-        open_drawing_sheet_setup(&mut app);
-        app.state
-            .dialogs
-            .drawing_sheet_setup
-            .draft
-            .title_fields
-            .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-            .expect("canonical title field")
-            .value = "Released amplifier".to_owned();
-
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let saved = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key)
-            .unwrap()
-            .find(ids[0])
-            .unwrap()
-            .page_format();
-        assert_eq!(
-            saved.inheritance,
-            crate::state::DrawingSheetInheritance::ProjectDefault
-        );
-        assert_eq!(
-            saved.title_block.fields[&crate::state::DrawingSheetTitleFieldId::SheetTitle].value,
-            "Released amplifier"
-        );
-        assert!(app.state.can_undo_project_design());
-    }
-
-    #[test]
-    fn document_scope_updates_every_sheet_in_one_transaction() {
-        let (mut app, key, ids) = governed_app_with_sheets(3);
-        open_drawing_sheet_setup(&mut app);
-        let setup = &mut app.state.dialogs.drawing_sheet_setup;
-        setup.draft.scope = PageSetupScope::Document;
-        setup
-            .draft
-            .apply_size_choice(super::super::draft::SheetSizeChoice::Standard(
-                DrawingSheetStandard::IsoA3,
-            ));
-        let expected = setup.draft.validate().unwrap().page_format;
-
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let catalog = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key)
-            .unwrap();
-        assert!(ids.iter().all(|id| {
-            let format = catalog.find(*id).unwrap().page_format();
-            format.authored_size == expected.authored_size
-                && format.orientation == expected.orientation
-        }));
-        assert_eq!(
-            catalog
-                .find(ids[1])
-                .unwrap()
-                .page_format()
-                .title_block
-                .fields[&crate::state::DrawingSheetTitleFieldId::SheetTitle]
-                .value,
-            "Sheet 2"
-        );
-        assert!(app.state.can_undo_project_design());
-    }
-
-    #[test]
-    fn document_scope_preserves_organization_managed_sheets_and_names_them() {
-        let (mut app, key, ids) = governed_app_with_sheets(2);
-        let managed_format = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.title_block.template =
-                    crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged;
-                draft
-                    .title_block
-                    .fields
-                    .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-                    .unwrap()
-                    .value = "Sheet 2".to_owned();
-            })
-            .unwrap();
-        {
-            let catalog = app
-                .state
-                .workspace
-                .content
-                .design_management
-                .sheet_catalog_mut(&key)
-                .unwrap();
-            let revision = catalog.find(ids[1]).unwrap().revision();
-            catalog
-                .update_sheet_page_format(ids[1], revision, managed_format.clone())
-                .unwrap();
-            catalog.set_active(ids[0]).unwrap();
-        }
-        open_drawing_sheet_setup(&mut app);
-        let setup = &mut app.state.dialogs.drawing_sheet_setup;
-        setup.draft.scope = PageSetupScope::Document;
-        setup
-            .draft
-            .apply_size_choice(super::super::draft::SheetSizeChoice::Standard(
-                DrawingSheetStandard::IsoA3,
-            ));
-
-        let message = apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let catalog = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key)
-            .unwrap();
-        assert_eq!(
-            catalog
-                .find(ids[0])
-                .unwrap()
-                .page_format()
-                .authored_size
-                .label(),
-            "ISO A3"
-        );
-        assert_eq!(catalog.find(ids[1]).unwrap().page_format(), &managed_format);
-        assert!(message.contains("Sheet 2"));
-        assert!(message.contains("organization-managed"));
-    }
-
-    #[test]
-    fn a_managed_title_authority_is_reapplied_at_commit() {
-        let (mut app, key, ids) = governed_app_with_sheets(1);
-        let managed = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.title_block.template =
-                    crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged;
-                draft
-                    .title_block
-                    .fields
-                    .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-                    .unwrap()
-                    .value = "Managed sheet".to_owned();
-            })
-            .unwrap();
-        {
-            let catalog = app
-                .state
-                .workspace
-                .content
-                .design_management
-                .sheet_catalog_mut(&key)
-                .unwrap();
-            let revision = catalog.find(ids[0]).unwrap().revision();
-            catalog
-                .update_sheet_page_format(ids[0], revision, managed.clone())
-                .unwrap();
-        }
-        open_drawing_sheet_setup(&mut app);
-        let draft = &mut app.state.dialogs.drawing_sheet_setup.draft;
-        draft.zone_mode = super::super::draft::ZoneModeChoice::None;
-        draft.centring_marks = false;
-        draft.title_block = super::super::draft::TitleBlockTemplateChoice::None;
-        draft
-            .title_fields
-            .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-            .unwrap()
-            .value = "Edited managed sheet".to_owned();
-        draft.apply_size_choice(super::super::draft::SheetSizeChoice::Standard(
-            DrawingSheetStandard::IsoA3,
-        ));
-
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let saved = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key)
-            .unwrap()
-            .find(ids[0])
-            .unwrap()
-            .page_format();
-        // Only the title block is managed; the frame stays as edited.
-        assert_eq!(saved.zones.mode, crate::state::DrawingSheetZoneMode::None);
-        assert!(!saved.marks.centring);
-        assert_eq!(
-            saved.title_block.template,
-            crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
-        );
-        assert_eq!(
-            saved.title_block.fields[&crate::state::DrawingSheetTitleFieldId::SheetTitle].value,
-            "Edited managed sheet"
-        );
-        assert_eq!(saved.authored_size.label(), "ISO A3");
-    }
-
-    #[test]
-    fn page_setup_preview_counts_only_document_sheets_that_can_be_written() {
-        let (mut app, key, ids) = governed_app_with_sheets(3);
-        {
-            let catalog = app
-                .state
-                .workspace
-                .content
-                .design_management
-                .sheet_catalog_mut(&key)
-                .unwrap();
-            let revision = catalog.find(ids[1]).unwrap().revision();
-            let managed = catalog
-                .find(ids[1])
-                .unwrap()
-                .page_format()
-                .try_update(|draft| {
-                    draft.title_block.template =
-                        crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged;
-                })
-                .unwrap();
-            catalog
-                .update_sheet_page_format(ids[1], revision, managed)
-                .unwrap();
-            catalog.set_active(ids[0]).unwrap();
-        }
-
-        open_drawing_sheet_setup(&mut app);
-
-        let setup = &app.state.dialogs.drawing_sheet_setup;
-        assert_eq!(setup.sheet_count, 3);
-        assert_eq!(setup.writable_sheet_count, 2);
-        assert_eq!(setup.managed_sheet_names, vec!["Sheet 2"]);
-    }
-
-    #[test]
-    fn default_and_custom_preset_scope_publish_real_catalog_state() {
-        let (mut app, key, ids) = governed_app_with_sheets(1);
-        open_drawing_sheet_setup(&mut app);
-        let setup = &mut app.state.dialogs.drawing_sheet_setup;
-        setup.draft.size = super::super::draft::SheetSizeChoice::Custom;
-        setup.draft.custom_name = "Lab panel".to_owned();
-        setup.draft.width = "250".to_owned();
-        setup.draft.height = "400".to_owned();
-        setup.draft.save_custom_preset = true;
-        setup.draft.scope = PageSetupScope::CurrentSheetAndDefault;
-
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let management = &app.state.workspace.content.design_management;
-        let format = management
-            .sheet_catalog(&key)
-            .unwrap()
-            .find(ids[0])
-            .unwrap()
-            .page_format();
-        assert_eq!(format.authored_size.label(), "Lab panel",);
-        assert_eq!(management.drawing_sheet_settings().presets.len(), 1);
-        assert_eq!(
-            management
-                .drawing_sheet_settings()
-                .default_format
-                .inheritance,
-            crate::state::DrawingSheetInheritance::ProjectDefault
-        );
-    }
-
-    #[test]
-    fn personal_preset_use_captures_an_exact_project_snapshot_on_apply() {
-        let (mut app, key, ids) = governed_app_with_sheets(1);
-        let personal = crate::state::DrawingSheetPreset {
-            id: "personal-review-strip".to_owned(),
-            name: "Review strip".to_owned(),
-            scope: crate::state::DrawingSheetPresetScope::User,
-            format: crate::state::SchematicSheetFormat::try_custom(
-                "Review strip",
-                210_001,
-                594_002,
-                crate::state::SchematicPageOrientation::Portrait,
-            )
-            .unwrap()
-            .try_update(|draft| {
-                if let crate::state::AuthoredDrawingSheetSize::Custom { snapshot } =
-                    &mut draft.authored_size
-                {
-                    snapshot.preset_id = Some("personal-review-strip".to_owned());
-                }
-            })
-            .unwrap(),
-        };
-        let mut personal_settings = app
-            .state
-            .ui
-            .preferences
-            .drawing_sheet_personal_preferences();
-        personal_settings.presets.push(personal.clone());
-        app.state
-            .ui
-            .preferences
-            .set_drawing_sheet_personal_preferences(personal_settings)
-            .unwrap();
-
-        open_drawing_sheet_setup_with_preset(&mut app, personal).unwrap();
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let project_preset = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .presets
-            .first()
-            .unwrap();
-        assert_eq!(
-            project_preset.scope,
-            crate::state::DrawingSheetPresetScope::Project
-        );
-        assert_eq!(
-            project_preset.format.portrait_dimensions_um(),
-            (210_001, 594_002)
-        );
-        let sheet = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key)
-            .unwrap()
-            .find(ids[0])
-            .unwrap();
-        let crate::state::AuthoredDrawingSheetSize::Custom { snapshot } =
-            &sheet.page_format().authored_size
-        else {
-            panic!("captured personal size must remain a custom snapshot");
-        };
-        assert_eq!(
-            snapshot.preset_id.as_deref(),
-            Some(project_preset.id.as_str())
-        );
-    }
-
-    #[test]
-    fn personal_preset_authority_change_fails_closed_while_page_setup_is_open() {
-        let (mut app, _, _) = governed_app_with_sheets(1);
-        open_drawing_sheet_setup(&mut app);
-        let mut personal = app
-            .state
-            .ui
-            .preferences
-            .drawing_sheet_personal_preferences();
-        personal.presets.push(
-            crate::state::DrawingSheetPreset {
-                id: "late-personal-size".to_owned(),
-                name: "Late personal size".to_owned(),
-                scope: crate::state::DrawingSheetPresetScope::User,
-                format: crate::state::SchematicSheetFormat::try_custom(
-                    "Late personal size",
-                    250_000,
-                    400_000,
-                    crate::state::SchematicPageOrientation::Portrait,
-                )
-                .unwrap(),
-            }
-            .normalized_for_storage()
-            .unwrap(),
-        );
-        app.state
-            .ui
-            .preferences
-            .set_drawing_sheet_personal_preferences(personal)
-            .unwrap();
-
-        let error = apply_drawing_sheet_setup(&mut app.state).unwrap_err();
-
-        assert!(error.contains("Personal custom sheet sizes changed"));
-    }
-
-    #[test]
-    fn nested_support_resume_retains_the_isolated_page_setup_draft() {
-        let (mut app, _, _) = governed_app_with_sheets(1);
-        open_drawing_sheet_setup(&mut app);
-        app.state.dialogs.drawing_sheet_setup.draft.width = "333.125".to_owned();
-        app.state.dialogs.drawing_sheet_setup.draft.custom_name =
-            "Uncommitted working size".to_owned();
-        let draft = app.state.dialogs.drawing_sheet_setup.draft.clone();
-        app.state.dialogs.drawing_sheet_setup.open = false;
-        app.state.dialogs.drawing_sheet_setup.support_suspended = true;
-
-        resume_drawing_sheet_setup_after_support(&mut app.state).unwrap();
-
-        assert!(app.state.dialogs.drawing_sheet_setup.open);
-        assert!(!app.state.dialogs.drawing_sheet_setup.support_suspended);
-        assert_eq!(app.state.dialogs.drawing_sheet_setup.draft, draft);
-    }
-
-    #[test]
-    fn bootstrap_resume_fails_closed_after_the_active_view_changes() {
-        let mut app = RSpiceApp::test_instance();
-        open_drawing_sheet_setup(&mut app);
-        app.state.dialogs.drawing_sheet_setup.open = false;
-        app.state.dialogs.drawing_sheet_setup.support_suspended = true;
-        app.state.workspace.content.active_view.cell = "different_cell".to_owned();
-
-        let error = resume_drawing_sheet_setup_after_support(&mut app.state).unwrap_err();
-
-        assert!(error.contains("active cell/view changed"));
-        assert!(!app.state.dialogs.drawing_sheet_setup.open);
-        assert!(app.state.dialogs.drawing_sheet_setup.support_suspended);
-    }
-
-    #[test]
-    fn unchanged_apply_creates_no_history_and_read_only_authority_fails_closed() {
-        let (mut app, _, _) = governed_app_with_sheets(1);
-        open_drawing_sheet_setup(&mut app);
-        assert!(apply_drawing_sheet_setup(&mut app.state).is_ok());
-        assert!(!app.state.can_undo_project_design());
-
-        open_drawing_sheet_setup(&mut app);
-        app.state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions {
-                open_project_read_only: true,
-                ..Default::default()
-            },
-            String::new(),
-        );
-        assert!(apply_drawing_sheet_setup(&mut app.state).is_err());
-        assert!(!app.state.can_undo_project_design());
-    }
-
-    #[test]
-    fn bootstrap_apply_saves_staged_sheet_and_project_title_fields_consistently() {
-        let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.content.active_key();
-        let mut settings = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .clone();
-        settings.title_block_field_values.insert(
-            crate::state::DrawingSheetTitleFieldId::Organization,
-            "Previous organization".to_owned(),
-        );
-        let revision = app.state.workspace.content.design_management.revision();
-        app.state
-            .workspace
-            .content
-            .design_management
-            .update_drawing_sheet_settings(revision, settings)
-            .unwrap();
-        open_drawing_sheet_setup(&mut app);
-        let fields = &mut app.state.dialogs.drawing_sheet_setup.draft.title_fields;
-        fields
-            .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
-            .unwrap()
-            .value = "Bootstrap title".to_owned();
-        fields
-            .get_mut(&crate::state::DrawingSheetTitleFieldId::Organization)
-            .unwrap()
-            .value = "Example Labs".to_owned();
-
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let catalog = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key)
-            .unwrap();
-        let sheet = catalog.active().unwrap();
-        assert_eq!(
-            sheet.page_format().title_block.fields
-                [&crate::state::DrawingSheetTitleFieldId::SheetTitle]
-                .value,
-            "Bootstrap title"
-        );
-        assert_eq!(
-            sheet.page_format().title_block.fields
-                [&crate::state::DrawingSheetTitleFieldId::Organization]
-                .value,
-            ""
-        );
-        assert_eq!(
-            app.state
-                .workspace
-                .content
-                .design_management
-                .drawing_sheet_settings()
-                .title_block_field_values[&crate::state::DrawingSheetTitleFieldId::Organization],
-            "Example Labs"
-        );
-    }
-
-    #[test]
-    fn bootstrap_apply_publishes_an_unchanged_inherited_format() {
-        let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.content.active_key();
-        open_drawing_sheet_setup(&mut app);
-        assert!(!app.state.dialogs.drawing_sheet_setup.is_dirty());
-
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let catalog = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key)
-            .expect("bootstrap publishes the first governed sheet");
-        assert_eq!(catalog.sheets().len(), 1);
-        assert!(app.state.can_undo_project_design());
-    }
-
-    #[test]
-    fn bootstrap_current_sheet_physical_edit_severs_default_inheritance() {
-        let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.content.active_key();
-        open_drawing_sheet_setup(&mut app);
-        app.state
-            .dialogs
-            .drawing_sheet_setup
-            .draft
-            .set_orientation(crate::state::SchematicPageOrientation::Portrait);
-
-        apply_drawing_sheet_setup(&mut app.state).unwrap();
-
-        let sheet = app
-            .state
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&key)
-            .and_then(|catalog| catalog.active())
-            .expect("bootstrap publishes the edited governed sheet");
-        assert_eq!(
-            sheet.page_format().inheritance,
-            crate::state::DrawingSheetInheritance::Explicit
-        );
-        assert_eq!(
-            sheet.page_format().orientation,
-            crate::state::SchematicPageOrientation::Portrait
-        );
-        assert_eq!(
-            crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(&app.state)
-                .format
-                .orientation,
-            crate::state::SchematicPageOrientation::Portrait
-        );
-    }
-}
+mod tests;

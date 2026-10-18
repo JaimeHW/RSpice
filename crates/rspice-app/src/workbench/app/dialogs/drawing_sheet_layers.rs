@@ -1,8 +1,8 @@
 //! Device-local visibility for optional drawing-sheet construction layers.
 //!
 //! The authored paper edge is deliberately not configurable here. Layer
-//! choices affect only the editing canvas and never mutate Page Setup,
-//! printing, export, netlisting, or simulation.
+//! choices affect only the editing canvas and never mutate the authored
+//! sheet, printing, export, netlisting, or simulation.
 
 use egui::{Context, Frame, Margin, RichText, Stroke, Ui};
 

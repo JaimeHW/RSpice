@@ -195,10 +195,10 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
-        action: ContextAction::PageSetup,
+        action: ContextAction::SheetProperties,
         icon: ContextIcon::Sheet,
-        label: "Page setup…",
-        shortcut_command: Some(Command::PageSetup),
+        label: "Sheet properties",
+        shortcut_command: Some(Command::SheetProperties),
     }),
     // Fitting the drawing sheet is not here. `Command::ZoomFit` already has a
     // toolbar button on this canvas, a status-bar route, a mobile canvas
@@ -1235,13 +1235,13 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                     .any(|library| !library.read_only),
             "Add at least one schematic port and make a writable design library available",
         ),
-        ContextAction::PageSetup => (
+        ContextAction::SheetProperties => (
             writable
                 && matches!(
                     state.workspace.content.active_view_type(),
                     ViewType::Schematic | ViewType::Testbench
                 ),
-            "Page setup requires a writable schematic or testbench",
+            "Sheet properties require a writable schematic or testbench",
         ),
         ContextAction::FitContent => (
             matches!(
@@ -1364,9 +1364,7 @@ fn execute_context_action(
         ContextAction::CreateSymbolFromPorts => {
             crate::workbench::app::open_create_model_bound_symbol_dialog(state);
         }
-        ContextAction::PageSetup => {
-            crate::workbench::app::open_drawing_sheet_setup_for_state(state);
-        }
+        ContextAction::SheetProperties => crate::workbench::app::reveal_sheet_properties(state),
         ContextAction::FitContent => {
             state.schematic.session.editor.needs_fit = true;
             state.schematic.session.editor.needs_drawing_sheet_fit = false;

@@ -78,7 +78,8 @@ pub enum ContextAction {
     ReplaceInstance,
     CreateHierarchy,
     CreateSymbolFromPorts,
-    PageSetup,
+    /// Show the sheet's properties in the inspector.
+    SheetProperties,
     FitContent,
     ShowInNetlist,
     Probe,

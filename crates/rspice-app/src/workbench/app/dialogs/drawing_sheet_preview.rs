@@ -14,9 +14,9 @@ use crate::workbench::app_state::AppState;
 
 /// Immutable schematic geometry captured before a modal borrows its own state.
 ///
-/// Page Setup uses this snapshot to answer the same physical-page question in
-/// its preview and overflow summary. Supporting surfaces omit it when they are
-/// comparing formats rather than the active drawing.
+/// The sheet-format manager draws it on the open sheet's card, so that card
+/// shows the drawing the format would frame. Surfaces comparing formats
+/// rather than the active drawing omit it.
 #[derive(Debug, Clone, Default)]
 pub(super) struct DrawingSheetPreviewContent {
     objects: Vec<DrawingSheetPrintablePreview>,
@@ -65,24 +65,13 @@ pub(super) fn drawing_sheet_preview(
     height: f32,
     label: &str,
 ) {
-    drawing_sheet_preview_impl(ui, format, height, label, None, false, None);
+    drawing_sheet_preview_impl(ui, format, height, label, None, None);
 }
 
 /// The desk (backdrop) color the preview paints behind the paper, exposed so
 /// a fused surface can extend the same desk across its whole preview region.
 pub(super) fn sheet_desk_color(ctx: &egui::Context) -> Color32 {
     SheetPreviewPalette::for_text_color(Tokens::get(ctx).color.text).desk
-}
-
-pub(super) fn drawing_sheet_preview_with_content(
-    ui: &mut Ui,
-    format: &SchematicSheetFormat,
-    height: f32,
-    label: &str,
-    content: &DrawingSheetPreviewContent,
-    invalid: bool,
-) {
-    drawing_sheet_preview_impl(ui, format, height, label, Some(content), invalid, None);
 }
 
 /// One sheet drawn at the scale its whole set shares.
@@ -100,15 +89,7 @@ pub(super) fn drawing_sheet_preview_at_common_scale(
     content: Option<&DrawingSheetPreviewContent>,
     common_extent_um: (u64, u64),
 ) {
-    drawing_sheet_preview_impl(
-        ui,
-        format,
-        height,
-        label,
-        content,
-        false,
-        Some(common_extent_um),
-    );
+    drawing_sheet_preview_impl(ui, format, height, label, content, Some(common_extent_um));
 }
 
 /// The share of the ruler kept clear around the drawn page, matching the 6 %
@@ -121,7 +102,6 @@ fn drawing_sheet_preview_impl(
     height: f32,
     label: &str,
     content: Option<&DrawingSheetPreviewContent>,
-    invalid: bool,
     common_extent_um: Option<(u64, u64)>,
 ) {
     let t = Tokens::get(ui.ctx());
@@ -211,26 +191,12 @@ fn drawing_sheet_preview_impl(
 
     let paper_rect = map_rect(paper);
     ui.painter().rect_filled(paper_rect, 0.0, palette.paper);
-    if invalid {
-        ui.painter().rect_filled(
-            paper_rect,
-            0.0,
-            Color32::from_rgba_unmultiplied(
-                palette.warning.r(),
-                palette.warning.g(),
-                palette.warning.b(),
-                10,
-            ),
-        );
-        paint_dashed_rect(ui, paper_rect, Stroke::new(1.4, palette.warning), 6.0, 3.0);
-    } else {
-        ui.painter().rect_stroke(
-            paper_rect,
-            0.0,
-            Stroke::new(1.25, palette.edge),
-            egui::StrokeKind::Inside,
-        );
-    }
+    ui.painter().rect_stroke(
+        paper_rect,
+        0.0,
+        Stroke::new(1.25, palette.edge),
+        egui::StrokeKind::Inside,
+    );
 
     let drawing_rect = map_rect(geometry.drawing_area);
     paint_frame(ui, format, &geometry, &map, scale, palette);
@@ -668,7 +634,7 @@ mod tests {
 
     #[test]
     fn the_preview_letters_the_zones_the_sheet_model_letters() {
-        // Page Setup's preview keeps no alphabet of its own: it letters the
+        // The preview keeps no alphabet of its own: it letters the
         // references the canvas and the plot letter, from the sheet model.
         let format = SchematicSheetFormat::from_standard(
             crate::state::DrawingSheetStandard::IsoA0,

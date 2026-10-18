@@ -911,26 +911,12 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
         project_default.inheritance,
         DrawingSheetInheritance::ProjectDefault
     );
-    assert!(crate::workbench::app::open_drawing_sheet_setup_for_state(
-        &mut state
-    ));
-    let page_setup_format = state
-        .dialogs
-        .drawing_sheet_setup
-        .draft
-        .validate()
-        .expect("the initial Page Setup draft is valid")
-        .page_format;
+    let sheet_format =
+        crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(&state).format;
     assert_eq!(
-        page_setup_format.as_drawing_sheet_default(),
+        sheet_format.as_drawing_sheet_default(),
         project_default,
-        "the initial Page Setup draft resolves the project default without storing a concrete sheet title in the reusable template"
-    );
-    assert_eq!(
-        page_setup_format.title_block.fields[&crate::state::DrawingSheetTitleFieldId::SheetTitle]
-            .value,
-        "top",
-        "the governed sheet keeps its own title while inheriting the project format"
+        "the sheet the panel edits is drawn on the project default"
     );
 }
 

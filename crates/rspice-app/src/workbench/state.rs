@@ -971,6 +971,10 @@ pub struct WorkbenchState {
     pub navigator_visible: bool,
     #[serde(default = "default_true")]
     pub inspector_visible: bool,
+    /// A one-frame request that the inspector's sheet panel scroll its Sheet
+    /// section into view, the next time it shows.
+    #[serde(skip)]
+    pub reveal_sheet_section: bool,
     #[serde(default)]
     pub console_visible: bool,
     #[serde(default)]
@@ -1379,6 +1383,7 @@ impl Default for WorkbenchState {
             route_diagnostic: None,
             navigator_visible: true,
             inspector_visible: true,
+            reveal_sheet_section: false,
             console_visible: false,
             console_maximized: false,
             focus_mode: false,

@@ -33,8 +33,8 @@ use crate::state::{
 };
 use crate::workbench::AppState;
 use crate::workbench::app::drawing_sheet_edit::{
-    DrawingSheetEdit, apply_drawing_sheet_edit, drawing_sheet_setup_available_for_state,
-    format_sheet_length, parse_sheet_length,
+    DrawingSheetEdit, apply_drawing_sheet_edit, drawing_sheet_editable, format_sheet_length,
+    parse_sheet_length,
 };
 use crate::workbench::app_state::schematic_preferences::NET_NAME_CHARACTERS;
 use crate::workbench::design_system::{
@@ -69,7 +69,7 @@ fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlock
 pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
     let sheet = resolve_active_drawing_sheet(state);
     let identity = sheet_identity(state);
-    let editable = drawing_sheet_setup_available_for_state(state);
+    let editable = drawing_sheet_editable(state);
     let cut = cut_fields(state, &sheet);
     let mut edit = None;
     let mut schematic_edit = None;

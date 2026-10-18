@@ -597,9 +597,10 @@ fn file_menu_exposes_the_canonical_drawing_sheet_workflows_in_order() {
     assert_eq!(
         DRAWING_SHEET_FILE_COMMANDS,
         [
-            Command::PageSetup,
+            Command::SheetProperties,
             Command::SheetFormatManager,
             Command::CustomSheetSizes,
+            Command::SheetDefaults,
         ]
     );
 }

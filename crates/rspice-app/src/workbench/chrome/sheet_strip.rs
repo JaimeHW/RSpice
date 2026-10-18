@@ -113,7 +113,7 @@ enum StripAction {
     NewSheetAfter(Option<crate::state::SheetId>),
     Delete(crate::state::SheetId),
     MoveSelection(crate::state::SheetId),
-    PageSetup(crate::state::SheetId),
+    SheetProperties(crate::state::SheetId),
     Reorder {
         sheet: crate::state::SheetId,
         to_index: usize,
@@ -139,9 +139,9 @@ fn apply(app: &mut RSpiceApp, action: StripAction, entries: &[SheetEntry]) {
         StripAction::MoveSelection(id) => {
             let _ = sheet_actions::move_selection_to_sheet(&mut app.state, id);
         }
-        StripAction::PageSetup(id) => {
+        StripAction::SheetProperties(id) => {
             let _ = sheet_actions::activate_sheet(&mut app.state, id);
-            crate::workbench::app::open_drawing_sheet_setup_for_state(&mut app.state);
+            sheet_actions::reveal_sheet_properties(&mut app.state);
         }
         StripAction::Reorder { sheet, to_index } => {
             let to_index = to_index.min(entries.len().saturating_sub(1));
@@ -304,7 +304,7 @@ fn sheet_chips(
                 ChipMenu::Delete => action = StripAction::Delete(entry.id),
                 ChipMenu::MoveSelection => action = StripAction::MoveSelection(entry.id),
                 ChipMenu::NewAfter => action = StripAction::NewSheetAfter(Some(entry.id)),
-                ChipMenu::PageSetup => action = StripAction::PageSetup(entry.id),
+                ChipMenu::SheetProperties => action = StripAction::SheetProperties(entry.id),
             }
         }
     }
@@ -336,7 +336,7 @@ enum ChipMenu {
     Delete,
     MoveSelection,
     NewAfter,
-    PageSetup,
+    SheetProperties,
 }
 
 enum RenameOutcome {
@@ -447,8 +447,8 @@ fn sheet_chip(ui: &mut Ui, entry: &SheetEntry, selected: bool, height: f32) -> C
             menu = Some(ChipMenu::MoveSelection);
             ui.close();
         }
-        if ui.button("Page setup\u{2026}").clicked() {
-            menu = Some(ChipMenu::PageSetup);
+        if ui.button("Sheet properties").clicked() {
+            menu = Some(ChipMenu::SheetProperties);
             ui.close();
         }
         ui.separator();

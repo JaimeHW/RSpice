@@ -8,9 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Deserializer, Serialize};
-use sha2::{Digest as _, Sha256};
 
-use crate::product::ContentDigest;
 use crate::state::{
     DrawingSheetInheritance, DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetStandard,
     SchematicPageOrientation, SchematicSheetFormat,
@@ -125,20 +123,6 @@ impl DrawingSheetPersonalPreferences {
         } else {
             snapshot.source_preset_unavailable = false;
         }
-    }
-
-    pub(crate) fn semantic_digest(&self) -> ContentDigest {
-        #[derive(Serialize)]
-        struct DigestMaterial<'a> {
-            schema: &'static str,
-            value: &'a DrawingSheetPersonalPreferences,
-        }
-        let bytes = serde_json::to_vec(&DigestMaterial {
-            schema: "rspice-personal-drawing-sheet-preferences/v1",
-            value: self,
-        })
-        .expect("personal drawing-sheet preferences are always serializable");
-        ContentDigest::from_bytes(Sha256::digest(bytes).into())
     }
 
     pub(crate) fn validate(&self) -> Result<(), String> {

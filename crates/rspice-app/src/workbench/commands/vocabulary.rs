@@ -76,9 +76,10 @@ pub enum Command {
     LiveSession,
     PublishToWeb,
     ExportNetlist(crate::io::NetlistFormat),
-    PageSetup,
+    SheetProperties,
     SheetFormatManager,
     CustomSheetSizes,
+    SheetDefaults,
     PrintHardcopy,
     ExportActiveView,
     Exit,
@@ -461,13 +462,16 @@ impl Command {
             Self::ExportNetlist(crate::io::NetlistFormat::Xyce) => {
                 spec("export-netlist-xyce", "Export Xyce netlist…", "File")
             }
-            Self::PageSetup => spec("page-setup", "Page setup…", "File"),
+            // The stable ID is the one shortcut profiles saved before the
+            // sheet's properties moved into the inspector.
+            Self::SheetProperties => spec("page-setup", "Sheet properties", "File"),
             Self::SheetFormatManager => spec(
                 "sheet-format-manager",
                 "Sheet formats across this document…",
                 "File",
             ),
             Self::CustomSheetSizes => spec("sheet-preset-library", "Custom sheet sizes…", "File"),
+            Self::SheetDefaults => spec("sheet-defaults", "Sheet defaults…", "File"),
             Self::PrintHardcopy => spec("print-hardcopy", "Print / hardcopy…", "File"),
             Self::ExportActiveView => spec("export-active-view", "Export active view…", "File"),
             Self::Exit => spec("exit-rspice", "Exit RSpice…", "File"),
@@ -1175,9 +1179,10 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     Command::ExportNetlist(crate::io::NetlistFormat::Hspice),
     Command::ExportNetlist(crate::io::NetlistFormat::Xyce),
-    Command::PageSetup,
+    Command::SheetProperties,
     Command::SheetFormatManager,
     Command::CustomSheetSizes,
+    Command::SheetDefaults,
     Command::PrintHardcopy,
     Command::ExportActiveView,
     Command::Exit,

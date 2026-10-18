@@ -21,7 +21,7 @@ use crate::ui::icons::Icon;
 use crate::ui::widgets::Button;
 use crate::workbench::AppState;
 use crate::workbench::app::drawing_sheet_edit::{
-    DrawingSheetEdit, current_size_choice_label, mixed_size_advisory,
+    DrawingSheetEdit, current_size_choice_label, mixed_size_advisory, sheet_unit_suffix,
     standard_orientation_advisory, standard_size_choice_label,
 };
 use crate::workbench::app::open_drawing_sheet_overflow_review;
@@ -48,7 +48,15 @@ pub(super) fn sheet_section(
     editable: bool,
     edit: &mut Option<PanelEdit>,
 ) {
+    let top = ui.cursor().min;
     section_header(ui, "Sheet", None);
+    // Sheet properties asks for this section; bring it to the top once.
+    if std::mem::take(&mut state.workbench.reveal_sheet_section) {
+        ui.scroll_to_rect(
+            egui::Rect::from_min_max(top, ui.cursor().min),
+            Some(egui::Align::TOP),
+        );
+    }
     let format = &sheet.format;
     size_rows(ui, state, format, identity, editable, edit);
     overflow_rows(ui, state, sheet);
@@ -201,7 +209,7 @@ fn size_rows(
             *edit = Some(Ok(DrawingSheetEdit::Size(standard)));
         }
         Some(SizeChoice::Saved(index)) => {
-            *edit = Some(Ok(DrawingSheetEdit::Preset(saved[index].clone())));
+            *edit = Some(Ok(DrawingSheetEdit::Preset(Box::new(saved[index].clone()))));
         }
         Some(SizeChoice::OneOff) => {
             let (width_um, height_um) = format.oriented_dimensions_um();
@@ -215,11 +223,7 @@ fn size_rows(
     if !(one_off && editable) {
         return;
     }
-    let unit = match format.display_unit {
-        DrawingSheetDisplayUnit::Millimetres => "mm",
-        DrawingSheetDisplayUnit::Centimetres => "cm",
-        DrawingSheetDisplayUnit::Inches => "in",
-    };
+    let unit = sheet_unit_suffix(format.display_unit);
     for text in [SheetText::Width, SheetText::Height, SheetText::SizeName] {
         let label = match text {
             SheetText::SizeName => text.label().to_owned(),

@@ -10,17 +10,9 @@ mod draft;
 mod transaction;
 
 pub(crate) use draft::{
-    BorderTemplateChoice, DrawingSheetAuthority, DrawingSheetDraft, DrawingSheetSection,
-    DrawingSheetSetupState, DrawingSheetSupportRequest, FieldProblem,
-    GovernedDrawingSheetAuthority, PageSetupScope, SheetDisplayUnit, SheetSizeChoice,
-    TitleBlockTemplateChoice, ZoneModeChoice, current_size_choice_label, format_choice_label,
-    format_sheet_length, format_um, parse_sheet_length, standard_orientation_advisory,
-    standard_size_choice_label,
+    current_size_choice_label, format_sheet_length, parse_sheet_length, sheet_unit_suffix,
+    standard_orientation_advisory, standard_size_choice_label,
 };
 pub(crate) use transaction::{
-    DrawingSheetEdit, apply_drawing_sheet_edit, apply_drawing_sheet_setup,
-    drawing_sheet_setup_available, drawing_sheet_setup_available_for_state, mixed_size_advisory,
-    open_drawing_sheet_setup, open_drawing_sheet_setup_for_state,
-    open_drawing_sheet_setup_with_preset, resume_drawing_sheet_setup_after_support,
-    validate_drawing_sheet_authority,
+    DrawingSheetEdit, apply_drawing_sheet_edit, drawing_sheet_editable, mixed_size_advisory,
 };

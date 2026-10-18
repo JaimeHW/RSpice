@@ -1266,9 +1266,10 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::ExportNetlist(_)
         | Command::PrintHardcopy
         | Command::ExportActiveView => WorkbenchIcon::Export,
-        Command::PageSetup => WorkbenchIcon::File,
+        Command::SheetProperties => WorkbenchIcon::File,
         Command::SheetFormatManager => WorkbenchIcon::Grid,
         Command::CustomSheetSizes => WorkbenchIcon::Models,
+        Command::SheetDefaults => WorkbenchIcon::File,
         Command::Undo => WorkbenchIcon::Undo,
         Command::Redo => WorkbenchIcon::Redo,
         Command::Cut | Command::Copy | Command::Paste | Command::Duplicate => WorkbenchIcon::Copy,
@@ -1496,10 +1497,11 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-const DRAWING_SHEET_FILE_COMMANDS: [Command; 3] = [
-    Command::PageSetup,
+const DRAWING_SHEET_FILE_COMMANDS: [Command; 4] = [
+    Command::SheetProperties,
     Command::SheetFormatManager,
     Command::CustomSheetSizes,
+    Command::SheetDefaults,
 ];
 
 fn menu_popup_max_height(ui: &Ui) -> f32 {

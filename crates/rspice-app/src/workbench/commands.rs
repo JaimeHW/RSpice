@@ -469,9 +469,11 @@ impl Command {
                     crate::services::cloud_account::LIVE_COLLABORATION_FEATURE,
                 )
             }
-            Self::PageSetup => crate::workbench::app::drawing_sheet_setup_available(app),
+            Self::SheetProperties => {
+                crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
+            }
             Self::SheetFormatManager => {
-                crate::workbench::app::drawing_sheet_setup_available(app)
+                crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
                     && !state.schematic_edit_read_only()
                     && !state.dialogs.drawing_sheet_support.manager.open
                     && state
@@ -481,8 +483,12 @@ impl Command {
                         .is_some_and(|catalog| catalog.active().is_some())
             }
             Self::CustomSheetSizes => {
-                crate::workbench::app::drawing_sheet_setup_available(app)
+                crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
                     && !state.dialogs.drawing_sheet_presets.any_open()
+            }
+            Self::SheetDefaults => {
+                crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
+                    && !state.dialogs.drawing_sheet_defaults.open
             }
             Self::ExportActiveView => {
                 crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(state)
@@ -1317,11 +1323,9 @@ impl Command {
                     );
                 }
             }
-            // Page setup and custom sheet sizes are disabled whenever they
-            // would refuse, so a refusal here needs no words.
-            Self::PageSetup => {
-                crate::workbench::app::open_drawing_sheet_setup_for_state(&mut app.state);
-            }
+            // Sheet properties and custom sheet sizes are disabled whenever
+            // they would refuse, so a refusal here needs no words.
+            Self::SheetProperties => crate::workbench::app::reveal_sheet_properties(&mut app.state),
             Self::SheetFormatManager => {
                 if let Err(error) = crate::workbench::app::open_sheet_format_manager(&mut app.state)
                 {
@@ -1330,6 +1334,9 @@ impl Command {
             }
             Self::CustomSheetSizes => {
                 crate::workbench::app::open_custom_sheet_size_library(&mut app.state);
+            }
+            Self::SheetDefaults => {
+                crate::workbench::app::open_drawing_sheet_defaults(&mut app.state);
             }
             Self::PrintHardcopy => crate::workbench::app::open_hardcopy_workflow(
                 app,

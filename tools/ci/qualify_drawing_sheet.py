@@ -49,8 +49,10 @@ SHEET_SOURCE_SCOPES = (
     "crates/rspice-design-model/src/sheet_authoring.rs",
     "crates/rspice-design-model/src/sheet_package.rs",
     "crates/rspice-app/src/schematic/view/drawing_sheet.rs",
-    "crates/rspice-app/src/workbench/app/dialogs/drawing_sheet_setup.rs",
-    "crates/rspice-app/src/workbench/app/dialogs/drawing_sheet_setup",
+    "crates/rspice-app/src/workbench/app/drawing_sheet_edit.rs",
+    "crates/rspice-app/src/workbench/app/drawing_sheet_edit",
+    "crates/rspice-app/src/workbench/docks/inspector/design/sheet.rs",
+    "crates/rspice-app/src/workbench/docks/inspector/design/sheet",
     "crates/rspice-app/src/workbench/app/dialogs/hardcopy.rs",
     "crates/rspice-app/src/workbench/app/dialogs/hardcopy",
     "crates/rspice-app/src/workbench/hardcopy_adapters",
@@ -369,7 +371,7 @@ def command_gates(
         ),
         Gate(
             "ui-drawing-sheet",
-            "Page Setup, sheet rendering, and preset dialog tests",
+            "Sheet properties, sheet rendering, and preset dialog tests",
             (
                 "cargo",
                 "test",

@@ -19,7 +19,6 @@ pub(in crate::workbench) mod drawing_sheet_layers;
 pub(in crate::workbench) mod drawing_sheet_overflow;
 pub(in crate::workbench) mod drawing_sheet_presets;
 pub(in crate::workbench) mod drawing_sheet_preview;
-pub(in crate::workbench) mod drawing_sheet_setup;
 pub(in crate::workbench) mod drawing_sheet_support;
 pub(in crate::workbench) mod engineering_table;
 pub(in crate::workbench) mod find_replace;

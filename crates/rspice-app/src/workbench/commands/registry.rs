@@ -245,7 +245,7 @@ const SAVE_ALL: &[ShortcutBinding] = &[primary(
     chord(Key::S, true, false, true, "Ctrl+Shift+S"),
     ALL,
 )];
-const PAGE_SETUP: &[ShortcutBinding] = &[primary(
+const SHEET_PROPERTIES: &[ShortcutBinding] = &[primary(
     chord(Key::P, true, true, true, "Ctrl+Shift+Alt+P"),
     ALL,
 )];
@@ -589,9 +589,10 @@ impl Command {
                 | Self::ExportPublicationSnapshot
                 | Self::PublishToWeb
                 | Self::ExportNetlist(_)
-                | Self::PageSetup
+                | Self::SheetProperties
                 | Self::SheetFormatManager
                 | Self::CustomSheetSizes
+                | Self::SheetDefaults
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::FindInDesign
@@ -689,9 +690,10 @@ impl Command {
                 | Self::ImportResultDataset
                 | Self::CreateResultDocument
                 | Self::RescanModelLibraries
-                | Self::PageSetup
+                | Self::SheetProperties
                 | Self::SheetFormatManager
                 | Self::CustomSheetSizes
+                | Self::SheetDefaults
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::CheckAndSave
@@ -799,9 +801,10 @@ impl Command {
             | Self::DescendHierarchy
             | Self::DescendHierarchyDirect
             | Self::ShowInNetlist
-            | Self::PageSetup
+            | Self::SheetProperties
             | Self::SheetFormatManager
             | Self::CustomSheetSizes
+            | Self::SheetDefaults
             | Self::GridSnapRouting
             | Self::DrawingSheetLayers
             | Self::VisibilityOptions
@@ -921,8 +924,8 @@ impl Command {
             Self::SaveAll => SAVE_ALL,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::CloseProject => CLOSE_PROJECT,
-            Self::PageSetup => PAGE_SETUP,
-            Self::SheetFormatManager | Self::CustomSheetSizes => NONE,
+            Self::SheetProperties => SHEET_PROPERTIES,
+            Self::SheetFormatManager | Self::CustomSheetSizes | Self::SheetDefaults => NONE,
             Self::PrintHardcopy => PRINT_HARDCOPY,
             Self::ExportActiveView => EXPORT_ACTIVE_VIEW,
             Self::Exit => EXIT,
@@ -1244,15 +1247,17 @@ impl Command {
                     }
                 }
             },
-            Self::PageSetup if app.state.schematic_edit_read_only() => {
+            Self::SheetProperties if app.state.schematic_edit_read_only() => {
                 "the active schematic is read-only"
             }
-            Self::PageSetup => "open an editable schematic or testbench drawing sheet",
+            Self::SheetProperties => "open an editable schematic or testbench drawing sheet",
             Self::SheetFormatManager if app.state.schematic_edit_read_only() => {
                 "the active schematic is read-only"
             }
             Self::SheetFormatManager
-                if !crate::workbench::app::drawing_sheet_setup_available(app) =>
+                if !crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(
+                    &app.state,
+                ) =>
             {
                 "open an editable schematic or testbench drawing sheet"
             }
@@ -1269,7 +1274,7 @@ impl Command {
                     .and_then(|catalog| catalog.active())
                     .is_none() =>
             {
-                "create the governed drawing sheet in Page Setup first"
+                "give the open sheet a property of its own in Sheet properties first"
             }
             Self::SheetFormatManager => "command is unavailable in this context",
             Self::SelectionBulkEdit => "open a schematic project",

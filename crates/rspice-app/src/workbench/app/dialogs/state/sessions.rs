@@ -340,10 +340,6 @@ pub struct DialogState {
     /// `ProjectWorkspace::hardcopy_setups`.
     pub(crate) hardcopy: crate::workbench::app::HardcopyDialogState,
 
-    /// Permanent authored drawing-sheet transaction for schematic and
-    /// testbench documents. It never contains printer or export-media state.
-    pub(crate) drawing_sheet_setup: crate::workbench::app::DrawingSheetSetupState,
-
     /// Project and personal defaults for future authored drawing sheets.
     pub(crate) drawing_sheet_defaults: crate::workbench::app::DrawingSheetDefaultsDialogState,
 
@@ -555,7 +551,6 @@ impl DialogState {
             || self.dataset_export.is_some()
             || self.preferences_open
             || self.hardcopy.open
-            || self.drawing_sheet_setup.open
             || self.drawing_sheet_defaults.open
             || self.drawing_sheet_presets.any_open()
             || self.drawing_sheet_support.any_open()

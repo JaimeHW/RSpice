@@ -1,8 +1,9 @@
-//! Commands owning the drawing sheet: page setup, formats, and preset sizes.
+//! Commands owning the drawing sheet: its properties, formats, and preset
+//! sizes.
 //!
-//! Sheet setup belongs to a schematic document; output media belongs to
-//! print and export. Keeping the two apart is the invariant here — an
-//! authored symbol is a valid hardcopy source, so Page Setup must report
+//! The sheet belongs to a schematic document; output media belongs to print
+//! and export. Keeping the two apart is the invariant here — an authored
+//! symbol is a valid hardcopy source, so Sheet properties must report
 //! unavailable there rather than substitute the output-media dialog that
 //! happens to be reachable.
 
@@ -11,7 +12,8 @@ use super::*;
 #[test]
 fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
     let expected = [
-        (Command::PageSetup, "page-setup", "Page setup…"),
+        // The stable ID shortcut profiles saved it under as Page setup.
+        (Command::SheetProperties, "page-setup", "Sheet properties"),
         (
             Command::SheetFormatManager,
             "sheet-format-manager",
@@ -22,6 +24,7 @@ fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
             "sheet-preset-library",
             "Custom sheet sizes…",
         ),
+        (Command::SheetDefaults, "sheet-defaults", "Sheet defaults…"),
     ];
     let searchable = command_catalog().collect::<Vec<_>>();
 
@@ -34,7 +37,7 @@ fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
 }
 
 #[test]
-fn authored_page_setup_never_falls_back_to_symbol_hardcopy_media() {
+fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
     let mut app = app_with_selected_authored_symbol();
     app.state.project_lifecycle.authority.open_session();
     app.state
@@ -51,14 +54,33 @@ fn authored_page_setup_never_falls_back_to_symbol_hardcopy_media() {
         "the symbol is a valid print/export source"
     );
 
-    assert!(!Command::PageSetup.is_enabled(&app));
-    Command::PageSetup.execute(&mut app);
+    assert!(!Command::SheetProperties.is_enabled(&app));
+    Command::SheetProperties.execute(&mut app);
 
-    assert!(!app.state.dialogs.drawing_sheet_setup.open);
+    assert!(!app.state.workbench.reveal_sheet_section);
     assert!(
         !app.state.dialogs.hardcopy.open,
-        "authored Page Setup must not substitute output-media setup"
+        "Sheet properties must not substitute output-media setup"
     );
+}
+
+/// Sheet properties show the sheet where it is edited: the selection is
+/// cleared, so the inspector is the sheet's; the inspector opens where it was
+/// closed; and the sheet panel is asked to bring its Sheet section into view.
+#[test]
+fn sheet_properties_open_the_inspector_on_the_sheet() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+    app.state.select_all_schematic_objects();
+    app.state.workbench.inspector_visible = false;
+    assert!(Command::SheetProperties.is_enabled(&app));
+
+    Command::SheetProperties.execute(&mut app);
+
+    assert!(app.state.schematic.session.editor.selection.is_empty());
+    assert!(app.state.workbench.inspector_visible);
+    assert!(app.state.workbench.reveal_sheet_section);
 }
 
 #[test]
@@ -83,12 +105,19 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
     Command::CustomSheetSizes.execute(&mut app);
     assert!(app.state.dialogs.drawing_sheet_presets.any_open());
 
+    // The project default is where a format reaches several sheets, so its
+    // dialog is a command of its own.
+    assert!(Command::SheetDefaults.is_enabled(&app));
+    Command::SheetDefaults.execute(&mut app);
+    assert!(app.state.dialogs.drawing_sheet_defaults.open);
+
     let mut results = RSpiceApp::test_instance();
     results.state.project_lifecycle.authority.open_session();
     results.state.workbench.workspace = Workspace::Results;
-    assert!(!Command::PageSetup.is_enabled(&results));
+    assert!(!Command::SheetProperties.is_enabled(&results));
     assert!(!Command::SheetFormatManager.is_enabled(&results));
     assert!(!Command::CustomSheetSizes.is_enabled(&results));
+    assert!(!Command::SheetDefaults.is_enabled(&results));
 }
 
 #[test]

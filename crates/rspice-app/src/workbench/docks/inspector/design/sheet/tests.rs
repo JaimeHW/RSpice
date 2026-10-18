@@ -272,7 +272,6 @@ fn document_values_typed_in_the_panel_land_on_the_project() {
         "RS-0001-SCH-0042"
     );
     assert_eq!(settings.document_control.revision, "B");
-    assert!(!panel.app.state.dialogs.drawing_sheet_setup.open);
 
     assert!(panel.app.state.undo_project_design().unwrap().is_some());
     assert_eq!(panel.document_value(DrawingSheetTitleFieldId::Revision), "");
@@ -287,11 +286,11 @@ fn document_values_typed_in_the_panel_land_on_the_project() {
     );
 }
 
-/// A date Page Setup cannot read is refused in its words and changes
-/// nothing; the release status is chosen from its list.
+/// A date the document control cannot read is refused in its words and
+/// changes nothing; the release status is chosen from its list.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn the_document_date_and_status_are_held_to_page_setups_rules() {
+fn the_document_date_and_status_are_held_to_the_document_controls_rules() {
     let mut panel = SheetPanel::new();
     panel.enter("Date of issue", "18/10/2026");
     assert_eq!(panel.document_value(DrawingSheetTitleFieldId::Date), "");
@@ -472,7 +471,6 @@ fn a_title_value_typed_and_entered_lands_on_the_sheet_as_one_undo_step() {
         panel.title_value(DrawingSheetTitleFieldId::DrawnBy),
         "J. Whitfield"
     );
-    assert!(!panel.app.state.dialogs.drawing_sheet_setup.open);
 
     assert!(panel.app.state.undo_project_design().unwrap().is_some());
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
@@ -546,8 +544,8 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
     assert!(!panel.app.state.can_undo_project_design());
 }
 
-/// The size menu names each standard as Page Setup does, and a choice lands
-/// on the sheet at once.
+/// The size menu names each standard with its oriented size, and a choice
+/// lands on the sheet at once.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_size_chosen_in_the_panel_lands_on_the_sheet() {
@@ -935,4 +933,17 @@ fn a_value_the_block_cuts_short_says_so_under_its_row() {
         "{painted}"
     );
     assert_eq!(painted.matches(CUT).count(), 1, "{painted}");
+}
+
+/// Sheet properties ask the panel to bring its Sheet section into view, and
+/// the panel does so the next time it shows, once.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_panel_brings_its_sheet_section_into_view_once_when_asked() {
+    let mut app = RSpiceApp::test_instance();
+    crate::workbench::app::reveal_sheet_properties(&mut app.state);
+    assert!(app.state.workbench.reveal_sheet_section);
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
+    assert!(painted.starts_with("Sheet\nSize\n"), "{painted}");
+    assert!(!app.state.workbench.reveal_sheet_section);
 }
