@@ -666,9 +666,10 @@ fn filter_segments(
             node.set_role(egui::accesskit::Role::RadioButton);
             node.set_selected(selected);
         });
+        // A press chooses without taking keyboard focus, so the focus ring
+        // appears only for a reader who is using the keys.
         if response.clicked() {
             view.filter = filter;
-            response.request_focus();
         }
         if response.has_focus() {
             focused = Some(index);

@@ -411,6 +411,21 @@ fn a_domain_filter_hides_the_other_domain_without_discarding_it() {
     );
 }
 
+/// A press on a filter segment chooses it and leaves keyboard focus where it
+/// was. Taking focus on a press drew the keyboard focus ring around the
+/// segment the pointer chose.
+#[test]
+fn a_pressed_filter_segment_chooses_without_taking_keyboard_focus() {
+    let mut panel = Panel::seeded(DESKTOP);
+    panel.click(|label| label.starts_with("System,"));
+
+    assert_eq!(
+        panel.app.state.workbench.notification_filter,
+        NotificationFilter::System
+    );
+    assert_eq!(panel.ctx.memory(|memory| memory.focused()), None);
+}
+
 #[test]
 fn a_filter_that_matches_nothing_says_why_the_list_is_empty() {
     let mut panel = Panel::open(DESKTOP, |ctx, toasts| {
