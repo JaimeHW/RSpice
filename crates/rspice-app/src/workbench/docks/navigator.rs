@@ -6067,22 +6067,22 @@ mod tests {
         // A checkpoint locator names native files, so the recovery catalog
         // has rows only where those exist.
         #[cfg(not(target_arch = "wasm32"))]
-        seed_recovery_catalog(&mut app);
+        seed_recovery_catalog(&mut app.state);
         app
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn seed_recovery_catalog(app: &mut RSpiceApp) {
+    fn seed_recovery_catalog(state: &mut crate::workbench::app_state::AppState) {
         use crate::workbench::lifecycle::project_checkpoint::{
             ProjectCheckpointReason, fixture_summary,
         };
 
         let now = crate::time_compat::checked_unix_time_ms().expect("clock");
-        let name = app.state.workspace.content.project.name().to_owned();
-        app.state.dialogs.project_checkpoint_recovery.project_id =
-            Some(app.state.workspace.content.project.id().to_string());
-        app.state.dialogs.project_checkpoint_recovery.initialized = true;
-        app.state.dialogs.project_checkpoint_recovery.checkpoints = [
+        let name = state.workspace.content.project.name().to_owned();
+        state.dialogs.project_checkpoint_recovery.project_id =
+            Some(state.workspace.content.project.id().to_string());
+        state.dialogs.project_checkpoint_recovery.initialized = true;
+        state.dialogs.project_checkpoint_recovery.checkpoints = [
             (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),
             (
                 ProjectCheckpointReason::TechnologyAttachment,
