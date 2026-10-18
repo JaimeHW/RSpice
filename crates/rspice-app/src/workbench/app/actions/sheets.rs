@@ -127,6 +127,10 @@ pub(in crate::workbench) fn new_sheet_after(
     state: &mut AppState,
     after: Option<SheetId>,
 ) -> Result<String, String> {
+    if active_sheet_catalog(state).is_none() {
+        let outcome = second_sheet(state).map(|name| format!("Created sheet `{name}`."));
+        return report(state, outcome);
+    }
     match create(state, after) {
         Ok((id, name)) => {
             let _ = activate(state, id, name.clone());
@@ -396,6 +400,47 @@ fn enter_active_sheet(state: &mut AppState) {
     state.schematic.session.editor.net_highlight.clear();
     state.schematic.session.editor.needs_drawing_sheet_fit = true;
     state.schematic.session.editor.needs_fit = false;
+}
+
+/// A drawing with no sheet catalog is one sheet. Its first new sheet creates
+/// the catalog with everything already drawn as Sheet 1, adds Sheet 2 after
+/// it and enters it, as one transaction, so one undo gives back the single
+/// drawing.
+fn second_sheet(state: &mut AppState) -> Result<String, String> {
+    state.cancel_schematic_drag();
+    state.sync_active_schematic_to_workspace();
+    let key = state.workspace.content.active_schematic_reference().key();
+    let objects = live_object_ids(state);
+    let before = (*state.workspace.content.design_management).clone();
+    let mut candidate = before.clone();
+    let first = candidate
+        .bootstrap_for_cell_view(&key, "Sheet 1", objects)
+        .map_err(|error| error.to_string())?;
+    let settings = candidate.drawing_sheet_settings().clone();
+    let catalog = candidate
+        .sheet_catalog_mut(&key)
+        .ok_or_else(|| NO_CATALOG.to_owned())?;
+    let name = unique_sheet_name(catalog);
+    let page_format = new_sheet_page_format(&settings, catalog)?;
+    let page_number = first_free_page_number(catalog)?;
+    let second = catalog
+        .create_sheet_with_page_format(
+            SheetDefinition {
+                name: name.clone(),
+                template: SheetTemplate::AnalogSchematic,
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(page_number),
+            },
+            Some(first),
+            page_format,
+        )
+        .map_err(|error| error.to_string())?;
+    catalog
+        .set_active(second)
+        .map_err(|error| error.to_string())?;
+    commit(state, "create sheet", before, candidate)?;
+    enter_active_sheet(state);
+    Ok(name)
 }
 
 fn create(

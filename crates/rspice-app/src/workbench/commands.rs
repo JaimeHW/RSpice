@@ -793,15 +793,12 @@ impl Command {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
             // Sheet navigation is offered only where there is a second sheet
-            // to reach; sheet authoring needs the governed catalog to exist.
+            // to reach. A drawing with no sheet catalog is one sheet, and a
+            // new sheet there creates the catalog.
             Self::NextSheet | Self::PreviousSheet => {
                 active_schematic_editor(app) && sheet_actions::sheet_count(state) > 1
             }
-            Self::NewSheet => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && sheet_actions::sheet_count(state) > 0
-            }
+            Self::NewSheet => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::DeleteSheet => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
