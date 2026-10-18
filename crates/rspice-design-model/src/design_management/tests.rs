@@ -2895,7 +2895,6 @@ fn a_title_block_letters_at_one_height_on_every_sheet() {
         for template in [
             DrawingSheetTitleBlockTemplate::Compact,
             DrawingSheetTitleBlockTemplate::Standard,
-            DrawingSheetTitleBlockTemplate::Wide,
             DrawingSheetTitleBlockTemplate::OrganizationManaged,
         ] {
             let format = SchematicSheetFormat::default()

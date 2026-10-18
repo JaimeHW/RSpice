@@ -543,8 +543,14 @@ impl Default for DrawingSheetMarks {
 pub enum DrawingSheetTitleBlockTemplate {
     #[default]
     Compact,
+    /// ISO 7200's 180 mm block.
+    ///
+    /// A sheet, default, preset or package saved naming the retired `wide`
+    /// block loads as this one. That block was 230 mm wide, past ISO 7200's
+    /// 180 mm maximum, and existed only to give an equal-width grid wider
+    /// cells, which cells sized by what they hold no longer need.
+    #[serde(alias = "wide")]
     Standard,
-    Wide,
     OrganizationManaged,
     None,
 }
@@ -555,7 +561,6 @@ impl DrawingSheetTitleBlockTemplate {
         match self {
             Self::Compact => Some((130_000, 32_000)),
             Self::Standard => Some((180_000, 45_000)),
-            Self::Wide => Some((230_000, 45_000)),
             Self::OrganizationManaged => Some((180_000, 50_000)),
             Self::None => None,
         }
@@ -571,7 +576,6 @@ impl DrawingSheetTitleBlockTemplate {
         match self {
             Self::Compact | Self::None => 0,
             Self::Standard | Self::OrganizationManaged => 297_000,
-            Self::Wide => 420_000,
         }
     }
 }
@@ -2125,7 +2129,7 @@ pub const fn drawing_sheet_title_block_rows(
 ) -> Option<usize> {
     match template {
         DrawingSheetTitleBlockTemplate::Compact => Some(3),
-        DrawingSheetTitleBlockTemplate::Standard | DrawingSheetTitleBlockTemplate::Wide => Some(4),
+        DrawingSheetTitleBlockTemplate::Standard => Some(4),
         DrawingSheetTitleBlockTemplate::OrganizationManaged => Some(5),
         DrawingSheetTitleBlockTemplate::None => None,
     }

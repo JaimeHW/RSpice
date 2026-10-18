@@ -115,6 +115,121 @@ pub struct DrawingSheetPresetPackage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publisher_signature: Option<DrawingSheetPresetPublisherSignature>,
     pub presets: Vec<PortableDrawingSheetPreset>,
+    /// How the package named what the product has since retired. Never
+    /// written: read from the package's own text when it is decoded.
+    #[serde(skip)]
+    retired_spellings: RetiredSpellings,
+}
+
+/// Names a package was written with that the product has since retired.
+///
+/// A preset saved naming the retired 230 mm `wide` title block loads as ISO
+/// 7200's block, but its package's digest, signature, frame-reference
+/// manifest and review rows were all written naming `wide`. They are checked
+/// against the name they were written with, so retiring the block costs no
+/// one a package they already hold, and a package sealed again is written
+/// with today's name throughout.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RetiredSpellings {
+    /// Positions of the presets whose title block was written as `wide`.
+    wide_title_blocks: BTreeSet<usize>,
+}
+
+impl RetiredSpellings {
+    /// The retired names the package written as `package` uses.
+    fn of(package: &serde_json::Value) -> Self {
+        let wide_title_blocks = package
+            .get("presets")
+            .and_then(serde_json::Value::as_array)
+            .map(|presets| {
+                presets
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, preset)| {
+                        preset
+                            .pointer("/format/title_block/template")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("wide")
+                    })
+                    .map(|(index, _)| index)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self { wide_title_blocks }
+    }
+
+    /// The name the frame-reference manifest gives the title block of the
+    /// preset at `index`.
+    fn title_block_reference(
+        &self,
+        index: usize,
+        template: DrawingSheetTitleBlockTemplate,
+    ) -> Option<&'static str> {
+        if self.wide_title_blocks.contains(&index) {
+            return Some("wide");
+        }
+        match template {
+            DrawingSheetTitleBlockTemplate::Compact => Some("compact"),
+            DrawingSheetTitleBlockTemplate::Standard => Some("standard"),
+            DrawingSheetTitleBlockTemplate::None
+            | DrawingSheetTitleBlockTemplate::OrganizationManaged => None,
+        }
+    }
+
+    /// The name the review rows give the title block of the preset at
+    /// `index`.
+    fn title_block_identity(
+        &self,
+        index: usize,
+        template: DrawingSheetTitleBlockTemplate,
+    ) -> &'static str {
+        if self.wide_title_blocks.contains(&index) {
+            return "builtin/wide";
+        }
+        match template {
+            DrawingSheetTitleBlockTemplate::Compact => "builtin/compact",
+            DrawingSheetTitleBlockTemplate::Standard => "builtin/standard",
+            DrawingSheetTitleBlockTemplate::OrganizationManaged => "organization-managed",
+            DrawingSheetTitleBlockTemplate::None => "none",
+        }
+    }
+
+    /// `canonical`, the contract `presets` serialize to, as the package was
+    /// written: each preset written as `wide` names it again.
+    ///
+    /// Every preset serializes exactly one title block, whose template is its
+    /// first field, so the n-th standard block in the contract belongs to the
+    /// n-th preset whose block is standard.
+    fn respell(&self, canonical: Vec<u8>, presets: &[PortableDrawingSheetPreset]) -> Vec<u8> {
+        const STANDARD_BLOCK: &[u8] = br#""title_block":{"template":"standard""#;
+        const WIDE_BLOCK: &[u8] = br#""title_block":{"template":"wide""#;
+        if self.wide_title_blocks.is_empty() {
+            return canonical;
+        }
+        let respelled = presets
+            .iter()
+            .enumerate()
+            .filter(|(_, preset)| {
+                preset.format.title_block.template == DrawingSheetTitleBlockTemplate::Standard
+            })
+            .map(|(index, _)| self.wide_title_blocks.contains(&index))
+            .collect::<Vec<_>>();
+        let mut written = Vec::with_capacity(canonical.len());
+        let mut rest = canonical.as_slice();
+        let mut standard_blocks = 0;
+        while let Some(at) = rest
+            .windows(STANDARD_BLOCK.len())
+            .position(|window| window == STANDARD_BLOCK)
+        {
+            written.extend_from_slice(&rest[..at]);
+            let wide = respelled.get(standard_blocks).copied().unwrap_or(false);
+            written.extend_from_slice(if wide { WIDE_BLOCK } else { STANDARD_BLOCK });
+            standard_blocks += 1;
+            rest = &rest[at + STANDARD_BLOCK.len()..];
+        }
+        written.extend_from_slice(rest);
+        written
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,8 +335,9 @@ pub fn build_package_with_options(
             .then_with(|| left.name.cmp(&right.name))
             .then_with(|| scope_rank(left.source_scope).cmp(&scope_rank(right.source_scope)))
     });
+    let retired_spellings = RetiredSpellings::default();
     let builtin_frame_references = if include_builtin_frame_references {
-        builtin_frame_references(&presets)
+        builtin_frame_references(&presets, &retired_spellings)
     } else {
         Vec::new()
     };
@@ -236,6 +352,7 @@ pub fn build_package_with_options(
         source_metadata,
         publisher_signature: None,
         presets,
+        retired_spellings,
     };
     package.source_digest_sha256 = package_digest(&package)?;
     validate_package(&package)?;
@@ -270,7 +387,7 @@ pub fn encode_package_with_format(
                     exact_dimension_unit: "micrometre".to_owned(),
                 },
                 package: package.clone(),
-                review: human_review_rows(&package.presets),
+                review: human_review_rows(&package.presets, &package.retired_spellings),
             };
             serde_json::to_string_pretty(&document)
         }
@@ -301,15 +418,23 @@ fn decode_package_without_authenticity(source: &str) -> Result<DrawingSheetPrese
         .and_then(serde_json::Value::as_str)
         .is_some()
     {
-        let document =
+        let retired_spellings = value
+            .get("package")
+            .map(RetiredSpellings::of)
+            .unwrap_or_default();
+        let mut document =
             serde_json::from_value::<HumanReviewPackageDocument>(value).map_err(|error| {
                 format!("The human-review package is not valid schema-1 JSON: {error}")
             })?;
+        document.package.retired_spellings = retired_spellings;
         validate_human_review_document(&document)?;
         document.package
     } else {
-        serde_json::from_value::<DrawingSheetPresetPackage>(value)
-            .map_err(|error| format!("The preset package is not valid schema-1 JSON: {error}"))?
+        let retired_spellings = RetiredSpellings::of(&value);
+        let mut package = serde_json::from_value::<DrawingSheetPresetPackage>(value)
+            .map_err(|error| format!("The preset package is not valid schema-1 JSON: {error}"))?;
+        package.retired_spellings = retired_spellings;
+        package
     };
     validate_package(&package)?;
     Ok(package)
@@ -355,6 +480,12 @@ pub fn publish_organization_drawing_sheet_package(
             "The source package is already signed. Export a new unsigned package before publishing it."
                 .to_owned(),
         );
+    }
+    // Sealed again, the package is written with today's names throughout.
+    package.retired_spellings = RetiredSpellings::default();
+    if package.includes_builtin_frame_references {
+        package.builtin_frame_references =
+            builtin_frame_references(&package.presets, &package.retired_spellings);
     }
     if package.presets.is_empty() {
         return Err("An empty drawing-sheet package cannot be published.".to_owned());
@@ -490,7 +621,8 @@ fn validate_package(package: &DrawingSheetPresetPackage) -> Result<(), String> {
             "The built-in frame-reference declaration does not match its manifest.".to_owned(),
         );
     }
-    let expected_references = builtin_frame_references(&package.presets);
+    let expected_references =
+        builtin_frame_references(&package.presets, &package.retired_spellings);
     if package.includes_builtin_frame_references
         && package.builtin_frame_references != expected_references
     {
@@ -664,8 +796,11 @@ pub fn canonical_package_contract(package: &DrawingSheetPresetPackage) -> Result
         }),
         presets: &package.presets,
     };
-    serde_json::to_vec(&contract)
-        .map_err(|error| format!("Could not canonicalize the sheet-format package: {error}"))
+    let canonical = serde_json::to_vec(&contract)
+        .map_err(|error| format!("Could not canonicalize the sheet-format package: {error}"))?;
+    Ok(package
+        .retired_spellings
+        .respell(canonical, &package.presets))
 }
 
 pub fn package_digest(package: &DrawingSheetPresetPackage) -> Result<String, String> {
@@ -706,9 +841,12 @@ fn source_metadata(presets: &[PortableDrawingSheetPreset]) -> PresetPackageSourc
     }
 }
 
-fn builtin_frame_references(presets: &[PortableDrawingSheetPreset]) -> Vec<BuiltinFrameReference> {
+fn builtin_frame_references(
+    presets: &[PortableDrawingSheetPreset],
+    spellings: &RetiredSpellings,
+) -> Vec<BuiltinFrameReference> {
     let mut references = BTreeSet::new();
-    for preset in presets {
+    for (index, preset) in presets.iter().enumerate() {
         let border = match preset.format.border {
             DrawingSheetBorderTemplate::Standard => Some("standard"),
             DrawingSheetBorderTemplate::Plain => Some("plain"),
@@ -722,14 +860,9 @@ fn builtin_frame_references(presets: &[PortableDrawingSheetPreset]) -> Vec<Built
                 identity: identity.to_owned(),
             });
         }
-        let title_block = match preset.format.title_block.template {
-            DrawingSheetTitleBlockTemplate::Compact => Some("compact"),
-            DrawingSheetTitleBlockTemplate::Standard => Some("standard"),
-            DrawingSheetTitleBlockTemplate::Wide => Some("wide"),
-            DrawingSheetTitleBlockTemplate::None
-            | DrawingSheetTitleBlockTemplate::OrganizationManaged => None,
-        };
-        if let Some(identity) = title_block {
+        if let Some(identity) =
+            spellings.title_block_reference(index, preset.format.title_block.template)
+        {
             references.insert(BuiltinFrameReference {
                 kind: "title-block".to_owned(),
                 identity: identity.to_owned(),
@@ -739,15 +872,19 @@ fn builtin_frame_references(presets: &[PortableDrawingSheetPreset]) -> Vec<Built
     references.into_iter().collect()
 }
 
-fn human_review_rows(presets: &[PortableDrawingSheetPreset]) -> Vec<HumanReviewPreset> {
+fn human_review_rows(
+    presets: &[PortableDrawingSheetPreset],
+    spellings: &RetiredSpellings,
+) -> Vec<HumanReviewPreset> {
     presets
         .iter()
-        .map(|preset| {
+        .enumerate()
+        .map(|(index, preset)| {
             let mut dependencies = Vec::new();
             dependencies.push(format!("border:{}", border_identity(preset.format.border)));
             dependencies.push(format!(
                 "title-block:{}",
-                title_block_identity(preset.format.title_block.template)
+                spellings.title_block_identity(index, preset.format.title_block.template)
             ));
             HumanReviewPreset {
                 stable_id: preset.stable_id.clone(),
@@ -775,7 +912,12 @@ fn validate_human_review_document(document: &HumanReviewPackageDocument) -> Resu
     {
         return Err("Unsupported human-review sheet-format schema.".to_owned());
     }
-    if document.review != human_review_rows(&document.package.presets) {
+    if document.review
+        != human_review_rows(
+            &document.package.presets,
+            &document.package.retired_spellings,
+        )
+    {
         return Err(
             "The human-review projection does not match the canonical preset definitions."
                 .to_owned(),
@@ -790,16 +932,6 @@ fn border_identity(template: DrawingSheetBorderTemplate) -> &'static str {
         DrawingSheetBorderTemplate::Plain => "builtin/plain",
         DrawingSheetBorderTemplate::None => "none",
         DrawingSheetBorderTemplate::OrganizationManaged => "organization-managed",
-    }
-}
-
-fn title_block_identity(template: DrawingSheetTitleBlockTemplate) -> &'static str {
-    match template {
-        DrawingSheetTitleBlockTemplate::Compact => "builtin/compact",
-        DrawingSheetTitleBlockTemplate::Standard => "builtin/standard",
-        DrawingSheetTitleBlockTemplate::Wide => "builtin/wide",
-        DrawingSheetTitleBlockTemplate::OrganizationManaged => "organization-managed",
-        DrawingSheetTitleBlockTemplate::None => "none",
     }
 }
 
@@ -1249,5 +1381,137 @@ mod tests {
                 .unwrap();
         let tampered = encoded.replace("250.001 \u{00d7} 400.002 mm", "250 \u{00d7} 400 mm");
         assert!(parse_package(&tampered, &PdkPublisherTrustStore::default()).is_err());
+    }
+
+    /// `package`, whose one preset is on ISO 7200's block, as a build that
+    /// still offered the retired 230 mm block wrote it had the preset named
+    /// that block: the preset, the frame-reference manifest, the digest and
+    /// any signature all say `wide`.
+    fn written_naming_wide(
+        package: &DrawingSheetPresetPackage,
+        signing_key: Option<&SigningKey>,
+    ) -> serde_json::Value {
+        use sha2::Digest as _;
+        let contract = String::from_utf8(canonical_package_contract(package).unwrap()).unwrap();
+        assert_eq!(
+            contract
+                .matches(r#""title_block":{"template":"standard""#)
+                .count(),
+            1
+        );
+        let contract = contract
+            .replace(
+                r#""title_block":{"template":"standard""#,
+                r#""title_block":{"template":"wide""#,
+            )
+            .replace(
+                r#"{"kind":"title-block","identity":"standard"}"#,
+                r#"{"kind":"title-block","identity":"wide"}"#,
+            );
+        let mut wire = serde_json::to_value(package).unwrap();
+        wire["presets"][0]["format"]["title_block"]["template"] = serde_json::json!("wide");
+        for reference in wire["builtin_frame_references"].as_array_mut().unwrap() {
+            if reference["kind"] == "title-block" {
+                reference["identity"] = serde_json::json!("wide");
+            }
+        }
+        wire["source_digest_sha256"] = serde_json::json!(
+            Sha256::digest(contract.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        if let Some(signing_key) = signing_key {
+            let mut message = PACKAGE_SIGNATURE_DOMAIN.to_vec();
+            message.extend_from_slice(contract.as_bytes());
+            wire["publisher_signature"]["signature_base64"] =
+                serde_json::json!(STANDARD.encode(signing_key.sign(&message).to_bytes()));
+        }
+        wire
+    }
+
+    #[test]
+    fn a_package_written_naming_the_retired_wide_block_still_loads() {
+        let preset = |scope| DrawingSheetPreset {
+            id: "legacy-panel".to_owned(),
+            name: "Legacy panel".to_owned(),
+            scope,
+            format: custom_format("Legacy panel", 420_000, 594_000, StartingFrame::IsoA)
+                .unwrap()
+                .try_update(|draft| {
+                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+                })
+                .unwrap(),
+        };
+        let package = build_package([preset(DrawingSheetPresetScope::Project)]).unwrap();
+        let wire = written_naming_wide(&package, None);
+        let source = serde_json::to_string_pretty(&wire).unwrap();
+        let untrusted = PdkPublisherTrustStore::default();
+        let restored = parse_package(&source, &untrusted)
+            .expect("a package naming the retired block loads on ISO 7200's");
+        assert_eq!(
+            restored.presets[0].format.title_block.template,
+            DrawingSheetTitleBlockTemplate::Standard
+        );
+        assert_eq!(restored.presets, package.presets);
+        assert_eq!(
+            inspect_drawing_sheet_package(&source)
+                .unwrap()
+                .source_digest_sha256,
+            wire["source_digest_sha256"].as_str().unwrap()
+        );
+        // The digest it was written with still covers it.
+        let tampered = source.replace("594000", "594001");
+        assert!(parse_package(&tampered, &untrusted).is_err());
+
+        // So does the review form, whose rows were written naming it too.
+        let mut document = serde_json::from_str::<serde_json::Value>(
+            &encode_package_with_format(&package, DrawingSheetPackageEncoding::HumanReviewJson)
+                .unwrap(),
+        )
+        .unwrap();
+        for dependency in document["review"][0]["dependencies"]
+            .as_array_mut()
+            .unwrap()
+        {
+            if dependency == "title-block:builtin/standard" {
+                *dependency = serde_json::json!("title-block:builtin/wide");
+            }
+        }
+        document["package"] = wire;
+        assert!(parse_package(&document.to_string(), &untrusted).is_ok());
+
+        // A signature made over the old name still verifies.
+        let mut organization =
+            build_package([preset(DrawingSheetPresetScope::Organization)]).unwrap();
+        organization.publisher_signature = Some(DrawingSheetPresetPublisherSignature {
+            publisher_id: "rspice-test-publisher".to_owned(),
+            signing_key_id: "sheet-formats-2026".to_owned(),
+            signature_base64: String::new(),
+        });
+        let signing_key = SigningKey::from_bytes(&[0x53; 32]);
+        let signed = written_naming_wide(&organization, Some(&signing_key)).to_string();
+        let mut trust = PdkPublisherTrustStore::default();
+        trust.keys.push(TrustedPdkPublisherKey {
+            publisher_id: "rspice-test-publisher".to_owned(),
+            key_id: "sheet-formats-2026".to_owned(),
+            verifying_key: signing_key.verifying_key().to_bytes(),
+            revoked: false,
+        });
+        assert!(parse_package(&signed, &trust).is_ok());
+        verify_published_drawing_sheet_package(&signed, &signing_key.verifying_key().to_bytes())
+            .unwrap();
+
+        // Sealed again, it is written with today's name throughout.
+        let published = publish_organization_drawing_sheet_package(
+            &source,
+            &[0x29; 32],
+            "acme.eda",
+            "drawing-sheets-2026",
+            true,
+            DrawingSheetPackageEncoding::CanonicalSchema1,
+        )
+        .unwrap();
+        assert!(!published.encoded.contains("\"wide\""));
     }
 }

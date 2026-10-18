@@ -48,10 +48,9 @@ const CUSTOM_SIZE: &str = "custom";
 
 /// The title-block templates a sheet can choose for itself. The organization
 /// block is assigned by the organization, never chosen here.
-const TEMPLATES: [DrawingSheetTitleBlockTemplate; 4] = [
+const TEMPLATES: [DrawingSheetTitleBlockTemplate; 3] = [
     DrawingSheetTitleBlockTemplate::Compact,
     DrawingSheetTitleBlockTemplate::Standard,
-    DrawingSheetTitleBlockTemplate::Wide,
     DrawingSheetTitleBlockTemplate::None,
 ];
 
@@ -520,7 +519,6 @@ const fn template_name(template: DrawingSheetTitleBlockTemplate) -> &'static str
     match template {
         DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
         DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
-        DrawingSheetTitleBlockTemplate::Wide => "RSpice wide",
         DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization block",
         DrawingSheetTitleBlockTemplate::None => "No title block",
     }

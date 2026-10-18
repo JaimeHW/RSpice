@@ -215,16 +215,14 @@ pub(crate) enum TitleBlockTemplateChoice {
     #[default]
     Compact,
     Standard,
-    Wide,
     Organization,
     None,
 }
 
 impl TitleBlockTemplateChoice {
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 4] = [
         Self::Compact,
         Self::Standard,
-        Self::Wide,
         Self::Organization,
         Self::None,
     ];
@@ -233,7 +231,6 @@ impl TitleBlockTemplateChoice {
         match self {
             Self::Compact => "RSpice compact",
             Self::Standard => "RSpice standard",
-            Self::Wide => "RSpice wide",
             Self::Organization => "Organization block · managed",
             Self::None => "No title block",
         }
@@ -243,7 +240,6 @@ impl TitleBlockTemplateChoice {
         match self {
             Self::Compact => "Identity, revision and page; suited to A4 and ANSI A.",
             Self::Standard => "Full engineering identity, responsibility, date and scale.",
-            Self::Wide => "Standard block plus organization and classification bands.",
             Self::Organization => "Organization-owned labels, order and mark.",
             Self::None => "The authored sheet carries no title block.",
         }
@@ -1159,7 +1155,6 @@ pub(super) fn title_template_from_model(
     match value {
         DrawingSheetTitleBlockTemplate::Compact => TitleBlockTemplateChoice::Compact,
         DrawingSheetTitleBlockTemplate::Standard => TitleBlockTemplateChoice::Standard,
-        DrawingSheetTitleBlockTemplate::Wide => TitleBlockTemplateChoice::Wide,
         DrawingSheetTitleBlockTemplate::OrganizationManaged => {
             TitleBlockTemplateChoice::Organization
         }
@@ -1171,7 +1166,6 @@ fn title_template_to_model(value: TitleBlockTemplateChoice) -> DrawingSheetTitle
     match value {
         TitleBlockTemplateChoice::Compact => DrawingSheetTitleBlockTemplate::Compact,
         TitleBlockTemplateChoice::Standard => DrawingSheetTitleBlockTemplate::Standard,
-        TitleBlockTemplateChoice::Wide => DrawingSheetTitleBlockTemplate::Wide,
         TitleBlockTemplateChoice::Organization => {
             DrawingSheetTitleBlockTemplate::OrganizationManaged
         }

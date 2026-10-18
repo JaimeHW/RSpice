@@ -249,6 +249,38 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
 }
 
 #[test]
+fn a_sheet_saved_on_the_retired_wide_block_loads_on_the_iso_7200_block() {
+    // The 230 mm block was wider than ISO 7200's 180 mm maximum. Whatever
+    // named it — a sheet, a default, a preset — loads on the standard's block
+    // and is written back under that block's name.
+    assert_eq!(
+        serde_json::from_value::<DrawingSheetTitleBlockTemplate>(serde_json::json!("wide"))
+            .unwrap(),
+        DrawingSheetTitleBlockTemplate::Standard
+    );
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA3,
+        SchematicPageOrientation::Landscape,
+    );
+    let mut wire = serde_json::to_value(&format).unwrap();
+    wire["title_block"]["template"] = serde_json::json!("wide");
+    let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
+    assert_eq!(
+        restored.title_block.template,
+        DrawingSheetTitleBlockTemplate::Standard
+    );
+    restored.validate().unwrap();
+    assert_eq!(
+        restored.geometry().unwrap().effective_title_block_template,
+        DrawingSheetTitleBlockTemplate::Standard
+    );
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap()["title_block"]["template"],
+        serde_json::json!("standard")
+    );
+}
+
+#[test]
 fn an_organization_template_sealed_while_paper_size_was_withdrawn_still_loads() {
     let managed = SchematicSheetFormat::default()
         .try_update(|draft| {

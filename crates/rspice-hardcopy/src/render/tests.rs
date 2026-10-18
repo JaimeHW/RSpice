@@ -1793,7 +1793,6 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
     let title_templates = [
         DrawingSheetTitleBlockTemplate::Compact,
         DrawingSheetTitleBlockTemplate::Standard,
-        DrawingSheetTitleBlockTemplate::Wide,
         DrawingSheetTitleBlockTemplate::OrganizationManaged,
         DrawingSheetTitleBlockTemplate::None,
     ];
@@ -1895,7 +1894,7 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
         }
     }
 
-    assert_eq!(cases, 600);
+    assert_eq!(cases, 480);
 }
 
 #[test]

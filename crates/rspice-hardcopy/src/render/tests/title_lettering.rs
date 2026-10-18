@@ -331,7 +331,7 @@ fn plotted_title_capitals_stand_at_the_height_the_standard_names() {
         ),
         (
             DrawingSheetStandard::IsoA0,
-            DrawingSheetTitleBlockTemplate::Wide,
+            DrawingSheetTitleBlockTemplate::Standard,
         ),
     ] {
         let format =

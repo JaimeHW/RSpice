@@ -1596,7 +1596,6 @@ fn title_template_label(template: crate::state::DrawingSheetTitleBlockTemplate) 
     match template {
         crate::state::DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
         crate::state::DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
-        crate::state::DrawingSheetTitleBlockTemplate::Wide => "RSpice wide",
         crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization managed",
         crate::state::DrawingSheetTitleBlockTemplate::None => "None",
     }

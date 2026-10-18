@@ -1331,7 +1331,6 @@ fn title_frame_block(
                     &[
                         (DrawingSheetTitleBlockTemplate::Compact, "RSpice compact"),
                         (DrawingSheetTitleBlockTemplate::Standard, "RSpice standard"),
-                        (DrawingSheetTitleBlockTemplate::Wide, "RSpice wide"),
                         (DrawingSheetTitleBlockTemplate::None, "No title block"),
                     ],
                 );
@@ -1509,7 +1508,6 @@ fn title_block_template_label(template: DrawingSheetTitleBlockTemplate) -> &'sta
     match template {
         DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
         DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
-        DrawingSheetTitleBlockTemplate::Wide => "RSpice wide",
         DrawingSheetTitleBlockTemplate::None => "No title block",
         DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization block",
     }
@@ -1895,7 +1893,7 @@ mod tests {
         let mut border_candidate = SchematicSheetFormat::default()
             .try_update(|draft| {
                 draft.apply_border_template(DrawingSheetBorderTemplate::None);
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::Wide;
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
             })
             .unwrap();
         enforce_managed_default_authority(&mut border_candidate, &border_authority);
@@ -1905,7 +1903,7 @@ mod tests {
         );
         assert_eq!(
             border_candidate.title_block.template,
-            DrawingSheetTitleBlockTemplate::Wide
+            DrawingSheetTitleBlockTemplate::Compact
         );
 
         let title_authority = SchematicSheetFormat::default()
