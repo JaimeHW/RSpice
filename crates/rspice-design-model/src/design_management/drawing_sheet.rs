@@ -556,6 +556,17 @@ pub enum DrawingSheetTitleBlockTemplate {
 }
 
 impl DrawingSheetTitleBlockTemplate {
+    /// The template's name wherever RSpice offers or reports it.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact · 130 × 32 mm",
+            Self::Standard => "ISO 7200 · 180 × 45 mm",
+            Self::OrganizationManaged => "Organization block",
+            Self::None => "No title block",
+        }
+    }
+
     #[must_use]
     pub const fn dimensions_um(self) -> Option<(u64, u64)> {
         match self {

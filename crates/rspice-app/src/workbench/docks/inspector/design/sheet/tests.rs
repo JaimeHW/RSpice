@@ -136,7 +136,7 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
     assert_eq!(
         painted,
         "Sheet\nSize\nISO A4 · 297 × 210 mm\nOrientation\nLandscape\n\
-         Title block\nTemplate\nRSpice standard\n\
+         Title block\nTemplate\nISO 7200 · 180 × 45 mm\n\
          Sheet title\ntop\n\nDocument type\nCircuit diagram\n\n\
          Drawn by\n\nApproved by\n\n\
          Document\nAll sheets\nRevision\n\nDate\nYYYY-MM-DD\n\n\

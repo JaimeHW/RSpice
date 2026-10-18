@@ -1315,9 +1315,10 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
         ui.add_space(6.0);
         ui.add(
             egui::Label::new(
-                egui::RichText::new(
-                    "Does not fit this drawing area — RSpice compact will be drawn. The requested choice stays saved.",
-                )
+                egui::RichText::new(format!(
+                    "Does not fit this drawing area — {} will be drawn. The requested choice stays saved.",
+                    TitleBlockTemplateChoice::Compact.label(),
+                ))
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                 .color(t.color.warn),
             )

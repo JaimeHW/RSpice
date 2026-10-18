@@ -537,7 +537,7 @@ fn target_band(
     let small = format!(
         "{} \u{00b7} {} \u{2014} {}",
         border_template_label(format.border),
-        title_block_template_label(format.title_block.template),
+        format.title_block.template.label(),
         seeds
     );
     let wrap = rect.width() - 22.0;
@@ -1043,7 +1043,7 @@ fn preview_region(
             );
         let text = format!(
             "{} does not fit this page's{area} drawing area; new sheets draw the compact block until the format grows.",
-            title_block_template_label(record.title_block.template),
+            record.title_block.template.label(),
         );
         let mut job = LayoutJob::simple(
             text,
@@ -1331,10 +1331,8 @@ fn title_frame_block(
                     ui,
                     "sheet-defaults-title-block",
                     &mut selected,
-                    &[(
-                        DrawingSheetTitleBlockTemplate::OrganizationManaged,
-                        "Organization block \u{00b7} managed",
-                    )],
+                    &[DrawingSheetTitleBlockTemplate::OrganizationManaged]
+                        .map(|template| (template, template.label())),
                 );
             } else {
                 enum_combo(
@@ -1342,10 +1340,11 @@ fn title_frame_block(
                     "sheet-defaults-title-block",
                     &mut selected,
                     &[
-                        (DrawingSheetTitleBlockTemplate::Compact, "RSpice compact"),
-                        (DrawingSheetTitleBlockTemplate::Standard, "RSpice standard"),
-                        (DrawingSheetTitleBlockTemplate::None, "No title block"),
-                    ],
+                        DrawingSheetTitleBlockTemplate::Compact,
+                        DrawingSheetTitleBlockTemplate::Standard,
+                        DrawingSheetTitleBlockTemplate::None,
+                    ]
+                    .map(|template| (template, template.label())),
                 );
             }
             if selected != record.title_block.template {
@@ -1365,9 +1364,10 @@ fn reset_frame_block(ui: &mut Ui, width: f32, enabled: bool, edits: &mut Vec<Rec
                 .ghost()
                 .enabled(enabled)
                 .show(ui)
-                .on_hover_text(
-                    "Restore the built-in default: A4 landscape, standard border with zones, RSpice compact title block.",
-                )
+                .on_hover_text(format!(
+                    "Restore the built-in default: A4 landscape, standard border with zones, {} title block.",
+                    SchematicSheetFormat::default().title_block.template.label(),
+                ))
                 .clicked()
             {
                 edits.push(RecordEdit::Reset);
@@ -1514,15 +1514,6 @@ fn border_template_label(border: DrawingSheetBorderTemplate) -> &'static str {
         DrawingSheetBorderTemplate::Plain => "Plain border",
         DrawingSheetBorderTemplate::None => "No border",
         DrawingSheetBorderTemplate::OrganizationManaged => "Organization border",
-    }
-}
-
-fn title_block_template_label(template: DrawingSheetTitleBlockTemplate) -> &'static str {
-    match template {
-        DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
-        DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
-        DrawingSheetTitleBlockTemplate::None => "No title block",
-        DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization block",
     }
 }
 

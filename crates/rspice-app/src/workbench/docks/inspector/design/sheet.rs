@@ -515,13 +515,9 @@ const fn orientation_label(orientation: SchematicPageOrientation) -> &'static st
     }
 }
 
+/// The template's one name, as Page Setup and every other surface give it.
 const fn template_name(template: DrawingSheetTitleBlockTemplate) -> &'static str {
-    match template {
-        DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
-        DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
-        DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization block",
-        DrawingSheetTitleBlockTemplate::None => "No title block",
-    }
+    template.label()
 }
 
 /// How many objects stand outside the drawing area, and where.

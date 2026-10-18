@@ -625,7 +625,7 @@ fn manager_format_table(ui: &mut Ui, rows: &mut [SheetFormatManagerRow], t: &Tok
                             });
                             cells.col(|ui| {
                                 manager_cell(ui, t, selected, false);
-                                ui.label(title_template_label(row.format.title_block.template));
+                                ui.label(row.format.title_block.template.label());
                             });
                             cells.col(|ui| {
                                 manager_cell(ui, t, selected, false);
@@ -1592,15 +1592,6 @@ fn managed_title_field_value_changed(
     }
 }
 
-fn title_template_label(template: crate::state::DrawingSheetTitleBlockTemplate) -> &'static str {
-    match template {
-        crate::state::DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
-        crate::state::DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
-        crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization managed",
-        crate::state::DrawingSheetTitleBlockTemplate::None => "None",
-    }
-}
-
 /// Strip geometry: the reference's 9 pt gutter, 140 pt minimum track and 7 pt
 /// card padding, with the page drawn between these two heights.
 const MANAGER_THUMB_GAP: f32 = 9.0;
@@ -1785,10 +1776,7 @@ fn title_field_summary_facts(
 ) {
     let t = Tokens::get(ui.ctx());
     let facts = [
-        (
-            "Template",
-            title_template_label(format.title_block.template).to_owned(),
-        ),
+        ("Template", format.title_block.template.label().to_owned()),
         (
             "Placement",
             title_anchor_label(format.title_block.anchor).to_owned(),

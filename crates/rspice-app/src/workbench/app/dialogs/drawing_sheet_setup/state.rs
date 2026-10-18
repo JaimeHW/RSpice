@@ -227,13 +227,9 @@ impl TitleBlockTemplateChoice {
         Self::None,
     ];
 
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Compact => "RSpice compact",
-            Self::Standard => "RSpice standard",
-            Self::Organization => "Organization block · managed",
-            Self::None => "No title block",
-        }
+    /// The template's one name, as every other surface gives it.
+    pub(crate) fn label(self) -> &'static str {
+        title_template_to_model(self).label()
     }
 
     pub(crate) const fn summary(self) -> &'static str {
