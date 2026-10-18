@@ -29,8 +29,8 @@ use super::drawing_sheet_preview::{
     DrawingSheetPreviewContent, drawing_sheet_preview, drawing_sheet_preview_at_common_scale,
 };
 #[cfg(test)]
-use super::drawing_sheet_setup::open_drawing_sheet_setup_for_state;
-use super::drawing_sheet_setup::{
+use crate::workbench::app::drawing_sheet_edit::open_drawing_sheet_setup_for_state;
+use crate::workbench::app::drawing_sheet_edit::{
     DrawingSheetAuthority, GovernedDrawingSheetAuthority, validate_drawing_sheet_authority,
 };
 
@@ -2438,10 +2438,8 @@ mod tests {
 
         app.state.dialogs.drawing_sheet_setup.open = true;
         app.state.dialogs.drawing_sheet_setup.support_suspended = false;
-        crate::workbench::app::dialogs::drawing_sheet_setup::apply_drawing_sheet_setup(
-            &mut app.state,
-        )
-        .unwrap();
+        crate::workbench::app::drawing_sheet_edit::apply_drawing_sheet_setup(&mut app.state)
+            .unwrap();
 
         let designs = &app.state.workspace.content.design_management;
         let saved = designs

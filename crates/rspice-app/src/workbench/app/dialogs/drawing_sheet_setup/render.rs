@@ -10,25 +10,21 @@ use egui::{
 };
 
 use crate::state::{
-    AuthoredDrawingSheetSize, DrawingSheetFrameConvention, DrawingSheetPresetScope,
-    DrawingSheetStandard, DrawingSheetStandardSeries, SchematicPageOrientation,
-    SchematicSheetFormat,
+    DrawingSheetFrameConvention, DrawingSheetPresetScope, DrawingSheetStandard,
+    DrawingSheetStandardSeries, SchematicPageOrientation,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::app::RSpiceApp;
-
-use super::super::drawing_sheet_preview::DrawingSheetPreviewContent;
-use super::commit::{
-    apply_drawing_sheet_setup, resume_drawing_sheet_setup_after_support,
-    validate_drawing_sheet_authority,
-};
-use super::state::{
+use crate::workbench::app::drawing_sheet_edit::{
     BorderTemplateChoice, DrawingSheetDraft, DrawingSheetSection, DrawingSheetSetupState,
     DrawingSheetSupportRequest, FieldProblem, PageSetupScope, SheetDisplayUnit, SheetSizeChoice,
-    TitleBlockTemplateChoice, ZoneModeChoice, display_unit_from_model, format_um,
+    TitleBlockTemplateChoice, ZoneModeChoice, apply_drawing_sheet_setup, format_choice_label,
+    format_um, resume_drawing_sheet_setup_after_support, validate_drawing_sheet_authority,
 };
+
+use super::super::drawing_sheet_preview::DrawingSheetPreviewContent;
 
 const TITLE: &str = "Page setup";
 const DESCRIPTION: &str = "Author the permanent physical drawing sheet independently from printer paper and export media.";
@@ -1480,55 +1476,6 @@ fn selected_size_label(state: &DrawingSheetSetupState) -> String {
             ),
         SheetSizeChoice::Custom => "One-off custom size…".to_owned(),
     }
-}
-
-/// The Format menu's label for `standard` on the sheet `format` describes:
-/// its designation and oriented size in that sheet's unit. A surface offering
-/// the same choice names it exactly as this dialog does.
-pub(crate) fn standard_size_choice_label(
-    standard: DrawingSheetStandard,
-    format: &SchematicSheetFormat,
-) -> String {
-    format_choice_label(
-        standard.label(),
-        standard.portrait_dimensions_um(),
-        format.orientation,
-        display_unit_from_model(format.display_unit),
-    )
-}
-
-/// The Format menu's label for the size `format` already has, custom sizes
-/// included.
-pub(crate) fn current_size_choice_label(format: &SchematicSheetFormat) -> String {
-    match &format.authored_size {
-        AuthoredDrawingSheetSize::Standard { standard } => {
-            standard_size_choice_label(*standard, format)
-        }
-        AuthoredDrawingSheetSize::Custom { snapshot } => format_choice_label(
-            &snapshot.name,
-            format.portrait_dimensions_um(),
-            format.orientation,
-            display_unit_from_model(format.display_unit),
-        ),
-    }
-}
-
-fn format_choice_label(
-    name: &str,
-    portrait: (u64, u64),
-    orientation: SchematicPageOrientation,
-    unit: SheetDisplayUnit,
-) -> String {
-    let (width, height) = match orientation {
-        SchematicPageOrientation::Landscape => (portrait.1, portrait.0),
-        SchematicPageOrientation::Portrait => portrait,
-    };
-    format!(
-        "{name} · {} × {} {}",
-        format_um(width, unit),
-        format_um(height, unit),
-        unit.suffix()
-    )
 }
 
 const fn standard_series_heading(series: DrawingSheetStandardSeries) -> &'static str {

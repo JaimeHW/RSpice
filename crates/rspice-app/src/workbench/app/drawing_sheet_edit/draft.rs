@@ -891,7 +891,57 @@ pub(crate) fn format_um(value_um: u64, unit: SheetDisplayUnit) -> String {
         .to_owned()
 }
 
-pub(super) fn display_unit_from_model(unit: DrawingSheetDisplayUnit) -> SheetDisplayUnit {
+/// The size menu's label for `standard` on the sheet `format` describes: its
+/// designation and oriented size in that sheet's unit. Every surface offering
+/// the same choice names it exactly so.
+pub(crate) fn standard_size_choice_label(
+    standard: DrawingSheetStandard,
+    format: &SchematicSheetFormat,
+) -> String {
+    format_choice_label(
+        standard.label(),
+        standard.portrait_dimensions_um(),
+        format.orientation,
+        display_unit_from_model(format.display_unit),
+    )
+}
+
+/// The size menu's label for the size `format` already has, custom sizes
+/// included.
+pub(crate) fn current_size_choice_label(format: &SchematicSheetFormat) -> String {
+    match &format.authored_size {
+        AuthoredDrawingSheetSize::Standard { standard } => {
+            standard_size_choice_label(*standard, format)
+        }
+        AuthoredDrawingSheetSize::Custom { snapshot } => format_choice_label(
+            &snapshot.name,
+            format.portrait_dimensions_um(),
+            format.orientation,
+            display_unit_from_model(format.display_unit),
+        ),
+    }
+}
+
+/// `name` with the oriented size its portrait edges make, in `unit`.
+pub(crate) fn format_choice_label(
+    name: &str,
+    portrait: (u64, u64),
+    orientation: SchematicPageOrientation,
+    unit: SheetDisplayUnit,
+) -> String {
+    let (width, height) = match orientation {
+        SchematicPageOrientation::Landscape => (portrait.1, portrait.0),
+        SchematicPageOrientation::Portrait => portrait,
+    };
+    format!(
+        "{name} · {} × {} {}",
+        format_um(width, unit),
+        format_um(height, unit),
+        unit.suffix()
+    )
+}
+
+fn display_unit_from_model(unit: DrawingSheetDisplayUnit) -> SheetDisplayUnit {
     match unit {
         DrawingSheetDisplayUnit::Millimetres => SheetDisplayUnit::Millimetres,
         DrawingSheetDisplayUnit::Centimetres => SheetDisplayUnit::Centimetres,

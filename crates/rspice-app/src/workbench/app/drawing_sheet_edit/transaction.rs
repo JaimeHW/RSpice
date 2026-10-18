@@ -11,7 +11,7 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::Workspace;
 
-use super::state::{
+use super::draft::{
     DrawingSheetAuthority, DrawingSheetDraft, DrawingSheetSetupState,
     GovernedDrawingSheetAuthority, PageSetupScope, SheetSizeChoice, ValidatedDrawingSheetDraft,
     title_template_from_model,
@@ -58,7 +58,7 @@ pub(crate) fn open_drawing_sheet_setup_with_preset(
     let mut draft = DrawingSheetDraft::from_format(&preset.format);
     draft.scope = scope;
     draft.title_fields = title_fields;
-    draft.size = super::state::SheetSizeChoice::CapturedPreset {
+    draft.size = super::draft::SheetSizeChoice::CapturedPreset {
         id: preset.id,
         name: preset.name,
         scope: preset.scope,
@@ -931,10 +931,10 @@ fn preset_id_stem(name: &str) -> String {
 fn capture_selected_personal_preset(
     candidate: &mut crate::state::DesignManagementCatalog,
     personal: &crate::workbench::DrawingSheetPersonalPreferences,
-    choice: &super::state::SheetSizeChoice,
+    choice: &super::draft::SheetSizeChoice,
     sheet_format: &mut SchematicSheetFormat,
 ) -> Result<(), String> {
-    let super::state::SheetSizeChoice::CapturedPreset {
+    let super::draft::SheetSizeChoice::CapturedPreset {
         id,
         scope: crate::state::DrawingSheetPresetScope::User,
         ..
@@ -1635,7 +1635,7 @@ mod tests {
         );
         assert_eq!(
             setup.draft.size,
-            super::super::state::SheetSizeChoice::Standard(DrawingSheetStandard::IsoA4)
+            super::super::draft::SheetSizeChoice::Standard(DrawingSheetStandard::IsoA4)
         );
         assert!(!setup.is_dirty());
     }
@@ -1714,7 +1714,7 @@ mod tests {
         setup.draft.scope = PageSetupScope::Document;
         setup
             .draft
-            .apply_size_choice(super::super::state::SheetSizeChoice::Standard(
+            .apply_size_choice(super::super::draft::SheetSizeChoice::Standard(
                 DrawingSheetStandard::IsoA3,
             ));
         let expected = setup.draft.validate().unwrap().page_format;
@@ -1780,7 +1780,7 @@ mod tests {
         setup.draft.scope = PageSetupScope::Document;
         setup
             .draft
-            .apply_size_choice(super::super::state::SheetSizeChoice::Standard(
+            .apply_size_choice(super::super::draft::SheetSizeChoice::Standard(
                 DrawingSheetStandard::IsoA3,
             ));
 
@@ -1837,15 +1837,15 @@ mod tests {
         }
         open_drawing_sheet_setup(&mut app);
         let draft = &mut app.state.dialogs.drawing_sheet_setup.draft;
-        draft.zone_mode = super::super::state::ZoneModeChoice::None;
+        draft.zone_mode = super::super::draft::ZoneModeChoice::None;
         draft.centring_marks = false;
-        draft.title_block = super::super::state::TitleBlockTemplateChoice::None;
+        draft.title_block = super::super::draft::TitleBlockTemplateChoice::None;
         draft
             .title_fields
             .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
             .unwrap()
             .value = "Edited managed sheet".to_owned();
-        draft.apply_size_choice(super::super::state::SheetSizeChoice::Standard(
+        draft.apply_size_choice(super::super::draft::SheetSizeChoice::Standard(
             DrawingSheetStandard::IsoA3,
         ));
 
@@ -1915,7 +1915,7 @@ mod tests {
         let (mut app, key, ids) = governed_app_with_sheets(1);
         open_drawing_sheet_setup(&mut app);
         let setup = &mut app.state.dialogs.drawing_sheet_setup;
-        setup.draft.size = super::super::state::SheetSizeChoice::Custom;
+        setup.draft.size = super::super::draft::SheetSizeChoice::Custom;
         setup.draft.custom_name = "Lab panel".to_owned();
         setup.draft.width = "250".to_owned();
         setup.draft.height = "400".to_owned();
