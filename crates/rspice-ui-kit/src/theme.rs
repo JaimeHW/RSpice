@@ -398,15 +398,28 @@ fn build_style(t: &Tokens) -> egui::Style {
     style.spacing.icon_width_inner = 8.0;
     style.spacing.icon_spacing = 6.0;
     style.spacing.tooltip_width = 360.0;
+    // A thin bar over its own reserved gutter: the thumb shows whenever a list
+    // overflows, widens under the pointer, and its track appears only while
+    // it is dragged or hovered. egui's solid bar paints its thumb in the
+    // inactive widget fill, which is `bg-inset`, the track's own colour, so
+    // no list ever showed that it scrolled; and its opaque track cut every
+    // row fill short of the edge. The gutter keeps the solid bar's 13 points,
+    // so nothing laid out beside a bar moves.
     style.spacing.scroll = ScrollStyle {
+        floating: true,
         bar_width: 10.0,
+        floating_width: 6.0,
+        floating_allocated_width: 13.0,
         handle_min_length: 30.0,
         bar_inner_margin: 3.0,
         bar_outer_margin: 0.0,
-        // A solid bar keeps its width whether or not the pointer is over the
-        // list, so its thumb shows too, as a desktop list's does: egui's
-        // solid style leaves an empty gutter until the pointer arrives.
-        dormant_handle_opacity: 0.6,
+        foreground_color: true,
+        dormant_background_opacity: 0.0,
+        active_background_opacity: 0.0,
+        interact_background_opacity: 0.4,
+        dormant_handle_opacity: 0.35,
+        active_handle_opacity: 0.5,
+        interact_handle_opacity: 0.75,
         // egui fades the content at a scrolled edge by default, which greys
         // the last visible row of a table or line of a log as if it were
         // disabled. The thumb is the sign that more is there.
