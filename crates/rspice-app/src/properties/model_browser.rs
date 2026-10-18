@@ -543,13 +543,19 @@ const NOTE_HEIGHT: f32 = 18.0;
 /// bands.
 const KIND_HEIGHT: f32 = 16.0;
 const DESCRIPTION_GAP: f32 = 4.0;
-const FACTS_GAP: f32 = 12.0;
-const PARAMETERS_GAP: f32 = 14.0;
+const FACTS_GAP: f32 = 4.0;
+const PARAMETERS_GAP: f32 = 10.0;
 const CAPTION_HEIGHT: f32 = 16.0;
 const RULE_GAP: f32 = 4.0;
-/// The sheet's fact rows and the column their values start in.
-const FACT_PITCH: f32 = 22.0;
-const FACT_LABEL_WIDTH: f32 = 84.0;
+/// The sheet's fact rows, on the parameter grid's pitch, and the air between
+/// the widest label and the column every value starts in.
+const FACT_PITCH: f32 = PARAMETER_PITCH;
+const FACT_LABEL_GAP: f32 = 12.0;
+/// Every label [`sheet_facts`] can state. The value column is measured over
+/// all of them, so it holds still while the reader steps from card to card.
+const FACT_LABELS: [&str; 7] = [
+    "Library", "Source", "Section", "Corners", "Length", "Width", "Supply",
+];
 /// The parameter grid: row pitch, the narrowest column, and the gap between
 /// two columns.
 const PARAMETER_PITCH: f32 = 20.0;
@@ -1142,15 +1148,20 @@ fn sheet_pane(ui: &mut Ui, picked: Option<(&ModelLibrary, &DeviceModel)>) {
                     response.on_hover_text(text);
                 }
             };
-            // The name takes the filter's height, so across the hairline the
-            // two first lines read as one.
-            line(
-                ui,
-                t.metrics.ctl_h,
-                model.name.as_str(),
-                theme::mono(tokens::FS_3, FontWeight::Medium),
-                t.color.text,
-            );
+            // The name sits on the filter's centreline, so across the hairline
+            // the two first lines read as one, and keeps none of the control
+            // height below its own line.
+            let name_font = theme::mono(tokens::FS_3, FontWeight::Medium);
+            let height = name_height(ui, &name_font);
+            let (rect, response) =
+                ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, model.name.as_str())
+            });
+            let centred = Rect::from_min_size(rect.min, vec2(rect.width(), t.metrics.ctl_h));
+            if run(ui, centred, false, &model.name, name_font, t.color.text) {
+                response.on_hover_text(model.name.as_str());
+            }
             let mut kind = vec![model.model_type.display_name().to_owned()];
             kind.extend(level_label(model));
             line(
@@ -1166,8 +1177,9 @@ fn sheet_pane(ui: &mut Ui, picked: Option<(&ModelLibrary, &DeviceModel)>) {
             }
 
             ui.add_space(FACTS_GAP);
+            let column = fact_column(ui);
             for (label, value, hover) in &sheet_facts(library, model) {
-                fact(ui, label, value, hover.as_deref());
+                fact(ui, column, label, value, hover.as_deref());
             }
 
             let parameters = parameters(model);
@@ -1286,9 +1298,17 @@ fn body_height(ui: &mut Ui, groups: &[Group<'_>], sheet_width: Option<f32>) -> f
     height.clamp(MIN_BODY, MAX_BODY)
 }
 
+/// How tall the sheet's name line is: down to the foot of the name's own line
+/// when it is centred on the filter beside it.
+fn name_height(ui: &mut Ui, font: &egui::FontId) -> f32 {
+    let row = ui.fonts_mut(|fonts| fonts.row_height(font));
+    (Tokens::get(ui.ctx()).metrics.ctl_h + row) * 0.5
+}
+
 /// The height one model's sheet paints at `width` inside its insets.
 fn sheet_height(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel, width: f32) -> f32 {
-    let mut height = FILTER_TOP + Tokens::get(ui.ctx()).metrics.ctl_h + KIND_HEIGHT;
+    let name_font = theme::mono(tokens::FS_3, FontWeight::Medium);
+    let mut height = FILTER_TOP + name_height(ui, &name_font) + KIND_HEIGHT;
     let description = model.description.trim();
     if !description.is_empty() {
         let job = description_job(description, width, egui::Color32::WHITE);
@@ -1339,8 +1359,22 @@ fn description(ui: &mut Ui, text: &str) {
     }
 }
 
-/// One label/value fact, the value in its own column.
-fn fact(ui: &mut Ui, label: &str, value: &str, hover: Option<&str>) {
+/// Where the facts' values start: past the widest label any sheet states.
+fn fact_column(ui: &mut Ui) -> f32 {
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    FACT_LABELS
+        .iter()
+        .map(|label| measured_width(ui, label, font.clone()))
+        .fold(0.0, f32::max)
+        + FACT_LABEL_GAP
+}
+
+/// One label/value fact, the value starting `column` in.
+fn fact(ui: &mut Ui, column: f32, label: &str, value: &str, hover: Option<&str>) {
+    debug_assert!(
+        FACT_LABELS.contains(&label),
+        "{label} is not in FACT_LABELS"
+    );
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), FACT_PITCH), Sense::hover());
@@ -1351,7 +1385,7 @@ fn fact(ui: &mut Ui, label: &str, value: &str, hover: Option<&str>) {
         ui,
         Rect::from_min_max(
             rect.min,
-            egui::pos2(rect.left() + FACT_LABEL_WIDTH - 8.0, rect.bottom()),
+            egui::pos2(rect.left() + column - FACT_LABEL_GAP, rect.bottom()),
         ),
         false,
         label,
@@ -1360,10 +1394,7 @@ fn fact(ui: &mut Ui, label: &str, value: &str, hover: Option<&str>) {
     );
     let elided = run(
         ui,
-        Rect::from_min_max(
-            egui::pos2(rect.left() + FACT_LABEL_WIDTH, rect.top()),
-            rect.max,
-        ),
+        Rect::from_min_max(egui::pos2(rect.left() + column, rect.top()), rect.max),
         false,
         value,
         theme::mono(tokens::FS_0, FontWeight::Regular),
