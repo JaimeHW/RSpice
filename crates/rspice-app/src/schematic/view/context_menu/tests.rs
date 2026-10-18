@@ -1547,3 +1547,90 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
         Some(SelectionTransform::MirrorVertical.description())
     );
 }
+
+/// Under "Selected net across hierarchy" an Alt+click net highlight is
+/// carried into the instance a user descends into. Picking that instance
+/// cleared it first: the click before the descend key or a double-click,
+/// and the context menu that offers Descend, so the child lit nothing and
+/// neither did the parent on the way back up. Picking a descendable
+/// instance now leaves it lit; picking an ordinary part still clears it.
+#[test]
+fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
+    use crate::state::SchematicNetHighlighting;
+    use crate::workbench::examples::hierarchy_reference::{self, AMP_INSTANCES};
+    use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
+
+    fn lit(state: &AppState) -> Option<String> {
+        let highlight = &state.schematic.session.editor.net_highlight;
+        highlight
+            .active
+            .then(|| highlight.selected_net_name.clone())
+            .flatten()
+    }
+    fn click(state: &mut AppState, id: u64) {
+        let request = EditorRequest {
+            source: super::super::requests::editor_request_source(state),
+            selection: state.schematic.session.editor.selection.clone(),
+            action: EditorAction::SelectPointer {
+                target: Some(PointerTarget::Component(id)),
+                additive: false,
+                alt_held: false,
+            },
+        };
+        super::super::requests::apply_editor_request(state, request);
+    }
+
+    let reference = hierarchy_reference::build();
+    let mut state = reference.state;
+    state.open_workspace_view(reference.top.clone());
+    state.ui.schematic_visibility.net_highlighting =
+        SchematicNetHighlighting::SelectedNetAcrossHierarchy;
+    let component_named = |state: &AppState, name: &str| {
+        state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .map(|component| component.id)
+            .expect("top places the component")
+    };
+    let x1 = component_named(&state, AMP_INSTANCES[0]);
+
+    for by_menu in [false, true] {
+        assert!(state.light_net_named("in"), "top has a net named in");
+        if by_menu {
+            select_context_target(&mut state, Some(PointerTarget::Component(x1)));
+        } else {
+            click(&mut state, x1);
+        }
+        assert_eq!(
+            state.schematic.session.editor.selection.single_component(),
+            Some(x1)
+        );
+        assert_eq!(lit(&state).as_deref(), Some("in"), "menu {by_menu}");
+
+        let symbol_context = schematic_symbol_context(&state);
+        execute_context_action(
+            ContextAction::DescendHierarchy,
+            &mut state,
+            Point::origin(),
+            &symbol_context,
+        );
+        assert_eq!(lit(&state).as_deref(), Some("IN"), "X1's port is lit");
+        state.ascend_workspace_level();
+        assert_eq!(lit(&state).as_deref(), Some("in"), "back up, in is lit");
+        state.schematic.session.editor.selection.clear();
+    }
+
+    let part = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| state.hierarchy_master_for_component(component.id).is_none())
+        .map(|component| component.id)
+        .expect("top places an ordinary part");
+    click(&mut state, part);
+    assert_eq!(lit(&state), None, "an ordinary part still clears it");
+}

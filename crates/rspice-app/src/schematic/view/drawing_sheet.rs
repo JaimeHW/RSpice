@@ -1,10 +1,9 @@
 //! Resolve drawing-sheet project inputs and coordinate current overflow navigation.
 
 use super::viewport::Viewport;
-use super::{SchematicSymbolContext, schematic_symbol_context};
+use super::{AppState, SchematicSymbolContext, schematic_symbol_context};
 use crate::state::DrawingSheetTitleFieldId;
 use crate::state::overflow_memo::OverflowKey;
-use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
 use rspice_schematic_editor::view::drawing_sheet::{self as sheet_view, DrawingSheetCanvas};
 pub(crate) use rspice_schematic_editor::view::drawing_sheet::{

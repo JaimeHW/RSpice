@@ -598,12 +598,15 @@ fn select_pointer_target(
 }
 
 /// Select what the menu opens on, unless it is already in the selection,
-/// and name it as the menu's target.
+/// and name it as the menu's target. A net highlight stays lit on an
+/// instance the menu can descend into, so Descend carries it.
 fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) -> ContextTarget {
     let Some(target) = target else {
         return ContextTarget::Canvas;
     };
-    state.schematic.session.editor.net_highlight.clear();
+    if !super::requests::picks_instance_to_descend(state, Some(target)) {
+        state.schematic.session.editor.net_highlight.clear();
+    }
     match target {
         PointerTarget::Component(id) => {
             if !state.schematic.session.editor.selection.has_component(id) {

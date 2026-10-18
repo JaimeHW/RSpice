@@ -4,10 +4,19 @@ use crate::workbench::app_state::AppState;
 use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 use rspice_schematic_editor::view::keyboard_navigation;
 use rspice_schematic_editor::view::pointer_target::{
-    PointerSelectionEffect, select_pointer_target,
+    PointerSelectionEffect, PointerTarget, select_pointer_target,
 };
 
 pub(super) use crate::workbench::app::schematic_editor_request_source as editor_request_source;
+
+/// Whether `target` is an instance the user can descend into. Picking one
+/// leaves a net highlight lit, so the descent (the descend key, the second
+/// click of a double-click, or the menu's Descend) carries it into the
+/// instance and back out.
+pub(super) fn picks_instance_to_descend(state: &AppState, target: Option<PointerTarget>) -> bool {
+    matches!(target, Some(PointerTarget::Component(id))
+        if state.hierarchy_master_for_component(id).is_some())
+}
 
 pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest) {
     if request.source != editor_request_source(state)
@@ -34,6 +43,8 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
             additive,
             alt_held,
         } => {
+            let kept = (!additive && picks_instance_to_descend(state, target))
+                .then(|| state.schematic.session.editor.net_highlight.clone());
             if let PointerSelectionEffect::HighlightWire(id) = select_pointer_target(
                 &mut state.schematic.session.editor,
                 target,
@@ -41,6 +52,9 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
                 alt_held,
             ) {
                 super::interaction::highlight_canvas_net(state, |net| net.wire_ids.contains(&id));
+            }
+            if let Some(kept) = kept {
+                state.schematic.session.editor.net_highlight = kept;
             }
         }
     }
