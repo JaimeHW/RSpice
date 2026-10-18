@@ -380,6 +380,17 @@ pub fn resolve_drawing_sheet_title_fields(
                     id,
                     value: match authority {
                         _ if !value.trim().is_empty() => value.to_owned(),
+                        // ASME Y14.35 letters a dash in REV for a drawing's
+                        // initial release, so on the ASME form a revision not
+                        // yet issued is a blank cell: a dash there would read
+                        // as released.
+                        DrawingSheetTitleFieldValueAuthority::Automatic
+                            if id == DrawingSheetTitleFieldId::Revision
+                                && format.title_block.template
+                                    == DrawingSheetTitleBlockTemplate::AsmeY141 =>
+                        {
+                            String::new()
+                        }
                         // A value RSpice supplies and does not have yet, such
                         // as the date of a document never issued, reads as
                         // not yet known.

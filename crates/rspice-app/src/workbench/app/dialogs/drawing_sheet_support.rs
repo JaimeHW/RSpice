@@ -871,7 +871,13 @@ fn document_control_editor(ui: &mut Ui, state: &mut TitleBlockFieldsState) {
                         ui.end_row();
                     });
             }
-            if let Some(advisory) = state.draft_document_control.revision_advisory() {
+            if let Some(advisory) = state.format.as_ref().map_or_else(
+                || state.draft_document_control.revision_advisory(),
+                |format| {
+                    let revision = state.draft_document_control.revision_index();
+                    format.title_block.template.revision_advisory(revision)
+                },
+            ) {
                 ui.add_space(7.0);
                 ui.colored_label(t.color.warn, advisory);
             }

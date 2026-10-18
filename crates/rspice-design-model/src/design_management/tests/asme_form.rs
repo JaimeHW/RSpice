@@ -841,3 +841,73 @@ fn the_asme_form_letters_no_document_type_and_the_status_in_capitals() {
     );
     assert!(!text.iter().any(|line| line.contains("Schematic diagram")));
 }
+
+#[test]
+fn rev_stays_blank_until_the_document_is_issued_a_revision() {
+    // ASME Y14.35 reads a dash in REV as the initial release, so a sheet not
+    // yet issued a revision letters nothing there.
+    let format = sheet(DrawingSheetStandard::AnsiB);
+    let layout = layout_of(&format);
+    let rev = |fields: &[ResolvedDrawingSheetTitleField]| {
+        let cell = layout.cell(Field::Revision).unwrap();
+        layout
+            .lettering(fields)
+            .into_iter()
+            .filter(|line| layout.cells[line.cell] == *cell && line.text != "REV")
+            .map(|line| line.text)
+            .collect::<Vec<_>>()
+    };
+    let draft = resolved(&format, &[]);
+    assert_eq!(
+        draft
+            .iter()
+            .find(|field| field.id == Field::Revision)
+            .unwrap()
+            .value,
+        ""
+    );
+    assert!(rev(&draft).is_empty());
+    assert_eq!(rev(&resolved(&format, &[(Field::Revision, "B")])), ["B"]);
+    // A dash is lettered only when it is the revision entered, for the
+    // initial release.
+    assert_eq!(rev(&resolved(&format, &[(Field::Revision, "-")])), ["-"]);
+    // ISO 7200's form still reads an index not yet issued as not yet known.
+    let iso = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA3,
+        SchematicPageOrientation::Landscape,
+    );
+    let iso_revision = resolve_drawing_sheet_title_fields(&iso, &BTreeMap::new())
+        .into_iter()
+        .find(|field| field.id == Field::Revision)
+        .unwrap();
+    assert_eq!(iso_revision.value, "\u{2014}");
+}
+
+#[test]
+fn a_revision_outside_the_y14_35_sequence_is_advised_against_on_the_asme_form() {
+    let asme = DrawingSheetTitleBlockTemplate::AsmeY141;
+    for issued in ["", "-", "A", "B", "Y", "AA", "AB", "BY", "YY"] {
+        assert_eq!(asme.revision_advisory(issued), None, "{issued}");
+    }
+    for letter in ["I", "O", "Q", "S", "X", "Z", "AI", "ZA"] {
+        assert_eq!(
+            asme.revision_advisory(letter),
+            Some("ASME Y14.35 letters a revision in capitals from A, without I, O, Q, S, X or Z."),
+            "{letter}"
+        );
+    }
+    for other in ["b", "1", "A1", "B-2"] {
+        assert!(asme.revision_advisory(other).is_some(), "{other}");
+    }
+    assert_eq!(
+        asme.revision_advisory("ABC"),
+        Some("ASME Y14.35 gives a revision two letters at most.")
+    );
+    // Every other block keeps ISO 7200's advice: Q and S are fine there.
+    let iso = DrawingSheetTitleBlockTemplate::Standard;
+    assert_eq!(iso.revision_advisory("Q"), None);
+    assert_eq!(
+        iso.revision_advisory("O"),
+        drawing_sheet_revision_advisory("O")
+    );
+}

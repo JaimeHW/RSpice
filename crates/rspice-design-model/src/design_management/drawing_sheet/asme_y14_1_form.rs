@@ -332,6 +332,46 @@ pub const ASME_Y14_1_FORM_FIELDS: [DrawingSheetTitleFieldId; 16] = [
     Field::Page,
 ];
 
+/// The capitals ASME Y14.35 letters revisions with: A to Y, less I, O, Q,
+/// S and X, which read as numerals or other letters, and Z.
+const fn y14_35_revision_letter(letter: char) -> bool {
+    letter.is_ascii_uppercase() && !matches!(letter, 'I' | 'O' | 'Q' | 'S' | 'X' | 'Z')
+}
+
+/// What ASME Y14.35 advises against in a revision, if `revision` does it:
+/// anything but capitals from its sequence, A to Y and then AA, AB and on,
+/// or more than two of them. A dash, the initial issue, is none of these.
+/// An advisory, not a refusal: a document already issued under such a
+/// revision keeps it. (ASME Y14.35's sequence is known here from a
+/// secondary summary of the standard.)
+#[must_use]
+pub fn drawing_sheet_asme_revision_advisory(revision: &str) -> Option<&'static str> {
+    let revision = revision.trim();
+    if revision.is_empty() || revision == "-" {
+        None
+    } else if !revision.chars().all(y14_35_revision_letter) {
+        Some("ASME Y14.35 letters a revision in capitals from A, without I, O, Q, S, X or Z.")
+    } else if revision.chars().count() > 2 {
+        Some("ASME Y14.35 gives a revision two letters at most.")
+    } else {
+        None
+    }
+}
+
+impl DrawingSheetTitleBlockTemplate {
+    /// What the standard behind this block advises against in `revision`:
+    /// ASME Y14.35 on the ASME form, ISO 7200 on every other block.
+    #[must_use]
+    pub fn revision_advisory(self, revision: &str) -> Option<&'static str> {
+        match self {
+            Self::AsmeY141 => drawing_sheet_asme_revision_advisory(revision),
+            Self::Compact | Self::Standard | Self::OrganizationManaged | Self::None => {
+                drawing_sheet_revision_advisory(revision)
+            }
+        }
+    }
+}
+
 impl DrawingSheetStandard {
     /// The drawing size designation ASME Y14.1's SIZE block letters: Table
     /// 4-1's bare letter for an ANSI sheet, and the series named for an ARCH

@@ -209,6 +209,35 @@ fn a_revision_index_with_an_o_is_flagged_and_kept() {
     );
 }
 
+/// On the ASME form a revision is held to ASME Y14.35's sequence instead,
+/// and flagged, not refused, outside it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_revision_outside_y14_35_is_flagged_and_kept_on_an_asme_sheet() {
+    let mut panel = SheetPanel::new();
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
+    )
+    .unwrap();
+    panel.enter("Revision", "S");
+    assert_eq!(
+        panel.document_value(DrawingSheetTitleFieldId::Revision),
+        "S"
+    );
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(
+        painted.contains(
+            "Revision\nS\nASME Y14.35 letters a revision in capitals from A, without I, O, Q, \
+             S, X or Z.\n"
+        ),
+        "{painted}"
+    );
+    panel.enter("Revision", "B");
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(!painted.contains("Y14.35"), "{painted}");
+}
+
 /// The document's values every sheet letters — owner, number, revision —
 /// are typed here too, and each lands on the project as its own undo step
 /// without disturbing the others.

@@ -30,7 +30,7 @@ use crate::state::{
     AuthoredDrawingSheetSize, DrawingSheetFrameConvention, DrawingSheetReleaseStatus,
     DrawingSheetStandard, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
     DrawingSheetTitleFieldValueAuthority, NetNamingPolicy, SchematicGridPitch,
-    SchematicPageOrientation, SchematicSheetFormat, SheetId, drawing_sheet_revision_advisory,
+    SchematicPageOrientation, SchematicSheetFormat, SheetId,
 };
 use crate::ui::icons::Icon;
 use crate::ui::widgets::Button;
@@ -434,8 +434,10 @@ fn document_section(
             };
             property_row(ui, field.display_label(), shown);
         }
+        // ISO 7200's advice on a revision index, or ASME Y14.35's on the
+        // ASME form.
         if field == DrawingSheetTitleFieldId::Revision
-            && let Some(advisory) = drawing_sheet_revision_advisory(&stored)
+            && let Some(advisory) = format.title_block.template.revision_advisory(&stored)
         {
             problem_line(ui, Problem::Warning, advisory);
         }
