@@ -74,6 +74,11 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
         execution_limits_for(self.max_parallel_workers)
     }
 
+    /// The chain this run's includes resolve through.
+    fn include_search(&self) -> crate::netlist_preparation::IncludeSearchChain {
+        crate::netlist_preparation::IncludeSearchChain::for_project(self.technology.project)
+    }
+
     fn plan_data(
         &self,
         plan_id: rspice_app_types::product::SimulationPlanId,
@@ -424,10 +429,7 @@ where
         expand_generated_dependencies_with_sealed_sources(
             &netlist,
             root_schematic.current_file(),
-            &crate::netlist_preparation::IncludeSearchChain::resolve(
-                inputs.technology.project.include_search_paths(),
-                inputs.technology.project.data_root(),
-            ),
+            &inputs.include_search(),
             Some(&sealed_models),
         )?;
     netlist = measurements::materialize(
@@ -661,15 +663,8 @@ pub fn build_prepared_manual_deck<R, A>(
             "Relative .include/.inc/.lib sources require an imported deck origin before they can be sealed",
         ));
     }
-    let (expanded, canonical_origin, sealed_source_dependencies) = expand_manual_dependencies(
-        &composed,
-        origin,
-        &crate::netlist_preparation::IncludeSearchChain::resolve(
-            inputs.technology.project.include_search_paths(),
-            inputs.technology.project.data_root(),
-        ),
-        &sealed_models,
-    )?;
+    let (expanded, canonical_origin, sealed_source_dependencies) =
+        expand_manual_dependencies(&composed, origin, &inputs.include_search(), &sealed_models)?;
     let expanded = owned_source::bind_execution_profile(
         descriptor.and_then(|descriptor| descriptor.execution_profile),
         expanded,

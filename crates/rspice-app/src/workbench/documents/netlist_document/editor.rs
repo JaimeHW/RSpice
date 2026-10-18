@@ -629,10 +629,7 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
     } else {
         None
     };
-    let include_search = rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
-        state.workspace.content.project.include_search_paths(),
-        state.workspace.content.project.data_root(),
-    );
+    let include_search = state.include_search_chain();
     // Only a parse of the buffer itself, as its own root, says which of its
     // lines a run reads. A composed override's parse reads the lines of the
     // composed deck, and a dependency's sections are selected, and its

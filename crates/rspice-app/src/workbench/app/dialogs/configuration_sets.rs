@@ -588,10 +588,7 @@ impl RSpiceApp {
         rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
             &generated,
             root.current_file(),
-            &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
-                self.state.workspace.content.project.include_search_paths(),
-                self.state.workspace.content.project.data_root(),
-            ),
+            &self.state.include_search_chain(),
             self.state.model_library_manager.catalog(),
             self.state.model_library_manager.resolution_records(),
         )
@@ -1192,9 +1189,8 @@ fn configuration_netlist_digest(
         rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
             &source,
             root.current_file(),
-            &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
-                workspace.content.project.include_search_paths(),
-                workspace.content.project.data_root(),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::for_project(
+                &workspace.content.project,
             ),
             model_libraries.catalog(),
             model_libraries.resolution_records(),

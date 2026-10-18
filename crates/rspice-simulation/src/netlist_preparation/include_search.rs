@@ -74,6 +74,16 @@ impl IncludeSearchChain {
         }
     }
 
+    /// The chain a project's includes resolve through.
+    ///
+    /// Every surface that resolves a project's includes — a run, a check, a
+    /// configuration's seal and the live editor — builds its chain here, so
+    /// no two of them can walk different ones.
+    #[must_use]
+    pub fn for_project(project: &rspice_project_contract::ProjectDescriptor) -> Self {
+        Self::resolve(project.include_search_paths(), project.data_root())
+    }
+
     /// Every entry, in the order the resolver walks them.
     #[must_use]
     pub fn entries(&self) -> &[IncludeSearchEntry] {

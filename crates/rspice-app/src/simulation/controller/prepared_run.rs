@@ -551,10 +551,7 @@ impl SimulationController {
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
             root_schematic.current_file(),
-            &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
-                state.workspace.content.project.include_search_paths(),
-                state.workspace.content.project.data_root(),
-            ),
+            &state.include_search_chain(),
             Some(&sealed_models),
         )?;
         Ok(source)

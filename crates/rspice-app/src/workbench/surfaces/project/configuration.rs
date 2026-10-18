@@ -346,10 +346,7 @@ fn validate_candidate_configuration(
     rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
         &generated,
         root.current_file(),
-        &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
-            app.state.workspace.content.project.include_search_paths(),
-            app.state.workspace.content.project.data_root(),
-        ),
+        &app.state.include_search_chain(),
         app.state.model_library_manager.catalog(),
         app.state.model_library_manager.resolution_records(),
     )

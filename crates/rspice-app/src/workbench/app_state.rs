@@ -360,6 +360,15 @@ impl AppState {
         }
     }
 
+    /// The chain the project's `.include` and `.lib` files resolve through.
+    pub(crate) fn include_search_chain(
+        &self,
+    ) -> rspice_simulation::netlist_preparation::IncludeSearchChain {
+        rspice_simulation::netlist_preparation::IncludeSearchChain::for_project(
+            &self.workspace.content.project,
+        )
+    }
+
     /// Resolve the project-owned technology contract against both mutable
     /// execution catalogs. No simulation or governed save may infer authority
     /// from a display label, an active registry package, or model paths alone.

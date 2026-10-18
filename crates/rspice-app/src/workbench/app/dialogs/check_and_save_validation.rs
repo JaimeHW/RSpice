@@ -416,7 +416,7 @@ impl CheckAndSaveValidationReport {
                 match rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
                     &generated_source,
                     root.current_file(),
-                    &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(state.workspace.content.project.include_search_paths(), state.workspace.content.project.data_root()),
+                    &state.include_search_chain(),
                     state.model_library_manager.catalog(),
                     state.model_library_manager.resolution_records(),
                 ) {
