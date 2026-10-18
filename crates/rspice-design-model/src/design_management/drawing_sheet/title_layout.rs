@@ -20,9 +20,14 @@
 //! # How the fields are split into rows
 //!
 //! Fields keep the order the sheet lists them in and fill the rows from the
-//! top, each row taking the next run of them. Within a row every cell takes
-//! its share of the field grid in proportion to its need, the last cell
-//! taking what integer rounding leaves, so a row spans the grid exactly.
+//! top, each row taking the next run of them. A row with room for its cells'
+//! needs gives every cell a share of the field grid in proportion to its
+//! need, so the width to spare is spread across the row. A row without room
+//! gives each fixed-form field its whole need first — a page number, a date
+//! or a status cut short says nothing — and the free-text fields share what
+//! is left in proportion to theirs; only a row whose fixed-form fields alone
+//! overrun the grid shares all of it in proportion. Either way the last cell
+//! takes what integer rounding leaves, so a row spans the grid exactly.
 //!
 //! Of every way to cut the list into the template's rows, the layout takes
 //! the one whose fullest row overruns the grid by least. That is no overrun
@@ -67,6 +72,20 @@ impl DrawingSheetTitleFieldId {
             Self::DocumentId => 16,
             Self::Scale => 3,
         }
+    }
+
+    /// Whether the field's value has a fixed form, held whole by a cell given
+    /// its need, rather than free text a long value overruns.
+    const fn has_fixed_form(self) -> bool {
+        matches!(
+            self,
+            Self::Page
+                | Self::Revision
+                | Self::PaperSize
+                | Self::Date
+                | Self::DocumentStatus
+                | Self::Classification
+        )
     }
 
     /// Width of the cell that holds this field's typical value and its
@@ -239,14 +258,9 @@ pub fn drawing_sheet_title_layout(
         .into_iter()
         .enumerate()
     {
-        let run_need_um = needs[run.clone()].iter().sum::<u64>().max(1);
+        let widths = share_row(&fields[run.clone()], &needs[run.clone()], grid_width_um);
         let mut x_um = grid_x_um;
-        for index in run.clone() {
-            let cell_width_um = if index + 1 == run.end {
-                width_um - x_um
-            } else {
-                grid_width_um * needs[index] / run_need_um
-            };
+        for (index, cell_width_um) in run.zip(widths) {
             cells.push(DrawingSheetTitleCell {
                 id: fields[index],
                 row,
@@ -263,6 +277,42 @@ pub fn drawing_sheet_title_layout(
         rows,
         cells,
     })
+}
+
+/// The widths of one row's cells, which together span `grid_width_um`
+/// exactly, by the rule the module documentation sets out.
+fn share_row(fields: &[DrawingSheetTitleFieldId], needs: &[u64], grid_width_um: u64) -> Vec<u64> {
+    let total_um = needs.iter().sum::<u64>().max(1);
+    let fixed_um = fields
+        .iter()
+        .zip(needs)
+        .filter(|(id, _)| id.has_fixed_form())
+        .map(|(_, need)| need)
+        .sum::<u64>();
+    let free_um = total_um.saturating_sub(fixed_um);
+    let mut widths = if total_um <= grid_width_um || fixed_um >= grid_width_um || free_um == 0 {
+        needs
+            .iter()
+            .map(|need| grid_width_um * need / total_um)
+            .collect::<Vec<_>>()
+    } else {
+        let free_room_um = grid_width_um - fixed_um;
+        fields
+            .iter()
+            .zip(needs)
+            .map(|(id, need)| {
+                if id.has_fixed_form() {
+                    *need
+                } else {
+                    free_room_um * need / free_um
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    if let Some((last, others)) = widths.split_last_mut() {
+        *last = grid_width_um - others.iter().sum::<u64>();
+    }
+    widths
 }
 
 /// Cut `needs` into at most `rows` contiguous runs, by the rule the module

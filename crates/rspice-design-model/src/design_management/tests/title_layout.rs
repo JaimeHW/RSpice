@@ -112,6 +112,46 @@ fn the_compact_block_letters_its_fixed_form_values_whole() {
     }
 }
 
+/// A sheet that shows every field on the compact block — how sheets were
+/// saved before fields could be hidden — has more to letter than the block
+/// holds. The free-text fields give way; a page number, revision, paper
+/// size, date, status or classification is still lettered whole, caption
+/// and all.
+#[test]
+fn an_overfull_block_cuts_free_text_and_keeps_fixed_forms_whole() {
+    let compact = SchematicSheetFormat::default()
+        .try_update(|draft| draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact)
+        .unwrap();
+    let every = showing(&compact, &DrawingSheetTitleFieldId::ALL);
+    let layout = layout_of(&every);
+    assert_eq!(layout.cells.len(), DrawingSheetTitleFieldId::ALL.len());
+    let fixed = [
+        (Field::Page, "12 of 12"),
+        (Field::Revision, "C"),
+        (Field::PaperSize, "ANSI B"),
+        (Field::Date, "2026-10-18"),
+        (Field::DocumentStatus, "In review"),
+        (Field::Classification, "Confidential"),
+    ];
+    for (field, value) in fixed {
+        let cell = layout.cell(field).expect("every field is shown");
+        assert_eq!(cell.letter_value(value), value, "{field:?} cuts {value:?}");
+        assert_eq!(cell.letter_caption(), field.display_label());
+        assert!(cell.width_um >= field.title_cell_need_um(), "{field:?}");
+    }
+    // The block is over-full, so something gives way, and it is free text.
+    let cut = TYPICAL_VALUES
+        .iter()
+        .filter(|(field, value)| layout.cell(*field).is_some_and(|cell| cell.elides(value)))
+        .map(|(field, _)| *field)
+        .collect::<Vec<_>>();
+    assert!(!cut.is_empty());
+    assert!(
+        cut.iter()
+            .all(|field| !fixed.iter().any(|(fixed, _)| fixed == field))
+    );
+}
+
 #[test]
 fn every_row_spans_the_field_grid_exactly() {
     let base = SchematicSheetFormat::default();
