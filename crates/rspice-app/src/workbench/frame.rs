@@ -207,87 +207,191 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     apply_platform_full_screen_request(ctx, app);
 }
 
-/// Announce a run the moment it stops running, and offer its dataset.
+/// Announce each run the moment it stops running, and offer what it left.
 ///
 /// The console already records the batch outcome, but a console line is not a
-/// notice and carries nowhere to go. This watches the newest run's lifecycle
+/// notice and carries nowhere to go. This watches every run's lifecycle
 /// rather than reading the log, so the offer is bound to a run identity
 /// instead of to the wording of a message.
 fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
-    use crate::state::SimulationRunLifecycle as Lifecycle;
-    use crate::ui::widgets::ToastKind;
-
-    let Some(newest) = app.state.simulation.retained.runs.first() else {
-        app.state.ui.observed_newest_run = None;
-        return;
-    };
-    let (run_id, terminal) = (newest.id, newest.lifecycle.is_terminal());
-    let (retained, lifecycle) = (newest.analyses.len(), newest.lifecycle);
-    let previously_running = app.state.ui.observed_newest_run == Some((run_id, false));
-    app.state.ui.observed_newest_run = Some((run_id, terminal));
-    if !terminal || !previously_running {
+    let runs = app
+        .state
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .map(|run| (run.run_id, run.lifecycle));
+    let ended = app.state.ui.run_watch.observe(runs);
+    if ended.is_empty() {
         return;
     }
-
-    let (kind, outcome) = match lifecycle {
-        Lifecycle::Completed => (ToastKind::Success, "complete"),
-        Lifecycle::Failed => (ToastKind::Error, "failed"),
-        Lifecycle::Aborted => (ToastKind::Warn, "cancelled"),
-        Lifecycle::Interrupted => (ToastKind::Warn, "interrupted"),
-        _ => return,
-    };
-    let title = format!("Run {run_id} {outcome}");
-    let category = crate::ui::widgets::NotificationCategory::Job;
-    if retained == 0 {
-        // Nothing to open in Results, so Results is not offered. A control
-        // that arrives at an empty dataset would be worse than no control.
-        let detail = "No analysis result was retained, so there is nothing to open in Results.";
-        // A failure with no dataset still has an account of itself, and it
-        // starts at the run's line in the session's log, which the run wrote
-        // as it ended. A cancelled run has none worth a trip.
-        let failure_line = matches!(lifecycle, Lifecycle::Failed)
-            .then(|| {
-                app.state
-                    .log_buffer
-                    .entries()
-                    .filter(|entry| {
-                        entry.anchor
-                            == Some(crate::diagnostics::LogAnchor::ResultRun {
-                                run_sequence: run_id,
-                            })
-                    })
-                    .last()
-            })
-            .flatten()
-            .map(|entry| entry.id);
-        if let Some(log_id) = failure_line {
-            app.state.ui.toasts.notify_with_action(
+    let notices = ended
+        .into_iter()
+        .filter_map(|run_id| run_notice(&app.state, run_id))
+        .collect::<Vec<_>>();
+    for notice in notices {
+        let category = crate::ui::widgets::NotificationCategory::Job;
+        let toasts = &mut app.state.ui.toasts;
+        match notice.action {
+            Some(action) => toasts.notify_with_action(
                 ctx,
                 category,
-                kind,
-                title,
-                detail,
-                crate::ui::widgets::NotificationAction::ShowInConsole { log_id },
-            );
-        } else {
-            app.state
-                .ui
-                .toasts
-                .notify_with_title(ctx, category, kind, title, detail);
+                notice.kind,
+                notice.title,
+                notice.detail,
+                action,
+            ),
+            None => {
+                toasts.notify_with_title(ctx, category, notice.kind, notice.title, notice.detail)
+            }
         }
-        return;
     }
-    let plural = if retained == 1 { "is" } else { "es" };
-    app.state.ui.toasts.notify_with_action(
-        ctx,
-        category,
+}
+
+/// One run's outcome, in the words the shell announces it with.
+struct RunNotice {
+    kind: crate::ui::widgets::ToastKind,
+    title: String,
+    detail: String,
+    action: Option<crate::ui::widgets::NotificationAction>,
+}
+
+/// What a run that kept no analysis has to say for itself.
+const NOTHING_RETAINED: &str =
+    "No analysis result was retained, so there is nothing to open in Results.";
+
+/// What one ended run announces, or `None` when its end is not news.
+///
+/// The words agree with the run's end line in the Console: a run that
+/// finished some analyses and failed others "completed with errors", and the
+/// warning count is the run log's own.
+fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNotice> {
+    use crate::state::SimulationRunLifecycle as Lifecycle;
+    use crate::ui::widgets::{NotificationAction, ToastKind};
+
+    let run = state.simulation.retained.run_by_stable_id(run_id)?;
+    let sequence = run.id;
+    let retained = run.analyses.len();
+    let plan = run
+        .prepared_receipt()
+        .and_then(|receipt| receipt.simulation_plan_id())
+        .and_then(|plan_id| plan_name(state, plan_id));
+    let saved = saved_detail(plan.as_deref(), retained, run.elapsed_time);
+    let (kind, title, detail) = match run.lifecycle {
+        // The reader's own Stop. The Console and the status bar already say
+        // it, and a warning for doing what they asked would be noise.
+        Lifecycle::Aborted => return None,
+        Lifecycle::Completed => match run.log.count(LogSeverity::Warning) {
+            0 => (
+                ToastKind::Success,
+                format!("Run {sequence} complete"),
+                saved,
+            ),
+            1 => (
+                ToastKind::Warn,
+                format!("Run {sequence} complete with 1 warning"),
+                saved,
+            ),
+            warnings => (
+                ToastKind::Warn,
+                format!("Run {sequence} complete with {warnings} warnings"),
+                saved,
+            ),
+        },
+        Lifecycle::Failed if run.analyses.iter().any(|analysis| analysis.success) => (
+            ToastKind::Error,
+            format!("Run {sequence} completed with errors"),
+            saved,
+        ),
+        Lifecycle::Failed => (
+            ToastKind::Error,
+            format!("Run {sequence} failed"),
+            crate::simulation::SimulationController::run_failure(sequence, &run.log).map_or_else(
+                || {
+                    if retained == 0 {
+                        NOTHING_RETAINED.to_owned()
+                    } else {
+                        saved
+                    }
+                },
+                str::to_owned,
+            ),
+        ),
+        Lifecycle::Interrupted => (
+            ToastKind::Warn,
+            format!("Run {sequence} interrupted"),
+            match retained {
+                0 => NOTHING_RETAINED.to_owned(),
+                1 => "1 analysis saved with this run.".to_owned(),
+                _ => format!("{retained} analyses saved with this run."),
+            },
+        ),
+        _ => return None,
+    };
+    let action = if retained > 0 {
+        Some(NotificationAction::OpenRunInResults {
+            run_sequence: sequence,
+        })
+    } else if run.lifecycle == Lifecycle::Failed {
+        // Nothing to open in Results, so Results is not offered: a control
+        // that arrives at an empty dataset would be worse than none. A
+        // failure still has an account of itself, and it starts at the
+        // run's line in the session's log, which the run wrote as it ended.
+        state
+            .log_buffer
+            .entries()
+            .filter(|entry| {
+                entry.anchor
+                    == Some(crate::diagnostics::LogAnchor::ResultRun {
+                        run_sequence: sequence,
+                    })
+            })
+            .last()
+            .map(|entry| NotificationAction::ShowInConsole { log_id: entry.id })
+    } else {
+        None
+    };
+    Some(RunNotice {
         kind,
         title,
-        format!("{retained} analys{plural} saved with this run."),
-        crate::ui::widgets::NotificationAction::OpenRunInResults {
-            run_sequence: run_id,
-        },
-    );
+        detail,
+        action,
+    })
+}
+
+/// `Nightly AC · 3 analyses saved · 12.40 s`. The plan is left out for a run
+/// that had none, such as a typed deck. The time is written the way the
+/// run's end line in the Console writes it.
+fn saved_detail(plan: Option<&str>, retained: usize, elapsed_seconds: f64) -> String {
+    let saved = match retained {
+        0 => "no analyses saved".to_owned(),
+        1 => "1 analysis saved".to_owned(),
+        _ => format!("{retained} analyses saved"),
+    };
+    plan.map(str::to_owned)
+        .into_iter()
+        .chain([saved, format!("{elapsed_seconds:.2} s")])
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
+}
+
+/// The name a plan goes by in the plan manager, active or not. `None` once
+/// the plan is gone.
+fn plan_name(state: &AppState, plan_id: crate::product::SimulationPlanId) -> Option<String> {
+    if state
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .is_some_and(|plan| plan.id() == plan_id)
+    {
+        return Some(state.sim_setup.active_plan_name().as_str().to_owned());
+    }
+    state
+        .sim_setup
+        .inactive_plans()
+        .iter()
+        .find(|plan| plan.id() == plan_id)
+        .map(|plan| plan.name().as_str().to_owned())
 }
 
 fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
@@ -666,18 +770,49 @@ mod tests {
     /// not on the terminal state itself. Opening a project whose history
     /// already holds a finished run must not claim one just completed — and
     /// the notice that is raised has to carry the dataset it announces.
+    ///
+    /// A failure that finished an analysis first "completed with errors", as
+    /// the run's end line in the Console says. The reader's own Stop is not
+    /// announced at all: the Console and the status bar already say it.
     #[test]
-    fn run_outcome_notices_distinguish_failure_cancellation_and_interruption() {
+    fn run_outcome_notices_distinguish_failure_and_interruption_and_leave_a_stop_unannounced() {
         use crate::diagnostics::LogAnchor;
         use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle};
         use crate::ui::widgets::{NotificationAction, ToastKind};
+
+        for retained in [false, true] {
+            let ctx = Context::default();
+            let mut app = RSpiceApp::test_instance();
+            let run = app.state.simulation.start_run();
+            if retained {
+                run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "partial"));
+            }
+            run.lifecycle = Lifecycle::Running;
+            announce_run_completion(&ctx, &mut app);
+            app.state.simulation.retained.runs[0].success = false;
+            app.state.simulation.retained.runs[0]
+                .finish_lifecycle(Lifecycle::Aborted)
+                .unwrap();
+            announce_run_completion(&ctx, &mut app);
+            assert!(
+                app.state.ui.toasts.activity().is_empty(),
+                "a run the reader stopped is not news to them"
+            );
+        }
 
         let mut observed = Vec::new();
         let mut expected = Vec::new();
         for retained in [false, true] {
             for (lifecycle, title, kind) in [
-                (Lifecycle::Failed, "Run 1 failed", ToastKind::Error),
-                (Lifecycle::Aborted, "Run 1 cancelled", ToastKind::Warn),
+                (
+                    Lifecycle::Failed,
+                    if retained {
+                        "Run 1 completed with errors"
+                    } else {
+                        "Run 1 failed"
+                    },
+                    ToastKind::Error,
+                ),
                 (Lifecycle::Interrupted, "Run 1 interrupted", ToastKind::Warn),
             ] {
                 let ctx = Context::default();
@@ -724,7 +859,7 @@ mod tests {
     #[test]
     fn a_run_is_announced_when_it_finishes_and_offers_the_dataset_it_made() {
         use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle};
-        use crate::ui::widgets::NotificationAction;
+        use crate::ui::widgets::{NotificationAction, ToastKind};
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -756,9 +891,10 @@ mod tests {
         assert_eq!(activity[0].title(), "Run 1 complete");
         assert_eq!(
             activity[0].message(),
-            "1 analysis saved with this run.",
-            "one analysis is an analysis, not an \"analys\""
+            "1 analysis saved \u{b7} 0.00 s",
+            "one analysis is an analysis, not an \"analys\"; a run with no plan names none"
         );
+        assert_eq!(activity[0].kind(), ToastKind::Success);
         assert_eq!(
             activity[0].action(),
             Some(NotificationAction::OpenRunInResults { run_sequence: 1 }),
@@ -881,6 +1017,245 @@ mod tests {
              the run's line in the Console, so that line is"
         );
         assert_eq!(app.state.ui.toasts.unread_count(), 1);
+    }
+
+    /// A receipt naming `plan_id`, as a run prepared from that plan carries.
+    fn plan_receipt(plan_id: crate::product::SimulationPlanId) -> crate::state::PreparedRunReceipt {
+        use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+        use crate::state::{PreparedRunTaskReceipt, PreparedSourceCheckReceipt};
+
+        crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(plan_id),
+            project_revision: ObjectRevision::INITIAL,
+            prepared_snapshot_digest: ContentDigest::from_bytes([1; 32]),
+            source_content_digest: ContentDigest::from_bytes([2; 32]),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(
+                ContentDigest::from_bytes([3; 32]),
+            ),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy: crate::state::PreparedSpecificationPolicy::default(),
+            tasks: vec![
+                PreparedRunTaskReceipt::new(
+                    AnalysisInstanceId::new(),
+                    ObjectRevision::INITIAL,
+                    Vec::new(),
+                    0,
+                    ContentDigest::from_bytes([4; 32]),
+                )
+                .expect("task receipt"),
+            ],
+        })
+        .expect("plan receipt")
+    }
+
+    /// One line in a run's own log.
+    fn run_log_line(severity: LogSeverity, message: &str) -> rspice_app_types::run_log::RunLogLine {
+        rspice_app_types::run_log::RunLogLine {
+            unix_ms: 0,
+            severity,
+            source: LogSource::Run,
+            message: message.to_owned(),
+        }
+    }
+
+    /// Every run seen running is announced when it ends, not just the
+    /// newest. A campaign starts its next run in the update that finishes
+    /// the last, so the newest run had always moved on by the time a frame
+    /// looked, and only the final run of a sequence was ever announced.
+    #[test]
+    fn every_run_seen_running_is_announced_not_only_the_newest() {
+        use crate::state::SimulationRunLifecycle as Lifecycle;
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+
+        // One update: the first run fails and the second starts.
+        let first = app.state.simulation.retained.runs[0].id;
+        app.state.simulation.retained.runs[0].lifecycle = Lifecycle::Failed;
+        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+        let titles = |app: &RSpiceApp| {
+            app.state
+                .ui
+                .toasts
+                .activity()
+                .iter()
+                .map(|record| record.title().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(titles(&app), [format!("Run {first} failed")]);
+
+        let second = app.state.simulation.retained.runs[0].id;
+        app.state.simulation.retained.runs[0].lifecycle = Lifecycle::Completed;
+        announce_run_completion(&ctx, &mut app);
+        announce_run_completion(&ctx, &mut app);
+        assert_eq!(
+            titles(&app),
+            [
+                format!("Run {second} complete"),
+                format!("Run {first} failed")
+            ],
+            "each run once, in the order they ended"
+        );
+    }
+
+    /// A run that opens and ends between two frames was never seen running
+    /// by the frame, but it was seen by the controller that opened it.
+    #[test]
+    fn a_run_that_ends_before_any_frame_sees_it_is_still_announced() {
+        use crate::state::SimulationRunLifecycle as Lifecycle;
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        let run = app.state.simulation.start_run();
+        run.lifecycle = Lifecycle::Completed;
+        let run_id = run.run_id;
+        app.state.ui.run_watch.run_started(run_id);
+
+        announce_run_completion(&ctx, &mut app);
+
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].title(), "Run 1 complete");
+    }
+
+    /// A completion with warnings is not a clean one. Its count is the run
+    /// log's, so the notice and the run's end line in the Console agree.
+    #[test]
+    fn a_run_that_completed_with_warnings_says_so() {
+        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle};
+        use crate::ui::widgets::ToastKind;
+
+        for (warnings, title) in [
+            (1, "Run 1 complete with 1 warning"),
+            (3, "Run 1 complete with 3 warnings"),
+        ] {
+            let ctx = Context::default();
+            let mut app = RSpiceApp::test_instance();
+            let run = app.state.simulation.start_run();
+            run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "tran"));
+            run.lifecycle = Lifecycle::Running;
+            announce_run_completion(&ctx, &mut app);
+            let run = &mut app.state.simulation.retained.runs[0];
+            for _ in 0..warnings {
+                run.log
+                    .push(run_log_line(LogSeverity::Warning, "gmin stepping was used"));
+            }
+            run.log
+                .push(run_log_line(LogSeverity::Info, "Run 1 completed"));
+            run.lifecycle = Lifecycle::Completed;
+
+            announce_run_completion(&ctx, &mut app);
+
+            let activity = app.state.ui.toasts.activity();
+            assert_eq!(activity.len(), 1);
+            assert_eq!(activity[0].title(), title);
+            assert_eq!(activity[0].kind(), ToastKind::Warn);
+        }
+    }
+
+    /// The detail names the plan the run was prepared from, what it saved,
+    /// and how long it took, in the run log's own format. A run that finished
+    /// some analyses and failed others completed with errors, as its end
+    /// line in the Console says, and still offers what it saved.
+    #[test]
+    fn a_partly_failed_run_names_its_plan_and_what_it_saved() {
+        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle};
+        use crate::ui::widgets::{NotificationAction, ToastKind};
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        let plan_id = app
+            .state
+            .sim_setup
+            .create_plan("Nightly AC")
+            .expect("a plan to run");
+        let run = app
+            .state
+            .simulation
+            .start_prepared_run(plan_receipt(plan_id))
+            .expect("a prepared run");
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "ac"));
+        run.add_analysis(AnalysisResult::failed(
+            2,
+            AnalysisType::Transient,
+            "tran",
+            "timestep too small",
+        ));
+        run.lifecycle = Lifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+        let run = &mut app.state.simulation.retained.runs[0];
+        run.lifecycle = Lifecycle::Failed;
+        run.elapsed_time = 12.4;
+
+        announce_run_completion(&ctx, &mut app);
+
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].title(), "Run 1 completed with errors");
+        assert_eq!(activity[0].kind(), ToastKind::Error);
+        assert_eq!(
+            activity[0].message(),
+            "Nightly AC \u{b7} 2 analyses saved \u{b7} 12.40 s"
+        );
+        assert_eq!(
+            activity[0].action(),
+            Some(NotificationAction::OpenRunInResults { run_sequence: 1 })
+        );
+    }
+
+    /// A run that failed outright says why in the words its end line quotes:
+    /// the first error it wrote about itself, not the end line.
+    #[test]
+    fn a_failed_run_quotes_its_first_failure() {
+        use crate::state::SimulationRunLifecycle as Lifecycle;
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+        let run = &mut app.state.simulation.retained.runs[0];
+        run.log.push(run_log_line(
+            LogSeverity::Error,
+            "Transient: timestep too small at 1.2 us",
+        ));
+        run.log
+            .push(run_log_line(LogSeverity::Error, "A later error"));
+        run.log.push(run_log_line(
+            LogSeverity::Error,
+            "Run 1 failed after 0.31 s: Transient: timestep too small at 1.2 us",
+        ));
+        run.lifecycle = Lifecycle::Failed;
+
+        announce_run_completion(&ctx, &mut app);
+
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity[0].title(), "Run 1 failed");
+        assert_eq!(
+            activity[0].message(),
+            "Transient: timestep too small at 1.2 us"
+        );
+
+        // With nothing but its end line, a run's failure has no account of
+        // its own, and the detail says what it left instead.
+        let mut app = RSpiceApp::test_instance();
+        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        announce_run_completion(&ctx, &mut app);
+        let run = &mut app.state.simulation.retained.runs[0];
+        run.log.push(run_log_line(
+            LogSeverity::Error,
+            "Run 1 failed after 0.31 s",
+        ));
+        run.lifecycle = Lifecycle::Failed;
+        announce_run_completion(&ctx, &mut app);
+        assert_eq!(
+            app.state.ui.toasts.activity()[0].message(),
+            NOTHING_RETAINED
+        );
     }
 
     #[test]
