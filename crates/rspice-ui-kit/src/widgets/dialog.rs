@@ -1324,8 +1324,14 @@ impl<'a> Dialog<'a> {
                 // hosts no bar of its own, so its width never answered to its
                 // height in the first place, and the region inside it that does
                 // scroll is its owner's to lay out.
+                //
+                // An overlay body keeps the theme's bar and gives up only its
+                // gutter: egui's own floating style rests its thumb at zero
+                // opacity, so a body that overflowed showed no sign of it.
                 if self.overlay_scrollbar {
-                    ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
+                    let scroll = &mut ui.spacing_mut().scroll;
+                    scroll.floating = true;
+                    scroll.floating_allocated_width = 0.0;
                 }
                 let body_width = (content.x - ui.spacing().scroll.allocated_width()).max(1.0);
                 // The body is painted once, by the surface beneath it. Its
