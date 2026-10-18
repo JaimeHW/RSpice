@@ -59,6 +59,93 @@ impl ZoomBox {
         Some((ax.min(bx), ay.min(by), ax.max(bx), ay.max(by)))
     }
 }
+
+/// What the mouse wheel does over a canvas.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WheelAction {
+    /// Zoom about the pointer; Shift+wheel scrolls sideways.
+    #[default]
+    Zoom,
+    /// Scroll the view, as a document scrolls; Ctrl+wheel (Command on a Mac)
+    /// zooms about the pointer.
+    Scroll,
+}
+
+/// The button that pans the view with a drag. Space or Alt with a primary
+/// drag pans whichever this is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PanButton {
+    #[default]
+    Middle,
+    /// A right drag pans; a right click that does not move is still the
+    /// context menu, because a press only becomes a drag past egui's click
+    /// threshold.
+    Right,
+}
+
+/// How a schematic or symbol canvas answers the wheel and the pan button.
+/// The application hands it in from its preferences on every frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CanvasNavigation {
+    pub wheel: WheelAction,
+    /// Wheel up zooms out rather than in.
+    pub invert_zoom: bool,
+    /// How far one wheel step zooms, relative to the shipped rate.
+    pub zoom_rate: f64,
+    pub pan_button: PanButton,
+    /// The view pans by itself while a gesture carries something to its edge.
+    pub edge_pan: bool,
+}
+
+impl Default for CanvasNavigation {
+    fn default() -> Self {
+        Self {
+            wheel: WheelAction::Zoom,
+            invert_zoom: false,
+            zoom_rate: 1.0,
+            pan_button: PanButton::Middle,
+            edge_pan: true,
+        }
+    }
+}
+
+impl CanvasNavigation {
+    /// The zoom factor `wheel_points` of upward wheel travel asks for.
+    fn wheel_zoom_factor(self, wheel_points: f32) -> f64 {
+        self.scale_zoom_step((f64::from(wheel_points) * WHEEL_ZOOM_EXPONENT_PER_POINT).exp())
+    }
+
+    /// A wheel zoom step `factor` at the shipped rate, scaled to the chosen
+    /// rate and turned round when the wheel is inverted.
+    pub fn scale_zoom_step(self, factor: f64) -> f64 {
+        let direction = if self.invert_zoom { -1.0 } else { 1.0 };
+        factor.powf(self.zoom_rate * direction)
+    }
+
+    /// The button whose drag pans, for a canvas that pans on egui's drag.
+    pub const fn pan_pointer_button(self) -> egui::PointerButton {
+        match self.pan_button {
+            PanButton::Middle => egui::PointerButton::Middle,
+            PanButton::Right => egui::PointerButton::Secondary,
+        }
+    }
+
+    /// Whether the pan button is dragging the view on `response` this frame.
+    pub fn button_pan_active(self, ui: &Ui, response: &Response) -> bool {
+        match self.pan_button {
+            // From the very first event: egui's click-vs-drag threshold
+            // would swallow the first few pixels as a dead zone, and the
+            // canvas has no competing middle-click action.
+            PanButton::Middle => {
+                response.is_pointer_button_down_on() && ui.input(|i| i.pointer.middle_down())
+            }
+            // Only past the click threshold, so a right click still opens the
+            // context menu.
+            PanButton::Right => response.dragged_by(egui::PointerButton::Secondary),
+        }
+    }
+}
+
 /// Convert normalized raw wheel/trackpad points into a continuous zoom.
 ///
 /// Egui deliberately replays discrete wheel notches through its smoothed
@@ -99,17 +186,16 @@ pub fn handle_viewport_navigation(
     zoom: &mut f64,
     pan: &mut (f64, f64),
     min_zoom: f64,
+    navigation: CanvasNavigation,
 ) {
-    // Middle-button pan follows the raw pointer delta from the very first
-    // event: egui's click-vs-drag threshold would swallow the first few
-    // pixels as a dead zone, and the canvas has no competing middle-click
-    // action. Space+primary and Alt+primary are the mockup's modeless pan
-    // escape hatches while an authoring tool remains armed.
-    let middle_pan = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.middle_down());
+    // The pan button follows the raw pointer delta. Space+primary and
+    // Alt+primary are the mockup's modeless pan escape hatches while an
+    // authoring tool remains armed.
+    let button_pan = navigation.button_pan_active(ui, response);
     let modified_primary_pan = response.is_pointer_button_down_on()
         && ui.input(|input| input.pointer.primary_down())
         && primary_pan_modifier_down(ui);
-    if middle_pan || modified_primary_pan {
+    if button_pan || modified_primary_pan {
         let delta = ui.input(|i| i.pointer.delta());
         apply_pan_delta(pan, delta);
     }
@@ -145,23 +231,36 @@ pub fn handle_viewport_navigation(
 
     // Cursor-centered zoom, matching professional CAD tools.
     if response.hovered() {
-        let (scroll, shift) = raw_wheel_navigation_delta(ui);
-        if shift {
-            let horizontal = if scroll.y != 0.0 { scroll.y } else { scroll.x };
+        let wheel = raw_wheel_navigation_delta(ui);
+        let zooms = match navigation.wheel {
+            WheelAction::Zoom => !wheel.shift,
+            WheelAction::Scroll => wheel.zoom_modifier,
+        };
+        if zooms {
+            if wheel.delta.y != 0.0
+                && let Some(cursor_pos) = response.hover_pos()
+            {
+                apply_zoom_about(
+                    zoom,
+                    pan,
+                    available,
+                    cursor_pos,
+                    navigation.wheel_zoom_factor(wheel.delta.y),
+                    min_zoom,
+                );
+            }
+        } else if wheel.shift {
+            let horizontal = if wheel.delta.y != 0.0 {
+                wheel.delta.y
+            } else {
+                wheel.delta.x
+            };
             if horizontal != 0.0 {
                 apply_horizontal_scroll_pan(pan, horizontal);
             }
-        } else if scroll.y != 0.0
-            && let Some(cursor_pos) = response.hover_pos()
-        {
-            apply_zoom_about(
-                zoom,
-                pan,
-                available,
-                cursor_pos,
-                wheel_zoom_factor(scroll.y),
-                min_zoom,
-            );
+        } else {
+            // Scrolled as a document scrolls: wheel down shows what is below.
+            apply_pan_delta(pan, wheel.delta);
         }
     }
 }
@@ -219,10 +318,22 @@ pub fn apply_edge_pan(
     true
 }
 
-fn raw_wheel_navigation_delta(ui: &Ui) -> (Vec2, bool) {
+/// One frame of wheel travel, in canonical points, and the modifiers held
+/// while it happened.
+struct WheelTravel {
+    delta: Vec2,
+    shift: bool,
+    /// Ctrl, or Command on a Mac.
+    zoom_modifier: bool,
+}
+
+fn raw_wheel_navigation_delta(ui: &Ui) -> WheelTravel {
     ui.input(|input| {
-        let mut normalized = Vec2::ZERO;
-        let mut shift = input.modifiers.shift;
+        let mut travel = WheelTravel {
+            delta: Vec2::ZERO,
+            shift: input.modifiers.shift,
+            zoom_modifier: input.modifiers.command || input.modifiers.ctrl,
+        };
         for event in &input.raw.events {
             let Event::MouseWheel {
                 unit,
@@ -233,11 +344,12 @@ fn raw_wheel_navigation_delta(ui: &Ui) -> (Vec2, bool) {
             else {
                 continue;
             };
-            shift |= modifiers.shift;
-            normalized.x += canonical_wheel_points(*unit, delta.x);
-            normalized.y += canonical_wheel_points(*unit, delta.y);
+            travel.shift |= modifiers.shift;
+            travel.zoom_modifier |= modifiers.command || modifiers.ctrl;
+            travel.delta.x += canonical_wheel_points(*unit, delta.x);
+            travel.delta.y += canonical_wheel_points(*unit, delta.y);
         }
-        (normalized, shift)
+        travel
     })
 }
 
@@ -251,10 +363,6 @@ fn canonical_wheel_points(unit: MouseWheelUnit, delta: f32) -> f32 {
         -WHEEL_ZOOM_MAX_DELTA_PER_EVENT,
         WHEEL_ZOOM_MAX_DELTA_PER_EVENT,
     )
-}
-
-fn wheel_zoom_factor(scroll_delta_y: f32) -> f64 {
-    (f64::from(scroll_delta_y) * WHEEL_ZOOM_EXPONENT_PER_POINT).exp()
 }
 
 fn apply_horizontal_scroll_pan(pan: &mut (f64, f64), delta: f32) {
@@ -430,21 +538,108 @@ mod tests {
 
     #[test]
     fn wheel_zoom_is_continuous_bounded_and_reversible() {
-        assert_eq!(wheel_zoom_factor(0.0), 1.0);
+        let shipped = CanvasNavigation::default();
+        assert_eq!(shipped.wheel_zoom_factor(0.0), 1.0);
 
-        let notch_in = wheel_zoom_factor(120.0);
-        let notch_out = wheel_zoom_factor(-120.0);
+        let notch_in = shipped.wheel_zoom_factor(120.0);
+        let notch_out = shipped.wheel_zoom_factor(-120.0);
         assert!(
             (1.08..1.082).contains(&notch_in),
             "one wheel notch should be a controlled step, got {notch_in}"
         );
         assert!((notch_in * notch_out - 1.0).abs() < 1e-12);
 
-        let small_delta = wheel_zoom_factor(1.0);
+        let small_delta = shipped.wheel_zoom_factor(1.0);
         assert!(
             (1.0..1.001).contains(&small_delta),
             "precision scrolling should remain proportional, got {small_delta}"
         );
+    }
+
+    /// Inverting the wheel turns one notch in into one notch out, and the
+    /// rate scales the step without changing its direction.
+    #[test]
+    fn the_wheel_zoom_follows_the_chosen_direction_and_rate() {
+        let shipped = CanvasNavigation::default();
+        let inverted = CanvasNavigation {
+            invert_zoom: true,
+            ..shipped
+        };
+        assert!(
+            (inverted.wheel_zoom_factor(120.0) - shipped.wheel_zoom_factor(-120.0)).abs() < 1e-12
+        );
+        let fast = CanvasNavigation {
+            zoom_rate: 2.0,
+            ..shipped
+        };
+        let one = shipped.wheel_zoom_factor(120.0);
+        assert!((fast.wheel_zoom_factor(120.0) - one * one).abs() < 1e-12);
+    }
+
+    /// Driven through a real frame: with the wheel set to scroll, a plain
+    /// wheel moves the view and leaves the zoom alone, and Ctrl+wheel zooms.
+    #[test]
+    fn a_scrolling_wheel_pans_and_zooms_only_with_ctrl() {
+        let scroll = CanvasNavigation {
+            wheel: WheelAction::Scroll,
+            ..CanvasNavigation::default()
+        };
+        for (modifiers, expect_zoom) in [
+            (egui::Modifiers::NONE, false),
+            (egui::Modifiers::CTRL, true),
+        ] {
+            let (zoom, pan) = wheel_once(scroll, modifiers);
+            assert_eq!(zoom != 1.0, expect_zoom, "{modifiers:?}");
+            if !expect_zoom {
+                assert_eq!(pan, (0.0, -40.0), "wheel down shows what is below");
+            }
+        }
+        let (zoom, _) = wheel_once(CanvasNavigation::default(), egui::Modifiers::NONE);
+        assert!(zoom < 1.0, "the shipped wheel zooms");
+    }
+
+    /// One notch of wheel-down over the middle of a canvas, returning the
+    /// zoom and pan it leaves behind.
+    fn wheel_once(navigation: CanvasNavigation, modifiers: egui::Modifiers) -> (f64, (f64, f64)) {
+        let ctx = egui::Context::default();
+        let canvas = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0));
+        let mut zoom = 1.0;
+        let mut pan = (0.0, 0.0);
+        for events in [
+            vec![Event::PointerMoved(canvas.center())],
+            vec![Event::MouseWheel {
+                unit: MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, -1.0),
+                phase: TouchPhase::Move,
+                modifiers,
+            }],
+        ] {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(canvas),
+                    modifiers,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.interact(
+                        canvas,
+                        egui::Id::new("canvas"),
+                        egui::Sense::click_and_drag(),
+                    );
+                    handle_viewport_navigation(
+                        ui,
+                        &response,
+                        canvas,
+                        &mut zoom,
+                        &mut pan,
+                        SCHEMATIC_ZOOM_MIN,
+                        navigation,
+                    );
+                },
+            );
+        }
+        (zoom, pan)
     }
 
     #[test]

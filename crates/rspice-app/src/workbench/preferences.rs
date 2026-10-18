@@ -588,10 +588,16 @@ pub enum ChoicePreference {
     SchematicCursor,
     /// The dialect an imported deck with no dialect markers is read as.
     ImportedNetlistDialect,
+    /// What the mouse wheel does over a schematic or symbol canvas.
+    CanvasWheel,
+    /// How far one wheel notch zooms. Zero is Normal, then Slow, then Fast.
+    CanvasZoomSpeed,
+    /// The button that pans a schematic or symbol canvas.
+    CanvasPanButton,
 }
 
 impl ChoicePreference {
-    pub(crate) const ALL: [Self; 51] = [
+    pub(crate) const ALL: [Self; 54] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
@@ -643,6 +649,9 @@ impl ChoicePreference {
         Self::ExtensionUpdates,
         Self::SchematicCursor,
         Self::ImportedNetlistDialect,
+        Self::CanvasWheel,
+        Self::CanvasZoomSpeed,
+        Self::CanvasPanButton,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -698,6 +707,9 @@ impl ChoicePreference {
             Self::ExtensionUpdates => "extension-updates",
             Self::SchematicCursor => "schematic-cursor",
             Self::ImportedNetlistDialect => "imported-netlist-dialect",
+            Self::CanvasWheel => "canvas-wheel",
+            Self::CanvasZoomSpeed => "canvas-zoom-speed",
+            Self::CanvasPanButton => "canvas-pan-button",
         }
     }
 
@@ -753,6 +765,8 @@ impl ChoicePreference {
             // Junction dots and wire routing are one bit each.
             Self::InterfaceScale | Self::DefaultSolverPreset | Self::WireJunctionBehavior => 3,
             Self::ImportedNetlistDialect => 5,
+            Self::CanvasWheel | Self::CanvasPanButton => 1,
+            Self::CanvasZoomSpeed => 2,
         }
     }
 
@@ -786,10 +800,12 @@ pub enum TogglePreference {
     AutomaticDiagnostics,
     PythonAutomationApi,
     RunDesignChecksOnSave,
+    InvertWheelZoom,
+    CanvasEdgePan,
 }
 
 impl TogglePreference {
-    pub(crate) const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 12] = [
         Self::ReducedMotion,
         Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
@@ -800,6 +816,8 @@ impl TogglePreference {
         Self::AutomaticDiagnostics,
         Self::PythonAutomationApi,
         Self::RunDesignChecksOnSave,
+        Self::InvertWheelZoom,
+        Self::CanvasEdgePan,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -814,16 +832,22 @@ impl TogglePreference {
             Self::AutomaticDiagnostics => "automatic-diagnostics",
             Self::PythonAutomationApi => "python-automation-api",
             Self::RunDesignChecksOnSave => "run-design-checks-on-save",
+            Self::InvertWheelZoom => "invert-wheel-zoom",
+            Self::CanvasEdgePan => "canvas-edge-pan",
         }
     }
 
     /// Off by default for the three that cost something the author did not
     /// ask for: an animation budget, a diagnostics upload, and a design-check
-    /// pass on every save.
+    /// pass on every save. An inverted wheel is off because it is the
+    /// exception, not the convention.
     const fn default_value(self) -> bool {
         !matches!(
             self,
-            Self::ReducedMotion | Self::AutomaticDiagnostics | Self::RunDesignChecksOnSave
+            Self::ReducedMotion
+                | Self::AutomaticDiagnostics
+                | Self::RunDesignChecksOnSave
+                | Self::InvertWheelZoom
         )
     }
 }
@@ -1375,6 +1399,35 @@ impl UserPreferences {
     #[must_use]
     pub fn imported_netlist_dialect(&self) -> crate::state::NetlistSourceDialect {
         IMPORTABLE_NETLIST_DIALECTS[self.choice(ChoicePreference::ImportedNetlistDialect)]
+    }
+
+    /// How the schematic and symbol canvases answer the wheel and the pan
+    /// button, as the Navigation page sets it.
+    #[must_use]
+    pub fn canvas_navigation(&self) -> rspice_schematic_editor::view::navigation::CanvasNavigation {
+        use rspice_schematic_editor::view::navigation::{CanvasNavigation, PanButton, WheelAction};
+        CanvasNavigation {
+            wheel: if self.choice(ChoicePreference::CanvasWheel) == 1 {
+                WheelAction::Scroll
+            } else {
+                WheelAction::Zoom
+            },
+            invert_zoom: self.toggle(TogglePreference::InvertWheelZoom),
+            // Normal, Slow, Fast: the stored order, whose zero is shipped.
+            zoom_rate: [1.0, 0.5, 2.0][self.choice(ChoicePreference::CanvasZoomSpeed)],
+            pan_button: if self.choice(ChoicePreference::CanvasPanButton) == 1 {
+                PanButton::Right
+            } else {
+                PanButton::Middle
+            },
+            edge_pan: self.toggle(TogglePreference::CanvasEdgePan),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn choose_right_button_pan(&mut self) {
+        self.set_choice(ChoicePreference::CanvasPanButton, 1)
+            .expect("the right button is a pan button");
     }
 
     /// The Component shelf's personal pin set and placement history.

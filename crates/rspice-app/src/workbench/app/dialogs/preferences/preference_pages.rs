@@ -7,6 +7,7 @@
 //! store is wide, that is why — the store keeps keys for domains that have no
 //! runtime owner yet, and they stay off the page until one exists.
 
+mod navigation;
 mod simulation;
 
 use egui::Ui;
@@ -47,6 +48,7 @@ pub(super) fn render(
         PreferenceCategory::Appearance => appearance(ui, state),
         PreferenceCategory::Accessibility => accessibility(ui, state),
         PreferenceCategory::Workspace => workspace(ui, state),
+        PreferenceCategory::Navigation => navigation::page(ui, state),
         PreferenceCategory::Shortcuts => {
             super::shortcut_preferences::render_page(ui, state, actions);
         }
@@ -941,6 +943,18 @@ pub(super) fn restore_defaults(
                     .apply_console_launch_behavior(console.is_open());
             }
         }
+        PreferenceCategory::Navigation => preferences.restore_defaults(
+            &[
+                ChoicePreference::CanvasWheel,
+                ChoicePreference::CanvasZoomSpeed,
+                ChoicePreference::CanvasPanButton,
+            ],
+            &[
+                TogglePreference::InvertWheelZoom,
+                TogglePreference::CanvasEdgePan,
+            ],
+            &[],
+        ),
         PreferenceCategory::Shortcuts => {
             // The bindings and the binding policies are one profile, and
             // replacing it has to go through the persist-before-live owner
@@ -1019,7 +1033,12 @@ mod tests {
             .split("#[cfg(test)]")
             .next()
             .expect("production source precedes tests");
-        [include_str!("preference_pages/simulation.rs"), own].concat()
+        [
+            include_str!("preference_pages/navigation.rs"),
+            include_str!("preference_pages/simulation.rs"),
+            own,
+        ]
+        .concat()
     }
 
     /// The same source with whole-line comments dropped.
@@ -1338,6 +1357,8 @@ mod tests {
             ("threads", "Solver threads"),
             ("cpu", "Solver threads"),
             ("hotkeys", "Key bindings"),
+            ("trackpad", "Mouse wheel"),
+            ("retention", "Runs kept"),
         ] {
             assert!(
                 labels_found_by(query).iter().any(|label| label == row),

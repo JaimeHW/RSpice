@@ -6,6 +6,7 @@ pub mod interaction;
 pub mod session;
 pub mod surface;
 
+use crate::view::navigation::{CanvasNavigation, WheelAction};
 use crate::view::resolved_symbol_render::draw_resolved_symbol;
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2, pos2, vec2};
 use rspice_design::{
@@ -67,18 +68,33 @@ pub fn update_viewport(
     rect: Rect,
     document: &SymbolDocument,
     response: &egui::Response,
+    navigation: CanvasNavigation,
 ) -> SymbolViewport {
     if session.needs_fit {
         fit_symbol_view(session, rect, document);
         session.needs_fit = false;
     }
     if response.hovered() {
-        let factor = ui.input(|input| symbol_scroll_zoom_factor(input.smooth_scroll_delta.y));
-        if let Some(factor) = factor {
+        let (scroll, ctrl_zoom) = ui.input(|input| (input.smooth_scroll_delta, input.zoom_delta()));
+        let step = match navigation.wheel {
+            // egui turns Shift+wheel into sideways travel, which scrolls.
+            WheelAction::Zoom => {
+                session.pan.0 += scroll.x;
+                symbol_scroll_zoom_factor(scroll.y)
+            }
+            // egui hands Ctrl+wheel over as a zoom rather than a scroll.
+            WheelAction::Scroll => {
+                session.pan.0 += scroll.x;
+                session.pan.1 += scroll.y;
+                (ctrl_zoom != 1.0).then_some(ctrl_zoom)
+            }
+        };
+        if let Some(factor) = step {
+            let factor = navigation.scale_zoom_step(f64::from(factor)) as f32;
             session.zoom = (session.zoom * factor).clamp(1.0, 18.0);
         }
     }
-    if response.dragged_by(egui::PointerButton::Middle) {
+    if response.dragged_by(navigation.pan_pointer_button()) {
         let delta = ui.input(|input| input.pointer.delta());
         session.pan.0 += delta.x;
         session.pan.1 += delta.y;

@@ -105,7 +105,14 @@ fn print_symbol_editor_renders_for_review() {
             let (rect, response) =
                 ui.allocate_exact_size(stage.size(), egui::Sense::click_and_drag());
             let mut session = session.clone();
-            let viewport = update_viewport(ui, &mut session, rect, &document, &response);
+            let viewport = update_viewport(
+                ui,
+                &mut session,
+                rect,
+                &document,
+                &response,
+                crate::view::navigation::CanvasNavigation::default(),
+            );
             draw_canvas(
                 ui, viewport, &document, &metadata, &ports, &session, &reference,
             );

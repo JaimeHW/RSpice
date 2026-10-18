@@ -317,11 +317,15 @@ fn set_canvas_cursor(
         return;
     }
     let editor = &state.schematic.session.editor;
-    let (any_down, middle_down) =
-        ui.input(|input| (input.pointer.any_down(), input.pointer.middle_down()));
+    let any_down = ui.input(|input| input.pointer.any_down());
     let pan_modifier = navigation::primary_pan_modifier_down(ui);
+    let button_pan = state
+        .ui
+        .preferences
+        .canvas_navigation()
+        .button_pan_active(ui, response);
     let context = rspice_schematic_editor::session::tool::CanvasCursorContext {
-        panning: response.is_pointer_button_down_on() && (middle_down || pan_modifier),
+        panning: button_pan || (response.is_pointer_button_down_on() && pan_modifier),
         pan_armed: pan_modifier && !any_down,
         zoom_box: editor.zoom_box.armed || editor.zoom_box.drag.is_some(),
         shelf_drop,
@@ -346,7 +350,11 @@ fn full_crosshair_at(
     if !state.ui.preferences.schematic_full_crosshair()
         || !response.hovered()
         || rspice_schematic_editor::view::pointer_target::canvas_touch_mode(ui.ctx())
-        || ui.input(|input| input.pointer.middle_down())
+        || state
+            .ui
+            .preferences
+            .canvas_navigation()
+            .button_pan_active(ui, response)
         || navigation::primary_pan_modifier_down(ui)
     {
         return None;
@@ -424,6 +432,7 @@ pub fn render_schematic_view(
     // the camera is built and the scene is painted — the old order drew
     // last frame's state, so the canvas trailed the cursor by a full
     // frame during pans and drags.
+    let canvas_navigation = state.ui.preferences.canvas_navigation();
     handle_viewport_navigation(
         ui,
         &response,
@@ -431,6 +440,7 @@ pub fn render_schematic_view(
         &mut state.schematic.session.editor.zoom,
         &mut state.schematic.session.editor.pan,
         min_zoom,
+        canvas_navigation,
     );
     edge_pan::edge_pan(ui, &response, available, state);
     let viewport = viewport_from_camera(
@@ -1137,6 +1147,65 @@ mod tests {
         assert!(
             rows.is_empty() && columns.is_empty(),
             "hidden while panning"
+        );
+    }
+
+    /// Press the right button at `from`, carry it to `to` and let go, one
+    /// event per frame over a bare canvas at unit zoom.
+    fn right_drag(state: &mut AppState, from: egui::Pos2, to: egui::Pos2) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let editor = &mut state.schematic.session.editor;
+        (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
+        (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for event in [
+            egui::Event::PointerMoved(from),
+            button(from, true),
+            egui::Event::PointerMoved(to),
+            button(to, false),
+        ] {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |ui| render_schematic_view(ui, state, None),
+            );
+        }
+    }
+
+    /// The right button pans only when Navigation says so, and even then a
+    /// right click that does not move is still the context menu.
+    #[test]
+    fn a_right_drag_pans_only_when_the_right_button_is_chosen() {
+        let from = egui::pos2(300.0, 200.0);
+        let to = from + egui::vec2(40.0, 0.0);
+
+        let mut shipped = AppState::default();
+        right_drag(&mut shipped, from, to);
+        assert_eq!(shipped.schematic.session.editor.pan, (0.0, 0.0));
+
+        let mut right = AppState::default();
+        right.ui.preferences.choose_right_button_pan();
+        right_drag(&mut right, from, to);
+        assert_eq!(right.schematic.session.editor.pan, (40.0, 0.0));
+        assert!(right.dialogs.interaction.context_target.is_none());
+
+        right_drag(&mut right, from, from);
+        assert_eq!(right.schematic.session.editor.pan, (0.0, 0.0));
+        assert!(
+            right.dialogs.interaction.context_target.is_some(),
+            "a right click that stays put opens the context menu"
         );
     }
 }

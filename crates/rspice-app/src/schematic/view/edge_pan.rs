@@ -10,7 +10,11 @@ use rspice_schematic_editor::view::navigation::apply_edge_pan;
 /// Pan toward the edge the pointer rests near, if a gesture is carrying
 /// something, and keep frames coming while it does.
 pub(super) fn edge_pan(ui: &Ui, response: &Response, canvas: Rect, state: &mut AppState) {
-    if !carrying(state) || state.application_modal_open() || Popup::is_any_open(ui.ctx()) {
+    if !state.ui.preferences.canvas_navigation().edge_pan
+        || !carrying(state)
+        || state.application_modal_open()
+        || Popup::is_any_open(ui.ctx())
+    {
         return;
     }
     let Some(pointer) = ui.input(|input| input.pointer.latest_pos()) else {

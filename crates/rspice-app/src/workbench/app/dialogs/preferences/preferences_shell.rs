@@ -168,13 +168,15 @@ pub(super) enum PreferenceCategory {
     Projects,
     Results,
     Simulation,
+    Navigation,
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 9] = [
+    pub(super) const ALL: [Self; 10] = [
         Self::Appearance,
         Self::Accessibility,
         Self::Workspace,
+        Self::Navigation,
         Self::Shortcuts,
         Self::Units,
         Self::Simulation,
@@ -194,14 +196,17 @@ impl PreferenceCategory {
             Self::Projects => "Projects and files",
             Self::Results => "Results and precision",
             Self::Simulation => "Simulation",
+            Self::Navigation => "Navigation",
         }
     }
 
     pub(super) const fn group(self) -> CategoryGroup {
         match self {
-            Self::Appearance | Self::Accessibility | Self::Workspace | Self::Shortcuts => {
-                CategoryGroup::Interface
-            }
+            Self::Appearance
+            | Self::Accessibility
+            | Self::Workspace
+            | Self::Navigation
+            | Self::Shortcuts => CategoryGroup::Interface,
             Self::Units | Self::Simulation | Self::Schematic | Self::Projects | Self::Results => {
                 CategoryGroup::Engineering
             }
@@ -219,6 +224,7 @@ impl PreferenceCategory {
             Self::Projects => "projects",
             Self::Results => "results",
             Self::Simulation => "simulation",
+            Self::Navigation => "navigation",
         }
     }
 }
@@ -1913,6 +1919,7 @@ mod tests {
                 "Appearance",
                 "Accessibility",
                 "Workspace",
+                "Navigation",
                 "Shortcuts",
                 "Units and notation",
                 "Simulation",

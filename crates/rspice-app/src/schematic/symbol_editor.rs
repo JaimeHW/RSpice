@@ -108,7 +108,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ui.spacing_mut().item_spacing.x = 0.0;
         let canvas_size = vec2(ui.available_width().max(180.0), height);
         let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
-        let viewport = update_viewport(ui, &mut state.ui.symbol.editor, rect, &document, &response);
+        let navigation = state.ui.preferences.canvas_navigation();
+        let viewport = update_viewport(
+            ui,
+            &mut state.ui.symbol.editor,
+            rect,
+            &document,
+            &response,
+            navigation,
+        );
         interaction::handle_canvas(state, &mut document, &mut editor, viewport, &response);
         draw_canvas(
             ui,
