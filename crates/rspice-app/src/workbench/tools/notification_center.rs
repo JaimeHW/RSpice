@@ -828,7 +828,11 @@ fn notice_list(
 ) {
     // The bar floats over the rows instead of taking a gutter from them: a
     // gutter is a stripe of panel fill down the trailing edge of every row.
-    ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
+    // It is otherwise the theme's bar; egui's own floating style rests its
+    // thumb at zero opacity, so a list that overflowed never showed it.
+    let scroll = &mut ui.spacing_mut().scroll;
+    scroll.floating = true;
+    scroll.floating_allocated_width = 0.0;
     // Partitioned by age rather than cut at the first old record: a console
     // line is mirrored with the time it was written, which can put an older
     // record above a newer one, and a cut there would file both as old.
