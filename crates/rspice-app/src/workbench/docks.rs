@@ -344,7 +344,7 @@ pub fn show_console(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         if let Some(action) = vertical_splitter_action(ctx, &response) {
             app.state.workbench.console_height =
                 apply_splitter_step(app.state.workbench.console_height, action, 16.0)
-                    .unwrap_or(145.0)
+                    .unwrap_or(crate::workbench::state::default_console_height())
                     .clamp(layout.console_min_height, layout.console_max_height);
             app.state.workbench.console_maximized = false;
             app.state.workbench.console_visible = true;
