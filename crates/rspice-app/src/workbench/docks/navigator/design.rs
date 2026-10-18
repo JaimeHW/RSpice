@@ -478,6 +478,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut folded = None;
     ScrollArea::vertical()
         .id_salt("workbench.design.navigator")
+        .auto_shrink([false, true])
         .show(ui, |ui| {
             find_matches::find_matches_section(ui, &mut app.state);
             for section in DESIGN_NAVIGATOR_SECTION_ORDER {

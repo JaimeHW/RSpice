@@ -596,6 +596,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut open_log = None;
     ScrollArea::vertical()
         .id_salt("workbench.task_log")
+        .auto_shrink([false, true])
         // egui otherwise keeps a scrolled area at least 64 points tall, past
         // the bottom edge of a dock dragged shorter than that.
         .min_scrolled_height(0.0)

@@ -38,6 +38,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // hierarchy to ascend, so the line carried no click either.
     ScrollArea::vertical()
         .id_salt("workbench.symbol.navigator")
+        .auto_shrink([false, true])
         .show(ui, |ui| {
             pins_section(ui, app, &mut document, &metadata, &ports);
             body_section(ui, app, &document);

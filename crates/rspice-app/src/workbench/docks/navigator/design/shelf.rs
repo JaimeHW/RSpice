@@ -259,6 +259,7 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     let state = &mut app.state;
     ScrollArea::vertical()
         .id_salt("workbench.design.component_shelf")
+        .auto_shrink([false, true])
         .show(ui, |ui| {
             let pinned = pinned_band(ui, state, &library_parts, &cells);
             band = recent_band(ui, state, &library_parts, &cells).or(pinned);

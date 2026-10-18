@@ -464,6 +464,7 @@ fn table(
     // detail region under it off the bottom of the dock.
     let mut area = egui::ScrollArea::vertical()
         .id_salt("workbench.problems")
+        .auto_shrink([false, true])
         .max_height(table.height)
         .min_scrolled_height(0.0);
     let cursor = cursor_group(table.arrangement, selection, view);

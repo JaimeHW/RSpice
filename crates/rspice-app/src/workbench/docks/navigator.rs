@@ -482,12 +482,14 @@ fn panel_search_clear(ui: &mut Ui, id: &'static str, field: &Response) -> bool {
 }
 
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
-    ScrollArea::vertical().show(ui, |ui| match app.state.workbench.project_page {
-        ProjectPage::Overview | ProjectPage::Library => project_library_navigator(ui, app),
-        ProjectPage::Configuration => project_configuration_navigator(ui, app),
-        ProjectPage::Dependencies => project_dependency_navigator(ui, app),
-        ProjectPage::Recovery => project_recovery_navigator(ui, app),
-    });
+    ScrollArea::vertical()
+        .auto_shrink([false, true])
+        .show(ui, |ui| match app.state.workbench.project_page {
+            ProjectPage::Overview | ProjectPage::Library => project_library_navigator(ui, app),
+            ProjectPage::Configuration => project_configuration_navigator(ui, app),
+            ProjectPage::Dependencies => project_dependency_navigator(ui, app),
+            ProjectPage::Recovery => project_recovery_navigator(ui, app),
+        });
 }
 
 fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -808,6 +810,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     ScrollArea::vertical()
         .id_salt("workbench.simulation.navigator")
+        .auto_shrink([false, true])
         .show(ui, |ui| {
             let active = app.state.workbench.simulation_page;
             // Enabled over total. The previous wording called the total
@@ -1844,6 +1847,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     ScrollArea::vertical()
         .id_salt("workbench.results.navigator")
+        .auto_shrink([false, true])
         .show(ui, |ui| match tab {
             ResultsBrowserTab::Signals => {
                 unreachable!("signal rows return through the virtualized result browser")
@@ -3542,6 +3546,7 @@ fn show_virtualized_result_signals(
         .min(row_height * RESULT_BROWSER_RENDER_WINDOW_ROWS as f32);
     ScrollArea::vertical()
         .id_salt("workbench.results.navigator")
+        .auto_shrink([false, true])
         .max_height(list_height)
         .show_viewport(ui, |ui, viewport| {
             let spacing = ui.spacing().item_spacing.y;
