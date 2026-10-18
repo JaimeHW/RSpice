@@ -61,6 +61,22 @@ pub(crate) fn report_engineering_canvas_focus(response: &Response, view_type: Vi
     if response.clicked() || response.drag_started() || requested {
         response.request_focus();
     }
+    // Esc drops the canvas's tool, not its keyboard. egui lets go of a
+    // focused widget on Escape unless the widget claims the key, and the
+    // canvas's single keys act only while it holds focus, so W, R or C after
+    // Esc did nothing until the canvas was clicked again. Tab and the arrows
+    // are left to egui.
+    if response.has_focus() {
+        response.ctx.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    escape: true,
+                    ..Default::default()
+                },
+            );
+        });
+    }
     response.ctx.data_mut(|data| {
         data.insert_temp(
             Id::new(CANVAS_FOCUS_RECORD_ID),
