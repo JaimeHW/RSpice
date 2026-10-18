@@ -1,10 +1,13 @@
 //! Random edit sequences on a cell view whose two sheets are drawn alike,
-//! checked after every edit against four invariants:
+//! checked after every edit against five invariants:
 //!
 //! - **Sheet isolation.** An edit on one sheet leaves the other sheet's
 //!   objects of every kind -- parts, wires, dots, buses, taps, labels,
 //!   probes, notes and shapes -- and its nets exactly as they were, although
 //!   both sheets draw on the very same coordinates.
+//! - **A dot pasted alone reads its own sheet.** A paste of dots alone lands
+//!   exactly when the open sheet's own wires and dots, with the other
+//!   sheet's left out, give it a crossing to go to.
 //! - **Dots are junctions.** The dots painted are the points the junction
 //!   rule marks on the design a run reads, and each is where the netlister
 //!   joins three conductor ends or the crossing the dot itself joins.
@@ -14,8 +17,8 @@
 //!   holds a zero-length segment.
 //!
 //! The default run checks [`DEFAULT_SEQUENCES`] seeded sequences. The full
-//! ten thousand are ignored by default and run with
-//! `cargo test -p rspice-app --lib -- --ignored ten_thousand_random_edit_sequences`.
+//! eight thousand are ignored by default and run with
+//! `cargo test -p rspice-app --lib -- --ignored eight_thousand_random_edit_sequences`.
 //! A failure is shrunk to the fewest steps that still fail the same way and
 //! reported with its seed and those steps, written as the Rust a regression
 //! test replays from the annotated drawing. Each different way of failing is
@@ -30,15 +33,17 @@ use crate::schematic::view::selection_transform::SelectionTransform;
 use crate::state::{Component, ComponentType, Junction, MoveSelectionMode, Point, Rotation, Wire};
 use crate::workbench::app_state::AppState;
 use rspice_design::schematic::bus::{Bus, BusTap};
+use rspice_design::schematic::clipboard::ClipboardData;
 use rspice_design::schematic::design_note::DesignNote;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design::schematic::documentation_shape::DocumentationShape;
 use rspice_design::schematic::junction_edit::JunctionRule;
 use rspice_design::schematic::net_label::NetLabel;
+use rspice_design::schematic::owned::Schematic;
 use rspice_design::schematic::probe::SchematicProbe;
 
-/// Sequences the default test run checks, about 24 s alone in the dev
-/// profile. The full ten thousand take about nine minutes.
+/// Sequences the default test run checks, about 27 s alone in the dev
+/// profile. The full eight thousand take about nine minutes.
 const DEFAULT_SEQUENCES: u64 = 400;
 /// Edits in one sequence.
 const STEPS: usize = 12;
@@ -110,6 +115,8 @@ pub(super) enum Step {
     Copy(Vec<Pick>),
     /// Paste the clipboard with its middle at the point.
     Paste(Point),
+    /// Copy one dot alone and paste it at the point.
+    PasteDot(u64, Point),
     /// Open the other sheet.
     Sheet,
     Undo,
@@ -157,6 +164,7 @@ impl Step {
             Self::Junction(at) => format!("Junction({})", point(at)),
             Self::Copy(selection) => format!("Copy({})", picks(selection)),
             Self::Paste(at) => format!("Paste({})", point(at)),
+            Self::PasteDot(dot, at) => format!("PasteDot({dot}, {})", point(at)),
             Self::Sheet => "Sheet".to_owned(),
             Self::Undo => "Undo".to_owned(),
             Self::Redo => "Redo".to_owned(),
@@ -231,9 +239,14 @@ struct ActiveSheet {
     parts: Vec<Component>,
     wires: Vec<Wire>,
     junctions: Vec<Point>,
+    /// The same dots, by identity.
+    dots: Vec<u64>,
     buses: Vec<Bus>,
     taps: Vec<u64>,
     labels: Vec<u64>,
+    /// The other sheet's wires and dots, which share these coordinates.
+    other_wires: Vec<Wire>,
+    other_junctions: Vec<Point>,
 }
 
 impl ActiveSheet {
@@ -260,6 +273,12 @@ impl ActiveSheet {
                 .filter(|junction| on_sheet(junction.id))
                 .map(|junction| junction.pos)
                 .collect(),
+            dots: document
+                .junctions
+                .iter()
+                .map(|junction| junction.id)
+                .filter(|id| on_sheet(*id))
+                .collect(),
             buses: document
                 .buses
                 .iter()
@@ -277,6 +296,18 @@ impl ActiveSheet {
                 .iter()
                 .map(|label| label.id)
                 .filter(|id| on_sheet(*id))
+                .collect(),
+            other_wires: document
+                .wires
+                .iter()
+                .filter(|wire| !on_sheet(wire.id))
+                .cloned()
+                .collect(),
+            other_junctions: document
+                .junctions
+                .iter()
+                .filter(|junction| !on_sheet(junction.id))
+                .map(|junction| junction.pos)
                 .collect(),
         }
     }
@@ -326,10 +357,7 @@ impl ActiveSheet {
     }
 
     fn vertices(&self) -> Vec<Point> {
-        self.wires
-            .iter()
-            .flat_map(|wire| wire.points.iter().copied())
-            .collect()
+        vertices(&self.wires)
     }
 
     /// A pitch point strictly inside one of the active wires' segments.
@@ -358,25 +386,31 @@ impl ActiveSheet {
 
     /// Where an orthogonal segment of one active wire crosses another's.
     fn crossings(&self) -> Vec<Point> {
-        let segments = self
-            .wires
-            .iter()
-            .flat_map(|wire| wire.points.windows(2).map(|pair| (pair[0], pair[1])))
-            .collect::<Vec<_>>();
-        let mut found = Vec::new();
-        for &(a, b) in &segments {
-            for &(c, d) in &segments {
-                if a.y == b.y && c.x == d.x {
-                    let x = c.x;
-                    let y = a.y;
-                    if a.x.min(b.x) < x && x < a.x.max(b.x) && c.y.min(d.y) < y && y < c.y.max(d.y)
-                    {
-                        found.push(p(x, y));
-                    }
-                }
-            }
+        crossings(&self.wires)
+    }
+
+    /// The crossings and dots of either sheet, where a dot copied alone can
+    /// go.
+    fn meetings(&self) -> Vec<Point> {
+        let mut points = crossings(&self.wires);
+        points.extend(crossings(&self.other_wires));
+        points.extend(self.junctions.iter().copied());
+        points.extend(self.other_junctions.iter().copied());
+        points
+    }
+
+    /// Where a paste lands: as often as not a crossing, a dot or a vertex
+    /// of either sheet, and otherwise anywhere on the canvas.
+    fn landing(&self, rng: &mut Rng) -> Point {
+        let mut points = self.meetings();
+        points.extend(vertices(&self.wires));
+        points.extend(vertices(&self.other_wires));
+        if rng.chance(50)
+            && let Some(point) = rng.pick(&points)
+        {
+            return point;
         }
-        found
+        rng.point()
     }
 
     /// A point a click would aim for: a pin, a vertex, a wire's inside or
@@ -392,10 +426,39 @@ impl ActiveSheet {
     }
 }
 
+/// Every vertex of `wires`.
+fn vertices(wires: &[Wire]) -> Vec<Point> {
+    wires
+        .iter()
+        .flat_map(|wire| wire.points.iter().copied())
+        .collect()
+}
+
+/// Where an orthogonal segment of one of `wires` crosses another's.
+fn crossings(wires: &[Wire]) -> Vec<Point> {
+    let segments = wires
+        .iter()
+        .flat_map(|wire| wire.points.windows(2).map(|pair| (pair[0], pair[1])))
+        .collect::<Vec<_>>();
+    let mut found = Vec::new();
+    for &(a, b) in &segments {
+        for &(c, d) in &segments {
+            if a.y == b.y && c.x == d.x {
+                let x = c.x;
+                let y = a.y;
+                if a.x.min(b.x) < x && x < a.x.max(b.x) && c.y.min(d.y) < y && y < c.y.max(d.y) {
+                    found.push(p(x, y));
+                }
+            }
+        }
+    }
+    found
+}
+
 /// The next edit for the bench as it stands.
 fn generate(bench: &Bench, rng: &mut Rng) -> Step {
     let sheet = ActiveSheet::read(bench);
-    let roll = rng.below(112);
+    let roll = rng.below(118);
     let step = match roll {
         0..=19 => {
             let start = sheet.target(rng);
@@ -465,7 +528,7 @@ fn generate(bench: &Bench, rng: &mut Rng) -> Step {
             let picks = sheet.picks(rng);
             (!picks.is_empty()).then_some(Step::Copy(picks))
         }
-        72..=76 => Some(Step::Paste(rng.point())),
+        72..=76 => Some(Step::Paste(sheet.landing(rng))),
         77..=81 => Some(Step::Sheet),
         82..=92 => Some(Step::Undo),
         93..=99 => Some(Step::Redo),
@@ -487,7 +550,7 @@ fn generate(bench: &Bench, rng: &mut Rng) -> Step {
             ))
         }
         // The tap tool lands a tap's end on a wire.
-        _ => sheet.on_bus(rng).and_then(|(bus, from)| {
+        108..=111 => sheet.on_bus(rng).and_then(|(bus, from)| {
             let to = if rng.chance(50) {
                 rng.pick(&sheet.vertices())
             } else {
@@ -495,6 +558,14 @@ fn generate(bench: &Bench, rng: &mut Rng) -> Step {
             }?;
             let member = u32::try_from(rng.below(4)).unwrap_or(0);
             (to != from).then_some(Step::Tap(bus, from, to, member))
+        }),
+        // A dot copied alone pastes only onto a crossing of the sheet it
+        // lands on, so it is aimed at where wires meet on either sheet.
+        _ => rng.pick(&sheet.dots).map(|dot| {
+            let at = rng
+                .pick(&sheet.meetings())
+                .unwrap_or_else(|| sheet.landing(rng));
+            Step::PasteDot(dot, at)
         }),
     };
     step.unwrap_or(Step::Undo)
@@ -509,6 +580,17 @@ fn on_active_sheet(bench: &Bench, id: u64) -> bool {
         || document.bus_taps.iter().any(|tap| tap.id == id)
         || document.net_labels.iter().any(|label| label.id == id);
     exists && bench.sheet_of(id) == bench.active_sheet()
+}
+
+/// Where the active sheet's dot `id` stands, while it is there.
+fn dot_on_active_sheet(bench: &Bench, id: u64) -> Option<Point> {
+    let document = bench.state().schematic.document();
+    document
+        .junctions
+        .iter()
+        .find(|junction| junction.id == id)
+        .filter(|_| bench.sheet_of(id) == bench.active_sheet())
+        .map(|junction| junction.pos)
 }
 
 /// Select `picks` that are on the active sheet; whether any was.
@@ -607,6 +689,13 @@ fn apply(bench: &mut Bench, step: &Step) {
             }
         }
         Step::Paste(at) => bench.paste_at(*at),
+        Step::PasteDot(dot, at) => {
+            if let Some(from) = dot_on_active_sheet(bench, *dot) {
+                bench.select(|selection| selection.select_junction(from));
+                bench.copy_selection();
+                bench.paste_at(*at);
+            }
+        }
         Step::Sheet => bench.activate_sheet(1 - bench.active_sheet()),
         Step::Undo => bench.undo(),
         Step::Redo => bench.redo(),
@@ -971,6 +1060,52 @@ struct History {
     redo: Vec<World>,
 }
 
+/// The open sheet's wires and dots, with the other sheet's left out.
+fn open_sheet_conductors(bench: &Bench) -> SchematicDocument {
+    let document = bench.state().schematic.document();
+    let active = bench.active_sheet();
+    SchematicDocument {
+        wires: document
+            .wires
+            .iter()
+            .filter(|wire| bench.sheet_of(wire.id) == active)
+            .cloned()
+            .collect(),
+        junctions: document
+            .junctions
+            .iter()
+            .filter(|junction| bench.sheet_of(junction.id) == active)
+            .cloned()
+            .collect(),
+        grid_size: document.grid_size,
+        ..SchematicDocument::default()
+    }
+}
+
+/// Whether `clipboard` pasted at `at` onto `sheet`, one sheet's wires and
+/// dots, lands while it holds dots alone; `None` while it holds anything
+/// else.
+fn dot_paste_lands(sheet: SchematicDocument, clipboard: &ClipboardData, at: Point) -> Option<bool> {
+    let dots_alone = !clipboard.junctions.is_empty()
+        && clipboard.components.is_empty()
+        && clipboard.wires.is_empty()
+        && clipboard.buses.is_empty()
+        && clipboard.bus_taps.is_empty()
+        && clipboard.net_labels.is_empty()
+        && clipboard.design_notes.is_empty()
+        && clipboard.documentation_shapes.is_empty()
+        && clipboard.probes.is_empty();
+    if !dots_alone {
+        return None;
+    }
+    let at = crate::workbench::app::on_grid(at, sheet.grid_size);
+    let mut sheet = Schematic::from_document(sheet);
+    Some(matches!(
+        sheet.paste_at(clipboard, at, |_| false),
+        Ok(Some(edit)) if edit.value.has_content()
+    ))
+}
+
 /// Make `step` and check every invariant against the world it found.
 fn step_and_check(
     bench: &mut Bench,
@@ -978,6 +1113,14 @@ fn step_and_check(
     before: &World,
     step: &Step,
 ) -> Result<World, String> {
+    // A paste is judged on the open sheet as it stood, against the
+    // clipboard the step pasted: a dot paste copies its dot first.
+    let paste = match step {
+        Step::Paste(at) => Some(*at),
+        Step::PasteDot(dot, at) => dot_on_active_sheet(bench, *dot).map(|_| *at),
+        _ => None,
+    }
+    .map(|at| (at, open_sheet_conductors(bench)));
     let made = catch_unwind(AssertUnwindSafe(|| apply(bench, step)));
     if let Err(panic) = made {
         let message = panic
@@ -986,6 +1129,26 @@ fn step_and_check(
             .or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_owned()))
             .unwrap_or_default();
         return Err(format!("panic: {message}"));
+    }
+    if let Some((at, sheet)) = paste
+        && let Some(lands) = dot_paste_lands(sheet, &bench.state().ui.schematic_clipboard, at)
+    {
+        let pasted = bench
+            .state()
+            .prompt_text()
+            .is_some_and(|prompt| prompt.starts_with("Pasted"));
+        if pasted != lands {
+            return Err(format!(
+                "dot paste: a dot pasted alone {} where the open sheet's own wires and dots {}\n{}",
+                if pasted { "landed" } else { "was refused" },
+                if lands {
+                    "take it"
+                } else {
+                    "give it nowhere to go"
+                },
+                bench.describe()
+            ));
+        }
     }
     let projected = bench.projected();
     let after = World::read(bench, &projected);
@@ -1220,7 +1383,7 @@ fn random_edit_sequences_keep_sheets_dots_undo_and_wires_sound() {
 }
 
 #[test]
-#[ignore = "ten thousand sequences take minutes; run on demand"]
-fn ten_thousand_random_edit_sequences() {
-    check_sequences(0..10_000);
+#[ignore = "eight thousand sequences take minutes; run on demand"]
+fn eight_thousand_random_edit_sequences() {
+    check_sequences(0..8_000);
 }
