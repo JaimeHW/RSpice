@@ -27,8 +27,7 @@ use super::commit::{
 use super::state::{
     BorderTemplateChoice, DrawingSheetDraft, DrawingSheetSection, DrawingSheetSetupState,
     DrawingSheetSupportRequest, FieldProblem, PageSetupScope, SheetDisplayUnit, SheetSizeChoice,
-    TitleBlockTemplateChoice, ZoneModeChoice,
-    display_unit_from_model, format_um,
+    TitleBlockTemplateChoice, ZoneModeChoice, display_unit_from_model, format_um,
 };
 
 const TITLE: &str = "Page setup";

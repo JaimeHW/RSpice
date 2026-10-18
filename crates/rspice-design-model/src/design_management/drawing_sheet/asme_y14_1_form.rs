@@ -513,7 +513,7 @@ impl SchematicSheetFormat {
             AuthoredDrawingSheetSize::Standard { standard } => {
                 standard.asme_size_designation().map_or(
                     DrawingSheetTitleText::Field(Field::PaperSize),
-                    |designation| DrawingSheetTitleText::Fixed(designation),
+                    DrawingSheetTitleText::Fixed,
                 )
             }
             AuthoredDrawingSheetSize::Custom { .. } => {
@@ -565,12 +565,7 @@ mod seat {
         let em_um = drawing_sheet_mono_em_um(lettering_um);
         let rise_um = em_um * 7 / 20;
         let ink_um = rise_um + pitch_um * (lines - 1) + em_um * 12 / 20;
-        let room_um = bottom_um - top_um;
-        let slack_um = if room_um > ink_um {
-            room_um - ink_um
-        } else {
-            0
-        };
+        let slack_um = (bottom_um - top_um).saturating_sub(ink_um);
         top_um + slack_um / 2 + rise_um
     }
 }
