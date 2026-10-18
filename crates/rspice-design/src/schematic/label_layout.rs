@@ -217,9 +217,10 @@ fn infer_terminal_axis(component: &Component) -> TerminalAxis {
 /// the side its unturned body's right-hand side faces, so an instance
 /// mirrored or turned end for end letters its value on the left, ending at
 /// the body, instead of across the gate lead and the wire that leaves it.
-/// Unless the device is turned a quarter, the value hangs just below the
-/// body's middle, clear of the bulk (or substrate) lead that runs out along
-/// it on that side. The text itself stays upright.
+/// Unless the device is turned a quarter, the value hangs just off the
+/// body's middle on its drain's (or collector's) side, clear of the bulk (or
+/// substrate) lead that runs out along the middle on that side and of the
+/// tie that turns from it toward the source. The text itself stays upright.
 ///
 /// Linear in `origin` and `scale`: `origin` is the instance's position and
 /// `scale` the size of one world unit in the caller's space, so the canvas
@@ -273,11 +274,21 @@ pub fn instance_label_layout(
             (x + half_w + margin, Start)
         };
         // Unturned, the gate (or base) and the bulk run their leads across
-        // the body's middle, so the value hangs just below that axis rather
-        // than across a wire leaving either one. Turned a quarter, those
-        // leads run up and down and the middle is clear.
+        // the body's middle, so the value hangs just off that axis rather
+        // than across a wire leaving either one. A bulk is tied toward its
+        // source (its own, or the rail beside it), so the value takes the
+        // drain's side, where no tie runs. Turned a quarter, those leads run
+        // up and down and the middle is clear.
+        let source_below = component
+            .kind
+            .terminal_offsets()
+            .iter()
+            .find(|(terminal, _)| matches!(*terminal, "S" | "E"))
+            .is_some_and(|(_, at)| component.transform_point(*at).y > 0);
         let (value_y, vertical) = if component.rotation.is_vertical() {
             (y, Center)
+        } else if source_below {
+            (y - margin, End)
         } else {
             (y + margin, Start)
         };

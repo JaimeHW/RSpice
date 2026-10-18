@@ -314,11 +314,12 @@ fn a_printed_label_hangs_off_the_canvas_anchor_in_the_canvas_type() {
     assert_eq!(compiled.text("4.7k"), (x, y, TextAnchor::Start, 2_250));
 
     // A MOSFET: name above, value to the right, past the 40 x 80 body,
-    // hanging 4 wu below the middle so the bulk lead and its wire run clear
-    // of it.
+    // standing 4 wu above the middle, on the drain's side, so the bulk lead
+    // and the tie it turns toward the source run clear of it. Its baseline
+    // is one 9-wu line box (11.7 wu) up from its bottom edge plus 9.225.
     let (x, y) = compiled.at(160.0, -44.0 - 13.0 + 10.25);
     assert_eq!(compiled.text("M1"), (x, y, TextAnchor::Middle, 2_500));
-    let (x, y) = compiled.at(160.0 + 24.0, 4.0 + 9.225);
+    let (x, y) = compiled.at(160.0 + 24.0, -4.0 - 11.7 + 9.225);
     assert_eq!(compiled.text("nch"), (x, y, TextAnchor::Start, 2_250));
 
     // The cell turned a half: its symbol's name anchor (-30, -40) lands at

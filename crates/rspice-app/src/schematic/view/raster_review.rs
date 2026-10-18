@@ -1223,7 +1223,8 @@ fn a_pin_name_stands_clear_of_an_artwork_lead() {
 /// its drain and source leads run up and down. An unmirrored device's value
 /// stood on its bulk's axis, so the bulk wire ran under the text (M1's on the
 /// analog sheet), and a mirrored device's on the same axis on its other side
-/// (M3's).
+/// (M3's). Hung below that axis, it still sat across the input pair's bulk
+/// ties, which turn down toward the tail.
 #[test]
 fn a_transistor_value_stands_clear_of_every_pin_line() {
     let mut state = analog_sheet();
@@ -1265,6 +1266,34 @@ fn a_transistor_value_stands_clear_of_every_pin_line() {
                 "{}: the value {:?} at {:?} stands on the line of its {pin} pin at {at:?}",
                 transistor.name, value.text, value.rect
             );
+        }
+        // Nor does a wire leaving one of its pins run under it: the pair's
+        // bulk ties turn down toward the tail 20 wu out from the body.
+        let terminals = transistor
+            .terminal_positions()
+            .into_iter()
+            .map(|(_, at)| at)
+            .collect::<Vec<_>>();
+        for wire in &state.schematic.document().wires {
+            if !wire.points.iter().any(|point| terminals.contains(point)) {
+                continue;
+            }
+            for pair in wire.points.windows(2) {
+                let segment = Rect::from_two_pos(
+                    on_screen(framing.centre, render.zoom, pair[0]),
+                    on_screen(framing.centre, render.zoom, pair[1]),
+                )
+                .expand(0.5);
+                assert!(
+                    !segment.intersects(value.rect),
+                    "{}: the value {:?} at {:?} stands on the wire from {:?} to {:?}",
+                    transistor.name,
+                    value.text,
+                    value.rect,
+                    pair[0],
+                    pair[1]
+                );
+            }
         }
     }
 }

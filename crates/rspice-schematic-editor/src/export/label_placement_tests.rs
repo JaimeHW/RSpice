@@ -86,19 +86,20 @@ fn the_canvas_stands_names_and_values_outside_the_body_for_every_turn_and_mirror
             ((100.0, 236.0), A::CENTER_TOP),
         ),
         // A tall device: name above, value to the right, past the turned body.
-        // Unturned, the value hangs just below the middle, where the bulk
-        // lead runs out.
+        // Unturned, the value stands just above the middle, where the bulk
+        // lead runs out, on the drain's side, away from the source the bulk
+        // is tied toward.
         case(
             K::Nmos,
             R::R0,
             ((100.0, 112.0), A::CENTER_BOTTOM),
-            ((148.0, 208.0), A::LEFT_TOP),
+            ((148.0, 192.0), A::LEFT_BOTTOM),
         ),
         case(
             K::Nmos,
             R::R180,
             ((100.0, 112.0), A::CENTER_BOTTOM),
-            ((148.0, 208.0), A::LEFT_TOP),
+            ((148.0, 192.0), A::LEFT_BOTTOM),
         ),
         case(
             K::Nmos,
@@ -141,14 +142,23 @@ fn the_canvas_stands_names_and_values_outside_the_body_for_every_turn_and_mirror
             // where it stands unturned, away from the gate.
             let faces_left = component.transform_point(Point::new(1, 0)).x < 0;
             let tall = matches!(case.kind, K::Nmos | K::NpnBjt);
-            let value = if tall && faces_left {
-                (
-                    (200.0 - case.value.0.0, case.value.0.1),
-                    A([egui::Align::Max, case.value.1.y()]),
-                )
-            } else {
-                case.value
-            };
+            let mut value = case.value;
+            if tall && faces_left {
+                value = (
+                    (200.0 - value.0.0, value.0.1),
+                    A([egui::Align::Max, value.1.y()]),
+                );
+            }
+            // Unturned with its source on top (flipped, or turned end for
+            // end), its value hangs below the middle instead: the mirror
+            // image about the middle.
+            let source_above = component.transform_point(Point::new(0, 1)).y < 0;
+            if tall && !case.rotation.is_vertical() && source_above {
+                value = (
+                    (value.0.0, 400.0 - value.0.1),
+                    A([value.1.x(), egui::Align::Min]),
+                );
+            }
             assert!(
                 close(layout.name_pos, case.name.0),
                 "{context}: name at {:?}",
