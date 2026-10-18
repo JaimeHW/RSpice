@@ -1321,10 +1321,14 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
                 .width(ui.available_width())
                 .selected_text(state.draft.title_block.label())
                 .show_ui(ui, |ui| {
-                    for choice in TitleBlockTemplateChoice::ALL
-                        .into_iter()
-                        .filter(|choice| *choice != TitleBlockTemplateChoice::Organization)
-                    {
+                    // The compact block is offered only to a sheet already on
+                    // it, beside the ISO 7200 form that replaces it.
+                    let on_compact =
+                        state.baseline.title_block == TitleBlockTemplateChoice::Compact;
+                    for choice in TitleBlockTemplateChoice::ALL.into_iter().filter(|choice| {
+                        *choice != TitleBlockTemplateChoice::Organization
+                            && (*choice != TitleBlockTemplateChoice::Compact || on_compact)
+                    }) {
                         ui.selectable_value(&mut state.draft.title_block, choice, choice.label());
                     }
                 });
@@ -1339,21 +1343,27 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
     // The substitution warning belongs to the choice that triggers it. It used
     // to be raised in a banner across the foot of the surface, several hundred
     // pixels from the control it is about.
-    if state
-        .draft
-        .validate()
-        .is_ok_and(|validated| validated.page_format.title_block_substituted())
+    if let Ok(validated) = state.draft.validate()
+        && validated.page_format.title_block_substituted()
     {
         let t = Tokens::get(ui.ctx());
+        let warning = match validated.page_format.effective_title_block_template() {
+            crate::state::DrawingSheetTitleBlockTemplate::None => {
+                "Does not fit this drawing area, so the sheet carries no title block. The \
+                 requested choice stays saved."
+                    .to_owned()
+            }
+            printed => format!(
+                "Does not fit this drawing area — {} will be drawn. The requested choice stays saved.",
+                printed.label(),
+            ),
+        };
         ui.add_space(6.0);
         ui.add(
             egui::Label::new(
-                egui::RichText::new(format!(
-                    "Does not fit this drawing area — {} will be drawn. The requested choice stays saved.",
-                    TitleBlockTemplateChoice::Compact.label(),
-                ))
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.warn),
+                egui::RichText::new(warning)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.warn),
             )
             .wrap(),
         );

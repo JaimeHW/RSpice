@@ -124,7 +124,8 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
 /// With nothing selected the panel is the sheet's property editor: its size,
 /// orientation and title block, and every value its title block shows that
 /// someone types, editable where they stand — this sheet's own, then the
-/// document's. An empty value shows what the block letters instead. The
+/// document's, each in the order ISO 7200's form is read and named as the
+/// form names it. An empty value shows what the block letters instead. The
 /// toolbar's Check cellview and the File menu's Page setup are not repeated
 /// as buttons, and a check never run adds no section.
 #[cfg(not(target_arch = "wasm32"))]
@@ -137,11 +138,56 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
         painted,
         "Sheet\nSize\nISO A4 · 297 × 210 mm\nOrientation\nLandscape\n\
          Title block\nTemplate\nISO 7200 · 180 × 45 mm\n\
-         Sheet title\ntop\n\nDocument type\nCircuit diagram\n\n\
-         Drawn by\n\nApproved by\n\n\
-         Document\nAll sheets\nRevision\n\nDate\nYYYY-MM-DD\n\n\
-         Document status\nDraft\nOrganization\n\nDocument ID\n\n\
+         Created by\n\nApproved by\n\nDocument type\nCircuit diagram\n\nTitle\ntop\n\n\
+         Document\nAll sheets\nLegal owner\n\nDocument status\nIn preparation\n\
+         Identification number\n\nRevision\n\nDate of issue\nYYYY-MM-DD\n\n\
          Schematic\nGrid\n2.5 mm\nNet names\nASCII letters, digits, _.$:/![]<>-\n"
+    );
+}
+
+/// A sheet chooses ISO 7200's form or no block; the compact block is offered
+/// only to a sheet already on it.
+#[test]
+fn the_compact_block_is_offered_only_to_a_sheet_on_it() {
+    assert_eq!(
+        template_choices(DrawingSheetTitleBlockTemplate::Standard),
+        [
+            DrawingSheetTitleBlockTemplate::Standard,
+            DrawingSheetTitleBlockTemplate::None,
+        ]
+    );
+    assert_eq!(
+        template_choices(DrawingSheetTitleBlockTemplate::None),
+        [
+            DrawingSheetTitleBlockTemplate::Standard,
+            DrawingSheetTitleBlockTemplate::None,
+        ]
+    );
+    assert_eq!(
+        template_choices(DrawingSheetTitleBlockTemplate::Compact),
+        [
+            DrawingSheetTitleBlockTemplate::Compact,
+            DrawingSheetTitleBlockTemplate::Standard,
+            DrawingSheetTitleBlockTemplate::None,
+        ]
+    );
+}
+
+/// A revision index ISO 7200 advises against is flagged where it is typed,
+/// and kept.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_revision_index_with_an_o_is_flagged_and_kept() {
+    let mut panel = SheetPanel::new();
+    panel.enter("Revision", "O");
+    assert_eq!(panel.document_value(DrawingSheetTitleFieldId::Revision), "O");
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(
+        painted.contains(
+            "Revision\nO\nISO 7200 advises against I and O in a revision index: they read as \
+             1 and 0.\n"
+        ),
+        "{painted}"
     );
 }
 
@@ -152,8 +198,8 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
 #[test]
 fn document_values_typed_in_the_panel_land_on_the_project() {
     let mut panel = SheetPanel::new();
-    panel.enter("Organization", "Whitfield Analog Devices");
-    panel.enter("Document ID", "RS-0001-SCH-0042");
+    panel.enter("Legal owner", "Whitfield Analog Devices");
+    panel.enter("Identification number", "RS-0001-SCH-0042");
     panel.enter("Revision", "B");
 
     let settings = panel
@@ -194,7 +240,7 @@ fn document_values_typed_in_the_panel_land_on_the_project() {
 #[test]
 fn the_document_date_and_status_are_held_to_page_setups_rules() {
     let mut panel = SheetPanel::new();
-    panel.enter("Date", "18/10/2026");
+    panel.enter("Date of issue", "18/10/2026");
     assert_eq!(panel.document_value(DrawingSheetTitleFieldId::Date), "");
     assert_eq!(
         panel.app.state.prompt_text(),
@@ -207,18 +253,19 @@ fn the_document_date_and_status_are_held_to_page_setups_rules() {
         DrawingSheetEdit::Status(DrawingSheetReleaseStatus::Released),
     )
     .unwrap_err();
-    assert_eq!(refused, "A released or obsolete document needs a revision.");
+    assert_eq!(refused, "A released or withdrawn document needs a revision.");
 
     panel.enter("Revision", "A");
-    panel.enter("Date", "2026-10-18");
+    panel.enter("Date of issue", "2026-10-18");
     apply_drawing_sheet_edit(
         &mut panel.app.state,
         DrawingSheetEdit::Status(DrawingSheetReleaseStatus::Released),
     )
     .unwrap();
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(painted.contains("Document status\nReleased\n"), "{painted}");
     assert!(
-        painted.contains("Revision\nA\nDate\n2026-10-18\nDocument status\nReleased\n"),
+        painted.contains("Revision\nA\nDate of issue\n2026-10-18\n"),
         "{painted}"
     );
 }
@@ -232,7 +279,10 @@ fn only_the_fields_this_block_shows_are_offered() {
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(!painted.contains("Classification"), "{painted}");
     assert!(!painted.contains("Checked by"), "{painted}");
-    assert!(!painted.contains("Page\n"), "{painted}");
+    assert!(!painted.contains("Language"), "{painted}");
+    // RSpice fills in the sheet number itself, so the only "Sheet" is the
+    // section's own heading.
+    assert_eq!(painted.matches("Sheet\n").count(), 1, "{painted}");
 
     apply_drawing_sheet_edit(
         &mut app.state,
@@ -286,7 +336,7 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
 #[test]
 fn a_title_value_typed_and_entered_lands_on_the_sheet_as_one_undo_step() {
     let mut panel = SheetPanel::new();
-    panel.type_into("Drawn by", "J. Whitfield");
+    panel.type_into("Created by", "J. Whitfield");
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
     assert!(!panel.app.state.can_undo_project_design());
 
@@ -306,7 +356,7 @@ fn a_title_value_typed_and_entered_lands_on_the_sheet_as_one_undo_step() {
 #[test]
 fn escape_abandons_a_typed_title_value() {
     let mut panel = SheetPanel::new();
-    panel.type_into("Drawn by", "J. Whitfield");
+    panel.type_into("Created by", "J. Whitfield");
     panel.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
     panel.pass(Vec::new());
     assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnBy), "");
@@ -319,7 +369,7 @@ fn escape_abandons_a_typed_title_value() {
 #[test]
 fn a_value_still_being_typed_lands_when_the_panel_moves_on() {
     let mut panel = SheetPanel::new();
-    panel.type_into("Drawn by", "J. Whitfield");
+    panel.type_into("Created by", "J. Whitfield");
     commit_pending_title_field(&panel.ctx, &mut panel.app.state);
     assert_eq!(
         panel.title_value(DrawingSheetTitleFieldId::DrawnBy),
@@ -352,7 +402,7 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
         .unwrap();
     catalog.set_active(first).unwrap();
 
-    panel.type_into("Drawn by", "J. Whitfield");
+    panel.type_into("Created by", "J. Whitfield");
     panel
         .app
         .state

@@ -30,6 +30,7 @@ use crate::state::{
     AuthoredDrawingSheetSize, DrawingSheetReleaseStatus, DrawingSheetStandard,
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
     NetNamingPolicy, SchematicGridPitch, SchematicPageOrientation, SchematicSheetFormat, SheetId,
+    drawing_sheet_revision_advisory,
 };
 use crate::ui::icons::Icon;
 use crate::ui::widgets::Button;
@@ -49,13 +50,23 @@ use rspice_ui_kit::panels::{section_header, section_header_explained};
 /// The Size menu's entry for a size the standard list does not hold.
 const CUSTOM_SIZE: &str = "custom";
 
-/// The title-block templates a sheet can choose for itself. The organization
+/// The title-block templates a sheet on `current` can choose for itself:
+/// ISO 7200's form, or none. The compact block is offered only to a sheet
+/// already on it, beside the form that replaces it, and the organization
 /// block is assigned by the organization, never chosen here.
-const TEMPLATES: [DrawingSheetTitleBlockTemplate; 3] = [
-    DrawingSheetTitleBlockTemplate::Compact,
-    DrawingSheetTitleBlockTemplate::Standard,
-    DrawingSheetTitleBlockTemplate::None,
-];
+fn template_choices(
+    current: DrawingSheetTitleBlockTemplate,
+) -> Vec<DrawingSheetTitleBlockTemplate> {
+    let compact = (current == DrawingSheetTitleBlockTemplate::Compact)
+        .then_some(DrawingSheetTitleBlockTemplate::Compact);
+    compact
+        .into_iter()
+        .chain([
+            DrawingSheetTitleBlockTemplate::Standard,
+            DrawingSheetTitleBlockTemplate::None,
+        ])
+        .collect()
+}
 
 pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
     let sheet = resolve_active_drawing_sheet(state);
@@ -257,13 +268,17 @@ fn title_block_section(
     let template = format.title_block.template;
     let managed = template == DrawingSheetTitleBlockTemplate::OrganizationManaged;
     if editable && !managed {
+        let templates = template_choices(template);
         let mut selected = template_name(template).to_owned();
-        let choices = TEMPLATES.map(|choice| {
-            (
-                template_name(choice).to_owned(),
-                template_name(choice).to_owned(),
-            )
-        });
+        let choices = templates
+            .iter()
+            .map(|choice| {
+                (
+                    template_name(*choice).to_owned(),
+                    template_name(*choice).to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
         if property_row_combo(
             ui,
             "Template",
@@ -271,7 +286,7 @@ fn title_block_section(
             &mut selected,
             &choices,
             true,
-        ) && let Some(choice) = TEMPLATES
+        ) && let Some(choice) = templates
             .into_iter()
             .find(|choice| template_name(*choice) == selected)
         {
@@ -281,25 +296,32 @@ fn title_block_section(
         property_row(ui, "Template", template_name(template));
     }
     if format.title_block_substituted() {
-        let printed = template_name(sheet.geometry.physical.effective_title_block_template);
         problem_line(
             ui,
             Problem::Warning,
-            &format!(
-                "{} doesn't fit this size; {printed} is printed.",
-                template_name(template)
-            ),
+            &match sheet.geometry.physical.effective_title_block_template {
+                DrawingSheetTitleBlockTemplate::None => format!(
+                    "{} doesn't fit this sheet's drawing area; no title block is printed.",
+                    template_name(template)
+                ),
+                printed => format!(
+                    "{} doesn't fit this size; {} is printed.",
+                    template_name(template),
+                    template_name(printed)
+                ),
+            },
         );
     }
     if template == DrawingSheetTitleBlockTemplate::None {
         return;
     }
 
+    // The form's fields in the order it is read, named as it names them.
     for field in format.title_block_field_order() {
         let Some(authored) = format.title_block.fields.get(&field) else {
             continue;
         };
-        if !authored.visible
+        if !format.title_field_shown(field)
             || is_document_field(field)
             || field.policy().value_authority != DrawingSheetTitleFieldValueAuthority::Authored
         {
@@ -341,14 +363,7 @@ fn document_section(
     let fields = format
         .title_block_field_order()
         .into_iter()
-        .filter(|field| {
-            is_document_field(*field)
-                && format
-                    .title_block
-                    .fields
-                    .get(field)
-                    .is_some_and(|authored| authored.visible)
-        })
+        .filter(|field| is_document_field(*field) && format.title_field_shown(*field))
         .collect::<Vec<_>>();
     if fields.is_empty() {
         return;
@@ -408,6 +423,11 @@ fn document_section(
                 stored.as_str()
             };
             property_row(ui, field.display_label(), shown);
+        }
+        if field == DrawingSheetTitleFieldId::Revision
+            && let Some(advisory) = drawing_sheet_revision_advisory(&stored)
+        {
+            problem_line(ui, Problem::Warning, advisory);
         }
     }
 }

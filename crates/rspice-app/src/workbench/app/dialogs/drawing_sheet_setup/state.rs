@@ -238,8 +238,10 @@ impl TitleBlockTemplateChoice {
 
     pub(crate) const fn summary(self) -> &'static str {
         match self {
-            Self::Compact => "Identity, revision and page; suited to A4 and ANSI A.",
-            Self::Standard => "Full engineering identity, responsibility, date and scale.",
+            Self::Compact => "The earlier compact block, kept for the sheets already on it.",
+            Self::Standard => {
+                "ISO 7200's form: people, legal owner, title, identification and date of issue."
+            }
             Self::Organization => "Organization-owned labels, order and mark.",
             Self::None => "The authored sheet carries no title block.",
         }
@@ -802,7 +804,10 @@ impl DrawingSheetDraft {
         {
             problems.push(FieldProblem {
                 field: "title-fields",
-                message: "Sheet title is required and cannot be empty.".to_owned(),
+                message: format!(
+                    "{} is required and cannot be empty.",
+                    DrawingSheetTitleFieldId::SheetTitle.display_label()
+                ),
             });
         }
         if self.size == SheetSizeChoice::Custom && self.save_custom_preset {

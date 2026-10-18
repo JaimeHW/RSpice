@@ -1548,7 +1548,7 @@ mod tests {
             DrawingSheetEdit::TitleField(DrawingSheetTitleFieldId::SheetTitle, String::new()),
         )
         .unwrap_err();
-        assert!(error.contains("Sheet title is required"), "{error}");
+        assert!(error.contains("Title is required"), "{error}");
         assert!(!app.state.dialogs.drawing_sheet_setup.open);
         assert!(!app.state.can_undo_project_design());
     }

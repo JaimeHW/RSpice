@@ -1041,8 +1041,12 @@ fn preview_region(
                     )
                 },
             );
+        let instead = match record.effective_title_block_template() {
+            DrawingSheetTitleBlockTemplate::None => "no title block".to_owned(),
+            printed => format!("the {} block", printed.label()),
+        };
         let text = format!(
-            "{} does not fit this page's{area} drawing area; new sheets draw the compact block until the format grows.",
+            "{} does not fit this page's{area} drawing area; new sheets draw {instead} until the format grows.",
             record.title_block.template.label(),
         );
         let mut job = LayoutJob::simple(
@@ -1335,17 +1339,21 @@ fn title_frame_block(
                         .map(|template| (template, template.label())),
                 );
             } else {
-                enum_combo(
-                    ui,
-                    "sheet-defaults-title-block",
-                    &mut selected,
-                    &[
-                        DrawingSheetTitleBlockTemplate::Compact,
-                        DrawingSheetTitleBlockTemplate::Standard,
-                        DrawingSheetTitleBlockTemplate::None,
-                    ]
-                    .map(|template| (template, template.label())),
-                );
+                // New sheets start on ISO 7200's form; the compact block is
+                // offered only to a default already on it.
+                let choices = [
+                    DrawingSheetTitleBlockTemplate::Compact,
+                    DrawingSheetTitleBlockTemplate::Standard,
+                    DrawingSheetTitleBlockTemplate::None,
+                ]
+                .into_iter()
+                .filter(|template| {
+                    *template != DrawingSheetTitleBlockTemplate::Compact
+                        || record.title_block.template == DrawingSheetTitleBlockTemplate::Compact
+                })
+                .map(|template| (template, template.label()))
+                .collect::<Vec<_>>();
+                enum_combo(ui, "sheet-defaults-title-block", &mut selected, &choices);
             }
             if selected != record.title_block.template {
                 edits.push(RecordEdit::TitleBlock(selected));
@@ -1940,12 +1948,14 @@ mod tests {
         })
         .unwrap();
 
-        let retargeted = retarget_default_to_standard(&source, DrawingSheetStandard::IsoA5);
+        // A sheet that still carries the ISO 7200 block: one too small for it
+        // carries none, and so has no placement for an offset to miss.
+        let retargeted = retarget_default_to_standard(&source, DrawingSheetStandard::IsoA4);
 
         assert_eq!(
             retargeted.authored_size,
             AuthoredDrawingSheetSize::Standard {
-                standard: DrawingSheetStandard::IsoA5,
+                standard: DrawingSheetStandard::IsoA4,
             }
         );
         assert_eq!(retargeted.title_block.template, source.title_block.template);
