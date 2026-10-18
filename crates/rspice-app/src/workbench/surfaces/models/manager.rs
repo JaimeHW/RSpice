@@ -28,6 +28,7 @@ mod shelf;
 mod symbol_contracts;
 mod symbols;
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -35,9 +36,10 @@ use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, Vec2
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::model_library::{
-    ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel, ModelConsumerScope,
-    ModelLibrary, ModelLibraryManager, ModelSourceAuthority, PackModelHit, ProcessCorner,
-    closure_facts, envelope_is_invalid, model_library_source_digest, short_digest,
+    BinFamily, BindableModel, ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel,
+    ModelConsumerScope, ModelLibrary, ModelLibraryManager, ModelSourceAuthority, PackModelHit,
+    ProcessCorner, closure_facts, envelope_is_invalid, model_bin_family,
+    model_library_source_digest, short_digest,
 };
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, ViewType, explicit_component_model,
@@ -587,7 +589,10 @@ fn catalog_bar(
     hub: &hub::HubCatalog,
     installed: &[crate::state::model_hub::InstalledPack],
 ) {
-    let loaded = app.state.model_library_manager.total_model_count();
+    let loaded = scan.map_or_else(
+        || catalog_model_count(&app.state.model_library_manager),
+        |scan| scan.total,
+    );
     let packs = hub.packs.len();
     // Both halves of the shelf, because the chip names the scope and the scope
     // is both. Counting only the shipped index said "17" over a table of
@@ -759,7 +764,10 @@ fn facet_button(ui: &mut Ui, selected: bool, label: &str, count: Option<usize>) 
 
 struct ProjectModelRow {
     library: String,
+    /// The name an instance binds: the card's, or the binned family's.
     model: String,
+    /// How many bins the row's family holds, or 0 when the row is one card.
+    bins: usize,
     family: &'static str,
     source: String,
     pinned: bool,
@@ -775,6 +783,29 @@ struct ProjectModelRow {
     /// consumer index again while painting would be a second read per row.
     usage_count: usize,
     vectors: usize,
+}
+
+impl ProjectModelRow {
+    /// Whether the catalog's selection sits on this row: its card, or — for a
+    /// family, whose detail shows one bin at a time — any of its bins.
+    fn holds(&self, library: Option<&str>, model: Option<&str>) -> bool {
+        library == Some(self.library.as_str())
+            && model.is_some_and(|model| {
+                model == self.model
+                    || (self.bins > 0
+                        && model_bin_family(model)
+                            .is_some_and(|family| family.eq_ignore_ascii_case(&self.model)))
+            })
+    }
+
+    /// The model cell: the name, and how many bins a family holds.
+    fn model_label(&self) -> Cow<'_, str> {
+        match self.bins {
+            0 => Cow::Borrowed(&self.model),
+            1 => Cow::Owned(format!("{} · 1 bin", self.model)),
+            bins => Cow::Owned(format!("{} · {bins} bins", self.model)),
+        }
+    }
 }
 
 /// How much of the catalog row the source column takes, and where it ends.
@@ -799,9 +830,22 @@ struct ProjectCatalogPass {
 /// so the count and the rows are the same pass.
 struct ProjectCatalogScan {
     rows: Vec<ProjectModelRow>,
+    /// Every row the catalog holds before the facet and the query narrow it:
+    /// a family once, however many bins it has.
+    total: usize,
     facets: [usize; ProjectModelFacet::ALL.len()],
     review: usize,
     consumer_diagnostics: Vec<bindings::BindingDiagnostic>,
+}
+
+/// How many models the project catalog lists, counted as its rows count them,
+/// for the scope chip when the catalog itself is not the page on show.
+fn catalog_model_count(manager: &ModelLibraryManager) -> usize {
+    manager
+        .libraries_sorted()
+        .into_iter()
+        .map(|library| library.bindable_models().len())
+        .sum()
 }
 
 /// What the catalog's STATUS column says about a row, and in what tone.
@@ -863,12 +907,13 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
     let scan = &pass.scan;
     let rows = &scan.rows;
     let selected_visible = rows.iter().any(|row| {
-        app.state.model_library_manager.selected_library.as_deref() == Some(row.library.as_str())
-            && app.state.workbench.selected_model.as_deref() == Some(row.model.as_str())
+        row.holds(
+            app.state.model_library_manager.selected_library.as_deref(),
+            app.state.workbench.selected_model.as_deref(),
+        )
     });
     if !selected_visible && let Some(row) = rows.first() {
-        app.state.select_model_library(&row.library);
-        app.state.workbench.selected_model = Some(row.model.clone());
+        select_catalog_row(app, row);
     }
 
     // The mockup's `.model-browser`: the catalogue keeps a little under half
@@ -925,13 +970,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
             });
         }
         });
-    catalog_footer(
-        ui,
-        rows.len(),
-        app.state.model_library_manager.total_model_count(),
-        scan.review,
-        "project models",
-    );
+    catalog_footer(ui, rows.len(), scan.total, scan.review, "project models");
     bindings::unresolved_card(ui, app, &scan.consumer_diagnostics);
 
     detail::selected_model_detail(ui, app, &pass.consumers);
@@ -953,10 +992,38 @@ fn model_needs_review(library: &ModelLibrary, model: &DeviceModel) -> bool {
     envelope_is_invalid(model) || library.is_unpinned_root()
 }
 
+/// Put the catalog's selection on a row. A family's selection is one of its
+/// bins — the first, until its detail is asked for another — so every surface
+/// that reads the selected model still reads a card.
+fn select_catalog_row(app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
+    let card = (row.bins > 0)
+        .then(|| {
+            app.state
+                .model_library_manager
+                .get_library(&row.library)
+                .and_then(|library| library.bin_family(&row.model))
+                .map(|family| family.bins[0].name.clone())
+        })
+        .flatten()
+        .unwrap_or_else(|| row.model.clone());
+    app.state.select_model_library(&row.library);
+    app.state.workbench.selected_model = Some(card);
+}
+
+/// The family the catalog's selection belongs to: the family of the selected
+/// bin, or the family the selection names. Bind gives an instance the family.
+fn selection_family<'a>(library: &'a ModelLibrary, model: &str) -> Option<BinFamily<'a>> {
+    match library.get_model(model) {
+        Some(_) => model_bin_family(model).and_then(|family| library.bin_family(family)),
+        None => library.bin_family(model),
+    }
+}
+
 fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
-    let selected = app.state.model_library_manager.selected_library.as_deref()
-        == Some(row.library.as_str())
-        && app.state.workbench.selected_model.as_deref() == Some(row.model.as_str());
+    let selected = row.holds(
+        app.state.model_library_manager.selected_library.as_deref(),
+        app.state.workbench.selected_model.as_deref(),
+    );
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), Sense::click());
@@ -976,9 +1043,10 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
     // spelled out for a sighted reader, which makes it exactly the cell that
     // would otherwise be legible only to one.
     let status = catalog_status(row);
+    let model = row.model_label();
     let row_label = match status {
-        CatalogStatus::Unstated => format!("{} in {}", row.model, row.library),
-        status => format!("{} in {} · {}", row.model, row.library, status.label()),
+        CatalogStatus::Unstated => format!("{model} in {}", row.library),
+        status => format!("{model} in {} · {}", row.library, status.label()),
     };
     response.widget_info(|| {
         egui::WidgetInfo::selected(
@@ -989,9 +1057,9 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
         )
     });
     theme::paint_focus_ring(ui, &response, rect);
-    if response.clicked() {
-        app.state.select_model_library(&row.library);
-        app.state.workbench.selected_model = Some(row.model.clone());
+    // A family already selected keeps the bin its detail shows.
+    if response.clicked() && !selected {
+        select_catalog_row(app, row);
     }
     let used_by = used_by_cell(row);
     // A drifted row sets its mark at the source column's own right edge, so
@@ -1012,7 +1080,7 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
         ui,
         rect,
         &[
-            (&row.model, 0.20, true),
+            (&model, 0.20, true),
             (row.family, 0.17, false),
             (&source, SOURCE_COLUMN_FRACTION, false),
             (&used_by, 0.16, true),

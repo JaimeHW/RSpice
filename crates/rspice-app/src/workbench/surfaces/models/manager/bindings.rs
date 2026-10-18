@@ -145,6 +145,23 @@ impl ConsumerIndex {
             ))
             .map_or(&[], Vec::as_slice)
     }
+
+    /// The instances a binned family's cards run for: those naming the family,
+    /// and those naming one of its bins, whose label says which. An instance
+    /// naming a bin runs that card at every size, so the family is where a
+    /// reader looks for it once its bins are no longer rows of their own.
+    pub(super) fn of_family(&self, library: &ModelLibrary, family: &BinFamily<'_>) -> Vec<String> {
+        let mut consumers = self.of(library, family.name).to_vec();
+        for bin in &family.bins {
+            consumers.extend(
+                self.of(library, &bin.name)
+                    .iter()
+                    .map(|label| format!("{label}{CONSUMER_FIELD}names bin {}", bin.name)),
+            );
+        }
+        consumers.sort();
+        consumers
+    }
 }
 
 /// The separator between a consumer label's fields.
@@ -191,12 +208,22 @@ pub(super) fn unresolved_card(
     if diagnostics.is_empty() {
         return;
     }
+    // A bin's selection binds its family, as the detail's Bind does.
     let selected_model = app
         .state
         .model_library_manager
         .selected_library
         .clone()
-        .zip(app.state.workbench.selected_model.clone());
+        .zip(app.state.workbench.selected_model.clone())
+        .map(|(library, model)| {
+            let binding = app
+                .state
+                .model_library_manager
+                .get_library(&library)
+                .and_then(|catalog| selection_family(catalog, &model))
+                .map_or(model, |family| family.name.to_owned());
+            (library, binding)
+        });
     let t = Tokens::get(ui.ctx());
     card(ui, |ui| {
         card_title(

@@ -76,7 +76,7 @@ pub use rspice_model_library::qualification::{
     MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
     QualificationPlatformVectorOutcome,
 };
-pub(crate) use rspice_model_library::{BinFamily, BindableModel};
+pub(crate) use rspice_model_library::{BinFamily, BindableModel, model_bin_family};
 pub use rspice_model_library::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use rspice_model_library::{
     ModelConsumerScope, ModelResolutionRecord, ModelValidationFinding,
