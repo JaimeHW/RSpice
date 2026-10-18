@@ -1309,6 +1309,68 @@ fn bound_model_choices_accept_same_family_across_catalog_model_types() {
     );
 }
 
+/// A binned family is one model choice, named as an instance binds it. An
+/// instance pinned to one bin keeps that bin as its current choice, so the row
+/// says what it runs, and choosing the family binds the family's name.
+#[test]
+fn bound_model_choices_offer_a_binned_family_once() {
+    let mut app = RSpiceApp::test_instance();
+    let mut kit = ModelLibrary::new("kit");
+    for name in ["nch.1", "nch.2", "nch_hv"] {
+        let mut card = DeviceModel::new(name, ModelType::Nmos);
+        card.spice_type = Some("NMOS".to_owned());
+        kit.add_model(card);
+    }
+    app.state.model_library_manager.add_library(kit);
+    let mut binding = LibraryCellInstance::new("kit", "nch_cell", "spice");
+    binding.module_name = Some("nch.1".to_owned());
+    binding.netlist_template = Some("M{name} {nodes} {model} {params}".to_owned());
+    let component = Component::new(61, ComponentType::CellInstance, Point::origin())
+        .with_library_cell(binding)
+        .with_name_value("XM1", "nch_cell");
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
+    app.state.schematic.init_undo_history();
+
+    let component = app.state.schematic.document().components[0].clone();
+    let choices = bound_model_choices(&app.state, &component, "nch.1");
+    let owned = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(value, label)| ((*value).to_owned(), (*label).to_owned()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        choices,
+        owned(&[
+            ("nch", "nch · 2 bins"),
+            ("nch.1", "nch.1 · bin of nch"),
+            ("nch_hv", "nch_hv"),
+        ])
+    );
+
+    assert!(apply_bound_model_choice(&mut app, 61, "nch").expect("the family validates"));
+    let component = app.state.schematic.document().components[0].clone();
+    assert_eq!(
+        component
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.module_name.as_deref()),
+        Some("nch")
+    );
+    assert_eq!(
+        bound_model_choices(&app.state, &component, "nch"),
+        owned(&[("nch", "nch · 2 bins"), ("nch_hv", "nch_hv")]),
+        "once the family is bound, no bin is offered beside it"
+    );
+    let evidence = super::super::component_model_evidence(&app.state, &component);
+    assert_eq!(evidence.model.as_deref(), Some("nch"));
+    assert!(evidence.problem.is_none(), "{:?}", evidence.problem);
+}
+
 #[test]
 fn a_veriloga_cell_opens_its_exact_code_source_target() {
     let mut state = AppState::default();

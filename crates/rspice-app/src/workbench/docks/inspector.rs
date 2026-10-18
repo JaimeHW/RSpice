@@ -897,13 +897,12 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
                 Some(binding.cell.as_str()),
                 (!component.value.trim().is_empty()).then_some(component.value.trim()),
             ];
-            if let Some(model) = candidates.into_iter().flatten().find_map(|candidate| {
-                library
-                    .models
-                    .values()
-                    .find(|model| model.name.eq_ignore_ascii_case(candidate))
-            }) {
-                return catalog_model_evidence(library, model);
+            if let Some(model) = candidates
+                .into_iter()
+                .flatten()
+                .find_map(|candidate| library.bindable_model(candidate))
+            {
+                return bindable_model_evidence(library, &model);
             }
         }
 
@@ -948,22 +947,13 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
             .model_library_manager
             .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model_name)
         {
-            // A binned family is as sound as its least sound bin, since the
-            // instance's geometry may select any of them.
             Ok(Some(provider)) => state
                 .model_library_manager
                 .get_library(&provider.library)
                 .and_then(|library| {
-                    let cards = library.executable_cards(&provider.definition);
-                    (!cards.is_empty()).then(|| {
-                        cards
-                            .into_iter()
-                            .map(|model| catalog_model_evidence(library, model))
-                            .find(|evidence| evidence.problem.is_some())
-                            .unwrap_or_else(|| {
-                                ComponentModelEvidence::resolved(provider.definition.clone())
-                            })
-                    })
+                    library
+                        .bindable_model(&provider.definition)
+                        .map(|model| bindable_model_evidence(library, &model))
                 })
                 .unwrap_or_else(|| not_found(model_name)),
             Ok(None) => not_found(model_name),
@@ -979,6 +969,25 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
     ComponentModelEvidence {
         model: None,
         problem: None,
+    }
+}
+
+/// A binned family is as sound as its least sound bin, since the instance's
+/// geometry may select any of them.
+fn bindable_model_evidence(
+    library: &crate::state::model_library::ModelLibrary,
+    model: &crate::state::model_library::BindableModel<'_>,
+) -> ComponentModelEvidence {
+    match model {
+        crate::state::model_library::BindableModel::Card(card) => {
+            catalog_model_evidence(library, card)
+        }
+        crate::state::model_library::BindableModel::Family(family) => family
+            .bins
+            .iter()
+            .map(|bin| catalog_model_evidence(library, bin))
+            .find(|evidence| evidence.problem.is_some())
+            .unwrap_or_else(|| ComponentModelEvidence::resolved(family.name.to_owned())),
     }
 }
 
