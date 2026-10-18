@@ -467,10 +467,47 @@ fn an_empty_authored_field_is_painted_as_its_caption_alone() {
 }
 
 #[test]
-fn title_block_text_uses_an_ellipsis_instead_of_a_clipped_final_glyph() {
-    assert_eq!(truncate_title_text("ABCDEFG", 5), "ABCD…");
-    assert_eq!(truncate_title_text("ABCD", 5), "ABCD");
-    assert_eq!(truncate_title_text("ééééé", 4), "ééé…");
+fn the_canvas_letters_each_field_in_the_cell_the_sheet_lays_out() {
+    // The canvas draws the cells hardcopy plots, so a value is cut short on
+    // screen exactly where it is on paper and nowhere else.
+    use rspice_design_model::design_management::DrawingSheetTitleFieldId as Field;
+    let sheet = test_sheet();
+    let long = "a value far longer than any cell of the block can hold";
+    let values = [
+        (Field::Project, "MyCircuit"),
+        (Field::CellView, long),
+        (Field::Page, "12 of 12"),
+        (Field::Revision, "C"),
+        (Field::Date, "2026-10-18"),
+        (Field::DocumentStatus, "In review"),
+    ]
+    .into_iter()
+    .map(|(id, value)| (id, value.to_owned()))
+    .collect();
+    let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
+        &sheet.format,
+        &values,
+    );
+    let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
+        .expect("the sheet carries a title block");
+    let text = lettered_text(&painted_title_block(&sheet, &fields));
+    for (cell, field) in layout.cells.iter().zip(&fields) {
+        assert!(text.contains(&cell.letter_caption()), "{text:?}");
+        if !field.value.is_empty() {
+            assert!(text.contains(&cell.letter_value(&field.value)), "{text:?}");
+        }
+    }
+    for whole in ["MyCircuit", "12 of 12", "2026-10-18", "In review"] {
+        assert!(
+            text.iter().any(|line| line == whole),
+            "{whole} is cut: {text:?}"
+        );
+    }
+    assert!(
+        text.iter()
+            .any(|line| line.ends_with('…') && long.starts_with(line.trim_end_matches('…'))),
+        "a value longer than its cell ends in an ellipsis: {text:?}"
+    );
 }
 
 #[test]

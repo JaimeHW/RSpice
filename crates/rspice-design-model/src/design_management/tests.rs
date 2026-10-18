@@ -7,6 +7,7 @@ mod drawing_sheet_release;
 mod manual_annotation;
 mod sheet_lifecycle;
 mod title_fields;
+mod title_layout;
 
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {
@@ -484,22 +485,18 @@ fn managed_title_templates_are_versioned_digest_verified_and_layout_authoritativ
             draft.title_block.managed_template = Some(without_logo_snapshot);
         })
         .unwrap();
-    assert!(
-        drawing_sheet_title_cell_capacity(
-            &custom,
-            &custom.geometry().unwrap(),
-            9,
-            custom.authored_size.lettering().data_um
-        )
-        .unwrap()
-            < drawing_sheet_title_cell_capacity(
-                &without_logo,
-                &without_logo.geometry().unwrap(),
-                9,
-                without_logo.authored_size.lettering().data_um
-            )
-            .unwrap()
-    );
+    // The logo's reserve comes out of the field grid, so the same fields
+    // share less width beside it.
+    let with_logo_layout =
+        drawing_sheet_title_layout(&custom, &custom.geometry().unwrap()).unwrap();
+    let without_logo_layout =
+        drawing_sheet_title_layout(&without_logo, &without_logo.geometry().unwrap()).unwrap();
+    assert_eq!(with_logo_layout.grid_x_um, 40_000);
+    assert_eq!(without_logo_layout.grid_x_um, 0);
+    let first = with_logo_layout.cells[0];
+    assert_eq!(first.x_um, 40_000);
+    assert_eq!(without_logo_layout.cells[0].id, first.id);
+    assert!(first.width_um < without_logo_layout.cells[0].width_um);
     // A managed template governs the order fields resolve in; sheet-owned
     // visibility decides which of them appear, and the two compose.
     let resolved_order = resolve_drawing_sheet_title_fields(&custom, &BTreeMap::new())
@@ -2514,14 +2511,8 @@ fn drawing_sheet_transactions_retain_complete_revisioned_project_receipts() {
 #[test]
 fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
     let upright = SchematicSheetFormat::default();
-    let upright_geometry = upright.geometry().unwrap();
-    let upright_capacity = drawing_sheet_title_cell_capacity(
-        &upright,
-        &upright_geometry,
-        14,
-        upright.authored_size.lettering().data_um,
-    )
-    .unwrap();
+    let upright_layout =
+        drawing_sheet_title_layout(&upright, &upright.geometry().unwrap()).unwrap();
     let rotated = upright
         .try_update(|draft| {
             draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
@@ -2546,26 +2537,17 @@ fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
         None
     );
     assert_eq!(
-        drawing_sheet_title_cell_capacity(
-            &rotated,
-            &rotated_geometry,
-            14,
-            rotated.authored_size.lettering().data_um
-        ),
-        Some(upright_capacity),
-        "rotating the complete block must not change a field's authored text budget"
+        drawing_sheet_title_layout(&rotated, &rotated_geometry),
+        Some(upright_layout.clone()),
+        "rotating the complete block must not change a field's cell or text budget"
     );
-    assert!(
-        drawing_sheet_title_cell_capacity(
-            &upright,
-            &upright_geometry,
-            14,
-            upright.authored_size.lettering().caption_um
-        )
-        .unwrap()
-            > upright_capacity,
-        "smaller caption lettering must buy more characters in the same cell"
-    );
+    let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
+    for cell in &upright_layout.cells {
+        assert!(
+            cell.capacity(lettering.caption_um) > cell.capacity(lettering.data_um),
+            "smaller caption lettering must buy more characters in the same cell"
+        );
+    }
 }
 
 #[test]
@@ -2747,21 +2729,25 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
 
     // A field a sheet does not spend is width the others keep, so more of
     // each value survives.
-    let geometry = format.geometry().unwrap();
-    let lettering = format.authored_size.lettering();
-    let shown =
-        drawing_sheet_title_cell_capacity(&format, &geometry, visible.len(), lettering.data_um)
-            .unwrap();
-    let crowded = drawing_sheet_title_cell_capacity(
-        &format,
-        &geometry,
-        DrawingSheetTitleFieldId::ALL.len() + 1,
-        lettering.data_um,
-    )
-    .unwrap();
+    let crowded = format
+        .try_update(|draft| {
+            for field in hidden {
+                draft.title_block.fields.get_mut(&field).unwrap().visible = true;
+            }
+        })
+        .unwrap();
+    let width = |format: &SchematicSheetFormat| {
+        drawing_sheet_title_layout(format, &format.geometry().unwrap())
+            .unwrap()
+            .cell(DrawingSheetTitleFieldId::CellView)
+            .unwrap()
+            .width_um
+    };
     assert!(
-        shown > crowded,
-        "hiding the optional fields must widen the remaining cells: {shown} vs {crowded}"
+        width(&format) > width(&crowded),
+        "hiding the optional fields must widen the remaining cells: {} vs {}",
+        width(&format),
+        width(&crowded)
     );
 }
 
@@ -2824,24 +2810,25 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
     assert_eq!(drawing_sheet_mono_baseline_offset_um(2_500), 1_342);
     assert_eq!(drawing_sheet_mono_baseline_offset_um(1_800), 966);
 
-    // Every caption must fit the narrowest cell the default sheet produces,
-    // because a caption is fixed wording that no operator can shorten.
-    let format = SchematicSheetFormat::default();
-    let geometry = format.geometry().unwrap();
-    let fields = DrawingSheetTitleFieldId::ALL.len();
-    let caption_chars = drawing_sheet_title_cell_capacity(
-        &format,
-        &geometry,
-        fields,
-        format.authored_size.lettering().caption_um,
-    )
-    .unwrap();
-    for field in DrawingSheetTitleFieldId::ALL {
-        let caption = field.display_label();
-        assert!(
-            caption.chars().count() <= caption_chars,
-            "caption {caption:?} needs {} of {caption_chars} characters in the default block",
-            caption.chars().count()
+    // Every caption must fit its cell in the default block even with every
+    // field shown, because a caption is fixed wording that no operator can
+    // shorten.
+    let format = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            for state in draft.title_block.fields.values_mut() {
+                state.visible = true;
+            }
+        })
+        .unwrap();
+    let layout = drawing_sheet_title_layout(&format, &format.geometry().unwrap()).unwrap();
+    assert_eq!(layout.cells.len(), DrawingSheetTitleFieldId::ALL.len());
+    for cell in layout.cells {
+        let caption = cell.id.display_label();
+        assert_eq!(
+            cell.letter_caption(),
+            caption,
+            "caption {caption:?} is cut in its {} um cell of the default block",
+            cell.width_um
         );
     }
 }

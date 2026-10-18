@@ -204,19 +204,16 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     assert_eq!(geometry.title_block.unwrap().width_um, 180_000);
 
     // ISO 7200 recommends 25 characters for a title and 16 for the document
-    // identifier; every value cell of the default block holds the longer.
-    let visible = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new()).len();
-    let value_chars = drawing_sheet_title_cell_capacity(
-        &format,
-        &geometry,
-        visible,
-        format.authored_size.lettering().data_um,
-    )
-    .unwrap();
-    assert!(
-        value_chars >= 25,
-        "the default block holds {value_chars} characters a value"
-    );
+    // identifier, and the default block's cells hold both.
+    let layout = drawing_sheet_title_layout(&format, &geometry).unwrap();
+    let data_um = DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um;
+    for (field, chars) in [
+        (DrawingSheetTitleFieldId::SheetTitle, 25),
+        (DrawingSheetTitleFieldId::DocumentId, 16),
+    ] {
+        let held = layout.cell(field).unwrap().capacity(data_um);
+        assert!(held >= chars, "{field:?} holds {held} characters");
+    }
 
     // Paper too narrow for that block starts on the compact one, rather than
     // requesting a block Page Setup would report as substituted.

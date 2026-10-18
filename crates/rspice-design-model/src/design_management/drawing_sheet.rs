@@ -2214,39 +2214,6 @@ impl AuthoredDrawingSheetSize {
     }
 }
 
-/// Exact physical character capacity of one authored title-grid cell at the
-/// requested lettering height.
-///
-/// Canvas and hardcopy both letter the title block in IBM Plex Mono, whose
-/// advance is exactly 600/1000 em, so the budget is derived rather than
-/// estimated: every renderer that honours `lettering_um` fits the same text
-/// in the same cell. The budget is expressed in integer micrometres and is
-/// therefore stable across monitor DPI, canvas zoom, SVG/PDF export, and
-/// raster publication.
-#[must_use]
-pub fn drawing_sheet_title_cell_capacity(
-    format: &SchematicSheetFormat,
-    geometry: &DrawingSheetGeometry,
-    visible_field_count: usize,
-    lettering_um: u64,
-) -> Option<usize> {
-    let block = geometry.title_block?;
-    let rows = format.title_block_rows(geometry.effective_title_block_template)?;
-    let columns = visible_field_count.max(1).div_ceil(rows).max(1) as u64;
-    let authored_width_um = match format.title_block.rotation {
-        DrawingSheetTitleBlockRotation::Upright => block.width_um,
-        DrawingSheetTitleBlockRotation::Clockwise90
-        | DrawingSheetTitleBlockRotation::CounterClockwise90 => block.height_um,
-    };
-    let logo_reserve_um = format
-        .title_block_logo(geometry.effective_title_block_template)
-        .map_or(0, DrawingSheetManagedLogo::reserved_width_um);
-    let cell_width_um = authored_width_um.saturating_sub(logo_reserve_um) / columns;
-    let advance_um = drawing_sheet_mono_advance_um(lettering_um);
-    let lettered_um = cell_width_um.saturating_sub(DRAWING_SHEET_TITLE_CELL_PADDING_UM * 2);
-    Some((lettered_um / advance_um).max(4) as usize)
-}
-
 pub(super) mod lettering;
 pub use lettering::*;
 
@@ -2255,3 +2222,6 @@ pub use presets::*;
 
 pub(super) mod title_fields;
 pub use title_fields::*;
+
+pub(super) mod title_layout;
+pub use title_layout::*;

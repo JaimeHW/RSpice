@@ -6,8 +6,8 @@ use crate::schematic::view::drawing_sheet::{
     DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, drawing_sheet_printable_preview,
 };
 use crate::state::{
-    DrawingSheetRect, DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate,
-    DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels, SchematicSheetFormat,
+    DrawingSheetRect, DrawingSheetTitleBlockRotation, DrawingSheetZoneEdges, DrawingSheetZoneGrid,
+    DrawingSheetZoneLabels, SchematicSheetFormat,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -255,13 +255,7 @@ fn drawing_sheet_preview_impl(
     }
 
     if let Some(title_block) = geometry.title_block {
-        paint_title_block(
-            ui,
-            map_rect(title_block),
-            geometry.effective_title_block_template,
-            format,
-            palette,
-        );
+        paint_title_block(ui, map_rect(title_block), format, &geometry, palette);
     }
 
     paint_caption(ui, stage, caption_height, label, t.color.text_dim);
@@ -585,21 +579,15 @@ fn alphabetic_zone_label(index: usize) -> String {
 fn paint_title_block(
     ui: &Ui,
     title: Rect,
-    template: DrawingSheetTitleBlockTemplate,
     format: &SchematicSheetFormat,
+    geometry: &crate::state::DrawingSheetGeometry,
     palette: SheetPreviewPalette,
 ) {
-    let visible_fields = format
-        .title_block
-        .fields
-        .values()
-        .filter(|field| field.visible)
-        .count()
-        .max(1);
-    let Some(rows) = format.title_block_rows(template) else {
+    // The cells the canvas and the plot draw, scaled to the preview.
+    let Some(layout) = crate::state::drawing_sheet_title_layout(format, geometry) else {
         return;
     };
-    let columns = visible_fields.div_ceil(rows).clamp(1, 5);
+    let template = geometry.effective_title_block_template;
     let line_stroke = Stroke::new(0.55, palette.zone);
     let angle = match format.title_block.rotation {
         DrawingSheetTitleBlockRotation::Upright => 0.0,
@@ -631,13 +619,14 @@ fn paint_title_block(
         palette.block,
         Stroke::new(1.0, palette.border),
     ));
+    let x_at =
+        |x_um: u64| authored.left() + authored.width() * x_um as f32 / layout.width_um as f32;
+    let y_at = |row: usize| {
+        authored.top() + authored.height() * layout.row_top_um(row) as f32 / layout.height_um as f32
+    };
     let mut field_grid = authored;
-    if let Some(logo) = format.title_block_logo(template)
-        && let Some((template_width_um, _)) = format.title_block_dimensions_um(template)
-    {
-        let reserved_width =
-            authored.width() * (logo.reserved_width_um() as f32 / template_width_um as f32);
-        field_grid.min.x = (authored.left() + reserved_width).min(authored.right());
+    field_grid.min.x = x_at(layout.grid_x_um);
+    if let Some(logo) = format.title_block_logo(template) {
         ui.painter().line_segment(
             [
                 transform(pos2(field_grid.left(), authored.top())),
@@ -685,11 +674,8 @@ fn paint_title_block(
         }
     }
 
-    for row in 1..rows {
-        let y = egui::lerp(
-            field_grid.top()..=field_grid.bottom(),
-            row as f32 / rows as f32,
-        );
+    for row in 1..layout.rows {
+        let y = y_at(row);
         ui.painter().line_segment(
             [
                 transform(pos2(field_grid.left(), y)),
@@ -698,44 +684,26 @@ fn paint_title_block(
             line_stroke,
         );
     }
-    for field_index in 0..visible_fields {
-        let row = field_index / columns;
-        let column = field_index % columns;
-        if column == 0 {
-            continue;
-        }
-        let x = egui::lerp(
-            field_grid.left()..=field_grid.right(),
-            column as f32 / columns as f32,
-        );
-        let top = egui::lerp(
-            field_grid.top()..=field_grid.bottom(),
-            row as f32 / rows as f32,
-        );
-        let bottom = egui::lerp(
-            field_grid.top()..=field_grid.bottom(),
-            (row + 1) as f32 / rows as f32,
-        );
-        ui.painter().line_segment(
-            [transform(pos2(x, top)), transform(pos2(x, bottom))],
-            line_stroke,
-        );
-    }
-
     // At preview scale, field text would become an illegible grey smear.
     // Short ruled silhouettes still communicate the populated title-grid
     // structure without claiming values the preview cannot resolve.
-    let cell_width = field_grid.width() / columns as f32;
-    let cell_height = field_grid.height() / rows as f32;
-    if cell_width >= 7.0 && cell_height >= 4.0 {
-        for field_index in 0..visible_fields.min(rows * columns) {
-            let row = field_index / columns;
-            let column = field_index % columns;
-            let cell_left = field_grid.left() + cell_width * column as f32;
-            let cell_top = field_grid.top() + cell_height * row as f32;
+    for (field_index, cell) in layout.cells.iter().enumerate() {
+        let (cell_left, cell_right) = (x_at(cell.x_um), x_at(cell.x_um + cell.width_um));
+        let (cell_top, cell_bottom) = (y_at(cell.row), y_at(cell.row + 1));
+        if cell.x_um > layout.grid_x_um {
+            ui.painter().line_segment(
+                [
+                    transform(pos2(cell_left, cell_top)),
+                    transform(pos2(cell_left, cell_bottom)),
+                ],
+                line_stroke,
+            );
+        }
+        let (cell_width, cell_height) = (cell_right - cell_left, cell_bottom - cell_top);
+        if cell_width >= 7.0 && cell_height >= 4.0 {
             let inset = (cell_width * 0.12).clamp(1.0, 4.0);
             let width_ratio = 0.42 + (field_index % 3) as f32 * 0.12;
-            let end_x = (cell_left + cell_width * width_ratio).min(cell_left + cell_width - inset);
+            let end_x = (cell_left + cell_width * width_ratio).min(cell_right - inset);
             let y = cell_top + cell_height * 0.58;
             ui.painter().line_segment(
                 [

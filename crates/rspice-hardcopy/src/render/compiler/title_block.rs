@@ -31,18 +31,30 @@ impl SemanticSceneCompiler<'_> {
                 SceneTextRotation::CounterClockwise90
             }
         };
+        // The grid the canvas and Page Setup draw too: every rule and every
+        // cell's width come from the one layout, so a field is cut short on
+        // paper exactly where it is on screen.
+        let geometry = format
+            .geometry()
+            .map_err(|error| conversion_error(format!("drawing-sheet geometry: {error}")))?;
+        let layout =
+            rspice_design_model::design_management::drawing_sheet_title_layout(format, &geometry)
+                .ok_or_else(|| conversion_error("title block has no authored grid"))?;
+        let at_x = |x_um: u64| {
+            i64::try_from(x_um)
+                .ok()
+                .and_then(|x_um| authored_block.x_um.checked_add(x_um))
+                .ok_or_else(|| conversion_error("drawing-sheet title-block X geometry overflow"))
+        };
+        let at_y = |y_um: u64| {
+            i64::try_from(y_um)
+                .ok()
+                .and_then(|y_um| authored_block.y_um.checked_add(y_um))
+                .ok_or_else(|| conversion_error("drawing-sheet title-block Y geometry overflow"))
+        };
         let logo = format.title_block_logo(template);
-        let logo_reserved_width_um = logo.map_or(0, |logo| logo.reserved_width_um());
-        let field_grid_x = authored_block
-            .x_um
-            .checked_add(i64::try_from(logo_reserved_width_um).map_err(|_| {
-                conversion_error("drawing-sheet managed logo width exceeds coordinate range")
-            })?)
-            .ok_or_else(|| conversion_error("drawing-sheet managed logo position overflow"))?;
-        let field_grid_width = authored_block
-            .width_um
-            .checked_sub(logo_reserved_width_um)
-            .ok_or_else(|| conversion_error("drawing-sheet managed logo exceeds title block"))?;
+        let logo_reserved_width_um = layout.grid_x_um;
+        let field_grid_x = at_x(layout.grid_x_um)?;
         if let Some(logo) = logo {
             self.primitives.push(ScenePrimitive::Line {
                 from: transform(self, field_grid_x, authored_block.y_um)?,
@@ -87,68 +99,39 @@ impl SemanticSceneCompiler<'_> {
                 });
             }
         }
-        let rows = format
-            .title_block_rows(template)
-            .map(|rows| rows as u64)
-            .ok_or_else(|| conversion_error("title block has no authored grid"))?;
         let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
             format,
             automatic_values,
-        )
-        .into_iter()
-        .map(|field| (field.id.display_label(), field.value, field.id.emphasised()))
-        .collect::<Vec<_>>();
+        );
         // A block with no field to show is plotted as its outline alone, as
         // the canvas draws it, rather than with fields the sheet does not
         // carry.
         if fields.is_empty() {
             return Ok(());
         }
-        let visible_field_count = fields.len();
-        let columns = fields.len().div_ceil(rows as usize).max(1) as u64;
-        let row_height = authored_block.height_um / rows;
-        let cell_width = field_grid_width / columns;
-        for row in 1..rows {
-            let y = authored_block.y_um + (authored_block.height_um * row / rows) as i64;
+        let grid_right = at_x(layout.width_um)?;
+        for row in 1..layout.rows {
+            let y = at_y(layout.row_top_um(row))?;
             self.primitives.push(ScenePrimitive::Line {
                 from: transform(self, field_grid_x, y)?,
-                to: transform(self, field_grid_x + field_grid_width as i64, y)?,
+                to: transform(self, grid_right, y)?,
                 stroke,
             });
         }
-        for index in 0..fields.len() {
-            let row = index as u64 / columns;
-            let column = index as u64 % columns;
-            if column > 0 {
-                let x = field_grid_x + (cell_width * column) as i64;
-                let top = authored_block.y_um + (row_height * row) as i64;
+        let lettering = rspice_design_model::design_management::DRAWING_SHEET_TITLE_BLOCK_LETTERING;
+        for (cell, field) in layout.cells.iter().zip(fields) {
+            debug_assert_eq!(cell.id, field.id, "the layout lays out the resolved fields");
+            let row_top_um = layout.row_top_um(cell.row);
+            let row_height = layout.row_top_um(cell.row + 1) - row_top_um;
+            let row_y = at_y(row_top_um)?;
+            let cell_x = at_x(cell.x_um)?;
+            if cell.x_um > layout.grid_x_um {
                 self.primitives.push(ScenePrimitive::Line {
-                    from: transform(self, x, top)?,
-                    to: transform(self, x, top + row_height as i64)?,
+                    from: transform(self, cell_x, row_y)?,
+                    to: transform(self, cell_x, row_y + row_height as i64)?,
                     stroke,
                 });
             }
-        }
-        // Every cell in the grid is the same width, so the budget and the
-        // lettering are the block's, not each field's.
-        let geometry = format
-            .geometry()
-            .map_err(|error| conversion_error(format!("drawing-sheet geometry: {error}")))?;
-        let capacity = |lettering_um| {
-            rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
-                format,
-                &geometry,
-                visible_field_count,
-                lettering_um,
-            )
-            .ok_or_else(|| conversion_error("title block has no authored cell capacity"))
-        };
-        let lettering = rspice_design_model::design_management::DRAWING_SHEET_TITLE_BLOCK_LETTERING;
-        let value_chars = capacity(lettering.data_um)?;
-        let caption_chars = capacity(lettering.caption_um)?;
-        for (index, (label, value, emphasised)) in fields.into_iter().enumerate() {
-            let row = index as u64 / columns;
-            let column = index as u64 % columns;
             // Caption and value sit on the shared fractions of the cell that
             // the canvas also places them on. The canvas centres a line on
             // that point while publication places a baseline on it, so each
@@ -158,10 +141,7 @@ impl SemanticSceneCompiler<'_> {
             let at = |(numerator, denominator): (u64, u64)| {
                 (row_height * numerator / denominator) as i64
             };
-            let text_x = field_grid_x
-                + (cell_width * column) as i64
-                + DRAWING_SHEET_TITLE_CELL_PADDING_UM as i64;
-            let row_y = authored_block.y_um + (row_height * row) as i64;
+            let text_x = cell_x + DRAWING_SHEET_TITLE_CELL_PADDING_UM as i64;
             self.add_text_rotated(
                 transform(
                     self,
@@ -173,7 +153,7 @@ impl SemanticSceneCompiler<'_> {
                 // The field's own wording and nothing else, as the canvas
                 // letters it: ISO 7200 marks no field as filled in by the
                 // system, and a reader of the print has no use for knowing.
-                &truncate_title_block_text(label, caption_chars),
+                &cell.letter_caption(),
                 SceneFont::Monospace,
                 drawing_sheet_mono_em_um(lettering.caption_um),
                 stroke.color,
@@ -187,8 +167,9 @@ impl SemanticSceneCompiler<'_> {
                         + at(DRAWING_SHEET_TITLE_VALUE_POSITION)
                         + drawing_sheet_mono_baseline_offset_um(lettering.data_um) as i64,
                 )?,
-                &truncate_title_block_text(&value, value_chars),
-                if emphasised {
+                // An empty value plots nothing: the cell is a box to fill in.
+                &cell.letter_value(&field.value),
+                if field.id.emphasised() {
                     SceneFont::MonospaceMedium
                 } else {
                     SceneFont::Monospace
@@ -256,15 +237,4 @@ pub(in crate::render) fn midpoint_coordinate(
     end.checked_sub(start)
         .and_then(|distance| start.checked_add(distance / 2))
         .ok_or_else(|| conversion_error(format!("{context} coordinate overflow")))
-}
-
-pub(in crate::render) fn truncate_title_block_text(value: &str, max_chars: usize) -> String {
-    let count = value.chars().count();
-    if count <= max_chars {
-        return value.to_owned();
-    }
-    let keep = max_chars.saturating_sub(1);
-    let mut truncated = value.chars().take(keep).collect::<String>();
-    truncated.push('…');
-    truncated
 }

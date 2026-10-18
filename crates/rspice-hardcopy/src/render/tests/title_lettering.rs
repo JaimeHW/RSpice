@@ -10,7 +10,55 @@ use rspice_design_model::design_management::{
 
 /// Every line the title block plots, with the face and em it is set in.
 fn plotted_title_lines(format: &SchematicSheetFormat) -> Vec<(SceneFont, u64, String)> {
-    let source = resolved_blank_schematic(format);
+    plotted_lines_of(&resolved_blank_schematic(format))
+}
+
+/// A blank schematic on `format`, with `values` for the title fields its
+/// project and document control supply.
+fn blank_schematic_titled(
+    format: &SchematicSheetFormat,
+    values: BTreeMap<DrawingSheetTitleFieldId, String>,
+) -> ResolvedHardcopyDocument {
+    let identity = HardcopySourceIdentity::try_new(
+        "test-schematic",
+        HardcopyDocumentId::try_from_uuid(Uuid::from_u128(0x5343_4845_4d41)).unwrap(),
+        ObjectRevision::INITIAL,
+        "Test schematic",
+    )
+    .unwrap();
+    let semantic = SemanticSchematic {
+        view_path: identity.source_key.clone(),
+        drawing_sheet: Some(format.clone()),
+        drawing_sheet_title_values: values,
+        drawing_sheet_page_numbering: None,
+        grid_pitch_units: 10,
+        components: Vec::new(),
+        wires: Vec::new(),
+        buses: Vec::new(),
+        bus_taps: Vec::new(),
+        junctions: Vec::new(),
+        net_labels: Vec::new(),
+        design_notes: Vec::new(),
+        documentation_shapes: Vec::new(),
+    };
+    let digest = rspice_hardcopy_contract::sources::canonical_digest(
+        b"rspice-hardcopy-blank-schematic-sheet-v1",
+        &semantic,
+    )
+    .unwrap();
+    resolve_semantic_source(
+        identity,
+        digest,
+        HardcopyDocumentKind::SchematicOrSymbol,
+        HardcopyScope::CurrentSheet,
+        HardcopySemanticDocument::Schematic(Box::new(semantic)),
+        drawing_sheet_artwork_bounds(format).unwrap(),
+    )
+    .unwrap()
+}
+
+/// Every line the title block of `source` plots.
+fn plotted_lines_of(source: &ResolvedHardcopyDocument) -> Vec<(SceneFont, u64, String)> {
     // The title block alone, so every monospace line is one of its captions.
     let schematic = SchematicHardcopySetup::new(
         SchematicHardcopyExtent::AuthoredDrawingSheet,
@@ -23,7 +71,7 @@ fn plotted_title_lines(format: &SchematicSheetFormat) -> Vec<(SceneFont, u64, St
         false,
     );
     let scene = scene_from_resolved(
-        &source,
+        source,
         source.default_print_mapping(),
         schematic,
         resolved_metadata(),
@@ -201,6 +249,69 @@ fn an_empty_authored_field_plots_its_caption_alone() {
     }
     // A date RSpice does not have yet still reads as not yet known.
     assert_eq!(after("Date").map(|(_, _, text)| text).as_deref(), Some("—"));
+}
+
+#[test]
+fn a_new_sheet_plots_typical_title_values_whole() {
+    // Each cell is as wide as what its field typically holds, so a new
+    // A4 sheet plots a typical identity, responsibility and status with
+    // nothing cut short.
+    let authored = [
+        (
+            DrawingSheetTitleFieldId::SheetTitle,
+            "Bandgap reference core",
+        ),
+        (DrawingSheetTitleFieldId::DrawnBy, "J. Whitfield"),
+        (DrawingSheetTitleFieldId::ApprovedBy, "J. Whitfield"),
+    ];
+    let supplied = [
+        (DrawingSheetTitleFieldId::Project, "MyCircuit"),
+        (
+            DrawingSheetTitleFieldId::CellView,
+            "mycircuit/top/schematic",
+        ),
+        (DrawingSheetTitleFieldId::Page, "12 of 12"),
+        (DrawingSheetTitleFieldId::Revision, "C"),
+        (DrawingSheetTitleFieldId::Date, "2026-10-18"),
+        (DrawingSheetTitleFieldId::DocumentStatus, "In review"),
+        (
+            DrawingSheetTitleFieldId::Organization,
+            "Whitfield Analog Devices",
+        ),
+        (DrawingSheetTitleFieldId::DocumentId, "RS-0001-SCH-0042"),
+    ];
+    let format = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::Project)
+                .unwrap()
+                .visible = true;
+            for (field, value) in authored {
+                draft.title_block.fields.get_mut(&field).unwrap().value = value.to_owned();
+            }
+        })
+        .unwrap();
+    let source = blank_schematic_titled(
+        &format,
+        supplied
+            .into_iter()
+            .map(|(field, value)| (field, value.to_owned()))
+            .collect(),
+    );
+    let text = plotted_lines_of(&source)
+        .into_iter()
+        .map(|(_, _, text)| text)
+        .collect::<Vec<_>>();
+    assert!(
+        !text.iter().any(|line| line.contains('…')),
+        "the plot cuts a typical value short: {text:?}"
+    );
+    for (_, value) in authored.into_iter().chain(supplied) {
+        assert!(text.iter().any(|line| line == value), "{value:?}: {text:?}");
+    }
+    assert!(text.iter().any(|line| line == "Circuit diagram"));
 }
 
 #[test]

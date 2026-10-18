@@ -31,7 +31,7 @@ use rspice_design_model::design_management::{
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
     DrawingSheetTitleBlockRotation, DrawingSheetZoneEdges, DrawingSheetZoneGrid,
     DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField, SchematicSheetFormat,
-    drawing_sheet_mono_em_um, drawing_sheet_zone_lettering_um,
+    drawing_sheet_mono_em_um, drawing_sheet_title_layout, drawing_sheet_zone_lettering_um,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -1332,15 +1332,22 @@ fn draw_title_block(
         palette.block,
         Stroke::new(1.25, palette.border),
     ));
+    // The grid hardcopy and Page Setup draw too, in physical units on the
+    // upright block; the authored block maps those onto the screen.
+    let Some(layout) = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical) else {
+        return;
+    };
+    let x_at = |x_um: u64| {
+        authored_block.left() + authored_block.width() * x_um as f32 / layout.width_um as f32
+    };
+    let y_at = |row: usize| {
+        authored_block.top()
+            + authored_block.height() * layout.row_top_um(row) as f32 / layout.height_um as f32
+    };
     let effective_template = sheet.geometry.physical.effective_title_block_template;
     let mut field_grid = authored_block;
-    if let Some(logo) = sheet.format.title_block_logo(effective_template)
-        && let Some((template_width_um, _)) =
-            sheet.format.title_block_dimensions_um(effective_template)
-    {
-        let reserved_width =
-            authored_block.width() * (logo.reserved_width_um() as f32 / template_width_um as f32);
-        field_grid.min.x = (authored_block.left() + reserved_width).min(authored_block.right());
+    field_grid.min.x = x_at(layout.grid_x_um);
+    if let Some(logo) = sheet.format.title_block_logo(effective_template) {
         painter.line_segment(
             [
                 transform(pos2(field_grid.left(), authored_block.top())),
@@ -1366,29 +1373,9 @@ fn draw_title_block(
     if fields.is_empty() {
         return;
     }
-    let Some(rows) = sheet
-        .format
-        .title_block_rows(sheet.geometry.physical.effective_title_block_template)
-    else {
-        return;
-    };
     let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
-    let capacity = |lettering_um| {
-        rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
-            &sheet.format,
-            &sheet.geometry.physical,
-            fields.len(),
-            lettering_um,
-        )
-        .unwrap_or(4)
-    };
-    let value_chars = capacity(lettering.data_um);
-    let caption_chars = capacity(lettering.caption_um);
-    let columns = fields.len().div_ceil(rows).max(1);
-    let cell_width = field_grid.width() / columns as f32;
-    let cell_height = field_grid.height() / rows as f32;
-    for row in 1..rows {
-        let y = field_grid.top() + cell_height * row as f32;
+    for row in 1..layout.rows {
+        let y = y_at(row);
         painter.line_segment(
             [
                 transform(pos2(field_grid.left(), y)),
@@ -1397,31 +1384,21 @@ fn draw_title_block(
             Stroke::new(0.8, palette.zone),
         );
     }
-    for (index, field) in fields.into_iter().enumerate() {
-        let row = index / columns;
-        let column = index % columns;
-        if column > 0 {
-            let x = field_grid.left() + cell_width * column as f32;
-            let top = field_grid.top() + cell_height * row as f32;
+    for (layout_cell, field) in layout.cells.iter().zip(fields) {
+        debug_assert_eq!(layout_cell.id, field.id);
+        let (left, right) = (
+            x_at(layout_cell.x_um),
+            x_at(layout_cell.x_um + layout_cell.width_um),
+        );
+        let (top, bottom) = (y_at(layout_cell.row), y_at(layout_cell.row + 1));
+        if layout_cell.x_um > layout.grid_x_um {
             painter.line_segment(
-                [
-                    transform(pos2(x, top)),
-                    transform(pos2(x, top + cell_height)),
-                ],
+                [transform(pos2(left, top)), transform(pos2(left, bottom))],
                 Stroke::new(0.8, palette.zone),
             );
         }
-        let authored_cell = Rect::from_min_max(
-            pos2(
-                field_grid.left() + cell_width * column as f32,
-                field_grid.top() + cell_height * row as f32,
-            ),
-            pos2(
-                field_grid.left() + cell_width * (column + 1) as f32,
-                field_grid.top() + cell_height * (row + 1) as f32,
-            ),
-        )
-        .shrink2(vec2(authored_title_cell_padding() * zoom, 0.0));
+        let authored_cell = Rect::from_min_max(pos2(left, top), pos2(right, bottom))
+            .shrink2(vec2(authored_title_cell_padding() * zoom, 0.0));
         let cell = Rect::from_two_pos(
             transform(authored_cell.left_top()),
             transform(authored_cell.right_bottom()),
@@ -1443,7 +1420,7 @@ fn draw_title_block(
             Align2::LEFT_CENTER,
             // The field's own wording, in the case the plot and the dialogs
             // letter it in, so a caption reads the same on screen and on paper.
-            truncate_title_text(field.id.display_label(), caption_chars),
+            layout_cell.letter_caption(),
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(lettering.caption_um)),
                 theme::FontWeight::Regular,
@@ -1463,7 +1440,9 @@ fn draw_title_block(
                 at(DRAWING_SHEET_TITLE_VALUE_POSITION),
             )),
             Align2::LEFT_CENTER,
-            truncate_canvas_title_value(&field.value, value_chars),
+            // Cut to the cell's physical budget, so zoom and monitor DPI
+            // cannot disagree with Page Setup or the plot.
+            layout_cell.letter_value(&field.value),
             // A value stands a step of the series above its caption, which is
             // what makes it read as the field's content; only the document
             // identifier is set in the heavier weight. The plot letters both
@@ -1530,24 +1509,6 @@ fn draw_managed_title_logo(
             painter.add(Shape::line(points, stroke));
         }
     }
-}
-
-fn truncate_canvas_title_value(value: &str, max_chars: usize) -> String {
-    // Capacity is derived from physical title-block geometry, so canvas zoom
-    // and monitor DPI cannot disagree with Page Setup or hardcopy output.
-    truncate_title_text(value, max_chars)
-}
-
-fn truncate_title_text(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_owned();
-    }
-    let mut value = value
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
-    value.push('…');
-    value
 }
 
 fn title_block_rotation_angle(rotation: DrawingSheetTitleBlockRotation) -> f32 {
