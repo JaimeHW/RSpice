@@ -9,7 +9,7 @@ use crate::state::{
     AuthoredDrawingSheetSize, CustomDrawingSheetSnapshot, DRAWING_SHEET_MIXED_SIZES_ADVISORY,
     DrawingSheetBorderTemplate, DrawingSheetDisplayUnit, DrawingSheetFrameConvention,
     DrawingSheetInheritance, DrawingSheetManagedTemplateSnapshot, DrawingSheetMargins,
-    DrawingSheetMarks, DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetScale,
+    DrawingSheetMarks, DrawingSheetPreset, DrawingSheetPresetScope,
     DrawingSheetStandard, DrawingSheetStandardSeries, DrawingSheetTitleBlock,
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldState,
     DrawingSheetZoneMode, DrawingSheetZones, SchematicPageOrientation, SchematicSheetFormat,
@@ -272,10 +272,6 @@ pub(crate) struct DrawingSheetDraft {
     pub(crate) zone_rows: u8,
     pub(crate) centring_marks: bool,
     pub(crate) title_block: TitleBlockTemplateChoice,
-    /// Carried through unedited. A schematic is not drawn to scale and the
-    /// title block no longer letters one, so nothing offers this for editing;
-    /// a sheet keeps the value it was saved with.
-    pub(crate) scale: DrawingSheetScale,
     pub(crate) managed_title_template: Option<DrawingSheetManagedTemplateSnapshot>,
     pub(crate) title_fields:
         std::collections::BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>,
@@ -328,7 +324,6 @@ impl DrawingSheetDraft {
             zone_rows,
             centring_marks: format.marks.centring,
             title_block: title_template_from_model(format.title_block.template),
-            scale: format.title_block.scale,
             managed_title_template: format.title_block.managed_template.clone(),
             title_fields: format.title_block.fields.clone(),
             inheritance: format.inheritance,
@@ -671,7 +666,6 @@ impl DrawingSheetDraft {
             },
             title_block: DrawingSheetTitleBlock {
                 template: title_template_to_model(self.title_block),
-                scale: self.scale,
                 managed_template: self.managed_title_template.clone(),
                 fields: self.title_fields.clone(),
             },
@@ -1134,28 +1128,6 @@ mod tests {
         assert_eq!(draft.zone_mode, ZoneModeChoice::Automatic);
         assert!(draft.centring_marks);
         assert!(draft.validate().is_ok());
-    }
-
-    #[test]
-    fn a_sheet_keeps_the_scale_it_was_saved_with() {
-        let saved = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.title_block.scale = DrawingSheetScale::Ratio {
-                    drawing_units: 2,
-                    reality_units: 5,
-                };
-            })
-            .unwrap();
-
-        let mut draft = DrawingSheetDraft::from_format(&saved);
-        draft
-            .title_fields
-            .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
-            .unwrap()
-            .value = "Sheet 1".to_owned();
-        let format = draft.validate().unwrap().page_format;
-
-        assert_eq!(format.title_block.scale, saved.title_block.scale);
     }
 
     #[test]

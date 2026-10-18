@@ -329,9 +329,10 @@ fn canonical_entry(key: &str, visible: bool) -> String {
 /// `canonical` as a build without the language code wrote it: it lacks the
 /// language code and every field the ASME form has added since, which are
 /// the fields written last, places its title block upright in the lower
-/// right corner in so many words, as every build did before the placement
-/// was retired, and writes each preset's frame, the ISO 5457 frame of a
-/// custom size, as every build before the standard frames wrote it.
+/// right corner in so many words and declares a 1:1 scale, as every build
+/// did before the placement and the scale were retired, and writes each
+/// preset's frame, the ISO 5457 frame of a custom size, as every build
+/// before the standard frames wrote it.
 fn without_language(canonical: &[u8]) -> String {
     const FRAME_AS_WRITTEN: &str = concat!(
         r#""margins":{"top_um":10000,"right_um":10000,"bottom_um":10000,"left_um":20000},"#,
@@ -346,7 +347,7 @@ fn without_language(canonical: &[u8]) -> String {
     today = today.replace(
         opening,
         &format!(
-            r#"{opening},"anchor":"bottom-right","rotation":"upright","offset_x_um":0,"offset_y_um":0"#
+            r#"{opening},"anchor":"bottom-right","rotation":"upright","offset_x_um":0,"offset_y_um":0,"scale":{{"kind":"ratio","drawing_units":1,"reality_units":1}}"#
         ),
     );
     for key in [

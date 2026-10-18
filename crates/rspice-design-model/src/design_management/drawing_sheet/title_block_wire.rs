@@ -2,13 +2,15 @@
 //!
 //! The product has retired some of what it once wrote, and every sheet and
 //! package that names it still loads: the `compact` block reads as the
-//! sheet's standard block, and a block placed anywhere but upright in the
-//! lower right corner, turned or offset, reads as placed there.
+//! sheet's standard block, a block placed anywhere but upright in the lower
+//! right corner, turned or offset, reads as placed there, and a declared
+//! scale reads as none.
 
 use super::*;
 
 /// A title block as it was written, which names the retired `compact` block
-/// among the templates and may place the block as RSpice no longer does.
+/// among the templates, may place the block as RSpice no longer does, and
+/// may declare a scale.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DrawingSheetTitleBlockWire {
@@ -21,7 +23,8 @@ pub(super) struct DrawingSheetTitleBlockWire {
     offset_x_um: Option<i64>,
     #[serde(default)]
     offset_y_um: Option<i64>,
-    scale: DrawingSheetScale,
+    #[serde(default)]
+    scale: Option<RetiredDrawingSheetScale>,
     #[serde(default)]
     managed_template: Option<DrawingSheetManagedTemplateSnapshot>,
     fields: BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>,
@@ -63,21 +66,36 @@ enum RetiredTitleBlockRotation {
     CounterClockwise90,
 }
 
+/// Retired: the scale a sheet's title block once declared, before the block
+/// stopped lettering one. Read so the sheets that declare one load, and so a
+/// package sealed with one is respelled as written (see `sheet_package`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) enum RetiredDrawingSheetScale {
+    NotToScale,
+    Ratio {
+        drawing_units: u32,
+        reality_units: u32,
+    },
+}
+
 impl DrawingSheetTitleBlockWire {
     /// The title block as the product draws it: a block written as the
     /// retired compact one is `convention`'s standard block, ISO 7200's or
-    /// ASME Y14.1's, its field values and choices kept, and every block
-    /// stands upright in the lower right corner, wherever it was placed.
+    /// ASME Y14.1's, its field values and choices kept, every block stands
+    /// upright in the lower right corner, wherever it was placed, and none
+    /// declares a scale.
     pub(super) fn into_title_block(
         self,
         convention: DrawingSheetFrameConvention,
     ) -> DrawingSheetTitleBlock {
-        // The retired placement is read only to be let go.
+        // The retired placement and scale are read only to be let go.
         let _ = (
             self.anchor,
             self.rotation,
             self.offset_x_um,
             self.offset_y_um,
+            self.scale,
         );
         let template = match self.template {
             DrawingSheetTitleBlockTemplateWire::Compact => {
@@ -96,7 +114,6 @@ impl DrawingSheetTitleBlockWire {
         };
         DrawingSheetTitleBlock {
             template,
-            scale: self.scale,
             managed_template: self.managed_template,
             fields: self.fields,
         }

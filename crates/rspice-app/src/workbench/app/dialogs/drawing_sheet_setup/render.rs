@@ -570,7 +570,7 @@ fn field_section(field: &str) -> Option<DrawingSheetSection> {
     match field {
         "width" | "height" | "custom-name" => Some(DrawingSheetSection::Format),
         "bleed" => Some(DrawingSheetSection::Margins),
-        "title-fields" | "scale" => Some(DrawingSheetSection::TitleBlock),
+        "title-fields" => Some(DrawingSheetSection::TitleBlock),
         _ => None,
     }
 }
@@ -2170,8 +2170,8 @@ mod blocked_sections {
         assert_eq!(blocked_reason(&[]), None);
         let problems = vec![
             FieldProblem {
-                field: "scale",
-                message: "bad scale".to_owned(),
+                field: "title-fields",
+                message: "bad title".to_owned(),
             },
             FieldProblem {
                 field: "width",

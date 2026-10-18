@@ -207,3 +207,32 @@ fn a_preset_sealed_with_a_retired_placement_opens_upright_in_the_lower_right() {
         assert!(!resealed.contains(retired), "{retired}: {resealed}");
     }
 }
+
+#[test]
+fn a_preset_sealed_declaring_a_scale_opens_declaring_none() {
+    // A title block no longer declares a scale: the presets declaring 2:1,
+    // none and 1:1 open alike, while their packages still verify against the
+    // scale each was written with (see the first test), and a package sealed
+    // again declares none.
+    for fixture in [PROJECT, PROJECT_REVIEW, ORGANIZATION] {
+        assert!(fixture.contains(r#""drawing_units": 2"#));
+        assert!(fixture.contains(r#""kind": "not-to-scale""#));
+    }
+    let project = parse_package(PROJECT, &PdkPublisherTrustStore::default()).unwrap();
+    for preset in &project.presets {
+        let written = serde_json::to_value(&preset.format).unwrap();
+        assert!(
+            written["title_block"].get("scale").is_none(),
+            "{}",
+            preset.stable_id
+        );
+    }
+    let presets = project.presets.iter().map(|preset| DrawingSheetPreset {
+        id: preset.stable_id.clone(),
+        name: preset.name.clone(),
+        scope: preset.source_scope,
+        format: preset.format.clone(),
+    });
+    let resealed = encode_package(&build_package(presets).unwrap()).unwrap();
+    assert!(!resealed.contains(r#""scale""#), "{resealed}");
+}

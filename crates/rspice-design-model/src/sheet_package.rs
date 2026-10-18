@@ -19,8 +19,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::design_management::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetPreset,
-    DrawingSheetPresetScope, DrawingSheetScale, DrawingSheetTitleBlockTemplate,
-    DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, MAX_DRAWING_SHEET_PROJECT_PRESETS,
+    DrawingSheetPresetScope, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
+    DrawingSheetTitleFieldState, MAX_DRAWING_SHEET_PROJECT_PRESETS, RetiredDrawingSheetScale,
     SchematicSheetFormat,
 };
 
@@ -133,8 +133,9 @@ pub struct DrawingSheetPresetPackage {
 /// package's digest, signature, frame-reference manifest and review rows
 /// were all written naming the retired one. A preset saved anchoring,
 /// turning or offsetting its block, as every preset once wrote, loads with
-/// the block upright in the lower right corner, but its package was sealed
-/// over the placement it was written with. Likewise a preset written before
+/// the block upright in the lower right corner, and one declaring a scale,
+/// as every preset also once wrote, loads declaring none, but its package
+/// was sealed over the placement and scale it was written with. Likewise a preset written before
 /// the product gained a title-block field, such as the language code, loads
 /// with that field supplied, and one written with a field since retired
 /// loads without it, but its package was sealed over the fields it was
@@ -178,7 +179,8 @@ struct WrittenTitleBlockHead {
 impl WrittenTitleBlockHead {
     /// How `title_block`, a preset's title block as written, opened, when
     /// the product would open it otherwise today: when it names a retired
-    /// block, or places the block as the product no longer does.
+    /// block, places the block as the product no longer does or declares a
+    /// scale.
     fn of(title_block: &serde_json::Value) -> Option<Self> {
         let template = title_block
             .get("template")
@@ -186,10 +188,10 @@ impl WrittenTitleBlockHead {
         let retired_template = RETIRED_TITLE_BLOCKS
             .into_iter()
             .find(|(name, _)| template == Some(*name));
-        let retired_placement = ["anchor", "rotation", "offset_x_um", "offset_y_um"]
+        let retired_keys = ["anchor", "rotation", "offset_x_um", "offset_y_um", "scale"]
             .into_iter()
             .any(|key| title_block.get(key).is_some());
-        if retired_template.is_none() && !retired_placement {
+        if retired_template.is_none() && !retired_keys {
             return None;
         }
         // Each key the title block was written with, in the order it was
@@ -209,7 +211,7 @@ impl WrittenTitleBlockHead {
             };
             let bytes = if key == "scale" {
                 serde_json::to_vec(
-                    &serde_json::from_value::<DrawingSheetScale>(value.clone()).ok()?,
+                    &serde_json::from_value::<RetiredDrawingSheetScale>(value.clone()).ok()?,
                 )
             } else {
                 serde_json::to_vec(value)
@@ -437,7 +439,8 @@ impl RetiredSpellings {
 
     /// `canonical` with each preset's title block opening as it was written:
     /// the keys ahead of its managed template and fields, naming the retired
-    /// block it named and placing it where it was placed.
+    /// block it named, placing it where it was placed and declaring the scale
+    /// it declared.
     ///
     /// Every preset serializes exactly one title block, whose template is its
     /// first key and whose fields are its last, so the n-th title block in

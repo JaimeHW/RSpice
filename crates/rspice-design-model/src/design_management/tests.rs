@@ -108,13 +108,6 @@ fn governed_sheet_page_format_is_revisioned_and_legacy_safe() {
 
 #[test]
 fn drawing_sheet_standards_are_exact_valid_and_round_trip() {
-    assert_eq!(
-        SchematicSheetFormat::default().title_block.scale,
-        DrawingSheetScale::Ratio {
-            drawing_units: 1,
-            reality_units: 1,
-        }
-    );
     let expected = [
         (DrawingSheetStandard::IsoA5, (148_000, 210_000)),
         (DrawingSheetStandard::IsoA4, (210_000, 297_000)),
@@ -621,10 +614,7 @@ fn managed_title_logo_rejects_ambiguous_unbounded_and_excessive_geometry() {
 fn applying_a_format_preserves_target_sheet_fields() {
     let source = SchematicSheetFormat::default()
         .try_update(|draft| {
-            draft.title_block.scale = DrawingSheetScale::Ratio {
-                drawing_units: 2,
-                reality_units: 5,
-            };
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::None;
             draft
                 .title_block
                 .fields
@@ -661,11 +651,8 @@ fn applying_a_format_preserves_target_sheet_fields() {
         "Target owner"
     );
     assert_eq!(
-        applied.title_block.scale,
-        DrawingSheetScale::Ratio {
-            drawing_units: 2,
-            reality_units: 5,
-        }
+        applied.title_block.template,
+        DrawingSheetTitleBlockTemplate::None
     );
     assert!(applied.validate().is_ok());
 }
@@ -1296,10 +1283,6 @@ fn preset_storage_strips_authored_values_and_canonicalizes_custom_identity() {
     );
     format = format
         .try_update(|draft| {
-            draft.title_block.scale = DrawingSheetScale::Ratio {
-                drawing_units: 2,
-                reality_units: 5,
-            };
             draft
                 .title_block
                 .fields
@@ -1336,21 +1319,17 @@ fn preset_storage_strips_authored_values_and_canonicalizes_custom_identity() {
             .values()
             .all(|field| field.value.is_empty())
     );
-    assert_eq!(
-        preset.format.title_block.scale,
-        DrawingSheetScale::Ratio {
-            drawing_units: 2,
-            reality_units: 5,
-        }
-    );
     preset.validate().unwrap();
 }
 
 #[test]
 fn legacy_scale_mirror_and_missing_preset_references_normalize_safely() {
-    // Builds that lettered a Scale cell mirrored the scale into its field
-    // string; the field is retired now, so the stale copy goes with it.
+    // Builds that lettered a Scale cell declared a scale and mirrored it
+    // into its field string; both are retired now, so a sheet saved with
+    // them loads without either and is written without them.
     let mut legacy_format = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
+    legacy_format["title_block"]["scale"] =
+        serde_json::json!({ "kind": "ratio", "drawing_units": 99, "reality_units": 1 });
     legacy_format["title_block"]["fields"]["scale"] =
         serde_json::json!({ "value": "stale 99:1", "visible": true });
     let restored_format: SchematicSheetFormat = serde_json::from_value(legacy_format).unwrap();
@@ -1360,13 +1339,10 @@ fn legacy_scale_mirror_and_missing_preset_references_normalize_safely() {
             .fields
             .contains_key(&DrawingSheetTitleFieldId::Scale)
     );
-    assert_eq!(
-        restored_format.title_block.scale,
-        DrawingSheetScale::Ratio {
-            drawing_units: 1,
-            reality_units: 1,
-        }
-    );
+    assert_eq!(restored_format, SchematicSheetFormat::default());
+    let rewritten = serde_json::to_value(&restored_format).unwrap();
+    assert!(rewritten["title_block"].get("scale").is_none());
+    assert!(rewritten["title_block"]["fields"].get("scale").is_none());
 
     let missing = SchematicSheetFormat::try_custom(
         "Missing review strip",

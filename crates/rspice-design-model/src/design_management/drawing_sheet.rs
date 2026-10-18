@@ -634,39 +634,6 @@ impl DrawingSheetTitleBlockTemplate {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum DrawingSheetScale {
-    NotToScale,
-    Ratio {
-        drawing_units: u32,
-        reality_units: u32,
-    },
-}
-
-impl Default for DrawingSheetScale {
-    fn default() -> Self {
-        Self::Ratio {
-            drawing_units: 1,
-            reality_units: 1,
-        }
-    }
-}
-
-impl DrawingSheetScale {
-    fn validate(self) -> Result<(), DesignManagementError> {
-        match self {
-            Self::Ratio {
-                drawing_units: 0, ..
-            }
-            | Self::Ratio {
-                reality_units: 0, ..
-            } => Err(DesignManagementError::NumericRange("drawing sheet scale")),
-            _ => Ok(()),
-        }
-    }
-}
-
 /// One normalized point in a bounded organization logo. Coordinates use a
 /// 0..=10,000 basis so the same exact geometry can be projected to canvas,
 /// preview, SVG/PDF, raster output, and printer pages without embedding an
@@ -1109,15 +1076,13 @@ impl DrawingSheetManagedTemplateSnapshot {
 /// A sheet's title block. Both standards put it upright in the lower right
 /// corner of the drawing area, ISO 5457 4.1 and ASME Y14.1 6.1 alike, so it
 /// stands nowhere else; a sheet saved placing it elsewhere loads placed
-/// there (see the `title_block_wire` module).
+/// there (see the `title_block_wire` module). It declares no scale: a
+/// schematic is not drawn to one, and a sheet saved declaring one loads
+/// without it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetTitleBlock {
     pub template: DrawingSheetTitleBlockTemplate,
-    /// The scale a sheet declared before the title block stopped lettering
-    /// one. Nothing reads or edits it now; it is kept so the sheets and
-    /// presets that carry it load and save unchanged.
-    pub scale: DrawingSheetScale,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed_template: Option<DrawingSheetManagedTemplateSnapshot>,
     pub fields: BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>,
@@ -1141,7 +1106,6 @@ impl Default for DrawingSheetTitleBlock {
             // A sheet starts on its format's standard block (see
             // `SchematicSheetFormat::start_on_standard_title_block`).
             template: DrawingSheetTitleBlockTemplate::Standard,
-            scale: DrawingSheetScale::default(),
             managed_template: None,
             fields,
         }
@@ -1179,7 +1143,6 @@ impl DrawingSheetTitleBlock {
     }
 
     fn validate(&self) -> Result<(), DesignManagementError> {
-        self.scale.validate()?;
         match (&self.template, &self.managed_template) {
             (DrawingSheetTitleBlockTemplate::OrganizationManaged, Some(snapshot)) => {
                 snapshot.validate()?;
@@ -1566,8 +1529,8 @@ impl SchematicSheetFormat {
     /// Produce the reusable physical-format payload stored by custom-size
     /// preset authorities and portable packages.
     ///
-    /// Presets own geometry, frame/zones, title-block layout, declared scale,
-    /// and field visibility. They never own values authored by a sheet or
+    /// Presets own geometry, frame/zones, title-block layout and field
+    /// visibility. They never own values authored by a sheet or
     /// project. Clearing every field value here also prevents responsibility
     /// text from crossing projects through an export package.
     #[must_use]
@@ -2325,3 +2288,4 @@ pub use asme_y14_1_form::*;
 
 pub(super) mod title_block_wire;
 use title_block_wire::DrawingSheetTitleBlockWire;
+pub(crate) use title_block_wire::RetiredDrawingSheetScale;
