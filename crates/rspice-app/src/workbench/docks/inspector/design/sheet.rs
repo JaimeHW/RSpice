@@ -51,23 +51,20 @@ use rspice_ui_kit::panels::{section_header, section_header_explained};
 const CUSTOM_SIZE: &str = "custom";
 
 /// The title-block templates `format`'s sheet can choose for itself: ISO
-/// 7200's form, ASME Y14.1's on an ANSI or ARCH sheet, or none. A block the
-/// sheet is already on stays offered beside them, and the organization block
-/// is assigned by the organization, never chosen here.
+/// 7200's form, ASME Y14.1's on an ANSI or ARCH sheet or one already on it,
+/// or none. The organization block is assigned by the organization, never
+/// chosen here.
 fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlockTemplate> {
     let current = format.title_block.template;
     let asme_format = format.frame_convention() == DrawingSheetFrameConvention::AsmeY141;
     [
-        DrawingSheetTitleBlockTemplate::Compact,
         DrawingSheetTitleBlockTemplate::Standard,
         DrawingSheetTitleBlockTemplate::AsmeY141,
         DrawingSheetTitleBlockTemplate::None,
     ]
     .into_iter()
-    .filter(|choice| match choice {
-        DrawingSheetTitleBlockTemplate::Compact => current == *choice,
-        DrawingSheetTitleBlockTemplate::AsmeY141 => asme_format || current == *choice,
-        _ => true,
+    .filter(|choice| {
+        *choice != DrawingSheetTitleBlockTemplate::AsmeY141 || asme_format || current == *choice
     })
     .collect()
 }

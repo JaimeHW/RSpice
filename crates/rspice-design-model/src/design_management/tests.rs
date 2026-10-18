@@ -275,10 +275,11 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
             .any(|field| field.id == DrawingSheetTitleFieldId::Project)
     };
     assert!(!resolves_project(&with_project));
-    let compact_with_project = with_project
-        .try_update(|draft| draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact)
+    // The ASME form's supplementary strip has one.
+    let asme_with_project = with_project
+        .try_update(|draft| draft.title_block.template = DrawingSheetTitleBlockTemplate::AsmeY141)
         .unwrap();
-    assert!(resolves_project(&compact_with_project));
+    assert!(resolves_project(&asme_with_project));
     assert!(!resolves_project(&format));
 
     let hidden = format.try_update(|draft| {
@@ -314,10 +315,11 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
 
 #[test]
 fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
-    // On the compact block, where every field is the sheet's to show or hide.
+    // On an organization's block, where every field is the sheet's to show
+    // or hide.
     let format = SchematicSheetFormat::default()
         .try_update(|draft| {
-            draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
             draft
                 .title_block
                 .fields
@@ -720,9 +722,8 @@ fn drawing_sheet_geometry_is_canonical_and_bounded() {
 #[test]
 fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
     // A5 portrait's 118 mm drawing space cannot hold ISO 7200's 180 mm block,
-    // nor can a 200 mm wide sheet started from ANSI A. On a sheet ISO 5457
-    // frames, a block that does not fit gives way to none; on another, to the
-    // compact block. Either way the request stays.
+    // nor can a 200 mm wide sheet started from ANSI A. A block that does not
+    // fit gives way to none, and the request stays.
     for (standard, narrowed_um, printed) in [
         (
             DrawingSheetStandard::IsoA5,
@@ -732,7 +733,7 @@ fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
         (
             DrawingSheetStandard::AnsiA,
             Some(200_000),
-            DrawingSheetTitleBlockTemplate::Compact,
+            DrawingSheetTitleBlockTemplate::None,
         ),
     ] {
         let format =
@@ -2568,11 +2569,11 @@ fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
     let rotated_geometry = rotated.geometry().unwrap();
 
     assert_eq!(
-        drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::Compact),
-        Some(3)
+        drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::Standard),
+        Some(4)
     );
     assert_eq!(
-        drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::Standard),
+        drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::AsmeY141),
         Some(4)
     );
     assert_eq!(
@@ -2951,7 +2952,6 @@ fn a_title_block_letters_at_one_height_on_every_sheet() {
     // above the value.
     for standard in DrawingSheetStandard::ALL {
         for template in [
-            DrawingSheetTitleBlockTemplate::Compact,
             DrawingSheetTitleBlockTemplate::Standard,
             DrawingSheetTitleBlockTemplate::OrganizationManaged,
         ] {

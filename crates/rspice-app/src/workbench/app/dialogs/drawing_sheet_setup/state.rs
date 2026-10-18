@@ -166,7 +166,6 @@ impl ZoneModeChoice {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum TitleBlockTemplateChoice {
     #[default]
-    Compact,
     Standard,
     Asme,
     Organization,
@@ -174,13 +173,7 @@ pub(crate) enum TitleBlockTemplateChoice {
 }
 
 impl TitleBlockTemplateChoice {
-    pub(crate) const ALL: [Self; 5] = [
-        Self::Compact,
-        Self::Standard,
-        Self::Asme,
-        Self::Organization,
-        Self::None,
-    ];
+    pub(crate) const ALL: [Self; 4] = [Self::Standard, Self::Asme, Self::Organization, Self::None];
 
     /// The template's one name without a sheet to size it by.
     pub(crate) fn label(self) -> &'static str {
@@ -208,7 +201,6 @@ impl TitleBlockTemplateChoice {
 
     pub(crate) const fn summary(self) -> &'static str {
         match self {
-            Self::Compact => "The earlier compact block, kept for the sheets already on it.",
             Self::Standard => {
                 "ISO 7200's form: people, legal owner, title, identification and date of issue."
             }
@@ -632,9 +624,9 @@ impl DrawingSheetDraft {
     }
 
     /// The title blocks Page Setup offers the draft's sheet: ISO 7200's
-    /// form on any sheet, ASME Y14.1's on a sheet in its format, and no
-    /// block. A block the sheet is already on stays offered beside them,
-    /// and the organization's block is assigned, never chosen.
+    /// form on any sheet, ASME Y14.1's on a sheet in its format or already
+    /// on it, and no block. The organization's block is assigned, never
+    /// chosen.
     pub(crate) fn offered_title_blocks(
         &self,
         baseline: TitleBlockTemplateChoice,
@@ -647,7 +639,6 @@ impl DrawingSheetDraft {
                 TitleBlockTemplateChoice::Asme => {
                     asme_format || baseline == TitleBlockTemplateChoice::Asme
                 }
-                TitleBlockTemplateChoice::Compact => baseline == TitleBlockTemplateChoice::Compact,
                 TitleBlockTemplateChoice::Organization => false,
             })
             .collect()
@@ -1097,7 +1088,6 @@ pub(super) fn title_template_from_model(
     value: DrawingSheetTitleBlockTemplate,
 ) -> TitleBlockTemplateChoice {
     match value {
-        DrawingSheetTitleBlockTemplate::Compact => TitleBlockTemplateChoice::Compact,
         DrawingSheetTitleBlockTemplate::Standard => TitleBlockTemplateChoice::Standard,
         DrawingSheetTitleBlockTemplate::AsmeY141 => TitleBlockTemplateChoice::Asme,
         DrawingSheetTitleBlockTemplate::OrganizationManaged => {
@@ -1109,7 +1099,6 @@ pub(super) fn title_template_from_model(
 
 fn title_template_to_model(value: TitleBlockTemplateChoice) -> DrawingSheetTitleBlockTemplate {
     match value {
-        TitleBlockTemplateChoice::Compact => DrawingSheetTitleBlockTemplate::Compact,
         TitleBlockTemplateChoice::Standard => DrawingSheetTitleBlockTemplate::Standard,
         TitleBlockTemplateChoice::Asme => DrawingSheetTitleBlockTemplate::AsmeY141,
         TitleBlockTemplateChoice::Organization => {
@@ -1342,7 +1331,7 @@ mod tests {
         );
         assert!(draft.validate().is_ok());
 
-        draft.set_title_block_template(TitleBlockTemplateChoice::Compact);
+        draft.set_title_block_template(TitleBlockTemplateChoice::Standard);
         draft.title_block_rotation = TitleBlockRotationChoice::CounterClockwise;
         draft.set_title_block_anchor(TitleBlockAnchorChoice::BottomStrip);
         assert_eq!(

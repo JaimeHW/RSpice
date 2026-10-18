@@ -296,9 +296,7 @@ impl DrawingSheetTitleBlockTemplate {
         match self {
             Self::Standard => "ISO 7200 makes this field mandatory on its form.",
             Self::AsmeY141 => "ASME Y14.1's form always carries this field.",
-            Self::Compact | Self::OrganizationManaged | Self::None => {
-                "Every title block carries this field."
-            }
+            Self::OrganizationManaged | Self::None => "Every title block carries this field.",
         }
     }
 }
@@ -329,21 +327,6 @@ impl SchematicSheetFormat {
                 .fields
                 .get(&field)
                 .is_some_and(|state| state.visible)
-    }
-
-    /// Whether the sheet's paper is one ISO 5457 frames — the ISO A series
-    /// and the JIS B series JIS Z 8311 frames alike. ISO 7200's block is the
-    /// same on every such sheet, so it never gives way to another block on
-    /// one: a drawing area too small for it carries none.
-    pub(super) const fn framed_by_iso_5457(&self) -> bool {
-        matches!(
-            self.authored_size,
-            AuthoredDrawingSheetSize::Standard { standard }
-                if matches!(
-                    standard.series(),
-                    DrawingSheetStandardSeries::Iso | DrawingSheetStandardSeries::Jis
-                )
-        )
     }
 }
 

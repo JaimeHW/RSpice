@@ -564,19 +564,20 @@ struct DrawingSheetMarksWire {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DrawingSheetTitleBlockTemplate {
-    /// A 130 mm block that predates ISO 7200's form. It holds a title of a
-    /// dozen characters, against the standard's 25, so it is offered only
-    /// to a sheet already on it, and a sheet saved on it loads and draws as
-    /// it always did.
-    #[default]
-    Compact,
     /// ISO 7200's 180 mm block, drawn as the standard's form.
     ///
     /// A sheet, default, preset or package saved naming the retired `wide`
     /// block loads as this one. That block was 230 mm wide, past ISO 7200's
     /// 180 mm maximum, and existed only to give an equal-width grid wider
     /// cells, which cells sized by what they hold no longer need.
-    #[serde(alias = "wide")]
+    ///
+    /// So does one saved naming the retired `compact` block on its own; a
+    /// sheet saved on it loads on its format's standard block (see
+    /// [`DrawingSheetTitleBlock`]). That 130 mm block predated both
+    /// standards' forms and held a title of a dozen characters, against ISO
+    /// 7200's 25.
+    #[default]
+    #[serde(alias = "wide", alias = "compact")]
     Standard,
     OrganizationManaged,
     None,
@@ -593,7 +594,6 @@ impl DrawingSheetTitleBlockTemplate {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Compact => "Compact · 130 × 32 mm",
             Self::Standard => "ISO 7200 · 180 × 45 mm",
             Self::OrganizationManaged => "Organization block",
             Self::None => "No title block",
@@ -606,7 +606,6 @@ impl DrawingSheetTitleBlockTemplate {
     #[must_use]
     pub const fn dimensions_um(self) -> Option<(u64, u64)> {
         match self {
-            Self::Compact => Some((130_000, 32_000)),
             Self::Standard => Some((180_000, 45_000)),
             Self::OrganizationManaged => Some((180_000, 50_000)),
             Self::None | Self::AsmeY141 => None,
@@ -619,7 +618,7 @@ impl DrawingSheetTitleBlockTemplate {
     pub const fn outline_um(self) -> u64 {
         match self {
             Self::AsmeY141 => 600,
-            Self::Compact | Self::Standard | Self::OrganizationManaged | Self::None => {
+            Self::Standard | Self::OrganizationManaged | Self::None => {
                 DRAWING_SHEET_TITLE_OUTLINE_UM
             }
         }
@@ -1126,7 +1125,7 @@ impl DrawingSheetManagedTemplateSnapshot {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetTitleBlock {
     pub template: DrawingSheetTitleBlockTemplate,
@@ -1158,9 +1157,9 @@ impl Default for DrawingSheetTitleBlock {
             })
             .collect::<BTreeMap<_, _>>();
         Self {
-            // What a sheet saved before title blocks were stored has always
-            // been drawn with. A new sheet starts on ISO 7200's block instead.
-            template: DrawingSheetTitleBlockTemplate::Compact,
+            // A sheet starts on its format's standard block (see
+            // `SchematicSheetFormat::start_on_standard_title_block`).
+            template: DrawingSheetTitleBlockTemplate::Standard,
             anchor: DrawingSheetTitleBlockAnchor::BottomRight,
             rotation: DrawingSheetTitleBlockRotation::Upright,
             offset_x_um: 0,
@@ -1403,7 +1402,7 @@ struct SchematicSheetFormatWire {
     border: DrawingSheetBorderWire,
     zones: PresentField<DrawingSheetZonesWire>,
     marks: DrawingSheetMarksWire,
-    title_block: PresentField<DrawingSheetTitleBlock>,
+    title_block: PresentField<DrawingSheetTitleBlockWire>,
     inheritance: DrawingSheetInheritance,
 }
 
@@ -1468,6 +1467,7 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             .authored_size
             .0
             .unwrap_or_else(|| authored_size_from_legacy(&wire.size));
+        let convention = authored_size.frame_convention();
         let legacy_title_block = wire.title_block.0.is_none();
         // A left margin of exactly the binding margin is how a bound sheet
         // was stored; on a sheet of another format it was only a margin.
@@ -1503,7 +1503,16 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             marks: DrawingSheetMarks {
                 centring: wire.marks.centring,
             },
-            title_block: wire.title_block.0.unwrap_or_default(),
+            // A block saved as the retired compact one, or a sheet saved
+            // before title blocks were stored, which was drawn with it, is on
+            // its format's standard block.
+            title_block: wire.title_block.0.map_or_else(
+                || DrawingSheetTitleBlock {
+                    template: DrawingSheetTitleBlockTemplate::for_convention(convention),
+                    ..DrawingSheetTitleBlock::default()
+                },
+                |title_block| title_block.into_title_block(convention),
+            ),
             inheritance: wire.inheritance,
         };
         format.binding_margin &= format.can_bind();
@@ -1811,12 +1820,11 @@ impl SchematicSheetFormat {
     ///
     /// The requested choice is never silently rewritten. A block that does
     /// not fit, turned as the sheet turns it, inside the drawing area it sits
-    /// in gives way, and `title_block_substituted` reports that fact to Page
-    /// Setup and inspection surfaces. ISO 7200's block is the same on every
-    /// sheet ISO 5457 frames, so there it gives way to no block at all;
-    /// elsewhere a block gives way to the compact one. The ASME form steps
-    /// down from Fig 5-2's block to Fig 5-1's, and gives way to no block
-    /// only where neither fits; it is never turned.
+    /// in gives way to no block at all, and `title_block_substituted` reports
+    /// that fact to Page Setup and inspection surfaces: ISO 7200's block is
+    /// the same on every sheet. The ASME form steps down from Fig 5-2's block
+    /// to Fig 5-1's, and gives way only where neither fits; it is never
+    /// turned.
     #[must_use]
     pub fn effective_title_block_template(&self) -> DrawingSheetTitleBlockTemplate {
         let requested = self.title_block.template;
@@ -1842,11 +1850,8 @@ impl SchematicSheetFormat {
             });
         if fits {
             requested
-        } else if requested == DrawingSheetTitleBlockTemplate::Standard && self.framed_by_iso_5457()
-        {
-            DrawingSheetTitleBlockTemplate::None
         } else {
-            DrawingSheetTitleBlockTemplate::Compact
+            DrawingSheetTitleBlockTemplate::None
         }
     }
 
@@ -1928,8 +1933,8 @@ impl SchematicSheetFormat {
     }
 
     /// Captured organization logo for the exact effective title contract.
-    /// A substituted compact block never inherits managed artwork that no
-    /// longer has an authored reserve in its grid.
+    /// A block that gave way never inherits managed artwork that no longer
+    /// has an authored reserve in its grid.
     #[must_use]
     pub fn title_block_logo(
         &self,
@@ -2028,10 +2033,10 @@ impl SchematicSheetFormat {
             } else {
                 rotated_width
             };
-        // Small supported standards (for example ISO A5 portrait) may not
-        // carry the full compact footprint after margins and the zone band.
-        // Match the approved mockup contract by clipping the printed block to
-        // the drawing area instead of overlapping or rejecting the sheet.
+        // A block that does not fit gives way before it is placed (see
+        // `effective_title_block_template`); clipping it to the drawing area
+        // keeps a placement that would overlap the frame from ever being
+        // made.
         let width = requested_width.min(drawing_area.width_um);
         let height = height.min(drawing_area.height_um);
         if width == 0 || height == 0 {
@@ -2081,21 +2086,13 @@ impl SchematicSheetFormat {
     /// Start a new sheet on its format's standard title block: ISO 7200's
     /// 180 mm block on a sheet ISO 5457 frames, which holds the standard's
     /// 25-character title and 16-character document identifier, and ASME
-    /// Y14.1's form on an ANSI or ARCH sheet. Either is the block whether or
-    /// not the drawing area holds it: a sheet that cannot carries no block,
-    /// and Page Setup says why. A custom sheet framed to neither standard
-    /// whose drawing area cannot hold ISO 7200's block keeps the compact
-    /// block, rather than requesting one that Page Setup would then report
-    /// as substituted.
+    /// Y14.1's form on an ANSI or ARCH sheet, and on a custom size the block
+    /// of the series it was started from. Either is the block whether or not
+    /// the drawing area holds it: a sheet that cannot carries no block, and
+    /// Page Setup says why.
     fn start_on_standard_title_block(&mut self) {
-        let fallback = self.title_block.template;
-        let convention = self.frame_convention();
-        self.title_block.template = DrawingSheetTitleBlockTemplate::for_convention(convention);
-        let standard_gives_way =
-            self.framed_by_iso_5457() || convention == DrawingSheetFrameConvention::AsmeY141;
-        if (self.title_block_substituted() && !standard_gives_way) || self.geometry().is_err() {
-            self.title_block.template = fallback;
-        }
+        self.title_block.template =
+            DrawingSheetTitleBlockTemplate::for_convention(self.frame_convention());
     }
 
     /// Give a block the sheet's drawing area cannot place a way to fit: turn
@@ -2343,7 +2340,6 @@ pub const fn drawing_sheet_title_block_rows(
     template: DrawingSheetTitleBlockTemplate,
 ) -> Option<usize> {
     match template {
-        DrawingSheetTitleBlockTemplate::Compact => Some(3),
         DrawingSheetTitleBlockTemplate::Standard => Some(4),
         DrawingSheetTitleBlockTemplate::OrganizationManaged => Some(5),
         // A, B, the drawing number's row and the bottom row.
@@ -2464,3 +2460,6 @@ pub use iso_7200_form::*;
 
 pub(super) mod asme_y14_1_form;
 pub use asme_y14_1_form::*;
+
+pub(super) mod title_block_wire;
+use title_block_wire::DrawingSheetTitleBlockWire;

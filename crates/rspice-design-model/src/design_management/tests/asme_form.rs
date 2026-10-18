@@ -544,7 +544,7 @@ fn the_form_is_never_turned_and_steps_down_to_fig_5_1_where_fig_5_2_does_not_fit
 fn a_saved_ansi_sheet_keeps_the_block_it_was_saved_with() {
     for template in [
         DrawingSheetTitleBlockTemplate::Standard,
-        DrawingSheetTitleBlockTemplate::Compact,
+        DrawingSheetTitleBlockTemplate::None,
     ] {
         let saved = sheet(DrawingSheetStandard::AnsiB)
             .try_update(|draft| draft.title_block.template = template)

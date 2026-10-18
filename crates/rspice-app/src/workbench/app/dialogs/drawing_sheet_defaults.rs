@@ -1324,22 +1324,20 @@ fn title_frame_block(
             } else {
                 // New sheets start on their format's form: ISO 7200's, or
                 // ASME Y14.1's on an ANSI or ARCH page, which is offered only
-                // there. The compact block is offered only to a default
-                // already on it.
+                // there or to a default already on it.
                 let current = record.title_block.template;
                 let asme_format =
                     record.frame_convention() == DrawingSheetFrameConvention::AsmeY141;
                 let choices = [
-                    DrawingSheetTitleBlockTemplate::Compact,
                     DrawingSheetTitleBlockTemplate::Standard,
                     DrawingSheetTitleBlockTemplate::AsmeY141,
                     DrawingSheetTitleBlockTemplate::None,
                 ]
                 .into_iter()
-                .filter(|template| match template {
-                    DrawingSheetTitleBlockTemplate::Compact => current == *template,
-                    DrawingSheetTitleBlockTemplate::AsmeY141 => asme_format || current == *template,
-                    _ => true,
+                .filter(|template| {
+                    *template != DrawingSheetTitleBlockTemplate::AsmeY141
+                        || asme_format
+                        || current == *template
                 })
                 .map(|template| (template, record.title_block_template_label(template)))
                 .collect::<Vec<_>>();
@@ -1862,7 +1860,7 @@ mod tests {
         *draft = draft
             .try_update(|draft| {
                 draft.apply_border_template(DrawingSheetBorderTemplate::None);
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::None;
                 draft.orientation = SchematicPageOrientation::Portrait;
             })
             .unwrap();
@@ -1895,7 +1893,7 @@ mod tests {
         let mut title_candidate = SchematicSheetFormat::default()
             .try_update(|draft| {
                 draft.apply_border_template(DrawingSheetBorderTemplate::None);
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::None;
             })
             .unwrap();
         enforce_managed_default_authority(&mut title_candidate, &title_authority);

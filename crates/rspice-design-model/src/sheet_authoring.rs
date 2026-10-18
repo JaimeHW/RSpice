@@ -64,7 +64,7 @@ pub fn custom_format(
             match frame {
                 StartingFrame::IsoA => {
                     draft.apply_border_template(DrawingSheetBorderTemplate::Standard);
-                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
                 }
                 StartingFrame::AnsiA => {
                     // The size keeps the ASME Y14.1 format it was started on.
@@ -73,7 +73,7 @@ pub fn custom_format(
                         snapshot.started_from = Some(DrawingSheetStandardSeries::Ansi);
                     }
                     draft.apply_border_template(DrawingSheetBorderTemplate::Standard);
-                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+                    draft.title_block.template = DrawingSheetTitleBlockTemplate::AsmeY141;
                 }
                 StartingFrame::None => {
                     draft.apply_border_template(DrawingSheetBorderTemplate::None);
@@ -84,21 +84,7 @@ pub fn custom_format(
         })
         .map_err(|error| error.to_string())?;
     // A size started from ISO A takes ISO 7200's block and one started from
-    // ANSI A takes ASME Y14.1's. A sheet whose drawing area holds it starts
-    // on it; a narrower one keeps the compact block rather than one Page
-    // Setup would report as substituted.
-    let standard_block = match frame {
-        StartingFrame::IsoA => Some(DrawingSheetTitleBlockTemplate::Standard),
-        StartingFrame::AnsiA => Some(DrawingSheetTitleBlockTemplate::AsmeY141),
-        StartingFrame::None => None,
-    };
-    if let Some(template) = standard_block
-        && let Ok(standard) = format.try_update(|draft| {
-            draft.title_block.template = template;
-        })
-        && !standard.title_block_substituted()
-    {
-        format = standard;
-    }
+    // ANSI A takes ASME Y14.1's, whether or not its drawing area holds it: one
+    // that cannot carries no block, and Page Setup says why.
     Ok(format)
 }

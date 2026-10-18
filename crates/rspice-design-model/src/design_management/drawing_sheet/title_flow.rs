@@ -1,11 +1,10 @@
-//! The flowed grid the compact and organization blocks draw: the fields a
-//! sheet shows, poured into straight columns.
+//! The flowed grid an organization's block draws: the fields a sheet shows,
+//! poured into straight columns.
 //!
-//! ISO 7200's block is a designed form (see the `iso_7200_form` module).
-//! The compact block is kept only so the sheets saved on it load, and an
-//! organization's block is laid out from the field order it was sealed
-//! with; both are drawn exactly as they were before the form existed, by the
-//! rule below.
+//! ISO 7200's and ASME Y14.1's blocks are designed forms (see the
+//! `iso_7200_form` and `asme_y14_1_form` modules). An organization's block
+//! is laid out from the field order it was sealed with, and is drawn exactly
+//! as it was before the forms existed, by the rule below.
 //!
 //! # What a cell needs
 //!

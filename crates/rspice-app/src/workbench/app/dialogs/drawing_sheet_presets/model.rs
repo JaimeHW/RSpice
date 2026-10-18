@@ -405,10 +405,14 @@ pub(super) fn imported_project_preset(
     format = format
         .try_update(|draft| {
             draft.inheritance = DrawingSheetInheritance::Explicit;
+            // The organization's block gives way to the format's standard
+            // one.
             if candidate.resolution == ImportResolution::ReplaceManagedDependencies
                 && draft.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged
             {
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::for_convention(
+                    draft.authored_size.frame_convention(),
+                );
             }
             if let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size {
                 snapshot.preset_id = Some(id.clone());
@@ -613,7 +617,7 @@ mod tests {
             .expect("explicit replacement produces a project preset");
         assert_eq!(
             resolved.format.title_block.template,
-            DrawingSheetTitleBlockTemplate::Compact
+            DrawingSheetTitleBlockTemplate::Standard
         );
         assert!(!unavailable(&resolved));
     }

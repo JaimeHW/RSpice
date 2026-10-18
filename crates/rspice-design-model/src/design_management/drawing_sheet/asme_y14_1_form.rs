@@ -385,7 +385,7 @@ impl DrawingSheetTitleBlockTemplate {
     pub fn revision_advisory(self, revision: &str) -> Option<&'static str> {
         match self {
             Self::AsmeY141 => drawing_sheet_asme_revision_advisory(revision),
-            Self::Compact | Self::Standard | Self::OrganizationManaged | Self::None => {
+            Self::Standard | Self::OrganizationManaged | Self::None => {
                 drawing_sheet_revision_advisory(revision)
             }
         }

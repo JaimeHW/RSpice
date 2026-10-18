@@ -1843,7 +1843,7 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
         true,
     );
     let title_templates = [
-        DrawingSheetTitleBlockTemplate::Compact,
+        DrawingSheetTitleBlockTemplate::AsmeY141,
         DrawingSheetTitleBlockTemplate::Standard,
         DrawingSheetTitleBlockTemplate::OrganizationManaged,
         DrawingSheetTitleBlockTemplate::None,

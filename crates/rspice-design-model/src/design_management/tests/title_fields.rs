@@ -215,7 +215,7 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     }
 
     // Every sheet ISO 5457 frames starts on the block, in either
-    // orientation; the compact block is offered to no new one.
+    // orientation, and draws it or none.
     for standard in DrawingSheetStandard::ALL.into_iter().filter(|standard| {
         matches!(
             standard.series(),
@@ -237,26 +237,27 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
                 DrawingSheetTitleBlockRotation::Upright,
                 "{standard:?} {orientation:?} turns ISO 7200's block"
             );
-            assert_ne!(
+            assert!(matches!(
                 sheet.geometry().unwrap().effective_title_block_template,
-                DrawingSheetTitleBlockTemplate::Compact,
-                "{standard:?} {orientation:?}"
-            );
+                DrawingSheetTitleBlockTemplate::Standard | DrawingSheetTitleBlockTemplate::None
+            ));
         }
     }
 
-    // A sheet of another series whose drawing area cannot hold that block
-    // keeps the compact one, rather than requesting a block Page Setup would
-    // report as substituted; one whose drawing area holds it starts on it,
+    // A custom sheet whose drawing area cannot hold that block still asks for
+    // it, and carries none; one whose drawing area holds it draws it,
     // whatever its paper is called.
     let narrow =
         crate::custom_format("Panel", 200_000, 400_000, crate::StartingFrame::IsoA).unwrap();
     assert!(narrow.geometry().unwrap().drawing_area.width_um < 180_000);
     assert_eq!(
         narrow.title_block.template,
-        DrawingSheetTitleBlockTemplate::Compact
+        DrawingSheetTitleBlockTemplate::Standard
     );
-    assert!(!narrow.title_block_substituted());
+    assert_eq!(
+        narrow.effective_title_block_template(),
+        DrawingSheetTitleBlockTemplate::None
+    );
     // An ANSI sheet, and a size started from one, starts on ASME Y14.1's
     // form instead.
     for (wide, template) in [
@@ -280,14 +281,15 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
         assert!(!wide.title_block_substituted());
     }
 
-    // A sheet saved before title blocks were stored is still drawn with the
-    // compact block it always had, naming its project as it always did.
+    // A sheet saved before title blocks were stored, which was drawn with the
+    // retired compact block, is on its format's standard block, naming its
+    // project as it always did.
     let mut legacy = serde_json::to_value(&format).unwrap();
     legacy.as_object_mut().unwrap().remove("title_block");
     let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
     assert_eq!(
         restored.title_block.template,
-        DrawingSheetTitleBlockTemplate::Compact
+        DrawingSheetTitleBlockTemplate::Standard
     );
     let project = DrawingSheetTitleFieldId::Project;
     assert!(restored.title_block.fields[&project].visible);
@@ -309,10 +311,6 @@ fn each_title_block_template_goes_by_one_name() {
             DrawingSheetTitleBlockTemplate::Standard,
             "ISO 7200 · 180 × 45 mm",
         ),
-        (
-            DrawingSheetTitleBlockTemplate::Compact,
-            "Compact · 130 × 32 mm",
-        ),
         (DrawingSheetTitleBlockTemplate::None, "No title block"),
         (
             DrawingSheetTitleBlockTemplate::OrganizationManaged,
@@ -331,9 +329,9 @@ fn each_title_block_template_goes_by_one_name() {
 #[test]
 fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
     // A5 portrait's drawing area is 118 mm across, too narrow for ISO 7200's
-    // 180 mm block. On a sheet ISO 5457 frames the block is the same on every
-    // size, so it gives way to no block at all, never to the compact one,
-    // and it is not turned: the drawing reads the way its title block does.
+    // 180 mm block. The block is the same on every size, so it gives way to
+    // no block at all, and it is not turned: the drawing reads the way its
+    // title block does.
     let a5_portrait = SchematicSheetFormat::from_standard(
         DrawingSheetStandard::IsoA5,
         SchematicPageOrientation::Portrait,
@@ -385,13 +383,12 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
             .unwrap();
     assert!(ansi_portrait.geometry().unwrap().drawing_area.width_um < 180_000);
     assert!(ansi_portrait.title_block_substituted());
-    // Off ISO 5457's sheets the compact block still stands in for it.
     assert_eq!(
         ansi_portrait
             .geometry()
             .unwrap()
             .effective_title_block_template,
-        DrawingSheetTitleBlockTemplate::Compact
+        DrawingSheetTitleBlockTemplate::None
     );
     let unbound = ansi_portrait
         .try_update(|draft| draft.binding_margin = false)
@@ -414,11 +411,9 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
     .unwrap();
     assert!(short.geometry().unwrap().drawing_area.height_um < 45_000);
     assert!(short.title_block_substituted());
-    // A custom size is not one of ISO 5457's sheets, so the compact block
-    // stands in.
     assert_eq!(
         short.geometry().unwrap().effective_title_block_template,
-        DrawingSheetTitleBlockTemplate::Compact
+        DrawingSheetTitleBlockTemplate::None
     );
 }
 
@@ -445,42 +440,67 @@ fn a4_portrait_carries_the_whole_iso_7200_block() {
 }
 
 #[test]
-fn a_sheet_saved_on_the_compact_block_loads_and_draws_as_it_did() {
-    // A sheet saved before title blocks were stored, and one saved on the
-    // compact block, keep it: nothing rewrites what they chose, and it is
-    // laid out as the flowed grid it always was, in its own wording.
-    let format = SchematicSheetFormat::default();
-    let mut legacy = serde_json::to_value(&format).unwrap();
-    legacy.as_object_mut().unwrap().remove("title_block");
-    let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
-    let mut saved = serde_json::to_value(&format).unwrap();
-    saved["title_block"]["template"] = serde_json::json!("compact");
-    let reopened: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
-    for sheet in [restored, reopened] {
+fn a_sheet_saved_on_the_retired_compact_block_loads_on_its_formats_standard_block() {
+    // The 130 mm compact block predated both standards' forms. A sheet saved
+    // on it, or saved before title blocks were stored and so drawn with it,
+    // loads on its format's standard block: ISO 7200's on an ISO or JIS
+    // sheet or a size started from neither, ASME Y14.1's on an ANSI or ARCH
+    // sheet or a size started from one. Its values and choices stay.
+    for (format, standard_block) in [
+        (
+            SchematicSheetFormat::default(),
+            DrawingSheetTitleBlockTemplate::Standard,
+        ),
+        (
+            SchematicSheetFormat::from_standard(
+                DrawingSheetStandard::JisB4,
+                SchematicPageOrientation::Landscape,
+            ),
+            DrawingSheetTitleBlockTemplate::Standard,
+        ),
+        (
+            SchematicSheetFormat::from_standard(
+                DrawingSheetStandard::AnsiB,
+                SchematicPageOrientation::Landscape,
+            ),
+            DrawingSheetTitleBlockTemplate::AsmeY141,
+        ),
+        (
+            SchematicSheetFormat::from_standard(
+                DrawingSheetStandard::ArchD,
+                SchematicPageOrientation::Landscape,
+            ),
+            DrawingSheetTitleBlockTemplate::AsmeY141,
+        ),
+        (
+            crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::AnsiA).unwrap(),
+            DrawingSheetTitleBlockTemplate::AsmeY141,
+        ),
+        (
+            crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::IsoA).unwrap(),
+            DrawingSheetTitleBlockTemplate::Standard,
+        ),
+    ] {
+        let mut saved = serde_json::to_value(&format).unwrap();
+        saved["title_block"]["template"] = serde_json::json!("compact");
+        saved["title_block"]["fields"]["drawn-by"]["value"] = serde_json::json!("J. Whitfield");
+        let reopened: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
+        assert_eq!(reopened.title_block.template, standard_block);
         assert_eq!(
-            sheet.title_block.template,
-            DrawingSheetTitleBlockTemplate::Compact
+            reopened.title_block.fields[&DrawingSheetTitleFieldId::DrawnBy].value,
+            "J. Whitfield"
         );
-        let geometry = sheet.geometry().unwrap();
-        assert_eq!(
-            geometry.effective_title_block_template,
-            DrawingSheetTitleBlockTemplate::Compact
-        );
-        let layout = drawing_sheet_title_layout(&sheet, &geometry).unwrap();
-        assert_eq!((layout.width_um, layout.height_um), (130_000, 32_000));
-        let captions = layout
-            .cells
-            .iter()
-            .map(DrawingSheetTitleCell::letter_caption)
-            .collect::<Vec<_>>();
-        for caption in ["Sheet title", "Page", "Drawn by", "Document ID", "Date"] {
-            assert!(
-                captions.iter().any(|lettered| lettered == caption),
-                "{captions:?}"
-            );
-        }
-        assert!(!captions.iter().any(|lettered| lettered == "Lang."));
+        let mut legacy = serde_json::to_value(&format).unwrap();
+        legacy.as_object_mut().unwrap().remove("title_block");
+        let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.title_block.template, standard_block);
     }
+    // A template read on its own, with no sheet to say which standard it
+    // follows, reads as ISO 7200's.
+    assert_eq!(
+        serde_json::from_str::<DrawingSheetTitleBlockTemplate>(r#""compact""#).unwrap(),
+        DrawingSheetTitleBlockTemplate::Standard
+    );
 }
 
 #[test]

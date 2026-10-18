@@ -19,8 +19,9 @@ use sha2::{Digest as _, Sha256};
 
 use crate::design_management::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetPreset,
-    DrawingSheetPresetScope, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
-    DrawingSheetTitleFieldState, MAX_DRAWING_SHEET_PROJECT_PRESETS, SchematicSheetFormat,
+    DrawingSheetPresetScope, DrawingSheetScale, DrawingSheetTitleBlockTemplate,
+    DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, MAX_DRAWING_SHEET_PROJECT_PRESETS,
+    SchematicSheetFormat,
 };
 
 mod written_frame;
@@ -127,24 +128,25 @@ pub struct DrawingSheetPresetPackage {
 /// How a package was written where the product has since changed what it
 /// writes.
 ///
-/// A preset saved naming the retired 230 mm `wide` title block loads as ISO
-/// 7200's block, but its package's digest, signature, frame-reference
-/// manifest and review rows were all written naming `wide`. Likewise a
-/// preset written before the product gained a title-block field, such as the
-/// language code, loads with that field supplied, and one written with a
-/// field since retired loads without it, but its package was sealed over the
-/// fields it was written with. And a preset written before every sheet took
-/// its series' standard frame loads onto that frame, but its package was
-/// sealed over the frame it was written with: its margins, its plain or
-/// organization border, its zone counts, labels and edges, and its
-/// registration and folding flags. Each is checked against what was written,
-/// so changing the product costs no one a package they already hold, and a
-/// package sealed again is written with today's names, fields and frames
-/// throughout.
+/// A preset saved naming a retired title block, the 230 mm `wide` block or
+/// the 130 mm `compact` one, loads on a block the product draws, but its
+/// package's digest, signature, frame-reference manifest and review rows
+/// were all written naming the retired one. Likewise a preset written before
+/// the product gained a title-block field, such as the language code, loads
+/// with that field supplied, and one written with a field since retired
+/// loads without it, but its package was sealed over the fields it was
+/// written with. And a preset written before every sheet took its series'
+/// standard frame loads onto that frame, but its package was sealed over the
+/// frame it was written with: its margins, its plain or organization border,
+/// its zone counts, labels and edges, and its registration and folding
+/// flags. Each is checked against what was written, so changing the product
+/// costs no one a package they already hold, and a package sealed again is
+/// written with today's names, fields and frames throughout.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct RetiredSpellings {
-    /// Positions of the presets whose title block was written as `wide`.
-    wide_title_blocks: BTreeSet<usize>,
+    /// How each preset written with something the product no longer writes
+    /// opened its title block.
+    written_heads: BTreeMap<usize, WrittenTitleBlockHead>,
     /// The title-block fields each preset was written with, for the presets
     /// written with another set than the product has today.
     written_title_fields: BTreeMap<usize, WrittenTitleFields>,
@@ -155,6 +157,69 @@ struct RetiredSpellings {
 
 type WrittenTitleFields = BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>;
 
+/// The retired title blocks a package may name, each with the identity its
+/// review rows gave it.
+const RETIRED_TITLE_BLOCKS: [(&str, &str); 2] =
+    [("wide", "builtin/wide"), ("compact", "builtin/compact")];
+
+/// The keys a title block was written with ahead of its managed template and
+/// its fields, where they differ from what the product writes today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WrittenTitleBlockHead {
+    /// The retired block the preset named, and its review identity.
+    retired_template: Option<(&'static str, &'static str)>,
+    /// Those keys and their values, as they were written.
+    written: Vec<u8>,
+}
+
+impl WrittenTitleBlockHead {
+    /// How `title_block`, a preset's title block as written, opened, when
+    /// the product would open it otherwise today: when it names a retired
+    /// block, whose placement loading may have moved.
+    fn of(title_block: &serde_json::Value) -> Option<Self> {
+        let template = title_block
+            .get("template")
+            .and_then(serde_json::Value::as_str);
+        let retired_template = RETIRED_TITLE_BLOCKS
+            .into_iter()
+            .find(|(name, _)| template == Some(*name));
+        retired_template?;
+        // Each key the title block was written with, in the order it was
+        // written in: a value serializes as it was written, the scale by
+        // its own type so its tag stays first.
+        let mut written = Vec::new();
+        for key in [
+            "template",
+            "anchor",
+            "rotation",
+            "offset_x_um",
+            "offset_y_um",
+            "scale",
+        ] {
+            let Some(value) = title_block.get(key) else {
+                continue;
+            };
+            let bytes = if key == "scale" {
+                serde_json::to_vec(
+                    &serde_json::from_value::<DrawingSheetScale>(value.clone()).ok()?,
+                )
+            } else {
+                serde_json::to_vec(value)
+            }
+            .ok()?;
+            if !written.is_empty() {
+                written.push(b',');
+            }
+            written.extend_from_slice(format!(r#""{key}":"#).as_bytes());
+            written.extend(bytes);
+        }
+        Some(Self {
+            retired_template,
+            written,
+        })
+    }
+}
+
 impl RetiredSpellings {
     /// The retired names and field sets the package written as `package`
     /// uses.
@@ -164,16 +229,13 @@ impl RetiredSpellings {
             .and_then(serde_json::Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let wide_title_blocks = presets
+        let written_heads = presets
             .iter()
             .enumerate()
-            .filter(|(_, preset)| {
-                preset
-                    .pointer("/format/title_block/template")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("wide")
+            .filter_map(|(index, preset)| {
+                WrittenTitleBlockHead::of(preset.pointer("/format/title_block")?)
+                    .map(|head| (index, head))
             })
-            .map(|(index, _)| index)
             .collect();
         let current = DrawingSheetTitleFieldId::ALL
             .into_iter()
@@ -205,7 +267,7 @@ impl RetiredSpellings {
             })
             .collect();
         Self {
-            wide_title_blocks,
+            written_heads,
             written_title_fields,
             written_frames,
         }
@@ -239,6 +301,14 @@ impl RetiredSpellings {
         }
     }
 
+    /// The retired block the preset at `index` was written naming, and its
+    /// review identity.
+    fn retired_template(&self, index: usize) -> Option<(&'static str, &'static str)> {
+        self.written_heads
+            .get(&index)
+            .and_then(|head| head.retired_template)
+    }
+
     /// The name the frame-reference manifest gives the title block of the
     /// preset at `index`.
     fn title_block_reference(
@@ -246,11 +316,10 @@ impl RetiredSpellings {
         index: usize,
         template: DrawingSheetTitleBlockTemplate,
     ) -> Option<&'static str> {
-        if self.wide_title_blocks.contains(&index) {
-            return Some("wide");
+        if let Some((name, _)) = self.retired_template(index) {
+            return Some(name);
         }
         match template {
-            DrawingSheetTitleBlockTemplate::Compact => Some("compact"),
             DrawingSheetTitleBlockTemplate::Standard => Some("standard"),
             DrawingSheetTitleBlockTemplate::AsmeY141 => Some("asme-y14-1"),
             DrawingSheetTitleBlockTemplate::None
@@ -265,11 +334,10 @@ impl RetiredSpellings {
         index: usize,
         template: DrawingSheetTitleBlockTemplate,
     ) -> &'static str {
-        if self.wide_title_blocks.contains(&index) {
-            return "builtin/wide";
+        if let Some((_, identity)) = self.retired_template(index) {
+            return identity;
         }
         match template {
-            DrawingSheetTitleBlockTemplate::Compact => "builtin/compact",
             DrawingSheetTitleBlockTemplate::Standard => "builtin/standard",
             DrawingSheetTitleBlockTemplate::AsmeY141 => "builtin/asme-y14-1",
             DrawingSheetTitleBlockTemplate::OrganizationManaged => "organization-managed",
@@ -280,11 +348,12 @@ impl RetiredSpellings {
     /// `canonical`, the contract `presets` serialize to, as the package was
     /// written: each preset written with another frame has that frame again,
     /// each preset written with another field set lists exactly the fields it
-    /// was written with, and each preset written as `wide` names it again.
+    /// was written with, and each preset written naming a retired block names
+    /// it again.
     fn respell(&self, canonical: Vec<u8>, presets: &[PortableDrawingSheetPreset]) -> Vec<u8> {
         let canonical = self.respell_frames(canonical, presets);
         let canonical = self.respell_title_fields(canonical, presets);
-        self.respell_wide_title_blocks(canonical, presets)
+        self.respell_title_block_heads(canonical, presets)
     }
 
     /// `canonical` with each preset's frame as it was written.
@@ -358,41 +427,50 @@ impl RetiredSpellings {
         written
     }
 
-    /// `canonical` with each preset written as `wide` naming it again.
+    /// `canonical` with each preset's title block opening as it was written:
+    /// the keys ahead of its managed template and fields, naming the retired
+    /// block it named and placing it where it was placed.
     ///
     /// Every preset serializes exactly one title block, whose template is its
-    /// first field, so the n-th standard block in the contract belongs to the
-    /// n-th preset whose block is standard.
-    fn respell_wide_title_blocks(
+    /// first key and whose fields are its last, so the n-th title block in
+    /// the contract is the n-th preset's. A quote within a string is escaped,
+    /// so no value in a preset can read as a title block's opening or as one
+    /// of its keys.
+    fn respell_title_block_heads(
         &self,
         canonical: Vec<u8>,
         presets: &[PortableDrawingSheetPreset],
     ) -> Vec<u8> {
-        const STANDARD_BLOCK: &[u8] = br#""title_block":{"template":"standard""#;
-        const WIDE_BLOCK: &[u8] = br#""title_block":{"template":"wide""#;
-        if self.wide_title_blocks.is_empty() {
+        const OPENING: &[u8] = br#""title_block":{"#;
+        const ENDS: [&[u8]; 2] = [br#","managed_template":"#, br#","fields":"#];
+        if self.written_heads.is_empty() {
             return canonical;
         }
-        let respelled = presets
-            .iter()
-            .enumerate()
-            .filter(|(_, preset)| {
-                preset.format.title_block.template == DrawingSheetTitleBlockTemplate::Standard
-            })
-            .map(|(index, _)| self.wide_title_blocks.contains(&index))
-            .collect::<Vec<_>>();
+        let find = |haystack: &[u8], needle: &[u8]| {
+            haystack
+                .windows(needle.len())
+                .position(|window| window == needle)
+        };
         let mut written = Vec::with_capacity(canonical.len());
         let mut rest = canonical.as_slice();
-        let mut standard_blocks = 0;
-        while let Some(at) = rest
-            .windows(STANDARD_BLOCK.len())
-            .position(|window| window == STANDARD_BLOCK)
-        {
-            written.extend_from_slice(&rest[..at]);
-            let wide = respelled.get(standard_blocks).copied().unwrap_or(false);
-            written.extend_from_slice(if wide { WIDE_BLOCK } else { STANDARD_BLOCK });
-            standard_blocks += 1;
-            rest = &rest[at + STANDARD_BLOCK.len()..];
+        for index in 0..presets.len() {
+            let Some(at) = find(rest, OPENING) else {
+                break;
+            };
+            let head_at = at + OPENING.len();
+            let Some(head_len) = ENDS
+                .into_iter()
+                .filter_map(|end| find(&rest[head_at..], end))
+                .min()
+            else {
+                break;
+            };
+            written.extend_from_slice(&rest[..head_at]);
+            match self.written_heads.get(&index) {
+                Some(head) => written.extend_from_slice(&head.written),
+                None => written.extend_from_slice(&rest[head_at..head_at + head_len]),
+            }
+            rest = &rest[head_at + head_len..];
         }
         written.extend_from_slice(rest);
         written

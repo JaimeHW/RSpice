@@ -1839,7 +1839,7 @@ mod tests {
         let draft = &mut app.state.dialogs.drawing_sheet_setup.draft;
         draft.zone_mode = super::super::state::ZoneModeChoice::None;
         draft.centring_marks = false;
-        draft.title_block = super::super::state::TitleBlockTemplateChoice::Compact;
+        draft.title_block = super::super::state::TitleBlockTemplateChoice::None;
         draft.title_block_anchor = super::super::state::TitleBlockAnchorChoice::TopRight;
         draft
             .title_fields

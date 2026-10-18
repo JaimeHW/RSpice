@@ -211,10 +211,10 @@ fn only_the_document_identifier_is_plotted_in_the_heavier_weight() {
         "the identifier must be set in the Medium cut: {shown:?}"
     );
     // ISO 7200's form always carries the identifier, so the sheet that does
-    // not show it is one on the compact block.
+    // not show it is one on an organization's block.
     let hidden = format
         .try_update(|draft| {
-            draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
             draft
                 .title_block
                 .fields
@@ -271,7 +271,7 @@ fn a_plotted_caption_letters_the_field_name_and_nothing_else() {
 fn the_plot_letters_exactly_the_lines_the_layout_letters() {
     for template in [
         DrawingSheetTitleBlockTemplate::Standard,
-        DrawingSheetTitleBlockTemplate::Compact,
+        DrawingSheetTitleBlockTemplate::AsmeY141,
         DrawingSheetTitleBlockTemplate::OrganizationManaged,
     ] {
         let format = filled_in(
@@ -446,7 +446,7 @@ fn plotted_title_capitals_stand_at_the_height_the_standard_names() {
     for (standard, template) in [
         (
             DrawingSheetStandard::IsoA4,
-            DrawingSheetTitleBlockTemplate::Compact,
+            DrawingSheetTitleBlockTemplate::OrganizationManaged,
         ),
         (
             DrawingSheetStandard::IsoA3,

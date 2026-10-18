@@ -378,8 +378,7 @@ pub fn drawing_sheet_title_layout(
         DrawingSheetTitleBlockTemplate::AsmeY141 => format
             .asme_title_block_form()
             .map(|form| asme_y14_1_form_layout(format, form)),
-        DrawingSheetTitleBlockTemplate::Compact
-        | DrawingSheetTitleBlockTemplate::OrganizationManaged => {
+        DrawingSheetTitleBlockTemplate::OrganizationManaged => {
             flowed_title_layout(format, template, width_um, height_um)
         }
         DrawingSheetTitleBlockTemplate::None => None,

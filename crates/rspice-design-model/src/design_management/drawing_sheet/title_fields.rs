@@ -191,12 +191,11 @@ impl DrawingSheetTitleFieldId {
         }
     }
 
-    /// The caption a flowed grid — the compact and organization blocks —
-    /// letters over the field. These blocks keep the wording they were
-    /// drawn with before the ISO 7200 form, so a saved sheet on one of them
-    /// prints as it always did, and an organization's sealed block keeps
-    /// the labels it was released with. Every renderer letters it exactly
-    /// as written, case included.
+    /// The caption an organization's flowed block letters over the field.
+    /// The block keeps the wording it was drawn with before the ISO 7200
+    /// form, so an organization's sealed block keeps the labels it was
+    /// released with. Every renderer letters it exactly as written, case
+    /// included.
     #[must_use]
     pub const fn grid_caption(self) -> &'static str {
         match self {

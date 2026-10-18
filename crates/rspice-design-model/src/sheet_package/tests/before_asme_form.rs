@@ -92,3 +92,64 @@ fn tampering_with_a_package_sealed_before_the_asme_fields_is_still_caught() {
         assert!(parse_package(&tampered, &trust).is_err());
     }
 }
+
+#[test]
+fn a_preset_sealed_on_the_retired_compact_block_opens_on_its_standard_block() {
+    // The compact block is retired: a preset written on it opens on the
+    // standard block of the series its size was started from, while its
+    // package still verifies against what was written, its frame-reference
+    // manifest and review rows naming `compact`.
+    let (_, trust, _) = signed_organization_package();
+    for (fixture, trust) in [
+        (PROJECT, PdkPublisherTrustStore::default()),
+        (PROJECT_REVIEW, PdkPublisherTrustStore::default()),
+        (ORGANIZATION, trust),
+    ] {
+        let package = parse_package(fixture, &trust).unwrap();
+        let template = |id: &str| {
+            package
+                .presets
+                .iter()
+                .find(|preset| preset.stable_id == id)
+                .unwrap()
+                .format
+                .title_block
+                .template
+        };
+        assert_eq!(
+            template("compact-left"),
+            DrawingSheetTitleBlockTemplate::Standard
+        );
+        assert_eq!(
+            template("ansi-top"),
+            DrawingSheetTitleBlockTemplate::AsmeY141
+        );
+        assert_eq!(
+            template("iso-strip"),
+            DrawingSheetTitleBlockTemplate::Standard
+        );
+        assert!(
+            package
+                .builtin_frame_references
+                .contains(&BuiltinFrameReference {
+                    kind: "title-block".to_owned(),
+                    identity: "compact".to_owned(),
+                })
+        );
+    }
+    // Sealed again, the package is written with today's blocks throughout.
+    let project = parse_package(PROJECT, &PdkPublisherTrustStore::default()).unwrap();
+    let presets = project.presets.iter().map(|preset| DrawingSheetPreset {
+        id: preset.stable_id.clone(),
+        name: preset.name.clone(),
+        scope: preset.source_scope,
+        format: preset.format.clone(),
+    });
+    let resealed = encode_package(&build_package(presets).unwrap()).unwrap();
+    assert!(!resealed.contains(r#""template": "compact""#), "{resealed}");
+    assert!(!resealed.contains(r#""identity": "compact""#), "{resealed}");
+    assert!(
+        resealed.contains(r#""template": "asme-y14-1""#),
+        "{resealed}"
+    );
+}

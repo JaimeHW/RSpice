@@ -1,5 +1,5 @@
 //! A title block is a set of cells every renderer draws: ISO 7200's form as
-//! designed, and the compact and organization blocks as they always flowed.
+//! designed, and an organization's block as it always flowed.
 
 use super::*;
 
@@ -43,6 +43,27 @@ fn showing(
 fn on(template: DrawingSheetTitleBlockTemplate) -> SchematicSheetFormat {
     SchematicSheetFormat::default()
         .try_update(|draft| draft.title_block.template = template)
+        .unwrap()
+}
+
+/// A sheet on an organization's flowed block 130 × 32 mm in three rows: a
+/// block small enough to crowd, as the retired compact block was.
+fn small_flowed_block() -> SchematicSheetFormat {
+    let snapshot = DrawingSheetManagedTemplateSnapshot::try_new(
+        "example.small-title-block",
+        "1",
+        130_000,
+        32_000,
+        3,
+        DrawingSheetTitleFieldId::ALL.to_vec(),
+        Vec::new(),
+    )
+    .unwrap();
+    SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
+            draft.title_block.managed_template = Some(snapshot);
+        })
         .unwrap()
 }
 
@@ -477,11 +498,15 @@ fn the_iso_forms_mandatory_fields_stay_on_it() {
         assert!(!format.title_field_shown(field));
     }
     // Off the form the mandatory fields are the sheet's to hide again.
-    let compact = format
-        .try_update(|draft| draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact)
+    let flowed = format
+        .try_update(|draft| {
+            draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
+        })
         .unwrap();
-    assert!(!compact.title_field_shown(Field::Organization));
-    assert!(!DrawingSheetTitleBlockTemplate::Compact.requires_field(Field::Organization));
+    assert!(!flowed.title_field_shown(Field::Organization));
+    assert!(
+        !DrawingSheetTitleBlockTemplate::OrganizationManaged.requires_field(Field::Organization)
+    );
     // Project and Paper size are not on the form, whatever a sheet shows.
     let every = showing(
         &SchematicSheetFormat::default(),
@@ -492,7 +517,7 @@ fn the_iso_forms_mandatory_fields_stay_on_it() {
         assert!(!every.title_block_field_order().contains(&field));
         assert!(layout_of(&every).value(field).is_none());
         assert!(
-            with_project(&compact)
+            with_project(&flowed)
                 .title_block_field_order()
                 .contains(&field)
         );
@@ -561,7 +586,6 @@ fn every_lettered_line_stays_inside_its_cell() {
     };
     for format in [
         iso_with_optional(&ISO_OPTIONAL),
-        on(DrawingSheetTitleBlockTemplate::Compact),
         on(DrawingSheetTitleBlockTemplate::OrganizationManaged),
     ] {
         let (lines, layout) = filled(&format);
@@ -631,8 +655,8 @@ fn a_new_sheet_letters_typical_values_whole() {
 }
 
 #[test]
-fn the_compact_block_letters_its_fixed_form_values_whole() {
-    let compact = on(DrawingSheetTitleBlockTemplate::Compact);
+fn a_small_flowed_block_letters_its_fixed_form_values_whole() {
+    let compact = small_flowed_block();
     let mut fixed = vec![
         (Field::Page, "12 of 12"),
         (Field::Revision, "C"),
@@ -658,15 +682,14 @@ fn the_compact_block_letters_its_fixed_form_values_whole() {
     }
 }
 
-/// A sheet that shows every field on the compact block — how sheets were
-/// saved before fields could be hidden, so every field but the language code
-/// and the ASME form's fields they never had — has more to letter than the
-/// block holds. The free text gives way, then the document status; a page
-/// number, revision, paper size, date or classification is still lettered
-/// whole, and every caption is.
+/// A sheet that shows every field on a small flowed block — every field but
+/// the language code and the ASME form's fields — has more to letter than
+/// the block holds. The free text gives way, then the document status; a
+/// page number, revision, paper size, date or classification is still
+/// lettered whole, and every caption is.
 #[test]
 fn an_overfull_block_cuts_free_text_and_keeps_fixed_forms_whole() {
-    let compact = on(DrawingSheetTitleBlockTemplate::Compact);
+    let compact = small_flowed_block();
     let saved = DrawingSheetTitleFieldId::ALL
         .into_iter()
         .filter(|field| {
@@ -729,15 +752,13 @@ fn an_overfull_block_cuts_free_text_and_keeps_fixed_forms_whole() {
 #[test]
 fn every_flowed_row_spans_the_field_grid_exactly() {
     let every = DrawingSheetTitleFieldId::ALL;
-    for template in [
-        DrawingSheetTitleBlockTemplate::Compact,
-        DrawingSheetTitleBlockTemplate::OrganizationManaged,
-    ] {
+    let template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
+    for block in [small_flowed_block(), on(template)] {
         for rotation in [
             DrawingSheetTitleBlockRotation::Upright,
             DrawingSheetTitleBlockRotation::Clockwise90,
         ] {
-            let placed = on(template)
+            let placed = block
                 .try_update(|draft| draft.title_block.rotation = rotation)
                 .unwrap();
             for format in [
@@ -833,7 +854,7 @@ fn flowed_columns_line_up_and_stay_even_while_everything_fits() {
         }
     }
 
-    let compact = layout_of(&on(DrawingSheetTitleBlockTemplate::Compact));
+    let compact = layout_of(&small_flowed_block());
     let columns = compact.cells.iter().filter(|cell| cell.y_um == 0).count();
     assert_eq!(column_edges(&compact).len(), columns);
     let document_type = compact.cell(Field::DocumentType).unwrap();
@@ -863,8 +884,8 @@ fn flowed_fields_fill_the_rows_from_the_top_in_order() {
         Field::Organization,
         Field::DocumentId,
     ];
-    // The compact block has three rows, so twelve fields run four to a row.
-    let compact = showing(&on(DrawingSheetTitleBlockTemplate::Compact), &shown);
+    // The small block has three rows, so twelve fields run four to a row.
+    let compact = showing(&small_flowed_block(), &shown);
     assert_eq!(
         rows_of(&layout_of(&compact)),
         [
