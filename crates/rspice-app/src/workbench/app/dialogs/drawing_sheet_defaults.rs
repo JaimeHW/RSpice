@@ -1025,12 +1025,25 @@ fn preview_region(
 
     let facts = preview_facts_galley(ui, rect, record, target, following_sheets);
     let warning = record.title_block_substituted().then(|| {
-        let (width, _) = record.oriented_dimensions_um();
+        // The block gives way when it does not fit the drawing area, which
+        // the margins and border decide as much as the paper does.
+        let area = record
+            .geometry()
+            .map(|geometry| geometry.drawing_area)
+            .map_or_else(
+                |_| String::new(),
+                |area| {
+                    format!(
+                        " {}",
+                        record
+                            .display_unit
+                            .format_size_um(area.width_um, area.height_um)
+                    )
+                },
+            );
         let text = format!(
-            "{} needs a wider page than {} {}; new sheets draw the compact block until the format grows.",
+            "{} does not fit this page's{area} drawing area; new sheets draw the compact block until the format grows.",
             title_block_template_label(record.title_block.template),
-            record.display_unit.format_um(width),
-            record.display_unit.suffix(),
         );
         let mut job = LayoutJob::simple(
             text,

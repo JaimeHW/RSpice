@@ -215,27 +215,42 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
         assert!(held >= chars, "{field:?} holds {held} characters");
     }
 
-    // Paper too narrow for that block starts on the compact one, rather than
-    // requesting a block Page Setup would report as substituted.
+    // A sheet whose drawing area cannot hold that block starts on the compact
+    // one, rather than requesting a block Page Setup would report as
+    // substituted; one whose drawing area holds it starts on it, whatever
+    // its paper is called.
     for narrow in [
         SchematicSheetFormat::from_standard(
             DrawingSheetStandard::IsoA4,
             SchematicPageOrientation::Portrait,
         ),
-        crate::custom_format("Panel", 250_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
+        SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::AnsiA,
+            SchematicPageOrientation::Portrait,
+        ),
+        crate::custom_format("Panel", 210_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
     ] {
+        assert!(narrow.geometry().unwrap().drawing_area.width_um < 180_000);
         assert_eq!(
             narrow.title_block.template,
             DrawingSheetTitleBlockTemplate::Compact
         );
         assert!(!narrow.title_block_substituted());
     }
-    let wide_custom =
-        crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::AnsiA).unwrap();
-    assert_eq!(
-        wide_custom.title_block.template,
-        DrawingSheetTitleBlockTemplate::Standard
-    );
+    for wide in [
+        SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::AnsiA,
+            SchematicPageOrientation::Landscape,
+        ),
+        crate::custom_format("Panel", 250_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
+        crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::AnsiA).unwrap(),
+    ] {
+        assert_eq!(
+            wide.title_block.template,
+            DrawingSheetTitleBlockTemplate::Standard
+        );
+        assert!(!wide.title_block_substituted());
+    }
 
     // A sheet saved before title blocks were stored is still drawn with the
     // compact block it always had.
@@ -244,6 +259,73 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     let restored: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
     assert_eq!(
         restored.title_block.template,
+        DrawingSheetTitleBlockTemplate::Compact
+    );
+}
+
+#[test]
+fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
+    // A4 portrait keeps a 20 mm filing margin and 10 mm opposite, and a 5 mm
+    // zone band runs inside both, which leaves 170 mm: too narrow for ISO
+    // 7200's 180 mm block, which gives way to the compact one.
+    let a4_portrait = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Portrait,
+    );
+    assert_eq!(
+        a4_portrait.geometry().unwrap().drawing_area.width_um,
+        170_000
+    );
+    let asked = a4_portrait
+        .try_update(|draft| draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard)
+        .unwrap();
+    assert!(asked.title_block_substituted());
+    assert_eq!(
+        asked.geometry().unwrap().effective_title_block_template,
+        DrawingSheetTitleBlockTemplate::Compact
+    );
+
+    // Turned on its side the same block stands 45 mm across, and fits.
+    let turned = asked
+        .try_update(|draft| {
+            draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90
+        })
+        .unwrap();
+    assert!(!turned.title_block_substituted());
+    assert_eq!(
+        turned.geometry().unwrap().title_block.unwrap().width_um,
+        45_000
+    );
+
+    // What decides is the drawing area, not the paper: narrower margins make
+    // room for the block upright on the same sheet.
+    let narrow_margins = asked
+        .try_update(|draft| {
+            draft.margins = DrawingSheetMargins {
+                top_um: 10_000,
+                right_um: 5_000,
+                bottom_um: 10_000,
+                left_um: 5_000,
+            };
+        })
+        .unwrap();
+    assert_eq!(
+        narrow_margins.geometry().unwrap().drawing_area.width_um,
+        190_000
+    );
+    assert!(!narrow_margins.title_block_substituted());
+
+    // A drawing area too short for the block gives way as well.
+    let short = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft.margins.top_um = 80_000;
+            draft.margins.bottom_um = 80_000;
+        })
+        .unwrap();
+    assert_eq!(short.geometry().unwrap().drawing_area.height_um, 40_000);
+    assert!(short.title_block_substituted());
+    assert_eq!(
+        short.geometry().unwrap().effective_title_block_template,
         DrawingSheetTitleBlockTemplate::Compact
     );
 }

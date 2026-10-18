@@ -565,19 +565,6 @@ impl DrawingSheetTitleBlockTemplate {
             Self::None => None,
         }
     }
-
-    /// Minimum authored paper width for the requested engineering template.
-    ///
-    /// This is a printed-artifact constraint, not a viewport constraint. A
-    /// template that does not fit is visibly substituted with the compact
-    /// block while the requested template remains authored on the sheet.
-    #[must_use]
-    pub const fn minimum_sheet_width_um(self) -> u64 {
-        match self {
-            Self::Compact | Self::None => 0,
-            Self::Standard | Self::OrganizationManaged => 297_000,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1649,24 +1636,47 @@ impl SchematicSheetFormat {
 
     /// Title-block template actually painted on this physical sheet.
     ///
-    /// The requested choice is never silently rewritten. If its printed
-    /// footprint cannot fit the current paper width, the compact block is
-    /// substituted and `title_block_substituted` reports that fact to Page
-    /// Setup and inspection surfaces.
+    /// The requested choice is never silently rewritten. A block that does
+    /// not fit, turned as the sheet turns it, inside the drawing area it sits
+    /// in gives way to the compact block, and `title_block_substituted`
+    /// reports that fact to Page Setup and inspection surfaces.
     #[must_use]
     pub fn effective_title_block_template(&self) -> DrawingSheetTitleBlockTemplate {
         let requested = self.title_block.template;
-        let Some((template_width_um, _)) = self.title_block_dimensions_um(requested) else {
+        let Some((width_um, height_um)) = self.title_block_dimensions_um(requested) else {
             return DrawingSheetTitleBlockTemplate::None;
         };
-        let (paper_width_um, _) = self.oriented_dimensions_um();
-        let fits = paper_width_um >= requested.minimum_sheet_width_um()
-            && paper_width_um >= template_width_um.saturating_add(40_000);
+        let (across_um, down_um) = match self.title_block.rotation {
+            DrawingSheetTitleBlockRotation::Upright => (width_um, height_um),
+            DrawingSheetTitleBlockRotation::Clockwise90
+            | DrawingSheetTitleBlockRotation::CounterClockwise90 => (height_um, width_um),
+        };
+        let fits = self
+            .drawing_area_extent_um()
+            .is_some_and(|(area_width_um, area_height_um)| {
+                across_um <= area_width_um && down_um <= area_height_um
+            });
         if fits {
             requested
         } else {
             DrawingSheetTitleBlockTemplate::Compact
         }
+    }
+
+    /// Width and height of the drawing area: the paper less its margins and
+    /// the border's zone band on every side, or `None` when they leave none.
+    fn drawing_area_extent_um(&self) -> Option<(u64, u64)> {
+        let (paper_width_um, paper_height_um) = self.oriented_dimensions_um();
+        let bands_um = self.border.band_width_um().checked_mul(2)?;
+        let width_um = paper_width_um
+            .checked_sub(self.margins.left_um)?
+            .checked_sub(self.margins.right_um)?
+            .checked_sub(bands_um)?;
+        let height_um = paper_height_um
+            .checked_sub(self.margins.top_um)?
+            .checked_sub(self.margins.bottom_um)?
+            .checked_sub(bands_um)?;
+        Some((width_um, height_um))
     }
 
     #[must_use]
@@ -1886,8 +1896,9 @@ impl SchematicSheetFormat {
 
     /// Start a new sheet on ISO 7200's 180 mm title block, which holds the
     /// standard's 25-character title and 16-character document identifier.
-    /// Paper too narrow to carry it keeps the compact block, rather than
-    /// requesting one that Page Setup would then report as substituted.
+    /// A sheet whose drawing area cannot hold it keeps the compact block,
+    /// rather than requesting one that Page Setup would then report as
+    /// substituted.
     fn start_on_iso_7200_title_block(&mut self) {
         let fallback = self.title_block.template;
         self.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
