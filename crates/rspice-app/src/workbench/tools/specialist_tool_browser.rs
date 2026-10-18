@@ -324,9 +324,10 @@ fn filter_bar(ui: &mut Ui, browser: &mut SpecialistToolBrowserState) -> Response
                         selected,
                         index + 1 == SpecialistToolFilter::ALL.len(),
                     );
+                    // A press chooses without taking keyboard focus, so the
+                    // focus ring appears only for a reader using the keys.
                     if response.clicked() {
                         browser.filter = filter;
-                        response.request_focus();
                     }
                 }
             });
@@ -1074,6 +1075,54 @@ mod tests {
             },
         );
         height
+    }
+
+    /// A press on a filter chooses it and leaves keyboard focus where it was.
+    /// Taking focus on a press drew the keyboard focus ring around the filter
+    /// the pointer chose.
+    #[test]
+    fn a_pressed_filter_chooses_without_taking_keyboard_focus() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut browser = SpecialistToolBrowserState::default();
+        let mut frame = |events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 240.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(Frame::NONE)
+                        .show(ctx, |ui| {
+                            filter_bar(ui, &mut browser);
+                        });
+                },
+            )
+            .shapes
+        };
+        let at = frame(Vec::new())
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text == "Pinned" => {
+                    Some(text.pos + text.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .expect("the Pinned filter");
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(at), press(true)]);
+        frame(vec![press(false)]);
+        frame(Vec::new());
+
+        assert_eq!(browser.filter, SpecialistToolFilter::Pinned);
+        assert_eq!(ctx.memory(|memory| memory.focused()), None);
     }
 
     #[test]
