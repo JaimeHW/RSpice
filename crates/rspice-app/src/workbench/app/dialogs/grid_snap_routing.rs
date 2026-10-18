@@ -254,6 +254,7 @@ fn grid_snap_routing_body(
         transaction.validation_error = None;
     }
 
+    let spacing_labels = GridSnapSpacingChoice::ALL.map(GridSnapSpacingChoice::label);
     let spacing = enum_row(
         ui,
         "Snap spacing",
@@ -263,8 +264,8 @@ fn grid_snap_routing_body(
             "Independent interaction pitch; Free disables the snap engine."
         },
         "grid-snap-routing-spacing",
-        transaction.draft.snap_spacing.label(),
-        &["Free", "25 mil", "50 mil", "Metric \u{00b7} 0.5 mm"],
+        &transaction.draft.snap_spacing.label(),
+        &spacing_labels.each_ref().map(String::as_str),
     );
     if let Some(index) = spacing.0 {
         transaction.draft.snap_spacing = GridSnapSpacingChoice::ALL[index];

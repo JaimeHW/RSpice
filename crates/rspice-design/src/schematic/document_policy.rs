@@ -16,6 +16,10 @@ pub enum SchematicGridPitch {
 }
 
 impl SchematicGridPitch {
+    /// Every pitch, coarsest first. A stored grid preference is an index
+    /// into this list.
+    pub const ALL: [Self; 3] = [Self::Mil50, Self::Mil25, Self::Metric];
+
     #[must_use]
     pub const fn canvas_grid_size(self) -> i32 {
         match self {

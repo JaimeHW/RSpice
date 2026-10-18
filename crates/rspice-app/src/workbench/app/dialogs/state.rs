@@ -487,13 +487,11 @@ pub(crate) enum GridSnapSpacingChoice {
 impl GridSnapSpacingChoice {
     pub(crate) const ALL: [Self; 4] = [Self::Free, Self::Mil25, Self::Mil50, Self::Metric];
 
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Free => "Free",
-            Self::Mil25 => "25 mil",
-            Self::Mil50 => "50 mil",
-            Self::Metric => "Metric \u{00b7} 0.5 mm",
-        }
+    pub(crate) fn label(self) -> String {
+        self.pitch().map_or_else(
+            || "Free".to_owned(),
+            crate::schematic::view::drawing_sheet::grid_pitch_label,
+        )
     }
 
     pub(crate) const fn pitch(self) -> Option<crate::state::SchematicGridPitch> {

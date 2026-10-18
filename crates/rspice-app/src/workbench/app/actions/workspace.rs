@@ -165,13 +165,10 @@ impl AppState {
         // below into project-portable policy and then projected back into the
         // runtime engine.
         let preferences = &self.ui.preferences;
-        document.document_policy.grid_pitch =
-            match preferences.choice(ChoicePreference::SchematicGrid) {
-                0 => SchematicGridPitch::Mil50,
-                1 => SchematicGridPitch::Mil25,
-                2 => SchematicGridPitch::Metric,
-                _ => unreachable!("schematic grid preference is normalized before use"),
-            };
+        document.document_policy.grid_pitch = SchematicGridPitch::ALL
+            .get(preferences.choice(ChoicePreference::SchematicGrid))
+            .copied()
+            .expect("schematic grid preference is normalized before use");
         document.document_policy.wire_junctions =
             match preferences.choice(ChoicePreference::WireJunctionBehavior) {
                 0 => WireJunctionPolicy::OrthogonalAutomatic,

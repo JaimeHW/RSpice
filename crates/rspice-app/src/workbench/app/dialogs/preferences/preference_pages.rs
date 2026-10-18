@@ -583,10 +583,12 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         |ui| {
             value_column(ui, |ui| {
                 let mut selected = state.ui.preferences.choice(ChoicePreference::SchematicGrid);
+                let labels = crate::state::SchematicGridPitch::ALL
+                    .map(crate::schematic::view::drawing_sheet::grid_pitch_label);
                 if segmented(
                     ui,
                     "preferences.schematic.grid",
-                    &["50 mil", "25 mil", "Metric"],
+                    &labels.each_ref().map(String::as_str),
                     &mut selected,
                 ) {
                     state
