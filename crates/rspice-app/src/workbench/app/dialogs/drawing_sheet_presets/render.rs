@@ -225,8 +225,14 @@ pub(super) fn library_width(
     let columns: f32 = library_column_widths(&mut probe, &visible, usage)
         .iter()
         .sum();
-    columns.max(library_toolbar_width(&mut probe)).ceil()
+    // The surface's 1 pt border on either side: a dialog's width is its outer
+    // edge, and its body is that less the border. Without it the table ran
+    // 2 pt past the body and took a horizontal scrollbar for them.
+    columns.max(library_toolbar_width(&mut probe)).ceil() + 2.0 * SURFACE_BORDER
 }
+
+/// The width of the dialog surface's border, on each side.
+const SURFACE_BORDER: f32 = 1.0;
 
 const LIBRARY_HEADER_HEIGHT: f32 = 27.0;
 
