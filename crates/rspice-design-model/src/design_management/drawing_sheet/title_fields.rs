@@ -47,6 +47,10 @@ pub enum DrawingSheetTitleFieldId {
     /// document is written in, such as `en`. Optional, and kept by the
     /// project, since every sheet of a document is written in one language.
     Language,
+    /// ASME Y14.1's design activity identification: the CAGE code of the
+    /// activity whose drawing number the sheet carries. Optional, kept by the
+    /// project, and lettered only in the ASME form's DAI block.
+    CageCode,
 }
 
 /// What a schematic sheet is, in the name IEC 61082 gives it: the Document
@@ -54,7 +58,10 @@ pub enum DrawingSheetTitleFieldId {
 pub const DRAWING_SHEET_DEFAULT_DOCUMENT_TYPE: &str = "Circuit diagram";
 
 impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 16] = [
+    /// Every field a sheet carries. A field added since the first of these
+    /// goes last, so a block that pours its fields in this order keeps the
+    /// order a saved sheet was drawn with.
+    pub const ALL: [Self; 17] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
@@ -71,6 +78,7 @@ impl DrawingSheetTitleFieldId {
         Self::DocumentId,
         Self::Classification,
         Self::Language,
+        Self::CageCode,
     ];
 
     /// Fields withdrawn from the product that older sheets may still carry.
@@ -84,18 +92,23 @@ impl DrawingSheetTitleFieldId {
     /// one sheet. Visibility remains sheet-owned, but the value is resolved
     /// from [`DrawingSheetProjectSettings::title_block_field_values`] on every
     /// canvas and hardcopy page.
-    pub const PROJECT_OWNED: [Self; 4] = [
+    pub const PROJECT_OWNED: [Self; 5] = [
         Self::Organization,
         Self::DocumentId,
         Self::Classification,
         Self::Language,
+        Self::CageCode,
     ];
 
     #[must_use]
     pub const fn is_project_owned(self) -> bool {
         matches!(
             self,
-            Self::Organization | Self::DocumentId | Self::Classification | Self::Language
+            Self::Organization
+                | Self::DocumentId
+                | Self::Classification
+                | Self::Language
+                | Self::CageCode
         )
     }
 
@@ -124,6 +137,7 @@ impl DrawingSheetTitleFieldId {
             Self::DocumentType => "Document type",
             Self::DocumentStatus => "Document status",
             Self::Language => "Language",
+            Self::CageCode => "CAGE code",
         }
     }
 
@@ -204,7 +218,8 @@ impl DrawingSheetTitleFieldId {
             | Self::DocumentId
             | Self::Classification
             | Self::DocumentType
-            | Self::Language => DrawingSheetTitleFieldPolicy {
+            | Self::Language
+            | Self::CageCode => DrawingSheetTitleFieldPolicy {
                 required_visible: false,
                 value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
             },
@@ -222,7 +237,8 @@ impl DrawingSheetTitleFieldId {
     /// segment of Cell / view, so a sheet showing Project as well letters
     /// that name twice. Those wait in Page Setup until a sheet asks for
     /// them: every cell a sheet does not spend is width the cells beside it
-    /// keep.
+    /// keep. The CAGE code belongs to the ASME form, which always carries its
+    /// cell, so no other block shows it unless a sheet asks.
     #[must_use]
     pub const fn visible_by_default(self) -> bool {
         !matches!(
@@ -232,6 +248,7 @@ impl DrawingSheetTitleFieldId {
                 | Self::Classification
                 | Self::PaperSize
                 | Self::Language
+                | Self::CageCode
         )
     }
 }

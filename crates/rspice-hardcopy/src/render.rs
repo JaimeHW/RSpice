@@ -49,7 +49,7 @@ use rspice_design::symbol::{SymbolDocument, SymbolShape, SymbolTextPlacement};
 use rspice_design::symbol_artwork::{PathCommand, SymbolLibrary};
 use rspice_design_model::Point as SchematicPoint;
 use rspice_design_model::design_management::{
-    DRAWING_SHEET_TITLE_OUTLINE_UM, DrawingSheetBorderTemplate, DrawingSheetRect,
+    DrawingSheetBorderTemplate, DrawingSheetRect,
     DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
     SchematicSheetFormat, drawing_sheet_mono_baseline_offset_um, drawing_sheet_mono_em_um,
 };

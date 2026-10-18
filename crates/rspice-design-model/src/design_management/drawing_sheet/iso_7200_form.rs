@@ -263,19 +263,25 @@ pub const fn iso_7200_typical_chars(field: DrawingSheetTitleFieldId) -> Option<u
         Field::DrawnBy | Field::CheckedBy | Field::ApprovedBy | Field::DocumentStatus => Some(20),
         Field::DocumentType => Some(30),
         Field::PaperSize => Some(4),
-        Field::Organization | Field::Classification | Field::Project | Field::Scale => None,
+        Field::Organization
+        | Field::Classification
+        | Field::Project
+        | Field::Scale
+        | Field::CageCode => None,
     }
 }
 
 impl DrawingSheetTitleBlockTemplate {
     /// Whether a sheet on this template must show `field`: the fields every
-    /// block shows, and on ISO 7200's form the fields the standard makes
-    /// mandatory. Page Setup locks their visibility; their values may stay
-    /// empty.
+    /// block shows, on ISO 7200's form the fields the standard makes
+    /// mandatory, and on ASME Y14.1's every field of its blocks A to L, whose
+    /// cells the form always draws. Page Setup locks their visibility; their
+    /// values may stay empty.
     #[must_use]
     pub fn requires_field(self, field: DrawingSheetTitleFieldId) -> bool {
         field.policy().required_visible
             || (self == Self::Standard && ISO_7200_MANDATORY_FIELDS.contains(&field))
+            || (self == Self::AsmeY141 && ASME_Y14_1_FORM_FIELDS.contains(&field))
     }
 }
 
@@ -288,9 +294,12 @@ impl SchematicSheetFormat {
     #[must_use]
     pub fn title_field_shown(&self, field: DrawingSheetTitleFieldId) -> bool {
         let template = self.title_block.template;
-        if template == DrawingSheetTitleBlockTemplate::Standard
-            && !ISO_7200_FORM_FIELDS.contains(&field)
-        {
+        let on_form = match template {
+            DrawingSheetTitleBlockTemplate::Standard => ISO_7200_FORM_FIELDS.contains(&field),
+            DrawingSheetTitleBlockTemplate::AsmeY141 => ASME_Y14_1_FORM_FIELDS.contains(&field),
+            _ => true,
+        };
+        if !on_form {
             return false;
         }
         template.requires_field(field)
@@ -378,6 +387,7 @@ pub(super) fn iso_7200_form_layout(
                             // ISO 3098's least baseline spacing for lettering
                             // that may carry diacritics, 19/10 of its height.
                             line_pitch_um: down(line.lettering_um * 19 / 10),
+                            upper_case: false,
                         })
                         .collect(),
                 )

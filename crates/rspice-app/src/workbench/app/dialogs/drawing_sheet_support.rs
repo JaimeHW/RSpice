@@ -625,7 +625,11 @@ fn manager_format_table(ui: &mut Ui, rows: &mut [SheetFormatManagerRow], t: &Tok
                             });
                             cells.col(|ui| {
                                 manager_cell(ui, t, selected, false);
-                                ui.label(row.format.title_block.template.label());
+                                ui.label(
+                                    row.format.title_block_template_label(
+                                        row.format.title_block.template,
+                                    ),
+                                );
                             });
                             cells.col(|ui| {
                                 manager_cell(ui, t, selected, false);
@@ -1591,7 +1595,8 @@ fn title_field_owner(id: DrawingSheetTitleFieldId) -> &'static str {
         DrawingSheetTitleFieldId::Date | DrawingSheetTitleFieldId::DocumentStatus => "document",
         DrawingSheetTitleFieldId::Organization
         | DrawingSheetTitleFieldId::DocumentId
-        | DrawingSheetTitleFieldId::Language => "project",
+        | DrawingSheetTitleFieldId::Language
+        | DrawingSheetTitleFieldId::CageCode => "project",
         DrawingSheetTitleFieldId::Classification => "project policy",
     }
 }
@@ -1798,7 +1803,12 @@ fn title_field_summary_facts(
 ) {
     let t = Tokens::get(ui.ctx());
     let facts = [
-        ("Template", format.title_block.template.label().to_owned()),
+        (
+            "Template",
+            format
+                .title_block_template_label(format.title_block.template)
+                .to_owned(),
+        ),
         (
             "Placement",
             title_anchor_label(format.title_block.anchor).to_owned(),

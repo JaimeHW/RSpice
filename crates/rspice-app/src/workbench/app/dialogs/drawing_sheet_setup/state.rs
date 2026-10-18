@@ -167,21 +167,42 @@ pub(crate) enum TitleBlockTemplateChoice {
     #[default]
     Compact,
     Standard,
+    Asme,
     Organization,
     None,
 }
 
 impl TitleBlockTemplateChoice {
-    pub(crate) const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::Compact,
         Self::Standard,
+        Self::Asme,
         Self::Organization,
         Self::None,
     ];
 
-    /// The template's one name, as every other surface gives it.
+    /// The template's one name without a sheet to size it by.
     pub(crate) fn label(self) -> &'static str {
         title_template_to_model(self).label()
+    }
+
+    /// The template's name on the draft's sheet, as every other surface
+    /// gives it: the ASME form with the size of the block that sheet
+    /// carries.
+    pub(crate) fn label_on(self, draft: &DrawingSheetDraft) -> &'static str {
+        let template = title_template_to_model(self);
+        match draft.validate() {
+            Ok(validated) => validated.page_format.title_block_template_label(template),
+            Err(_) => template.label(),
+        }
+    }
+
+    /// The standard block of a frame convention's format.
+    pub(crate) const fn for_convention(convention: DrawingSheetFrameConvention) -> Self {
+        match convention {
+            DrawingSheetFrameConvention::Iso5457 => Self::Standard,
+            DrawingSheetFrameConvention::AsmeY141 => Self::Asme,
+        }
     }
 
     pub(crate) const fn summary(self) -> &'static str {
@@ -189,6 +210,9 @@ impl TitleBlockTemplateChoice {
             Self::Compact => "The earlier compact block, kept for the sheets already on it.",
             Self::Standard => {
                 "ISO 7200's form: people, legal owner, title, identification and date of issue."
+            }
+            Self::Asme => {
+                "ASME Y14.1's form: approvals, name, title, size, DAI, drawing number, revision and sheet, upright in the lower right corner."
             }
             Self::Organization => "Organization-owned labels, order and mark.",
             Self::None => "The authored sheet carries no title block.",
@@ -439,6 +463,16 @@ impl DrawingSheetDraft {
         if self.centring_marks == previous_convention.default_marks(border).centring {
             self.centring_marks = format.frame_convention().default_marks(border).centring;
         }
+        // A block left at the old format's standard one follows the new
+        // format's, and the ASME form leaves a sheet that is no longer in its
+        // format; a block the author chose otherwise stays.
+        let convention = format.frame_convention();
+        if self.title_block == TitleBlockTemplateChoice::for_convention(previous_convention)
+            || (self.title_block == TitleBlockTemplateChoice::Asme
+                && convention != DrawingSheetFrameConvention::AsmeY141)
+        {
+            self.set_title_block_template(TitleBlockTemplateChoice::for_convention(convention));
+        }
         self.refresh_automatic_zone_counts();
     }
 
@@ -582,11 +616,40 @@ impl DrawingSheetDraft {
 
     pub(crate) fn set_title_block_template(&mut self, template: TitleBlockTemplateChoice) {
         self.title_block = template;
-        if template == TitleBlockTemplateChoice::None {
+        if matches!(
+            template,
+            TitleBlockTemplateChoice::None | TitleBlockTemplateChoice::Asme
+        ) {
             self.title_block_offset_x = "0".to_owned();
             self.title_block_offset_y = "0".to_owned();
             self.title_block_rotation = TitleBlockRotationChoice::Upright;
         }
+        // ASME Y14.1 6.1: the lower right corner of the format.
+        if template == TitleBlockTemplateChoice::Asme {
+            self.title_block_anchor = TitleBlockAnchorChoice::BottomRight;
+        }
+    }
+
+    /// The title blocks Page Setup offers the draft's sheet: ISO 7200's
+    /// form on any sheet, ASME Y14.1's on a sheet in its format, and no
+    /// block. A block the sheet is already on stays offered beside them,
+    /// and the organization's block is assigned, never chosen.
+    pub(crate) fn offered_title_blocks(
+        &self,
+        baseline: TitleBlockTemplateChoice,
+    ) -> Vec<TitleBlockTemplateChoice> {
+        let asme_format = self.frame_convention() == DrawingSheetFrameConvention::AsmeY141;
+        TitleBlockTemplateChoice::ALL
+            .into_iter()
+            .filter(|choice| match choice {
+                TitleBlockTemplateChoice::Standard | TitleBlockTemplateChoice::None => true,
+                TitleBlockTemplateChoice::Asme => {
+                    asme_format || baseline == TitleBlockTemplateChoice::Asme
+                }
+                TitleBlockTemplateChoice::Compact => baseline == TitleBlockTemplateChoice::Compact,
+                TitleBlockTemplateChoice::Organization => false,
+            })
+            .collect()
     }
 
     pub(crate) fn set_title_block_anchor(&mut self, anchor: TitleBlockAnchorChoice) {
@@ -1018,6 +1081,7 @@ pub(super) fn title_template_from_model(
     match value {
         DrawingSheetTitleBlockTemplate::Compact => TitleBlockTemplateChoice::Compact,
         DrawingSheetTitleBlockTemplate::Standard => TitleBlockTemplateChoice::Standard,
+        DrawingSheetTitleBlockTemplate::AsmeY141 => TitleBlockTemplateChoice::Asme,
         DrawingSheetTitleBlockTemplate::OrganizationManaged => {
             TitleBlockTemplateChoice::Organization
         }
@@ -1029,6 +1093,7 @@ fn title_template_to_model(value: TitleBlockTemplateChoice) -> DrawingSheetTitle
     match value {
         TitleBlockTemplateChoice::Compact => DrawingSheetTitleBlockTemplate::Compact,
         TitleBlockTemplateChoice::Standard => DrawingSheetTitleBlockTemplate::Standard,
+        TitleBlockTemplateChoice::Asme => DrawingSheetTitleBlockTemplate::AsmeY141,
         TitleBlockTemplateChoice::Organization => {
             DrawingSheetTitleBlockTemplate::OrganizationManaged
         }

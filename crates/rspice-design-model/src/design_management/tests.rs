@@ -3,6 +3,7 @@
 use super::*;
 
 mod annotation_allocation;
+mod asme_form;
 mod drawing_sheet_release;
 mod frame;
 mod manual_annotation;
@@ -2685,6 +2686,7 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
         DrawingSheetTitleFieldId::DocumentType,
         DrawingSheetTitleFieldId::DocumentStatus,
         DrawingSheetTitleFieldId::Language,
+        DrawingSheetTitleFieldId::CageCode,
     ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()
@@ -2758,14 +2760,15 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
     }
     // Checked by is not one of the standard's fields, Classification is set
     // by a release policy, the language code is optional, Paper size
-    // restates the sheet in hand, and the project's name already leads
-    // Cell / view.
+    // restates the sheet in hand, the project's name already leads Cell /
+    // view, and the CAGE code belongs to the ASME form.
     let hidden = [
         DrawingSheetTitleFieldId::Project,
         DrawingSheetTitleFieldId::CheckedBy,
         DrawingSheetTitleFieldId::Classification,
         DrawingSheetTitleFieldId::PaperSize,
         DrawingSheetTitleFieldId::Language,
+        DrawingSheetTitleFieldId::CageCode,
     ];
     for field in hidden {
         assert!(

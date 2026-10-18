@@ -510,10 +510,21 @@ fn paint_title_block(
         transform(authored.right_bottom()),
         transform(authored.left_bottom()),
     ];
+    // The plot's widths in proportion: ISO 7200's 0.7 mm outline and 0.35 mm
+    // rules draw at 1 and 0.55 points, and the ASME form's thick and thin
+    // lines in the same ratio.
+    let outline_width =
+        layout.outline_um as f32 / crate::state::DRAWING_SHEET_TITLE_OUTLINE_UM as f32;
+    let rule_stroke = |width_um: u64| {
+        Stroke::new(
+            0.55 * width_um as f32 / crate::state::DRAWING_SHEET_TITLE_RULE_UM as f32,
+            palette.zone,
+        )
+    };
     ui.painter().add(Shape::convex_polygon(
         outline.to_vec(),
         palette.block,
-        Stroke::new(1.0, palette.border),
+        Stroke::new(outline_width, palette.border),
     ));
     let x_at =
         |x_um: u64| authored.left() + authored.width() * x_um as f32 / layout.width_um as f32;
@@ -575,7 +586,7 @@ fn paint_title_block(
                 transform(pos2(x_at(rule.from_x_um), y_at(rule.from_y_um))),
                 transform(pos2(x_at(rule.to_x_um), y_at(rule.to_y_um))),
             ],
-            line_stroke,
+            rule_stroke(rule.width_um),
         );
     }
     // At preview scale, field text would become an illegible grey smear.

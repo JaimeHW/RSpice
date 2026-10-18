@@ -28,7 +28,6 @@ use rspice_design::schematic::{
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{
     DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_BLOCK_LETTERING,
-    DRAWING_SHEET_TITLE_CELL_PADDING_UM, DRAWING_SHEET_TITLE_OUTLINE_UM,
     DRAWING_SHEET_TITLE_RULE_UM, DrawingSheetDisplayUnit, DrawingSheetFrameArtwork,
     DrawingSheetFrameLayer, DrawingSheetFrameMark,
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
@@ -1304,14 +1303,17 @@ fn draw_title_block(
     ];
     // The plot's line widths, magnified with the sheet as its lettering is.
     let pixels_per_point = painter.ctx().pixels_per_point();
+    let effective_template = sheet.geometry.physical.effective_title_block_template;
     let outline_stroke = Stroke::new(
-        title_line_width(DRAWING_SHEET_TITLE_OUTLINE_UM, zoom, pixels_per_point),
+        title_line_width(effective_template.outline_um(), zoom, pixels_per_point),
         palette.border,
     );
-    let rule_stroke = Stroke::new(
-        title_line_width(DRAWING_SHEET_TITLE_RULE_UM, zoom, pixels_per_point),
-        palette.zone,
-    );
+    let rule_stroke = |width_um: u64| {
+        Stroke::new(
+            title_line_width(width_um, zoom, pixels_per_point),
+            palette.zone,
+        )
+    };
     painter.add(Shape::convex_polygon(
         outline.to_vec(),
         palette.block,
@@ -1328,7 +1330,6 @@ fn draw_title_block(
     let y_at = |y_um: u64| {
         authored_block.top() + authored_block.height() * y_um as f32 / layout.height_um as f32
     };
-    let effective_template = sheet.geometry.physical.effective_title_block_template;
     let mut field_grid = authored_block;
     field_grid.min.x = x_at(layout.grid_x_um);
     if let Some(logo) = sheet.format.title_block_logo(effective_template) {
@@ -1337,7 +1338,7 @@ fn draw_title_block(
                 transform(pos2(field_grid.left(), authored_block.top())),
                 transform(pos2(field_grid.left(), authored_block.bottom())),
             ],
-            rule_stroke,
+            rule_stroke(DRAWING_SHEET_TITLE_RULE_UM),
         );
         draw_managed_title_logo(
             painter,
@@ -1357,17 +1358,17 @@ fn draw_title_block(
     if fields.is_empty() {
         return;
     }
-    // Each cell's own rules, each drawn once.
+    // Each cell's own rules, each drawn once at its own width.
     for rule in &layout.rules {
         painter.line_segment(
             [
                 transform(pos2(x_at(rule.from_x_um), y_at(rule.from_y_um))),
                 transform(pos2(x_at(rule.to_x_um), y_at(rule.to_y_um))),
             ],
-            rule_stroke,
+            rule_stroke(rule.width_um),
         );
     }
-    let padding = authored_title_cell_padding() * zoom;
+    let padding = authored_title_cell_padding(layout.padding_um) * zoom;
     for line in layout.lettering(&fields) {
         let cell = &layout.cells[line.cell];
         let authored_cell = Rect::from_min_max(
@@ -1427,8 +1428,8 @@ fn title_line_width(width_um: u64, zoom: f32, pixels_per_point: f32) -> f32 {
 /// Canvas and hardcopy inset by the same physical amount, and the character
 /// budget subtracts exactly this much from the cell, so a padding that drifts
 /// with zoom would put the budget and the painted text back out of step.
-fn authored_title_cell_padding() -> f32 {
-    DRAWING_SHEET_TITLE_CELL_PADDING_UM as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
+fn authored_title_cell_padding(padding_um: u64) -> f32 {
+    padding_um as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
 }
 
 fn draw_managed_title_logo(

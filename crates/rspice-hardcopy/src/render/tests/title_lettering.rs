@@ -593,3 +593,93 @@ fn plotted_zone_references_stand_centred_in_their_band() {
         );
     }
 }
+
+#[test]
+fn an_asme_sheet_plots_the_form_the_canvas_draws_in_its_line_weights() {
+    // ASME Y14.2's thick 0.6 mm line on the outline and the main divisions,
+    // its thin 0.3 mm line on the subdivisions, and every line the layout
+    // letters, at the layout's heights.
+    for standard in [
+        DrawingSheetStandard::AnsiB,
+        DrawingSheetStandard::AnsiD,
+        DrawingSheetStandard::ArchD,
+    ] {
+        let format = filled_in(&SchematicSheetFormat::from_standard(
+            standard,
+            SchematicPageOrientation::Landscape,
+        ));
+        assert_eq!(
+            format.title_block.template,
+            DrawingSheetTitleBlockTemplate::AsmeY141
+        );
+        assert_eq!(
+            plotted_title_lines(&format),
+            laid_out_title_lines(&format),
+            "{standard:?}"
+        );
+        let source = resolved_blank_schematic(&format);
+        let schematic = SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+        );
+        let scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            schematic,
+            resolved_metadata(),
+        )
+        .unwrap();
+        let outlines = scene
+            .primitives()
+            .iter()
+            .filter_map(|primitive| match primitive {
+                ScenePrimitive::Rect {
+                    stroke: Some(stroke),
+                    ..
+                } => Some(stroke.width.micrometres()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(outlines, [600], "{standard:?}");
+        let mut plotted = scene
+            .primitives()
+            .iter()
+            .filter_map(|primitive| match primitive {
+                ScenePrimitive::Line { stroke, .. } => Some(stroke.width.micrometres()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let layout = drawing_sheet_title_layout(&format, &format.geometry().unwrap()).unwrap();
+        let mut laid_out = layout
+            .rules
+            .iter()
+            .map(|rule| rule.width_um)
+            .collect::<Vec<_>>();
+        plotted.sort_unstable();
+        laid_out.sort_unstable();
+        assert_eq!(plotted, laid_out, "{standard:?}");
+        assert_eq!(
+            plotted.iter().filter(|width| **width == 600).count(),
+            4,
+            "{standard:?}: three rules across the block and the one beside E"
+        );
+        let text = plotted_title_lines(&format)
+            .into_iter()
+            .map(|(_, _, text)| text)
+            .collect::<Vec<_>>();
+        for heading in [
+            "TITLE", "SIZE", "DAI", "DWG NO", "REV", "SCALE", "NONE", "WEIGHT",
+        ] {
+            assert!(
+                text.iter().any(|line| line == heading),
+                "{standard:?} {text:?}"
+            );
+        }
+    }
+}

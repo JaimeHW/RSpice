@@ -257,18 +257,26 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
         DrawingSheetTitleBlockTemplate::Compact
     );
     assert!(!narrow.title_block_substituted());
-    for wide in [
-        SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::AnsiA,
-            SchematicPageOrientation::Landscape,
+    // An ANSI sheet, and a size started from one, starts on ASME Y14.1's
+    // form instead.
+    for (wide, template) in [
+        (
+            SchematicSheetFormat::from_standard(
+                DrawingSheetStandard::AnsiA,
+                SchematicPageOrientation::Landscape,
+            ),
+            DrawingSheetTitleBlockTemplate::AsmeY141,
         ),
-        crate::custom_format("Panel", 250_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
-        crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::AnsiA).unwrap(),
+        (
+            crate::custom_format("Panel", 250_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
+            DrawingSheetTitleBlockTemplate::Standard,
+        ),
+        (
+            crate::custom_format("Panel", 420_000, 297_000, crate::StartingFrame::AnsiA).unwrap(),
+            DrawingSheetTitleBlockTemplate::AsmeY141,
+        ),
     ] {
-        assert_eq!(
-            wide.title_block.template,
-            DrawingSheetTitleBlockTemplate::Standard
-        );
+        assert_eq!(wide.title_block.template, template);
         assert!(!wide.title_block_substituted());
     }
 
@@ -661,6 +669,7 @@ fn an_organization_template_sealed_while_paper_size_was_withdrawn_still_loads() 
         DrawingSheetTitleFieldId::PaperSize,
         DrawingSheetTitleFieldId::DocumentStatus,
         DrawingSheetTitleFieldId::Language,
+        DrawingSheetTitleFieldId::CageCode,
     ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()

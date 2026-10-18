@@ -9,7 +9,8 @@ use rspice_design::schematic::{
     wire::Wire,
 };
 use rspice_design_model::design_management::{
-    DrawingSheetStandard, DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZones,
+    DRAWING_SHEET_TITLE_OUTLINE_UM, DrawingSheetStandard, DrawingSheetZoneEdges,
+    DrawingSheetZoneGrid, DrawingSheetZones,
 };
 use rspice_design_model::{SchematicPageOrientation, SchematicPageSize};
 
@@ -603,6 +604,83 @@ fn title_block_lines_are_the_plots_widths_magnified_with_the_sheet() {
         })
         .expect("the outline is painted");
     assert!((outline - 2.8).abs() < 1e-4);
+}
+
+#[test]
+fn an_asme_sheet_paints_the_forms_lines_and_lettering_the_plot_prints() {
+    use rspice_design_model::design_management::{
+        DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId as Field,
+    };
+    for standard in [
+        DrawingSheetStandard::AnsiB,
+        DrawingSheetStandard::AnsiD,
+        DrawingSheetStandard::ArchD,
+    ] {
+        let format =
+            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape);
+        assert_eq!(
+            format.title_block.template,
+            DrawingSheetTitleBlockTemplate::AsmeY141
+        );
+        let sheet = ActiveDrawingSheet {
+            geometry: DrawingSheetGeometry::from_format(&format),
+            format,
+            sheet_name: "top".to_owned(),
+            page_label: "1 of 3".to_owned(),
+        };
+        let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
+            &sheet.format,
+            &[
+                (Field::Page, "1 of 3".to_owned()),
+                (Field::DocumentId, "RS-0042".to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical).unwrap();
+        let shapes = painted_title_block(&sheet, &fields);
+        // The 0.6 mm outline and each rule at its own width, magnified as
+        // the plot's widths are.
+        let outline = shapes
+            .iter()
+            .find_map(|shape| match shape {
+                Shape::Path(path) => Some(path.stroke.width),
+                _ => None,
+            })
+            .expect("the outline is painted");
+        assert!((outline - title_line_width(600, 1.0, 1.0)).abs() < 1e-4);
+        let mut painted = shapes
+            .iter()
+            .filter_map(|shape| match shape {
+                Shape::LineSegment { stroke, .. } => Some(stroke.width),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut laid_out = layout
+            .rules
+            .iter()
+            .map(|rule| title_line_width(rule.width_um, 1.0, 1.0))
+            .collect::<Vec<_>>();
+        painted.sort_by(f32::total_cmp);
+        laid_out.sort_by(f32::total_cmp);
+        assert_eq!(painted, laid_out, "{standard:?}");
+        let text = lettered_text(&shapes);
+        assert_eq!(
+            text,
+            layout
+                .lettering(&fields)
+                .into_iter()
+                .map(|line| line.text)
+                .collect::<Vec<_>>(),
+            "{standard:?}"
+        );
+        for line in ["SHEET", "1 OF 3", "SCALE", "NONE", "RS-0042"] {
+            assert!(
+                text.iter().any(|text| text == line),
+                "{standard:?} {text:?}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -11,8 +11,10 @@
 //! short on one and whole on the other.
 //!
 //! The rules are the cells' own edges: every edge that is not the block's
-//! outline is ruled once, and edges that meet end to end are one rule. No
-//! rule runs across the block on its own.
+//! outline is ruled once, and edges of one width that meet end to end are one
+//! rule. No rule runs across the block on its own. Each rule and the outline
+//! carry the width the block's standard prints them at, so every surface
+//! draws the same weights.
 //!
 //! The layout depends on which fields a sheet shows and never on what they
 //! hold, so a cell does not move while a value is typed into it, and a
@@ -97,6 +99,10 @@ pub struct DrawingSheetTitleValue {
     pub emphasised: bool,
     pub max_lines: u8,
     pub line_pitch_um: u64,
+    /// Whether the value is lettered in capitals whatever case it is
+    /// supplied in: wording RSpice supplies on a form whose standard letters
+    /// in capitals, such as `1 OF 3` on an ASME sheet.
+    pub upper_case: bool,
 }
 
 impl DrawingSheetTitleValue {
@@ -132,7 +138,12 @@ impl DrawingSheetTitleValue {
     }
 
     fn wrap(self, value: &str) -> (Vec<String>, bool) {
-        wrap_title_text(value, self.capacity(), usize::from(self.max_lines.max(1)))
+        let value = if self.upper_case {
+            std::borrow::Cow::Owned(value.to_uppercase())
+        } else {
+            std::borrow::Cow::Borrowed(value)
+        };
+        wrap_title_text(&value, self.capacity(), usize::from(self.max_lines.max(1)))
     }
 }
 
@@ -184,6 +195,8 @@ pub struct DrawingSheetTitleRule {
     pub from_y_um: u64,
     pub to_x_um: u64,
     pub to_y_um: u64,
+    /// Width of the line on paper.
+    pub width_um: u64,
 }
 
 /// What a line of title-block lettering is.
@@ -222,23 +235,58 @@ pub struct DrawingSheetTitleLayout {
     pub cells: Vec<DrawingSheetTitleCell>,
     /// Every rule between cells, each drawn once.
     pub rules: Vec<DrawingSheetTitleRule>,
+    /// Width of the block's outline on paper.
+    pub outline_um: u64,
+    /// Space between a cell's rules and the lettering inside them; each
+    /// line's character budget already leaves it on both sides.
+    pub padding_um: u64,
 }
 
 impl DrawingSheetTitleLayout {
+    /// The cells of an ISO 7200 block or a flowed grid: the outline is ISO
+    /// 128-20's wide line and every rule its narrow line.
     pub(super) fn from_cells(
         width_um: u64,
         height_um: u64,
         grid_x_um: u64,
         cells: Vec<DrawingSheetTitleCell>,
     ) -> Self {
-        let rules = cell_rules(&cells, width_um, height_um, grid_x_um);
-        Self {
+        let mut layout = Self {
             width_um,
             height_um,
             grid_x_um,
+            rules: Vec::new(),
             cells,
-            rules,
-        }
+            outline_um: DRAWING_SHEET_TITLE_OUTLINE_UM,
+            padding_um: DRAWING_SHEET_TITLE_CELL_PADDING_UM,
+        };
+        layout.rules = cell_rules(&layout, |_| DRAWING_SHEET_TITLE_RULE_UM);
+        layout
+    }
+
+    /// The cells of a form whose standard rules some divisions heavier than
+    /// others: `rule_um` gives the width of each stretch of a cell's edge,
+    /// handed over as a rule of zero width, and stretches of one width that
+    /// meet end to end are one rule.
+    pub(super) fn from_weighted_cells(
+        width_um: u64,
+        height_um: u64,
+        cells: Vec<DrawingSheetTitleCell>,
+        outline_um: u64,
+        padding_um: u64,
+        rule_um: impl Fn(DrawingSheetTitleRule) -> u64,
+    ) -> Self {
+        let mut layout = Self {
+            width_um,
+            height_um,
+            grid_x_um: 0,
+            rules: Vec::new(),
+            cells,
+            outline_um,
+            padding_um,
+        };
+        layout.rules = cell_rules(&layout, rule_um);
+        layout
     }
 
     #[must_use]
@@ -327,6 +375,9 @@ pub fn drawing_sheet_title_layout(
         DrawingSheetTitleBlockTemplate::Standard => {
             Some(iso_7200_form_layout(format, width_um, height_um))
         }
+        DrawingSheetTitleBlockTemplate::AsmeY141 => format
+            .asme_title_block_form()
+            .map(|form| asme_y14_1_form_layout(format, form)),
         DrawingSheetTitleBlockTemplate::Compact
         | DrawingSheetTitleBlockTemplate::OrganizationManaged => {
             flowed_title_layout(format, template, width_um, height_um)
@@ -390,63 +441,68 @@ fn wrap_title_text(text: &str, max_chars: usize, max_lines: usize) -> (Vec<Strin
     (lines, false)
 }
 
-/// The rules of `cells`: every edge that is not the outline of the block or
-/// of its field area, merged so that edges meeting end to end, or shared by
-/// two cells, are one rule drawn once.
+/// The rules of `layout`'s cells: every edge that is not the outline of the
+/// block or of its field area, each at the width `rule_um` gives it, merged
+/// so that edges of one width meeting end to end, or shared by two cells, are
+/// one rule drawn once.
 fn cell_rules(
-    cells: &[DrawingSheetTitleCell],
-    width_um: u64,
-    height_um: u64,
-    grid_x_um: u64,
+    layout: &DrawingSheetTitleLayout,
+    rule_um: impl Fn(DrawingSheetTitleRule) -> u64,
 ) -> Vec<DrawingSheetTitleRule> {
-    // (position across, start, end) for each orientation.
+    let (width_um, height_um, grid_x_um) = (layout.width_um, layout.height_um, layout.grid_x_um);
+    // (position across, width, start, end) for each orientation.
     let mut horizontal = Vec::new();
     let mut vertical = Vec::new();
-    for cell in cells {
+    let rule = |from: (u64, u64), to: (u64, u64)| DrawingSheetTitleRule {
+        from_x_um: from.0,
+        from_y_um: from.1,
+        to_x_um: to.0,
+        to_y_um: to.1,
+        width_um: 0,
+    };
+    for cell in &layout.cells {
         let (left, top) = (cell.x_um, cell.y_um);
         let (right, bottom) = (left + cell.width_um, top + cell.height_um);
         for y in [top, bottom] {
             if y > 0 && y < height_um {
-                horizontal.push((y, left, right));
+                horizontal.push((y, rule_um(rule((left, y), (right, y))), left, right));
             }
         }
         for x in [left, right] {
             if x > grid_x_um && x < width_um {
-                vertical.push((x, top, bottom));
+                vertical.push((x, rule_um(rule((x, top), (x, bottom))), top, bottom));
             }
         }
     }
     let mut rules = merge_runs(horizontal)
         .into_iter()
-        .map(|(y, from, to)| DrawingSheetTitleRule {
-            from_x_um: from,
-            from_y_um: y,
-            to_x_um: to,
-            to_y_um: y,
+        .map(|(y, width_um, from, to)| DrawingSheetTitleRule {
+            width_um,
+            ..rule((from, y), (to, y))
         })
         .collect::<Vec<_>>();
     rules.extend(
         merge_runs(vertical)
             .into_iter()
-            .map(|(x, from, to)| DrawingSheetTitleRule {
-                from_x_um: x,
-                from_y_um: from,
-                to_x_um: x,
-                to_y_um: to,
+            .map(|(x, width_um, from, to)| DrawingSheetTitleRule {
+                width_um,
+                ..rule((x, from), (x, to))
             }),
     );
     rules
 }
 
-/// Collinear segments merged wherever they overlap or meet.
-fn merge_runs(mut runs: Vec<(u64, u64, u64)>) -> Vec<(u64, u64, u64)> {
-    runs.retain(|&(_, from, to)| to > from);
+/// Collinear segments of one width merged wherever they overlap or meet.
+fn merge_runs(mut runs: Vec<(u64, u64, u64, u64)>) -> Vec<(u64, u64, u64, u64)> {
+    runs.retain(|&(_, _, from, to)| to > from);
     runs.sort_unstable();
-    let mut merged: Vec<(u64, u64, u64)> = Vec::with_capacity(runs.len());
-    for (at, from, to) in runs {
+    let mut merged: Vec<(u64, u64, u64, u64)> = Vec::with_capacity(runs.len());
+    for (at, width_um, from, to) in runs {
         match merged.last_mut() {
-            Some(last) if last.0 == at && from <= last.2 => last.2 = last.2.max(to),
-            _ => merged.push((at, from, to)),
+            Some(last) if last.0 == at && last.1 == width_um && from <= last.3 => {
+                last.3 = last.3.max(to);
+            }
+            _ => merged.push((at, width_um, from, to)),
         }
     }
     merged

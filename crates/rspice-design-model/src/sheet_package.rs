@@ -252,6 +252,7 @@ impl RetiredSpellings {
         match template {
             DrawingSheetTitleBlockTemplate::Compact => Some("compact"),
             DrawingSheetTitleBlockTemplate::Standard => Some("standard"),
+            DrawingSheetTitleBlockTemplate::AsmeY141 => Some("asme-y14-1"),
             DrawingSheetTitleBlockTemplate::None
             | DrawingSheetTitleBlockTemplate::OrganizationManaged => None,
         }
@@ -270,6 +271,7 @@ impl RetiredSpellings {
         match template {
             DrawingSheetTitleBlockTemplate::Compact => "builtin/compact",
             DrawingSheetTitleBlockTemplate::Standard => "builtin/standard",
+            DrawingSheetTitleBlockTemplate::AsmeY141 => "builtin/asme-y14-1",
             DrawingSheetTitleBlockTemplate::OrganizationManaged => "organization-managed",
             DrawingSheetTitleBlockTemplate::None => "none",
         }

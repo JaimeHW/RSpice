@@ -27,10 +27,10 @@ use crate::schematic::view::drawing_sheet::{
 };
 use crate::schematic::view::frame_symbol_context;
 use crate::state::{
-    AuthoredDrawingSheetSize, DrawingSheetReleaseStatus, DrawingSheetStandard,
-    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
-    NetNamingPolicy, SchematicGridPitch, SchematicPageOrientation, SchematicSheetFormat, SheetId,
-    drawing_sheet_revision_advisory,
+    AuthoredDrawingSheetSize, DrawingSheetFrameConvention, DrawingSheetReleaseStatus,
+    DrawingSheetStandard, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
+    DrawingSheetTitleFieldValueAuthority, NetNamingPolicy, SchematicGridPitch,
+    SchematicPageOrientation, SchematicSheetFormat, SheetId, drawing_sheet_revision_advisory,
 };
 use crate::ui::icons::Icon;
 use crate::ui::widgets::Button;
@@ -50,22 +50,26 @@ use rspice_ui_kit::panels::{section_header, section_header_explained};
 /// The Size menu's entry for a size the standard list does not hold.
 const CUSTOM_SIZE: &str = "custom";
 
-/// The title-block templates a sheet on `current` can choose for itself:
-/// ISO 7200's form, or none. The compact block is offered only to a sheet
-/// already on it, beside the form that replaces it, and the organization
-/// block is assigned by the organization, never chosen here.
-fn template_choices(
-    current: DrawingSheetTitleBlockTemplate,
-) -> Vec<DrawingSheetTitleBlockTemplate> {
-    let compact = (current == DrawingSheetTitleBlockTemplate::Compact)
-        .then_some(DrawingSheetTitleBlockTemplate::Compact);
-    compact
-        .into_iter()
-        .chain([
-            DrawingSheetTitleBlockTemplate::Standard,
-            DrawingSheetTitleBlockTemplate::None,
-        ])
-        .collect()
+/// The title-block templates `format`'s sheet can choose for itself: ISO
+/// 7200's form, ASME Y14.1's on an ANSI or ARCH sheet, or none. A block the
+/// sheet is already on stays offered beside them, and the organization block
+/// is assigned by the organization, never chosen here.
+fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlockTemplate> {
+    let current = format.title_block.template;
+    let asme_format = format.frame_convention() == DrawingSheetFrameConvention::AsmeY141;
+    [
+        DrawingSheetTitleBlockTemplate::Compact,
+        DrawingSheetTitleBlockTemplate::Standard,
+        DrawingSheetTitleBlockTemplate::AsmeY141,
+        DrawingSheetTitleBlockTemplate::None,
+    ]
+    .into_iter()
+    .filter(|choice| match choice {
+        DrawingSheetTitleBlockTemplate::Compact => current == *choice,
+        DrawingSheetTitleBlockTemplate::AsmeY141 => asme_format || current == *choice,
+        _ => true,
+    })
+    .collect()
 }
 
 pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
@@ -268,14 +272,14 @@ fn title_block_section(
     let template = format.title_block.template;
     let managed = template == DrawingSheetTitleBlockTemplate::OrganizationManaged;
     if editable && !managed {
-        let templates = template_choices(template);
-        let mut selected = template_name(template).to_owned();
+        let templates = template_choices(format);
+        let mut selected = template_name(format, template).to_owned();
         let choices = templates
             .iter()
             .map(|choice| {
                 (
-                    template_name(*choice).to_owned(),
-                    template_name(*choice).to_owned(),
+                    template_name(format, *choice).to_owned(),
+                    template_name(format, *choice).to_owned(),
                 )
             })
             .collect::<Vec<_>>();
@@ -288,12 +292,12 @@ fn title_block_section(
             true,
         ) && let Some(choice) = templates
             .into_iter()
-            .find(|choice| template_name(*choice) == selected)
+            .find(|choice| template_name(format, *choice) == selected)
         {
             *edit = Some(DrawingSheetEdit::TitleBlock(choice));
         }
     } else {
-        property_row(ui, "Template", template_name(template));
+        property_row(ui, "Template", template_name(format, template));
     }
     if format.title_block_substituted() {
         problem_line(
@@ -302,12 +306,12 @@ fn title_block_section(
             &match sheet.geometry.physical.effective_title_block_template {
                 DrawingSheetTitleBlockTemplate::None => format!(
                     "{} doesn't fit this sheet's drawing area; no title block is printed.",
-                    template_name(template)
+                    template_name(format, template)
                 ),
                 printed => format!(
                     "{} doesn't fit this size; {} is printed.",
-                    template_name(template),
-                    template_name(printed)
+                    template_name(format, template),
+                    template_name(format, printed)
                 ),
             },
         );
@@ -620,9 +624,13 @@ const fn orientation_label(orientation: SchematicPageOrientation) -> &'static st
     }
 }
 
-/// The template's one name, as Page Setup and every other surface give it.
-const fn template_name(template: DrawingSheetTitleBlockTemplate) -> &'static str {
-    template.label()
+/// The template's one name on `format`'s sheet, as Page Setup and every
+/// other surface give it.
+fn template_name(
+    format: &SchematicSheetFormat,
+    template: DrawingSheetTitleBlockTemplate,
+) -> &'static str {
+    format.title_block_template_label(template)
 }
 
 /// How many objects stand outside the drawing area, and where.

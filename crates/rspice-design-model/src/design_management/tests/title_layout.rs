@@ -422,12 +422,14 @@ fn the_iso_forms_vertical_rules_stand_on_a_common_grid() {
         from_y_um: 0,
         to_x_um: 47_500,
         to_y_um: 45_000,
+        width_um: DRAWING_SHEET_TITLE_RULE_UM,
     }));
     assert!(layout.rules.contains(&DrawingSheetTitleRule {
         from_x_um: 110_000,
         from_y_um: 11_250,
         to_x_um: 110_000,
         to_y_um: 45_000,
+        width_um: DRAWING_SHEET_TITLE_RULE_UM,
     }));
     let mut rules = layout.rules.clone();
     rules.sort_unstable();
@@ -658,15 +660,16 @@ fn the_compact_block_letters_its_fixed_form_values_whole() {
 
 /// A sheet that shows every field on the compact block — how sheets were
 /// saved before fields could be hidden, so every field but the language code
-/// they never had — has more to letter than the block holds. The free text
-/// gives way, then the document status; a page number, revision, paper size,
-/// date or classification is still lettered whole, and every caption is.
+/// and CAGE code they never had — has more to letter than the block holds.
+/// The free text gives way, then the document status; a page number,
+/// revision, paper size, date or classification is still lettered whole, and
+/// every caption is.
 #[test]
 fn an_overfull_block_cuts_free_text_and_keeps_fixed_forms_whole() {
     let compact = on(DrawingSheetTitleBlockTemplate::Compact);
     let saved = DrawingSheetTitleFieldId::ALL
         .into_iter()
-        .filter(|field| *field != Field::Language)
+        .filter(|field| !matches!(field, Field::Language | Field::CageCode))
         .collect::<Vec<_>>();
     let every = showing(&compact, &saved);
     let layout = layout_of(&every);
@@ -904,6 +907,7 @@ fn a_value_longer_than_its_cell_is_cut_with_an_ellipsis() {
         emphasised: false,
         max_lines: 1,
         line_pitch_um: 0,
+        upper_case: false,
     };
     assert_eq!(value(5).letter("ABCDEFG"), ["ABCD…"]);
     assert!(value(5).elides("ABCDEFG"));

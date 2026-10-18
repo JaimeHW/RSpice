@@ -696,7 +696,9 @@ fn section_detail(state: &DrawingSheetSetupState, section: DrawingSheetSection) 
                 state.draft.zone_columns, state.draft.zone_rows
             ),
         },
-        DrawingSheetSection::TitleBlock => state.draft.title_block.label().to_owned(),
+        DrawingSheetSection::TitleBlock => {
+            state.draft.title_block.label_on(&state.draft).to_owned()
+        }
         DrawingSheetSection::Scope => match state.draft.scope {
             PageSetupScope::CurrentSheet => "this sheet".to_owned(),
             PageSetupScope::Document => format!("{} sheets", state.sheet_count),
@@ -1183,17 +1185,11 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
         |ui| {
             egui::ComboBox::from_id_salt("drawing-sheet-title-template")
                 .width(ui.available_width())
-                .selected_text(state.draft.title_block.label())
+                .selected_text(state.draft.title_block.label_on(&state.draft))
                 .show_ui(ui, |ui| {
-                    // The compact block is offered only to a sheet already on
-                    // it, beside the ISO 7200 form that replaces it.
-                    let on_compact =
-                        state.baseline.title_block == TitleBlockTemplateChoice::Compact;
-                    for choice in TitleBlockTemplateChoice::ALL.into_iter().filter(|choice| {
-                        *choice != TitleBlockTemplateChoice::Organization
-                            && (*choice != TitleBlockTemplateChoice::Compact || on_compact)
-                    }) {
-                        ui.selectable_value(&mut state.draft.title_block, choice, choice.label());
+                    for choice in state.draft.offered_title_blocks(state.baseline.title_block) {
+                        let label = choice.label_on(&state.draft);
+                        ui.selectable_value(&mut state.draft.title_block, choice, label);
                     }
                 });
         },
@@ -1219,7 +1215,7 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
             }
             printed => format!(
                 "Does not fit this drawing area — {} will be drawn. The requested choice stays saved.",
-                printed.label(),
+                validated.page_format.title_block_template_label(printed),
             ),
         };
         ui.add_space(6.0);
@@ -1233,7 +1229,12 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
         );
     }
     ui.add_space(14.0);
-    let enabled = state.draft.title_block != TitleBlockTemplateChoice::None;
+    // ASME Y14.1 places its block upright in the lower right corner, so the
+    // ASME form is placed nowhere else.
+    let enabled = !matches!(
+        state.draft.title_block,
+        TitleBlockTemplateChoice::None | TitleBlockTemplateChoice::Asme
+    );
     ui.add_enabled_ui(enabled, |ui| {
         two_column(ui, |left, right| {
             field_caption(left, "Anchor");

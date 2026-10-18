@@ -538,7 +538,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             "layer:drawing-sheet-title-block",
             StrokeStyle::try_new(
                 SemanticColor::Foreground,
-                Length::from_micrometres(DRAWING_SHEET_TITLE_OUTLINE_UM),
+                Length::from_micrometres(geometry.effective_title_block_template.outline_um()),
                 StrokePattern::Solid,
                 None,
             )?,

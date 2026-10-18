@@ -58,6 +58,8 @@ impl DrawingSheetTitleFieldId {
             Self::DocumentStatus => longest_release_status_chars(),
             Self::Classification => 12,
             Self::Language => 3,
+            // A CAGE code is five characters.
+            Self::CageCode => 5,
             // Free text. A project name is a short identifier, and in a
             // single-library workspace it also leads `Cell / view`.
             Self::Project => 10,
@@ -83,6 +85,7 @@ impl DrawingSheetTitleFieldId {
                 | Self::DocumentStatus
                 | Self::Classification
                 | Self::Language
+                | Self::CageCode
         )
     }
 
@@ -196,6 +199,7 @@ pub(super) fn flowed_title_layout(
                     emphasised: id.emphasised(),
                     max_lines: 1,
                     line_pitch_um: 0,
+                    upper_case: false,
                 }],
             }
         })

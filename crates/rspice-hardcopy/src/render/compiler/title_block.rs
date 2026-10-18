@@ -19,17 +19,15 @@ impl SemanticSceneCompiler<'_> {
             stroke: Some(stroke),
             fill: None,
         });
-        // The outline is ISO 128-20's wide line; the rules inside it, and a
-        // managed logo's artwork, are the narrow line at half its width,
-        // whatever width a print mapping gives the outline.
-        let rule = StrokeStyle {
-            width: Length::from_micrometres(
-                stroke.width.micrometres()
-                    * rspice_design_model::design_management::DRAWING_SHEET_TITLE_RULE_UM
-                    / rspice_design_model::design_management::DRAWING_SHEET_TITLE_OUTLINE_UM,
-            ),
+        // The outline is drawn at `stroke`; each rule inside it, and a
+        // managed logo's artwork, keeps its standard's proportion to the
+        // outline, whatever width a print mapping gives the outline.
+        let outline_um = template.outline_um();
+        let rule_of = |width_um: u64| StrokeStyle {
+            width: Length::from_micrometres(stroke.width.micrometres() * width_um / outline_um),
             ..stroke
         };
+        let rule = rule_of(rspice_design_model::design_management::DRAWING_SHEET_TITLE_RULE_UM);
         let rotation = format.title_block.rotation;
         let authored_block = authored_title_block_rect(block, rotation)?;
         let transform = |this: &Self, x: i64, y: i64| {
@@ -120,12 +118,12 @@ impl SemanticSceneCompiler<'_> {
         if fields.is_empty() {
             return Ok(());
         }
-        // Each cell's own rules, each drawn once.
+        // Each cell's own rules, each drawn once at its own width.
         for cell_rule in &layout.rules {
             self.primitives.push(ScenePrimitive::Line {
                 from: transform(self, at_x(cell_rule.from_x_um)?, at_y(cell_rule.from_y_um)?)?,
                 to: transform(self, at_x(cell_rule.to_x_um)?, at_y(cell_rule.to_y_um)?)?,
-                stroke: rule,
+                stroke: rule_of(cell_rule.width_um),
             });
         }
         // Every line sits on the seat the canvas also places it on. The

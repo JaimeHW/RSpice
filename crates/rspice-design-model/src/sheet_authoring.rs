@@ -83,17 +83,22 @@ pub fn custom_format(
             }
         })
         .map_err(|error| error.to_string())?;
-    // ISO 7200 and ASME Y14.1 both draw a title block about 180 mm wide.
-    // A sheet whose drawing area holds one starts on it; a narrower one keeps
-    // the compact block rather than one Page Setup would report as
-    // substituted.
-    if matches!(frame, StartingFrame::IsoA | StartingFrame::AnsiA)
-        && let Ok(iso_7200) = format.try_update(|draft| {
-            draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+    // A size started from ISO A takes ISO 7200's block and one started from
+    // ANSI A takes ASME Y14.1's. A sheet whose drawing area holds it starts
+    // on it; a narrower one keeps the compact block rather than one Page
+    // Setup would report as substituted.
+    let standard_block = match frame {
+        StartingFrame::IsoA => Some(DrawingSheetTitleBlockTemplate::Standard),
+        StartingFrame::AnsiA => Some(DrawingSheetTitleBlockTemplate::AsmeY141),
+        StartingFrame::None => None,
+    };
+    if let Some(template) = standard_block
+        && let Ok(standard) = format.try_update(|draft| {
+            draft.title_block.template = template;
         })
-        && !iso_7200.title_block_substituted()
+        && !standard.title_block_substituted()
     {
-        format = iso_7200;
+        format = standard;
     }
     Ok(format)
 }

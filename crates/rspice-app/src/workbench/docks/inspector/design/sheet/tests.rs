@@ -145,31 +145,46 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
     );
 }
 
-/// A sheet chooses ISO 7200's form or no block; the compact block is offered
-/// only to a sheet already on it.
+/// A sheet chooses ISO 7200's form, ASME Y14.1's on an ANSI or ARCH sheet,
+/// or no block; the compact block is offered only to a sheet already on it.
 #[test]
 fn the_compact_block_is_offered_only_to_a_sheet_on_it() {
+    use DrawingSheetTitleBlockTemplate as Template;
+    let on = |standard, template| {
+        SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape)
+            .try_update(|draft| draft.title_block.template = template)
+            .unwrap()
+    };
+    let a4 = DrawingSheetStandard::IsoA4;
     assert_eq!(
-        template_choices(DrawingSheetTitleBlockTemplate::Standard),
-        [
-            DrawingSheetTitleBlockTemplate::Standard,
-            DrawingSheetTitleBlockTemplate::None,
-        ]
+        template_choices(&on(a4, Template::Standard)),
+        [Template::Standard, Template::None]
     );
     assert_eq!(
-        template_choices(DrawingSheetTitleBlockTemplate::None),
-        [
-            DrawingSheetTitleBlockTemplate::Standard,
-            DrawingSheetTitleBlockTemplate::None,
-        ]
+        template_choices(&on(a4, Template::None)),
+        [Template::Standard, Template::None]
     );
     assert_eq!(
-        template_choices(DrawingSheetTitleBlockTemplate::Compact),
-        [
-            DrawingSheetTitleBlockTemplate::Compact,
-            DrawingSheetTitleBlockTemplate::Standard,
-            DrawingSheetTitleBlockTemplate::None,
-        ]
+        template_choices(&on(a4, Template::Compact)),
+        [Template::Compact, Template::Standard, Template::None]
+    );
+    for standard in [DrawingSheetStandard::AnsiB, DrawingSheetStandard::ArchD] {
+        assert_eq!(
+            template_choices(&on(standard, Template::AsmeY141)),
+            [Template::Standard, Template::AsmeY141, Template::None]
+        );
+        assert_eq!(
+            template_choices(&on(standard, Template::Standard)),
+            [Template::Standard, Template::AsmeY141, Template::None]
+        );
+    }
+    // The ASME form is named with the size of the block the sheet carries.
+    assert_eq!(
+        template_name(
+            &on(DrawingSheetStandard::AnsiD, Template::AsmeY141),
+            Template::AsmeY141
+        ),
+        "ASME Y14.1 · 7.62 × 2.50 in"
     );
 }
 

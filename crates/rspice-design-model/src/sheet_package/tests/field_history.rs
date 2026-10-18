@@ -326,10 +326,11 @@ fn canonical_entry(key: &str, visible: bool) -> String {
     format!(r#","{key}":{{"value":"","visible":{visible}}}"#)
 }
 
-/// `canonical` as a build without the language code wrote it: the field
-/// written last is the one it lacks, and each preset's frame, the ISO 5457
-/// frame of a custom size, is written as every build before the standard
-/// frames wrote it.
+/// `canonical` as a build without the language code wrote it: it lacks the
+/// language code and the CAGE code the ASME form has added since, which are
+/// the fields written last, and each preset's frame, the ISO 5457 frame of
+/// a custom size, is written as every build before the standard frames
+/// wrote it.
 fn without_language(canonical: &[u8]) -> String {
     const FRAME_AS_WRITTEN: &str = concat!(
         r#""margins":{"top_um":10000,"right_um":10000,"bottom_um":10000,"left_um":20000},"#,
@@ -338,14 +339,15 @@ fn without_language(canonical: &[u8]) -> String {
         r#""labels":"alpha-numeric","edges":"all"},"#,
         r#""marks":{"registration":true,"folding":false}"#,
     );
-    let today = String::from_utf8(canonical.to_vec()).unwrap();
-    let entry = canonical_entry("language", false);
-    assert!(today.contains(&entry), "{today}");
+    let mut today = String::from_utf8(canonical.to_vec()).unwrap();
+    for key in ["language", "cage-code"] {
+        let entry = canonical_entry(key, false);
+        assert!(today.contains(&entry), "{key}: {today}");
+        today = today.replacen(&entry, "", 1);
+    }
     let frame = frame_span(&custom_format("Frame", 250_000, 400_000, StartingFrame::IsoA).unwrap())
         .unwrap();
-    today
-        .replacen(&entry, "", 1)
-        .replace(std::str::from_utf8(&frame).unwrap(), FRAME_AS_WRITTEN)
+    today.replace(std::str::from_utf8(&frame).unwrap(), FRAME_AS_WRITTEN)
 }
 
 /// `canonical` as a build from before the document type and status, and

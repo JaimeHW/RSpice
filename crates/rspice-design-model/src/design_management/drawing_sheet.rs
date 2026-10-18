@@ -580,10 +580,16 @@ pub enum DrawingSheetTitleBlockTemplate {
     Standard,
     OrganizationManaged,
     None,
+    /// ASME Y14.1's block, drawn as the standard's form: Fig 5-1 on A to C
+    /// sizes and Fig 5-2 on D and larger, upright in the lower right corner.
+    #[serde(rename = "asme-y14-1")]
+    AsmeY141,
 }
 
 impl DrawingSheetTitleBlockTemplate {
-    /// The template's name wherever RSpice offers or reports it.
+    /// The template's name wherever RSpice offers or reports it without a
+    /// sheet to size it by. The ASME form's name gives its size on a sheet
+    /// (see [`SchematicSheetFormat::title_block_template_label`]).
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -591,16 +597,40 @@ impl DrawingSheetTitleBlockTemplate {
             Self::Standard => "ISO 7200 · 180 × 45 mm",
             Self::OrganizationManaged => "Organization block",
             Self::None => "No title block",
+            Self::AsmeY141 => "ASME Y14.1",
         }
     }
 
+    /// The block's size where it does not depend on the sheet. The ASME
+    /// form's does (see [`SchematicSheetFormat::asme_title_block_form`]).
     #[must_use]
     pub const fn dimensions_um(self) -> Option<(u64, u64)> {
         match self {
             Self::Compact => Some((130_000, 32_000)),
             Self::Standard => Some((180_000, 45_000)),
             Self::OrganizationManaged => Some((180_000, 50_000)),
-            Self::None => None,
+            Self::None | Self::AsmeY141 => None,
+        }
+    }
+
+    /// Width of the block's outline on paper: ASME Y14.2's thick line on the
+    /// ASME form, and ISO 128-20's wide line on every other block.
+    #[must_use]
+    pub const fn outline_um(self) -> u64 {
+        match self {
+            Self::AsmeY141 => 600,
+            Self::Compact | Self::Standard | Self::OrganizationManaged | Self::None => {
+                DRAWING_SHEET_TITLE_OUTLINE_UM
+            }
+        }
+    }
+
+    /// The block a new sheet of `convention`'s format starts on.
+    #[must_use]
+    pub const fn for_convention(convention: DrawingSheetFrameConvention) -> Self {
+        match convention {
+            DrawingSheetFrameConvention::Iso5457 => Self::Standard,
+            DrawingSheetFrameConvention::AsmeY141 => Self::AsmeY141,
         }
     }
 }
@@ -1172,6 +1202,18 @@ impl DrawingSheetTitleBlock {
         }
     }
 
+    /// ASME Y14.1 6.1 puts its block in the lower right corner of the
+    /// format, and its figures letter it upright, so a sheet on the ASME
+    /// form places it nowhere else.
+    fn normalize_placement(&mut self) {
+        if self.template == DrawingSheetTitleBlockTemplate::AsmeY141 {
+            self.anchor = DrawingSheetTitleBlockAnchor::BottomRight;
+            self.rotation = DrawingSheetTitleBlockRotation::Upright;
+            self.offset_x_um = 0;
+            self.offset_y_um = 0;
+        }
+    }
+
     fn validate(&self) -> Result<(), DesignManagementError> {
         self.scale.validate()?;
         match (&self.template, &self.managed_template) {
@@ -1475,6 +1517,7 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
         }
         format.title_block.normalize_title_field_set();
         format.title_block.normalize_managed_template();
+        format.title_block.normalize_placement();
         if legacy_title_block {
             // A sheet saved before title blocks were stored has always been
             // drawn naming its project, and keeps doing so: only new sheets
@@ -1505,6 +1548,7 @@ impl SchematicSheetFormat {
     ) -> Result<Self, DesignManagementError> {
         draft.title_block.normalize_managed_template();
         draft.title_block.normalize_title_field_set();
+        draft.title_block.normalize_placement();
         let mut format = Self {
             size: draft.authored_size.legacy_projection(),
             orientation: draft.orientation,
@@ -1621,7 +1665,7 @@ impl SchematicSheetFormat {
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
         };
-        format.start_on_iso_7200_title_block();
+        format.start_on_standard_title_block();
         format.fit_default_title_block();
         debug_assert!(format.validate().is_ok());
         format
@@ -1668,7 +1712,7 @@ impl SchematicSheetFormat {
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
         };
-        format.start_on_iso_7200_title_block();
+        format.start_on_standard_title_block();
         format.fit_default_title_block();
         format.validate()?;
         Ok(format)
@@ -1762,10 +1806,19 @@ impl SchematicSheetFormat {
     /// in gives way, and `title_block_substituted` reports that fact to Page
     /// Setup and inspection surfaces. ISO 7200's block is the same on every
     /// sheet ISO 5457 frames, so there it gives way to no block at all;
-    /// elsewhere a block gives way to the compact one.
+    /// elsewhere a block gives way to the compact one. The ASME form steps
+    /// down from Fig 5-2's block to Fig 5-1's, and gives way to no block
+    /// only where neither fits; it is never turned.
     #[must_use]
     pub fn effective_title_block_template(&self) -> DrawingSheetTitleBlockTemplate {
         let requested = self.title_block.template;
+        if requested == DrawingSheetTitleBlockTemplate::AsmeY141 {
+            return if self.asme_title_block_form().is_some() {
+                requested
+            } else {
+                DrawingSheetTitleBlockTemplate::None
+            };
+        }
         let Some((width_um, height_um)) = self.title_block_dimensions_um(requested) else {
             return DrawingSheetTitleBlockTemplate::None;
         };
@@ -1791,7 +1844,7 @@ impl SchematicSheetFormat {
 
     /// Width and height of the drawing area inside the frame, or `None` when
     /// the margins and the frame leave none.
-    fn drawing_area_extent_um(&self) -> Option<(u64, u64)> {
+    pub(super) fn drawing_area_extent_um(&self) -> Option<(u64, u64)> {
         let (paper_width_um, paper_height_um) = self.oriented_dimensions_um();
         let paper = DrawingSheetRect::new(0, 0, paper_width_um, paper_height_um);
         let printable = paper.inset_by(self.margins()).ok()?;
@@ -1812,13 +1865,16 @@ impl SchematicSheetFormat {
         &self,
         template: DrawingSheetTitleBlockTemplate,
     ) -> Option<(u64, u64)> {
-        if template == DrawingSheetTitleBlockTemplate::OrganizationManaged {
-            self.title_block
+        match template {
+            DrawingSheetTitleBlockTemplate::OrganizationManaged => self
+                .title_block
                 .managed_template
                 .as_ref()
-                .map(DrawingSheetManagedTemplateSnapshot::dimensions_um)
-        } else {
-            template.dimensions_um()
+                .map(DrawingSheetManagedTemplateSnapshot::dimensions_um),
+            DrawingSheetTitleBlockTemplate::AsmeY141 => self
+                .asme_title_block_form()
+                .map(AsmeY141TitleBlockForm::dimensions_um),
+            _ => template.dimensions_um(),
         }
     }
 
@@ -1834,13 +1890,16 @@ impl SchematicSheetFormat {
         }
     }
 
-    /// The fields the sheet's title block can carry, in its order: ISO
-    /// 7200's form in the order it is read, an organization's block in the
-    /// order it was sealed with, and any other block every field.
+    /// The fields the sheet's title block can carry, in its order: ISO 7200's
+    /// and ASME Y14.1's forms in the order each is read, an organization's
+    /// block in the order it was sealed with, and any other block every
+    /// field.
     #[must_use]
     pub fn title_block_field_order(&self) -> Vec<DrawingSheetTitleFieldId> {
-        if self.title_block.template == DrawingSheetTitleBlockTemplate::Standard {
-            return ISO_7200_FORM_FIELDS.to_vec();
+        match self.title_block.template {
+            DrawingSheetTitleBlockTemplate::Standard => return ISO_7200_FORM_FIELDS.to_vec(),
+            DrawingSheetTitleBlockTemplate::AsmeY141 => return ASME_Y14_1_FORM_FIELDS.to_vec(),
+            _ => {}
         }
         self.title_block
             .managed_template
@@ -2005,33 +2064,40 @@ impl SchematicSheetFormat {
         Ok(rect)
     }
 
-    /// Start a new sheet on ISO 7200's 180 mm title block, which holds the
-    /// standard's 25-character title and 16-character document identifier.
-    /// On a sheet ISO 5457 frames it is the block, whether or not the
-    /// drawing area holds it: one that cannot carries no block, and Page
-    /// Setup says why. A sheet of another series whose drawing area cannot
-    /// hold it keeps the compact block, rather than requesting one that Page
-    /// Setup would then report as substituted.
-    fn start_on_iso_7200_title_block(&mut self) {
+    /// Start a new sheet on its format's standard title block: ISO 7200's
+    /// 180 mm block on a sheet ISO 5457 frames, which holds the standard's
+    /// 25-character title and 16-character document identifier, and ASME
+    /// Y14.1's form on an ANSI or ARCH sheet. Either is the block whether or
+    /// not the drawing area holds it: a sheet that cannot carries no block,
+    /// and Page Setup says why. A custom sheet framed to neither standard
+    /// whose drawing area cannot hold ISO 7200's block keeps the compact
+    /// block, rather than requesting one that Page Setup would then report
+    /// as substituted.
+    fn start_on_standard_title_block(&mut self) {
         let fallback = self.title_block.template;
-        self.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
-        if (self.title_block_substituted() && !self.framed_by_iso_5457())
-            || self.geometry().is_err()
-        {
+        let convention = self.frame_convention();
+        self.title_block.template = DrawingSheetTitleBlockTemplate::for_convention(convention);
+        let standard_gives_way =
+            self.framed_by_iso_5457() || convention == DrawingSheetFrameConvention::AsmeY141;
+        if (self.title_block_substituted() && !standard_gives_way) || self.geometry().is_err() {
             self.title_block.template = fallback;
         }
     }
 
     /// Give a block the sheet's drawing area cannot place a way to fit: turn
     /// it on its side, or else carry none. ISO 5457 has the drawing read the
-    /// way its title block does, so ISO 7200's block is never turned.
+    /// way its title block does, so ISO 7200's block is never turned, and
+    /// ASME Y14.1 letters its block upright.
     fn fit_default_title_block(&mut self) {
         if self.title_block.template == DrawingSheetTitleBlockTemplate::None
             || self.geometry().is_ok()
         {
             return;
         }
-        if self.title_block.template != DrawingSheetTitleBlockTemplate::Standard {
+        if !matches!(
+            self.title_block.template,
+            DrawingSheetTitleBlockTemplate::Standard | DrawingSheetTitleBlockTemplate::AsmeY141
+        ) {
             self.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
             if self.geometry().is_ok() {
                 return;
@@ -2266,6 +2332,8 @@ pub const fn drawing_sheet_title_block_rows(
         DrawingSheetTitleBlockTemplate::Compact => Some(3),
         DrawingSheetTitleBlockTemplate::Standard => Some(4),
         DrawingSheetTitleBlockTemplate::OrganizationManaged => Some(5),
+        // A, B, the drawing number's row and the bottom row.
+        DrawingSheetTitleBlockTemplate::AsmeY141 => Some(4),
         DrawingSheetTitleBlockTemplate::None => None,
     }
 }
@@ -2379,3 +2447,6 @@ use title_flow::flowed_title_layout;
 
 pub(super) mod iso_7200_form;
 pub use iso_7200_form::*;
+
+pub(super) mod asme_y14_1_form;
+pub use asme_y14_1_form::*;

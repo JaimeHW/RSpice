@@ -116,7 +116,8 @@ fn default_title_field_value(
         DrawingSheetTitleFieldId::Organization
         | DrawingSheetTitleFieldId::DocumentId
         | DrawingSheetTitleFieldId::Classification
-        | DrawingSheetTitleFieldId::Language => state
+        | DrawingSheetTitleFieldId::Language
+        | DrawingSheetTitleFieldId::CageCode => state
             .workspace
             .content
             .design_management

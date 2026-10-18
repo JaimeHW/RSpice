@@ -20,8 +20,8 @@ use egui::{
 
 use crate::state::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
-    DrawingSheetInheritance, DrawingSheetNewSheetPolicy, DrawingSheetPreset,
-    DrawingSheetPresetScope, DrawingSheetProjectSettings, DrawingSheetStandard,
+    DrawingSheetFrameConvention, DrawingSheetInheritance, DrawingSheetNewSheetPolicy,
+    DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetProjectSettings, DrawingSheetStandard,
     DrawingSheetStandardSeries, DrawingSheetTitleBlock, DrawingSheetTitleBlockTemplate,
     SchematicPageOrientation, SchematicSheetFormat,
 };
@@ -537,7 +537,7 @@ fn target_band(
     let small = format!(
         "{} \u{00b7} {} \u{2014} {}",
         border_template_label(format.border),
-        format.title_block.template.label(),
+        format.title_block_template_label(format.title_block.template),
         seeds
     );
     let wrap = rect.width() - 22.0;
@@ -1043,11 +1043,11 @@ fn preview_region(
             );
         let instead = match record.effective_title_block_template() {
             DrawingSheetTitleBlockTemplate::None => "no title block".to_owned(),
-            printed => format!("the {} block", printed.label()),
+            printed => format!("the {} block", record.title_block_template_label(printed)),
         };
         let text = format!(
             "{} does not fit this page's{area} drawing area; new sheets draw {instead} until the format grows.",
-            record.title_block.template.label(),
+            record.title_block_template_label(record.title_block.template),
         );
         let mut job = LayoutJob::simple(
             text,
@@ -1322,19 +1322,26 @@ fn title_frame_block(
                         .map(|template| (template, template.label())),
                 );
             } else {
-                // New sheets start on ISO 7200's form; the compact block is
-                // offered only to a default already on it.
+                // New sheets start on their format's form: ISO 7200's, or
+                // ASME Y14.1's on an ANSI or ARCH page, which is offered only
+                // there. The compact block is offered only to a default
+                // already on it.
+                let current = record.title_block.template;
+                let asme_format =
+                    record.frame_convention() == DrawingSheetFrameConvention::AsmeY141;
                 let choices = [
                     DrawingSheetTitleBlockTemplate::Compact,
                     DrawingSheetTitleBlockTemplate::Standard,
+                    DrawingSheetTitleBlockTemplate::AsmeY141,
                     DrawingSheetTitleBlockTemplate::None,
                 ]
                 .into_iter()
-                .filter(|template| {
-                    *template != DrawingSheetTitleBlockTemplate::Compact
-                        || record.title_block.template == DrawingSheetTitleBlockTemplate::Compact
+                .filter(|template| match template {
+                    DrawingSheetTitleBlockTemplate::Compact => current == *template,
+                    DrawingSheetTitleBlockTemplate::AsmeY141 => asme_format || current == *template,
+                    _ => true,
                 })
-                .map(|template| (template, template.label()))
+                .map(|template| (template, record.title_block_template_label(template)))
                 .collect::<Vec<_>>();
                 enum_combo(ui, "sheet-defaults-title-block", &mut selected, &choices);
             }
@@ -1569,11 +1576,22 @@ fn retarget_default(
         })
     };
 
-    if let Ok(candidate) = rebuild(source.title_block.clone()) {
+    // A block left at the old format's standard one follows the new
+    // format's, and the ASME form leaves a page no longer in its format; a
+    // block chosen otherwise stays.
+    let mut title_block = source.title_block.clone();
+    let standard_block = DrawingSheetTitleBlockTemplate::for_convention(source.frame_convention());
+    if title_block.template == standard_block
+        || (title_block.template == DrawingSheetTitleBlockTemplate::AsmeY141
+            && base.frame_convention() != DrawingSheetFrameConvention::AsmeY141)
+    {
+        title_block.template = base.title_block.template;
+    }
+    if let Ok(candidate) = rebuild(title_block.clone()) {
         return candidate;
     }
 
-    let mut anchored = source.title_block.clone();
+    let mut anchored = title_block;
     anchored.offset_x_um = 0;
     anchored.offset_y_um = 0;
     if let Ok(candidate) = rebuild(anchored) {
