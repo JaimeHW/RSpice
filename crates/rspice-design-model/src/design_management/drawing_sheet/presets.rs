@@ -660,10 +660,9 @@ impl DrawingSheetDocumentControl {
         if !self.revision_date_utc.is_empty()
             && !is_exact_iso_calendar_date(&self.revision_date_utc)
         {
-            return Err(DesignManagementError::InvalidText {
-                field: "drawing sheet document revision date",
-                value: self.revision_date_utc.clone(),
-            });
+            return Err(DesignManagementError::DocumentControl(
+                "The date must be a calendar date written YYYY-MM-DD.",
+            ));
         }
         validate_value(
             "drawing sheet document change reference",
@@ -680,16 +679,14 @@ impl DrawingSheetDocumentControl {
             DrawingSheetReleaseStatus::Released | DrawingSheetReleaseStatus::Obsolete
         ) {
             if self.revision_index().is_empty() {
-                return Err(DesignManagementError::InvalidText {
-                    field: "released drawing sheet document revision",
-                    value: self.revision.clone(),
-                });
+                return Err(DesignManagementError::DocumentControl(
+                    "A released or obsolete document needs a revision.",
+                ));
             }
             if self.revision_date_utc.is_empty() {
-                return Err(DesignManagementError::InvalidText {
-                    field: "released drawing sheet document revision date",
-                    value: self.revision_date_utc.clone(),
-                });
+                return Err(DesignManagementError::DocumentControl(
+                    "A released or obsolete document needs a date.",
+                ));
             }
         }
         Ok(())

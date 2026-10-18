@@ -58,6 +58,10 @@ pub enum DesignManagementError {
     NoChanges(&'static str),
     #[error("{field} value {value:?} is empty, padded, or contains control characters")]
     InvalidText { field: &'static str, value: String },
+    /// A document control that cannot stand as written, said the way the
+    /// person correcting it needs to read it.
+    #[error("{0}")]
+    DocumentControl(&'static str),
     #[error("{field} contains {actual} bytes; maximum is {maximum}")]
     TextTooLong {
         field: &'static str,
