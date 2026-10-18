@@ -441,8 +441,13 @@ fn render_property_field(
     let mut editor_id = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
+        let browse_button = rspice_ui_kit::widgets::Button::new("Browse");
+        // The button as it will be drawn, measured. A 58-point allowance for
+        // it was eight short, so the row ran past the column's edge and every
+        // grid after it was laid out that much wider than the ones above.
         let editor_width = if has_browser {
-            (ui.available_width() - 58.0).max(60.0)
+            (ui.available_width() - browse_button.measured_width(ui) - ui.spacing().item_spacing.x)
+                .max(60.0)
         } else {
             ui.available_width().max(60.0)
         };
@@ -459,11 +464,7 @@ fn render_property_field(
         numeric_text = editor.numeric_text;
         numeric_parse_error = editor.parse_error;
         editor_id = editor.control_id;
-        if has_browser
-            && rspice_ui_kit::widgets::Button::new("Browse")
-                .show(ui)
-                .clicked()
-        {
+        if has_browser && browse_button.show(ui).clicked() {
             browse_clicked = true;
         }
     });
@@ -724,6 +725,122 @@ fn property_group_heading(ui: &mut Ui, label: &str) {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use rspice_design::properties::{PropertyCatalog, component::collect_properties_with_sheet};
+    use rspice_design::schematic::component::Component;
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design_model::Point;
+
+    /// Every text the parameter form paints for a freshly opened `kind`, and
+    /// where, after `prepare` has had the draft. The pane is tall enough that
+    /// nothing scrolls out of it, so a field missing from the list was not
+    /// drawn at all rather than drawn out of sight.
+    fn painted_texts(
+        kind: ComponentType,
+        prepare: impl FnOnce(&mut ComponentPropertyDraft),
+    ) -> Vec<(String, egui::Rect)> {
+        let (sheet, mut draft) = opened(kind);
+        prepare(&mut draft);
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        // Fonts on the first pass, measured rows on the second.
+        for _ in 0..2 {
+            drop(form_frame(&ctx, &sheet, &mut draft, true, Vec::new()));
+        }
+        texts(form_frame(&ctx, &sheet, &mut draft, true, Vec::new()))
+    }
+
+    /// A draft freshly opened on the catalog's sheet for `kind`.
+    fn opened(kind: ComponentType) -> (PropertySheet, ComponentPropertyDraft) {
+        let sheet = PropertyCatalog::new()
+            .get(kind)
+            .expect("catalog sheet")
+            .clone();
+        let component = Component::new(1, kind, Point::origin());
+        let mut draft = ComponentPropertyDraft::default();
+        draft.reset(
+            kind,
+            &sheet,
+            collect_properties_with_sheet(&component, Some(&sheet)),
+        );
+        (sheet, draft)
+    }
+
+    /// One frame of the form, in a `Ui` that is `enabled` or not.
+    fn form_frame(
+        ctx: &egui::Context,
+        sheet: &PropertySheet,
+        draft: &mut ComponentPropertyDraft,
+        enabled: bool,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                vec2(460.0, 3000.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.add_enabled_ui(enabled, |ui| {
+                    render_component_parameters(
+                        ui,
+                        draft,
+                        sheet,
+                        &[],
+                        QuantityPresentationPolicy::default(),
+                        UiNumberLocale::default(),
+                        &mut |_, _| {},
+                    );
+                });
+            });
+        })
+    }
+
+    fn texts(output: egui::FullOutput) -> Vec<(String, egui::Rect)> {
+        output
+            .shapes
+            .into_iter()
+            .filter_map(|clipped| match clipped.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every grid on the form is as wide as the first.
+    ///
+    /// The model binding's row reserved 58 points for its Browse button, which
+    /// draws about eight wider, so the row ran past its column and widened the
+    /// form under it: the Temperature fields ended right of the Electrical
+    /// ones above them. A unit is set flush with its column's right edge, so
+    /// the right column's units say where that edge is in each group.
+    #[test]
+    fn the_model_row_keeps_to_the_columns_above_it() {
+        let texts = painted_texts(ComponentType::Resistor, |_| {});
+        let right_edge = |unit: &str| {
+            texts
+                .iter()
+                .filter(|(text, _)| text == unit)
+                .map(|(_, rect)| rect.right())
+                .fold(f32::NEG_INFINITY, f32::max)
+        };
+        // AC Resistance, above the model row; Temp Coeff 1, below it.
+        let above = right_edge("Ω");
+        let below = right_edge("1/°C");
+        assert!(
+            above.is_finite() && below.is_finite(),
+            "both units painted: {above} {below}"
+        );
+        assert!(
+            (above - below).abs() < 0.5,
+            "the right column ends at {above} above the model row and {below} below it"
+        );
+    }
 
     /// A band spans the pane it heads, gutter included, through a real scroll
     /// area rather than a stand-in for one.
