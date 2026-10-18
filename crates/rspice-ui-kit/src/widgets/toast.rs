@@ -2,10 +2,13 @@
 //! trailing edge — and the session activity they are retained in.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
+use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
-    Align2, Area, Context, Frame, Id, Margin, Order, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Area, Context, Frame, Galley, Id, Margin, Order, Rect, Sense, Stroke, Ui, Vec2, pos2,
+    vec2,
 };
 
 use crate::theme::{self, FontWeight};
@@ -235,6 +238,9 @@ const TOAST_DRAIN_HEIGHT: f32 = 2.0;
 /// display's full rate for five seconds per notice.
 const TOAST_DRAIN_STEP: Duration = Duration::from_millis(33);
 const TOAST_COLUMN_GAP: f32 = 10.0;
+/// The most lines a toast's message takes before it is cut. The notification
+/// panel's rows hold two; a toast arrives alone and can say a little more.
+const TOAST_MESSAGE_MAX_ROWS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ToastLayout {
@@ -649,6 +655,8 @@ impl Toasts {
                 ui.set_max_width(layout.width);
                 ui.spacing_mut().item_spacing.y = TOAST_GAP;
                 for toast in &self.queue {
+                    let mut cut = false;
+                    let mut control_hovered = false;
                     let card = ui
                         .scope(|ui| {
                             // One opacity for the whole card, so the entrance
@@ -678,6 +686,8 @@ impl Toasts {
                                     if outcome.focused {
                                         focused.push(toast.id);
                                     }
+                                    cut = outcome.cut;
+                                    control_hovered = outcome.control_hovered;
                                 });
                             let card = frame.response.rect;
                             // Only a notice with a deadline has a clock to draw.
@@ -697,6 +707,10 @@ impl Toasts {
                     }
                     ui.ctx().accesskit_node_builder(toast_response.id, |node| {
                         node.set_role(egui::accesskit::Role::Status);
+                        // Read out when it arrives, without taking the
+                        // reader's focus: a confirmation waits for a pause,
+                        // a warning or a failure interrupts.
+                        node.set_live(toast_live(toast.kind));
                         node.set_label(format!(
                             "{}: {}. {}",
                             toast.kind.label(),
@@ -704,6 +718,11 @@ impl Toasts {
                             toast.message
                         ));
                     });
+                    if cut && !control_hovered {
+                        // What the card cut short is a hover away, in full,
+                        // as it is on the notification panel's rows.
+                        toast_response.on_hover_text(format!("{}\n{}", toast.title, toast.message));
+                    }
                 }
             });
 
@@ -816,6 +835,39 @@ struct ToastOutcome {
     taken: Option<NotificationAction>,
     /// One of its controls has the keyboard.
     focused: bool,
+    /// Its message ran past the lines a card gives it.
+    cut: bool,
+    /// The pointer is on one of its controls, which have tooltips of their own.
+    control_hovered: bool,
+}
+
+/// How a screen reader is told a toast arrived: politely for a
+/// confirmation, at once for something that may need the reader.
+const fn toast_live(kind: ToastKind) -> egui::accesskit::Live {
+    match kind {
+        ToastKind::Success | ToastKind::Info => egui::accesskit::Live::Polite,
+        ToastKind::Warn | ToastKind::Error => egui::accesskit::Live::Assertive,
+    }
+}
+
+/// A toast's detail, wrapped to the card and cut at four lines with an
+/// ellipsis. A console paragraph must not turn one notice into a page.
+fn message_galley(ui: &Ui, message: &str, width: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::single_section(
+        message.to_owned(),
+        TextFormat {
+            font_id: theme::sans(tokens::FS_0, FontWeight::Regular),
+            color: Tokens::get(ui.ctx()).color.text_dim,
+            ..Default::default()
+        },
+    );
+    job.wrap = TextWrapping {
+        max_width: width,
+        max_rows: TOAST_MESSAGE_MAX_ROWS,
+        break_anywhere: false,
+        overflow_character: Some('\u{2026}'),
+    };
+    ui.painter().layout_job(job)
 }
 
 fn toast_entry_opacity(age: f64, animate_entry: bool) -> f32 {
@@ -831,6 +883,8 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutco
     let mut dismissed = false;
     let mut taken = None;
     let mut focused = false;
+    let mut cut = false;
+    let mut control_hovered = false;
     let dismiss_side = if large_targets {
         tokens::TOUCH_TARGET
     } else {
@@ -863,11 +917,9 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutco
                     .color(t.color.text),
             );
             if !toast.message.is_empty() {
-                ui.label(
-                    egui::RichText::new(&toast.message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
+                let message = message_galley(ui, &toast.message, content_width);
+                cut = message.elided;
+                ui.label(message);
             }
             // The offer sits under the detail rather than beside the close
             // mark: it is the notice's one positive action, and putting it in
@@ -876,6 +928,7 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutco
                 ui.add_space(1.0);
                 let offer = notice::offer_link(ui, action.label(), &toast.title, large_targets);
                 focused |= offer.has_focus();
+                control_hovered |= offer.contains_pointer();
                 if offer.clicked() {
                     taken = Some(action);
                 }
@@ -890,12 +943,15 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutco
             &format!("Dismiss {}", toast.title),
         );
         focused |= dismiss.has_focus();
+        control_hovered |= dismiss.contains_pointer();
         dismissed = dismiss.clicked();
     });
     ToastOutcome {
         dismissed,
         taken,
         focused,
+        cut,
+        control_hovered,
     }
 }
 
@@ -1592,5 +1648,115 @@ mod tests {
         assert_eq!(toast_entry_opacity(0.0, false), 1.0);
         assert_eq!(toast_entry_opacity(TOAST_ENTER / 2.0, false), 1.0);
         assert_eq!(toast_entry_opacity(TOAST_ENTER / 2.0, true), 0.5);
+    }
+
+    /// A screen reader hears a toast arrive, politely for a confirmation and
+    /// at once for a warning or failure, and the reader's focus stays where
+    /// it was.
+    #[test]
+    fn a_toast_is_announced_by_severity_without_taking_focus() {
+        for (kind, live) in [
+            (ToastKind::Success, egui::accesskit::Live::Polite),
+            (ToastKind::Info, egui::accesskit::Live::Polite),
+            (ToastKind::Warn, egui::accesskit::Live::Assertive),
+            (ToastKind::Error, egui::accesskit::Live::Assertive),
+        ] {
+            let ctx = Context::default();
+            crate::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut toasts = Toasts::default();
+            toasts.notify_with_action(
+                &ctx,
+                NotificationCategory::Job,
+                kind,
+                "Run 4",
+                "Finished.",
+                NotificationAction::OpenRunInResults { run_sequence: 4 },
+            );
+            let mut output = None;
+            for _ in 0..3 {
+                output = Some(frame(&ctx, &mut toasts, 0.0, Some(true), Vec::new()));
+            }
+            let update = output
+                .and_then(|output| output.platform_output.accesskit_update)
+                .expect("accesskit is on");
+            let statuses: Vec<_> = update
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Status)
+                .map(|(_, node)| (node.label().map(str::to_owned), node.live()))
+                .collect();
+            assert_eq!(
+                statuses,
+                [(
+                    Some(format!("{}: Run 4. Finished.", kind.label())),
+                    Some(live)
+                )],
+                "{kind:?}"
+            );
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                None,
+                "a {kind:?} toast never takes the keyboard"
+            );
+        }
+    }
+
+    /// A console paragraph is one card, not a page: the message stops at four
+    /// lines with an ellipsis, and the whole of it is under the pointer.
+    #[test]
+    fn a_long_message_is_cut_to_four_lines_and_given_in_full_on_hover() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        let message = "Could not write amplifier.rsp: the folder is read-only. ".repeat(8);
+        toasts.error_with_title(&ctx, "Save failed", message.clone());
+        let texts = |output: &egui::FullOutput| {
+            fn walk(shape: &egui::Shape, out: &mut Vec<Arc<Galley>>) {
+                match shape {
+                    egui::Shape::Text(text) => out.push(text.galley.clone()),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+                    _ => {}
+                }
+            }
+            let mut out = Vec::new();
+            for clipped in &output.shapes {
+                walk(&clipped.shape, &mut out);
+            }
+            out
+        };
+
+        // Past the entrance fade, which paints nothing at its first instant.
+        let _ = frame(&ctx, &mut toasts, 0.0, Some(true), Vec::new());
+        let painted = texts(&frame(&ctx, &mut toasts, 0.5, Some(true), Vec::new()));
+        let detail = painted
+            .iter()
+            .find(|galley| galley.text().starts_with("Could not write"))
+            .expect("the message is painted");
+        assert_eq!(detail.rows.len(), TOAST_MESSAGE_MAX_ROWS);
+        assert!(detail.elided, "and says it was cut");
+
+        // Rest the pointer on the card, clear of its controls, until the
+        // tooltip is due.
+        let card = ctx
+            .memory(|memory| memory.area_rect(Id::new("rspice.toasts")))
+            .expect("the stack is laid out");
+        let pointer = card.left_top() + vec2(60.0, 40.0);
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            0.6,
+            Some(true),
+            vec![egui::Event::PointerMoved(pointer)],
+        );
+        let mut hovered = Vec::new();
+        for time in [1.4, 2.2, 3.0] {
+            hovered = texts(&frame(&ctx, &mut toasts, time, Some(true), Vec::new()));
+        }
+        let full = format!("Save failed\n{message}");
+        assert!(
+            hovered.iter().any(|galley| galley.text() == full),
+            "the hover gives the title and the whole message"
+        );
     }
 }
