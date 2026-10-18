@@ -1548,6 +1548,68 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
     );
 }
 
+/// The Arrange page offers Snap Selection to Grid, the command the Design
+/// menu's Arrange ends with, under the same command id, and its row puts an
+/// off-grid part back on the grid in one undo step. A phone has no menu bar,
+/// so without the row a finger could not snap at all.
+#[test]
+fn the_arrange_page_snaps_the_selection_to_the_grid() {
+    let mut state = AppState::default();
+    state.schematic.document_mut_for_test().components.clear();
+    state.schematic.document_mut_for_test().wires.clear();
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(Component::new(
+            41,
+            ComponentType::Resistor,
+            Point::new(323, 367),
+        ));
+    state.sync_active_schematic_to_workspace();
+    state.schematic.init_undo_history();
+    let symbol_context = schematic_symbol_context(&state);
+    let snap = ARRANGE_ENTRIES
+        .iter()
+        .find_map(|entry| match entry {
+            ContextEntry::Command(command)
+                if command.shortcut_command == Some(Command::SnapSelectionToGrid) =>
+            {
+                Some(command)
+            }
+            _ => None,
+        })
+        .expect("the Arrange page offers Snap Selection to Grid");
+    assert_eq!(snap.label, Command::SnapSelectionToGrid.spec().label);
+    assert!(
+        !action_availability(snap.action, &state).0,
+        "nothing is selected to snap"
+    );
+
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(41);
+    assert!(action_availability(snap.action, &state).0);
+    execute_context_action(snap.action, &mut state, Point::origin(), &symbol_context);
+
+    assert_eq!(state.schematic.document().grid_size, 10);
+    assert_eq!(
+        state.schematic.document().components[0].pos,
+        Point::new(320, 370)
+    );
+    assert_ne!(
+        state.schematic.document().components[0].pos,
+        Point::new(323, 367)
+    );
+    assert_eq!(
+        state.schematic.undo_description(),
+        Some("snap selection to grid")
+    );
+}
+
 /// Under "Selected net across hierarchy" an Alt+click net highlight is
 /// carried into the instance a user descends into. Picking that instance
 /// cleared it first: the click before the descend key or a double-click,

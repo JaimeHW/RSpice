@@ -301,6 +301,8 @@ const ARRANGE_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Separator,
     arrange(ArrangeAction::DistributeHorizontal, ContextIcon::Arrange),
     arrange(ArrangeAction::DistributeVertical, ContextIcon::Arrange),
+    ContextEntry::Separator,
+    arrange(ArrangeAction::SnapToGrid, ContextIcon::Grid),
 ];
 
 const fn arrange(action: ArrangeAction, icon: ContextIcon) -> ContextEntry {
@@ -328,6 +330,7 @@ const fn arrange_command(action: ArrangeAction) -> Command {
         ArrangeAction::AlignBottom => Command::AlignSelectionBottom,
         ArrangeAction::DistributeHorizontal => Command::DistributeSelectionHorizontal,
         ArrangeAction::DistributeVertical => Command::DistributeSelectionVertical,
+        ArrangeAction::SnapToGrid => Command::SnapSelectionToGrid,
     }
 }
 
@@ -346,7 +349,8 @@ fn arrange_layout(action: ArrangeAction) -> Option<SelectionLayoutCommand> {
         ArrangeAction::RotateClockwise
         | ArrangeAction::RotateCounterClockwise
         | ArrangeAction::MirrorHorizontal
-        | ArrangeAction::MirrorVertical => return None,
+        | ArrangeAction::MirrorVertical
+        | ArrangeAction::SnapToGrid => return None,
     })
 }
 
@@ -1139,6 +1143,12 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             }),
             "Select at least one editable object",
         ),
+        // The Design menu's availability for the same command.
+        ContextAction::ArrangeCommand(ArrangeAction::SnapToGrid) => (
+            !state.schematic_edit_read_only()
+                && !state.schematic.session.editor.selection.is_empty(),
+            "Select at least one editable object",
+        ),
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
             Some(layout) => match selection_layout_availability(state, layout) {
                 Ok(()) => (true, ""),
@@ -1285,6 +1295,9 @@ fn execute_context_action(
         }
         // A page turn, which the menu takes itself.
         ContextAction::Arrange => {}
+        ContextAction::ArrangeCommand(ArrangeAction::SnapToGrid) => {
+            super::grid_snap_selection::run_snap_selection_to_grid(state, symbol_context);
+        }
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
             Some(layout) => match apply_selection_layout(state, symbol_context, layout) {
                 Ok(true) => {}

@@ -1884,18 +1884,10 @@ impl Command {
             }
             Self::SnapSelectionToGrid => {
                 let symbol_context = schematic_symbol_context(&app.state);
-                let result = crate::schematic::view::grid_snap_selection::snap_selection_to_grid(
+                crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid(
                     &mut app.state,
                     &symbol_context,
                 );
-                match result {
-                    Ok(0) => app.state.prompt("The selection is on the grid already."),
-                    Ok(moved) => app.state.prompt(format!(
-                        "Snapped {moved} {} to the grid.",
-                        if moved == 1 { "object" } else { "objects" }
-                    )),
-                    Err(error) => app.state.prompt(error),
-                }
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
