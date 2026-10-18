@@ -13,7 +13,7 @@
 
 use egui::{Align, Layout, Ui};
 
-use super::super::{CONSOLE_COLUMN_GAP, CONSOLE_FONT_SIZE};
+use super::super::{CONSOLE_COLUMN_GAP, CONSOLE_SELECT_CHROME};
 use super::arrange::Tally;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -24,21 +24,35 @@ use crate::workbench::app_state::problems_view::{ProblemGrouping, ProblemsView};
 /// What the producer control says when the grid is narrowed to none.
 const EVERY_PRODUCER: &str = "All producers";
 
-/// The text filter's width, in characters of the face it is printed in.
-const FILTER_CHARACTERS: f32 = 16.0;
+/// What the text filter says while it is empty: what it matches.
+const FILTER_HINT: &str = "rule, subject, message";
 
-/// The producer control's width, in characters.
-const PRODUCER_CHARACTERS: f32 = 22.0;
+/// The text filter's margin around its text: egui's own, stated, because the
+/// field's width is reckoned from it.
+const FILTER_MARGIN: egui::Margin = egui::Margin::symmetric(4, 2);
 
-/// The grouping control's width, in characters.
-const GROUPING_CHARACTERS: f32 = 13.0;
+/// The space between two lines of the strip, when it wraps.
+const LINE_GAP: f32 = 4.0;
 
 /// Draw the strip, editing the reading position it is drawn from.
+///
+/// Every control is as wide as the longest thing it can say — a select its
+/// longest choice, the text filter its hint — in the face it says it in, so
+/// none prints a cut word and picking a choice never moves the controls
+/// beside it.
 pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) {
     let advance = character_width(ui);
+    let select_width = |options: &[String]| {
+        let widest = options
+            .iter()
+            .map(|option| option.chars().count())
+            .max()
+            .unwrap_or(0);
+        advance * widest as f32 + CONSOLE_SELECT_CHROME
+    };
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.spacing_mut().item_spacing.y = LINE_GAP;
         for level in DiagnosticLevel::ALL {
             let count = tally.severity(level);
             let listed = view.severities.lists(level);
@@ -84,7 +98,7 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
             "Producer",
             &selected,
             &options,
-            advance * PRODUCER_CHARACTERS,
+            select_width(&options),
         )
         .picked;
         if let Some(picked) = picked {
@@ -94,15 +108,20 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
                 .map(|(producer, _)| producer.clone());
         }
 
+        // The hint whole, inside the field's margins, with a character to
+        // spare for the caret, in the face and well of the Console's find
+        // field.
         let response = ui.add_sized(
             [
-                advance * FILTER_CHARACTERS,
+                advance * (FILTER_HINT.chars().count() as f32 + 1.0) + FILTER_MARGIN.sum().x,
                 Tokens::get(ui.ctx()).metrics.ctl_h,
             ],
             egui::TextEdit::singleline(&mut view.text)
                 .id(egui::Id::new("workbench.problems.text"))
-                .hint_text("rule, subject, message")
-                .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular)),
+                .hint_text(FILTER_HINT)
+                .margin(FILTER_MARGIN)
+                .vertical_align(egui::Align::Center)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
         );
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_label("Filter findings by text");
@@ -118,7 +137,7 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
             "Grouping",
             view.grouping.label(),
             &grouping_options,
-            advance * GROUPING_CHARACTERS,
+            select_width(&grouping_options),
         )
         .picked;
         if let Some(picked) = picked
@@ -132,9 +151,13 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
 /// What the strip says about a list the filters have emptied, and the control
 /// that undoes it. A page that said only "no findings" here would be claiming
 /// the design is clean when the reader had hidden what is wrong with it.
+///
+/// It is the toolbar's last line, as far under the controls as their own
+/// lines are apart.
 pub(super) fn filtered_out(ui: &mut Ui, listed: usize, total: usize) -> bool {
     let tokens = Tokens::get(ui.ctx());
     let mut cleared = false;
+    ui.add_space(LINE_GAP);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = CONSOLE_COLUMN_GAP;
         ui.label(
@@ -160,14 +183,14 @@ pub(super) fn filtered_out(ui: &mut Ui, listed: usize, total: usize) -> bool {
     cleared
 }
 
-/// One character of the face the strip is printed in, which is what its
-/// controls are sized in rather than in pixels somebody typed.
+/// One character of the face the strip's controls print in, which is what
+/// they are sized in rather than in pixels somebody typed.
 fn character_width(ui: &Ui) -> f32 {
     ui.fonts_mut(|fonts| {
         fonts
             .layout_no_wrap(
                 "M".to_owned(),
-                theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
                 egui::Color32::WHITE,
             )
             .size()
