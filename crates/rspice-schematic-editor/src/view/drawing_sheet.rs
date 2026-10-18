@@ -474,6 +474,7 @@ pub fn draw_base(
             resolve_title_fields,
             sheet,
         );
+        draw_same_revision_note(painter, viewport, lod, palette, sheet);
     }
     if lod.show_origin {
         draw_origin(painter, paper, viewport.zoom, palette, lettering);
@@ -1414,6 +1415,36 @@ fn draw_title_block(
             rotation,
         );
     }
+}
+
+/// Sheet one of several on the ASME form says every sheet is at the same
+/// revision, above its block, where the plot letters it.
+fn draw_same_revision_note(
+    painter: &Painter,
+    viewport: &Viewport,
+    lod: DrawingSheetLod,
+    palette: DrawingSheetPalette,
+    sheet: &ActiveDrawingSheet,
+) {
+    if !lod.show_title_block_fields {
+        return;
+    }
+    let Some(note) = sheet
+        .format
+        .same_revision_note(&sheet.geometry.physical, &sheet.page_label)
+    else {
+        return;
+    };
+    painter.text(
+        sheet_point_to_screen(viewport, (note.x_um, note.seat_um)),
+        Align2::LEFT_CENTER,
+        note.text,
+        theme::mono(
+            drawing_sheet_font_size(viewport.zoom, authored_lettering(note.lettering_um)),
+            theme::FontWeight::Regular,
+        ),
+        palette.block_ink,
+    );
 }
 
 /// Screen width of a title-block line `width_um` wide on paper: magnified

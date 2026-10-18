@@ -911,3 +911,57 @@ fn a_revision_outside_the_y14_35_sequence_is_advised_against_on_the_asme_form() 
         drawing_sheet_revision_advisory("O")
     );
 }
+
+#[test]
+fn sheet_one_of_several_says_all_sheets_are_the_same_revision_near_its_block() {
+    for standard in [
+        DrawingSheetStandard::AnsiA,
+        DrawingSheetStandard::AnsiD,
+        DrawingSheetStandard::ArchE1,
+    ] {
+        let format =
+            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape);
+        let geometry = format.geometry().unwrap();
+        let block = geometry.title_block.unwrap();
+        let note = format
+            .same_revision_note(&geometry, "1 of 3")
+            .expect("sheet one of three carries the note");
+        assert_eq!(note.text, "ALL SHEETS ARE THE SAME REVISION LEVEL");
+        assert_eq!(note.lettering_um, 3_000);
+        // Directly above the block, ending at its right edge, and inside
+        // the drawing area.
+        let em = drawing_sheet_mono_em_um(note.lettering_um) as i64;
+        let width = (drawing_sheet_mono_advance_um(note.lettering_um) * 38) as i64;
+        assert!(note.seat_um + em * 587 / 1_000 < block.y_um, "{standard:?}");
+        assert!(note.seat_um > block.y_um - 10_000, "{standard:?}");
+        assert!(note.x_um >= block.x_um);
+        assert!(note.x_um + width <= block.x_um + block.width_um as i64);
+        assert!(note.seat_um - em > geometry.drawing_area.y_um);
+        // Only sheet one of a drawing of several.
+        for page in ["2 of 3", "1 of 1", "not a page"] {
+            assert_eq!(format.same_revision_note(&geometry, page), None, "{page}");
+        }
+    }
+    // Not on ISO 7200's block, nor on an ANSI sheet that chose it.
+    for format in [
+        SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::IsoA3,
+            SchematicPageOrientation::Landscape,
+        ),
+        sheet(DrawingSheetStandard::AnsiB)
+            .try_update(|draft| {
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+            })
+            .unwrap(),
+    ] {
+        let geometry = format.geometry().unwrap();
+        assert_eq!(format.same_revision_note(&geometry, "1 of 3"), None);
+    }
+    assert_eq!(
+        DrawingSheetNumber::from_page_label("12 of 12"),
+        Some(DrawingSheetNumber {
+            number: 12,
+            count: 12
+        })
+    );
+}

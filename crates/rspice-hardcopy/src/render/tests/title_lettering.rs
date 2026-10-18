@@ -689,3 +689,35 @@ fn an_asme_sheet_plots_the_form_the_canvas_draws_in_its_line_weights() {
         }
     }
 }
+
+#[test]
+fn sheet_one_of_several_on_the_asme_form_plots_the_same_revision_note() {
+    // ASME Y14.1 8: sheet one of a drawing whose sheets share one revision
+    // says so near its title block, at the place the canvas letters it.
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiB,
+        SchematicPageOrientation::Landscape,
+    );
+    let note_lines = |page: &str| {
+        let source = blank_schematic_titled(
+            &format,
+            [(DrawingSheetTitleFieldId::Page, page.to_owned())]
+                .into_iter()
+                .collect(),
+        );
+        plotted_lines_of(&source)
+            .into_iter()
+            .filter(|(_, _, text)| text == "ALL SHEETS ARE THE SAME REVISION LEVEL")
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        note_lines("1 of 3"),
+        [(
+            SceneFont::Monospace,
+            drawing_sheet_mono_em_um(3_000),
+            "ALL SHEETS ARE THE SAME REVISION LEVEL".to_owned()
+        )]
+    );
+    assert!(note_lines("2 of 3").is_empty());
+    assert!(note_lines("1 of 1").is_empty());
+}

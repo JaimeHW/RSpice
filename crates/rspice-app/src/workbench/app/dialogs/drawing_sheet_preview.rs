@@ -21,12 +21,17 @@ use crate::workbench::app_state::AppState;
 #[derive(Debug, Clone, Default)]
 pub(super) struct DrawingSheetPreviewContent {
     objects: Vec<DrawingSheetPrintablePreview>,
+    /// The active sheet's number, as its title block letters it, which
+    /// decides whether the sheet carries the same-revision note.
+    page_label: String,
 }
 
 impl DrawingSheetPreviewContent {
     pub(super) fn from_state(state: &AppState) -> Self {
         Self {
             objects: drawing_sheet_printable_preview(state),
+            page_label: crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state)
+                .page_label,
         }
     }
 
@@ -237,6 +242,19 @@ fn drawing_sheet_preview_impl(
 
     if let Some(title_block) = geometry.title_block {
         paint_title_block(ui, map_rect(title_block), format, &geometry, palette);
+    }
+    // The same-revision note the canvas and the plot letter, as the value
+    // lines are drawn: a stroke on its line, over its length.
+    if let Some(note) =
+        content.and_then(|content| format.same_revision_note(&geometry, &content.page_label))
+    {
+        let width_um =
+            crate::state::drawing_sheet_mono_advance_um(note.lettering_um) * note.text.len() as u64;
+        let (x, y) = (note.x_um as f32, note.seat_um as f32);
+        ui.painter().line_segment(
+            [map(x, y), map(x + width_um as f32, y)],
+            Stroke::new(0.65, palette.block_ink),
+        );
     }
 
     paint_caption(ui, stage, caption_height, label, t.color.text_dim);

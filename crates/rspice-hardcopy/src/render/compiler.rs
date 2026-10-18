@@ -587,6 +587,23 @@ impl<'a> SemanticSceneCompiler<'a> {
                 title_block,
                 title_stroke,
             )?;
+            // Sheet one of several on the ASME form says every sheet is at
+            // the same revision, where the canvas letters it.
+            if let Some(note) = title_values
+                .get(&DrawingSheetTitleFieldId::Page)
+                .and_then(|page| format.same_revision_note(&geometry, page))
+            {
+                let baseline_um =
+                    note.seat_um + drawing_sheet_mono_baseline_offset_um(note.lettering_um) as i64;
+                self.add_text_rotated(
+                    self.drawing_sheet_point(note.x_um, baseline_um)?,
+                    note.text,
+                    SceneFont::Monospace,
+                    drawing_sheet_mono_em_um(note.lettering_um),
+                    title_stroke.color,
+                    SceneTextRotation::Upright,
+                )?;
+            }
         }
         if self.schematic_output.includes_paper() {
             self.add_mapping_legend(

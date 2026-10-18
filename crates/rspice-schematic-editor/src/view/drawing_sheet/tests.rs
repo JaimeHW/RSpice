@@ -684,6 +684,59 @@ fn an_asme_sheet_paints_the_forms_lines_and_lettering_the_plot_prints() {
 }
 
 #[test]
+fn sheet_one_of_several_on_the_asme_form_paints_the_same_revision_note() {
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiB,
+        SchematicPageOrientation::Landscape,
+    );
+    let painted = |page: &str| {
+        let sheet = ActiveDrawingSheet {
+            geometry: DrawingSheetGeometry::from_format(&format),
+            format: format.clone(),
+            sheet_name: "top".to_owned(),
+            page_label: page.to_owned(),
+        };
+        let viewport = Viewport {
+            offset: Pos2::ZERO,
+            zoom: 1.0,
+            bounds: Rect::from_min_size(Pos2::ZERO, vec2(2_000.0, 2_000.0)),
+        };
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let frame = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(2_000.0, 2_000.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    draw_same_revision_note(
+                        &ui.ctx().layer_painter(egui::LayerId::background()),
+                        &viewport,
+                        DrawingSheetLod::resolve(1.0, 1.0, DRAWING_SHEET_TITLE_BLOCK_LETTERING),
+                        DrawingSheetPalette::resolve(&Tokens::get(ui.ctx())),
+                        &sheet,
+                    );
+                },
+            )
+        };
+        drop(frame());
+        let shapes = frame()
+            .shapes
+            .into_iter()
+            .map(|clipped| clipped.shape)
+            .collect::<Vec<_>>();
+        lettered_text(&shapes)
+    };
+    assert_eq!(
+        painted("1 of 3"),
+        ["ALL SHEETS ARE THE SAME REVISION LEVEL"]
+    );
+    assert!(painted("2 of 3").is_empty());
+    assert!(painted("1 of 1").is_empty());
+}
+
+#[test]
 fn the_canvas_letters_each_field_in_the_cell_the_sheet_lays_out() {
     // The canvas draws the cells hardcopy plots, so a value is cut short on
     // screen exactly where it is on paper and nowhere else.

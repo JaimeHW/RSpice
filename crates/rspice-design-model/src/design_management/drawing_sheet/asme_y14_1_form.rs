@@ -921,3 +921,77 @@ fn approval_cells(form: AsmeY141TitleBlockForm) -> Vec<DrawingSheetTitleCell> {
     }
     cells
 }
+
+/// ASME Y14.1 8: sheet one of a drawing whose sheets are all kept at one
+/// revision may omit the revision status of sheets block, "a note located
+/// near the title block" stating so in its place. RSpice keeps one revision
+/// for every sheet of a project, so it letters the note on sheet one of a
+/// drawing of more than one sheet.
+pub const DRAWING_SHEET_SAME_REVISION_NOTE: &str = "ALL SHEETS ARE THE SAME REVISION LEVEL";
+
+/// Where a sheet stands in its drawing, as its title block's sheet number
+/// letters it: `2 of 5`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawingSheetNumber {
+    pub number: u32,
+    pub count: u32,
+}
+
+impl DrawingSheetNumber {
+    /// The sheet number a title block's Sheet field holds, which every
+    /// surface writes `{number} of {count}`.
+    #[must_use]
+    pub fn from_page_label(label: &str) -> Option<Self> {
+        let (number, count) = label.trim().split_once(" of ")?;
+        Some(Self {
+            number: number.trim().parse().ok()?,
+            count: count.trim().parse().ok()?,
+        })
+    }
+}
+
+/// One line of lettering a sheet's format letters beside its title block,
+/// placed on the sheet: `x_um` where it starts and `seat_um` the point it is
+/// seated on, as a title block's lines are (see
+/// [`DrawingSheetTitleCaption::seat_um`]), in sheet micrometres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawingSheetNote {
+    pub text: &'static str,
+    pub x_um: i64,
+    pub seat_um: i64,
+    pub lettering_um: u64,
+}
+
+impl SchematicSheetFormat {
+    /// The same-revision note the sheet whose Sheet field reads `page`
+    /// letters: on sheet one of a drawing of more than one sheet on the ASME
+    /// form, directly above the block and ending at its right edge, at 3 mm.
+    #[must_use]
+    pub fn same_revision_note(
+        &self,
+        geometry: &DrawingSheetGeometry,
+        page: &str,
+    ) -> Option<DrawingSheetNote> {
+        let sheet = DrawingSheetNumber::from_page_label(page)?;
+        if geometry.effective_title_block_template != DrawingSheetTitleBlockTemplate::AsmeY141
+            || sheet.number != 1
+            || sheet.count < 2
+        {
+            return None;
+        }
+        let block = geometry.title_block?;
+        let text = DRAWING_SHEET_SAME_REVISION_NOTE;
+        let width_um = drawing_sheet_mono_advance_um(ENTRY_UM) * text.len() as u64;
+        let right_um = block.x_um + block.width_um as i64 - PADDING_UM as i64;
+        // Its descenders clear the block's outline as an entry's clear the
+        // rule under it.
+        let seat_um =
+            block.y_um - (FOOT_CLEAR_UM + drawing_sheet_mono_em_um(ENTRY_UM) * 12 / 20) as i64;
+        Some(DrawingSheetNote {
+            text,
+            x_um: right_um - width_um as i64,
+            seat_um,
+            lettering_um: ENTRY_UM,
+        })
+    }
+}
