@@ -28,9 +28,9 @@ impl SemanticSceneCompiler<'_> {
             ..stroke
         };
         let rule = rule_of(rspice_design_model::design_management::DRAWING_SHEET_TITLE_RULE_UM);
-        // The form the canvas and Page Setup draw too: every rule and every
-        // cell's width come from the one layout, so a field is cut short on
-        // paper exactly where it is on screen.
+        // The form the canvas and the sheet previews draw too: every rule and
+        // every cell's width come from the one layout, so a field is cut
+        // short on paper exactly where it is on screen.
         let geometry = format
             .geometry()
             .map_err(|error| conversion_error(format!("drawing-sheet geometry: {error}")))?;

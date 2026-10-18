@@ -980,7 +980,7 @@ impl SheetCatalog {
     /// Atomically replace one sheet's authored physical page format.
     ///
     /// Electrical semantics are unchanged, but both the sheet and catalog
-    /// revisions advance so asynchronous Page Setup commits fail closed.
+    /// revisions advance so a stale sheet edit fails closed.
     pub fn update_sheet_page_format(
         &mut self,
         id: SheetId,

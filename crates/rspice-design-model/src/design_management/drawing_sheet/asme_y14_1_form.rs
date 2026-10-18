@@ -552,7 +552,7 @@ impl SchematicSheetFormat {
             })
     }
 
-    /// The template's name as this sheet's Page Setup offers it: the ASME
+    /// The template's name as this sheet's properties offer it: the ASME
     /// form with the size of the block its sheet carries.
     #[must_use]
     pub fn title_block_template_label(

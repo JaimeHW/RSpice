@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This procedure is the release gate for RSpice drawing sheets, Page Setup,
-preview, export, and printing. A release is not qualified by a successful
-build or by one visual inspection. Every applicable automated and manual gate
-below must have retained evidence tied to the exact release commit and binary
-digest.
+This procedure is the release gate for RSpice drawing sheets, the sheet's
+properties, preview, export, and printing. A release is not qualified by a
+successful build or by one visual inspection. Every applicable automated and
+manual gate below must have retained evidence tied to the exact release commit
+and binary digest.
 
 Mobile and tablet qualification is deferred until that product work is
 reactivated. Deferral does not waive desktop or browser gates and must not be
@@ -109,21 +109,23 @@ contain:
 Keep the project read-only during artifact comparison. Any authored mutation
 requires a new source digest and invalidates earlier evidence.
 
-## Desktop Page Setup qualification
+## Desktop sheet properties qualification
 
 On Windows, macOS, and Linux:
 
-1. Open Page Setup from the exact active sheet and record the displayed
+1. Open Sheet properties from the exact active sheet and record the displayed
    library/cell/view, stable sheet identity, ordinal, inherited source, and
    working revision.
-2. Exercise every page, keyboard path, invalid value, unit conversion, and
-   scope choice. Verify focus, error placement, disabled reasons, and no
-   clipped controls at the supported desktop sizes and scale factors.
-3. Change size, orientation, margins, bleed, frame/zones, title block, and
-   inheritance. Verify the live preview and change summary update together.
-4. Cancel and prove the authoritative project bytes and undo history did not
-   change. Apply once and prove one transaction, one revision, and one undo
-   entry were created. Undo and redo must restore exact bytes.
+2. Exercise every row, keyboard path, invalid value and unit. Verify focus,
+   refusal wording, disabled rows, and no clipped labels at the supported
+   desktop sizes and scale factors.
+3. Change size, a custom size's edges, orientation, the format's source,
+   frame, zones, marks, binding margin, units, title block and its optional
+   boxes. Verify the canvas and the overflow count update together.
+4. Abandon a typed value with Escape and prove the authoritative project
+   bytes and undo history did not change. Commit one value and prove one
+   transaction, one revision, and one undo entry were created. Undo and redo
+   must restore exact bytes.
 5. Reorder and rename sheets, close/reopen the project, and prove setup stays
    bound to stable identity rather than label or ordinal.
 6. Import valid, unknown-key, revoked-key, tampered, stale-schema, duplicate,
@@ -134,8 +136,8 @@ On Windows, macOS, and Linux:
 Build a fresh optimized WASM package and serve it over the supported
 deployment headers. Test every supported browser/OS pair with hardware WebGPU.
 
-- Repeat Page Setup apply/cancel, inherited/override, preview, current-sheet,
-  and mixed-sheet-set scenarios.
+- Repeat the sheet-properties commit/abandon, inherited/override, current-sheet,
+  project-default and mixed-sheet-set scenarios.
 - Verify worker startup, cancellation, source/plan generation guards, bounded
   transfers, and zero console errors or unhandled rejections.
 - Verify Print resolves the exact governed active sheet immediately before

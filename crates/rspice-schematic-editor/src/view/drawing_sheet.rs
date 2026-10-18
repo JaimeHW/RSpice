@@ -879,8 +879,8 @@ struct PrintableObjectBounds<'a> {
 
 /// Compact, modal-safe snapshot of one durable object that hardcopy emits.
 ///
-/// Page Setup cannot borrow the live schematic while its modal state is
-/// active, so the preview takes this owned representation from the same
+/// A sheet preview cannot borrow the live schematic while a modal holds its
+/// own state, so the preview takes this owned representation from the same
 /// object/bounds authority as canvas overflow detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrawingSheetPrintablePreviewKind {
@@ -970,7 +970,7 @@ fn active_object_bounds<'a>(
             // Hardcopy always emits the retained instance name and value at
             // the instance anchor. Its semantic bounds authority gives the
             // longer label two world units per source character, so include
-            // the same deterministic horizontal extent in Page Setup and
+            // the same deterministic horizontal extent in sheet previews and
             // canvas overflow rather than reviewing only the symbol body.
             let label_width = component
                 .name
@@ -1307,7 +1307,7 @@ fn draw_title_block(
         palette.block,
         outline_stroke,
     ));
-    // The form hardcopy and Page Setup draw too, in physical units on the
+    // The form hardcopy and the sheet previews draw too, in physical units on the
     // block, mapped onto the screen.
     let Some(layout) = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical) else {
         return;
@@ -1363,7 +1363,7 @@ fn draw_title_block(
         // line on its own centre leaves the vertical placement to the font's
         // real metrics rather than to a guessed line box. The text is the
         // form's own wording, cut to the cell's physical budget, so zoom and
-        // monitor DPI cannot disagree with Page Setup or the plot.
+        // monitor DPI cannot disagree with a sheet preview or the plot.
         let (color, weight) = match line.role {
             DrawingSheetTitleLetteringRole::Caption => {
                 (palette.block_label, theme::FontWeight::Regular)

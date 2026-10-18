@@ -5,7 +5,7 @@
 //! A sheet follows one of two standards, chosen by the series its size comes
 //! from (see [`DrawingSheetFrameConvention`]). The frame is laid out here once,
 //! in sheet micrometres, as [`DrawingSheetFrameArtwork`]; the canvas, the plot
-//! and Page Setup's preview each paint that list rather than working out a
+//! and the sheet previews each paint that list rather than working out a
 //! frame of their own, so the screen previews the print line for line.
 
 use super::*;

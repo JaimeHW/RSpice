@@ -5,7 +5,7 @@
 //! A template's layout is a set of cells. Each is a rectangle in the block's
 //! upright frame — it may span rows — with an optional caption, lettered over
 //! its value or inline before it, and the values it letters, each at its own
-//! ISO 3098 height. The canvas, the plot and the Page Setup preview all draw
+//! ISO 3098 height. The canvas, the plot and the sheet previews all draw
 //! the cells laid out here rather than working out a grid of their own, so a
 //! field cannot sit in one place on screen and another on paper, or be cut
 //! short on one and whole on the other.

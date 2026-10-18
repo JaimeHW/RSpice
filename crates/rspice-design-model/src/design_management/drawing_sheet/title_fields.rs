@@ -156,11 +156,11 @@ impl DrawingSheetTitleFieldId {
         }
     }
 
-    /// The field's name wherever RSpice offers it for editing — the
-    /// inspector, Page Setup and the title-block fields dialog — in the term
-    /// ISO 7200 gives it, so the panel names a field as the printed form
-    /// does. The ISO form's own captions are the same terms, abbreviated
-    /// where its figures abbreviate them (`Rev.`, `Lang.`).
+    /// The field's name wherever RSpice offers it for editing, the
+    /// inspector's sheet panel above all, in the term ISO 7200 gives it, so
+    /// the panel names a field as the printed form does. The ISO form's own
+    /// captions are the same terms, abbreviated where its figures abbreviate
+    /// them (`Rev.`, `Lang.`).
     #[must_use]
     pub const fn display_label(self) -> &'static str {
         match self {
@@ -290,9 +290,9 @@ impl DrawingSheetTitleFieldId {
     /// is optional and restates the sheet the reader is holding, and in a
     /// single-library workspace the project's name is already the leading
     /// segment of Cell / view, so a sheet showing Project as well letters
-    /// that name twice. Those wait in Page Setup until a sheet asks for
-    /// them: every cell a sheet does not spend is width the cells beside it
-    /// keep. The CAGE code, the engineer, the signature dates and the
+    /// that name twice. Those wait among the sheet's optional boxes until it
+    /// asks for them: every cell a sheet does not spend is width the cells
+    /// beside it keep. The CAGE code, the engineer, the signature dates and the
     /// contract number belong to the ASME form, which always carries their
     /// cells, so no other block shows them unless a sheet asks.
     #[must_use]

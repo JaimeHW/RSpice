@@ -346,7 +346,7 @@ pub struct DrawingSheetPreset {
     pub format: SchematicSheetFormat,
 }
 
-/// Project-domain evidence for a committed Page Setup or Sheet Format Manager
+/// Project-domain evidence for a committed sheet edit or Sheet Format Manager
 /// operation. It is deliberately independent from transient console messages
 /// and undo history so a saved project can explain every multi-sheet format
 /// mutation after reopening.

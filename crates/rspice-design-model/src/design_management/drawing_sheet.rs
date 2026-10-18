@@ -1510,7 +1510,7 @@ impl SchematicSheetFormat {
         digest("rspice-drawing-sheet-format/v1", self)
     }
 
-    /// Atomically materialize and validate a complete Page Setup draft.
+    /// Atomically materialize and validate a complete format draft.
     pub fn try_from_draft(
         mut draft: SchematicSheetFormatDraft,
     ) -> Result<Self, DesignManagementError> {
@@ -1765,10 +1765,10 @@ impl SchematicSheetFormat {
     ///
     /// The requested choice is never silently rewritten. A block that does
     /// not fit upright inside the drawing area gives way to no block at all,
-    /// and `title_block_substituted` reports that fact to Page Setup and
-    /// inspection surfaces: ISO 7200's block is the same on every sheet. The
-    /// ASME form steps down from Fig 5-2's block to Fig 5-1's, and gives way
-    /// only where neither fits.
+    /// and `title_block_substituted` reports that fact to the sheet's
+    /// properties and inspection surfaces: ISO 7200's block is the same on
+    /// every sheet. The ASME form steps down from Fig 5-2's block to Fig
+    /// 5-1's, and gives way only where neither fits.
     #[must_use]
     pub fn effective_title_block_template(&self) -> DrawingSheetTitleBlockTemplate {
         let requested = self.title_block.template;
@@ -1967,7 +1967,7 @@ impl SchematicSheetFormat {
     /// Y14.1's form on an ANSI or ARCH sheet, and on a custom size the block
     /// of the series it was started from. Either is the block whether or not
     /// the drawing area holds it: a sheet that cannot carries no block, and
-    /// Page Setup says why.
+    /// its properties say why.
     fn start_on_standard_title_block(&mut self) {
         self.title_block.template =
             DrawingSheetTitleBlockTemplate::for_convention(self.frame_convention());

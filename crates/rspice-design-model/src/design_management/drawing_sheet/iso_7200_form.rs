@@ -281,8 +281,8 @@ impl DrawingSheetTitleBlockTemplate {
     /// Whether a sheet on this template must show `field`: the fields every
     /// block shows, on ISO 7200's form the fields the standard makes
     /// mandatory, and on ASME Y14.1's every field of its blocks A to L, whose
-    /// cells the form always draws. Page Setup locks their visibility; their
-    /// values may stay empty.
+    /// cells the form always draws. No sheet hides them; their values may
+    /// stay empty.
     #[must_use]
     pub fn requires_field(self, field: DrawingSheetTitleFieldId) -> bool {
         field.policy().required_visible
@@ -290,7 +290,7 @@ impl DrawingSheetTitleBlockTemplate {
             || (self == Self::AsmeY141 && ASME_Y14_1_FORM_FIELDS.contains(&field))
     }
 
-    /// Why Page Setup locks a field this template requires.
+    /// Why a sheet cannot hide a field this template requires.
     #[must_use]
     pub const fn required_field_note(self) -> &'static str {
         match self {

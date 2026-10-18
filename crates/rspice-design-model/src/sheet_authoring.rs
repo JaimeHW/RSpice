@@ -85,6 +85,6 @@ pub fn custom_format(
         .map_err(|error| error.to_string())?;
     // A size started from ISO A takes ISO 7200's block and one started from
     // ANSI A takes ASME Y14.1's, whether or not its drawing area holds it: one
-    // that cannot carries no block, and Page Setup says why.
+    // that cannot carries no block, and the sheet's properties say why.
     Ok(format)
 }
