@@ -59,11 +59,7 @@ pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
                 Ok(()) => ctx.data_mut(|data| {
                     data.insert_temp(owner_id(), Owner::of(&app.state));
                 }),
-                Err(error) => app
-                    .state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Checkpoint import", error),
+                Err(error) => app.state.report_failure("Checkpoint import failed", error),
             }
         }
         Action::Export(checkpoint) => export(ctx, &mut app.state, &checkpoint),
@@ -100,10 +96,7 @@ fn export(ctx: &egui::Context, state: &mut AppState, checkpoint: &TransientCheck
         format!("tran-{}.rspice-tran", &digest[..12]),
         checkpoint.bytes().to_vec(),
     ) {
-        state
-            .ui
-            .toasts
-            .error_with_title(ctx, "Checkpoint export", error);
+        state.report_failure("Checkpoint export failed", error);
     }
 }
 
@@ -125,6 +118,7 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
         if owner.as_ref() == Some(&Owner::of(&app.state)) {
             match outcome {
                 Ok(Some(file)) => {
+                    let name = file.name.clone();
                     let result = TransientCheckpointEvidence::from_bytes(file.bytes.into())
                         .map_err(|error| error.to_string())
                         .and_then(|checkpoint| {
@@ -137,50 +131,29 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                     match result {
                         Ok(inserted) => {
                             app.invalidate_simulation_preflight();
-                            app.state.ui.toasts.success(ctx, "Checkpoint imported", if inserted {
-                                "Select it under Resume transient. Preparation checks each circuit and Run Set point."
-                            } else { "This checkpoint is already imported." });
+                            app.state.prompt(if inserted {
+                                format!("Imported {name}; select it under Resume transient.")
+                            } else {
+                                format!("{name} is already imported.")
+                            });
                         }
-                        Err(error) => {
-                            app.state
-                                .ui
-                                .toasts
-                                .error_with_title(ctx, "Checkpoint import", error)
-                        }
+                        Err(error) => app.state.report_failure("Checkpoint import failed", error),
                     }
                 }
                 Ok(None) => {}
-                Err(error) => app
-                    .state
-                    .ui
-                    .toasts
-                    .error_with_title(ctx, "Checkpoint import", error),
+                Err(error) => app.state.report_failure("Checkpoint import failed", error),
             }
         }
     }
     if let Some(outcome) = file_exchange::take_saved(ctx, export_id()) {
         match outcome {
-            Ok(Some(file)) => {
-                if cfg!(target_arch = "wasm32") {
-                    app.state.ui.toasts.success(
-                        ctx,
-                        "Checkpoint download prepared",
-                        format!("Finish saving {} in your browser.", file.name),
-                    );
-                } else {
-                    app.state.ui.toasts.success(
-                        ctx,
-                        "Checkpoint exported",
-                        format!("Saved {}", file.name),
-                    );
-                }
-            }
+            Ok(Some(file)) => app.state.prompt(if cfg!(target_arch = "wasm32") {
+                format!("Finish saving {} in your browser.", file.name)
+            } else {
+                format!("Saved checkpoint {}", file.name)
+            }),
             Ok(None) => {}
-            Err(error) => app
-                .state
-                .ui
-                .toasts
-                .error_with_title(ctx, "Checkpoint export", error),
+            Err(error) => app.state.report_failure("Checkpoint export failed", error),
         }
     }
     let Some(inspection) = ctx.data(|data| data.get_temp::<Inspection>(inspection_id())) else {

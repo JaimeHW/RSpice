@@ -102,7 +102,7 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
                         .on_disabled_hover_text("Enter an expression first")
                         .clicked()
                     {
-                        plot_expression(ui.ctx(), app);
+                        plot_expression(app);
                     }
                     if Button::new("Evaluate").show(ui).clicked() {
                         let (panel, simulation) =
@@ -122,7 +122,7 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
 ///
 /// The tool stays open: plotting is a step in composing an expression, not
 /// the end of the task.
-fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
+fn plot_expression(app: &mut RSpiceApp) {
     let expression = app.state.calculator_panel.expression.trim().to_owned();
     if expression.is_empty() {
         return;
@@ -168,14 +168,12 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
-    app.state.ui.toasts.info(
-        ctx,
-        if added {
-            format!("Plotted {expression}")
-        } else {
-            format!("{expression} is already plotted")
-        },
-    );
+    // The strips are in front of the reader now; the status bar confirms it.
+    app.state.prompt(if added {
+        format!("Plotted {expression}")
+    } else {
+        format!("{expression} is already plotted")
+    });
 }
 
 #[cfg(test)]
@@ -185,7 +183,6 @@ mod tests {
     #[test]
     fn plotting_keeps_the_tool_open_and_never_duplicates_a_trace() {
         let mut app = crate::workbench::RSpiceApp::test_instance();
-        let ctx = egui::Context::default();
         let analysis =
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
                 .with_waveforms(vec![
@@ -209,8 +206,16 @@ mod tests {
         app.state.dialogs.waveform_calculator_dialog = true;
         app.state.calculator_panel.expression = "V(out)/V(in)".to_owned();
 
-        plot_expression(&ctx, &mut app);
-        plot_expression(&ctx, &mut app);
+        plot_expression(&mut app);
+        assert_eq!(app.state.prompt_text(), Some("Plotted V(out)/V(in)"));
+        plot_expression(&mut app);
+        // The reader is looking at the strips: the answer is the status
+        // bar's, and nothing is interrupted for it.
+        assert_eq!(
+            app.state.prompt_text(),
+            Some("V(out)/V(in) is already plotted")
+        );
+        assert!(app.state.ui.toasts.activity().is_empty());
 
         let traces = app
             .state
@@ -232,10 +237,9 @@ mod tests {
     #[test]
     fn an_empty_expression_plots_nothing() {
         let mut app = crate::workbench::RSpiceApp::test_instance();
-        let ctx = egui::Context::default();
         app.state.calculator_panel.expression = "   ".to_owned();
 
-        plot_expression(&ctx, &mut app);
+        plot_expression(&mut app);
 
         assert!(app.state.ui.results.session.exprs.is_empty());
     }

@@ -31,7 +31,6 @@ use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
     note_result_export_failure, note_result_export_success,
 };
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -152,11 +151,7 @@ pub(super) fn export_numpy(
         Ok(bytes) => bytes,
         Err(error) => {
             note_result_export_failure(state, format!("{} encoding failed: {error}", kind.label()));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.label()),
-            );
+            state.report_failure(format!("{} export failed", kind.label()), error.to_string());
             return;
         }
     };
@@ -182,10 +177,9 @@ pub(super) fn export_numpy(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, kind.label());
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
+            note_result_export_success(
+                state,
+                kind.label(),
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     kind.label(),
                     &published_path,
@@ -196,11 +190,7 @@ pub(super) fn export_numpy(
         }
         Err(error) => {
             note_result_export_failure(state, format!("{} export failed: {error}", kind.label()));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.label()),
-            );
+            state.report_failure(format!("{} export failed", kind.label()), error.to_string());
         }
     }
 }

@@ -89,11 +89,11 @@ const CASES: [Case; 7] = [
 
 /// Index-aligned with [`CASES`].
 const FINGERPRINTS: [&str; 7] = [
-    "7002f7497a25d2ecfe2358e6dd3a4f6830e0286a1a017afab05c9e50c6d62cef",
-    "c3b908eaeb8294b905cc0f5ea85fa46a7ae84e9c7a4c5269bccc44b14dcb601f",
+    "a3ef652867c0345c3e7e885d9ab3c6334d277900a054c49069e2668b6fe0a674",
+    "574b148eb8be65d4169423fcf47268d268c47baf85a6751bb356f2076a5a49ba",
     "ba3e75a34a627b007b7ba97d3a55e6d66921ff4a66be0d8972279146dc21ea68",
-    "b0686c082de23a49b495f1493d7b5e0e9036681421f22bd0b44a3972f833854e",
-    "7a5512099e310251410f9aa662d3c353ac0ca0c66d1bb29ccece32f2e83ac9f6",
+    "8ac5c27426db067394ea6d102293cea7741d11f1f6b7b48ed7b24736bab7e885",
+    "522f170c1504415eed2d1ca5cb306ce50578f830df115d4a175a8d96a6af319e",
     "727cbac096615fe41589f18b3bc911cd246f6dc74006369023ba5baec183c971",
     "62fbecba3c959d9812570482e8428398c0e2362d0dcd116eb42f34646dbdeda9",
 ];
@@ -139,11 +139,15 @@ fn raster(case: &Case) -> Canvas {
         mode: case.mode,
         ..crate::ui::Theme::default()
     };
-    if scene == Scene::PanelHover {
-        crate::ui::raster::render_with_pointer(size, FIRST_ROW, pass)
-    } else {
-        crate::ui::raster::render_themed(theme, size, pass)
-    }
+    // The earlier rows tell the time of day, so the clock and its zone are
+    // pinned: a render reviewed in one zone is the render every machine draws.
+    super::tests::with_pinned_clock(|| {
+        if scene == Scene::PanelHover {
+            crate::ui::raster::render_with_pointer(size, FIRST_ROW, pass)
+        } else {
+            crate::ui::raster::render_themed(theme, size, pass)
+        }
+    })
 }
 
 fn regression_height(canvas: &Canvas) -> usize {

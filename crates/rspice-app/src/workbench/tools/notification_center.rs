@@ -18,7 +18,7 @@ use std::time::Duration;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
     Align, Area, Color32, CornerRadius, Frame, Galley, Id, Layout, Order, Pos2, Rect, Response,
-    Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Sense, Stroke, Ui, UiBuilder, Vec2, ViewportId, pos2, vec2,
 };
 
 use crate::ui::theme::{self, FontWeight, mix};
@@ -122,20 +122,66 @@ struct PanelView {
     unread_only: bool,
 }
 
+/// The window with the keyboard, or the main window when none of the
+/// application's windows has it. Toasts are drawn there, and so is a panel
+/// that no bell opened.
+pub(in crate::workbench) fn focused_window(ctx: &egui::Context) -> ViewportId {
+    ctx.input(|input| {
+        input
+            .raw
+            .viewports
+            .iter()
+            .find_map(|(window, info)| (info.focused == Some(true)).then_some(*window))
+    })
+    .unwrap_or(ViewportId::ROOT)
+}
+
+/// The window the panel is drawn in: the one whose bell opened it, or, for a
+/// panel a command or a route opened, the window that had the keyboard when
+/// it was first drawn. Claimed once, so the open panel does not follow the
+/// keyboard from window to window, and claimed again if its window closes.
+fn owner(ctx: &egui::Context) -> ViewportId {
+    let window_id = title_bar::notification_window_id();
+    let held = ctx.data(|data| data.get_temp::<ViewportId>(window_id));
+    if let Some(window) = held
+        && (window == ViewportId::ROOT
+            || ctx.input(|input| input.raw.viewports.contains_key(&window)))
+    {
+        return window;
+    }
+    let claimed = focused_window(ctx);
+    ctx.data_mut(|data| data.insert_temp(window_id, claimed));
+    claimed
+}
+
+/// Whether the panel is on screen in the window this pass draws. It is
+/// drawn in one window only, whichever bell it hangs from.
+pub(in crate::workbench) fn showing_here(ctx: &egui::Context, state: &AppState) -> bool {
+    state.workbench.notification_center_showing() && owner(ctx) == ctx.viewport_id()
+}
+
 pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrome_bottom: f32) {
-    let was_open_id = panel_id().with("was-open");
+    // Which window drew the panel on the last pass that drew it.
+    let drawn_in_id = panel_id().with("drawn-in");
     let enter_id = panel_id().with("enter");
     if !app.state.workbench.notification_center_showing() {
-        ctx.data_mut(|data| data.insert_temp(was_open_id, false));
+        ctx.data_mut(|data| {
+            data.remove::<ViewportId>(drawn_in_id);
+            data.remove::<ViewportId>(title_bar::notification_window_id());
+        });
         // Walk the entrance back to zero while closed, so the next opening
         // has somewhere to animate from.
         let _ = ctx.animate_bool_with_time(enter_id, false, 0.0);
         return;
     }
-    let opening = !ctx
-        .data(|data| data.get_temp::<bool>(was_open_id))
-        .unwrap_or(false);
-    ctx.data_mut(|data| data.insert_temp(was_open_id, true));
+    let here = ctx.viewport_id();
+    if owner(ctx) != here {
+        return;
+    }
+    // Arriving in a window, by opening or by moving from another window's
+    // bell, is an opening: the press that did it landed on a bell.
+    let opening = ctx.data(|data| data.get_temp::<ViewportId>(drawn_in_id)) != Some(here);
+    ctx.data_mut(|data| data.insert_temp(drawn_in_id, here));
 
     let anchor = title_bar::notification_anchor(ctx);
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -171,7 +217,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
     }
     ctx.request_repaint_after(AGE_REFRESH);
 
-    let now = ctx.input(|input| input.time);
+    let clock = Clock::read(ctx.input(|input| input.time));
     let mut view = PanelView {
         filter: app.state.workbench.notification_filter,
         unread_only: app.state.workbench.notification_unread_only,
@@ -198,7 +244,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
                         ui,
                         &mut view,
                         records,
-                        now,
+                        clock,
                         large,
                         placement.max_height - 2.0,
                         &mut intents,
@@ -337,7 +383,7 @@ fn panel_contents(
     ui: &mut Ui,
     view: &mut PanelView,
     records: &[NotificationRecord],
-    now: f64,
+    clock: Clock,
     large: bool,
     max_height: f32,
     intents: &mut Vec<Intent>,
@@ -364,7 +410,7 @@ fn panel_contents(
         notice_list(
             ui,
             &visible,
-            now,
+            clock,
             large,
             (max_height - used).max(0.0),
             intents,
@@ -763,7 +809,7 @@ fn is_recent(now: f64, created: f64) -> bool {
 fn notice_list(
     ui: &mut Ui,
     visible: &[&NotificationRecord],
-    now: f64,
+    clock: Clock,
     large: bool,
     max_height: f32,
     intents: &mut Vec<Intent>,
@@ -777,7 +823,7 @@ fn notice_list(
     let (recent, earlier): (Vec<_>, Vec<_>) = visible
         .iter()
         .copied()
-        .partition(|record| is_recent(now, record.created()));
+        .partition(|record| is_recent(clock.now, record.created()));
     let groups = [("Recent", recent), ("Earlier this session", earlier)];
     let mut extents = Vec::with_capacity(groups.len());
 
@@ -794,7 +840,7 @@ fn notice_list(
                     let top = ui.cursor().top();
                     group_heading(ui, label, None);
                     for (index, record) in records.iter().enumerate() {
-                        notice_row(ui, record, now, index == 0, large, intents);
+                        notice_row(ui, record, clock, index == 0, large, intents);
                     }
                     extents.push((label, top, ui.cursor().top()));
                 }
@@ -861,17 +907,85 @@ fn group_heading(ui: &mut Ui, label: &str, pinned: Option<Rect>) {
     );
 }
 
-/// "now", then minutes, then hours. No "ago": the column is already a column
-/// of ages, and the word would be the widest thing in it.
-fn age_label(now: f64, created: f64) -> String {
-    let age = (now - created).max(0.0);
+/// The moment a pass is drawn at, on the egui clock every record is stamped
+/// with and on the reader's wall clock. Read once per pass so every row
+/// agrees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Clock {
+    now: f64,
+    /// Unix time at `now`; zero when the platform cannot say.
+    wall: Duration,
+}
+
+impl Clock {
+    fn read(now: f64) -> Self {
+        Self {
+            now,
+            wall: crate::time_compat::unix_epoch(),
+        }
+    }
+
+    /// When a record was raised, on the reader's clock: the projection the
+    /// activity stream puts a console line's time through, run backwards.
+    /// `None` when the wall clock cannot place it.
+    fn local(self, created: f64) -> Option<time::OffsetDateTime> {
+        if self.wall.is_zero() {
+            return None;
+        }
+        let age = Duration::try_from_secs_f64((self.now - created).max(0.0)).ok()?;
+        local_date_time(u64::try_from(self.wall.checked_sub(age)?.as_millis()).ok()?)
+    }
+}
+
+/// A Unix time on the reader's clock. Tests read it in a zone they pin, so a
+/// render reviewed in one zone is the render every machine draws.
+fn local_date_time(unix_ms: u64) -> Option<time::OffsetDateTime> {
+    #[cfg(test)]
+    if let Some(zone) = tests::PINNED_ZONE.with(std::cell::Cell::get) {
+        let utc = time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix_ms) * 1_000_000)
+            .ok()?;
+        return Some(utc.to_offset(zone));
+    }
+    crate::time_compat::local_date_time(unix_ms)
+}
+
+/// From this age a row gives the time of day instead of a count.
+const CLOCK_AGE: f64 = 3_600.0;
+
+/// "now", then minutes, then the time of day. No "ago": the column is already
+/// a column of ages, and the word would be the widest thing in it. Past the
+/// hour a count stops answering "when?" ("3 hr" late in a long session is a
+/// sum left to the reader), so the row gives the time on the reader's clock,
+/// as the Console's time column does, and the hover adds the date.
+fn age_label(clock: Clock, created: f64) -> String {
+    let age = (clock.now - created).max(0.0);
     if age < 60.0 {
         "now".to_owned()
-    } else if age < 3_600.0 {
+    } else if age < CLOCK_AGE {
         format!("{} min", (age / 60.0).floor() as u64)
+    } else if let Some(local) = clock.local(created) {
+        format!("{:02}:{:02}", local.hour(), local.minute())
     } else {
-        format!("{} hr", (age / 3_600.0).floor() as u64)
+        // A wall clock that cannot be read leaves the count.
+        format!("{} hr", (age / CLOCK_AGE).floor() as u64)
     }
+}
+
+/// The date and time a time-of-day age stands for, for the row's hover.
+fn age_stamp(clock: Clock, created: f64) -> Option<String> {
+    if clock.now - created < CLOCK_AGE {
+        return None;
+    }
+    let local = clock.local(created)?;
+    Some(format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        local.year(),
+        u8::from(local.month()),
+        local.day(),
+        local.hour(),
+        local.minute(),
+        local.second()
+    ))
 }
 
 fn message_galley(ui: &Ui, message: &str, width: f32) -> Arc<Galley> {
@@ -898,7 +1012,7 @@ fn message_galley(ui: &Ui, message: &str, width: f32) -> Arc<Galley> {
 fn notice_row(
     ui: &mut Ui,
     record: &NotificationRecord,
-    now: f64,
+    clock: Clock,
     first_in_group: bool,
     large: bool,
     intents: &mut Vec<Intent>,
@@ -983,7 +1097,7 @@ fn notice_row(
         format!(
             "{} \u{00b7} {}",
             record.category().label(),
-            age_label(now, record.created())
+            age_label(clock, record.created())
         ),
         theme::mono(tokens::FS_MICRO, FontWeight::Regular),
         t.color.text_faint,
@@ -1105,9 +1219,15 @@ fn notice_row(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &announced)
     });
     let message_elided = message.as_ref().is_some_and(|galley| galley.elided);
+    // Whatever the row cut short is one hover away, in full, and so is the
+    // date a time of day leaves out.
+    let mut hover = Vec::new();
     if title_elided || message_elided {
-        // Whatever the row cut short is one hover away, in full.
-        response.on_hover_text(format!("{}\n{}", record.title(), record.message()));
+        hover.push(format!("{}\n{}", record.title(), record.message()));
+    }
+    hover.extend(age_stamp(clock, record.created()));
+    if !hover.is_empty() {
+        response.on_hover_text(hover.join("\n"));
     }
 }
 

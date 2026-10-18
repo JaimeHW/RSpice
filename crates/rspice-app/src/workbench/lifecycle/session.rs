@@ -186,6 +186,75 @@ pub(crate) struct SchematicVisibilityRecovery {
     pub(crate) selection: crate::state::Selection,
 }
 
+/// What the shell has seen of runs and campaigns, so that each one's end is
+/// announced exactly once.
+///
+/// Every run seen before it ended is watched, not just the newest: a
+/// campaign starts its next member in the same update that finishes the
+/// last, so by the time a frame looks the newest run has already moved on.
+/// Transient by construction.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RunWatch {
+    /// Runs seen before they ended, by stable identity. A run that was over
+    /// when it was first seen, such as history opened with a project, is
+    /// never in here, so it is never announced as having just finished.
+    running: std::collections::HashSet<crate::product::RunId>,
+    /// Campaign outcomes the controller reported that the shell has not
+    /// announced yet, oldest first.
+    campaign_outcomes: Vec<crate::simulation::controller::prepared_run::CampaignOutcome>,
+}
+
+impl RunWatch {
+    /// Watch a run from the moment it opens, before any frame has seen it.
+    /// A run that ends inside the update that started it is still one that
+    /// was seen running.
+    pub(crate) fn run_started(&mut self, run_id: crate::product::RunId) {
+        self.running.insert(run_id);
+    }
+
+    /// Bring the watch up to date with the runs as they stand, newest first,
+    /// and return the runs that ended since it last looked, oldest first.
+    pub(crate) fn observe(
+        &mut self,
+        runs: impl IntoIterator<Item = (crate::product::RunId, crate::state::SimulationRunLifecycle)>,
+    ) -> Vec<crate::product::RunId> {
+        use crate::state::SimulationRunLifecycle as Lifecycle;
+
+        let mut running = std::collections::HashSet::new();
+        let mut ended = Vec::new();
+        for (run_id, lifecycle) in runs {
+            if matches!(
+                lifecycle,
+                Lifecycle::Preparing | Lifecycle::Running | Lifecycle::Cancelling
+            ) {
+                running.insert(run_id);
+            } else if lifecycle.is_terminal() && self.running.contains(&run_id) {
+                ended.push(run_id);
+            }
+        }
+        // A run that left the history while running is not announced, and
+        // is not kept waiting for an end it can no longer reach.
+        self.running = running;
+        ended.reverse();
+        ended
+    }
+
+    /// Hold a campaign outcome until the shell announces it.
+    pub(crate) fn campaign_outcome(
+        &mut self,
+        outcome: crate::simulation::controller::prepared_run::CampaignOutcome,
+    ) {
+        self.campaign_outcomes.push(outcome);
+    }
+
+    /// The campaign outcomes not yet announced, oldest first.
+    pub(crate) fn take_campaign_outcomes(
+        &mut self,
+    ) -> Vec<crate::simulation::controller::prepared_run::CampaignOutcome> {
+        std::mem::take(&mut self.campaign_outcomes)
+    }
+}
+
 /// Persistent and per-frame state shared by workbench document engines.
 #[derive(Debug, Clone, Default)]
 pub struct UiSessionState {
@@ -208,6 +277,13 @@ pub struct UiSessionState {
     pub browser_spoken_feedback: bool,
     /// Toast queue.
     pub toasts: Toasts,
+    /// The shell's egui context, kept so that a failure reported by a
+    /// workflow that holds no frame (a save, an open) is still toasted on the
+    /// frame clock. Set once when the shell starts. Transient.
+    pub(crate) toast_context: egui::Context,
+    /// The last autosave checkpoint could not be written. A failure is said
+    /// when it starts, not again at every interval it persists. Transient.
+    pub(crate) autosave_failing: bool,
     /// A retained result document asked to be taken back to the plan that
     /// produced it.
     ///
@@ -215,14 +291,13 @@ pub struct UiSessionState {
     /// frame drains this the way it already drains the export requests they
     /// raise. Transient.
     pub(crate) open_producing_plan_requested: bool,
-    /// The newest run's display sequence and terminality, as the previous
-    /// frame saw them.
+    /// The runs seen running and the campaign outcomes not yet announced.
     ///
     /// The shell announces a completion on the *transition* into a terminal
     /// lifecycle rather than on the terminal state itself, so opening a
     /// project whose history already holds a finished run never claims a run
-    /// just completed. Transient by construction.
-    pub(crate) observed_newest_run: Option<(u64, bool)>,
+    /// just completed.
+    pub(crate) run_watch: RunWatch,
     /// Schematic-space cursor position, reported by the canvas each frame the
     /// pointer hovers it; consumed by the status bar.
     pub canvas_hover: Option<(f64, f64)>,

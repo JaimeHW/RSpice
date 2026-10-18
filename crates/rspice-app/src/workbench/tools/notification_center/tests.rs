@@ -17,6 +17,31 @@ const DESKTOP: (f32, f32) = (1280.0, 760.0);
 const TABLET: (f32, f32) = (820.0, 640.0);
 const PHONE: (f32, f32) = (390.0, 780.0);
 
+thread_local! {
+    /// The zone the panel reads wall times in under test; see
+    /// [`super::local_date_time`].
+    pub(super) static PINNED_ZONE: std::cell::Cell<Option<time::UtcOffset>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// The wall clock while a pass is drawn: 15:00:30 UTC on 18 October 2026.
+/// The half minute absorbs the fraction of a second egui's clock has run by
+/// the time a fixture's passes are drawn.
+const PINNED_WALL: std::time::Duration = std::time::Duration::from_secs(1_792_335_630);
+
+/// Run `pass` with the wall clock and its zone pinned, so the seeded notice
+/// raised two hours before egui's zero reads 13:00 on every machine.
+pub(super) fn with_pinned_clock<R>(pass: impl FnOnce() -> R) -> R {
+    struct Restore(Option<time::UtcOffset>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PINNED_ZONE.with(|zone| zone.set(self.0));
+        }
+    }
+    let _restore = Restore(PINNED_ZONE.with(|zone| zone.replace(Some(time::UtcOffset::UTC))));
+    crate::time_compat::with_unix_epoch(Ok(PINNED_WALL), pass)
+}
+
 /// A press and a release at one point, which is what egui reads as a click.
 fn click_events(at: Pos2) -> Vec<egui::Event> {
     vec![
@@ -165,17 +190,19 @@ impl Panel {
         }
 
         let app = &mut self.app;
-        let output = self.ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(
-                    Pos2::ZERO,
-                    vec2(self.size.0, self.size.1),
-                )),
-                events,
-                ..egui::RawInput::default()
-            },
-            |ui| show(ui.ctx(), app, TITLE_BAR),
-        );
+        let output = with_pinned_clock(|| {
+            self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        Pos2::ZERO,
+                        vec2(self.size.0, self.size.1),
+                    )),
+                    events,
+                    ..egui::RawInput::default()
+                },
+                |ui| show(ui.ctx(), app, TITLE_BAR),
+            )
+        });
         self.texts.clear();
         for clipped in &output.shapes {
             walk(&clipped.shape, clipped.clip_rect, &mut self.texts);
@@ -267,7 +294,7 @@ fn the_panel_states_the_session_in_one_grammar() {
         "Information",
         "Job \u{00b7} now",
         "Job \u{00b7} 30 min",
-        "System \u{00b7} 2 hr",
+        "System \u{00b7} 13:00",
         "Open in Results",
         "Show in Console",
         "This session \u{00b7} 4 of 50 kept",
@@ -574,6 +601,179 @@ fn the_bell_is_a_toggle() {
     assert!(!state.workbench.notification_center_showing());
 }
 
+/// A detached application window, as egui names it.
+fn detached() -> ViewportId {
+    ViewportId::from_hash_of("detached workbench window")
+}
+
+/// Input for one pass drawn for `window`, among `open` windows, while
+/// `keyboard` (if any) has the keyboard.
+fn window_input(
+    window: ViewportId,
+    open: &[ViewportId],
+    keyboard: Option<ViewportId>,
+) -> egui::RawInput {
+    let mut input = egui::RawInput {
+        viewport_id: window,
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(DESKTOP.0, DESKTOP.1))),
+        ..egui::RawInput::default()
+    };
+    for &id in open {
+        input.viewports.insert(
+            id,
+            egui::ViewportInfo {
+                parent: (id != ViewportId::ROOT).then_some(ViewportId::ROOT),
+                focused: Some(keyboard == Some(id)),
+                ..Default::default()
+            },
+        );
+    }
+    input
+}
+
+/// One session drawn across the main window and a detached one.
+struct Windows {
+    ctx: egui::Context,
+    app: RSpiceApp,
+}
+
+impl Windows {
+    fn new() -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        seed_session(&ctx, &mut app.state.ui.toasts);
+        Self { ctx, app }
+    }
+
+    /// Press the bell of `window`, with both windows open.
+    fn press_bell_in(&mut self, window: ViewportId) {
+        let workbench = &mut self.app.state.workbench;
+        let both = [ViewportId::ROOT, detached()];
+        let _ = self
+            .ctx
+            .run_ui(window_input(window, &both, Some(window)), |ui| {
+                title_bar::press_bell(ui.ctx(), workbench);
+            });
+    }
+
+    /// Draw the panel for `window`, among `open` windows, and say whether it
+    /// put the panel there: two passes, so a panel arriving in the window has
+    /// measured itself.
+    fn panel_drawn_in(&mut self, window: ViewportId, open: &[ViewportId]) -> bool {
+        fn heads(shape: &egui::Shape) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.text() == "Notifications",
+                egui::Shape::Vec(shapes) => shapes.iter().any(heads),
+                _ => false,
+            }
+        }
+        let app = &mut self.app;
+        let mut drawn = false;
+        for _ in 0..2 {
+            let output = with_pinned_clock(|| {
+                self.ctx
+                    .run_ui(window_input(window, open, Some(window)), |ui| {
+                        show(ui.ctx(), app, TITLE_BAR);
+                    })
+            });
+            drawn = output.shapes.iter().any(|clipped| heads(&clipped.shape));
+        }
+        drawn
+    }
+
+    fn showing(&self) -> bool {
+        self.app.state.workbench.notification_center_showing()
+    }
+}
+
+/// Toasts are drawn in the window with the keyboard, and in the main window
+/// when no window of the application has it; never in two at once.
+#[test]
+fn toasts_go_to_the_window_with_the_keyboard() {
+    let ctx = egui::Context::default();
+    let both = [ViewportId::ROOT, detached()];
+    let mut seen = Vec::new();
+    for keyboard in [Some(detached()), Some(ViewportId::ROOT), None] {
+        let _ = ctx.run_ui(window_input(ViewportId::ROOT, &both, keyboard), |ui| {
+            seen.push(focused_window(ui.ctx()));
+        });
+    }
+    assert_eq!(seen, [detached(), ViewportId::ROOT, ViewportId::ROOT]);
+}
+
+/// The bell pressed in a detached window opens the panel in that window,
+/// under that bell, and nowhere else; the main window's bell brings it back,
+/// and pressing that bell again puts it away.
+#[test]
+fn the_panel_opens_in_the_window_whose_bell_was_pressed() {
+    let mut windows = Windows::new();
+    let both = [ViewportId::ROOT, detached()];
+    assert!(!windows.panel_drawn_in(ViewportId::ROOT, &both));
+
+    windows.press_bell_in(detached());
+    assert!(windows.showing());
+    assert!(windows.panel_drawn_in(detached(), &both));
+    assert!(
+        !windows.panel_drawn_in(ViewportId::ROOT, &both),
+        "the main window does not draw a panel another window's bell opened"
+    );
+
+    windows.press_bell_in(ViewportId::ROOT);
+    assert!(
+        windows.showing(),
+        "another window's bell moves the panel rather than closing it"
+    );
+    assert!(windows.panel_drawn_in(ViewportId::ROOT, &both));
+    assert!(!windows.panel_drawn_in(detached(), &both));
+
+    windows.press_bell_in(ViewportId::ROOT);
+    assert!(!windows.showing());
+}
+
+/// A panel whose window closed comes back in a window that is still open,
+/// rather than staying open where nobody can see it or close it.
+#[test]
+fn a_panel_whose_window_closed_comes_back_in_the_main_window() {
+    let mut windows = Windows::new();
+    let both = [ViewportId::ROOT, detached()];
+    assert!(!windows.panel_drawn_in(ViewportId::ROOT, &both));
+    windows.press_bell_in(detached());
+    assert!(!windows.panel_drawn_in(ViewportId::ROOT, &both));
+
+    assert!(windows.panel_drawn_in(ViewportId::ROOT, &[ViewportId::ROOT]));
+}
+
+/// Each window has its own bell, and the panel hangs from the bell of the
+/// window it is drawn in: a bell drawn in a detached window is not where the
+/// main window's panel points.
+#[test]
+fn each_window_has_its_own_bell_to_hang_the_panel_from() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    let both = [ViewportId::ROOT, detached()];
+    let layout =
+        crate::workbench::layout::LayoutSpec::resolve(DESKTOP.0, DESKTOP.1, &app.state.workbench);
+    let _ = ctx.run_ui(window_input(ViewportId::ROOT, &both, None), |_| {});
+    let mut anchors = Vec::new();
+    for _ in 0..2 {
+        let _ = ctx.run_ui(window_input(detached(), &both, Some(detached())), |ui| {
+            title_bar::show(ui, &mut app, layout);
+            anchors.push(title_bar::notification_anchor(ui.ctx()).is_some());
+        });
+    }
+    let _ = ctx.run_ui(window_input(ViewportId::ROOT, &both, None), |ui| {
+        anchors.push(title_bar::notification_anchor(ui.ctx()).is_some());
+    });
+    assert_eq!(
+        anchors.last(),
+        Some(&false),
+        "the main window has no bell drawn: {anchors:?}"
+    );
+    assert!(anchors[1], "the detached window's bell is its anchor");
+}
+
 /// A phone-width shell draws no bell, so the panel must be reachable by name:
 /// a registered command is what the palette searches.
 #[test]
@@ -626,12 +826,36 @@ fn filters_project_domains_without_mutating_activity() {
     ));
 }
 
+/// Under the hour an age is a count; from the hour it is the time on the
+/// reader's clock, with the date a hover away. Egui's 7,200 s here is the
+/// pinned wall's 15:00:30, so a notice from egui's zero was raised at 13:00:30.
 #[test]
-fn ages_are_session_relative_bounded_and_grouped_at_a_quarter_hour() {
-    assert_eq!(age_label(2.0, 4.0), "now");
-    assert_eq!(age_label(59.0, 0.0), "now");
-    assert_eq!(age_label(180.0, 0.0), "3 min");
-    assert_eq!(age_label(7_200.0, 0.0), "2 hr");
+fn ages_count_minutes_then_tell_the_time_and_group_at_a_quarter_hour() {
+    with_pinned_clock(|| {
+        let at = |now: f64| Clock {
+            now,
+            wall: PINNED_WALL,
+        };
+        assert_eq!(age_label(at(2.0), 4.0), "now");
+        assert_eq!(age_label(at(59.0), 0.0), "now");
+        assert_eq!(age_label(at(180.0), 0.0), "3 min");
+        assert_eq!(age_label(at(3_599.0), 0.0), "59 min");
+        assert_eq!(age_label(at(3_600.0), 0.0), "14:00");
+        assert_eq!(age_label(at(7_200.0), 0.0), "13:00");
+        assert_eq!(age_stamp(at(3_599.0), 0.0), None, "a count needs no date");
+        assert_eq!(
+            age_stamp(at(7_200.0), 0.0).as_deref(),
+            Some("2026-10-18 13:00:30")
+        );
+
+        // A wall clock that cannot be read still says how long ago.
+        let unread = Clock {
+            now: 7_200.0,
+            wall: std::time::Duration::ZERO,
+        };
+        assert_eq!(age_label(unread, 0.0), "2 hr");
+        assert_eq!(age_stamp(unread, 0.0), None);
+    });
 
     assert!(is_recent(899.0, 0.0));
     assert!(!is_recent(900.0, 0.0));

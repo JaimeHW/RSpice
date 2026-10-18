@@ -657,3 +657,32 @@ fn default_printer_resolution_prefers_600_then_a_bounded_highest_mode() {
     assert_eq!(preferred_resolution(vec![2_400, 4_800]), Some(2_400));
     assert_eq!(preferred_resolution(Vec::new()), None);
 }
+
+/// A hardcopy write that failed after its dialog was closed is said, once;
+/// one the reader cancelled by closing the dialog is not, and an open dialog
+/// shows its own failure.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_hardcopy_that_fails_after_its_dialog_closed_is_reported() {
+    let mut app = RSpiceApp::test_instance();
+    conclude_native_finalization(
+        &mut app,
+        Err("Hardcopy export was cancelled before it was written.".to_owned()),
+    );
+    assert!(app.state.ui.toasts.activity().is_empty());
+
+    app.state.dialogs.hardcopy.open = true;
+    conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
+    assert_eq!(
+        app.state.dialogs.hardcopy.error.as_deref(),
+        Some("The disk is full.")
+    );
+    assert!(app.state.ui.toasts.activity().is_empty());
+
+    app.state.dialogs.hardcopy.close();
+    conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
+    let activity = app.state.ui.toasts.activity();
+    assert_eq!(activity.len(), 1);
+    assert_eq!(activity[0].title(), "Hardcopy failed");
+    assert_eq!(activity[0].message(), "The disk is full.");
+}

@@ -119,7 +119,7 @@ pub(super) fn more_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutS
             if tool_row(ui, app, tool, row_height) {
                 match tool.action {
                     OverflowAction::Command(command, _) => {
-                        command.execute_with_feedback(app, ui.ctx());
+                        command.execute(app);
                     }
                     OverflowAction::Run(run) => run(&mut app.state),
                 }

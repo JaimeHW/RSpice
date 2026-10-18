@@ -317,8 +317,11 @@ impl RSpiceApp {
             DialogChoice::None => {}
             DialogChoice::Cancelled | DialogChoice::Ghost => {
                 // An in-flight publish keeps running on the executor; the
-                // receipt still binds the project and reports to the console.
+                // receipt still binds the project and reports to the console,
+                // and a failure is reported once this dialog is not there to
+                // show it. A publish that already ended was shown here.
                 self.state.dialogs.publish_web.open = false;
+                self.state.dialogs.publish_web.submitted = in_flight;
             }
             DialogChoice::Secondary => {
                 if secondary_unpublishes {
@@ -347,8 +350,9 @@ impl RSpiceApp {
 
     /// Drain the executor's publish receipt: bind the project to its page
     /// lineage and report the URL. Runs every frame from the app loop so a
-    /// closed dialog never loses the binding.
+    /// closed dialog never loses the binding, or the failure.
     pub(in crate::workbench) fn record_publish_receipt(&mut self) {
+        self.report_unwatched_publish_failure();
         let Some(receipt) = self.cloud_account.take_publish_receipt() else {
             return;
         };
@@ -384,6 +388,23 @@ impl RSpiceApp {
                 receipt.url_path
             ),
         );
+    }
+
+    /// Say that a publish failed after its dialog was closed.
+    ///
+    /// The dialog shows a failure while it is open. Once it is closed nothing
+    /// else would, and a publish the user asked for must not fail silently.
+    fn report_unwatched_publish_failure(&mut self) {
+        let dialog = &self.state.dialogs.publish_web;
+        if dialog.open || !dialog.submitted {
+            return;
+        }
+        let Some(PublishState::Failed { message }) = &self.cloud_account.snapshot().publish else {
+            return;
+        };
+        let message = message.clone();
+        self.state.dialogs.publish_web.submitted = false;
+        self.state.report_failure("Publish failed", message);
     }
 
     /// Rebuild the snapshot with the confirmed page fields and hand the
@@ -1011,5 +1032,44 @@ mod tests {
 
         assert_eq!(imported_model_source_count(&state, true), 1);
         assert_eq!(imported_model_source_count(&state, false), 0);
+    }
+
+    /// A publish that fails after its dialog was closed is said, once. One
+    /// the open dialog already showed is not said again.
+    #[test]
+    fn a_publish_that_fails_after_its_dialog_closed_is_reported_once() {
+        use crate::services::cloud_account::{CloudAccountService, CloudSessionSnapshot};
+        use crate::ui::widgets::ToastKind;
+
+        let failed = |message: &str| {
+            CloudAccountService::with_snapshot(
+                CloudAccountAvailability::Native,
+                CloudSessionSnapshot {
+                    publish: Some(PublishState::Failed {
+                        message: message.to_owned(),
+                    }),
+                    ..CloudSessionSnapshot::default()
+                },
+            )
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.cloud_account = failed("The page could not be rendered.");
+        app.state.dialogs.publish_web.open = true;
+        app.state.dialogs.publish_web.submitted = true;
+        app.record_publish_receipt();
+        assert!(
+            app.state.ui.toasts.activity().is_empty(),
+            "the open dialog shows the failure itself"
+        );
+
+        app.state.dialogs.publish_web.open = false;
+        app.record_publish_receipt();
+        app.record_publish_receipt();
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].title(), "Publish failed");
+        assert_eq!(activity[0].message(), "The page could not be rendered.");
+        assert_eq!(activity[0].kind(), ToastKind::Error);
     }
 }

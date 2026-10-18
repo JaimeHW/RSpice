@@ -453,9 +453,11 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
     app.state
         .pdk_config
         .add_library_path(root.to_string_lossy().into_owned());
-    let ctx = egui::Context::default();
 
-    Command::RescanModelLibraries.execute_with_feedback(&mut app, &ctx);
+    // The command itself reports, so the toolbar, the menu and the palette
+    // all say the same. A clean rescan answers the gesture on the status bar
+    // and in the Console; it interrupts nobody.
+    Command::RescanModelLibraries.execute(&mut app);
 
     assert_eq!(app.state.pdk_config.discovered_files.len(), 1);
     let success = app
@@ -465,21 +467,20 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
         .last()
         .expect("rescan receipt");
     assert_eq!(success.severity, crate::diagnostics::LogSeverity::Info);
-    assert!(success.message.contains("found 1 configured model file(s)"));
-    assert_eq!(
-        app.state.ui.toasts.activity()[0].kind(),
-        crate::ui::widgets::ToastKind::Success
-    );
+    assert!(success.message.contains("Found 1 configured model file(s)"));
     assert!(
-        app.state.ui.toasts.activity()[0]
-            .message()
-            .contains("found 1 configured model file(s)")
+        app.state
+            .prompt_text()
+            .is_some_and(|prompt| prompt.contains("Found 1 configured model file(s)"))
     );
+    assert!(app.state.ui.toasts.activity().is_empty());
 
+    // A library it could not read is worth interrupting for, with the way
+    // to the Console line that lists every path.
     app.state
         .pdk_config
         .add_library_path(root.join("missing").to_string_lossy().into_owned());
-    Command::RescanModelLibraries.execute_with_feedback(&mut app, &ctx);
+    Command::RescanModelLibraries.execute(&mut app);
 
     assert_eq!(app.state.pdk_config.discovered_files.len(), 1);
     let warning = app
@@ -491,14 +492,14 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
     assert_eq!(warning.severity, crate::diagnostics::LogSeverity::Warning);
     assert!(warning.message.contains("1 configured path error(s)"));
     assert!(warning.message.contains("Path does not exist"));
+    let warning = warning.id;
+    let activity = app.state.ui.toasts.activity();
+    assert_eq!(activity.len(), 1);
+    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Warn);
+    assert!(activity[0].message().contains("1 configured path error(s)"));
     assert_eq!(
-        app.state.ui.toasts.activity()[0].kind(),
-        crate::ui::widgets::ToastKind::Warn
-    );
-    assert!(
-        app.state.ui.toasts.activity()[0]
-            .message()
-            .contains("1 configured path error(s)")
+        activity[0].action(),
+        Some(crate::ui::widgets::NotificationAction::ShowInConsole { log_id: warning })
     );
 
     std::fs::remove_dir_all(&root).expect("remove model-library fixture");

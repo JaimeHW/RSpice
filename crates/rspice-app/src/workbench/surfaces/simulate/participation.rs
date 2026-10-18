@@ -470,7 +470,7 @@ pub(super) fn analysis_run_points_dialog(
             picker_note(ui, &selection_note);
             super::workflows::workflow_validation_message(ui, draft.validation_error.as_deref());
         });
-    super::workflows::finish_workflow_choice(ctx, app, choice, draft, commit_point_selection);
+    super::workflows::finish_workflow_choice(app, choice, draft, commit_point_selection);
 }
 
 /// What a point selection buys, in points and in tasks.

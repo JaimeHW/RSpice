@@ -108,11 +108,9 @@ impl RSpiceApp {
             DialogChoice::None => {}
             DialogChoice::Ghost if page == HelpCenterPage::SupportBundle => {
                 if disclosure_reviewed {
-                    export_support_bundle(self, ctx, include_session_log);
+                    export_support_bundle(self, include_session_log);
                 } else {
-                    self.state.ui.toasts.warn_with_title(
-                        ctx,
-                        "Disclosure review required",
+                    self.state.prompt(
                         "Review and acknowledge the support-bundle contents before export.",
                     );
                 }
@@ -201,11 +199,8 @@ impl RSpiceApp {
                     std::env::consts::ARCH,
                 );
                 ctx.copy_text(diagnostics);
-                self.state.ui.toasts.success(
-                    ctx,
-                    "Diagnostics copied",
-                    "Application and platform diagnostics were copied to the clipboard.",
-                );
+                self.state
+                    .prompt("Application and platform diagnostics were copied to the clipboard.");
             }
             _ => self.state.dialogs.about = false,
         }
@@ -556,7 +551,7 @@ fn render_legal_privacy(ui: &mut egui::Ui) {
         });
 }
 
-fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log: bool) {
+fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
     let documents = crate::workbench::chrome::document_bar::document_descriptors(&app.state);
     let logs = if include_session_log {
         support_bundle_log(&app.state, crate::diagnostics::home_directory().as_deref())
@@ -597,8 +592,7 @@ fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log
     let contents = match serde_json::to_string_pretty(&artifact) {
         Ok(contents) => contents,
         Err(error) => {
-            app.state.ui.toasts.error_with_title(
-                ctx,
+            app.state.report_failure(
                 "Support bundle failed",
                 format!("The disclosure artifact could not be encoded: {error}"),
             );
@@ -614,8 +608,7 @@ fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log
     let Some(mut path) = (match picked {
         Ok(path) => path,
         Err(error) => {
-            app.state.ui.toasts.error_with_title(
-                ctx,
+            app.state.report_failure(
                 "Support bundle failed",
                 format!("The export destination could not be selected: {error}"),
             );
@@ -633,13 +626,16 @@ fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log
                 .write_text_file_observed(&destination, &contents)
         });
     match result {
-        Ok(()) => app.state.ui.toasts.success(
-            ctx,
-            "Support bundle created",
-            "The reviewed, redacted support artifact was exported locally.",
-        ),
-        Err(error) => app.state.ui.toasts.error_with_title(
-            ctx,
+        Ok(()) => {
+            let message = crate::workbench::workflows::export_workflow::export_completion_message(
+                "support bundle",
+                &path,
+                None,
+                app.export_workflow_io.as_ref(),
+            );
+            app.state.prompt(message);
+        }
+        Err(error) => app.state.report_failure(
             "Support bundle failed",
             format!("The support artifact was not published: {error}"),
         ),
@@ -699,5 +695,57 @@ mod tests {
             message,
             r"Opened project amp (<HOME>\designs\amp.rspiceproj)."
         );
+    }
+
+    /// Writes nothing, and fails the write when told to.
+    struct BundleIo {
+        write_error: Option<&'static str>,
+    }
+
+    impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for BundleIo {
+        fn show_save_dialog(
+            &self,
+            _config: SaveDialogConfig<'_>,
+        ) -> Result<Option<std::path::PathBuf>, String> {
+            Ok(Some(std::path::PathBuf::from("bundle.json")))
+        }
+
+        fn write_text_file(&self, _path: &std::path::Path, _contents: &str) -> Result<(), String> {
+            self.write_error
+                .map_or(Ok(()), |error| Err(error.to_owned()))
+        }
+
+        fn write_waveform_csv(
+            &self,
+            _dataset: &crate::io::WaveformDataset,
+            _path: &std::path::Path,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// The bundle the user just exported is named on the status bar; one
+    /// that could not be written is said now.
+    #[test]
+    fn a_support_bundle_reports_its_file_and_toasts_only_a_failure() {
+        let mut app = RSpiceApp::test_instance();
+        app.export_workflow_io = Box::new(BundleIo { write_error: None });
+        export_support_bundle(&mut app, false);
+        assert!(
+            app.state
+                .prompt_text()
+                .is_some_and(|prompt| prompt.contains("bundle.json")),
+            "{:?}",
+            app.state.prompt_text()
+        );
+        assert!(app.state.ui.toasts.activity().is_empty());
+
+        app.export_workflow_io = Box::new(BundleIo {
+            write_error: Some("disk full"),
+        });
+        export_support_bundle(&mut app, false);
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].title(), "Support bundle failed");
     }
 }

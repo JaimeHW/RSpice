@@ -59,13 +59,17 @@ fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
     );
 }
 
-fn note_result_export_success(state: &mut AppState, format: &str) {
+/// A finished export. The Console keeps `message`, and the status bar shows
+/// it to the reader who just chose the file.
+fn note_result_export_success(state: &mut AppState, format: &str, message: String) {
     let data_version = state.simulation.view.data_version;
     state.ui.results.record_runtime_recovery_if(
         crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
         format!("{format} publication succeeded after the recorded export failure."),
         data_version,
     );
+    state.record(LogSeverity::Info, LogSource::Studio, message.clone());
+    state.prompt(message);
 }
 
 /// Canonical export vocabulary from the result-data contract. Availability is
@@ -203,11 +207,10 @@ pub(crate) fn action_export_result_selection_with_io(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, "Result text");
             let count = keys.len();
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
+            note_result_export_success(
+                state,
+                "Result text",
                 if count == 1 {
                     "Exported 1 result quantity.".to_owned()
                 } else {
@@ -217,11 +220,7 @@ pub(crate) fn action_export_result_selection_with_io(
         }
         Err(error) => {
             note_result_export_failure(state, format!("Result text export failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Result text export failed: {error}"),
-            );
+            state.report_failure("Result text export failed", error.to_string());
         }
     }
 }
@@ -245,10 +244,9 @@ pub(crate) fn action_export_csv_with_io(
             .iter()
             .find_map(|analysis| analysis.validate_retained_evidence().err())
     }) {
-        state.record(
-            LogSeverity::Error,
-            LogSource::Studio,
-            format!("Result export failed: the stored result did not verify: {error}"),
+        state.report_failure(
+            "Result export failed",
+            format!("the stored result did not verify: {error}"),
         );
         return;
     }
@@ -722,11 +720,7 @@ fn export_typed_result_tsv(
     let contents = match csv_to_tsv(&prepared.contents) {
         Ok(contents) => contents,
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("TSV export failed: {error}"),
-            );
+            state.report_failure("TSV export failed", error.to_string());
             return;
         }
     };
@@ -785,10 +779,9 @@ fn publish_result_text(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, label);
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
+            note_result_export_success(
+                state,
+                label,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     label,
                     &path,
@@ -799,11 +792,7 @@ fn publish_result_text(
         }
         Err((note, error)) => {
             note_result_export_failure(state, note);
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{label} export failed: {error}"),
-            );
+            state.report_failure(format!("{label} export failed"), error.to_string());
         }
     }
 }
@@ -854,10 +843,9 @@ fn export_native_result_bundle(
             return;
         }
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.display_name()),
+            state.report_failure(
+                format!("{} export failed", kind.display_name()),
+                error.to_string(),
             );
             return;
         }
@@ -873,10 +861,9 @@ fn export_native_result_bundle(
                 state,
                 format!("{} encoding failed: {error}", kind.display_name()),
             );
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.display_name()),
+            state.report_failure(
+                format!("{} export failed", kind.display_name()),
+                error.to_string(),
             );
             return;
         }
@@ -913,11 +900,10 @@ fn export_native_result_bundle(
     };
     match export {
         Ok(()) => {
-            note_result_export_success(state, kind.display_name());
             let detail = format!("{exported_signal_count} signals, {exported_point_count} points");
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
+            note_result_export_success(
+                state,
+                kind.display_name(),
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     kind.display_name(),
                     &published_path,
@@ -931,10 +917,9 @@ fn export_native_result_bundle(
                 state,
                 format!("{} export failed: {error}", kind.display_name()),
             );
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.display_name()),
+            state.report_failure(
+                format!("{} export failed", kind.display_name()),
+                error.to_string(),
             );
         }
     }
@@ -959,15 +944,14 @@ fn export_csv(
                 .and_then(|destination| io.write_waveform_csv_observed(dataset, &destination));
             match export {
                 Ok(()) => {
-                    note_result_export_success(state, "CSV");
                     let detail = format!(
                         "{} signals, {} points",
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
+                    note_result_export_success(
+                        state,
+                        "CSV",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "CSV",
                             &path,
@@ -978,11 +962,7 @@ fn export_csv(
                 }
                 Err(e) => {
                     note_result_export_failure(state, format!("CSV export failed: {e}"));
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("CSV export failed: {e}"),
-                    );
+                    state.report_failure("CSV export failed", e.to_string());
                 }
             }
         }
@@ -991,11 +971,7 @@ fn export_csv(
         }
         Err(e) => {
             note_result_export_failure(state, format!("CSV destination failed: {e}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("CSV export failed: {e}"),
-            );
+            state.report_failure("CSV export failed", e.to_string());
         }
     }
 }
@@ -1009,11 +985,7 @@ fn export_tsv(
         match crate::io::WaveformWriter::new(crate::io::WaveformFormat::Tsv).write_text(dataset) {
             Ok(contents) => contents,
             Err(error) => {
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("TSV export failed: {error}"),
-                );
+                state.report_failure("TSV export failed", error.to_string());
                 return;
             }
         };
@@ -1030,15 +1002,14 @@ fn export_tsv(
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
             match export {
                 Ok(()) => {
-                    note_result_export_success(state, "TSV");
                     let detail = format!(
                         "{} signals, {} points",
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
+                    note_result_export_success(
+                        state,
+                        "TSV",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "TSV",
                             &path,
@@ -1049,22 +1020,14 @@ fn export_tsv(
                 }
                 Err(error) => {
                     note_result_export_failure(state, format!("TSV export failed: {error}"));
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("TSV export failed: {error}"),
-                    );
+                    state.report_failure("TSV export failed", error.to_string());
                 }
             }
         }
         Ok(None) => {}
         Err(error) => {
             note_result_export_failure(state, format!("TSV destination failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("TSV export failed: {error}"),
-            );
+            state.report_failure("TSV export failed", error.to_string());
         }
     }
 }
@@ -1108,16 +1071,15 @@ fn export_touchstone(
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
             match export {
                 Ok(()) => {
-                    note_result_export_success(state, "Touchstone");
                     let detail = format!(
                         "{}-port matrix, {} signals, {} points",
                         port_count,
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
+                    note_result_export_success(
+                        state,
+                        "Touchstone",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "Touchstone",
                             &path,
@@ -1128,22 +1090,14 @@ fn export_touchstone(
                 }
                 Err(error) => {
                     note_result_export_failure(state, format!("Touchstone export failed: {error}"));
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("Touchstone export failed: {error}"),
-                    );
+                    state.report_failure("Touchstone export failed", error.to_string());
                 }
             }
         }
         Ok(None) => {}
         Err(error) => {
             note_result_export_failure(state, format!("Touchstone destination failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Touchstone export failed: {error}"),
-            );
+            state.report_failure("Touchstone export failed", error.to_string());
         }
     }
 }

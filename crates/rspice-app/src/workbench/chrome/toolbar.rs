@@ -1609,7 +1609,7 @@ fn toolbar_command(
         });
     }
     if response.clicked() {
-        command.execute_with_feedback(app, ui.ctx());
+        command.execute(app);
     }
 }
 

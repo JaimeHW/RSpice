@@ -33,6 +33,8 @@ struct MockExportWorkflowIo {
     byte_files: RefCell<Vec<(PathBuf, Vec<u8>, String)>>,
     dialog_titles: RefCell<Vec<String>>,
     saved_paths_are_reopenable: bool,
+    /// Why the save dialog could not open, when it cannot.
+    dialog_error: Option<String>,
 }
 
 impl Default for MockExportWorkflowIo {
@@ -44,6 +46,7 @@ impl Default for MockExportWorkflowIo {
             byte_files: RefCell::default(),
             dialog_titles: RefCell::default(),
             saved_paths_are_reopenable: true,
+            dialog_error: None,
         }
     }
 }
@@ -53,6 +56,9 @@ impl ExportWorkflowIo for MockExportWorkflowIo {
         self.dialog_titles
             .borrow_mut()
             .push(config.title.to_owned());
+        if let Some(error) = &self.dialog_error {
+            return Err(error.clone());
+        }
         Ok(Some(PathBuf::from(config.default_name)))
     }
 
@@ -518,6 +524,57 @@ fn csv_export_from_a_retained_sheet_is_unchanged_by_the_derived_route() {
         "a waveform sheet must still go through the waveform dataset writer"
     );
     assert_eq!(io.datasets.borrow().len(), 1);
+}
+
+/// The file the reader just chose is named on the status bar, and the Console
+/// keeps the same line. Nothing is toasted for an export that worked.
+#[test]
+fn a_result_export_names_its_file_on_the_status_bar() {
+    let mut state = state_with_typed_result(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![0.0, 2.0],
+        )]),
+    );
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
+    let io = MockExportWorkflowIo::default();
+
+    action_export_csv_with_io(&mut state, &io);
+
+    let line = last_log_message(&state);
+    assert!(line.contains("waveforms.csv"), "{line}");
+    assert_eq!(state.prompt_text(), Some(line.as_str()));
+    assert!(state.ui.toasts.activity().is_empty());
+}
+
+/// An export the user asked for that did not happen is said now, with the
+/// way to its Console line; the reader is not left to find it under the bell.
+#[test]
+fn a_result_export_that_fails_is_toasted() {
+    let mut state = state_with_typed_result(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![0.0, 2.0],
+        )]),
+    );
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
+    let io = MockExportWorkflowIo {
+        dialog_error: Some("the file picker is unavailable".to_owned()),
+        ..MockExportWorkflowIo::default()
+    };
+
+    action_export_csv_with_io(&mut state, &io);
+
+    assert_eq!(
+        last_log_message(&state),
+        "CSV export failed: the file picker is unavailable"
+    );
+    let activity = state.ui.toasts.activity();
+    assert_eq!(activity.len(), 1);
+    assert_eq!(activity[0].title(), "CSV export failed");
+    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
 }
 
 #[test]

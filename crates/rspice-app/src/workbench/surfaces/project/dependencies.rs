@@ -517,7 +517,7 @@ fn dependency_inventory(
     }
     dependency_action_bar(ui, |ui| {
         if Button::new("Export manifest\u{2026}").show(ui).clicked() {
-            export_dependency_manifest(ui.ctx(), state);
+            export_dependency_manifest(state);
         }
     });
 }
@@ -713,12 +713,11 @@ fn dependency_manifest(state: &AppState) -> DependencyManifest {
     }
 }
 
-fn export_dependency_manifest(ctx: &Context, state: &mut AppState) {
+fn export_dependency_manifest(state: &mut AppState) {
     let contents = match serde_json::to_vec_pretty(&dependency_manifest(state)) {
         Ok(contents) => contents,
         Err(error) => {
-            state.ui.toasts.error_with_title(
-                ctx,
+            state.report_failure(
                 "Manifest export failed",
                 format!("Dependency manifest serialization failed: {error}"),
             );
@@ -745,12 +744,9 @@ fn export_dependency_manifest(ctx: &Context, state: &mut AppState) {
     match crate::workbench::workflows::export_workflow::publish_project_manifest(
         &filename, &contents,
     ) {
-        Ok(Some(receipt)) => state.ui.toasts.success(ctx, "Manifest exported", receipt),
+        Ok(Some(exported)) => state.prompt(exported),
         Ok(None) => {}
-        Err(error) => state
-            .ui
-            .toasts
-            .error_with_title(ctx, "Manifest export failed", error),
+        Err(error) => state.report_failure("Manifest export failed", error),
     }
 }
 

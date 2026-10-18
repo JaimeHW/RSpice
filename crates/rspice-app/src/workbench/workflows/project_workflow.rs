@@ -383,11 +383,7 @@ fn save_scope_for_platform(state: &mut AppState, scope: SaveScope) -> SaveReques
         Err(ProjectIoError::Cancelled) => SaveRequestOutcome::Cancelled,
         Err(error) => {
             let message = error.to_string();
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Project save failed: {error}"),
-            );
+            state.report_failure("Project save failed", message.clone());
             SaveRequestOutcome::Failed(message)
         }
     }
@@ -511,10 +507,9 @@ fn start_browser_project_save(
                     state,
                     prepared.save.transaction(),
                 );
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Project copy failed: the saved project was not UTF-8: {error}"),
+                state.report_failure(
+                    "Project copy failed",
+                    format!("the saved project was not UTF-8: {error}"),
                 );
                 return SaveRequestOutcome::Failed(format!(
                     "Serialized project was not UTF-8: {error}"
@@ -535,9 +530,8 @@ fn start_browser_project_save(
                         "Downloaded a copy of the project; the open project is unchanged.",
                     );
                 } else {
-                    state.record(
-                        LogSeverity::Warning,
-                        LogSource::Studio,
+                    state.report_warning(
+                        "Saved as a download instead",
                         "The project was downloaded as a copy, not saved; it still has unsaved \
                          changes.",
                     );
@@ -549,11 +543,7 @@ fn start_browser_project_save(
                     state,
                     prepared.save.transaction(),
                 );
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Project download failed: {error}"),
-                );
+                state.report_failure("Project download failed", error.clone());
                 return SaveRequestOutcome::Failed(error);
             }
         }
@@ -593,11 +583,7 @@ fn start_browser_project_save(
                 state,
                 transaction,
             );
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Project save failed: {error}"),
-            );
+            state.report_failure("Project save failed", error);
             SaveRequestOutcome::Failed(message)
         }
     }
@@ -759,21 +745,24 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                     project_copy,
                     &display_name,
                 );
-                state.record(
-                    LogSeverity::Warning,
-                    LogSource::Studio,
-                    if project_copy {
+                if project_copy {
+                    state.record(
+                        LogSeverity::Warning,
+                        LogSource::Studio,
                         format!(
                             "Saved a copy of the project: {display_name}; browser storage was \
                              unavailable: {persistence_error}"
-                        )
-                    } else {
+                        ),
+                    );
+                } else {
+                    state.report_warning(
+                        "Project will not reopen on restart",
                         format!(
-                            "Saved project: {display_name}. It will not reopen on restart: \
-                             browser storage failed: {persistence_error}"
-                        )
-                    },
-                );
+                            "Saved {display_name}, but browser storage failed: \
+                             {persistence_error}"
+                        ),
+                    );
+                }
                 if !project_copy {
                     continuation = Some(canonical_save_continuation_event(
                         state,
@@ -817,11 +806,9 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 state,
                 transaction,
             );
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                "Project save failed: the project changed outside RSpice; reopen it or save a \
-                 copy.",
+            state.report_failure(
+                "Project save failed",
+                "the project changed outside RSpice; reopen it or save a copy.",
             );
             if !project_copy {
                 continuation = Some(SaveContinuationEvent::Conflict(transaction));
@@ -832,11 +819,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 state,
                 transaction,
             );
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Project save failed: {error}"),
-            );
+            state.report_failure("Project save failed", error.to_string());
             if !project_copy {
                 continuation = Some(SaveContinuationEvent::Failed(
                     transaction,
@@ -901,11 +884,7 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
         }
         Err(ProjectIoError::Cancelled) => false,
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Project Save As failed: {error}"),
-            );
+            state.report_failure("Project Save As failed", error.to_string());
             false
         }
     }
@@ -1097,11 +1076,7 @@ pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool 
         }
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Project open failed: {error}"),
-            );
+            state.report_failure("Project open failed", error.to_string());
             false
         }
     }
@@ -1152,10 +1127,9 @@ fn apply_loaded_project_authorized(
         Some(context) => match crate::io::restore_execution_context(context, project_id) {
             Ok(restored) => restored,
             Err(error) => {
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Project open failed: its saved simulation setup is invalid: {error}"),
+                state.report_failure(
+                    "Project open failed",
+                    format!("its saved simulation setup is invalid: {error}"),
                 );
                 #[cfg(target_arch = "wasm32")]
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
@@ -1377,11 +1351,7 @@ pub(crate) fn open_project(state: &mut AppState) -> bool {
         Ok(path) => load_project_from_path(state, &path),
         Err(ProjectIoError::Cancelled) => false,
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Project open failed: {error}"),
-            );
+            state.report_failure("Project open failed", error.to_string());
             false
         }
     }
@@ -1405,11 +1375,7 @@ pub(crate) fn open_project(state: &mut AppState) -> bool {
         }
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Project open failed: {error}"),
-            );
+            state.report_failure("Project open failed", error);
             false
         }
     }
@@ -1530,20 +1496,22 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
             if crate::workbench::lifecycle::project_lifecycle::complete_browser_binding_promotion(
                 state, &context, handle_id, &result,
             ) {
-                let (severity, text) = match result {
-                    Ok(()) => (
-                        LogSeverity::Info,
-                        format!("{display_name} will reopen when the browser restarts."),
-                    ),
-                    Err(error) => (
-                        LogSeverity::Warning,
+                match result {
+                    Ok(()) => {
+                        state.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            format!("{display_name} will reopen when the browser restarts."),
+                        );
+                    }
+                    Err(error) => state.report_warning(
+                        "Project will not reopen on restart",
                         format!(
                             "{display_name} will not reopen when the browser restarts: browser \
                              storage failed: {error}"
                         ),
                     ),
                 };
-                state.record(severity, LogSource::Studio, text);
             }
             false
         }
@@ -1586,11 +1554,7 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
                         state,
                         transaction,
                     );
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("Project open failed: {error}"),
-                    );
+                    state.report_failure("Project open failed", error);
                     false
                 }
                 BrowserProjectImportPayload::Loaded(file) => {
@@ -1608,11 +1572,7 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
                                 state,
                                 transaction,
                             );
-                            state.record(
-                                LogSeverity::Error,
-                                LogSource::Studio,
-                                format!("Project open failed: {error}"),
-                            );
+                            state.report_failure("Project open failed", error.to_string());
                             false
                         }
                     }
@@ -1655,11 +1615,7 @@ fn finish_browser_canonical_open(
                     state,
                     transaction,
                 );
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Project open failed: {error}"),
-                );
+                state.report_failure("Project open failed", error.to_string());
             }
             crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened {
                 ..
@@ -1679,11 +1635,7 @@ fn finish_browser_canonical_open(
                 state,
                 transaction,
             );
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Project open failed: {error}"),
-            );
+            state.report_failure("Project open failed", error.to_string());
             return false;
         }
     };
@@ -1729,14 +1681,13 @@ fn finish_browser_canonical_open(
 ///
 /// A guard that refused the command (no project, a run in progress, another
 /// operation pending) answers the gesture; a project that could not be read
-/// or written is a failure the session records.
+/// or written is a failure the session records and tells the user about.
 fn lifecycle_error(state: &mut AppState, error: ProjectLifecycleError, context: &str) {
-    let text = format!("{context}: {error}");
     match error {
         ProjectLifecycleError::InvalidState(_) | ProjectLifecycleError::Persistence(_) => {
-            state.record(LogSeverity::Error, LogSource::Studio, text);
+            state.report_failure(context, error.to_string());
         }
-        _ => state.prompt(text),
+        _ => state.prompt(format!("{context}: {error}")),
     }
 }
 

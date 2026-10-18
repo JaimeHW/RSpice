@@ -206,7 +206,7 @@ pub(super) fn commit_activate_plan(
     app.state.workbench.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
     Ok(format!(
-        "Opened '{name}' atomically with its complete plan-owned configuration."
+        "Opened '{name}' with its own analyses and settings."
     ))
 }
 

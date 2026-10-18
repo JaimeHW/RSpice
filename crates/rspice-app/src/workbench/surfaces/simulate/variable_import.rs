@@ -592,7 +592,7 @@ pub(super) fn design_variable_import_dialog(
     if changed {
         resolve_rows(app, plan_id, &mut draft);
     }
-    finish_workflow_choice(ctx, app, choice, draft, commit_selected_rows);
+    finish_workflow_choice(app, choice, draft, commit_selected_rows);
 }
 
 /// One line per declared column, naming which of the sheet's own columns

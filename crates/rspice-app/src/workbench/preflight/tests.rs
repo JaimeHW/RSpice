@@ -7,6 +7,7 @@
 use super::*;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::diagnostic_routes::apply_remediation;
+use crate::workbench::state::ConsolePage;
 
 mod engine;
 mod pipeline;

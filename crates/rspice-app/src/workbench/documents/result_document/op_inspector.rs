@@ -181,7 +181,7 @@ fn device_target(state: &AppState, name: &str) -> Option<u64> {
     )
     .map(|component| component.id)
 }
-fn apply_action(ui: &Ui, state: &mut AppState, action: OpAction) {
+fn apply_action(state: &mut AppState, action: OpAction) {
     match action {
         OpAction::LocateNode(name) => {
             let signal = if name
@@ -203,11 +203,7 @@ fn apply_action(ui: &Ui, state: &mut AppState, action: OpAction) {
                         .workbench
                         .activate(crate::workbench::state::Workspace::Design);
                 }
-                Err(error) => state.ui.toasts.warn_with_title(
-                    ui.ctx(),
-                    "Cannot locate node",
-                    error.message(&signal),
-                ),
+                Err(error) => state.prompt(error.message(&signal)),
             }
         }
         OpAction::LocateDevice(component_id) => {
@@ -218,11 +214,7 @@ fn apply_action(ui: &Ui, state: &mut AppState, action: OpAction) {
                 .iter()
                 .find(|component| component.id == component_id)
             else {
-                state.ui.toasts.warn_with_title(
-                    ui.ctx(),
-                    "Cannot locate device",
-                    "The retained device no longer resolves to the active schematic.",
-                );
+                state.prompt("The retained device no longer resolves to the active schematic.");
                 return;
             };
             let position = component.pos;
@@ -369,7 +361,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         clicked_sort,
     } = response;
     if let Some(action) = action {
-        apply_action(ui, state, action);
+        apply_action(state, action);
     }
     if let Some(key) = clicked_sort {
         state.ui.results.session.op_sort = match state.ui.results.session.op_sort.as_ref() {
@@ -564,5 +556,18 @@ mod tests {
             after.display.node_offset_count(),
             after.display.node_row_count()
         );
+    }
+
+    /// A locate that cannot be made is a refused gesture: the status bar
+    /// says why, and nothing is toasted.
+    #[test]
+    fn a_device_that_cannot_be_located_is_answered_on_the_status_bar() {
+        let mut state = AppState::default();
+        apply_action(&mut state, OpAction::LocateDevice(u64::MAX));
+        assert_eq!(
+            state.prompt_text(),
+            Some("The retained device no longer resolves to the active schematic.")
+        );
+        assert!(state.ui.toasts.activity().is_empty());
     }
 }

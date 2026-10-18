@@ -242,6 +242,30 @@ impl DesignCheckRuntime {
 }
 
 impl AppState {
+    /// Record how a finished design check came out: Warning when it found
+    /// errors, Info when it is clean. Every check the reader can run, by hand
+    /// or on save, states its outcome by this one rule.
+    pub(crate) fn record_check_outcome(&mut self, result: &DrcResult, line: String) {
+        use crate::diagnostics::{LogSeverity, LogSource};
+
+        let severity = if result.passed() {
+            LogSeverity::Info
+        } else {
+            LogSeverity::Warning
+        };
+        self.record(severity, LogSource::Studio, line);
+    }
+
+    /// Bring the reader to the findings a pass or a check just filed: the
+    /// Problems page, listing them. A filter left from earlier reading could
+    /// hide the very findings that stopped a run, or that a check the reader
+    /// asked for found, so the filters are cleared.
+    pub(crate) fn show_problem_findings(&mut self) {
+        self.workbench.console_visible = true;
+        self.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
+        self.problems_view.clear_filters();
+    }
+
     /// Check Cellview: the open cellview's own findings.
     ///
     /// The hierarchy below is walked only for what no single cellview can

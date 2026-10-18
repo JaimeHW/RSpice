@@ -67,6 +67,24 @@ impl SimulationController {
     ) -> Option<usize> {
         write_run_line(state, self.current_run_id, severity, message)
     }
+
+    /// The failure a failed run's end line quotes: the first error the run
+    /// wrote about itself. Never that end line, which is written last and
+    /// says only that the run failed.
+    pub(crate) fn run_failure(
+        run_sequence: u64,
+        log: &rspice_app_types::run_log::RunLog,
+    ) -> Option<&str> {
+        let end_line = format!("Run {run_sequence} failed after ");
+        log.lines()
+            .iter()
+            .find(|line| {
+                line.source == LogSource::Run
+                    && line.severity == LogSeverity::Error
+                    && !line.message.starts_with(&end_line)
+            })
+            .map(|line| line.message.as_str())
+    }
 }
 
 /// Open a run's log with its header and say in the session's log that it
@@ -84,6 +102,9 @@ pub(super) fn announce_run_start(
     let Some(run) = state.simulation.retained.run_by_sequence(run_sequence) else {
         return;
     };
+    // Watched from here, so a run that ends before a frame has seen it
+    // running is still announced when it ends.
+    let run_id = run.run_id;
     let mut header = vec![format!("Run {}", run.id), product_version()];
     header.extend(
         design
@@ -107,6 +128,7 @@ pub(super) fn announce_run_start(
         format!("Run {run_sequence} started: {}", analyses.join(", ")),
         LogAnchor::ResultRun { run_sequence },
     );
+    state.ui.run_watch.run_started(run_id);
 }
 
 /// Close a run's log with its summary and write the same line in the
@@ -157,12 +179,7 @@ pub(super) fn announce_run_end(state: &mut AppState, run_sequence: u64) {
             ),
         ),
         _ => {
-            let failure = run
-                .log
-                .lines()
-                .iter()
-                .find(|line| line.source == LogSource::Run && line.severity == LogSeverity::Error)
-                .map(|line| line.message.clone());
+            let failure = SimulationController::run_failure(id, &run.log).map(str::to_owned);
             (
                 LogSeverity::Error,
                 match failure {

@@ -1173,15 +1173,14 @@ fn report_design_checks_after_save(state: &mut AppState) {
         "Design checks on save: {} critical, {} errors, {} warnings.",
         summary.critical, summary.errors, summary.warnings
     );
-    if result.passed() {
-        state.record(LogSeverity::Info, LogSource::Studio, counts);
+    let line = if result.passed() {
+        counts
     } else {
-        state.record(
-            LogSeverity::Warning,
-            LogSource::Studio,
-            format!("{counts} See Problems."),
-        );
-    }
+        format!("{counts} See Problems.")
+    };
+    // The rule Check Design states its outcome by, so a check reads the same
+    // whether the reader ran it or a save did.
+    state.record_check_outcome(&result, line);
 }
 
 #[cfg(target_arch = "wasm32")]

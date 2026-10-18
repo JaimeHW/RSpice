@@ -67,25 +67,13 @@ pub(super) fn action_export_svg_with_io(
                         ),
                     );
                 }
-                Err(e) => {
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("SVG export failed: {e}"),
-                    );
-                }
+                Err(e) => state.report_failure("SVG export failed", e.to_string()),
             }
         }
         Ok(None) => {
             // User cancelled - no message needed
         }
-        Err(e) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("SVG export failed: {e}"),
-            );
-        }
+        Err(e) => state.report_failure("SVG export failed", e.to_string()),
     }
 }
 
@@ -126,11 +114,7 @@ pub(crate) fn action_export_netlist_with_io(
                     generated.source
                 }
                 Err(reasons) => {
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        netlist_failure_text("Netlist export", &reasons),
-                    );
+                    state.report_failure("Netlist export failed", reasons.join("; "));
                     return;
                 }
             }
@@ -179,25 +163,13 @@ pub(crate) fn action_export_netlist_with_io(
                         ),
                     );
                 }
-                Err(e) => {
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("Netlist export failed: {e}"),
-                    );
-                }
+                Err(e) => state.report_failure("Netlist export failed", e.to_string()),
             }
         }
         Ok(None) => {
             // User cancelled - no message needed
         }
-        Err(e) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Netlist export failed: {e}"),
-            );
-        }
+        Err(e) => state.report_failure("Netlist export failed", e.to_string()),
     }
 }
 
@@ -249,11 +221,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
         }) {
             Ok(bundle) => bundle,
             Err(error) => {
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Netlist bundle export failed: {error}"),
-                );
+                state.report_failure("Netlist bundle export failed", error.to_string());
                 return false;
             }
         };
@@ -270,11 +238,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     let Some(mut path) = (match picked {
         Ok(path) => path,
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Netlist bundle export failed: {error}"),
-            );
+            state.report_failure("Netlist bundle export failed", error.to_string());
             return false;
         }
     }) else {
@@ -299,11 +263,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
             true
         }
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Netlist bundle export failed: {error}"),
-            );
+            state.report_failure("Netlist bundle export failed", error.to_string());
             false
         }
     }
@@ -336,11 +296,7 @@ fn publish_generated_source(
     }) {
         Ok(path) => path,
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Netlist export failed: {error}"),
-            );
+            state.report_failure("Netlist export failed", error.to_string());
             return false;
         }
     }) else {
@@ -365,11 +321,7 @@ fn publish_generated_source(
             true
         }
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Netlist export failed: {error}"),
-            );
+            state.report_failure("Netlist export failed", error.to_string());
             false
         }
     }
@@ -573,11 +525,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
     let content = match built {
         Ok(content) => content,
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Publication snapshot export failed: {error}"),
-            );
+            state.report_failure("Publication snapshot export failed", error);
             return;
         }
     };
@@ -613,11 +561,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
                     );
                 }
                 Err(error) => {
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("Publication snapshot export failed: {error}"),
-                    );
+                    state.report_failure("Publication snapshot export failed", error.to_string());
                 }
             }
         }
@@ -625,11 +569,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
             // User cancelled - no message needed
         }
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Publication snapshot export failed: {error}"),
-            );
+            state.report_failure("Publication snapshot export failed", error.to_string());
         }
     }
 }
@@ -794,6 +734,11 @@ mod tests {
 
         assert_eq!(io.writes.borrow().len(), 1);
         assert_eq!(last_log_message(&state), "SVG export failed: disk full");
+        // An export the user asked for that did not happen is said now.
+        let activity = state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].title(), "SVG export failed");
+        assert_eq!(activity[0].message(), "disk full");
     }
 
     #[test]

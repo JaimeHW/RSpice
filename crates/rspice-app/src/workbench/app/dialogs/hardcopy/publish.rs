@@ -2086,6 +2086,17 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
             )),
         },
     };
+    conclude_native_finalization(app, completion);
+    true
+}
+
+/// State how a finalization that outlived its checks ended.
+///
+/// An open dialog shows a failure itself. Once it is closed nothing else
+/// would, so a write that failed after the reader closed it is reported, the
+/// way a failed export is; one the reader cancelled by closing is not.
+#[cfg(not(target_arch = "wasm32"))]
+fn conclude_native_finalization(app: &mut RSpiceApp, completion: Result<String, String>) {
     app.state.dialogs.hardcopy.busy = false;
     match completion {
         Ok(message) => {
@@ -2104,12 +2115,10 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
             if app.state.dialogs.hardcopy.open {
                 app.state.dialogs.hardcopy.error = Some(error);
             } else if !error.contains("was cancelled") {
-                app.state
-                    .record(LogSeverity::Error, LogSource::Studio, error);
+                app.state.report_failure("Hardcopy failed", error);
             }
         }
     }
-    true
 }
 
 #[cfg(not(target_arch = "wasm32"))]

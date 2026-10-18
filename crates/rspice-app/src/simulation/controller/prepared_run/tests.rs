@@ -13,6 +13,9 @@ use crate::workbench::{
     lifecycle::project_lifecycle, workflows::netlist_workflow::apply_imported_netlist,
 };
 use rspice_design::drc::DrcResult;
+
+mod campaign;
+
 static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -510,152 +513,6 @@ fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
     assert!(matches!(tasks[0].spec(), AnalysisSpec::Transient { .. }));
     assert!(matches!(tasks[1].spec(), AnalysisSpec::Fourier { .. }));
     assert_eq!(tasks[1].dependencies(), &[tasks[0].instance_id()]);
-}
-
-/// A runnable state holding two plans a campaign can freeze, the first of
-/// them active.
-fn two_plan_campaign_state() -> (
-    AppState,
-    crate::product::SimulationPlanId,
-    crate::product::SimulationPlanId,
-) {
-    let mut state = runnable_state();
-    let first_plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
-    state
-        .workspace
-        .content
-        .migrate_active_plan_data(first_plan_id);
-    let second_plan_id = state
-        .sim_setup
-        .create_plan("Second campaign plan")
-        .expect("create campaign plan");
-    state
-        .workspace
-        .content
-        .migrate_inactive_plan_data(second_plan_id);
-    state
-        .workspace
-        .content
-        .sync_legacy_specs_projection(second_plan_id);
-    (state, first_plan_id, second_plan_id)
-}
-
-#[test]
-fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
-    let (mut state, first_plan_id, second_plan_id) = two_plan_campaign_state();
-    let live_plan_before_dispatch = state.sim_setup.stable_analysis_plan().unwrap().id();
-    let mut controller = SimulationController::new();
-
-    let receipt = controller
-        .prepare_and_start_campaign(
-            &mut state,
-            "Nightly characterization",
-            &[first_plan_id, second_plan_id],
-        )
-        .expect("freeze and dispatch campaign");
-
-    assert_eq!(receipt.member_count, 2);
-    assert_eq!(
-        state.sim_setup.stable_analysis_plan().unwrap().id(),
-        live_plan_before_dispatch
-    );
-    let run = state
-        .simulation
-        .active_run()
-        .expect("first member dispatched");
-    assert_eq!(
-        run.prepared_receipt().unwrap().simulation_plan_id(),
-        Some(first_plan_id)
-    );
-    let membership = run
-        .campaign_membership()
-        .expect("campaign identity retained");
-    assert_eq!(membership.campaign_id(), receipt.campaign_id);
-    assert_eq!(membership.member_index(), 1);
-    assert_eq!(membership.member_count(), 2);
-    assert_eq!(
-        controller
-            .active_campaign
-            .as_ref()
-            .expect("campaign remains active")
-            .pending
-            .len(),
-        1
-    );
-
-    let project = project_lifecycle::snapshot(&state).expect("campaign member project snapshot");
-    let json = crate::io::project_io::serialize_project_file(&project)
-        .expect("campaign member serializes");
-    let loaded =
-        crate::io::project_io::load_project_text(&json, None).expect("campaign member reloads");
-    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
-        .expect("campaign result history restores");
-    let restored_membership = restored.retained.runs[0]
-        .campaign_membership()
-        .expect("campaign identity survives project round trip");
-    assert_eq!(restored_membership.campaign_id(), receipt.campaign_id);
-    assert_eq!(restored_membership.member_index(), 1);
-
-    controller.abort();
-}
-
-/// A campaign member that cannot be started is filed as a finding about
-/// that member, where its failures would have been filed had it run, and the
-/// campaign run again supersedes it. It used to reach only the Console, so
-/// a campaign none of whose members ran left the Problems page empty.
-#[test]
-fn a_campaign_member_that_cannot_start_is_filed_until_a_rerun_supersedes_it() {
-    let (mut state, first_plan_id, second_plan_id) = two_plan_campaign_state();
-    let next_run_id = state.simulation.retained.next_run_id;
-    state.simulation.retained.next_run_id = u64::MAX;
-    let mut controller = SimulationController::new();
-
-    controller
-        .prepare_and_start_campaign(
-            &mut state,
-            "Nightly characterization",
-            &[first_plan_id, second_plan_id],
-        )
-        .expect("the campaign freezes; its members are refused one by one");
-
-    assert!(state.simulation.active_run().is_none());
-    let refused = state.diagnostics.published_member_refusals();
-    assert_eq!(refused.len(), 2, "{refused:?}");
-    for (index, (scope, subject, message)) in refused.iter().enumerate() {
-        let member = index + 1;
-        assert_eq!(*scope, format!("simulation-run/member-{member}"));
-        assert!(
-            subject.ends_with(&format!(" · campaign member {member}")),
-            "{subject}"
-        );
-        assert!(
-            message.starts_with("The member could not be started: ")
-                && message.contains("run sequence is exhausted"),
-            "{message}"
-        );
-    }
-    assert!(
-        refused[1].1.starts_with("Second campaign plan"),
-        "the member is named by the plan it was to run: {}",
-        refused[1].1
-    );
-
-    state.simulation.retained.next_run_id = next_run_id;
-    controller
-        .prepare_and_start_campaign(
-            &mut state,
-            "Nightly characterization",
-            &[first_plan_id, second_plan_id],
-        )
-        .expect("the campaign runs again");
-
-    assert!(state.simulation.active_run().is_some());
-    assert!(
-        state.diagnostics.published_member_refusals().is_empty(),
-        "the campaign run again is a new measurement"
-    );
-
-    controller.abort();
 }
 
 #[test]

@@ -2289,3 +2289,31 @@ fn the_export_route_loses_no_fact_to_elision() {
 fn the_import_route_loses_no_fact_to_elision() {
     assert_route_loses_no_fact_to_elision(SimulationPlanManagerMode::Import);
 }
+
+/// A plan edit answers the gesture that made it, on the status bar. The
+/// reader is looking at the manager; nothing is interrupted to say so.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_plan_edit_is_answered_on_the_status_bar_not_toasted() {
+    let (mut app, active, available, _) = app_with_every_lifecycle_state();
+    let ctx = egui::Context::default();
+
+    let mut rename = route_draft(&app, SimulationPlanManagerMode::Rename, active, available);
+    rename.name = "Corner characterization v2".to_owned();
+    handle_plan_manager_action(&ctx, &mut app, rename, Some(PlanManagerAction::ApplyRename));
+    assert!(
+        app.state
+            .prompt_text()
+            .is_some_and(|prompt| prompt.starts_with("Renamed")),
+        "{:?}",
+        app.state.prompt_text()
+    );
+
+    let browse = route_draft(&app, SimulationPlanManagerMode::Browse, active, available);
+    handle_plan_manager_action(&ctx, &mut app, browse, Some(PlanManagerAction::CopyExport));
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("Portable plan JSON was copied to the clipboard.")
+    );
+    assert!(app.state.ui.toasts.activity().is_empty());
+}

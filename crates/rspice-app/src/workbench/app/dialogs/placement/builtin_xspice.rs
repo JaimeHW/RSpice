@@ -55,11 +55,9 @@ impl RSpiceApp {
                     let label =
                         crate::workbench::app::arm_library_cell_placement(&mut self.state, binding);
                     self.state.dialogs.builtin_xspice_placement.close();
-                    self.state.ui.toasts.success(
-                        ctx,
-                        "Component placement armed",
-                        format!("{label} will snap to the schematic grid."),
-                    );
+                    self.state.prompt(format!(
+                        "{label} is armed; it will snap to the schematic grid."
+                    ));
                     rspice_schematic_editor::view::canvas::request_focus(ctx);
                 }
                 Err(error) => {

@@ -2,10 +2,13 @@
 //! trailing edge — and the session activity they are retained in.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
+use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
-    Align2, Area, Context, Frame, Id, Margin, Order, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Area, Context, Frame, Galley, Id, Margin, Order, Rect, Sense, Stroke, Ui, Vec2, pos2,
+    vec2,
 };
 
 use crate::theme::{self, FontWeight};
@@ -126,10 +129,25 @@ pub struct Toast {
     action: Option<NotificationAction>,
     /// Absolute time (egui clock) at which the toast was created.
     created: f64,
-    /// Absolute time at which it leaves. Separate from `created` because a
-    /// notice under the pointer is being read, and its clock starts over when
-    /// the pointer moves away.
-    expires: f64,
+    /// Absolute time at which it leaves, or `None` for a notice that stays
+    /// until it is answered. Separate from `created` because a notice under
+    /// the pointer is being read, and its clock starts over when the pointer
+    /// moves away; and because a held clock pushes it back.
+    expires: Option<f64>,
+    /// Whether one of its controls had the keyboard on the last pass. A
+    /// reader tabbing to "Show in Console" is reading the notice, and it must
+    /// not leave from under the focus.
+    focus_held: bool,
+}
+
+impl Toast {
+    /// How much of its lifetime is left, from one down to zero. `None` for a
+    /// notice with no deadline, which has no clock to draw.
+    fn remaining(&self, now: f64) -> Option<f32> {
+        let lifetime = toast_lifetime(self.kind)?;
+        let expires = self.expires?;
+        Some(((expires - now) / lifetime).clamp(0.0, 1.0) as f32)
+    }
 }
 
 /// One retained session activity item. Toasts disappear after a few seconds,
@@ -183,8 +201,23 @@ impl NotificationRecord {
     }
 }
 
-/// Lifetime of a toast in seconds (matches the reviewed workbench mockup).
+/// Lifetime of a success or information toast in seconds (matches the
+/// reviewed workbench mockup).
 const TOAST_LIFETIME: f64 = 5.2;
+/// Lifetime of a warning. A warning usually asks for a second look, and five
+/// seconds is a glance.
+const TOAST_WARN_LIFETIME: f64 = 10.0;
+
+/// How long a toast of this severity stays unattended. An error has no
+/// deadline: it is what the reader has to act on, so it leaves when it is
+/// dismissed or followed, and never while they are looking elsewhere.
+const fn toast_lifetime(kind: ToastKind) -> Option<f64> {
+    match kind {
+        ToastKind::Success | ToastKind::Info => Some(TOAST_LIFETIME),
+        ToastKind::Warn => Some(TOAST_WARN_LIFETIME),
+        ToastKind::Error => None,
+    }
+}
 /// Mockup entrance animation duration.
 const TOAST_ENTER: f64 = 0.18;
 /// The mockup shows at most three transient notices at once.
@@ -205,6 +238,9 @@ const TOAST_DRAIN_HEIGHT: f32 = 2.0;
 /// display's full rate for five seconds per notice.
 const TOAST_DRAIN_STEP: Duration = Duration::from_millis(33);
 const TOAST_COLUMN_GAP: f32 = 10.0;
+/// The most lines a toast's message takes before it is cut. The notification
+/// panel's rows hold two; a toast arrives alone and can say a little more.
+const TOAST_MESSAGE_MAX_ROWS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ToastLayout {
@@ -242,6 +278,11 @@ pub struct Toasts {
     activity: Vec<NotificationRecord>,
     next_notification_id: u64,
     observed_log_revision: u64,
+    /// When the stack was last drawn, and whether the window it was drawn in
+    /// had lost focus to another application then. The time since is charged
+    /// to that state: a run that finishes while the reader is in another
+    /// application is announced when they come back, not to nobody.
+    last_pass: Option<(f64, bool)>,
 }
 
 impl Toasts {
@@ -396,10 +437,21 @@ impl Toasts {
             kind,
             action,
             created,
-            expires: created + TOAST_LIFETIME,
+            expires: toast_lifetime(kind).map(|lifetime| created + lifetime),
+            focus_held: false,
         });
-        if self.queue.len() > MAX_VISIBLE_TOASTS {
-            self.queue.drain(..self.queue.len() - MAX_VISIBLE_TOASTS);
+        // Past the visible three, the oldest notice that is not an error makes
+        // room. An error is the notice the reader has to act on, and three
+        // confirmations arriving behind it must not push it off screen; only
+        // a stack of errors gives up its oldest. Either way the record stays
+        // in the bell.
+        while self.queue.len() > MAX_VISIBLE_TOASTS {
+            let oldest = self
+                .queue
+                .iter()
+                .position(|toast| toast.kind != ToastKind::Error)
+                .unwrap_or(0);
+            self.queue.remove(oldest);
         }
     }
 
@@ -457,16 +509,6 @@ impl Toasts {
             {
                 continue;
             }
-            // Two records naming the same destination are two reports of one
-            // event, not two events. The shell announces a finished run in
-            // its own words — with the run's identity and what it retained —
-            // and this line is the same completion said again; keeping both
-            // counted one run twice in the unread badge.
-            if entry.action.is_some()
-                && self.activity.iter().any(|held| held.action == entry.action)
-            {
-                continue;
-            }
             // A line that names nowhere still came from somewhere. A warning
             // or a failure is one sentence here and sits among the lines that
             // explain it in the Console, so that is where it offers to go. An
@@ -479,6 +521,14 @@ impl Toasts {
                     },
                 )
             });
+            // Two records offering the same destination are two reports of one
+            // event, not two events. The shell announces a finished run in
+            // its own words — with the run's identity and what it retained —
+            // and a failure it toasted already offers this very line; keeping
+            // both counted one event twice in the unread badge.
+            if offer.is_some() && self.activity.iter().any(|held| held.action == offer) {
+                continue;
+            }
             self.record_activity(
                 // A mirrored line has no title of its own, so it is filed
                 // under its severity. An entry that does name a destination
@@ -546,6 +596,23 @@ impl Toasts {
         self.activity.retain(|item| !item.read);
     }
 
+    /// Take back every offer `retired` matches, from the bell's records and
+    /// from the toasts still on screen. The notices keep their title and
+    /// message: what happened is still true, but where they offered to go
+    /// is no longer there.
+    pub fn retire_offers(&mut self, retired: impl Fn(NotificationAction) -> bool) {
+        let offers = self
+            .activity
+            .iter_mut()
+            .map(|record| &mut record.action)
+            .chain(self.queue.iter_mut().map(|toast| &mut toast.action));
+        for offer in offers {
+            if offer.is_some_and(&retired) {
+                *offer = None;
+            }
+        }
+    }
+
     /// Render all live toasts and drop expired ones. Chrome metrics are passed
     /// explicitly so this reusable widget does not depend on the workbench
     /// layout module.
@@ -560,30 +627,20 @@ impl Toasts {
         toolbar_height: f32,
         large_targets: bool,
     ) -> Option<NotificationAction> {
-        if self.queue.is_empty() {
-            return None;
-        }
         let now = ctx.input(|i| i.time);
-        self.queue.retain(|toast| now < toast.expires);
+        // Another application has the keyboard: nobody is reading the
+        // notices, so their clocks stand still until the reader is back.
+        let away = ctx.input(|i| i.viewport().focused) == Some(false);
+        if let Some((then, was_away)) = self.last_pass.replace((now, away)) {
+            hold_clocks(&mut self.queue, now, then, was_away);
+        }
+        self.queue
+            .retain(|toast| toast.expires.is_none_or(|expires| now < expires));
         if self.queue.is_empty() {
             return None;
         }
 
-        let soonest_expiry = self
-            .queue
-            .iter()
-            .map(|toast| (toast.expires - now).max(0.0))
-            .fold(f64::INFINITY, f64::min);
         let animate = ctx.global_style().animation_time > 0.0;
-        if animate {
-            // The drain bar is the clock made visible, so it has to be seen
-            // moving. Reduced motion draws no bar and wakes once, at expiry.
-            ctx.request_repaint_after(
-                TOAST_DRAIN_STEP.min(Duration::from_secs_f64(soonest_expiry)),
-            );
-        } else if soonest_expiry.is_finite() {
-            ctx.request_repaint_after(Duration::from_secs_f64(soonest_expiry));
-        }
         if animate
             && self
                 .queue
@@ -602,7 +659,8 @@ impl Toasts {
         }
         let mut answered = None;
         let mut taken = None;
-        let mut held = Vec::new();
+        let mut hovered = Vec::new();
+        let mut focused = Vec::new();
 
         Area::new(Id::new("rspice.toasts"))
             .order(Order::Foreground)
@@ -614,7 +672,8 @@ impl Toasts {
                 ui.set_max_width(layout.width);
                 ui.spacing_mut().item_spacing.y = TOAST_GAP;
                 for toast in &self.queue {
-                    let remaining = ((toast.expires - now) / TOAST_LIFETIME).clamp(0.0, 1.0);
+                    let mut cut = false;
+                    let mut control_hovered = false;
                     let card = ui
                         .scope(|ui| {
                             // One opacity for the whole card, so the entrance
@@ -641,10 +700,16 @@ impl Toasts {
                                     if outcome.dismissed || outcome.taken.is_some() {
                                         answered = Some(toast.id);
                                     }
+                                    if outcome.focused {
+                                        focused.push(toast.id);
+                                    }
+                                    cut = outcome.cut;
+                                    control_hovered = outcome.control_hovered;
                                 });
                             let card = frame.response.rect;
-                            if animate {
-                                paint_drain_bar(ui, card, remaining as f32);
+                            // Only a notice with a deadline has a clock to draw.
+                            if animate && let Some(remaining) = toast.remaining(now) {
+                                paint_drain_bar(ui, card, remaining);
                             }
                             card
                         })
@@ -655,10 +720,14 @@ impl Toasts {
                         Sense::hover(),
                     );
                     if toast_response.contains_pointer() {
-                        held.push(toast.id);
+                        hovered.push(toast.id);
                     }
                     ui.ctx().accesskit_node_builder(toast_response.id, |node| {
                         node.set_role(egui::accesskit::Role::Status);
+                        // Read out when it arrives, without taking the
+                        // reader's focus: a confirmation waits for a pause,
+                        // a warning or a failure interrupts.
+                        node.set_live(toast_live(toast.kind));
                         node.set_label(format!(
                             "{}: {}. {}",
                             toast.kind.label(),
@@ -666,16 +735,24 @@ impl Toasts {
                             toast.message
                         ));
                     });
+                    if cut && !control_hovered {
+                        // What the card cut short is a hover away, in full,
+                        // as it is on the notification panel's rows.
+                        toast_response.on_hover_text(format!("{}\n{}", toast.title, toast.message));
+                    }
                 }
             });
 
         // A notice under the pointer is being read. Its clock starts over when
         // the pointer leaves rather than resuming, so the drain bar the reader
-        // comes back to is a full one and not a sliver about to vanish.
+        // comes back to is a full one and not a sliver about to vanish. One
+        // whose control has the keyboard is held until the next pass charges
+        // the time to it.
         for toast in &mut self.queue {
-            if held.contains(&toast.id) {
-                toast.expires = now + TOAST_LIFETIME;
+            if hovered.contains(&toast.id) {
+                toast.expires = toast_lifetime(toast.kind).map(|lifetime| now + lifetime);
             }
+            toast.focus_held = focused.contains(&toast.id);
         }
         if let Some(id) = answered {
             // Dismissing a notice, or following it, is having read it. One
@@ -683,7 +760,72 @@ impl Toasts {
             self.queue.retain(|toast| toast.id != id);
             self.mark_read(id);
         }
+
+        // Wake for the soonest clock that is running. A held clock has
+        // nothing on it that moves, and whatever releases it (the pointer
+        // leaving, the keyboard moving, the window coming back) is an event
+        // that wakes the frame on its own; so a window left in the
+        // background sleeps rather than redrawing a still bar thirty times a
+        // second. A stack of errors has no deadline to wake for at all.
+        let soonest_expiry = self
+            .queue
+            .iter()
+            .filter(|toast| !away && !toast.focus_held && !hovered.contains(&toast.id))
+            .filter_map(|toast| toast.expires)
+            .map(|expires| (expires - now).max(0.0))
+            .fold(f64::INFINITY, f64::min);
+        if soonest_expiry.is_finite() {
+            let expiry = Duration::from_secs_f64(soonest_expiry);
+            // The drain bar is the clock made visible, so it has to be seen
+            // moving. Reduced motion draws no bar and wakes once, at expiry.
+            ctx.request_repaint_after(if animate {
+                TOAST_DRAIN_STEP.min(expiry)
+            } else {
+                expiry
+            });
+        }
         taken
+    }
+
+    /// Keep a titled record, and its offer, in the notification center
+    /// without raising a toast.
+    ///
+    /// For an outcome the reader asked not to be interrupted for: it is
+    /// still unread, still counted on the bell, and still leads where it
+    /// would have led, but nothing appears over their work.
+    pub fn record_quietly(
+        &mut self,
+        ctx: &Context,
+        category: NotificationCategory,
+        kind: ToastKind,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        action: Option<NotificationAction>,
+    ) {
+        let created = ctx.input(|i| i.time);
+        self.record_activity(
+            title.into(),
+            message.into(),
+            category,
+            kind,
+            action,
+            created,
+        );
+    }
+}
+
+/// Push back the deadline of every notice whose clock was held from the last
+/// pass at `then` until `now`: all of them while the window was away, and one
+/// whose control had the keyboard. A notice is charged only for the time it
+/// was on the stack, so one raised while the reader was away gets its whole
+/// lifetime once they are back.
+fn hold_clocks(queue: &mut [Toast], now: f64, then: f64, window_away: bool) {
+    for toast in queue {
+        if let Some(expires) = &mut toast.expires
+            && (window_away || toast.focus_held)
+        {
+            *expires += (now - then.max(toast.created)).max(0.0);
+        }
     }
 }
 
@@ -708,6 +850,41 @@ fn paint_drain_bar(ui: &Ui, card: Rect, remaining: f32) {
 struct ToastOutcome {
     dismissed: bool,
     taken: Option<NotificationAction>,
+    /// One of its controls has the keyboard.
+    focused: bool,
+    /// Its message ran past the lines a card gives it.
+    cut: bool,
+    /// The pointer is on one of its controls, which have tooltips of their own.
+    control_hovered: bool,
+}
+
+/// How a screen reader is told a toast arrived: politely for a
+/// confirmation, at once for something that may need the reader.
+const fn toast_live(kind: ToastKind) -> egui::accesskit::Live {
+    match kind {
+        ToastKind::Success | ToastKind::Info => egui::accesskit::Live::Polite,
+        ToastKind::Warn | ToastKind::Error => egui::accesskit::Live::Assertive,
+    }
+}
+
+/// A toast's detail, wrapped to the card and cut at four lines with an
+/// ellipsis. A console paragraph must not turn one notice into a page.
+fn message_galley(ui: &Ui, message: &str, width: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::single_section(
+        message.to_owned(),
+        TextFormat {
+            font_id: theme::sans(tokens::FS_0, FontWeight::Regular),
+            color: Tokens::get(ui.ctx()).color.text_dim,
+            ..Default::default()
+        },
+    );
+    job.wrap = TextWrapping {
+        max_width: width,
+        max_rows: TOAST_MESSAGE_MAX_ROWS,
+        break_anywhere: false,
+        overflow_character: Some('\u{2026}'),
+    };
+    ui.painter().layout_job(job)
 }
 
 fn toast_entry_opacity(age: f64, animate_entry: bool) -> f32 {
@@ -722,6 +899,9 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutco
     let t = Tokens::get(ui.ctx());
     let mut dismissed = false;
     let mut taken = None;
+    let mut focused = false;
+    let mut cut = false;
+    let mut control_hovered = false;
     let dismiss_side = if large_targets {
         tokens::TOUCH_TARGET
     } else {
@@ -754,33 +934,42 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutco
                     .color(t.color.text),
             );
             if !toast.message.is_empty() {
-                ui.label(
-                    egui::RichText::new(&toast.message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
+                let message = message_galley(ui, &toast.message, content_width);
+                cut = message.elided;
+                ui.label(message);
             }
             // The offer sits under the detail rather than beside the close
             // mark: it is the notice's one positive action, and putting it in
             // the corner strip would make it a second dismissal.
             if let Some(action) = toast.action {
                 ui.add_space(1.0);
-                if notice::offer_link(ui, action.label(), &toast.title, large_targets).clicked() {
+                let offer = notice::offer_link(ui, action.label(), &toast.title, large_targets);
+                focused |= offer.has_focus();
+                control_hovered |= offer.contains_pointer();
+                if offer.clicked() {
                     taken = Some(action);
                 }
             }
         });
 
         let (close_rect, _) = ui.allocate_exact_size(Vec2::splat(dismiss_side), Sense::hover());
-        dismissed = notice::dismiss_button(
+        let dismiss = notice::dismiss_button(
             ui,
             close_rect.translate(vec2(0.0, -2.0)),
             ui.id().with(("toast-dismiss", toast.id)),
             &format!("Dismiss {}", toast.title),
-        )
-        .clicked();
+        );
+        focused |= dismiss.has_focus();
+        control_hovered |= dismiss.contains_pointer();
+        dismissed = dismiss.clicked();
     });
-    ToastOutcome { dismissed, taken }
+    ToastOutcome {
+        dismissed,
+        taken,
+        focused,
+        cut,
+        control_hovered,
+    }
 }
 
 #[cfg(test)]
@@ -991,6 +1180,57 @@ mod tests {
         assert_eq!(toasts.activity()[0].action(), Some(action));
     }
 
+    /// One failure, one record. A failure is toasted in its own words with an
+    /// offer to show the Console line it wrote, and that same line is then
+    /// mirrored; the line is the failure said again, not a second failure.
+    #[test]
+    fn a_toasted_failure_and_its_console_line_are_retained_once() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        let action = NotificationAction::ShowInConsole { log_id: 7 };
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::System,
+            ToastKind::Error,
+            "Could not save project",
+            "The disk is full.",
+            action,
+        );
+
+        toasts.synchronize_activity(
+            8,
+            [mirrored(
+                7,
+                NotificationCategory::System,
+                ToastKind::Error,
+                "Could not save project: The disk is full.",
+                1.0,
+            )],
+        );
+
+        assert_eq!(
+            toasts.activity().len(),
+            1,
+            "a toasted failure and its mirrored line must leave one record"
+        );
+        assert_eq!(toasts.activity()[0].title(), "Could not save project");
+        assert_eq!(toasts.activity()[0].action(), Some(action));
+        assert_eq!(toasts.unread_count(), 1, "so the badge counts it once");
+
+        // A different line is a different event and is still kept.
+        toasts.synchronize_activity(
+            9,
+            [mirrored(
+                8,
+                NotificationCategory::System,
+                ToastKind::Error,
+                "Could not save project: The disk is full.",
+                2.0,
+            )],
+        );
+        assert_eq!(toasts.activity().len(), 2);
+    }
+
     #[test]
     fn titled_toasts_replace_only_the_matching_visible_tone_and_title() {
         let ctx = Context::default();
@@ -1005,6 +1245,47 @@ mod tests {
         assert_eq!(toasts.queue[1].kind, ToastKind::Warn);
         assert_eq!(toasts.activity().len(), 3);
         assert_eq!(toasts.activity()[0].title(), "Project saved");
+    }
+
+    /// A quiet record is everything a notice is except the toast: unread,
+    /// counted, titled, and still offering where it leads. It neither raises
+    /// a toast nor replaces one that is already up under the same title.
+    #[test]
+    fn a_quiet_record_reaches_the_bell_without_a_toast() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        toasts.success(&ctx, "Run 3 complete", "2 analyses saved");
+        let offer = NotificationAction::OpenRunInResults { run_sequence: 4 };
+
+        toasts.record_quietly(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Success,
+            "Run 4 complete",
+            "1 analysis saved",
+            Some(offer),
+        );
+        toasts.record_quietly(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Success,
+            "Run 3 complete",
+            "",
+            None,
+        );
+
+        assert_eq!(toasts.queue.len(), 1, "no toast was raised or replaced");
+        assert_eq!(toasts.queue[0].message, "2 analyses saved");
+        assert_eq!(toasts.activity().len(), 3);
+        assert_eq!(toasts.unread_count(), 3);
+        let quiet = &toasts.activity()[1];
+        assert_eq!(quiet.title(), "Run 4 complete");
+        assert_eq!(quiet.message(), "1 analysis saved");
+        assert_eq!(quiet.category(), NotificationCategory::Job);
+        assert_eq!(quiet.kind(), ToastKind::Success);
+        assert_eq!(quiet.action(), Some(offer));
+        assert!(!quiet.is_read());
+        assert_eq!(toasts.activity()[0].action(), None);
     }
 
     #[test]
@@ -1100,6 +1381,55 @@ mod tests {
         assert!(!toasts.dismiss(saved), "a record is dismissed once");
     }
 
+    /// A retired offer leaves the record and the toast on screen alike, and
+    /// the notice itself stays; an offer the predicate spares stays too.
+    #[test]
+    fn retiring_an_offer_keeps_the_notice_and_takes_the_offer_everywhere() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        let run = NotificationAction::OpenRunInResults { run_sequence: 3 };
+        let console = NotificationAction::ShowInConsole { log_id: 9 };
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Success,
+            "Run 3 complete",
+            "2 analyses saved with this run.",
+            run,
+        );
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::System,
+            ToastKind::Warn,
+            "Library reloaded",
+            "1 model changed.",
+            console,
+        );
+
+        toasts.retire_offers(|action| action == run);
+
+        let offers = |toasts: &Toasts| {
+            (
+                toasts
+                    .activity()
+                    .iter()
+                    .map(NotificationRecord::action)
+                    .collect::<Vec<_>>(),
+                toasts
+                    .queue
+                    .iter()
+                    .map(|toast| toast.action)
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            offers(&toasts),
+            (vec![Some(console), None], vec![None, Some(console)])
+        );
+        assert_eq!(toasts.activity()[1].title(), "Run 3 complete");
+        assert_eq!(toasts.queue[0].message, "2 analyses saved with this run.");
+    }
+
     #[test]
     fn marking_read_reports_a_change_only_the_first_time() {
         let ctx = Context::default();
@@ -1123,23 +1453,12 @@ mod tests {
         toasts.info(&ctx, "first");
         assert_eq!(
             toasts.queue[0].expires,
-            toasts.queue[0].created + TOAST_LIFETIME
+            Some(toasts.queue[0].created + TOAST_LIFETIME)
         );
 
-        let pass = |toasts: &mut Toasts, time: f64| {
-            let _ = ctx.run_ui(
-                egui::RawInput {
-                    time: Some(time),
-                    ..Default::default()
-                },
-                |ui| {
-                    let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
-                },
-            );
-        };
-        pass(&mut toasts, TOAST_LIFETIME - 0.1);
+        pass(&ctx, &mut toasts, TOAST_LIFETIME - 0.1);
         assert_eq!(toasts.queue.len(), 1);
-        pass(&mut toasts, TOAST_LIFETIME + 0.1);
+        pass(&ctx, &mut toasts, TOAST_LIFETIME + 0.1);
         assert!(toasts.queue.is_empty());
         assert_eq!(
             toasts.unread_count(),
@@ -1148,10 +1467,362 @@ mod tests {
         );
     }
 
+    /// One frame of the toast stack at `time` on the egui clock.
+    fn pass(ctx: &Context, toasts: &mut Toasts, time: f64) {
+        let _ = frame(ctx, toasts, time, None, Vec::new());
+    }
+
+    /// One frame at `time`, in a window that does or does not have the
+    /// keyboard (`None`: a platform that does not say).
+    fn frame(
+        ctx: &Context,
+        toasts: &mut Toasts,
+        time: f64,
+        focused: Option<bool>,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let mut input = egui::RawInput {
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        input.viewports.insert(
+            egui::ViewportId::ROOT,
+            egui::ViewportInfo {
+                focused,
+                ..Default::default()
+            },
+        );
+        ctx.run_ui(input, |ui| {
+            let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
+        })
+    }
+
+    /// A run that finishes while the reader is in another application is
+    /// announced when they come back, for its whole lifetime: the clock stands
+    /// still while the window is in the background.
+    #[test]
+    fn a_window_in_the_background_holds_every_clock() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.info(&ctx, "Run 4 complete");
+
+        let _ = frame(&ctx, &mut toasts, 0.0, Some(false), Vec::new());
+        let _ = frame(&ctx, &mut toasts, 600.0, Some(false), Vec::new());
+        assert_eq!(toasts.queue.len(), 1, "nobody was there to read it");
+
+        let _ = frame(&ctx, &mut toasts, 601.0, Some(true), Vec::new());
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            601.0 + TOAST_LIFETIME - 0.1,
+            Some(true),
+            Vec::new(),
+        );
+        assert_eq!(
+            toasts.queue.len(),
+            1,
+            "it runs its lifetime once they are back"
+        );
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            601.0 + TOAST_LIFETIME + 0.1,
+            Some(true),
+            Vec::new(),
+        );
+        assert!(toasts.queue.is_empty());
+    }
+
+    /// A held clock has nothing on it that moves, so a window in the
+    /// background does not redraw its toasts thirty times a second.
+    #[test]
+    fn a_window_in_the_background_does_not_redraw_a_still_drain_bar() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.info(&ctx, "Run 4 complete");
+        let wake = |output: &egui::FullOutput| {
+            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+        };
+
+        for time in [0.0, 0.5] {
+            let _ = frame(&ctx, &mut toasts, time, Some(true), Vec::new());
+        }
+        let running = frame(&ctx, &mut toasts, 1.0, Some(true), Vec::new());
+        assert!(
+            wake(&running) <= TOAST_DRAIN_STEP,
+            "a running clock is drawn moving: {:?}",
+            wake(&running)
+        );
+
+        let _ = frame(&ctx, &mut toasts, 1.5, Some(false), Vec::new());
+        let held = frame(&ctx, &mut toasts, 2.0, Some(false), Vec::new());
+        assert!(
+            wake(&held) > Duration::from_secs(60),
+            "a held clock asks for no frames: {:?}",
+            wake(&held)
+        );
+    }
+
+    /// A reader who tabbed to a toast's control is reading it, and it does
+    /// not leave from under the keyboard; it resumes when the keyboard moves on.
+    #[test]
+    fn a_toast_whose_control_has_the_keyboard_holds_its_clock() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Info,
+            "Run 4 complete",
+            "2 analyses saved with this run.",
+            NotificationAction::OpenRunInResults { run_sequence: 4 },
+        );
+        let tab = egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        // The stack measures itself first; then Tab, and a pass at the same
+        // instant for the focus to settle.
+        for events in [Vec::new(), Vec::new(), vec![tab], Vec::new()] {
+            let _ = frame(&ctx, &mut toasts, 0.0, Some(true), events);
+        }
+        assert!(
+            ctx.memory(|memory| memory.focused()).is_some(),
+            "Tab reaches the toast's controls"
+        );
+        let _ = frame(&ctx, &mut toasts, 20.0, Some(true), Vec::new());
+        assert_eq!(toasts.queue.len(), 1, "the focused notice is held");
+
+        ctx.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+        // Held through 21 s, so it leaves at 21 s plus its whole lifetime.
+        let _ = frame(&ctx, &mut toasts, 21.0, Some(true), Vec::new());
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            21.0 + TOAST_LIFETIME - 0.1,
+            Some(true),
+            Vec::new(),
+        );
+        assert_eq!(toasts.queue.len(), 1, "the clock resumed where it stood");
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            21.0 + TOAST_LIFETIME + 0.1,
+            Some(true),
+            Vec::new(),
+        );
+        assert!(toasts.queue.is_empty());
+    }
+
+    /// A confirmation is a glance, a warning a second look, and an error
+    /// stays until the reader answers it.
+    #[test]
+    fn a_toast_lives_as_long_as_its_severity_asks() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.success(&ctx, "Project saved", "");
+        toasts.warn(&ctx, "2 models were skipped");
+        toasts.error_with_title(&ctx, "Export failed", "The folder is read-only.");
+        let kinds = |toasts: &Toasts| {
+            toasts
+                .queue
+                .iter()
+                .map(|toast| toast.kind)
+                .collect::<Vec<_>>()
+        };
+
+        pass(&ctx, &mut toasts, TOAST_LIFETIME + 0.1);
+        assert_eq!(kinds(&toasts), [ToastKind::Warn, ToastKind::Error]);
+        pass(&ctx, &mut toasts, TOAST_WARN_LIFETIME - 0.1);
+        assert_eq!(kinds(&toasts), [ToastKind::Warn, ToastKind::Error]);
+        pass(&ctx, &mut toasts, TOAST_WARN_LIFETIME + 0.1);
+        assert_eq!(kinds(&toasts), [ToastKind::Error]);
+        pass(&ctx, &mut toasts, 3_600.0);
+        assert_eq!(
+            kinds(&toasts),
+            [ToastKind::Error],
+            "an error leaves when it is answered, not when time passes"
+        );
+        assert_eq!(
+            toasts.queue[0].remaining(3_600.0),
+            None,
+            "so it draws no clock"
+        );
+
+        let error = toasts.queue[0].id;
+        assert!(toasts.dismiss(error));
+        assert!(toasts.queue.is_empty());
+    }
+
+    /// Three confirmations arriving behind an error push confirmations off
+    /// the stack, never the error; only a stack of errors gives up its oldest.
+    #[test]
+    fn a_full_stack_drops_its_oldest_notice_that_is_not_an_error() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        toasts.error_with_title(&ctx, "Save failed", "The disk is full.");
+        for index in 0..3 {
+            toasts.info(&ctx, format!("plotted {index}"));
+        }
+        let shown = |toasts: &Toasts| {
+            toasts
+                .queue
+                .iter()
+                .map(|toast| toast.message.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            shown(&toasts),
+            ["The disk is full.", "plotted 1", "plotted 2"],
+            "the error stays on screen"
+        );
+
+        for index in 0..3 {
+            toasts.error_with_title(&ctx, format!("Export {index} failed"), "");
+        }
+        assert_eq!(
+            toasts
+                .queue
+                .iter()
+                .map(|toast| toast.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Export 0 failed", "Export 1 failed", "Export 2 failed"],
+            "three errors make room by the oldest error"
+        );
+        assert_eq!(
+            toasts.activity().len(),
+            7,
+            "every notice dropped from the stack keeps its record"
+        );
+    }
+
     #[test]
     fn reduced_motion_skips_the_toast_entry_fade() {
         assert_eq!(toast_entry_opacity(0.0, false), 1.0);
         assert_eq!(toast_entry_opacity(TOAST_ENTER / 2.0, false), 1.0);
         assert_eq!(toast_entry_opacity(TOAST_ENTER / 2.0, true), 0.5);
+    }
+
+    /// A screen reader hears a toast arrive, politely for a confirmation and
+    /// at once for a warning or failure, and the reader's focus stays where
+    /// it was.
+    #[test]
+    fn a_toast_is_announced_by_severity_without_taking_focus() {
+        for (kind, live) in [
+            (ToastKind::Success, egui::accesskit::Live::Polite),
+            (ToastKind::Info, egui::accesskit::Live::Polite),
+            (ToastKind::Warn, egui::accesskit::Live::Assertive),
+            (ToastKind::Error, egui::accesskit::Live::Assertive),
+        ] {
+            let ctx = Context::default();
+            crate::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut toasts = Toasts::default();
+            toasts.notify_with_action(
+                &ctx,
+                NotificationCategory::Job,
+                kind,
+                "Run 4",
+                "Finished.",
+                NotificationAction::OpenRunInResults { run_sequence: 4 },
+            );
+            let mut output = None;
+            for _ in 0..3 {
+                output = Some(frame(&ctx, &mut toasts, 0.0, Some(true), Vec::new()));
+            }
+            let update = output
+                .and_then(|output| output.platform_output.accesskit_update)
+                .expect("accesskit is on");
+            let statuses: Vec<_> = update
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Status)
+                .map(|(_, node)| (node.label().map(str::to_owned), node.live()))
+                .collect();
+            assert_eq!(
+                statuses,
+                [(
+                    Some(format!("{}: Run 4. Finished.", kind.label())),
+                    Some(live)
+                )],
+                "{kind:?}"
+            );
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                None,
+                "a {kind:?} toast never takes the keyboard"
+            );
+        }
+    }
+
+    /// A console paragraph is one card, not a page: the message stops at four
+    /// lines with an ellipsis, and the whole of it is under the pointer.
+    #[test]
+    fn a_long_message_is_cut_to_four_lines_and_given_in_full_on_hover() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        let message = "Could not write amplifier.rsp: the folder is read-only. ".repeat(8);
+        toasts.error_with_title(&ctx, "Save failed", message.clone());
+        let texts = |output: &egui::FullOutput| {
+            fn walk(shape: &egui::Shape, out: &mut Vec<Arc<Galley>>) {
+                match shape {
+                    egui::Shape::Text(text) => out.push(text.galley.clone()),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+                    _ => {}
+                }
+            }
+            let mut out = Vec::new();
+            for clipped in &output.shapes {
+                walk(&clipped.shape, &mut out);
+            }
+            out
+        };
+
+        // Past the entrance fade, which paints nothing at its first instant.
+        let _ = frame(&ctx, &mut toasts, 0.0, Some(true), Vec::new());
+        let painted = texts(&frame(&ctx, &mut toasts, 0.5, Some(true), Vec::new()));
+        let detail = painted
+            .iter()
+            .find(|galley| galley.text().starts_with("Could not write"))
+            .expect("the message is painted");
+        assert_eq!(detail.rows.len(), TOAST_MESSAGE_MAX_ROWS);
+        assert!(detail.elided, "and says it was cut");
+
+        // Rest the pointer on the card, clear of its controls, until the
+        // tooltip is due.
+        let card = ctx
+            .memory(|memory| memory.area_rect(Id::new("rspice.toasts")))
+            .expect("the stack is laid out");
+        let pointer = card.left_top() + vec2(60.0, 40.0);
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            0.6,
+            Some(true),
+            vec![egui::Event::PointerMoved(pointer)],
+        );
+        let mut hovered = Vec::new();
+        for time in [1.4, 2.2, 3.0] {
+            hovered = texts(&frame(&ctx, &mut toasts, time, Some(true), Vec::new()));
+        }
+        let full = format!("Save failed\n{message}");
+        assert!(
+            hovered.iter().any(|galley| galley.text() == full),
+            "the hover gives the title and the whole message"
+        );
     }
 }

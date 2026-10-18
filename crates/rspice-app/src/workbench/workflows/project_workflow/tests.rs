@@ -1584,12 +1584,40 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
 
     assert!(!saved);
     assert!(!published);
-    assert!(
-        state
-            .log_buffer
-            .entries()
-            .any(|entry| { entry.message.contains("Project save failed") })
+    let line = state
+        .log_buffer
+        .entries()
+        .find(|entry| entry.message.contains("Project save failed"))
+        .map(|entry| entry.id)
+        .expect("the failure is in the Console");
+    // A save the user asked for that did not happen is said now, not left
+    // for the reader to find under the bell.
+    let activity = state.ui.toasts.activity();
+    assert_eq!(activity.len(), 1);
+    assert_eq!(activity[0].title(), "Project save failed");
+    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+    assert_eq!(
+        activity[0].action(),
+        Some(crate::ui::widgets::NotificationAction::ShowInConsole { log_id: line })
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
+    let mut state = AppState::default();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-open-missing-{}-{}.rspiceproj",
+        std::process::id(),
+        crate::time_compat::unix_epoch().as_nanos()
+    ));
+
+    assert!(!load_project_from_path(&mut state, &path));
+
+    let activity = state.ui.toasts.activity();
+    assert_eq!(activity.len(), 1, "an open that failed is said now");
+    assert_eq!(activity[0].title(), "Project open failed");
+    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
 }
 
 #[test]
