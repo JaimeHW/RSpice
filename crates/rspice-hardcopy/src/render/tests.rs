@@ -22,8 +22,7 @@ use rspice_design_model::SchematicPageOrientation;
 use rspice_design_model::design_management::{
     DrawingSheetManagedLogo, DrawingSheetManagedLogoPoint, DrawingSheetManagedLogoPrimitive,
     DrawingSheetManagedTemplateSnapshot, DrawingSheetStandard, DrawingSheetTitleBlockRotation,
-    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetZoneEdges,
-    DrawingSheetZoneLabels, SchematicSheetFormat,
+    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, SchematicSheetFormat,
 };
 use rspice_hardcopy_contract::sources::{
     HardcopySourceIdentity, HardcopySourceSet, HardcopySourceSetMember,
@@ -1324,9 +1323,8 @@ fn authored_sheet_clip_preserves_partially_intersecting_non_linear_primitives() 
 }
 
 #[test]
-fn coordinate_zone_mode_keeps_rules_but_suppresses_every_edge_label() {
-    let mut format = SchematicSheetFormat::default();
-    format.zones.labels = DrawingSheetZoneLabels::Coordinates;
+fn zones_only_output_draws_the_whole_band_and_nothing_else() {
+    let format = SchematicSheetFormat::default();
     let geometry = format.geometry().unwrap();
     let source = resolved_blank_schematic(&format);
     let schematic = SchematicHardcopySetup::new(
@@ -1347,16 +1345,10 @@ fn coordinate_zone_mode_keeps_rules_but_suppresses_every_edge_label() {
     )
     .unwrap();
     assert!(
-        scene
-            .primitives()
-            .iter()
-            .all(|primitive| !matches!(primitive, ScenePrimitive::Text { .. }))
-    );
-    assert!(
-        scene
-            .primitives()
-            .iter()
-            .all(|primitive| matches!(primitive, ScenePrimitive::Line { .. })),
+        scene.primitives().iter().all(|primitive| matches!(
+            primitive,
+            ScenePrimitive::Line { .. } | ScenePrimitive::Text { .. }
+        )),
         "zones-only output must own its ruled band without borrowing paper, border, or title primitives"
     );
     assert!(
@@ -1378,14 +1370,11 @@ fn coordinate_zone_mode_keeps_rules_but_suppresses_every_edge_label() {
 }
 
 #[test]
-fn hardcopy_zone_labels_follow_the_selected_output_edges() {
-    let bottom_right = SchematicSheetFormat::default()
-        .try_update(|draft| {
-            draft.zones.edges = DrawingSheetZoneEdges::BottomAndRight;
-        })
-        .unwrap();
-    let geometry = bottom_right.geometry().unwrap();
-    let source = resolved_blank_schematic(&bottom_right);
+fn hardcopy_zone_labels_follow_the_edges_the_standard_letters() {
+    // ISO 5457 4.4 letters A4 at the top and the right side only.
+    let a4 = SchematicSheetFormat::default();
+    let geometry = a4.geometry().unwrap();
+    let source = resolved_blank_schematic(&a4);
     let schematic = SchematicHardcopySetup::new(
         SchematicHardcopyExtent::AuthoredDrawingSheet,
         OutsideSheetContentPolicy::Ask,
@@ -1415,17 +1404,16 @@ fn hardcopy_zone_labels_follow_the_selected_output_edges() {
         .collect::<Vec<_>>();
     let zones = geometry.zones.unwrap();
     assert_eq!(labels.len(), usize::from(zones.columns + zones.rows));
+    let drawing_top = u64::try_from(geometry.drawing_area.y_um).unwrap();
     let drawing_right =
         u64::try_from(geometry.drawing_area.x_um + geometry.drawing_area.width_um as i64).unwrap();
-    let drawing_bottom =
-        u64::try_from(geometry.drawing_area.y_um + geometry.drawing_area.height_um as i64).unwrap();
     assert_eq!(
         labels
             .iter()
-            .filter(|origin| origin.y.micrometres() > drawing_bottom)
+            .filter(|origin| origin.y.micrometres() < drawing_top)
             .count(),
         usize::from(zones.columns),
-        "one column label must be emitted on the selected bottom edge"
+        "one column label must be emitted on the top edge"
     );
     assert_eq!(
         labels
@@ -1433,13 +1421,16 @@ fn hardcopy_zone_labels_follow_the_selected_output_edges() {
             .filter(|origin| origin.x.micrometres() > drawing_right)
             .count(),
         usize::from(zones.rows),
-        "one row label must be emitted on the selected right edge"
+        "one row label must be emitted on the right edge"
     );
 
-    let all_edges = bottom_right
-        .try_update(|draft| draft.zones.edges = DrawingSheetZoneEdges::All)
-        .unwrap();
-    let source = resolved_blank_schematic(&all_edges);
+    // Every other size letters all four sides.
+    let a3 = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA3,
+        SchematicPageOrientation::Landscape,
+    );
+    let zones = a3.geometry().unwrap().zones.unwrap();
+    let source = resolved_blank_schematic(&a3);
     let scene = scene_from_resolved(
         &source,
         source.default_print_mapping(),
@@ -1866,17 +1857,6 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
         SchematicPageOrientation::Portrait,
         SchematicPageOrientation::Landscape,
     ];
-    let zone_labels = [
-        DrawingSheetZoneLabels::AlphaNumeric,
-        DrawingSheetZoneLabels::NumericAlpha,
-        DrawingSheetZoneLabels::Coordinates,
-    ];
-    let zone_edges = [
-        DrawingSheetZoneEdges::All,
-        DrawingSheetZoneEdges::TopAndLeft,
-        DrawingSheetZoneEdges::TopAndRight,
-        DrawingSheetZoneEdges::BottomAndRight,
-    ];
     let mut cases = 0usize;
 
     for standard in DrawingSheetStandard::ALL {
@@ -1887,8 +1867,6 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
                             .try_update(|draft| {
                                 draft.title_block.template = template;
                                 draft.title_block.rotation = rotation;
-                                draft.zones.labels = zone_labels[cases % zone_labels.len()];
-                                draft.zones.edges = zone_edges[cases % zone_edges.len()];
                                 draft
                                     .title_block
                                     .fields

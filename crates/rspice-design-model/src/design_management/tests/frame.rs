@@ -235,9 +235,9 @@ fn a4_letters_its_grid_references_at_the_top_and_right_only() {
         SchematicPageOrientation::Landscape,
     ] {
         let a4 = sheet(DrawingSheetStandard::IsoA4, orientation);
-        assert_eq!(a4.zones.edges, DrawingSheetZoneEdges::TopAndRight);
         let geometry = a4.geometry().unwrap();
         let zones = geometry.zones.unwrap();
+        assert_eq!(zones.edges, DrawingSheetZoneEdges::TopAndRight);
         let labels = texts(
             &a4.frame_artwork(&geometry),
             DrawingSheetFrameLayer::ZoneLabels,
@@ -257,7 +257,10 @@ fn a4_letters_its_grid_references_at_the_top_and_right_only() {
         }
         // Every other ISO size letters all four sides.
         let a3 = sheet(DrawingSheetStandard::IsoA3, orientation);
-        assert_eq!(a3.zones.edges, DrawingSheetZoneEdges::All);
+        assert_eq!(
+            a3.geometry().unwrap().zones.unwrap().edges,
+            DrawingSheetZoneEdges::All
+        );
     }
 }
 
@@ -399,11 +402,14 @@ fn arch_sheets_are_zoned_in_equal_zones_of_one_to_five_and_a_half_inches() {
         );
         let (width_um, height_um) = format.oriented_dimensions_um();
         let zones = format.geometry().unwrap().zones.unwrap();
-        assert!(drawing_sheet_asme_zone_count_allowed(
-            width_um,
-            zones.columns
-        ));
-        assert!(drawing_sheet_asme_zone_count_allowed(height_um, zones.rows));
+        for (edge_um, count) in [(width_um, zones.columns), (height_um, zones.rows)] {
+            let zone_um = edge_um / u64::from(count);
+            assert!(
+                (DRAWING_SHEET_ASME_MIN_ZONE_UM..=DRAWING_SHEET_ASME_MAX_ZONE_UM)
+                    .contains(&zone_um),
+                "{standard:?}: {count} zones of {zone_um} µm"
+            );
+        }
     }
     // ARCH D's 36 in edge takes ANSI D's eight zones; its 24 in edge, too
     // long for ANSI C's four, takes five.
@@ -423,38 +429,6 @@ fn arch_sheets_are_zoned_in_equal_zones_of_one_to_five_and_a_half_inches() {
         serde_json::to_value(DrawingSheetStandard::ArchE1).unwrap(),
         serde_json::json!("arch-e1")
     );
-}
-
-#[test]
-fn asme_zone_counts_must_keep_zones_between_one_and_five_and_a_half_inches() {
-    assert!(drawing_sheet_asme_zone_count_allowed(279_400, 2));
-    assert!(
-        !drawing_sheet_asme_zone_count_allowed(279_400, 24),
-        "0.46 in zones"
-    );
-    assert!(
-        !drawing_sheet_asme_zone_count_allowed(1_117_600, 2),
-        "22 in zones"
-    );
-    assert!(drawing_sheet_asme_zone_count_allowed(1_117_600, 8));
-    // A sheet saved with such a count still loads and draws.
-    let crowded = sheet(
-        DrawingSheetStandard::AnsiA,
-        SchematicPageOrientation::Landscape,
-    )
-    .try_update(|draft| {
-        draft.zones.mode = DrawingSheetZoneMode::Custom;
-        draft.zones.custom_columns = Some(24);
-        draft.zones.custom_rows = Some(2);
-    })
-    .unwrap();
-    assert_eq!(crowded.geometry().unwrap().zones.unwrap().columns, 24);
-    // Its 0.46 in zones count from the trimmed edge, so the first and last
-    // lie wholly in the 0.50 in margin and the frame shows zones 2 to 23.
-    let columns = layout(&crowded).columns;
-    assert_eq!(columns.len(), 22);
-    assert_eq!(columns.first().unwrap().label, "23");
-    assert_eq!(columns.last().unwrap().label, "2");
 }
 
 #[test]

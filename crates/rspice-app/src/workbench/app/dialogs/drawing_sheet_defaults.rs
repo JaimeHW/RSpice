@@ -1721,8 +1721,6 @@ fn enforce_managed_default_authority(
         if authority.border == DrawingSheetBorderTemplate::OrganizationManaged {
             draft.border = authority.border;
             draft.zones.mode = authority.zones.mode;
-            draft.zones.custom_columns = authority.zones.custom_columns;
-            draft.zones.custom_rows = authority.zones.custom_rows;
         }
         if authority.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged {
             draft.title_block.template = authority.title_block.template;

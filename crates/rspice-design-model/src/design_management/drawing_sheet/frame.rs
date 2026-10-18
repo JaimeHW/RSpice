@@ -506,7 +506,7 @@ impl SchematicSheetFormat {
         let (band_right, band_bottom) = far_corner(band);
         let (area_right, area_bottom) = far_corner(area);
         let width_um = convention.zone_line_um();
-        // The band carries every boundary on all four sides; the edge choice
+        // The band carries every boundary on all four sides; the standard
         // decides only where the references are lettered.
         for x in zones.column_boundaries_um() {
             artwork.line(

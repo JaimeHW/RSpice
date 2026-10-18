@@ -510,6 +510,23 @@ fn its_presets_load_onto_todays_frames_and_seal_again_without_the_old_options() 
     assert!(!bound.marks.centring);
     assert!(organization.marks.centring);
     assert!(!plain.marks.centring);
+    // Custom counts, coordinate and column-lettered schemes and partial
+    // edges give way to the standard's zones.
+    for format in [organization, plain] {
+        let geometry = format.geometry().unwrap();
+        let grid = geometry.zones.unwrap();
+        assert_eq!(
+            (grid.columns, grid.rows),
+            (6, 8),
+            "ISO 5457's 50 mm fields on a 250 × 400 mm sheet"
+        );
+        assert_eq!(
+            grid.edges,
+            crate::design_management::DrawingSheetZoneEdges::All
+        );
+        let zones = format.zone_layout(&geometry).unwrap();
+        assert_eq!(zones.rows[0].label, "A");
+    }
 
     let resealed = build_package(package.presets.iter().map(|preset| DrawingSheetPreset {
         id: preset.stable_id.clone(),
@@ -519,7 +536,14 @@ fn its_presets_load_onto_todays_frames_and_seal_again_without_the_old_options() 
     }))
     .unwrap();
     let encoded = encode_package(&resealed).unwrap();
-    for retired in [r#""registration""#, r#""folding""#] {
+    for retired in [
+        r#""registration""#,
+        r#""folding""#,
+        r#""custom_columns""#,
+        r#""custom_rows""#,
+        r#""labels""#,
+        r#""edges""#,
+    ] {
         assert!(!encoded.contains(retired), "{retired} is written again");
     }
     let reopened = parse_package(&encoded, &PdkPublisherTrustStore::default()).unwrap();

@@ -107,15 +107,6 @@ pub fn drawing_sheet_asme_zone_count(edge_um: u64) -> u8 {
     u8::try_from(count).unwrap_or(u8::MAX)
 }
 
-/// Whether `count` equal zones along an edge of `edge_um` stay within ASME
-/// Y14.1 Table 4-1 Note (1): no zone shorter than 1 in or longer than 5.50 in.
-#[must_use]
-pub fn drawing_sheet_asme_zone_count_allowed(edge_um: u64, count: u8) -> bool {
-    count > 0
-        && edge_um >= u64::from(count) * DRAWING_SHEET_ASME_MIN_ZONE_UM
-        && edge_um <= u64::from(count) * DRAWING_SHEET_ASME_MAX_ZONE_UM
-}
-
 /// One zone along one edge of the frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingSheetZoneField {
@@ -140,25 +131,20 @@ impl DrawingSheetZoneField {
     }
 }
 
-/// A sheet's zones: the fields along the horizontal edges (left to right) and
-/// along the vertical edges (top to bottom), each with its label.
+/// A sheet's zones: the fields along the horizontal edges (left to right),
+/// numbered, and along the vertical edges (top to bottom), lettered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingSheetZoneLayout {
     pub columns: Vec<DrawingSheetZoneField>,
     pub rows: Vec<DrawingSheetZoneField>,
-    pub labels: DrawingSheetZoneLabels,
     pub edges: DrawingSheetZoneEdges,
 }
 
 impl DrawingSheetZoneLayout {
     /// The zone reference of a point in sheet micrometres, such as `B3`, or
-    /// `None` outside the drawing frame and when the sheet quotes coordinates
-    /// instead of zones.
+    /// `None` outside the drawing frame.
     #[must_use]
     pub fn reference_at(&self, x_um: i64, y_um: i64) -> Option<String> {
-        if self.labels == DrawingSheetZoneLabels::Coordinates {
-            return None;
-        }
         let column = self.columns.iter().find(|field| field.contains(x_um))?;
         let row = self.rows.iter().find(|field| field.contains(y_um))?;
         Some(format!("{}{}", row.label, column.label))
@@ -177,14 +163,9 @@ impl DrawingSheetZoneLayout {
     /// Which band edges letter the zone labels: top, right, bottom, left.
     #[must_use]
     pub const fn lettered_edges(&self) -> (bool, bool, bool, bool) {
-        if matches!(self.labels, DrawingSheetZoneLabels::Coordinates) {
-            return (false, false, false, false);
-        }
         match self.edges {
             DrawingSheetZoneEdges::All => (true, true, true, true),
-            DrawingSheetZoneEdges::TopAndLeft => (true, false, false, true),
             DrawingSheetZoneEdges::TopAndRight => (true, true, false, false),
-            DrawingSheetZoneEdges::BottomAndRight => (false, true, true, false),
         }
     }
 }
@@ -198,8 +179,7 @@ enum ZoneAxis {
     Vertical,
 }
 
-/// Zones a sheet of `size` in automatic zone mode carries along its oriented
-/// width and height: ISO 5457 Table 2 and its 50 mm rule, or ASME Y14.1 Table
+/// Zones a sheet of `size` carries along its oriented width and height: ISO 5457 Table 2 and its 50 mm rule, or ASME Y14.1 Table
 /// 4-1 and its Note (1), by the size's frame convention.
 #[must_use]
 pub fn drawing_sheet_automatic_zone_counts(
@@ -236,8 +216,7 @@ pub fn drawing_sheet_automatic_zone_counts(
 }
 
 impl SchematicSheetFormat {
-    /// Zones a sheet in automatic zone mode carries along its oriented
-    /// width and height.
+    /// Zones the sheet carries along its oriented width and height.
     pub(super) fn automatic_zone_counts(&self) -> (u8, u8) {
         drawing_sheet_automatic_zone_counts(&self.authored_size, self.orientation)
     }
@@ -250,7 +229,6 @@ impl SchematicSheetFormat {
         Some(DrawingSheetZoneLayout {
             columns: self.zone_fields(geometry, grid, ZoneAxis::Horizontal),
             rows: self.zone_fields(geometry, grid, ZoneAxis::Vertical),
-            labels: grid.labels,
             edges: grid.edges,
         })
     }
@@ -278,8 +256,7 @@ impl SchematicSheetFormat {
         let count = usize::from(count.max(1));
         let frame_end = frame_start + frame_length as i64;
         let convention = self.frame_convention();
-        let boundaries =
-            self.zone_boundaries_um(convention, count, edge_um, frame_start, frame_end);
+        let boundaries = zone_boundaries_um(convention, count, edge_um);
         let mut fields = Vec::with_capacity(count);
         for index in 0..count {
             let start_um = if index == 0 {
@@ -298,63 +275,48 @@ impl SchematicSheetFormat {
                 DrawingSheetFrameConvention::Iso5457 => index,
                 DrawingSheetFrameConvention::AsmeY141 => count - 1 - index,
             };
-            let lettered = match (axis, grid.labels) {
-                (ZoneAxis::Horizontal, DrawingSheetZoneLabels::NumericAlpha)
-                | (ZoneAxis::Vertical, DrawingSheetZoneLabels::AlphaNumeric) => true,
-                (ZoneAxis::Horizontal, _) | (ZoneAxis::Vertical, _) => false,
-            };
+            // Both standards number along the horizontal edges and letter
+            // along the vertical ones.
             fields.push(DrawingSheetZoneField {
                 start_um,
                 end_um,
-                label: if lettered {
-                    drawing_sheet_zone_letters(ordinal)
-                } else {
-                    (ordinal + 1).to_string()
+                label: match axis {
+                    ZoneAxis::Horizontal => (ordinal + 1).to_string(),
+                    ZoneAxis::Vertical => drawing_sheet_zone_letters(ordinal),
                 },
             });
         }
         fields
     }
+}
 
-    /// The `count - 1` positions between neighbouring zones, ascending, in
-    /// sheet micrometres. A position may fall outside the drawing frame on a
-    /// sheet whose margins are wider than a standard's; its zone then ends at
-    /// the frame.
-    fn zone_boundaries_um(
-        &self,
-        convention: DrawingSheetFrameConvention,
-        count: usize,
-        edge_um: u64,
-        frame_start: i64,
-        frame_end: i64,
-    ) -> Vec<i64> {
-        let edge_um = edge_um as i64;
-        let count_i64 = count as i64;
-        match (convention, self.zones.mode) {
-            (DrawingSheetFrameConvention::Iso5457, DrawingSheetZoneMode::Automatic) => {
-                // 50 mm fields from the axis of symmetry outwards.
-                let centre = edge_um / 2;
-                let each_side = (count_i64 - 2) / 2;
-                (-each_side..=each_side)
-                    .map(|step| centre + step * ISO_5457_FIELD_UM as i64)
-                    .collect()
-            }
-            (DrawingSheetFrameConvention::Iso5457, _) => {
-                // An authored count divides the drawing frame equally, as it
-                // always has.
-                let length = frame_end - frame_start;
-                (1..count_i64)
-                    .map(|index| frame_start + length * index / count_i64)
-                    .collect()
-            }
-            (DrawingSheetFrameConvention::AsmeY141, _) => {
-                // Equal zones over the trimmed sheet, Table 4-1 Note (1),
-                // measured from the lower right corner the zones count from.
-                (1..count_i64)
-                    .rev()
-                    .map(|index| edge_um - edge_um * index / count_i64)
-                    .collect()
-            }
+/// The `count - 1` positions between neighbouring zones along an edge of
+/// `edge_um`, ascending, in sheet micrometres. Both standards measure them
+/// over the trimmed sheet, so the first and last may fall in the margin;
+/// their zones then end at the frame.
+fn zone_boundaries_um(
+    convention: DrawingSheetFrameConvention,
+    count: usize,
+    edge_um: u64,
+) -> Vec<i64> {
+    let edge_um = edge_um as i64;
+    let count_i64 = count as i64;
+    match convention {
+        DrawingSheetFrameConvention::Iso5457 => {
+            // 50 mm fields from the axis of symmetry outwards.
+            let centre = edge_um / 2;
+            let each_side = (count_i64 - 2) / 2;
+            (-each_side..=each_side)
+                .map(|step| centre + step * ISO_5457_FIELD_UM as i64)
+                .collect()
+        }
+        DrawingSheetFrameConvention::AsmeY141 => {
+            // Equal zones over the trimmed sheet, Table 4-1 Note (1),
+            // measured from the lower right corner the zones count from.
+            (1..count_i64)
+                .rev()
+                .map(|index| edge_um - edge_um * index / count_i64)
+                .collect()
         }
     }
 }

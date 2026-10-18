@@ -12,10 +12,9 @@ use crate::state::{
     DrawingSheetMarks, DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetScale,
     DrawingSheetStandard, DrawingSheetStandardSeries, DrawingSheetTitleBlock,
     DrawingSheetTitleBlockAnchor, DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate,
-    DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, DrawingSheetZoneEdges,
-    DrawingSheetZoneLabels, DrawingSheetZoneMode, DrawingSheetZones, SchematicPageOrientation,
-    SchematicSheetFormat, SchematicSheetFormatDraft, SheetId,
-    drawing_sheet_asme_zone_count_allowed, drawing_sheet_automatic_zone_counts,
+    DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, DrawingSheetZoneMode, DrawingSheetZones,
+    SchematicPageOrientation, SchematicSheetFormat, SchematicSheetFormatDraft, SheetId,
+    drawing_sheet_automatic_zone_counts,
 };
 use crate::workbench::app::SchematicEditAuthority;
 
@@ -156,60 +155,16 @@ impl BorderTemplateChoice {
 pub(crate) enum ZoneModeChoice {
     #[default]
     Automatic,
-    Custom,
     None,
 }
 
 impl ZoneModeChoice {
-    pub(crate) const ALL: [Self; 3] = [Self::Automatic, Self::Custom, Self::None];
+    pub(crate) const ALL: [Self; 2] = [Self::Automatic, Self::None];
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Automatic => "Automatic",
-            Self::Custom => "Custom",
             Self::None => "None",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum ZoneEdgesChoice {
-    #[default]
-    All,
-    TopLeft,
-    TopRight,
-    BottomRight,
-}
-
-impl ZoneEdgesChoice {
-    pub(crate) const ALL: [Self; 4] = [Self::All, Self::TopLeft, Self::TopRight, Self::BottomRight];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::All => "All four edges",
-            Self::TopLeft => "Top and left",
-            Self::TopRight => "Top and right · ISO A4",
-            Self::BottomRight => "Bottom and right",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum ZoneLabelsChoice {
-    #[default]
-    AlphaNumeric,
-    NumericAlpha,
-    Coordinates,
-}
-
-impl ZoneLabelsChoice {
-    pub(crate) const ALL: [Self; 3] = [Self::AlphaNumeric, Self::NumericAlpha, Self::Coordinates];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::AlphaNumeric => "Rows A…Y · columns 1…24",
-            Self::NumericAlpha => "Rows 1…24 · columns A…Y",
-            Self::Coordinates => "Coordinates only",
         }
     }
 }
@@ -358,10 +313,10 @@ pub(crate) struct DrawingSheetDraft {
     pub(crate) bleed: String,
     pub(crate) border: BorderTemplateChoice,
     pub(crate) zone_mode: ZoneModeChoice,
+    /// The zones the sheet's standard gives its size and orientation, shown
+    /// beside the zone choice.
     pub(crate) zone_columns: u8,
     pub(crate) zone_rows: u8,
-    pub(crate) zone_edges: ZoneEdgesChoice,
-    pub(crate) zone_labels: ZoneLabelsChoice,
     pub(crate) centring_marks: bool,
     pub(crate) title_block: TitleBlockTemplateChoice,
     pub(crate) title_block_anchor: TitleBlockAnchorChoice,
@@ -404,10 +359,8 @@ impl DrawingSheetDraft {
         };
         let (width_um, height_um) = format.oriented_dimensions_um();
         let display_unit = display_unit_from_model(format.display_unit);
-        let geometry = format.geometry().ok();
-        let (zone_columns, zone_rows) = geometry
-            .and_then(|geometry| geometry.zones.map(|zones| (zones.columns, zones.rows)))
-            .unwrap_or((4, 4));
+        let (zone_columns, zone_rows) =
+            drawing_sheet_automatic_zone_counts(&format.authored_size, format.orientation);
         Self {
             size,
             custom_started_from: format.authored_size.series_for_custom_size(),
@@ -430,8 +383,6 @@ impl DrawingSheetDraft {
             zone_mode: zone_mode_from_model(format.zones.mode),
             zone_columns,
             zone_rows,
-            zone_edges: zone_edges_from_model(format.zones.edges),
-            zone_labels: zone_labels_from_model(format.zones.labels),
             centring_marks: format.marks.centring,
             title_block: title_template_from_model(format.title_block.template),
             title_block_anchor: title_anchor_from_model(format.title_block.anchor),
@@ -481,9 +432,6 @@ impl DrawingSheetDraft {
         }
         self.orientation = orientation;
         std::mem::swap(&mut self.width, &mut self.height);
-        // Custom zone counts are authored horizontal/vertical divisions, not
-        // derived page-edge labels. Automatic mode, however, follows the
-        // oriented edges by the sheet's standard.
         self.refresh_automatic_zone_counts();
     }
 
@@ -511,16 +459,8 @@ impl DrawingSheetDraft {
         self.margin_right = format_um(margins.right_um, self.display_unit);
         self.margin_bottom = format_um(margins.bottom_um, self.display_unit);
         self.margin_left = format_um(margins.left_um, self.display_unit);
-        // Edges and marks the author left at the old size's defaults follow
-        // the new size's; ones they chose stay as they are.
-        let default_edges = |standard: Option<DrawingSheetStandard>| {
-            zone_edges_from_model(standard.map_or(DrawingSheetZoneEdges::All, |standard| {
-                standard.default_zone_edges()
-            }))
-        };
-        if self.zone_edges == default_edges(previous) {
-            self.zone_edges = default_edges(Some(standard));
-        }
+        // Marks the author left at the old size's default follow the new
+        // size's; a choice they made stays as it is.
         let border = border_to_model(self.border);
         if self.centring_marks == previous_convention.default_marks(border).centring {
             self.centring_marks = format.frame_convention().default_marks(border).centring;
@@ -598,12 +538,9 @@ impl DrawingSheetDraft {
         }
     }
 
-    /// Bring the counts automatic zone mode shows up to the sheet's size,
-    /// orientation and standard. Custom counts are left as authored.
+    /// Bring the zone counts shown up to the sheet's size, orientation and
+    /// standard.
     fn refresh_automatic_zone_counts(&mut self) {
-        if self.zone_mode != ZoneModeChoice::Automatic {
-            return;
-        }
         if let (Ok(width_um), Ok(height_um)) = (
             parse_length_um(&self.width, self.display_unit),
             parse_length_um(&self.height, self.display_unit),
@@ -827,26 +764,6 @@ impl DrawingSheetDraft {
                 });
             }
         }
-        if self.zone_mode == ZoneModeChoice::Custom
-            && (!(2..=24).contains(&self.zone_columns) || !(2..=24).contains(&self.zone_rows))
-        {
-            problems.push(FieldProblem {
-                field: "zones",
-                message: "Custom zone rows and columns must each be between 2 and 24.".to_owned(),
-            });
-        } else if self.zone_mode == ZoneModeChoice::Custom
-            && self.frame_convention() == DrawingSheetFrameConvention::AsmeY141
-            && let (Some(width), Some(height)) = (width_um, height_um)
-            && let Some(message) = asme_zone_count_problem([
-                (width, self.zone_columns, "column"),
-                (height, self.zone_rows, "row"),
-            ])
-        {
-            problems.push(FieldProblem {
-                field: "zones",
-                message,
-            });
-        }
         if bleed_um.is_some_and(|bleed| bleed > 25_400) {
             problems.push(FieldProblem {
                 field: "bleed",
@@ -876,11 +793,6 @@ impl DrawingSheetDraft {
             border: border_to_model(self.border),
             zones: DrawingSheetZones {
                 mode: zone_mode_to_model(self.zone_mode),
-                custom_columns: (self.zone_mode == ZoneModeChoice::Custom)
-                    .then_some(self.zone_columns),
-                custom_rows: (self.zone_mode == ZoneModeChoice::Custom).then_some(self.zone_rows),
-                labels: zone_labels_to_model(self.zone_labels),
-                edges: zone_edges_to_model(self.zone_edges),
             },
             marks: DrawingSheetMarks {
                 centring: self.centring_marks,
@@ -1232,7 +1144,6 @@ fn border_to_model(value: BorderTemplateChoice) -> DrawingSheetBorderTemplate {
 fn zone_mode_from_model(value: DrawingSheetZoneMode) -> ZoneModeChoice {
     match value {
         DrawingSheetZoneMode::Automatic => ZoneModeChoice::Automatic,
-        DrawingSheetZoneMode::Custom => ZoneModeChoice::Custom,
         DrawingSheetZoneMode::None => ZoneModeChoice::None,
     }
 }
@@ -1240,42 +1151,7 @@ fn zone_mode_from_model(value: DrawingSheetZoneMode) -> ZoneModeChoice {
 fn zone_mode_to_model(value: ZoneModeChoice) -> DrawingSheetZoneMode {
     match value {
         ZoneModeChoice::Automatic => DrawingSheetZoneMode::Automatic,
-        ZoneModeChoice::Custom => DrawingSheetZoneMode::Custom,
         ZoneModeChoice::None => DrawingSheetZoneMode::None,
-    }
-}
-
-fn zone_edges_from_model(value: DrawingSheetZoneEdges) -> ZoneEdgesChoice {
-    match value {
-        DrawingSheetZoneEdges::All => ZoneEdgesChoice::All,
-        DrawingSheetZoneEdges::TopAndLeft => ZoneEdgesChoice::TopLeft,
-        DrawingSheetZoneEdges::TopAndRight => ZoneEdgesChoice::TopRight,
-        DrawingSheetZoneEdges::BottomAndRight => ZoneEdgesChoice::BottomRight,
-    }
-}
-
-fn zone_edges_to_model(value: ZoneEdgesChoice) -> DrawingSheetZoneEdges {
-    match value {
-        ZoneEdgesChoice::All => DrawingSheetZoneEdges::All,
-        ZoneEdgesChoice::TopLeft => DrawingSheetZoneEdges::TopAndLeft,
-        ZoneEdgesChoice::TopRight => DrawingSheetZoneEdges::TopAndRight,
-        ZoneEdgesChoice::BottomRight => DrawingSheetZoneEdges::BottomAndRight,
-    }
-}
-
-fn zone_labels_from_model(value: DrawingSheetZoneLabels) -> ZoneLabelsChoice {
-    match value {
-        DrawingSheetZoneLabels::AlphaNumeric => ZoneLabelsChoice::AlphaNumeric,
-        DrawingSheetZoneLabels::NumericAlpha => ZoneLabelsChoice::NumericAlpha,
-        DrawingSheetZoneLabels::Coordinates => ZoneLabelsChoice::Coordinates,
-    }
-}
-
-fn zone_labels_to_model(value: ZoneLabelsChoice) -> DrawingSheetZoneLabels {
-    match value {
-        ZoneLabelsChoice::AlphaNumeric => DrawingSheetZoneLabels::AlphaNumeric,
-        ZoneLabelsChoice::NumericAlpha => DrawingSheetZoneLabels::NumericAlpha,
-        ZoneLabelsChoice::Coordinates => DrawingSheetZoneLabels::Coordinates,
     }
 }
 
@@ -1339,21 +1215,6 @@ fn title_rotation_to_model(value: TitleBlockRotationChoice) -> DrawingSheetTitle
             DrawingSheetTitleBlockRotation::CounterClockwise90
         }
     }
-}
-
-/// Why custom zone counts break ASME Y14.1 Table 4-1 Note (1), which keeps
-/// every zone between 1 and 5.50 in long, if they do.
-fn asme_zone_count_problem(edges: [(u64, u8, &str); 2]) -> Option<String> {
-    edges
-        .into_iter()
-        .find(|(edge_um, count, _)| !drawing_sheet_asme_zone_count_allowed(*edge_um, *count))
-        .map(|(edge_um, count, axis)| {
-            format!(
-                "ASME Y14.1 zones are 1 to 5.50 in long; {count} {axis}s across {} in make them {:.2} in.",
-                format_um(edge_um, SheetDisplayUnit::Inches),
-                edge_um as f64 / 25_400.0 / f64::from(count),
-            )
-        })
 }
 
 #[cfg(test)]
@@ -1438,34 +1299,21 @@ mod tests {
         // ISO 5457 Amd 1 lets A4 stand either way.
         draft.apply_size_choice(SheetSizeChoice::Standard(DrawingSheetStandard::IsoA4));
         assert_eq!(draft.orientation_advisory(), None);
-        assert_eq!(draft.zone_edges, ZoneEdgesChoice::TopRight);
     }
 
     #[test]
-    fn page_setup_refuses_asme_zones_outside_one_to_five_and_a_half_inches() {
+    fn a_new_ansi_sheet_takes_table_4_1_zones_and_leaves_the_arrows_off() {
         let mut draft = valid_draft();
         draft.apply_size_choice(SheetSizeChoice::Standard(DrawingSheetStandard::AnsiA));
-        // A new ANSI sheet lays zones out by Table 4-1, letters every edge, and
-        // leaves the optional microfilm arrows off.
         assert_eq!((draft.zone_columns, draft.zone_rows), (2, 2));
-        assert_eq!(draft.zone_edges, ZoneEdgesChoice::All);
         assert!(!draft.centring_marks);
-        draft.zone_mode = ZoneModeChoice::Custom;
-        draft.zone_columns = 24;
-        draft.zone_rows = 2;
-        let problems = draft.validate().unwrap_err();
-        assert!(
-            problems
-                .iter()
-                .any(|problem| problem.field == "zones" && problem.message.contains("ASME Y14.1")),
-            "{problems:?}"
+        let zones = draft.validate().unwrap().page_format.geometry().unwrap();
+        assert_eq!(
+            zones
+                .zones
+                .map(|zones| (zones.columns, zones.rows, zones.edges)),
+            Some((2, 2, crate::state::DrawingSheetZoneEdges::All))
         );
-        draft.zone_columns = 4;
-        assert!(draft.validate().is_ok());
-        // The same count on an ISO sheet is the author's to choose.
-        draft.apply_size_choice(SheetSizeChoice::Standard(DrawingSheetStandard::IsoA4));
-        draft.zone_columns = 24;
-        assert!(draft.validate().is_ok());
     }
 
     #[test]
@@ -1504,33 +1352,19 @@ mod tests {
     }
 
     #[test]
-    fn orientation_keeps_authored_custom_zone_counts() {
+    fn the_zones_shown_follow_the_sizes_and_orientations_standard() {
         let mut draft = valid_draft();
-        draft.zone_mode = ZoneModeChoice::Custom;
-        draft.zone_columns = 7;
-        draft.zone_rows = 5;
+        assert_eq!((draft.zone_columns, draft.zone_rows), (6, 4));
         draft.set_orientation(SchematicPageOrientation::Portrait);
-        assert_eq!(
-            (draft.zone_columns, draft.zone_rows),
-            (7, 5),
-            "custom zone divisions remain authored through orientation changes"
-        );
-    }
-
-    #[test]
-    fn size_changes_keep_authored_custom_zone_counts() {
-        let mut draft = valid_draft();
-        draft.zone_mode = ZoneModeChoice::Custom;
-        draft.zone_columns = 7;
-        draft.zone_rows = 5;
-
+        assert_eq!((draft.zone_columns, draft.zone_rows), (4, 6));
         draft.apply_size_choice(SheetSizeChoice::Standard(DrawingSheetStandard::AnsiE));
-
-        assert_eq!(
-            (draft.zone_columns, draft.zone_rows),
-            (7, 5),
-            "custom zone divisions remain authored through size changes"
-        );
+        assert_eq!((draft.zone_columns, draft.zone_rows), (8, 8));
+        // Zones off and on again, the counts are still the standard's.
+        draft.zone_mode = ZoneModeChoice::None;
+        draft.set_orientation(SchematicPageOrientation::Landscape);
+        draft.apply_size_choice(SheetSizeChoice::Standard(DrawingSheetStandard::AnsiB));
+        draft.zone_mode = ZoneModeChoice::Automatic;
+        assert_eq!((draft.zone_columns, draft.zone_rows), (4, 2));
     }
 
     #[test]

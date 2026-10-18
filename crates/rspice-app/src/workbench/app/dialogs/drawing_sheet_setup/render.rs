@@ -28,7 +28,7 @@ use super::state::{
     BorderTemplateChoice, DrawingSheetDraft, DrawingSheetSection, DrawingSheetSetupState,
     DrawingSheetSupportRequest, FieldProblem, MarginEdge, PageSetupScope, SheetDisplayUnit,
     SheetSizeChoice, TitleBlockAnchorChoice, TitleBlockRotationChoice, TitleBlockTemplateChoice,
-    ZoneEdgesChoice, ZoneLabelsChoice, ZoneModeChoice, display_unit_from_model, format_um,
+    ZoneModeChoice, display_unit_from_model, format_um,
 };
 
 const TITLE: &str = "Page setup";
@@ -572,7 +572,6 @@ fn field_section(field: &str) -> Option<DrawingSheetSection> {
         "margin-top" | "margin-right" | "margin-bottom" | "margin-left" | "margins" | "bleed" => {
             Some(DrawingSheetSection::Margins)
         }
-        "zones" => Some(DrawingSheetSection::Frame),
         "title-offset-x" | "title-offset-y" | "title-fields" | "scale" => {
             Some(DrawingSheetSection::TitleBlock)
         }
@@ -718,7 +717,7 @@ fn editor_column(
                             .show(ui, |ui| match state.section {
                                 DrawingSheetSection::Format => format_panel(ui, state, problems),
                                 DrawingSheetSection::Margins => margins_panel(ui, state, problems),
-                                DrawingSheetSection::Frame => frame_panel(ui, state, problems),
+                                DrawingSheetSection::Frame => frame_panel(ui, state),
                                 DrawingSheetSection::TitleBlock => title_panel(ui, state, problems),
                                 DrawingSheetSection::Scope => scope_panel(ui, state),
                             });
@@ -1165,7 +1164,7 @@ fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fi
     });
 }
 
-fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[FieldProblem]) {
+fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
     field_caption(ui, "Border template");
     let previous_border = state.draft.border;
     ui.add_enabled_ui(
@@ -1193,8 +1192,10 @@ fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
         state.draft.border,
         BorderTemplateChoice::None | BorderTemplateChoice::Plain
     );
-    ui.add_enabled_ui(zones_available, |ui| {
-        two_column(ui, |left, right| {
+    let (marks_title, marks_detail) = state.draft.centring_marks_wording();
+    let marked = state.draft.standard_frame();
+    two_column(ui, |left, right| {
+        left.add_enabled_ui(zones_available, |left| {
             field_caption(left, "Zone divisions");
             left.add_enabled_ui(
                 state.draft.border != BorderTemplateChoice::Organization,
@@ -1217,7 +1218,7 @@ fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
                 left,
                 &match state.draft.zone_mode {
                     ZoneModeChoice::Automatic => format!(
-                        "{} — {} × {} on this sheet.",
+                        "{} — {} × {} on this sheet{}.",
                         match state.draft.frame_convention() {
                             DrawingSheetFrameConvention::Iso5457 => {
                                 "ISO 5457 50 mm fields from the centre"
@@ -1227,69 +1228,21 @@ fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
                             }
                         },
                         state.draft.zone_columns,
-                        state.draft.zone_rows
+                        state.draft.zone_rows,
+                        if state.draft.size.standard() == Some(DrawingSheetStandard::IsoA4) {
+                            ", lettered at the top and right"
+                        } else {
+                            ""
+                        }
                     ),
-                    ZoneModeChoice::Custom => {
-                        "Fixed counts, kept through size and orientation changes.".to_owned()
-                    }
                     ZoneModeChoice::None => {
                         "Reviews quote sheet coordinates instead of zone references.".to_owned()
                     }
                 },
             );
-            field_caption(right, "Reference edges");
-            right.add_enabled_ui(state.draft.zone_mode != ZoneModeChoice::None, |ui| {
-                egui::ComboBox::from_id_salt("drawing-sheet-zone-edges")
-                    .width(ui.available_width())
-                    .selected_text(state.draft.zone_edges.label())
-                    .show_ui(ui, |ui| {
-                        for choice in ZoneEdgesChoice::ALL {
-                            ui.selectable_value(
-                                &mut state.draft.zone_edges,
-                                choice,
-                                choice.label(),
-                            );
-                        }
-                    });
-            });
         });
-        if state.draft.zone_mode == ZoneModeChoice::Custom {
-            ui.add_space(11.0);
-            two_column(ui, |left, right| {
-                numeric_u8_field(
-                    left,
-                    "Columns",
-                    &mut state.draft.zone_columns,
-                    2..=24,
-                    field_error(problems, "zones"),
-                );
-                numeric_u8_field(
-                    right,
-                    "Rows",
-                    &mut state.draft.zone_rows,
-                    2..=24,
-                    field_error(problems, "zones"),
-                );
-            });
-        }
-        ui.add_space(11.0);
-        field_caption(ui, "Zone labels");
-        ui.add_enabled_ui(state.draft.zone_mode != ZoneModeChoice::None, |ui| {
-            egui::ComboBox::from_id_salt("drawing-sheet-zone-labels")
-                .width(ui.available_width())
-                .selected_text(state.draft.zone_labels.label())
-                .show_ui(ui, |ui| {
-                    for choice in ZoneLabelsChoice::ALL {
-                        ui.selectable_value(&mut state.draft.zone_labels, choice, choice.label());
-                    }
-                });
-        });
-    });
-    ui.add_space(14.0);
-    let (marks_title, marks_detail) = state.draft.centring_marks_wording();
-    let marked = state.draft.standard_frame();
-    two_column(ui, |left, _| {
-        left.add_enabled_ui(marked, |ui| {
+        right.add_space(19.0);
+        right.add_enabled_ui(marked, |ui| {
             toggle_card(
                 ui,
                 marks_title,
@@ -2007,21 +1960,6 @@ fn field_error_slot(ui: &mut Ui, error: Option<&str>) {
             }
         },
     );
-}
-
-fn numeric_u8_field(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut u8,
-    range: std::ops::RangeInclusive<u8>,
-    error: Option<&str>,
-) {
-    field_caption(ui, label);
-    ui.add_sized(
-        vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h),
-        egui::DragValue::new(value).range(range),
-    );
-    field_error_slot(ui, error);
 }
 
 fn field_error<'a>(problems: &'a [FieldProblem], field: &str) -> Option<&'a str> {

@@ -12,8 +12,6 @@ pub const DRAWING_SHEET_MAX_EDGE_UM: u64 = 2_540_000;
 pub const DRAWING_SHEET_MAX_ASPECT_RATIO: u64 = 20;
 pub const DRAWING_SHEET_MAX_BLEED_UM: u64 = 25_400;
 pub const DRAWING_SHEET_MIN_DRAWING_EDGE_UM: u64 = 25_000;
-pub const DRAWING_SHEET_MIN_ZONE_COUNT: u8 = 2;
-pub const DRAWING_SHEET_MAX_ZONE_COUNT: u8 = 24;
 pub const MAX_DRAWING_SHEET_PROJECT_PRESETS: usize = 4_096;
 pub const MAX_DRAWING_SHEET_PRESET_NAME_CHARS: usize = 48;
 pub const MAX_DRAWING_SHEET_PRESET_IMPORT_RECEIPTS: usize = 4_096;
@@ -217,10 +215,11 @@ impl DrawingSheetStandard {
         }
     }
 
-    /// The zone edges a sheet of this size letters by default: ISO 5457 4.4
-    /// letters A4 at the top and the right side only.
+    /// The edges a sheet of this size letters its zone references on: ISO
+    /// 5457 4.4 letters A4 at the top and the right side only, and every
+    /// other size on all four sides.
     #[must_use]
-    pub const fn default_zone_edges(self) -> DrawingSheetZoneEdges {
+    pub const fn zone_edges(self) -> DrawingSheetZoneEdges {
         match self {
             Self::IsoA4 => DrawingSheetZoneEdges::TopAndRight,
             _ => DrawingSheetZoneEdges::All,
@@ -312,6 +311,16 @@ impl AuthoredDrawingSheetSize {
         match self {
             Self::Standard { standard } => standard.paper_size(),
             Self::Custom { snapshot } => &snapshot.name,
+        }
+    }
+
+    /// The edges a sheet of this size letters its zone references on. Only
+    /// a standard A4 sheet letters fewer than all four.
+    #[must_use]
+    pub const fn zone_edges(&self) -> DrawingSheetZoneEdges {
+        match self {
+            Self::Standard { standard } => standard.zone_edges(),
+            Self::Custom { .. } => DrawingSheetZoneEdges::All,
         }
     }
 
@@ -462,55 +471,31 @@ impl DrawingSheetBorderTemplate {
     }
 }
 
+/// Whether a sheet's frame carries zones. Where they lie, how many there are
+/// and how they are lettered is its standard's: ISO 5457 Table 2 or ASME
+/// Y14.1 Table 4-1, and their rules for other sizes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DrawingSheetZoneMode {
     #[default]
     Automatic,
-    Custom,
     None,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetZoneLabels {
-    #[default]
-    AlphaNumeric,
-    NumericAlpha,
-    Coordinates,
-}
-
+/// The edges a frame letters its zone references on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DrawingSheetZoneEdges {
     #[default]
     All,
-    TopAndLeft,
     /// ISO 5457 4.4's edges for A4.
     TopAndRight,
-    BottomAndRight,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetZones {
     pub mode: DrawingSheetZoneMode,
-    pub custom_columns: Option<u8>,
-    pub custom_rows: Option<u8>,
-    pub labels: DrawingSheetZoneLabels,
-    pub edges: DrawingSheetZoneEdges,
-}
-
-impl Default for DrawingSheetZones {
-    fn default() -> Self {
-        Self {
-            mode: DrawingSheetZoneMode::Automatic,
-            custom_columns: None,
-            custom_rows: None,
-            labels: DrawingSheetZoneLabels::AlphaNumeric,
-            edges: DrawingSheetZoneEdges::All,
-        }
-    }
 }
 
 impl DrawingSheetZones {
@@ -520,32 +505,65 @@ impl DrawingSheetZones {
                 "drawing sheet zones without a border",
             ));
         }
-        match self.mode {
-            DrawingSheetZoneMode::Automatic | DrawingSheetZoneMode::None => {
-                if self.custom_columns.is_some() || self.custom_rows.is_some() {
-                    return Err(DesignManagementError::NumericRange(
-                        "inactive custom drawing sheet zones",
-                    ));
-                }
-            }
-            DrawingSheetZoneMode::Custom => {
-                validate_zone_count(self.custom_columns)?;
-                validate_zone_count(self.custom_rows)?;
-            }
-        }
         Ok(())
     }
 }
 
-fn validate_zone_count(value: Option<u8>) -> Result<(), DesignManagementError> {
-    if value.is_some_and(|count| {
-        (DRAWING_SHEET_MIN_ZONE_COUNT..=DRAWING_SHEET_MAX_ZONE_COUNT).contains(&count)
-    }) {
-        Ok(())
-    } else {
-        Err(DesignManagementError::NumericRange(
-            "custom drawing sheet zone count",
-        ))
+/// The zones as a sheet was written. Before its standard decided them, a
+/// sheet could fix its own counts (the `custom` mode), letter its columns
+/// rather than its rows or quote sheet coordinates instead (`labels`), and
+/// letter only the top and left or the bottom and right (`edges`). A sheet
+/// saved with any of them takes its standard's zones, and one that carried
+/// zones still does.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DrawingSheetZonesWire {
+    mode: DrawingSheetZoneModeWire,
+    #[serde(default, rename = "custom_columns")]
+    _custom_columns: Option<u8>,
+    #[serde(default, rename = "custom_rows")]
+    _custom_rows: Option<u8>,
+    #[serde(default, rename = "labels")]
+    _labels: PresentField<RetiredZoneLabels>,
+    #[serde(default, rename = "edges")]
+    _edges: PresentField<RetiredZoneEdges>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum DrawingSheetZoneModeWire {
+    Automatic,
+    Custom,
+    None,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetiredZoneLabels {
+    AlphaNumeric,
+    NumericAlpha,
+    Coordinates,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetiredZoneEdges {
+    All,
+    TopAndLeft,
+    TopAndRight,
+    BottomAndRight,
+}
+
+impl From<DrawingSheetZonesWire> for DrawingSheetZones {
+    fn from(wire: DrawingSheetZonesWire) -> Self {
+        Self {
+            mode: match wire.mode {
+                DrawingSheetZoneModeWire::Automatic | DrawingSheetZoneModeWire::Custom => {
+                    DrawingSheetZoneMode::Automatic
+                }
+                DrawingSheetZoneModeWire::None => DrawingSheetZoneMode::None,
+            },
+        }
     }
 }
 
@@ -1357,7 +1375,7 @@ struct SchematicSheetFormatWire {
     margins: PresentField<DrawingSheetMargins>,
     bleed_um: u64,
     border: DrawingSheetBorderTemplate,
-    zones: PresentField<DrawingSheetZones>,
+    zones: PresentField<DrawingSheetZonesWire>,
     marks: DrawingSheetMarksWire,
     title_block: PresentField<DrawingSheetTitleBlock>,
     inheritance: DrawingSheetInheritance,
@@ -1441,7 +1459,11 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             }),
             bleed_um: wire.bleed_um,
             border: wire.border,
-            zones: wire.zones.0.unwrap_or_default(),
+            zones: wire
+                .zones
+                .0
+                .map(DrawingSheetZones::from)
+                .unwrap_or_default(),
             marks: DrawingSheetMarks {
                 centring: wire.marks.centring,
             },
@@ -1587,10 +1609,7 @@ impl SchematicSheetFormat {
             margins: standard.default_margins(),
             bleed_um: 0,
             border: DrawingSheetBorderTemplate::Standard,
-            zones: DrawingSheetZones {
-                edges: standard.default_zone_edges(),
-                ..DrawingSheetZones::default()
-            },
+            zones: DrawingSheetZones::default(),
             marks: DrawingSheetFrameConvention::for_series(standard.series())
                 .default_marks(DrawingSheetBorderTemplate::Standard),
             title_block: DrawingSheetTitleBlock::default(),
@@ -1884,16 +1903,9 @@ impl SchematicSheetFormat {
                 Some(DrawingSheetZoneGrid {
                     columns,
                     rows,
-                    labels: self.zones.labels,
-                    edges: self.zones.edges,
+                    edges: self.authored_size.zone_edges(),
                 })
             }
-            DrawingSheetZoneMode::Custom => Some(DrawingSheetZoneGrid {
-                columns: self.zones.custom_columns.unwrap_or_default(),
-                rows: self.zones.custom_rows.unwrap_or_default(),
-                labels: self.zones.labels,
-                edges: self.zones.edges,
-            }),
         };
         Ok(DrawingSheetGeometry {
             bleed,
@@ -2035,10 +2047,6 @@ impl DrawingSheetZones {
     pub const fn none() -> Self {
         Self {
             mode: DrawingSheetZoneMode::None,
-            custom_columns: None,
-            custom_rows: None,
-            labels: DrawingSheetZoneLabels::AlphaNumeric,
-            edges: DrawingSheetZoneEdges::All,
         }
     }
 }
@@ -2199,7 +2207,6 @@ impl DrawingSheetRect {
 pub struct DrawingSheetZoneGrid {
     pub columns: u8,
     pub rows: u8,
-    pub labels: DrawingSheetZoneLabels,
     pub edges: DrawingSheetZoneEdges,
 }
 

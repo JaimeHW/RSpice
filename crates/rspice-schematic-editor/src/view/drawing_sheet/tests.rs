@@ -9,7 +9,7 @@ use rspice_design::schematic::{
     wire::Wire,
 };
 use rspice_design_model::design_management::{
-    DrawingSheetStandard, DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels,
+    DrawingSheetStandard, DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZones,
 };
 use rspice_design_model::{SchematicPageOrientation, SchematicPageSize};
 
@@ -67,7 +67,6 @@ fn a4_landscape_geometry_uses_the_mockup_origin_and_exact_calibration() {
         Some(DrawingSheetZoneGrid {
             columns: 6,
             rows: 4,
-            labels: DrawingSheetZoneLabels::AlphaNumeric,
             edges: DrawingSheetZoneEdges::TopAndRight,
         })
     );
@@ -119,10 +118,10 @@ fn zone_reference_and_sheet_coordinates_share_one_origin() {
 }
 
 #[test]
-fn coordinates_only_zones_retain_bands_but_suppress_labels_and_references() {
+fn a_frame_without_zones_letters_no_references_and_quotes_none() {
     let format = SchematicSheetFormat::default()
-        .try_update(|draft| draft.zones.labels = DrawingSheetZoneLabels::Coordinates)
-        .expect("coordinates-only zones are valid");
+        .try_update(|draft| draft.zones = DrawingSheetZones::none())
+        .expect("a frame may carry no zones");
     let sheet = ActiveDrawingSheet {
         geometry: DrawingSheetGeometry::from_format(&format),
         format,
@@ -140,20 +139,16 @@ fn coordinates_only_zones_retain_bands_but_suppress_labels_and_references() {
         .frame
         .layer(DrawingSheetFrameLayer::Zones)
         .count();
-    assert_eq!(
-        ticks,
-        2 * (5 + 3),
-        "every field boundary is ruled on both sides"
-    );
+    assert_eq!(ticks, 0, "no field boundary is ruled");
     assert_eq!(
         lettered_text(&shapes),
         ["A4"],
-        "coordinates-only mode letters no zone references, only the sheet size"
+        "no zone reference is lettered, only the sheet size"
     );
     assert_eq!(sheet.geometry.zone_reference(point.0, point.1), None);
     assert!(
         !sheet.cursor_status(point.0, point.1).contains("zone"),
-        "coordinates-only mode must not append a zone reference to status text"
+        "a frame without zones must not append a zone reference to status text"
     );
 }
 

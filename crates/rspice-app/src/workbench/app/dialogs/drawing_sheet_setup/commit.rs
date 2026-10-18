@@ -1793,9 +1793,7 @@ mod tests {
                 draft.apply_border_template(
                     crate::state::DrawingSheetBorderTemplate::OrganizationManaged,
                 );
-                draft.zones.mode = crate::state::DrawingSheetZoneMode::Custom;
-                draft.zones.custom_columns = Some(6);
-                draft.zones.custom_rows = Some(4);
+                draft.zones.mode = crate::state::DrawingSheetZoneMode::None;
                 draft.title_block.template =
                     crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged;
                 draft
@@ -1822,9 +1820,7 @@ mod tests {
         open_drawing_sheet_setup(&mut app);
         let draft = &mut app.state.dialogs.drawing_sheet_setup.draft;
         draft.border = super::super::state::BorderTemplateChoice::Plain;
-        draft.zone_columns = 9;
-        draft.zone_rows = 7;
-        draft.zone_labels = super::super::state::ZoneLabelsChoice::Coordinates;
+        draft.zone_mode = super::super::state::ZoneModeChoice::Automatic;
         draft.centring_marks = false;
         draft.title_block = super::super::state::TitleBlockTemplateChoice::Compact;
         draft.title_block_anchor = super::super::state::TitleBlockAnchorChoice::TopRight;
@@ -1854,12 +1850,6 @@ mod tests {
             crate::state::DrawingSheetBorderTemplate::OrganizationManaged
         );
         assert_eq!(saved.zones.mode, managed.zones.mode);
-        assert_eq!(saved.zones.custom_columns, Some(9));
-        assert_eq!(saved.zones.custom_rows, Some(7));
-        assert_eq!(
-            saved.zones.labels,
-            crate::state::DrawingSheetZoneLabels::Coordinates
-        );
         assert!(!saved.marks.centring);
         assert_eq!(
             saved.title_block.template,
