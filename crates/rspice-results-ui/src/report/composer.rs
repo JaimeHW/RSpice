@@ -225,6 +225,7 @@ pub fn show(ui: &mut Ui, host: &mut impl ComposerHost) {
             ComposerLayout::TwoColumnInspectorBelow => {
                 ScrollArea::vertical()
                     .id_salt("report-authoring.tablet")
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
                         let local_width = ui.available_width().max(1.0);
                         ui.horizontal(|ui| {
@@ -263,6 +264,7 @@ pub fn show(ui: &mut Ui, host: &mut impl ComposerHost) {
             ComposerLayout::Stacked => {
                 ScrollArea::vertical()
                     .id_salt("report-authoring.compact")
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
                         let local_width = ui.available_width().max(1.0);
                         ui.allocate_ui_with_layout(
@@ -536,6 +538,7 @@ fn outline(
 
         ScrollArea::vertical()
             .id_salt("report-authoring.outline")
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for (index, page) in document.pages().iter().enumerate() {

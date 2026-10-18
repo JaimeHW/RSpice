@@ -59,6 +59,7 @@ pub fn show(
             ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
             ScrollArea::vertical()
                 .id_salt("report-authoring.preview")
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
                     let compact = ui.available_width() < 560.0;
                     let horizontal_margin = if compact { 18.0 } else { 42.0 };

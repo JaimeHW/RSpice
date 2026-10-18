@@ -199,19 +199,17 @@ pub fn right_panel(
     // The fold sits on the rows' inset rather than on the panel edge.
     rspice_ui_kit::panels::panel_body(ui, |ui| {
         ui.collapsing("Device noise shares", |ui| {
-            egui::ScrollArea::vertical().max_height(240.0).show_rows(
-                ui,
-                30.0,
-                shares.len(),
-                |ui, range| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .max_height(240.0)
+                .show_rows(ui, 30.0, shares.len(), |ui, range| {
                     for index in range {
                         crate::presentation::stat_table(
                             ui,
                             &[(shares[index].0, format!("{:.1} %", shares[index].1), false)],
                         );
                     }
-                },
-            );
+                });
         })
     });
 }

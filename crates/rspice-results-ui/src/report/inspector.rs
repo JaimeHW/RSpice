@@ -49,6 +49,7 @@ pub fn show(
         // rather than on the scroll area's item spacing.
         ScrollArea::vertical()
             .id_salt("report-authoring.inspector")
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 panel_body(ui, |ui| {
                     code_inspector_section(ui, "Output formats", None, None, |ui| {
