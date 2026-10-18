@@ -126,10 +126,21 @@ pub struct Toast {
     action: Option<NotificationAction>,
     /// Absolute time (egui clock) at which the toast was created.
     created: f64,
-    /// Absolute time at which it leaves. Separate from `created` because a
-    /// notice under the pointer is being read, and its clock starts over when
-    /// the pointer moves away.
-    expires: f64,
+    /// Absolute time at which it leaves, or `None` for a notice that stays
+    /// until it is answered. Separate from `created` because a notice under
+    /// the pointer is being read, and its clock starts over when the pointer
+    /// moves away.
+    expires: Option<f64>,
+}
+
+impl Toast {
+    /// How much of its lifetime is left, from one down to zero. `None` for a
+    /// notice with no deadline, which has no clock to draw.
+    fn remaining(&self, now: f64) -> Option<f32> {
+        let lifetime = toast_lifetime(self.kind)?;
+        let expires = self.expires?;
+        Some(((expires - now) / lifetime).clamp(0.0, 1.0) as f32)
+    }
 }
 
 /// One retained session activity item. Toasts disappear after a few seconds,
@@ -183,8 +194,23 @@ impl NotificationRecord {
     }
 }
 
-/// Lifetime of a toast in seconds (matches the reviewed workbench mockup).
+/// Lifetime of a success or information toast in seconds (matches the
+/// reviewed workbench mockup).
 const TOAST_LIFETIME: f64 = 5.2;
+/// Lifetime of a warning. A warning usually asks for a second look, and five
+/// seconds is a glance.
+const TOAST_WARN_LIFETIME: f64 = 10.0;
+
+/// How long a toast of this severity stays unattended. An error has no
+/// deadline: it is what the reader has to act on, so it leaves when it is
+/// dismissed or followed, and never while they are looking elsewhere.
+const fn toast_lifetime(kind: ToastKind) -> Option<f64> {
+    match kind {
+        ToastKind::Success | ToastKind::Info => Some(TOAST_LIFETIME),
+        ToastKind::Warn => Some(TOAST_WARN_LIFETIME),
+        ToastKind::Error => None,
+    }
+}
 /// Mockup entrance animation duration.
 const TOAST_ENTER: f64 = 0.18;
 /// The mockup shows at most three transient notices at once.
@@ -396,10 +422,20 @@ impl Toasts {
             kind,
             action,
             created,
-            expires: created + TOAST_LIFETIME,
+            expires: toast_lifetime(kind).map(|lifetime| created + lifetime),
         });
-        if self.queue.len() > MAX_VISIBLE_TOASTS {
-            self.queue.drain(..self.queue.len() - MAX_VISIBLE_TOASTS);
+        // Past the visible three, the oldest notice that is not an error makes
+        // room. An error is the notice the reader has to act on, and three
+        // confirmations arriving behind it must not push it off screen; only
+        // a stack of errors gives up its oldest. Either way the record stays
+        // in the bell.
+        while self.queue.len() > MAX_VISIBLE_TOASTS {
+            let oldest = self
+                .queue
+                .iter()
+                .position(|toast| toast.kind != ToastKind::Error)
+                .unwrap_or(0);
+            self.queue.remove(oldest);
         }
     }
 
@@ -562,7 +598,8 @@ impl Toasts {
             return None;
         }
         let now = ctx.input(|i| i.time);
-        self.queue.retain(|toast| now < toast.expires);
+        self.queue
+            .retain(|toast| toast.expires.is_none_or(|expires| now < expires));
         if self.queue.is_empty() {
             return None;
         }
@@ -570,17 +607,20 @@ impl Toasts {
         let soonest_expiry = self
             .queue
             .iter()
-            .map(|toast| (toast.expires - now).max(0.0))
+            .filter_map(|toast| toast.expires)
+            .map(|expires| (expires - now).max(0.0))
             .fold(f64::INFINITY, f64::min);
         let animate = ctx.global_style().animation_time > 0.0;
-        if animate {
+        // A stack of errors has no deadline to wake for.
+        if soonest_expiry.is_finite() {
+            let expiry = Duration::from_secs_f64(soonest_expiry);
             // The drain bar is the clock made visible, so it has to be seen
             // moving. Reduced motion draws no bar and wakes once, at expiry.
-            ctx.request_repaint_after(
-                TOAST_DRAIN_STEP.min(Duration::from_secs_f64(soonest_expiry)),
-            );
-        } else if soonest_expiry.is_finite() {
-            ctx.request_repaint_after(Duration::from_secs_f64(soonest_expiry));
+            ctx.request_repaint_after(if animate {
+                TOAST_DRAIN_STEP.min(expiry)
+            } else {
+                expiry
+            });
         }
         if animate
             && self
@@ -612,7 +652,6 @@ impl Toasts {
                 ui.set_max_width(layout.width);
                 ui.spacing_mut().item_spacing.y = TOAST_GAP;
                 for toast in &self.queue {
-                    let remaining = ((toast.expires - now) / TOAST_LIFETIME).clamp(0.0, 1.0);
                     let card = ui
                         .scope(|ui| {
                             // One opacity for the whole card, so the entrance
@@ -641,8 +680,9 @@ impl Toasts {
                                     }
                                 });
                             let card = frame.response.rect;
-                            if animate {
-                                paint_drain_bar(ui, card, remaining as f32);
+                            // Only a notice with a deadline has a clock to draw.
+                            if animate && let Some(remaining) = toast.remaining(now) {
+                                paint_drain_bar(ui, card, remaining);
                             }
                             card
                         })
@@ -672,7 +712,7 @@ impl Toasts {
         // comes back to is a full one and not a sliver about to vanish.
         for toast in &mut self.queue {
             if held.contains(&toast.id) {
-                toast.expires = now + TOAST_LIFETIME;
+                toast.expires = toast_lifetime(toast.kind).map(|lifetime| now + lifetime);
             }
         }
         if let Some(id) = answered {
@@ -1239,28 +1279,113 @@ mod tests {
         toasts.info(&ctx, "first");
         assert_eq!(
             toasts.queue[0].expires,
-            toasts.queue[0].created + TOAST_LIFETIME
+            Some(toasts.queue[0].created + TOAST_LIFETIME)
         );
 
-        let pass = |toasts: &mut Toasts, time: f64| {
-            let _ = ctx.run_ui(
-                egui::RawInput {
-                    time: Some(time),
-                    ..Default::default()
-                },
-                |ui| {
-                    let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
-                },
-            );
-        };
-        pass(&mut toasts, TOAST_LIFETIME - 0.1);
+        pass(&ctx, &mut toasts, TOAST_LIFETIME - 0.1);
         assert_eq!(toasts.queue.len(), 1);
-        pass(&mut toasts, TOAST_LIFETIME + 0.1);
+        pass(&ctx, &mut toasts, TOAST_LIFETIME + 0.1);
         assert!(toasts.queue.is_empty());
         assert_eq!(
             toasts.unread_count(),
             1,
             "a notice that timed out was not necessarily seen"
+        );
+    }
+
+    /// One frame of the toast stack at `time` on the egui clock.
+    fn pass(ctx: &Context, toasts: &mut Toasts, time: f64) {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            },
+            |ui| {
+                let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
+            },
+        );
+    }
+
+    /// A confirmation is a glance, a warning a second look, and an error
+    /// stays until the reader answers it.
+    #[test]
+    fn a_toast_lives_as_long_as_its_severity_asks() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.success(&ctx, "Project saved", "");
+        toasts.warn(&ctx, "2 models were skipped");
+        toasts.error_with_title(&ctx, "Export failed", "The folder is read-only.");
+        let kinds = |toasts: &Toasts| {
+            toasts
+                .queue
+                .iter()
+                .map(|toast| toast.kind)
+                .collect::<Vec<_>>()
+        };
+
+        pass(&ctx, &mut toasts, TOAST_LIFETIME + 0.1);
+        assert_eq!(kinds(&toasts), [ToastKind::Warn, ToastKind::Error]);
+        pass(&ctx, &mut toasts, TOAST_WARN_LIFETIME - 0.1);
+        assert_eq!(kinds(&toasts), [ToastKind::Warn, ToastKind::Error]);
+        pass(&ctx, &mut toasts, TOAST_WARN_LIFETIME + 0.1);
+        assert_eq!(kinds(&toasts), [ToastKind::Error]);
+        pass(&ctx, &mut toasts, 3_600.0);
+        assert_eq!(
+            kinds(&toasts),
+            [ToastKind::Error],
+            "an error leaves when it is answered, not when time passes"
+        );
+        assert_eq!(
+            toasts.queue[0].remaining(3_600.0),
+            None,
+            "so it draws no clock"
+        );
+
+        let error = toasts.queue[0].id;
+        assert!(toasts.dismiss(error));
+        assert!(toasts.queue.is_empty());
+    }
+
+    /// Three confirmations arriving behind an error push confirmations off
+    /// the stack, never the error; only a stack of errors gives up its oldest.
+    #[test]
+    fn a_full_stack_drops_its_oldest_notice_that_is_not_an_error() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        toasts.error_with_title(&ctx, "Save failed", "The disk is full.");
+        for index in 0..3 {
+            toasts.info(&ctx, format!("plotted {index}"));
+        }
+        let shown = |toasts: &Toasts| {
+            toasts
+                .queue
+                .iter()
+                .map(|toast| toast.message.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            shown(&toasts),
+            ["The disk is full.", "plotted 1", "plotted 2"],
+            "the error stays on screen"
+        );
+
+        for index in 0..3 {
+            toasts.error_with_title(&ctx, format!("Export {index} failed"), "");
+        }
+        assert_eq!(
+            toasts
+                .queue
+                .iter()
+                .map(|toast| toast.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Export 0 failed", "Export 1 failed", "Export 2 failed"],
+            "three errors make room by the oldest error"
+        );
+        assert_eq!(
+            toasts.activity().len(),
+            7,
+            "every notice dropped from the stack keeps its record"
         );
     }
 
