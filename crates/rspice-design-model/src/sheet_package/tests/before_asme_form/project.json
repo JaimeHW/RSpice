@@ -1,0 +1,405 @@
+{
+  "schema": "rspice-sheet-formats",
+  "version": 1,
+  "source_digest_sha256": "d4e842036b8ea7e0a72bc5467946827cf6e5e6a1c92bdd28b630cb12fd10bfc6",
+  "includes_builtin_frame_references": true,
+  "includes_source_metadata": true,
+  "builtin_frame_references": [
+    {
+      "kind": "border",
+      "identity": "standard"
+    },
+    {
+      "kind": "title-block",
+      "identity": "compact"
+    },
+    {
+      "kind": "title-block",
+      "identity": "standard"
+    }
+  ],
+  "source_metadata": {
+    "producer": "RSpice",
+    "content": "drawing-sheet-format-definitions",
+    "exact_dimension_unit": "micrometre",
+    "source_scopes": [
+      "project"
+    ]
+  },
+  "presets": [
+    {
+      "stable_id": "ansi-top",
+      "name": "ANSI top",
+      "source_scope": "project",
+      "portrait_width_um": 250000,
+      "portrait_height_um": 400000,
+      "format": {
+        "size": {
+          "kind": "custom",
+          "name": "ANSI top",
+          "portrait_width_um": 250000,
+          "portrait_height_um": 400000
+        },
+        "orientation": "portrait",
+        "authored_size": {
+          "kind": "custom",
+          "snapshot": {
+            "preset_id": "ansi-top",
+            "name": "ANSI top",
+            "portrait_width_um": 250000,
+            "portrait_height_um": 400000,
+            "source_preset_unavailable": false,
+            "started_from": "ansi"
+          }
+        },
+        "display_unit": "millimetres",
+        "margins": {
+          "top_um": 12700,
+          "right_um": 12700,
+          "bottom_um": 12700,
+          "left_um": 12700
+        },
+        "bleed_um": 0,
+        "border": "standard",
+        "zones": {
+          "mode": "automatic",
+          "custom_columns": null,
+          "custom_rows": null,
+          "labels": "alpha-numeric",
+          "edges": "all"
+        },
+        "marks": {
+          "registration": false,
+          "folding": false
+        },
+        "title_block": {
+          "template": "compact",
+          "anchor": "top-right",
+          "rotation": "counter-clockwise90",
+          "offset_x_um": -5000,
+          "offset_y_um": 5000,
+          "scale": {
+            "kind": "ratio",
+            "drawing_units": 1,
+            "reality_units": 1
+          },
+          "fields": {
+            "project": {
+              "value": "",
+              "visible": false
+            },
+            "cell-view": {
+              "value": "",
+              "visible": true
+            },
+            "sheet-title": {
+              "value": "",
+              "visible": true
+            },
+            "page": {
+              "value": "",
+              "visible": true
+            },
+            "revision": {
+              "value": "",
+              "visible": true
+            },
+            "format": {
+              "value": "",
+              "visible": false
+            },
+            "drawn-by": {
+              "value": "",
+              "visible": true
+            },
+            "checked-by": {
+              "value": "",
+              "visible": false
+            },
+            "approved-by": {
+              "value": "",
+              "visible": true
+            },
+            "date": {
+              "value": "",
+              "visible": true
+            },
+            "organization": {
+              "value": "",
+              "visible": true
+            },
+            "document-id": {
+              "value": "",
+              "visible": true
+            },
+            "classification": {
+              "value": "",
+              "visible": false
+            },
+            "document-type": {
+              "value": "",
+              "visible": true
+            },
+            "document-status": {
+              "value": "",
+              "visible": true
+            },
+            "language": {
+              "value": "",
+              "visible": false
+            }
+          }
+        },
+        "inheritance": "explicit"
+      }
+    },
+    {
+      "stable_id": "compact-left",
+      "name": "Compact left",
+      "source_scope": "project",
+      "portrait_width_um": 250000,
+      "portrait_height_um": 400000,
+      "format": {
+        "size": {
+          "kind": "custom",
+          "name": "Compact left",
+          "portrait_width_um": 250000,
+          "portrait_height_um": 400000
+        },
+        "orientation": "portrait",
+        "authored_size": {
+          "kind": "custom",
+          "snapshot": {
+            "preset_id": "compact-left",
+            "name": "Compact left",
+            "portrait_width_um": 250000,
+            "portrait_height_um": 400000,
+            "source_preset_unavailable": false
+          }
+        },
+        "display_unit": "millimetres",
+        "margins": {
+          "top_um": 10000,
+          "right_um": 10000,
+          "bottom_um": 10000,
+          "left_um": 20000
+        },
+        "bleed_um": 0,
+        "border": "standard",
+        "zones": {
+          "mode": "automatic",
+          "custom_columns": null,
+          "custom_rows": null,
+          "labels": "alpha-numeric",
+          "edges": "all"
+        },
+        "marks": {
+          "registration": true,
+          "folding": false
+        },
+        "title_block": {
+          "template": "compact",
+          "anchor": "bottom-left",
+          "rotation": "clockwise90",
+          "offset_x_um": 5000,
+          "offset_y_um": -5000,
+          "scale": {
+            "kind": "ratio",
+            "drawing_units": 2,
+            "reality_units": 1
+          },
+          "fields": {
+            "project": {
+              "value": "",
+              "visible": false
+            },
+            "cell-view": {
+              "value": "",
+              "visible": true
+            },
+            "sheet-title": {
+              "value": "",
+              "visible": true
+            },
+            "page": {
+              "value": "",
+              "visible": true
+            },
+            "revision": {
+              "value": "",
+              "visible": true
+            },
+            "format": {
+              "value": "",
+              "visible": false
+            },
+            "drawn-by": {
+              "value": "",
+              "visible": true
+            },
+            "checked-by": {
+              "value": "",
+              "visible": false
+            },
+            "approved-by": {
+              "value": "",
+              "visible": true
+            },
+            "date": {
+              "value": "",
+              "visible": true
+            },
+            "organization": {
+              "value": "",
+              "visible": true
+            },
+            "document-id": {
+              "value": "",
+              "visible": true
+            },
+            "classification": {
+              "value": "",
+              "visible": false
+            },
+            "document-type": {
+              "value": "",
+              "visible": true
+            },
+            "document-status": {
+              "value": "",
+              "visible": true
+            },
+            "language": {
+              "value": "",
+              "visible": false
+            }
+          }
+        },
+        "inheritance": "explicit"
+      }
+    },
+    {
+      "stable_id": "iso-strip",
+      "name": "ISO strip",
+      "source_scope": "project",
+      "portrait_width_um": 250000,
+      "portrait_height_um": 400000,
+      "format": {
+        "size": {
+          "kind": "custom",
+          "name": "ISO strip",
+          "portrait_width_um": 250000,
+          "portrait_height_um": 400000
+        },
+        "orientation": "portrait",
+        "authored_size": {
+          "kind": "custom",
+          "snapshot": {
+            "preset_id": "iso-strip",
+            "name": "ISO strip",
+            "portrait_width_um": 250000,
+            "portrait_height_um": 400000,
+            "source_preset_unavailable": false
+          }
+        },
+        "display_unit": "millimetres",
+        "margins": {
+          "top_um": 10000,
+          "right_um": 10000,
+          "bottom_um": 10000,
+          "left_um": 20000
+        },
+        "bleed_um": 0,
+        "border": "standard",
+        "zones": {
+          "mode": "automatic",
+          "custom_columns": null,
+          "custom_rows": null,
+          "labels": "alpha-numeric",
+          "edges": "all"
+        },
+        "marks": {
+          "registration": true,
+          "folding": false
+        },
+        "title_block": {
+          "template": "standard",
+          "anchor": "bottom-strip",
+          "rotation": "upright",
+          "offset_x_um": 0,
+          "offset_y_um": 0,
+          "scale": {
+            "kind": "not-to-scale"
+          },
+          "fields": {
+            "project": {
+              "value": "",
+              "visible": false
+            },
+            "cell-view": {
+              "value": "",
+              "visible": true
+            },
+            "sheet-title": {
+              "value": "",
+              "visible": true
+            },
+            "page": {
+              "value": "",
+              "visible": true
+            },
+            "revision": {
+              "value": "",
+              "visible": true
+            },
+            "format": {
+              "value": "",
+              "visible": false
+            },
+            "drawn-by": {
+              "value": "",
+              "visible": true
+            },
+            "checked-by": {
+              "value": "",
+              "visible": false
+            },
+            "approved-by": {
+              "value": "",
+              "visible": true
+            },
+            "date": {
+              "value": "",
+              "visible": true
+            },
+            "organization": {
+              "value": "",
+              "visible": true
+            },
+            "document-id": {
+              "value": "",
+              "visible": true
+            },
+            "classification": {
+              "value": "",
+              "visible": false
+            },
+            "document-type": {
+              "value": "",
+              "visible": true
+            },
+            "document-status": {
+              "value": "",
+              "visible": true
+            },
+            "language": {
+              "value": "",
+              "visible": false
+            }
+          }
+        },
+        "inheritance": "explicit"
+      }
+    }
+  ]
+}

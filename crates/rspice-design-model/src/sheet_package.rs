@@ -1669,6 +1669,7 @@ mod tests {
         assert!(!published.encoded.contains("\"wide\""));
     }
 
+    mod before_asme_form;
     mod field_history;
     mod frame_history;
 }
