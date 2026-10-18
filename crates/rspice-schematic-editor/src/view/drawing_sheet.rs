@@ -7,6 +7,8 @@
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use egui::{
@@ -544,6 +546,14 @@ struct OverflowHaloPaint {
     tessellation: TessellationOptions,
 }
 
+/// Everything one halo is tessellated from besides the paint: its outline
+/// on screen, by the bits of its corners, and the severity its dash shows.
+type HaloOutline = ([u32; 4], DrawingSheetOverflowSeverity);
+
+/// Where one halo's triangles lie in a mesh: its vertices, then its
+/// indices, which name only those vertices.
+type HaloTriangles = (Range<usize>, Range<usize>);
+
 /// The halos last painted, tessellated, with what they were painted from.
 struct HeldOverflowHalos {
     /// Held, not just compared by address, so the address is never reused
@@ -551,6 +561,8 @@ struct HeldOverflowHalos {
     summary: Arc<DrawingSheetOverflowSummary>,
     paint: OverflowHaloPaint,
     mesh: Arc<Mesh>,
+    /// Where each outline's triangles lie in `mesh`.
+    halos: HashMap<HaloOutline, HaloTriangles>,
 }
 
 thread_local! {
@@ -565,7 +577,9 @@ thread_local! {
 /// a dashed outline of several dashes. They are tessellated once and the
 /// mesh is painted again while the advisories and the view stand still, so
 /// a hover frame neither re-dashes them nor hands the host thousands of
-/// strokes to tessellate.
+/// strokes to tessellate. When the advisories change and the view does not,
+/// as on every frame of a drag, each halo whose outline was painted last
+/// time is copied from the last mesh, and only the others are tessellated.
 pub fn draw_overflow_advisories(
     painter: &Painter,
     available: Rect,
@@ -593,11 +607,14 @@ pub fn draw_overflow_advisories(
         {
             return Arc::clone(&halos.mesh);
         }
-        let mesh = Arc::new(overflow_halo_mesh(&paint, viewport, summary));
+        let painted = held.as_ref().filter(|halos| halos.paint == paint);
+        let (mesh, halos) = overflow_halo_mesh(&paint, viewport, summary, painted);
+        let mesh = Arc::new(mesh);
         *held = Some(HeldOverflowHalos {
             summary: Arc::clone(summary),
             paint,
             mesh: Arc::clone(&mesh),
+            halos,
         });
         mesh
     });
@@ -605,12 +622,33 @@ pub fn draw_overflow_advisories(
 }
 
 /// Every advisory's dashed halo, tessellated as egui would tessellate the
-/// dashes painted one by one.
+/// dashes painted one by one, with where each outline's triangles lie.
+///
+/// `painted` is the last mesh when it was painted with this same paint: a
+/// halo's triangles depend only on its outline and the paint, so a halo
+/// whose outline it holds is copied from it, its indices moved to where its
+/// vertices now start, and the mesh is the one tessellating every dash would
+/// give.
 fn overflow_halo_mesh(
     paint: &OverflowHaloPaint,
     viewport: &Viewport,
     summary: &DrawingSheetOverflowSummary,
-) -> Mesh {
+    painted: Option<&HeldOverflowHalos>,
+) -> (Mesh, HashMap<HaloOutline, HaloTriangles>) {
+    // Dashes are strokes, which read neither the font texture's size nor
+    // the prepared discs; epaint documents both as safe to leave unset.
+    let mut tessellator = Tessellator::new(
+        paint.pixels_per_point,
+        paint.tessellation,
+        [1, 1],
+        Vec::new(),
+    );
+    let mut mesh = Mesh::default();
+    if let Some(painted) = painted {
+        mesh.vertices.reserve(painted.mesh.vertices.len());
+        mesh.indices.reserve(painted.mesh.indices.len());
+    }
+    let mut halos = HashMap::new();
     let mut dashes = Vec::new();
     for item in &summary.items {
         let mut screen = item.bounds.screen_rect(viewport).expand(3.0);
@@ -624,32 +662,53 @@ fn overflow_halo_mesh(
         if !screen.is_positive() {
             continue;
         }
-        let (dash, gap, width) = match item.severity {
-            DrawingSheetOverflowSeverity::OutsideBorder => (5.0, 4.0, 1.4),
-            DrawingSheetOverflowSeverity::OffPaper => (7.0, 3.0, 1.6),
-            DrawingSheetOverflowSeverity::TitleBlockCollision => (2.0, 3.0, 1.4),
-        };
-        Shape::dashed_line_many(
-            &rect_outline(screen),
-            Stroke::new(width, paint.ink),
-            dash,
-            gap,
-            &mut dashes,
+        let outline: HaloOutline = (
+            [
+                screen.min.x.to_bits(),
+                screen.min.y.to_bits(),
+                screen.max.x.to_bits(),
+                screen.max.y.to_bits(),
+            ],
+            item.severity,
         );
+        let (vertices_from, indices_from) = (mesh.vertices.len(), mesh.indices.len());
+        if let Some((painted, (vertices, indices))) = painted.and_then(|painted| {
+            painted
+                .halos
+                .get(&outline)
+                .map(|triangles| (&painted.mesh, triangles))
+        }) {
+            let (from, to) = (vertices.start as u32, vertices_from as u32);
+            mesh.vertices
+                .extend_from_slice(&painted.vertices[vertices.clone()]);
+            mesh.indices.extend(
+                painted.indices[indices.clone()]
+                    .iter()
+                    .map(|&index| index - from + to),
+            );
+        } else {
+            let (dash, gap, width) = match item.severity {
+                DrawingSheetOverflowSeverity::OutsideBorder => (5.0, 4.0, 1.4),
+                DrawingSheetOverflowSeverity::OffPaper => (7.0, 3.0, 1.6),
+                DrawingSheetOverflowSeverity::TitleBlockCollision => (2.0, 3.0, 1.4),
+            };
+            Shape::dashed_line_many(
+                &rect_outline(screen),
+                Stroke::new(width, paint.ink),
+                dash,
+                gap,
+                &mut dashes,
+            );
+            for dash in dashes.drain(..) {
+                tessellator.tessellate_shape(dash, &mut mesh);
+            }
+        }
+        halos.entry(outline).or_insert((
+            vertices_from..mesh.vertices.len(),
+            indices_from..mesh.indices.len(),
+        ));
     }
-    // Dashes are strokes, which read neither the font texture's size nor
-    // the prepared discs; epaint documents both as safe to leave unset.
-    let mut tessellator = Tessellator::new(
-        paint.pixels_per_point,
-        paint.tessellation,
-        [1, 1],
-        Vec::new(),
-    );
-    let mut mesh = Mesh::default();
-    for dash in dashes {
-        tessellator.tessellate_shape(dash, &mut mesh);
-    }
-    mesh
+    (mesh, halos)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -679,7 +738,7 @@ impl DrawingSheetOverflowTarget {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DrawingSheetOverflowSeverity {
     OutsideBorder,
     OffPaper,
