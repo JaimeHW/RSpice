@@ -128,6 +128,7 @@ fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
 /// Resolve the displayed source and apply requests to the phase-noise viewport.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantities = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.ui.result_presentation_policy().readout();
     let Some(model) = build_model(state) else {
         view::show_absent(ui, active_periodic_noise_without_phase_trace(state));
         return;
@@ -144,6 +145,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         viewport,
         level_range,
         &quantities,
+        presentation,
         &mut state.ui.results.session.cache,
     );
     if response.fit {
@@ -173,12 +175,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// Bind inspector measurements to the selected phase-noise trace.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let quantities = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
+    let digits = usize::from(presentation.displayed_significant_digits().get());
     let model = build_model(state);
     let input = model.as_ref().map(|model| view::PhaseNoiseInspector {
         trace: model.trace(),
         analysis: &state.simulation.active_run().unwrap().analyses[model.analysis_index].data,
     });
-    view::right_panel(ui, input, &quantities);
+    view::right_panel(ui, input, &quantities, digits);
 }
 
 #[cfg(test)]

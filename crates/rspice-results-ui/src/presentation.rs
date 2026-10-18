@@ -262,6 +262,39 @@ pub fn frequency_readout(
     rspice_ui_kit::plot::fmt_si_readout(hertz * scale + offset, unit, significant_digits)
 }
 
+/// An angle readout at `significant_digits`, in the unit Units ▸ Angle
+/// display chose. The stored value is radians either way.
+pub fn angle_readout(
+    quantity_policy: &QuantityPresentationPolicy,
+    radians: f64,
+    significant_digits: usize,
+) -> String {
+    use rspice_app_types::quantity::AngleDisplay;
+    match quantity_policy.angle_display {
+        AngleDisplay::Degrees => plain_readout(radians.to_degrees(), "°", significant_digits),
+        AngleDisplay::Radians => plain_readout(radians, "rad", significant_digits),
+    }
+}
+
+/// A readout at `significant_digits` in a unit that takes no SI prefix, such
+/// as dB, dBc/Hz, % or a bare ratio: `−60.25 dBc`, never `−60.25000 dBc` or
+/// `500 mdB`. `unit` may be empty.
+pub fn plain_readout(value: f64, unit: &str, significant_digits: usize) -> String {
+    let text = rspice_ui_kit::plot::fmt_significant(value, significant_digits, "");
+    // Scientific notation carries its own exponent, and trimming its
+    // mantissa would change the number.
+    let number = if text.contains('.') && !text.contains(['e', 'E']) {
+        text.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        text.as_str()
+    };
+    if unit.is_empty() {
+        number.to_owned()
+    } else {
+        format!("{number} {unit}")
+    }
+}
+
 /// A faint explanatory note under a right-panel section.
 ///
 /// The inspector's own note, in this panel's quieter tone: a viewer's notes

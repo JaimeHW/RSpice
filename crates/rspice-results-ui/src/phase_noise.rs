@@ -1,8 +1,9 @@
 //! Retained phase-noise spectrum, exact spot marker and evidence-backed inspector.
 
-use crate::presentation::{PlotView, well_hint};
+use crate::presentation::{PlotView, angle_readout, frequency_readout, plain_readout, well_hint};
 use crate::strip::{self, LegendChip};
 use crate::waveform::WaveformData;
+use crate::waves::ReadoutPolicy;
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::analysis_result::AnalysisResult;
@@ -47,15 +48,18 @@ pub fn show_absent(ui: &mut Ui, selected_periodic_noise_without_phase_trace: boo
     );
 }
 
-/// Draw the retained spectrum and request navigation without mutating host state.
+/// Draw the retained spectrum and request navigation without mutating host
+/// state; its cursor reads at the reader's significant digits.
 pub fn show(
     ui: &mut Ui,
     model: &PhaseNoiseTrace<'_>,
     view: PlotView,
     level_range: Option<(f64, f64)>,
     quantities: &QuantityPresentationPolicy,
+    presentation: ReadoutPolicy,
     cache: &mut plot::DecimationCache,
 ) -> PhaseNoiseResponse {
+    let digits = usize::from(presentation.displayed_significant_digits().get());
     let colors = Tokens::get(ui.ctx()).color;
     let legend = [LegendChip {
         name: "L(f) dBc/Hz",
@@ -118,12 +122,16 @@ pub fn show(
 
     let readout = |offset| {
         vec![
-            ("offset".to_owned(), quantities.format_frequency(offset, 2)),
+            (
+                "offset".to_owned(),
+                frequency_readout(quantities, offset, digits),
+            ),
             (
                 "L(f)".to_owned(),
-                format!(
-                    "{:.3} dBc/Hz",
-                    rspice_ui_kit::plot::sample_at(model.offset_hz, model.level_dbc_per_hz, offset)
+                plain_readout(
+                    rspice_ui_kit::plot::sample_at(model.offset_hz, model.level_dbc_per_hz, offset),
+                    "dBc/Hz",
+                    digits,
                 ),
             ),
         ]
@@ -135,12 +143,15 @@ pub fn show(
     }
 }
 
-/// Display only the inspector fields supported by the bound retained evidence.
+/// Display only the inspector fields supported by the bound retained
+/// evidence, at the reader's `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     input: Option<PhaseNoiseInspector<'_>>,
     quantities: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
+    let digits = significant_digits;
     section_header(ui, "Phase noise", None);
     let Some(input) = input else {
         crate::presentation::panel_note(ui, "No phase-noise trace in this run.");
@@ -155,25 +166,29 @@ pub fn right_panel(
     // extent is the plot's own X axis, and the trace is in its legend.
     let mut rows = vec![(
         "Carrier",
-        quantities.format_frequency(model.carrier_frequency_hz, 3),
+        frequency_readout(quantities, model.carrier_frequency_hz, digits),
         false,
     )];
     if let Some(radians) = retained_measurement(analysis, "phase_error_rms_rad") {
         rows.push((
             "Integrated phase error",
-            format!("{:.3}° rms", radians.to_degrees()),
+            format!("{} rms", angle_readout(quantities, radians, digits)),
             true,
         ));
     }
     if let Some(seconds) = retained_measurement(analysis, "timing_jitter_rms_s") {
         rows.push((
             "Integrated timing jitter",
-            rspice_ui_kit::plot::fmt_si_readout(seconds, "s rms", 4),
+            rspice_ui_kit::plot::fmt_si_readout(seconds, "s rms", digits),
             true,
         ));
     }
     if let Some(level) = exact_retained_value_at(model.offset_hz, model.level_dbc_per_hz, 1.0e6) {
-        rows.push(("Spot L(f) at 1 MHz", format!("{level:.3} dBc/Hz"), true));
+        rows.push((
+            "Spot L(f) at 1 MHz",
+            plain_readout(level, "dBc/Hz", digits),
+            true,
+        ));
     }
     crate::presentation::stat_table(ui, &rows);
     let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();

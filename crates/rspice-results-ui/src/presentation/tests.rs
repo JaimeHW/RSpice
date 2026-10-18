@@ -1,5 +1,38 @@
 use super::*;
 
+/// A readout counts the reader's significant digits, drops the zeros that
+/// only pad it out, and never puts an SI prefix on a level or a ratio.
+#[test]
+fn plain_readouts_count_significant_digits_without_a_prefix() {
+    assert_eq!(plain_readout(-60.123_456_7, "dBc", 4), "-60.12 dBc");
+    assert_eq!(plain_readout(-60.123_456_7, "dBc", 7), "-60.12346 dBc");
+    assert_eq!(plain_readout(0.5, "dB", 7), "0.5 dB");
+    assert_eq!(plain_readout(2.0, "", 7), "2");
+}
+
+/// Angles read at the chosen digits in the unit Angle display chose.
+#[test]
+fn angle_readouts_follow_the_angle_display_at_significant_digits() {
+    use rspice_app_types::quantity::AngleDisplay;
+    let degrees = QuantityPresentationPolicy {
+        angle_display: AngleDisplay::Degrees,
+        ..QuantityPresentationPolicy::default()
+    };
+    assert_eq!(
+        angle_readout(&degrees, 45.678_f64.to_radians(), 4),
+        "45.68 °"
+    );
+    assert_eq!(
+        angle_readout(&degrees, 45.678_f64.to_radians(), 3),
+        "45.7 °"
+    );
+    let radians = QuantityPresentationPolicy {
+        angle_display: AngleDisplay::Radians,
+        ..QuantityPresentationPolicy::default()
+    };
+    assert_eq!(angle_readout(&radians, 1.234_567, 4), "1.235 rad");
+}
+
 #[test]
 fn stat_columns_are_disjoint_at_phone_panel_width() {
     use rspice_ui_kit::panels::PANEL_INSET;

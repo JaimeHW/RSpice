@@ -1,5 +1,6 @@
 //! Inspectors for qualified frequency-response and ordinary-noise results.
 
+use crate::presentation::{angle_readout, frequency_readout, plain_readout};
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_core::engine::{QpacAnalysisResult, QpxfAnalysisResult};
@@ -31,11 +32,13 @@ pub struct NoiseSpectrumModel {
     pub band: Option<(f64, f64)>,
 }
 
-/// Render the inspector for the response qualified by the host document.
+/// Render the inspector for the response qualified by the host document,
+/// its readouts at the reader's `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     model: BodeInspector<'_>,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
     let (metrics, phase_available) = match model {
         BodeInspector::Qpxf(response) => {
@@ -54,7 +57,7 @@ pub fn right_panel(
                     ),
                     (
                         "Tones",
-                        frequency_list(&m.grid.frequencies_hz, quantity_policy),
+                        frequency_list(&m.grid.frequencies_hz, quantity_policy, significant_digits),
                         false,
                     ),
                     (
@@ -104,7 +107,7 @@ pub fn right_panel(
                     ),
                     (
                         "Tones",
-                        frequency_list(&m.tone_frequencies_hz, quantity_policy),
+                        frequency_list(&m.tone_frequencies_hz, quantity_policy, significant_digits),
                         false,
                     ),
                 ];
@@ -138,7 +141,7 @@ pub fn right_panel(
         }
     };
     section_header(ui, "Stability", None);
-    let rows = margin_rows(metrics, quantity_policy);
+    let rows = margin_rows(metrics, quantity_policy, significant_digits);
     crate::presentation::stat_table(ui, &rows);
 
     // A folded phase margin reads like a verdict and is not one. It goes above
@@ -198,10 +201,14 @@ fn qpxf_output_label(output: &rspice_core::engine::QpxfOutput) -> String {
 }
 
 /// A tone list in the reader's frequency units.
-fn frequency_list(frequencies: &[f64], quantity_policy: &QuantityPresentationPolicy) -> String {
+fn frequency_list(
+    frequencies: &[f64],
+    quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
+) -> String {
     frequencies
         .iter()
-        .map(|frequency| quantity_policy.format_frequency(*frequency, 4))
+        .map(|frequency| frequency_readout(quantity_policy, *frequency, significant_digits))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -217,36 +224,27 @@ fn frequency_list(frequencies: &[f64], quantity_policy: &QuantityPresentationPol
 fn margin_rows(
     m: AcBodeMetrics,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> [(&'static str, String, bool); 6] {
     let adc_is_dc = m.adc_is_dc;
     let fmt_opt =
         |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
+    let frequency = |v: f64| frequency_readout(quantity_policy, v, significant_digits);
+    let decibels = |v: f64| plain_readout(v, "dB", significant_digits);
     [
         (
             "Phase margin",
             fmt_opt(m.pm_deg, &|v| {
-                quantity_policy.format_angle(v.to_radians(), 1)
+                angle_readout(quantity_policy, v.to_radians(), significant_digits)
             }),
             true,
         ),
-        (
-            "Gain margin",
-            fmt_opt(m.gm_db, &|v| format!("{v:.1} dB")),
-            true,
-        ),
-        (
-            "Unity-gain freq",
-            fmt_opt(m.ugf, &|v| quantity_policy.format_frequency(v, 1)),
-            false,
-        ),
-        (
-            "f₁₈₀",
-            fmt_opt(m.f180, &|v| quantity_policy.format_frequency(v, 0)),
-            false,
-        ),
+        ("Gain margin", fmt_opt(m.gm_db, &decibels), true),
+        ("Unity-gain freq", fmt_opt(m.ugf, &frequency), false),
+        ("f₁₈₀", fmt_opt(m.f180, &frequency), false),
         (
             if adc_is_dc { "A_dc" } else { "A(f_min)" },
-            fmt_opt(m.adc_db, &|v| format!("{v:.1} dB")),
+            fmt_opt(m.adc_db, &decibels),
             false,
         ),
         (
@@ -255,17 +253,19 @@ fn margin_rows(
             } else {
                 "f₋₃dB re A(f_min)"
             },
-            fmt_opt(m.f3db, &|v| quantity_policy.format_frequency(v, 0)),
+            fmt_opt(m.f3db, &frequency),
             false,
         ),
     ]
 }
 
-/// Render the summary of the selected, validated ordinary-noise spectrum.
+/// Render the summary of the selected, validated ordinary-noise spectrum,
+/// its readouts at the reader's `significant_digits`.
 pub fn noise_spectrum_right_panel(
     ui: &mut Ui,
     model: Option<&NoiseSpectrumModel>,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
     section_header(ui, "Noise spectrum", None);
     let Some(model) = model else {
@@ -283,8 +283,8 @@ pub fn noise_spectrum_right_panel(
             "Band",
             format!(
                 "{} – {}",
-                quantity_policy.format_frequency(band.0, 2),
-                quantity_policy.format_frequency(band.1, 2)
+                frequency_readout(quantity_policy, band.0, significant_digits),
+                frequency_readout(quantity_policy, band.1, significant_digits)
             ),
             false,
         ),
@@ -292,7 +292,7 @@ pub fn noise_spectrum_right_panel(
             "Output integrated",
             model.total_rms.map_or_else(
                 || "—".to_owned(),
-                |value| rspice_ui_kit::plot::fmt_si_readout(value, "V rms", 4),
+                |value| rspice_ui_kit::plot::fmt_si_readout(value, "V rms", significant_digits),
             ),
             model.total_rms.is_some(),
         ),
@@ -300,7 +300,13 @@ pub fn noise_spectrum_right_panel(
             "Input referred",
             model.input_rms.map_or_else(
                 || "—".to_owned(),
-                |value| rspice_ui_kit::plot::fmt_si_readout(value, model.input_rms_unit, 4),
+                |value| {
+                    rspice_ui_kit::plot::fmt_si_readout(
+                        value,
+                        model.input_rms_unit,
+                        significant_digits,
+                    )
+                },
             ),
             model.input_rms.is_some(),
         ),
@@ -337,6 +343,7 @@ mod tests {
                     ..margins
                 },
                 &policy,
+                4,
             )
             .map(|(label, _, _)| label)
         };
@@ -345,5 +352,37 @@ mod tests {
         assert_eq!(labels(true)[5], "f₋₃dB");
         assert_eq!(labels(false)[4], "A(f_min)");
         assert_eq!(labels(false)[5], "f₋₃dB re A(f_min)");
+    }
+
+    /// The stability card reads at the reader's significant digits, not at a
+    /// decimal count fixed per row.
+    #[test]
+    fn the_margins_read_at_the_chosen_significant_digits() {
+        let margins = AcBodeMetrics {
+            adc_db: Some(62.345_678),
+            adc_is_dc: true,
+            ugf: Some(1.234_567_8e6),
+            pm_deg: Some(61.234_567),
+            pm_phase_deg: Some(-118.765_433),
+            f180: Some(4.567_891e6),
+            gm_db: Some(12.345_678),
+            f3db: Some(123.456_78),
+            ..Default::default()
+        };
+        let policy = QuantityPresentationPolicy::default();
+        let values = |digits| margin_rows(margins, &policy, digits).map(|(_, value, _)| value);
+        assert_eq!(
+            values(4),
+            [
+                "61.23 °",
+                "12.35 dB",
+                "1.235 MHz",
+                "4.568 MHz",
+                "62.35 dB",
+                "123.5 Hz"
+            ]
+        );
+        assert_eq!(values(6)[0], "61.2346 °");
+        assert_eq!(values(6)[2], "1.23457 MHz");
     }
 }

@@ -7,7 +7,7 @@ use rspice_results::{
 };
 use rspice_ui_kit::plot::{Axis, fmt_si, fmt_si_readout};
 
-use crate::presentation::frequency_readout;
+use crate::presentation::{frequency_readout, plain_readout};
 
 /// Stems are one painted segment per coefficient, so they are drawn only for
 /// a spectrum short enough that the cost is bounded.
@@ -74,7 +74,9 @@ pub(super) fn decade_ordinate(
 pub(super) fn inspector_rows(
     spectrum: &FftSpectrumEvidence,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> Vec<(&'static str, String, bool)> {
+    let digits = significant_digits;
     let mut rows = vec![
         ("Output", spectrum.output.clone(), false),
         ("Window", spectrum.window.clone(), false),
@@ -82,14 +84,14 @@ pub(super) fn inspector_rows(
             "Record",
             format!(
                 "{} … {}",
-                fmt_si_readout(spectrum.start_time_s, "s", 4),
-                fmt_si_readout(spectrum.stop_time_s, "s", 4)
+                fmt_si_readout(spectrum.start_time_s, "s", digits),
+                fmt_si_readout(spectrum.stop_time_s, "s", digits)
             ),
             false,
         ),
         (
             "Resolution",
-            frequency_readout(quantity_policy, spectrum.frequency_resolution_hz, 4),
+            frequency_readout(quantity_policy, spectrum.frequency_resolution_hz, digits),
             false,
         ),
     ];
@@ -101,16 +103,21 @@ pub(super) fn inspector_rows(
         frequency_readout(
             quantity_policy,
             spectrum.fundamental_bin as f64 * spectrum.frequency_resolution_hz,
-            4,
+            digits,
         ),
         true,
     ));
+    // A level takes no SI prefix: half a decibel is `0.5 dB`, not `500 mdB`.
     if let Some(metrics) = &spectrum.metrics {
-        rows.push(("THD", fmt_si_readout(metrics.thd_db, "dB", 4), false));
-        rows.push(("SNDR", fmt_si_readout(metrics.sndr_db, "dB", 4), false));
-        rows.push(("SNR", fmt_si_readout(metrics.snr_db, "dB", 4), false));
-        rows.push(("SFDR", fmt_si_readout(metrics.sfdr_db, "dB", 4), false));
-        rows.push(("ENOB", format!("{:.2} bits", metrics.enob_bits), true));
+        rows.push(("THD", plain_readout(metrics.thd_db, "dB", digits), false));
+        rows.push(("SNDR", plain_readout(metrics.sndr_db, "dB", digits), false));
+        rows.push(("SNR", plain_readout(metrics.snr_db, "dB", digits), false));
+        rows.push(("SFDR", plain_readout(metrics.sfdr_db, "dB", digits), false));
+        rows.push((
+            "ENOB",
+            plain_readout(metrics.enob_bits, "bits", digits),
+            true,
+        ));
     }
     rows
 }
@@ -223,6 +230,7 @@ mod tests {
         let rows = inspector_rows(
             &evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete),
             &QuantityPresentationPolicy::default(),
+            4,
         );
         let labels = rows.iter().map(|(label, _, _)| *label).collect::<Vec<_>>();
         assert_eq!(
@@ -251,12 +259,47 @@ mod tests {
         let rows = inspector_rows(
             &evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete),
             &policy,
+            4,
         );
         assert!(
             rows.iter()
                 .any(|(label, value, _)| *label == "Fundamental" && value == "6.283 krad/s"),
             "{rows:?}"
         );
+    }
+
+    /// The figures of merit read at the reader's significant digits, and a
+    /// level never takes an SI prefix.
+    #[test]
+    fn the_figures_of_merit_read_at_the_chosen_significant_digits() {
+        let mut spectrum =
+            evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete);
+        spectrum.metrics = Some(rspice_results::fft::spectrum::FftMetricsEvidence {
+            fundamental_magnitude: 1.0,
+            thd_ratio: 1.0e-3,
+            thd_db: -60.123_456,
+            sndr_db: 0.5,
+            enob_bits: 9.876_543,
+            snr_db: 61.234_567,
+            sfdr_db: 70.0,
+            sfdr_spur_bin: None,
+            sfdr_spur_frequency_hz: None,
+            largest_harmonics: Vec::new(),
+        });
+        let policy = QuantityPresentationPolicy::default();
+        let value = |digits, wanted: &str| {
+            inspector_rows(&spectrum, &policy, digits)
+                .into_iter()
+                .find(|(label, _, _)| *label == wanted)
+                .map(|(_, value, _)| value)
+                .expect("row present")
+        };
+        assert_eq!(value(4, "THD"), "-60.12 dB");
+        assert_eq!(value(6, "THD"), "-60.1235 dB");
+        assert_eq!(value(4, "SNDR"), "0.5 dB");
+        assert_eq!(value(4, "SFDR"), "70 dB");
+        assert_eq!(value(3, "ENOB"), "9.88 bits");
+        assert_eq!(value(6, "Fundamental"), "1 kHz");
     }
 
     /// Exact sampling is the normal case, so it says nothing; interpolation
@@ -267,13 +310,13 @@ mod tests {
             evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete);
         let policy = QuantityPresentationPolicy::default();
         assert!(
-            !inspector_rows(&spectrum, &policy)
+            !inspector_rows(&spectrum, &policy, 4)
                 .iter()
                 .any(|(label, _, _)| *label == "Sampling")
         );
         spectrum.accurate_sampling = false;
         assert!(
-            inspector_rows(&spectrum, &policy)
+            inspector_rows(&spectrum, &policy, 4)
                 .iter()
                 .any(|(label, value, _)| *label == "Sampling" && value == "interpolated")
         );

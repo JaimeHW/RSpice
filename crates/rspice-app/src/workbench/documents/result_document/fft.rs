@@ -7,6 +7,7 @@ use rspice_results_ui::fft::view;
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.ui.result_presentation_policy().readout();
     let plot_view = state.ui.results.session.plot_view(ResultViewer::Fft, 0);
     let out = view::show(
         ui,
@@ -15,6 +16,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         plot_view,
         &mut state.ui.results.session.cache,
         &quantity_policy,
+        presentation,
     );
     if out.fit_requested {
         state
@@ -44,10 +46,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    let presentation = state.ui.result_presentation_policy();
     view::right_panel(
         ui,
         &state.analysis.fft_state,
         &mut state.ui.results.session.fft_series,
         &state.ui.preferences.quantity_presentation_policy(),
+        usize::from(presentation.displayed_significant_digits().get()),
     );
 }

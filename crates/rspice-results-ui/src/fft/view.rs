@@ -7,7 +7,8 @@ use std::sync::Arc;
 use egui::Ui;
 
 use super::FftState;
-use crate::presentation::PlotView;
+use crate::presentation::{PlotView, frequency_readout, plain_readout};
+use crate::waves::ReadoutPolicy;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
@@ -185,7 +186,7 @@ fn resolution_bandwidth(data: &crate::fft::data::FftData) -> Option<f64> {
 // center view
 // ---------------------------------------------------------------------------
 
-/// Render the spectrum.
+/// Render the spectrum; its cursor reads at the reader's significant digits.
 pub fn show(
     ui: &mut Ui,
     fft: &mut FftState,
@@ -193,7 +194,9 @@ pub fn show(
     view: PlotView,
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
+    presentation: ReadoutPolicy,
 ) -> FftViewResponse {
+    let digits = usize::from(presentation.displayed_significant_digits().get());
     let mut out = FftViewResponse::default();
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -358,13 +361,16 @@ pub fn show(
 
     let readout = |x: f64| -> Vec<(String, String)> {
         vec![
-            ("f".to_owned(), quantity_policy.format_frequency(x, 1)),
+            (
+                "f".to_owned(),
+                frequency_readout(quantity_policy, x, digits),
+            ),
             (
                 "level".to_owned(),
-                format!(
-                    "{:.1} {}",
+                plain_readout(
                     sample_at(&model.frequency, &model.magnitude_db, x),
-                    level_unit
+                    level_unit,
+                    digits,
                 ),
             ),
         ]
@@ -379,12 +385,13 @@ pub fn show(
 // right panel
 // ---------------------------------------------------------------------------
 
-/// THD/SNR summary + harmonics table.
+/// THD/SNR summary + harmonics table, at the reader's `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     fft: &FftState,
     series: &mut Option<FftSeries>,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
     // The plot well already says the FFT has not run; a section header over
     // an explanation of that is the same sentence a second time.
@@ -397,16 +404,17 @@ pub fn right_panel(
     section_header(ui, "Spectrum", None);
     let level_unit = spectrum_level_unit(&model.source, model.normalization);
 
-    let f = |v: Option<f64>, digits: usize| {
+    let digits = significant_digits;
+    let f = |v: Option<f64>| {
         v.map_or("—".to_owned(), |v| {
-            quantity_policy.format_frequency(v, digits)
+            frequency_readout(quantity_policy, v, digits)
         })
     };
-    let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| format!("{v:.1} dB"));
+    let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| plain_readout(v, "dB", digits));
 
     let enob = analysis
         .sinad_db
-        .map(|sinad| format!("{:.1} bit", (sinad - 1.76) / 6.02));
+        .map(|sinad| plain_readout((sinad - 1.76) / 6.02, "bit", digits));
     let thd = analysis.thd_percent.map_or_else(
         || match analysis.harmonic_coverage {
             crate::fft::data::HarmonicCoverage::InsufficientBandwidth {
@@ -418,16 +426,20 @@ pub fn right_panel(
             crate::fft::data::HarmonicCoverage::NoFundamental { .. }
             | crate::fft::data::HarmonicCoverage::Complete { .. } => "—".to_owned(),
         },
-        |value| format!("{value:.3} % · {} harmonics", analysis.harmonics.len()),
+        |value| {
+            format!(
+                "{} · {} harmonics",
+                plain_readout(value, "%", digits),
+                analysis.harmonics.len()
+            )
+        },
     );
-    let amplitude = analysis
-        .fundamental_db
-        .map_or("—".to_owned(), |value| format!("{value:.1} {level_unit}"));
-    let resolution_bandwidth = model.resolution_bandwidth.map_or("—".to_owned(), |value| {
-        quantity_policy.format_frequency(value, 3)
+    let amplitude = analysis.fundamental_db.map_or("—".to_owned(), |value| {
+        plain_readout(value, level_unit, digits)
     });
+    let resolution_bandwidth = f(model.resolution_bandwidth);
     let noise_floor = match (analysis.noise_floor_db, analysis.fundamental_db) {
-        (Some(noise), Some(fundamental)) => format!("{:.1} dBc", noise - fundamental),
+        (Some(noise), Some(fundamental)) => plain_readout(noise - fundamental, "dBc", digits),
         _ => "—".to_owned(),
     };
 
@@ -436,7 +448,7 @@ pub fn right_panel(
     // so the panel states only what is derived from them.
     let rows = [
         ("Resolution BW", resolution_bandwidth, false),
-        ("Fundamental", f(analysis.fundamental_frequency, 1), false),
+        ("Fundamental", f(analysis.fundamental_frequency), false),
         ("Amplitude", amplitude, false),
         ("THD", thd, true),
         ("SNR", db(analysis.snr_db), false),
@@ -458,9 +470,9 @@ pub fn right_panel(
                     format!(
                         "HD{} · {}",
                         harmonic.order,
-                        quantity_policy.format_frequency(harmonic.frequency, 0)
+                        frequency_readout(quantity_policy, harmonic.frequency, digits)
                     ),
-                    format!("{:.1} dBc", harmonic.level_db - db0),
+                    plain_readout(harmonic.level_db - db0, "dBc", digits),
                 )
             })
             .collect();
@@ -611,6 +623,7 @@ mod tests {
                             PlotView::default(),
                             &mut cache,
                             &QuantityPresentationPolicy::default(),
+                            ReadoutPolicy::default(),
                         )
                     });
             },

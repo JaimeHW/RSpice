@@ -4,11 +4,11 @@ use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::{network_matrix::impedance_from_gamma, waveform::SharedWaveformValues};
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout};
 use rspice_ui_kit::tokens::Tokens;
 
 use super::{SmithChartState, state::SParamTrace};
-use crate::presentation::{PlotView, well_hint};
+use crate::presentation::{PlotView, angle_readout, frequency_readout, plain_readout, well_hint};
 use crate::strip::{self, LegendChip};
 
 /// A visible retained trace and its cached coordinate columns.
@@ -22,7 +22,8 @@ pub struct SmithPlotTrace<'a> {
 }
 
 /// Draw visible retained loci and update only their local view and pin.
-/// The host owns source qualification and cache invalidation.
+/// The host owns source qualification and cache invalidation. The point card
+/// reads at the reader's `significant_digits`.
 pub fn show(
     ui: &mut Ui,
     traces: &[SmithPlotTrace<'_>],
@@ -30,6 +31,7 @@ pub fn show(
     pin: &mut Option<(usize, usize)>,
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> Option<plot::PlotResponse> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -231,29 +233,32 @@ pub fn show(
         let frequency = trace.points.get(i).map(|p| p.frequency).unwrap_or(0.0);
         let mag = (gamma_re * gamma_re + gamma_im * gamma_im).sqrt();
         let phase = gamma_im.atan2(gamma_re);
+        let digits = significant_digits;
         let mut rows = vec![
             (
                 "f".to_owned(),
-                quantity_policy.format_frequency(frequency, 2),
+                frequency_readout(quantity_policy, frequency, digits),
             ),
             (
                 "Γ".to_owned(),
-                format!("{mag:.3} ∠ {}", quantity_policy.format_angle(phase, 1)),
+                format!(
+                    "{} ∠ {}",
+                    plain_readout(mag, "", digits),
+                    angle_readout(quantity_policy, phase, digits)
+                ),
             ),
         ];
         if let Some(reference_impedance_ohm) = trace.reference_impedance_ohm {
-            rows.push(("Z₀".to_owned(), fmt_si(reference_impedance_ohm, "Ω", 2)));
+            rows.push((
+                "Z₀".to_owned(),
+                fmt_si_readout(reference_impedance_ohm, "Ω", digits),
+            ));
             rows.push((
                 "Z".to_owned(),
                 if let Some((resistance, reactance)) =
                     impedance_from_gamma(gamma_re, gamma_im, reference_impedance_ohm)
                 {
-                    format!(
-                        "{} {} j{}",
-                        fmt_si(resistance, "Ω", 2),
-                        if reactance >= 0.0 { "+" } else { "−" },
-                        fmt_si(reactance.abs(), "Ω", 2)
-                    )
+                    impedance_readout(resistance, reactance, digits)
                 } else {
                     "open".to_owned()
                 },
@@ -261,7 +266,7 @@ pub fn show(
             rows.push((
                 "VSWR".to_owned(),
                 if mag < 1.0 {
-                    format!("{:.2}", (1.0 + mag) / (1.0 - mag))
+                    plain_readout((1.0 + mag) / (1.0 - mag), "", digits)
                 } else {
                     "∞".to_owned()
                 },
@@ -281,13 +286,15 @@ pub fn show(
     Some(response)
 }
 
-/// Trace summary.
+/// Trace summary, at the reader's `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     smith: &SmithChartState,
     pin: Option<(usize, usize)>,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
+    let digits = significant_digits;
     section_header(ui, "S-parameters", None);
     let visible_traces = smith
         .traces
@@ -315,7 +322,10 @@ pub fn right_panel(
         .and(maximum_gamma)
         .map(|gamma| {
             if gamma < 1.0 {
-                format!("{:.2} : 1", (1.0 + gamma) / (1.0 - gamma))
+                format!(
+                    "{} : 1",
+                    plain_readout((1.0 + gamma) / (1.0 - gamma), "", digits)
+                )
             } else {
                 "∞".to_owned()
             }
@@ -324,28 +334,22 @@ pub fn right_panel(
         let trace = visible_traces.get(*slot)?;
         let sample = trace.points.get(*point)?;
         let gamma = sample.s;
+        let frequency = frequency_readout(quantity_policy, sample.frequency, digits);
         let readout = if let Some(reference_impedance_ohm) = trace.reference_impedance_ohm {
             if let Some((resistance, reactance)) =
                 impedance_from_gamma(gamma.re, gamma.im, reference_impedance_ohm)
             {
                 format!(
-                    "{} · {} {} j{}",
-                    quantity_policy.format_frequency(sample.frequency, 2),
-                    fmt_si(resistance, "Ω", 2),
-                    if reactance >= 0.0 { "+" } else { "−" },
-                    fmt_si(reactance.abs(), "Ω", 2)
+                    "{frequency} · {}",
+                    impedance_readout(resistance, reactance, digits)
                 )
             } else {
-                format!(
-                    "{} · open",
-                    quantity_policy.format_frequency(sample.frequency, 2)
-                )
+                format!("{frequency} · open")
             }
         } else {
             format!(
-                "{} · |S| {:.3}",
-                quantity_policy.format_frequency(sample.frequency, 2),
-                gamma.norm()
+                "{frequency} · |S| {}",
+                plain_readout(gamma.norm(), "", digits)
             )
         };
         Some(format!("{} · {readout}", trace.name))
@@ -360,8 +364,8 @@ pub fn right_panel(
             match (first, last) {
                 (Some(a), Some(b)) => format!(
                     "{} – {}",
-                    quantity_policy.format_frequency(a.frequency, 1),
-                    quantity_policy.format_frequency(b.frequency, 1)
+                    frequency_readout(quantity_policy, a.frequency, digits),
+                    frequency_readout(quantity_policy, b.frequency, digits)
                 ),
                 _ => "—".to_owned(),
             },
@@ -375,10 +379,39 @@ pub fn right_panel(
         rows.push(("Marker", marker, false));
     }
     if let Some(value) = maximum_gamma {
-        rows.push(("|Γ| max", format!("{value:.3}"), true));
+        rows.push(("|Γ| max", plain_readout(value, "", digits), true));
     }
     if let Some(vswr) = maximum_vswr {
         rows.push(("Max VSWR", vswr, false));
     }
     crate::presentation::stat_table(ui, &rows);
+}
+
+/// `R ± jX` at the reader's significant digits: `50.12 Ω + j12.35 Ω`.
+fn impedance_readout(resistance: f64, reactance: f64, significant_digits: usize) -> String {
+    format!(
+        "{} {} j{}",
+        fmt_si_readout(resistance, "Ω", significant_digits),
+        if reactance >= 0.0 { "+" } else { "−" },
+        fmt_si_readout(reactance.abs(), "Ω", significant_digits)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An impedance reads at the chosen significant digits, not at two
+    /// decimals whatever the preference says.
+    #[test]
+    fn an_impedance_reads_at_the_chosen_significant_digits() {
+        assert_eq!(
+            impedance_readout(50.123_456, -12.345_678, 4),
+            "50.12 Ω − j12.35 Ω"
+        );
+        assert_eq!(
+            impedance_readout(50.123_456, 12.345_678, 6),
+            "50.1235 Ω + j12.3457 Ω"
+        );
+    }
 }

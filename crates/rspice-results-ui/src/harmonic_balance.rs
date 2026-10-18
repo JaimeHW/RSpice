@@ -1,12 +1,13 @@
 //! Retained coefficient-spectrum presentation for HB, Fourier, recorded FFT and QPSS.
 
-use crate::presentation::{PlotView, well_hint};
+use crate::presentation::{PlotView, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
+use crate::waves::ReadoutPolicy;
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si, sample_at};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout, sample_at};
 use std::sync::Arc;
 
 pub mod recorded_fft;
@@ -99,14 +100,17 @@ fn automatic_y_range(model: &HarmonicBalanceModel) -> Option<(f64, f64)> {
     padded_bounds(lower, upper)
 }
 
-/// Render the qualified coefficient spectrum and request navigation.
+/// Render the qualified coefficient spectrum and request navigation; its
+/// cursor reads at the reader's significant digits.
 pub fn show(
     ui: &mut Ui,
     model: &HarmonicBalanceModel,
     view: PlotView,
     quantity_policy: &QuantityPresentationPolicy,
+    presentation: ReadoutPolicy,
     cache: &mut plot::DecimationCache,
 ) -> SpectrumResponse {
+    let digits = usize::from(presentation.displayed_significant_digits().get());
     let legend = model
         .traces
         .iter()
@@ -223,15 +227,15 @@ pub fn show(
     let readout = |frequency: f64| -> Vec<(String, String)> {
         let mut rows = vec![(
             "f".to_owned(),
-            quantity_policy.format_frequency(frequency, 3),
+            frequency_readout(quantity_policy, frequency, digits),
         )];
         for trace in model.traces.iter().take(3) {
             rows.push((
                 trace.name.clone(),
-                fmt_si(
+                fmt_si_readout(
                     sample_at(&trace.frequency, &trace.magnitude, frequency),
                     "",
-                    4,
+                    digits,
                 ),
             ));
         }
@@ -250,11 +254,13 @@ pub fn show(
     }
 }
 
-/// Display metadata carried by the same retained coefficient spectrum.
+/// Display metadata carried by the same retained coefficient spectrum, at
+/// the reader's `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     source: Result<&HarmonicBalanceModel, SpectrumAbsence<'_>>,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
     let model = match source {
         Ok(model) => model,
@@ -283,7 +289,7 @@ pub fn right_panel(
         section_header(ui, "Spectrum", None);
         crate::presentation::stat_table(
             ui,
-            &recorded_fft::inspector_rows(spectrum, quantity_policy),
+            &recorded_fft::inspector_rows(spectrum, quantity_policy, significant_digits),
         );
     } else if let Some(point) = &model.qpss {
         section_header(ui, "Harmonics", None);
@@ -295,7 +301,9 @@ pub fn right_panel(
                     .grid
                     .frequencies_hz
                     .iter()
-                    .map(|frequency| quantity_policy.format_frequency(*frequency, 6))
+                    .map(|frequency| {
+                        frequency_readout(quantity_policy, *frequency, significant_digits)
+                    })
                     .collect::<Vec<_>>()
                     .join(", "),
                 true,

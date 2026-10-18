@@ -1,7 +1,7 @@
 //! Retained pole-zero map, root readouts and local plot interaction.
 
 use crate::{
-    presentation::{PlotView, well_hint},
+    presentation::{PlotView, frequency_readout, plain_readout, well_hint},
     strip::{self, LegendChip},
 };
 use egui::Ui;
@@ -12,7 +12,7 @@ use rspice_results::pole_zero::{
 };
 use rspice_ui_kit::{
     panels::section_header,
-    plot::{self, Axis, PlotSpec, XScale, fmt_si, fmt_si_readout},
+    plot::{self, Axis, PlotSpec, XScale, fmt_si_readout},
     tokens::Tokens,
 };
 
@@ -52,19 +52,29 @@ fn retained_root_representatives(data: &PoleZeroData, limit: usize) -> (Vec<&Com
 fn format_dominant_pole(
     root: &ComplexRoot,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> String {
     if root.is_real() {
         let sign = if root.real < 0.0 { "−" } else { "+" };
         format!(
             "{sign}{}",
-            quantity_policy.format_frequency(root.real.abs() / std::f64::consts::TAU, 3)
+            frequency_readout(
+                quantity_policy,
+                root.real.abs() / std::f64::consts::TAU,
+                significant_digits
+            )
         )
     } else {
-        format!("σ {:.6e} · jω {:+.6e} rad/s", root.real, root.imag)
+        format!(
+            "σ {} · jω {}",
+            fmt_si_readout(root.real, "rad/s", significant_digits),
+            fmt_si_readout(root.imag, "rad/s", significant_digits)
+        )
     }
 }
 
-/// Render the s-plane map.
+/// Render the s-plane map; the root card reads at the reader's
+/// `significant_digits`.
 pub fn show(
     ui: &mut Ui,
     data: Option<&PoleZeroData>,
@@ -72,6 +82,7 @@ pub fn show(
     pin: &mut Option<(usize, usize)>,
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> Option<PoleZeroResponse> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -236,18 +247,19 @@ pub fn show(
         painter.circle_stroke(pos, 6.0, egui::Stroke::new(1.5, c.accent));
 
         let magnitude = (root.real * root.real + root.imag * root.imag).sqrt();
+        let digits = significant_digits;
         let mut rows = vec![
-            ("σ".to_owned(), fmt_si(root.real, "", 3)),
-            ("jω".to_owned(), fmt_si(root.imag, "", 3)),
+            ("σ".to_owned(), fmt_si_readout(root.real, "", digits)),
+            ("jω".to_owned(), fmt_si_readout(root.imag, "", digits)),
             (
                 "fₙ".to_owned(),
-                quantity_policy.format_frequency(magnitude / std::f64::consts::TAU, 2),
+                frequency_readout(quantity_policy, magnitude / std::f64::consts::TAU, digits),
             ),
         ];
         if root.imag.abs() > 1e-12 && root.real.abs() > 1e-12 {
             rows.push((
                 "Q".to_owned(),
-                format!("{:.2}", magnitude / (2.0 * root.real.abs())),
+                plain_readout(magnitude / (2.0 * root.real.abs()), "", digits),
             ));
         }
         let title = if root.is_pole() { "pole" } else { "zero" };
@@ -259,12 +271,15 @@ pub fn show(
     })
 }
 
-/// Root table with damping and natural frequency.
+/// Root table with damping and natural frequency, at the reader's
+/// `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     data: Option<&PoleZeroData>,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
+    let digits = significant_digits;
     section_header(ui, "Stability", None);
     let Some(data) = data else {
         crate::presentation::panel_note(ui, "Roots appear once a pole-zero analysis runs.");
@@ -297,7 +312,7 @@ pub fn right_panel(
     if let Some(root) = summary.dominant_pole {
         summary_rows.push((
             "Dominant pole",
-            format_dominant_pole(root, quantity_policy),
+            format_dominant_pole(root, quantity_policy, digits),
             false,
         ));
     }
@@ -307,13 +322,13 @@ pub fn right_panel(
             if q.is_infinite() {
                 "∞ · imaginary-axis pole".to_owned()
             } else {
-                format!("{q:.4}")
+                plain_readout(q, "", digits)
             },
             false,
         ));
     }
     if let Some(gain) = data.gain {
-        summary_rows.push(("Gain", fmt_si_readout(gain, "", 4), false));
+        summary_rows.push(("Gain", fmt_si_readout(gain, "", digits), false));
     }
     crate::presentation::stat_table(ui, &summary_rows);
 
@@ -332,13 +347,20 @@ pub fn right_panel(
         };
         let value = if root.is_real() {
             // A real root is a frequency like every other root on the map.
-            quantity_policy.format_frequency(root.real.abs() / std::f64::consts::TAU, 3)
+            frequency_readout(
+                quantity_policy,
+                root.real.abs() / std::f64::consts::TAU,
+                digits,
+            )
         } else {
             format!(
-                "ζ {:.2} · fₙ {}",
-                root.damping_ratio(),
-                quantity_policy
-                    .format_frequency(root.natural_frequency() / std::f64::consts::TAU, 2)
+                "ζ {} · fₙ {}",
+                plain_readout(root.damping_ratio(), "", digits),
+                frequency_readout(
+                    quantity_policy,
+                    root.natural_frequency() / std::f64::consts::TAU,
+                    digits
+                )
             )
         };
         rows.push((name, value, false));
@@ -387,5 +409,20 @@ mod tests {
         assert_eq!(rows.len(), 12);
         assert!(rows.iter().all(|root| root.imag > 0.0));
         assert_eq!(omitted, 2);
+    }
+
+    /// The dominant pole reads at the reader's significant digits whether it
+    /// is real or complex.
+    #[test]
+    fn the_dominant_pole_reads_at_the_chosen_significant_digits() {
+        let policy = QuantityPresentationPolicy::default();
+        let real = ComplexRoot::pole(-std::f64::consts::TAU * 1_234.567, 0.0);
+        assert_eq!(format_dominant_pole(&real, &policy, 4), "−1.235 kHz");
+        assert_eq!(format_dominant_pole(&real, &policy, 6), "−1.23457 kHz");
+        let complex = ComplexRoot::pole(-1_234.567, 98_765.43);
+        assert_eq!(
+            format_dominant_pole(&complex, &policy, 4),
+            "σ -1.235 krad/s · jω 98.77 krad/s"
+        );
     }
 }
