@@ -334,11 +334,8 @@ pub fn draw_selection_rect(painter: &Painter, view: &PreviewView<'_>, tool_viewp
     if !band.is_active() {
         return;
     }
-    let window = SelectionWindow::from_band(
-        band.start,
-        band.current,
-        view.design.document.document_policy.selection_crossing,
-    );
+    let window =
+        SelectionWindow::from_band(band.start, band.current, view.editor.selection_crossing);
     let ppp = painter.pixels_per_point();
     // Corners on device-pixel centres, so a 1-dpx edge is crisp.
     let crisp = |point: Point| {

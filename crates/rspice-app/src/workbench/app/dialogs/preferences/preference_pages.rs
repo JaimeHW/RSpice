@@ -650,28 +650,57 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         "Enable live checking",
     );
     section_heading(ui, "Editing and hierarchy");
-    choice_row(
-        ui,
-        state,
-        ChoicePreference::WireJunctionBehavior,
-        "Wire and junction behavior",
-        "Orthogonal routing previews connectivity before a wire is committed.",
-        &[
-            "Orthogonal · automatic explicit junctions",
-            "Orthogonal · manual junctions",
-            "Any-angle routing",
-        ],
-    );
+    // Junction dots and wire routing are one bit each of one stored choice,
+    // so the values an earlier build wrote keep their meaning.
+    use crate::workbench::app_state::schematic_preferences::{
+        ANY_ANGLE_ROUTING, MANUAL_JUNCTION_DOTS,
+    };
+    for (bit, title, help, id, options) in [
+        (
+            MANUAL_JUNCTION_DOTS,
+            "Junction dots",
+            "Automatic adds a dot where a wire tees into another. Applies to open schematics.",
+            "preferences.schematic.junction-dots",
+            ["Automatic", "Manual"],
+        ),
+        (
+            ANY_ANGLE_ROUTING,
+            "Wire routing",
+            "For new schematics. Grid, snap and wire routing in the View menu changes it for now.",
+            "preferences.schematic.wire-routing",
+            ["Orthogonal", "Any angle"],
+        ),
+    ] {
+        preference_row(ui, title, help, |ui| {
+            value_column(ui, |ui| {
+                let stored = state
+                    .ui
+                    .preferences
+                    .choice(ChoicePreference::WireJunctionBehavior);
+                let mut selected = usize::from(stored & bit != 0);
+                if segmented(ui, id, &options, &mut selected) {
+                    state
+                        .ui
+                        .preferences
+                        .set_choice(
+                            ChoicePreference::WireJunctionBehavior,
+                            (stored & !bit) | if selected == 1 { bit } else { 0 },
+                        )
+                        .expect("junction and routing bits stay inside the domain");
+                }
+            });
+        });
+    }
     choice_row(
         ui,
         state,
         ChoicePreference::SelectionCrossingPolicy,
-        "Selection crossing policy",
-        "Left-to-right encloses; right-to-left intersects, matching physical editors.",
+        "Drag selection",
+        "Enclosed objects, touched objects, or by direction: left-to-right encloses.",
         &[
-            "Directional window selection",
+            "By drag direction",
             "Enclosed objects only",
-            "Intersecting objects",
+            "Touched objects",
         ],
     );
     toggle_row(
@@ -1374,8 +1403,8 @@ mod tests {
             .and_then(|source| source.split("\nfn ").next())
             .expect("Schematic page source");
         let selection = schematic
-            .find("\"Selection crossing policy\"")
-            .expect("selection policy row");
+            .find("\"Drag selection\"")
+            .expect("drag selection row");
         let edit_in_place = schematic
             .find("TogglePreference::HierarchicalEditInPlace")
             .expect("hierarchical edit-in-place row");

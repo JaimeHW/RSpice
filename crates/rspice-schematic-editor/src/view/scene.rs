@@ -93,7 +93,7 @@ pub fn draw_content(
         SelectionWindow::from_band(
             view.editor.selection_rect.start,
             view.editor.selection_rect.current,
-            view.design.document.document_policy.selection_crossing,
+            view.editor.selection_crossing,
         )
     });
     let filter = view.selection_filter;
@@ -688,19 +688,23 @@ mod band_tests {
 
     /// One long wire, and the selection a release of `band` would make.
     fn drag(start: Point, current: Point) -> (usize, Selection) {
-        let mut document = SchematicDocument {
+        let document = SchematicDocument {
             wires: vec![Wire::segment(1, Point::new(0, 0), Point::new(200, 0))],
             ..SchematicDocument::default()
         };
-        document.document_policy.selection_crossing = SelectionCrossingPolicy::Directional;
+        // A fresh session selects by drag direction.
         let mut editor = EditorSession::default();
+        assert_eq!(
+            editor.selection_crossing,
+            SelectionCrossingPolicy::Directional
+        );
         editor.selection_rect.start_at(start);
         editor.selection_rect.update(current);
         let mut released = Selection::default();
         SchematicSymbolContext::default().select_in_rect(
             &document,
             &mut released,
-            SelectionWindow::from_band(start, current, document.document_policy.selection_crossing),
+            SelectionWindow::from_band(start, current, editor.selection_crossing),
             false,
         );
         (painted_selected(&document, &editor), released)

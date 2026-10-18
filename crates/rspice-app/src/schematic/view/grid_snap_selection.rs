@@ -87,11 +87,7 @@ pub(crate) fn snap_selection_to_grid(
                 Snap::Probe(id, delta) => schematic.translate_layout_probe(id, delta),
             }
         }
-        let automatic_junctions = schematic
-            .document()
-            .document_policy
-            .wire_junctions
-            .automatic_junctions();
+        let automatic_junctions = schematic.session.editor.automatic_junctions;
         schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
         Ok::<usize, rspice_design::schematic::movement::MoveSelectionError>(snaps.len())
     });

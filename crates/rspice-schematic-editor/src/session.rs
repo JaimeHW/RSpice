@@ -35,7 +35,8 @@ use self::{
     wire::WireDrawing,
 };
 use rspice_design::schematic::{
-    document::SchematicDocument, rotation::Rotation, selection::Selection,
+    document::SchematicDocument, document_policy::SelectionCrossingPolicy, rotation::Rotation,
+    selection::Selection,
 };
 use rspice_design_model::Point;
 
@@ -144,6 +145,16 @@ pub struct EditorSession {
     /// Used for drag-to-select operations
     pub selection_rect: selection::SelectionRect,
 
+    /// Whether an edit that makes a T-join or a crossing on a pin adds its
+    /// junction dot. Personal editing behaviour: the workbench copies it from
+    /// Preferences into the open schematic every frame (runtime state, not
+    /// persisted).
+    pub automatic_junctions: bool,
+
+    /// Which objects a drag box selects. Personal editing behaviour, copied
+    /// from Preferences like [`Self::automatic_junctions`].
+    pub selection_crossing: SelectionCrossingPolicy,
+
     /// Net highlighting state (runtime state, not persisted)
     /// Tracks which wires are part of the highlighted net
     pub net_highlight: net_highlight::NetHighlightState,
@@ -181,6 +192,8 @@ impl Default for EditorSession {
             zoom_box: Default::default(),
             snap_engine: Default::default(),
             selection_rect: Default::default(),
+            automatic_junctions: true,
+            selection_crossing: SelectionCrossingPolicy::default(),
             net_highlight: Default::default(),
             canvas_cache: Default::default(),
         }

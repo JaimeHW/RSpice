@@ -200,12 +200,7 @@ fn apply(
             if !owns_operation(state, ctx, operation_id, None) {
                 return;
             }
-            let automatic_junctions = state
-                .schematic
-                .document()
-                .document_policy
-                .wire_junctions
-                .automatic_junctions();
+            let automatic_junctions = state.schematic.session.editor.automatic_junctions;
             let moved = state.schematic.session.editor.selection.components.clone();
             with_active_wire_topology(state, |schematic, scope| {
                 // A pin dropped inside a wire is connected there; the vertex
@@ -236,11 +231,7 @@ fn apply(
             let window = SelectionWindow::from_band(
                 start,
                 current,
-                state
-                    .schematic
-                    .document()
-                    .document_policy
-                    .selection_crossing,
+                state.schematic.session.editor.selection_crossing,
             );
             select_in_rect_on_active_sheet(state, symbols, window, additive);
         }

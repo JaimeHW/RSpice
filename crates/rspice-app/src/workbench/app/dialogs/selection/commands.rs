@@ -260,12 +260,7 @@ impl AppState {
         if refuse_read_only(self) {
             return false;
         }
-        let automatic_junctions = self
-            .schematic
-            .document()
-            .document_policy
-            .wire_junctions
-            .automatic_junctions();
+        let automatic_junctions = self.schematic.session.editor.automatic_junctions;
         // The undo step opens with every sheet present; the cell view's
         // other sheets, which share these coordinates, step out of reach
         // only while this one's wires are joined.
@@ -314,13 +309,7 @@ fn delete_on_active_sheet(state: &mut AppState) -> bool {
     state.schematic.begin_operation("delete selection");
     with_active_wire_topology(state, |schematic, scope| {
         schematic.delete_selection();
-        if removes_conductors
-            && schematic
-                .document()
-                .document_policy
-                .wire_junctions
-                .automatic_junctions()
-        {
+        if removes_conductors && schematic.session.editor.automatic_junctions {
             schematic.update_wire_junctions(scope);
         }
     });

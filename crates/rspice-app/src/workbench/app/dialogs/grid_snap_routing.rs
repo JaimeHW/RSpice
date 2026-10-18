@@ -223,7 +223,9 @@ fn canonical_routing_mode(requested: WireRoutingMode, current: WireRoutingMode) 
     }
 }
 
-const fn routing_style(mode: WireRoutingMode) -> SchematicWireRoutingStyle {
+pub(in crate::workbench) const fn routing_style(
+    mode: WireRoutingMode,
+) -> SchematicWireRoutingStyle {
     match mode {
         WireRoutingMode::HorizontalFirst | WireRoutingMode::VerticalFirst => {
             SchematicWireRoutingStyle::Orthogonal

@@ -181,12 +181,7 @@ impl SchematicState {
             self.split_wires_at_t_junction(joint, scope);
         }
         self.split_wires_under_pins(&selection.components, &mut terminal_points_for, scope);
-        let automatic_junctions = self
-            .design
-            .document()
-            .document_policy
-            .wire_junctions
-            .automatic_junctions();
+        let automatic_junctions = self.session.editor.automatic_junctions;
         self.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
     }
 }

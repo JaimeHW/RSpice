@@ -24,6 +24,7 @@ pub(in crate::workbench) mod problems_view;
 mod rule_deck;
 pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
+pub(in crate::workbench) mod schematic_preferences;
 pub(in crate::workbench) mod session;
 pub(in crate::workbench) mod sim_setup;
 #[cfg(test)]

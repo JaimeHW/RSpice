@@ -81,12 +81,7 @@ impl SchematicState {
             return false;
         }
         self.session.is_dirty = true;
-        let automatic_junctions = self
-            .design
-            .document()
-            .document_policy
-            .wire_junctions
-            .automatic_junctions();
+        let automatic_junctions = self.session.editor.automatic_junctions;
         self.connect_moved_pins(&selection.components, &mut terminal_points_for, scope);
         self.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
         true

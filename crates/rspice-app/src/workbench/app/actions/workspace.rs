@@ -58,10 +58,9 @@ fn is_schematic_like(view_type: ViewType) -> bool {
 }
 
 fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> SchematicState {
-    let mut schematic = state
-        .workspace
-        .clone_schematic_editor(&reference.key())
-        .unwrap_or_else(|| state.new_schematic_document());
+    let existing = state.workspace.clone_schematic_editor(&reference.key());
+    let created = existing.is_none();
+    let mut schematic = existing.unwrap_or_else(|| state.new_schematic_document());
     // Workspace buffers round-trip through serde, which skips the runtime
     // ID counter and name counters: without recalculation a freshly placed
     // component reuses an existing ID and selection matches both.
@@ -69,8 +68,19 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
     state.ui.schematic_snap.grid_size = schematic.document().grid_size;
-    schematic.session.editor.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
-    schematic.session.editor.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
+    schematic.session.editor.automatic_junctions = state.ui.preferences.automatic_junction_dots();
+    schematic.session.editor.selection_crossing = state.ui.preferences.selection_crossing();
+    if created {
+        // A new schematic starts from the routing preference, and the
+        // session's routing control follows it.
+        let routing_mode = schematic.session.editor.wire_drawing.routing_mode;
+        state.ui.schematic_routing_mode = routing_mode;
+        state.ui.schematic_visibility.wire_routing =
+            crate::workbench::app::dialogs::grid_snap_routing::routing_style(routing_mode);
+    } else {
+        schematic.session.editor.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
+        schematic.session.editor.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
+    }
     // Views from read-only libraries open for inspection, never for edit —
     // the docbar banner explains and every edit path checks this flag.
     schematic.session.read_only = state.workbench.safe_mode.project_read_only()
@@ -155,7 +165,7 @@ impl AppState {
     pub(crate) fn new_schematic_document(&self) -> SchematicState {
         use crate::state::{
             NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy,
-            SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy,
+            SchematicGridPitch, WireJunctionPolicy,
         };
         use crate::workbench::ChoicePreference;
 
@@ -169,20 +179,16 @@ impl AppState {
             .get(preferences.choice(ChoicePreference::SchematicGrid))
             .copied()
             .expect("schematic grid preference is normalized before use");
-        document.document_policy.wire_junctions =
-            match preferences.choice(ChoicePreference::WireJunctionBehavior) {
-                0 => WireJunctionPolicy::OrthogonalAutomatic,
-                1 => WireJunctionPolicy::OrthogonalManual,
-                2 => WireJunctionPolicy::AnyAngle,
-                _ => unreachable!("wire policy is normalized before use"),
-            };
-        document.document_policy.selection_crossing =
-            match preferences.choice(ChoicePreference::SelectionCrossingPolicy) {
-                0 => SelectionCrossingPolicy::Directional,
-                1 => SelectionCrossingPolicy::EnclosedOnly,
-                2 => SelectionCrossingPolicy::Intersecting,
-                _ => unreachable!("selection policy is normalized before use"),
-            };
+        // Whether the schematic may route at an angle is the document's; the
+        // junction dots and drag selection the editor applies come from
+        // Preferences live, so the document's copies of those are left alone.
+        document.document_policy.wire_junctions = if preferences.any_angle_wire_routing() {
+            WireJunctionPolicy::AnyAngle
+        } else if preferences.automatic_junction_dots() {
+            WireJunctionPolicy::OrthogonalAutomatic
+        } else {
+            WireJunctionPolicy::OrthogonalManual
+        };
         document.document_policy.net_naming =
             match preferences.choice(ChoicePreference::NetNamingPolicy) {
                 0 => NetNamingPolicy::StrictCaseSensitive,
@@ -206,7 +212,11 @@ impl AppState {
         let mut schematic = SchematicState::from_document(document);
         schematic.session.editor.snap_engine = self.ui.schematic_snap.clone();
         schematic.reconcile_grid_pitch_runtime();
-        let routing_mode = self.ui.schematic_routing_mode;
+        schematic.session.editor.automatic_junctions = preferences.automatic_junction_dots();
+        schematic.session.editor.selection_crossing = preferences.selection_crossing();
+        // Routing comes from the preference, not from whatever the session
+        // last drew with.
+        let routing_mode = preferences.new_schematic_routing_mode(self.ui.schematic_routing_mode);
         schematic
             .session
             .editor

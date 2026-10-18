@@ -497,12 +497,7 @@ fn connect_pins_inside_wires(
         // A pin dropped onto a wire's end or onto another pin joins them
         // with no wire to split, and can still make a point where three
         // conductor ends meet: the dots follow the drawing either way.
-        if schematic
-            .document()
-            .document_policy
-            .wire_junctions
-            .automatic_junctions()
-        {
+        if schematic.session.editor.automatic_junctions {
             schematic.update_wire_junctions(scope);
         }
     });
@@ -846,12 +841,7 @@ fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionP
     }
 
     if let Some(junction_id) = active_junction_at(state, target) {
-        let automatic = state
-            .schematic
-            .document()
-            .document_policy
-            .wire_junctions
-            .automatic_junctions();
+        let automatic = state.schematic.session.editor.automatic_junctions;
         if automatic && dot_required_on_active_sheet(state, target) {
             return JunctionPlacementOutcome::Required(target);
         }

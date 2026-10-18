@@ -109,11 +109,7 @@ pub(super) fn commit_armed_move_selection(
             scope,
         );
         if matches!(movement, Ok(true)) {
-            let automatic_junctions = schematic
-                .document()
-                .document_policy
-                .wire_junctions
-                .automatic_junctions();
+            let automatic_junctions = schematic.session.editor.automatic_junctions;
             // A pin moved inside a wire is connected there and owns a vertex.
             // A pin moved off a pin it touched keeps the connection with a
             // wire, unless the user asked for connections to break.

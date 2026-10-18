@@ -28,6 +28,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     app.state.reconcile_schematic_drag(ctx, false);
+    app.state.apply_schematic_editing_preferences();
     reconcile_platform_full_screen(app);
     // Preflight's engine pass builds the run's decks off the UI thread, and
     // is finished, or stopped, on whichever frame finds it so, whatever that
@@ -651,6 +652,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     app.state.reconcile_schematic_drag(ctx, false);
+    app.state.apply_schematic_editing_preferences();
     reconcile_platform_full_screen(app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();

@@ -709,7 +709,6 @@ impl ChoicePreference {
             | Self::LayoutCoordinateDisplay
             | Self::SchematicGrid
             | Self::OperatingPointAnnotation
-            | Self::WireJunctionBehavior
             | Self::SelectionCrossingPolicy
             | Self::ConvergenceFailurePolicy
             | Self::CheckpointPolicy
@@ -750,7 +749,8 @@ impl ChoicePreference {
             | Self::LocalProjectEncryption
             | Self::DataResidency
             | Self::SchematicCursor => 1,
-            Self::InterfaceScale | Self::DefaultSolverPreset => 3,
+            // Junction dots and wire routing are one bit each.
+            Self::InterfaceScale | Self::DefaultSolverPreset | Self::WireJunctionBehavior => 3,
         }
     }
 
