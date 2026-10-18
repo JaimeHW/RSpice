@@ -315,6 +315,7 @@ fn stacked_body(
 ) {
     ScrollArea::vertical()
         .id_salt("drawing-sheet-setup-stacked")
+        .auto_shrink([false, true])
         .show(ui, |ui| {
             Frame::NONE
                 .fill(Tokens::get(ui.ctx()).color.bg_panel)

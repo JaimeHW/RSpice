@@ -109,14 +109,16 @@ pub(super) fn render_dialog(
                 // through Model Editor, which owns validation and revision
                 // history.
                 let mut body = source.as_str();
-                ScrollArea::both().show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut body)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(26),
-                    );
-                });
+                ScrollArea::both()
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut body)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(26),
+                        );
+                    });
             });
             match choice {
                 DialogChoice::Primary => {

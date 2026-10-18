@@ -1013,6 +1013,7 @@ fn import_body(ui: &mut Ui, transfer: &mut PresetTransferState) -> Option<Transf
     } else {
         ScrollArea::vertical()
             .id_salt("sheet-preset-import-candidates")
+            .auto_shrink([false, true])
             .max_height(260.0)
             .show(ui, |ui| {
                 Grid::new("sheet-preset-import-grid")
@@ -1180,6 +1181,7 @@ fn export_body(
     section_heading(ui, "Definitions");
     ScrollArea::vertical()
         .id_salt("sheet-preset-export-definitions")
+        .auto_shrink([false, true])
         .max_height(360.0)
         .show(ui, |ui| {
             Grid::new("sheet-preset-export-grid")

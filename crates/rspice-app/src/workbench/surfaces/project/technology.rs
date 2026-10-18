@@ -568,6 +568,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 }
                 ScrollArea::vertical()
                     .id_salt("project-technology-migration-preview")
+                    .auto_shrink([false, true])
                     .max_height(150.0)
                     .show(ui, |ui| {
                         for entry in &diff.entries {

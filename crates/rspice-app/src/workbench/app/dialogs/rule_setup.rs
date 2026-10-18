@@ -121,6 +121,7 @@ fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
     let tokens = Tokens::get(ui.ctx());
     ScrollArea::vertical()
         .id_salt("rule-setup-table")
+        .auto_shrink([false, true])
         .show(ui, |ui| {
             Grid::new("rule-setup-grid")
                 .num_columns(6)

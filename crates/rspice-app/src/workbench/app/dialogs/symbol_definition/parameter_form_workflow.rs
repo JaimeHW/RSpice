@@ -545,6 +545,7 @@ fn field_editor(
     let t = Tokens::get(ui.ctx());
     ScrollArea::vertical()
         .id_salt("parameter-form-field-editor")
+        .auto_shrink([false, true])
         .show(ui, |ui| {
             Grid::new("parameter-field-properties")
                 .num_columns(2)

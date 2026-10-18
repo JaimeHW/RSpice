@@ -722,6 +722,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         let row_height = 24.0;
         egui::ScrollArea::vertical()
             .id_salt("rspice.code.find-results")
+            .auto_shrink([false, true])
             .max_height(168.0)
             .show_rows(ui, row_height, matches.len(), |ui, rows| {
                 let show_document =

@@ -543,6 +543,7 @@ fn render_legal_privacy(ui: &mut egui::Ui) {
     section_heading(ui, "Product license");
     ScrollArea::vertical()
         .id_salt("help.legal-license")
+        .auto_shrink([false, true])
         .max_height(300.0)
         .show(ui, |ui| {
             ui.label(

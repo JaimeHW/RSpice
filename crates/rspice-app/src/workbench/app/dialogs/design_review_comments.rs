@@ -734,6 +734,7 @@ fn review_thread_detail(
     ui.separator();
     ScrollArea::vertical()
         .id_salt("design-review-thread-detail")
+        .auto_shrink([false, true])
         .max_height(240.0)
         .show(ui, |ui| {
             if review.messages.is_empty() {

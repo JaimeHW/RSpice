@@ -999,6 +999,7 @@ fn manager_body(
         }
         ScrollArea::vertical()
             .id_salt("engineering-columns")
+            .auto_shrink([false, true])
             .max_height(300.0)
             .show(&mut columns[0], |ui| {
                 for index in 0..view.columns.len() {

@@ -975,6 +975,7 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
             ui.add_space(8.0);
             ScrollArea::vertical()
                 .id_salt("workbench.project.library.audit-history.receipts")
+                .auto_shrink([false, true])
                 .max_height(360.0)
                 .show(ui, |ui| {
                     if receipts.is_empty() && publications.is_empty() {
@@ -1137,6 +1138,7 @@ fn show_library_edit_locks(ctx: &Context, state: &AppState) {
             ui.add_space(8.0);
             ScrollArea::vertical()
                 .id_salt("workbench.project.library.edit-locks.rows")
+                .auto_shrink([false, true])
                 .max_height(360.0)
                 .show(ui, |ui| {
                     let Some(snapshot) = snapshot else {
