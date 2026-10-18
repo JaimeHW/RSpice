@@ -54,6 +54,16 @@ impl<'a> DesignView<'a> {
         }
     }
 
+    /// The objects the active sheet draws, borrowed in authored order. Unlike
+    /// [`Self::objects_on_active_sheet`] it never copies an object, so a
+    /// per-frame query over a multi-sheet drawing allocates only the list.
+    pub fn visible_objects<'b, T>(&self, objects: &'b [T], id: impl Fn(&T) -> u64) -> Vec<&'b T> {
+        objects
+            .iter()
+            .filter(|object| self.object_is_visible(id(object)))
+            .collect()
+    }
+
     pub fn active_wire_at(&self, point: Point) -> Option<u64> {
         if let Some(cache) = self.canvas_cache {
             return cache

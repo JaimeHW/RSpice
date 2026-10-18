@@ -5,10 +5,7 @@ use super::{
     SchematicSymbolContext,
     drawing::ProbeVisualStatus,
     drawing_sheet::ActiveDrawingSheet,
-    sheet_visibility::{
-        active_sheet_has_objects, active_wire_at, object_is_on_active_sheet,
-        objects_on_active_sheet,
-    },
+    sheet_visibility::{active_sheet_has_objects, active_wire_at, object_is_on_active_sheet},
     viewport::Viewport,
 };
 use crate::schematic::bus_notations;
@@ -82,13 +79,11 @@ fn canvas_hover(
         ToolPointerAction::Probe(grid) => active_wire_at(state, grid)
             .map(PointerTarget::Wire)
             .or_else(|| {
-                let components = objects_on_active_sheet(
-                    state,
-                    &state.schematic.document().components,
-                    |item| item.id,
-                );
+                let components = view
+                    .design
+                    .visible_objects(&state.schematic.document().components, |item| item.id);
                 symbol_context
-                    .component_at_resolved_symbol(components.as_ref(), grid)
+                    .component_at_resolved_symbol(&components, grid)
                     .map(PointerTarget::Component)
             }),
         _ => None,

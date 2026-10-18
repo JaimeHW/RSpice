@@ -195,10 +195,12 @@ fn collect_targets(
         }
     }
     if filter.instances {
-        let components = view.objects_on_active_sheet(&view.document.components, |item| item.id);
+        // Borrowed: a hover frame picks over every instance on the sheet,
+        // and copying them was a third of the pick's cost.
+        let components = view.visible_objects(&view.document.components, |item| item.id);
         targets.extend(
             hits(
-                components.as_ref(),
+                &components,
                 all,
                 |item| item.id,
                 |rest| symbol_context.component_at_resolved_symbol(rest, hit.grid),
@@ -670,5 +672,88 @@ mod tests {
             ]
         );
         assert_eq!(click(&document, &zoom, pointer, true), all.first().copied());
+    }
+
+    /// On a drawing of two sheets, the instances on the sheet in view are
+    /// picked topmost first, and one on the other sheet never is, even
+    /// where it lies on top of them.
+    #[test]
+    fn an_instance_on_another_sheet_is_never_picked() {
+        use rspice_design_model::design_management::{
+            SheetCatalog, SheetDefinition, SheetPortPolicy, SheetTemplate,
+        };
+
+        let document = SchematicDocument {
+            components: (1..=3)
+                .map(|id| Component::new(id, ComponentType::Resistor, Point::new(0, 0)))
+                .collect(),
+            ..Default::default()
+        };
+        let mut catalog = SheetCatalog::default();
+        let mut sheets = Vec::new();
+        for page in [1, 2] {
+            sheets.push(
+                catalog
+                    .create_sheet(
+                        SheetDefinition {
+                            name: format!("Sheet {page}"),
+                            template: SheetTemplate::AnalogSchematic,
+                            port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                            explicit_page_number: Some(page),
+                        },
+                        sheets.last().copied(),
+                    )
+                    .expect("the sheet is created"),
+            );
+        }
+        catalog
+            .assign_objects(catalog.revision(), sheets[1], [3])
+            .expect("the instance moves to the second sheet");
+        catalog
+            .set_active(sheets[0])
+            .expect("the first sheet opens");
+        let view = DesignView {
+            sheet_catalog: Some(&catalog),
+            ..view(&document)
+        };
+        let zoom = viewport(1.0);
+        let query = PointerQuery {
+            hit: PointerHit::new(Point::new(0, 0), Point::new(0, 0)),
+            radius: 6,
+            position: zoom.schematic_to_screen(Point::new(0, 0)),
+        };
+        let pick = |all: bool| {
+            let ctx = egui::Context::default();
+            let symbols = SchematicSymbolContext::default();
+            if all {
+                pointer_targets_all(
+                    &view,
+                    query,
+                    SchematicSelectionFilter::default(),
+                    &symbols,
+                    &ctx,
+                    &zoom,
+                    String::new,
+                )
+            } else {
+                pointer_target(
+                    &view,
+                    query,
+                    SchematicSelectionFilter::default(),
+                    &symbols,
+                    &ctx,
+                    &zoom,
+                    String::new,
+                )
+                .into_iter()
+                .collect()
+            }
+        };
+
+        assert_eq!(pick(false), vec![PointerTarget::Component(2)]);
+        assert_eq!(
+            pick(true),
+            vec![PointerTarget::Component(2), PointerTarget::Component(1)]
+        );
     }
 }

@@ -14,6 +14,7 @@ use rspice_design::{
     symbol_resolver::SymbolResolver,
 };
 use rspice_design_model::Point;
+use std::borrow::Borrow;
 use std::collections::HashMap;
 
 /// One drawn object, as [`SchematicSymbolContext::bounds_where`] offers it to
@@ -127,29 +128,36 @@ impl SchematicSymbolContext {
         (min.x, min.y, max.x, max.y)
     }
 
-    pub fn component_at_resolved_terminal(
+    /// The topmost of `components` with a terminal at `pos`. The components
+    /// may be owned or borrowed, so a caller narrowing a document's
+    /// components to one sheet need not copy them.
+    pub fn component_at_resolved_terminal<C: Borrow<Component>>(
         &self,
-        components: &[Component],
+        components: &[C],
         pos: Point,
     ) -> Option<u64> {
         // Topmost first: instances paint in document order, so the last one
         // is the one on top.
         components
             .iter()
+            .map(<C as Borrow<Component>>::borrow)
             .rev()
             .find(|component| self.terminal_points(component).contains(&pos))
             .map(|component| component.id)
     }
 
-    pub fn component_at_resolved_symbol(
+    /// The topmost of `components` with a terminal at `pos`, else the topmost
+    /// whose drawn extent holds it.
+    pub fn component_at_resolved_symbol<C: Borrow<Component>>(
         &self,
-        components: &[Component],
+        components: &[C],
         pos: Point,
     ) -> Option<u64> {
         self.component_at_resolved_terminal(components, pos)
             .or_else(|| {
                 components
                     .iter()
+                    .map(<C as Borrow<Component>>::borrow)
                     .rev()
                     .map(|component| (component.id, self.component_bounds(component)))
                     .find(|(_, (min, max))| {
