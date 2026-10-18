@@ -214,7 +214,7 @@ fn checkpoint_age(checkpoint: &std::path::Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::workbench::app::RSpiceApp;
+    use super::RSpiceApp;
 
     /// A checkpoint that could not be written is said when it happens: the
     /// user is relying on it, and a bell record is found too late.
