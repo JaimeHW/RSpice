@@ -256,7 +256,7 @@ impl Fixture {
                 *origin = ui.available_rect_before_wrap().min;
                 if app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
                 {
-                    crate::schematic::symbol_editor::show(ui, &mut app.state);
+                    crate::schematic::symbol_editor::show(ui, &mut app.state, None);
                 } else {
                     crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
                 }

@@ -66,6 +66,17 @@ impl AppState {
             bind_canvas_source, resume_canvas_source,
         };
 
+        // Leaving the symbol by any route but the session's own exit ends an
+        // in-place edit; what it changed stays, as any symbol edit does.
+        if self
+            .ui
+            .symbol
+            .in_place
+            .as_ref()
+            .is_some_and(|session| session.symbol != self.workspace.content.active_view)
+        {
+            self.ui.symbol.in_place = None;
+        }
         let source = self.symbol_editor_request_source();
         let is_symbol = self.workspace.content.active_view_type() == crate::state::ViewType::Symbol;
         let open_views = &self.workspace.content.open_views;
@@ -344,6 +355,18 @@ impl AppState {
         let Ok(base) = self.load_active_symbol_document() else {
             return;
         };
+        let key = self.workspace.content.active_key();
+        // Edited in place, the parent's wires are in view and a pin is moved
+        // against them: one left behind is the open-pin mark's to show, not
+        // a wire the edit drags along unseen.
+        if self.symbol_in_place().is_some() {
+            let parents = Vec::new();
+            self.ui
+                .symbol
+                .history
+                .begin_parent_edit(key, SymbolParentEdit { base, parents });
+            return;
+        }
         let reference = self.workspace.content.active_view.clone();
         let content = &self.workspace.content;
         let mut parents: Vec<SymbolParentWiring> = content
@@ -367,7 +390,6 @@ impl AppState {
             &reference,
             &base,
         ));
-        let key = content.active_key();
         self.ui
             .symbol
             .history

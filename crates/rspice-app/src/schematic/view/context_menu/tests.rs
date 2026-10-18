@@ -183,10 +183,11 @@ fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<Command>)> 
 }
 
 /// Each target's menu, row for row and rule for rule. Only the
-/// instance-master slot differs: an instance's three master rows, a Verilog-A
+/// instance-master slot differs: an instance's four master rows, a Verilog-A
 /// instance's "Open Verilog-A view" in place of Descend, and the empty
-/// canvas's one verb, "New Verilog-A device…", in place of all three, with
-/// the zoom box after Fit. The row and rule counts are the ones
+/// canvas's one verb, "New Verilog-A device…", in place of all four, with
+/// the zoom box after Fit and the sheet's own symbol after Create hierarchy.
+/// The row and rule counts are the ones
 /// `rspice-schematic-editor`'s geometry test measures against the 635 px
 /// ceiling: 20 + 4 (625 px), 19 + 4 (598 px).
 #[test]
@@ -209,7 +210,6 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             "Create hierarchy from selection…",
             Some(Command::CreateHierarchy),
         ),
-        ("Create symbol from schematic ports…", None),
         ("Sheet properties", Some(Command::SheetProperties)),
         ("Fit schematic content", Some(Command::FitSchematicContent)),
         ("Show in netlist", Some(Command::ShowInNetlist)),
@@ -227,6 +227,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             .collect::<Vec<_>>()
     };
     let master_rows = [
+        ("Edit symbol in place", Some(Command::EditSymbolInPlace)),
         (
             "Update instance interface",
             Some(Command::UpdateInstanceInterface),
@@ -248,6 +249,12 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         .position(|(label, _)| *label == "Fit schematic content")
         .expect("the canvas menu fits the content");
     expected.insert(fit + 1, ("Zoom box", Some(Command::ZoomBox)));
+    // A symbol from the sheet's ports is the sheet's verb.
+    let hierarchy = expected
+        .iter()
+        .position(|(label, _)| *label == "Create hierarchy from selection…")
+        .expect("the canvas menu creates hierarchy");
+    expected.insert(hierarchy + 1, ("Create symbol from schematic ports…", None));
     assert_eq!(catalog_of(&canvas), expected);
     assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (19, 4));
 
@@ -265,7 +272,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         let entries = menu_entries(&resistor, target);
         assert_eq!(
             catalog_of(&entries),
-            menu(&[descend, master_rows[0], master_rows[1]]),
+            menu(&[descend, master_rows[0], master_rows[1], master_rows[2]]),
             "{target:?}"
         );
         assert_eq!(
@@ -279,7 +286,12 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     let entries = menu_entries(&veriloga, ContextTarget::Component(id));
     assert_eq!(
         catalog_of(&entries),
-        menu(&[open_veriloga, master_rows[0], master_rows[1]])
+        menu(&[
+            open_veriloga,
+            master_rows[0],
+            master_rows[1],
+            master_rows[2]
+        ])
     );
     assert_eq!(
         (catalog_of(&entries).len(), separators_in(&entries)),

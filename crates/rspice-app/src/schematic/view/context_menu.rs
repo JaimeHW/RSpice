@@ -164,6 +164,12 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         shortcut_command: Some(Command::DescendHierarchyDirect),
     }),
     ContextEntry::Command(ContextCommand {
+        action: ContextAction::EditSymbolInPlace,
+        icon: ContextIcon::Hierarchy,
+        label: "Edit symbol in place",
+        shortcut_command: Some(Command::EditSymbolInPlace),
+    }),
+    ContextEntry::Command(ContextCommand {
         action: ContextAction::NewVerilogADevice,
         icon: ContextIcon::VerilogA,
         label: "New Verilog-A device…",
@@ -393,8 +399,14 @@ fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
     match action {
         ContextAction::DescendHierarchy => subject == MenuSubject::Object,
         ContextAction::OpenVerilogAView => subject == MenuSubject::VerilogAInstance,
-        ContextAction::NewVerilogADevice | ContextAction::ZoomBox => subject == MenuSubject::Canvas,
-        ContextAction::UpdateInstanceInterface | ContextAction::ReplaceInstance => {
+        // A symbol from the sheet's own ports is the sheet's verb, so it is
+        // on the sheet's menu; an instance's menu offers its symbol instead.
+        ContextAction::NewVerilogADevice
+        | ContextAction::ZoomBox
+        | ContextAction::CreateSymbolFromPorts => subject == MenuSubject::Canvas,
+        ContextAction::UpdateInstanceInterface
+        | ContextAction::ReplaceInstance
+        | ContextAction::EditSymbolInPlace => {
             matches!(subject, MenuSubject::Object | MenuSubject::VerilogAInstance)
         }
         _ => true,
@@ -407,11 +419,12 @@ fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
 /// cannot be taken right now stays where it is, disabled, and says why. What is
 /// left out is a verb that could never apply to the *kind* of object the menu
 /// is about. Only the instance-master slot varies. An instance offers its
-/// master's three rows; a Verilog-A instance's Descend row opens its module's
+/// master's four rows; a Verilog-A instance's Descend row opens its module's
 /// view; the empty canvas, which has no master, offers a new Verilog-A device
-/// in their place. A placed source gets the stimulus-library group instead of
-/// the master rows, which is also what lets the group in without turning the
-/// menu into a scroller. A rule with nothing left under it goes too.
+/// in their place, and a symbol from its own ports. A placed source gets the
+/// stimulus-library group instead of the master rows, which is also what lets
+/// the group in without turning the menu into a scroller. A rule with nothing
+/// left under it goes too.
 fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
     let subject = menu_subject(state, target);
     let mut entries: Vec<ContextEntry> = Vec::with_capacity(CONTEXT_ENTRIES.len());
@@ -1201,6 +1214,10 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             state.selected_veriloga_source().is_some(),
             "Select one Verilog-A instance whose view owns its module's source",
         ),
+        ContextAction::EditSymbolInPlace => match state.selected_symbol_in_place_target() {
+            Ok(_) => (true, ""),
+            Err(refusal) => (false, refusal.sentence()),
+        },
         ContextAction::NewVerilogADevice => (
             new_veriloga_device_available(state),
             "Make a writable design library available",
@@ -1343,6 +1360,9 @@ fn execute_context_action(
         }
         ContextAction::DescendHierarchy | ContextAction::OpenVerilogAView => {
             state.open_selected_instance_master();
+        }
+        ContextAction::EditSymbolInPlace => {
+            state.edit_selected_symbol_in_place();
         }
         ContextAction::NewVerilogADevice => {
             open_new_veriloga_device_form(state);

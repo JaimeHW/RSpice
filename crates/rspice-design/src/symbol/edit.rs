@@ -177,6 +177,12 @@ impl SymbolHistory {
     pub fn finish_redo(&mut self, key: String, current: SymbolDocumentSnapshot) {
         self.undo_stacks.entry(key).or_default().push(current);
     }
+
+    /// Forget the edits waiting to be redone, for edits the author threw
+    /// away rather than undid.
+    pub fn discard_redo(&mut self, key: &str) {
+        self.redo_stacks.remove(key);
+    }
 }
 
 /// Where each pin's terminal moved to, keyed by the name it had before.

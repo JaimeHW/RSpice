@@ -552,6 +552,11 @@ const CANCEL: &[ShortcutBinding] = &[primary(
     chord(Key::Escape, false, false, false, "Escape"),
     ALL,
 )];
+// Return leaves an in-place symbol edit, as Esc does once nothing is in flight.
+const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
+    chord(Key::Enter, false, false, false, "Enter"),
+    ALL,
+)];
 // Paging through the sheets of one drawing is what an unmodified Page
 // Up/Page Down means on an engineering canvas. The document strip's browser
 // alternates are Ctrl+Alt+Page Up/Down, so neither chord is shadowed.
@@ -800,6 +805,7 @@ impl Command {
             Self::AscendHierarchy
             | Self::DescendHierarchy
             | Self::DescendHierarchyDirect
+            | Self::EditSymbolInPlace
             | Self::ShowInNetlist
             | Self::SheetProperties
             | Self::SheetFormatManager
@@ -856,7 +862,8 @@ impl Command {
             | Self::SymbolRotatePin
             | Self::SymbolMirrorPin
             | Self::SymbolUpdatePinsFromContract
-            | Self::SymbolSave => ShortcutContext::SymbolCanvas,
+            | Self::SymbolSave
+            | Self::ExitSymbolInPlace => ShortcutContext::SymbolCanvas,
             Self::ToggleLinkedCursors => ShortcutContext::ResultsWorkspace,
             Self::EditSpecifications | Self::VerificationPage(_) => {
                 ShortcutContext::VerificationWorkspace
@@ -1010,6 +1017,8 @@ impl Command {
             Self::SymbolMirrorPin => SYMBOL_MIRROR_PIN,
             Self::SymbolUpdatePinsFromContract => NONE,
             Self::SymbolSave => NONE,
+            Self::EditSymbolInPlace => NONE,
+            Self::ExitSymbolInPlace => EXIT_SYMBOL_IN_PLACE,
             Self::Place(crate::state::ComponentType::Resistor) => PLACE_RESISTOR,
             Self::Place(crate::state::ComponentType::Capacitor) => PLACE_CAPACITOR,
             Self::Place(crate::state::ComponentType::Inductor) => PLACE_INDUCTOR,
@@ -1295,6 +1304,12 @@ impl Command {
             }
             Self::DescendHierarchy => "select one hierarchical instance",
             Self::DescendHierarchyDirect => "select one hierarchical or Verilog-A instance",
+            Self::EditSymbolInPlace => app
+                .state
+                .selected_symbol_in_place_target()
+                .err()
+                .map_or("select one instance", |refusal| refusal.reason()),
+            Self::ExitSymbolInPlace => "no symbol is being edited in place",
             Self::ShowInNetlist if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
             }

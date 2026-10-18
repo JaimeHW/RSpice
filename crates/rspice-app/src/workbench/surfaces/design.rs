@@ -36,7 +36,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             );
             paint_live_cursors(ui, app, content_rect);
         }
-        ViewType::Symbol => crate::schematic::symbol_editor::show(ui, &mut app.state),
+        ViewType::Symbol => {
+            crate::schematic::symbol_editor::show(ui, &mut app.state, app.symbol_library.as_ref())
+        }
         ViewType::Layout => layout_editor::show(ui, app),
         ViewType::VerilogA => super::veriloga::show_in_design(ui, app),
         ViewType::Spice | ViewType::Verilog => source_reference_document(ui, app, view_type),
@@ -188,7 +190,9 @@ impl BreadcrumbCrumb {
 
 fn breadcrumb(ctx: &Context, state: &mut AppState, content_rect: Rect) {
     let t = Tokens::get(ctx);
-    let crumbs = hierarchy_breadcrumb_segments(state);
+    let in_place = symbol_in_place_breadcrumb_segments(state);
+    let leaves_in_place = in_place.is_some();
+    let crumbs = in_place.unwrap_or_else(|| hierarchy_breadcrumb_segments(state));
     let maximum_frame_width = (content_rect.width() * 0.5 - 16.0).max(80.0);
     let mut focused_level = None;
 
@@ -225,9 +229,37 @@ fn breadcrumb(ctx: &Context, state: &mut AppState, content_rect: Rect) {
                 });
         });
 
-    if let Some(level) = focused_level {
-        state.focus_workspace_breadcrumb(level);
+    match focused_level {
+        // A level of the parent is a way out of the in-place edit, which
+        // asks first when it holds unsaved edits.
+        Some(level) if leaves_in_place => {
+            state.request_symbol_in_place_exit(crate::workbench::SymbolInPlaceExit::Level(level));
+        }
+        Some(level) => state.focus_workspace_breadcrumb(level),
+        None => {}
     }
+}
+
+/// The parent's whole occurrence path, then the instance whose symbol is
+/// edited in place and the symbol view, while one is.
+fn symbol_in_place_breadcrumb_segments(state: &AppState) -> Option<Vec<BreadcrumbCrumb>> {
+    let session = state.symbol_in_place()?;
+    let occurrence = state
+        .workspace
+        .content
+        .open_views
+        .iter()
+        .find(|open| open.reference == session.parent)
+        .map(|open| open.occurrence.clone())
+        .unwrap_or_else(|| DocumentOccurrence::rooted(session.parent.clone()));
+    let mut crumbs = vec![BreadcrumbCrumb::label_only(occurrence.root.library.clone())];
+    crumbs.extend((0..occurrence.depth()).map(|level| occurrence_level_crumb(&occurrence, level)));
+    crumbs.push(BreadcrumbCrumb::label_only(format!(
+        "{} \u{00b7} {}",
+        session.instance_name, session.symbol.cell
+    )));
+    crumbs.push(BreadcrumbCrumb::label_only(session.symbol.view.clone()));
+    Some(crumbs)
 }
 
 fn breadcrumb_separator(ui: &mut Ui, t: &Tokens) {

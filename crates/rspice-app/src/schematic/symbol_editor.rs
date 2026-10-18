@@ -1,5 +1,6 @@
 //! Symbol view surface.
 
+mod in_place;
 mod interaction;
 
 #[cfg(test)]
@@ -7,6 +8,7 @@ mod tests;
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
+use super::symbols::SymbolLibrary;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{PortSpec, SymbolDocument, SymbolEditorMetadata};
 use crate::ui::theme;
@@ -51,7 +53,9 @@ fn symbol_canvas_accessibility_label(
     )
 }
 
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+/// The symbol canvas: in its own view, or in place on a parent schematic
+/// whose built-in part symbols `symbol_library` draws.
+pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLibrary>) {
     let ports = state.active_symbol_ports();
     let mut document = match state.load_active_symbol_document() {
         Ok(document) => document,
@@ -84,7 +88,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .symbol
         .history
         .is_dirty(&state.workspace.content.active_key());
-    surface::unpublished_changes_strip(ui, dirty);
+    // Edited in place, the canvas is the parent sheet: a strip arriving with
+    // the first edit would shift the whole sheet under the pointer mid-drag.
+    // Leaving with unsaved edits asks instead.
+    if state.symbol_in_place().is_none() {
+        surface::unpublished_changes_strip(ui, dirty);
+    }
     if document.body.is_empty()
         && !ports.is_empty()
         && let Some(request) =
@@ -109,24 +118,35 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let canvas_size = vec2(ui.available_width().max(180.0), height);
         let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
         let navigation = state.ui.preferences.canvas_navigation();
-        let viewport = update_viewport(
-            ui,
-            &mut state.ui.symbol.editor,
-            rect,
-            &document,
-            &response,
-            navigation,
-        );
+        // Edited in place, the canvas frames the parent sheet and the symbol
+        // stands where its instance does.
+        let in_place = in_place::frame(ui, state, rect, &response);
+        let viewport = match &in_place {
+            Some(frame) => frame.symbol,
+            None => update_viewport(
+                ui,
+                &mut state.ui.symbol.editor,
+                rect,
+                &document,
+                &response,
+                navigation,
+            ),
+        };
         interaction::handle_canvas(state, &mut document, &mut editor, viewport, &response);
-        draw_canvas(
-            ui,
-            viewport,
-            &document,
-            &editor,
-            &ports,
-            &state.ui.symbol.editor,
-            &state.workspace.content.active_view,
-        );
+        match &in_place {
+            Some(frame) => {
+                in_place::draw(ui, state, frame, &document, &editor, &ports, symbol_library);
+            }
+            None => draw_canvas(
+                ui,
+                viewport,
+                &document,
+                &editor,
+                &ports,
+                &state.ui.symbol.editor,
+                &state.workspace.content.active_view,
+            ),
+        }
         // The canvas takes keyboard focus on every press for its shortcuts, so
         // only focus that Tab moved here shows the ring: a press never frames
         // the drawing. Painted after the artwork so the ring is not drawn over.
@@ -160,6 +180,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // both name the view this canvas is drawing.
     surface::canvas_check_note(ui.ctx(), &document, &ports, stage);
     show_save_symbol_dialog(ui.ctx(), state, &document, &mut editor, &ports);
+    in_place::show_leaving_question(ui.ctx(), state);
 }
 
 fn show_save_symbol_dialog(
@@ -195,6 +216,7 @@ fn show_save_symbol_dialog(
                         LogSource::Studio,
                         format!("Saved symbol revision {revision}"),
                     );
+                    state.symbol_in_place_saved();
                 }
                 Err(error) => state.ui.symbol.editor.save_error = Some(error),
             }
@@ -202,6 +224,7 @@ fn show_save_symbol_dialog(
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             state.ui.symbol.editor.save_dialog_open = false;
             state.ui.symbol.editor.save_error = None;
+            state.symbol_in_place_save_cancelled();
         }
         DialogChoice::Secondary | DialogChoice::None => {}
     }

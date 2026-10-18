@@ -72,6 +72,8 @@ pub enum ContextAction {
     /// A Verilog-A instance's master is a module, not a schematic, and has no
     /// occurrences to descend into: this opens the cell view instead.
     OpenVerilogAView,
+    /// Edit the instance's symbol master where the instance stands.
+    EditSymbolInPlace,
     /// The empty canvas's verb in the instance-master slot.
     NewVerilogADevice,
     UpdateInstanceInterface,

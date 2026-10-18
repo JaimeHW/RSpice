@@ -186,6 +186,11 @@ pub enum Command {
     SymbolMirrorPin,
     SymbolUpdatePinsFromContract,
     SymbolSave,
+    /// Edit the selected instance's symbol master where the instance stands
+    /// on its parent schematic.
+    EditSymbolInPlace,
+    /// Leave an in-place symbol edit for the parent schematic.
+    ExitSymbolInPlace,
     Place(ComponentType),
     RotateSelection,
     RotateSelectionCounterClockwise,
@@ -663,6 +668,14 @@ impl Command {
                 "Design",
             ),
             Self::SymbolSave => spec("save-symbol", "Validate and save symbol", "Design"),
+            Self::EditSymbolInPlace => {
+                spec("edit-symbol-in-place", "Edit symbol in place", "Design")
+            }
+            Self::ExitSymbolInPlace => spec(
+                "exit-symbol-in-place",
+                "Return to parent schematic",
+                "Design",
+            ),
             Self::Place(ComponentType::Resistor) => {
                 spec("place-resistor", "Place resistor", "Design")
             }
@@ -1310,6 +1323,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SymbolMirrorPin,
     Command::SymbolUpdatePinsFromContract,
     Command::SymbolSave,
+    Command::EditSymbolInPlace,
+    Command::ExitSymbolInPlace,
     Command::Place(ComponentType::Resistor),
     Command::Place(ComponentType::Capacitor),
     Command::Place(ComponentType::Inductor),

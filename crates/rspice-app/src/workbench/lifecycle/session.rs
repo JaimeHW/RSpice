@@ -174,6 +174,59 @@ pub use rspice_schematic_editor::symbol_editor::session::{
 pub struct SymbolUiState {
     pub editor: SymbolEditorSession,
     pub history: SymbolHistory,
+    /// The symbol being edited in place on a parent schematic, if any.
+    pub in_place: Option<Box<SymbolInPlace>>,
+}
+
+/// A symbol edited in place on the schematic that places one of its
+/// instances.
+///
+/// The symbol view is the open document, so its tools, inspector, undo and
+/// save are the symbol editor's own. This records what the canvas needs to
+/// draw the symbol where the instance stands, over its parent, and what it
+/// takes to hand the author back.
+#[derive(Debug, Clone)]
+pub struct SymbolInPlace {
+    /// The symbol view every edit goes to.
+    pub symbol: crate::state::CellViewRef,
+    /// The schematic the instance stands on.
+    pub parent: crate::state::CellViewRef,
+    pub instance_id: u64,
+    pub instance_name: String,
+    /// The symbol origin when the session began. The instance is drawn from
+    /// it for the whole session, so dragging the origin cannot move the frame
+    /// the pointer is read in.
+    pub origin: crate::state::Point,
+    /// The parent canvas's pan and zoom: carried in, and handed back on exit.
+    pub pan: (f64, f64),
+    pub zoom: f64,
+    /// A zoom a command asked for, carried out on the canvas's next frame.
+    pub zoom_request: Option<rspice_schematic_editor::view::navigation::ZoomRequest>,
+    /// Whether the symbol had a tab of its own before the session opened it.
+    pub symbol_was_open: bool,
+    /// The symbol as the session began, or as last saved in it. Leaving with
+    /// anything else asks first.
+    pub baseline: (
+        crate::state::SymbolDocument,
+        crate::state::SymbolEditorMetadata,
+    ),
+    pub baseline_depth: usize,
+    /// The question asked on leaving with unsaved edits, while it is open.
+    pub leaving: Option<SymbolInPlaceExit>,
+    /// Where to land once the save dialog publishes the symbol.
+    pub exit_after_save: Option<SymbolInPlaceExit>,
+    /// The parent is drawn with nothing selected or hovered: it is context
+    /// for the edit, not a drawing being edited.
+    pub parent_editor: rspice_schematic_editor::session::EditorSession,
+}
+
+/// Where leaving an in-place symbol edit lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolInPlaceExit {
+    /// The parent schematic, as the session found it.
+    Parent,
+    /// One level of the parent's occurrence, chosen on the breadcrumb.
+    Level(usize),
 }
 
 /// Transient, device-local recovery point for a visibility-policy change.

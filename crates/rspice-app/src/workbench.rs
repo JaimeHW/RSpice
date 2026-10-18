@@ -74,7 +74,7 @@ pub use app::{
 };
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
 pub use documents::result_document::ResultViewer;
-pub(crate) use lifecycle::session::SchematicVisibilityRecovery;
+pub(crate) use lifecycle::session::{SchematicVisibilityRecovery, SymbolInPlaceExit};
 pub use lifecycle::session::{
     SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolGridSpacing,
     SymbolTool, UiSessionState, UiSessionStateSer,

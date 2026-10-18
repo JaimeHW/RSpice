@@ -6,6 +6,7 @@
 //! read-only schematic refuses.
 
 mod symbol_document;
+mod symbol_in_place;
 
 use super::hierarchy_net_highlight::NetCarry;
 use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};

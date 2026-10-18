@@ -833,6 +833,12 @@ impl Command {
                     && !state.active_symbol_ports().is_empty()
             }
             Self::SymbolSave => active_symbol_editor(app) && !state.active_view_read_only(),
+            Self::EditSymbolInPlace => {
+                active_schematic_editor(app) && state.selected_symbol_in_place_target().is_ok()
+            }
+            Self::ExitSymbolInPlace => {
+                active_symbol_editor(app) && state.symbol_in_place().is_some()
+            }
             Self::AscendHierarchy => {
                 active_schematic_editor(app) && state.workspace.content.hierarchy_stack.len() > 1
             }
@@ -1452,6 +1458,8 @@ impl Command {
                         &mut app.state,
                         rspice_results_ui::session::ViewGesture::ZoomIn,
                     );
+                } else if let Some(session) = app.state.symbol_in_place_mut() {
+                    session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.zoom =
                         (app.state.ui.symbol.editor.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
@@ -1466,6 +1474,8 @@ impl Command {
                         &mut app.state,
                         rspice_results_ui::session::ViewGesture::ZoomOut,
                     );
+                } else if let Some(session) = app.state.symbol_in_place_mut() {
+                    session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.zoom =
                         (app.state.ui.symbol.editor.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
@@ -1482,6 +1492,10 @@ impl Command {
                         &mut app.state,
                         rspice_results_ui::session::ViewGesture::Fit,
                     );
+                } else if let Some(bounds) = app.state.symbol_in_place_bounds()
+                    && let Some(session) = app.state.symbol_in_place_mut()
+                {
+                    session.zoom_request = Some(ZoomRequest::Frame(bounds));
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.needs_fit = true;
                 } else {
@@ -1494,7 +1508,9 @@ impl Command {
                 app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
             }
             Self::ZoomOneToOne => {
-                if active_symbol_editor(app) {
+                if let Some(session) = app.state.symbol_in_place_mut() {
+                    session.zoom_request = Some(ZoomRequest::To(1.0));
+                } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.zoom = 1.0;
                 } else {
                     app.state.schematic.session.editor.zoom_request = Some(ZoomRequest::To(1.0));
@@ -1836,6 +1852,12 @@ impl Command {
                     app.state.ui.symbol.editor.save_error = None;
                 }
             },
+            Self::EditSymbolInPlace => {
+                app.state.edit_selected_symbol_in_place();
+            }
+            Self::ExitSymbolInPlace => app
+                .state
+                .request_symbol_in_place_exit(super::SymbolInPlaceExit::Parent),
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
             Self::RotateSelection if active_symbol_editor(app) => {
@@ -1902,7 +1924,12 @@ impl Command {
                 }
             }
             Self::Cancel => {
-                if active_symbol_editor(app) {
+                if active_symbol_editor(app) && app.state.symbol_in_place_canvas_idle() {
+                    // Nothing on the canvas to cancel: Escape leaves the
+                    // in-place edit, as Return does.
+                    app.state
+                        .request_symbol_in_place_exit(super::SymbolInPlaceExit::Parent);
+                } else if active_symbol_editor(app) {
                     // The symbol canvas's one interaction in flight is an
                     // open polyline; Escape keeps what has been drawn.
                     app.finish_pending_symbol_polyline();
