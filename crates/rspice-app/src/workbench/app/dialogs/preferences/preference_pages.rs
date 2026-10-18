@@ -495,7 +495,7 @@ fn units(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::FrequencyDisplay,
         "Frequency display",
-        "Stored internally as hertz.",
+        "Frequency axes and readouts. Values are stored in hertz.",
         &["Hz · engineering prefixes", "rad/s"],
     );
     choice_row(
@@ -503,7 +503,7 @@ fn units(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::TemperatureDisplay,
         "Temperature display",
-        "Display conversion is applied only after the stored kelvin value is resolved.",
+        "Temperatures in forms, readouts and the toolbar. Values are stored in kelvin.",
         &["°C", "K", "°F"],
     );
     choice_row(
@@ -511,7 +511,7 @@ fn units(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::CopiedValueFormat,
         "Copied values",
-        "Copy retains full precision plus an explicit unit.",
+        "Format of values copied from readouts and tables. Copies keep full precision.",
         &[
             "Engineering notation + unit",
             "Scientific notation + SI unit",
@@ -526,7 +526,7 @@ fn units(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::AngleDisplay,
         "Angle display",
-        "Expression functions continue to require an explicit unit where ambiguous.",
+        "Phase and angle axes and readouts.",
         &["Degrees", "Radians"],
     );
     choice_row(
@@ -542,7 +542,7 @@ fn units(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::TimeFrequencyInput,
         "Time and frequency input",
-        "Reject ambiguous suffixes and show the normalized value before commit.",
+        "Strict: time and frequency fields need a unit (5ns, 2GHz). Infer: a bare number takes the field's unit.",
         &["Strict units required", "Infer from field quantity"],
     );
     choice_row(
@@ -550,8 +550,8 @@ fn units(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::DecimalSeparatorInput,
         "Decimal separator on input",
-        "Netlists and automation files always use the portable period separator.",
-        &["Locale-aware UI · portable files", "Period everywhere"],
+        "Files and netlists always use a period.",
+        &["Follow system locale", "Period only"],
     );
 }
 
@@ -620,7 +620,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         state,
         TogglePreference::CrossProbeBehavior,
         "Cross-probe behavior",
-        "Highlight the matching net, device, netlist line and trace.",
+        "Selecting a net or device highlights its netlist line and trace.",
         "Enable cross-probe behavior",
     );
     toggle_row(
@@ -648,7 +648,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::SelectionCrossingPolicy,
         "Drag selection",
-        "Enclosed objects, touched objects, or by direction: left-to-right encloses.",
+        "By direction: left-to-right encloses, right-to-left touches. Or always enclose, or touch.",
         &[
             "By drag direction",
             "Enclosed objects only",
