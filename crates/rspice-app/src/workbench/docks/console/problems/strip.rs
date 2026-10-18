@@ -33,11 +33,9 @@ const PRODUCER_CHARACTERS: f32 = 22.0;
 /// The grouping control's width, in characters.
 const GROUPING_CHARACTERS: f32 = 13.0;
 
-/// Draw the strip, editing the reading position it is drawn from. Returns
-/// whether the reader asked for the sign-off report.
-pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) -> bool {
+/// Draw the strip, editing the reading position it is drawn from.
+pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) {
     let advance = character_width(ui);
-    let mut signoff = false;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         ui.spacing_mut().item_spacing.y = 4.0;
@@ -128,11 +126,7 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
         {
             view.grouping = *grouping;
         }
-
-        // Check Design's findings written out, whatever the filters hide.
-        signoff = ui.button("Export sign-off report…").clicked();
     });
-    signoff
 }
 
 /// What the strip says about a list the filters have emptied, and the control

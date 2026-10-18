@@ -852,7 +852,7 @@ impl Command {
             // toolbar shows a dead control beside a working shortcut.
             Self::CheckCellview => active_schematic_editor(app) || active_symbol_editor(app),
             // The design is the configured one, whichever view is open.
-            Self::CheckDesign | Self::ExportSignoffReport => true,
+            Self::CheckDesign => true,
             Self::CheckAndSave => {
                 active_schematic_editor(app) && !state.schematic_edit_read_only()
             }
@@ -1232,7 +1232,6 @@ impl Command {
                     | Self::GenerateNetlist
                     | Self::CheckCellview
                     | Self::CheckDesign
-                    | Self::ExportSignoffReport
                     | Self::PreflightChecks
                     | Self::ShowInNetlist
                     | Self::SimulationPage(_)
@@ -1981,12 +1980,6 @@ impl Command {
             }
             Self::CheckCellview => check_cellview(&mut app.state),
             Self::CheckDesign => check_design(&mut app.state),
-            Self::ExportSignoffReport => {
-                crate::workbench::workflows::export_workflow::export_signoff_report(
-                    &mut app.state,
-                    app.export_workflow_io.as_ref(),
-                );
-            }
             Self::CheckAndSave => {
                 crate::workbench::app::open_check_and_save_dialog(&mut app.state);
             }

@@ -220,9 +220,6 @@ pub enum Command {
     /// configuration, with every cellview of the project's own libraries the
     /// walk never reaches.
     CheckDesign,
-    /// Check Design, then its findings written out for sign-off: a summary
-    /// with the verdict and a CSV of every finding.
-    ExportSignoffReport,
     CheckAndSave,
     ClearChecks,
     NextViolation,
@@ -742,9 +739,6 @@ impl Command {
             Self::ShowInNetlist => spec("show-in-netlist", "Show in netlist", "Design"),
             Self::CheckCellview => spec("check-cellview", "Check cellview", "Design"),
             Self::CheckDesign => spec("check-design", "Check design", "Design"),
-            Self::ExportSignoffReport => {
-                spec("export-signoff-report", "Export sign-off report…", "Design")
-            }
             Self::CheckAndSave => spec("check-and-save", "Check and save", "Design"),
             Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
             Self::NextViolation => spec("next-violation", "Next violation", "Verify"),
@@ -1338,7 +1332,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ShowInNetlist,
     Command::CheckCellview,
     Command::CheckDesign,
-    Command::ExportSignoffReport,
     Command::CheckAndSave,
     Command::ClearChecks,
     Command::NextViolation,

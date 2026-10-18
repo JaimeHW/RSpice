@@ -25,7 +25,6 @@ use super::diagnostic_store::{
 use super::waivers;
 
 mod live;
-mod signoff;
 pub(in crate::workbench) use live::live_check_digest;
 
 /// Producer identity every schematic and electrical rule finding carries.

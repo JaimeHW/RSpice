@@ -120,8 +120,6 @@ struct PageIntent {
     clipboard: Option<String>,
     /// A waiver the reader asked to record, or to take away.
     waiver: Option<WaiverEdit>,
-    /// The sign-off report, asked for from the toolbar.
-    signoff: bool,
 }
 
 /// A change to a waiver stored with a cellview, as the page asks for it.
@@ -208,7 +206,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
             arrangement.tally.widest_producer,
             listed.unavailable().is_some(),
         );
-        intent.signoff = strip::filter_strip(ui, &mut view, &arrangement.tally);
+        strip::filter_strip(ui, &mut view, &arrangement.tally);
         if view.is_filtered() && strip::filtered_out(ui, arrangement.listed, total) {
             view.clear_filters();
         }
@@ -380,12 +378,6 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
         ) {
             Ok(text) | Err(text) => state.prompt(text),
         }
-    }
-    if intent.signoff {
-        crate::workbench::workflows::export_workflow::export_signoff_report(
-            state,
-            &crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
-        );
     }
     intent
         .waiver
