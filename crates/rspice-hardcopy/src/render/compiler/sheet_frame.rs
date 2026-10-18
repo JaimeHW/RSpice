@@ -29,14 +29,11 @@ impl SemanticSceneCompiler<'_> {
             let included = match item.layer {
                 DrawingSheetFrameLayer::Border
                 | DrawingSheetFrameLayer::CentringMarks
-                | DrawingSheetFrameLayer::FoldingMarks
                 | DrawingSheetFrameLayer::SizeDesignation => output.includes_border() && bordered,
                 DrawingSheetFrameLayer::Zones | DrawingSheetFrameLayer::ZoneLabels => {
                     output.includes_zones()
                 }
-                DrawingSheetFrameLayer::RegistrationMarks | DrawingSheetFrameLayer::TrimMarks => {
-                    output.crop_marks()
-                }
+                DrawingSheetFrameLayer::TrimMarks => output.crop_marks(),
             };
             if included {
                 self.drawing_sheet_frame_mark(&item.mark)?;

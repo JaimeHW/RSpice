@@ -439,9 +439,7 @@ fn paint_frame(
             DrawingSheetFrameLayer::ZoneLabels | DrawingSheetFrameLayer::SizeDesignation => {
                 palette.zone_ink
             }
-            DrawingSheetFrameLayer::Zones
-            | DrawingSheetFrameLayer::RegistrationMarks
-            | DrawingSheetFrameLayer::FoldingMarks => palette.zone,
+            DrawingSheetFrameLayer::Zones => palette.zone,
             // Trimming marks belong to output that is cut to size.
             DrawingSheetFrameLayer::TrimMarks => continue,
         };

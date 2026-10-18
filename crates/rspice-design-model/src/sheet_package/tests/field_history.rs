@@ -327,12 +327,25 @@ fn canonical_entry(key: &str, visible: bool) -> String {
 }
 
 /// `canonical` as a build without the language code wrote it: the field
-/// written last is the one it lacks.
+/// written last is the one it lacks, and each preset's frame, the ISO 5457
+/// frame of a custom size, is written as every build before the standard
+/// frames wrote it.
 fn without_language(canonical: &[u8]) -> String {
+    const FRAME_AS_WRITTEN: &str = concat!(
+        r#""margins":{"top_um":10000,"right_um":10000,"bottom_um":10000,"left_um":20000},"#,
+        r#""bleed_um":0,"border":"standard","#,
+        r#""zones":{"mode":"automatic","custom_columns":null,"custom_rows":null,"#,
+        r#""labels":"alpha-numeric","edges":"all"},"#,
+        r#""marks":{"registration":true,"folding":false}"#,
+    );
     let today = String::from_utf8(canonical.to_vec()).unwrap();
     let entry = canonical_entry("language", false);
     assert!(today.contains(&entry), "{today}");
-    today.replacen(&entry, "", 1)
+    let frame = frame_span(&custom_format("Frame", 250_000, 400_000, StartingFrame::IsoA).unwrap())
+        .unwrap();
+    today
+        .replacen(&entry, "", 1)
+        .replace(std::str::from_utf8(&frame).unwrap(), FRAME_AS_WRITTEN)
 }
 
 /// `canonical` as a build from before the document type and status, and

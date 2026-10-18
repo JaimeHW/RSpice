@@ -22,10 +22,7 @@ pub(super) fn default_print_mapping(
                     "Drawing sheet paper",
                     "authored paper edge and printable boundary",
                 )?);
-                if format.border != DrawingSheetBorderTemplate::None
-                    || format.marks.registration
-                    || format.marks.folding
-                {
+                if format.border != DrawingSheetBorderTemplate::None {
                     entries.push(layer_mapping(
                         "layer:drawing-sheet-frame",
                         "Drawing sheet frame",

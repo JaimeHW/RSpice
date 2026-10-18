@@ -362,8 +362,7 @@ pub(crate) struct DrawingSheetDraft {
     pub(crate) zone_rows: u8,
     pub(crate) zone_edges: ZoneEdgesChoice,
     pub(crate) zone_labels: ZoneLabelsChoice,
-    pub(crate) registration_marks: bool,
-    pub(crate) folding_marks: bool,
+    pub(crate) centring_marks: bool,
     pub(crate) title_block: TitleBlockTemplateChoice,
     pub(crate) title_block_anchor: TitleBlockAnchorChoice,
     pub(crate) title_block_rotation: TitleBlockRotationChoice,
@@ -433,8 +432,7 @@ impl DrawingSheetDraft {
             zone_rows,
             zone_edges: zone_edges_from_model(format.zones.edges),
             zone_labels: zone_labels_from_model(format.zones.labels),
-            registration_marks: format.marks.registration,
-            folding_marks: format.marks.folding,
+            centring_marks: format.marks.centring,
             title_block: title_template_from_model(format.title_block.template),
             title_block_anchor: title_anchor_from_model(format.title_block.anchor),
             title_block_rotation: title_rotation_from_model(format.title_block.rotation),
@@ -524,8 +522,8 @@ impl DrawingSheetDraft {
             self.zone_edges = default_edges(Some(standard));
         }
         let border = border_to_model(self.border);
-        if self.registration_marks == previous_convention.default_marks(border).registration {
-            self.registration_marks = format.frame_convention().default_marks(border).registration;
+        if self.centring_marks == previous_convention.default_marks(border).centring {
+            self.centring_marks = format.frame_convention().default_marks(border).centring;
         }
         self.refresh_automatic_zone_counts();
     }
@@ -690,25 +688,22 @@ impl DrawingSheetDraft {
             }
             BorderTemplateChoice::Plain | BorderTemplateChoice::None => ZoneModeChoice::None,
         };
-        let marks = self
+        self.centring_marks = self
             .frame_convention()
-            .default_marks(border_to_model(border));
-        self.registration_marks = marks.registration;
-        self.folding_marks = marks.folding;
+            .default_marks(border_to_model(border))
+            .centring;
         self.refresh_automatic_zone_counts();
     }
 
-    /// What the registration-marks option draws on this frame, and a note on
-    /// it.
-    pub(crate) fn registration_marks_wording(&self) -> (&'static str, &'static str) {
-        match (self.standard_frame(), self.frame_convention()) {
-            (true, DrawingSheetFrameConvention::Iso5457) => {
+    /// What the centring-marks option draws on this frame, and a note on it.
+    pub(crate) fn centring_marks_wording(&self) -> (&'static str, &'static str) {
+        match self.frame_convention() {
+            DrawingSheetFrameConvention::Iso5457 => {
                 ("Centring marks", "ISO 5457 marks on the axes")
             }
-            (true, DrawingSheetFrameConvention::AsmeY141) => {
+            DrawingSheetFrameConvention::AsmeY141 => {
                 ("Microfilm arrows", "ASME Y14.1 Fig 5-5, optional")
             }
-            (false, _) => ("Registration marks", "Paper-alignment targets"),
         }
     }
 
@@ -888,8 +883,7 @@ impl DrawingSheetDraft {
                 edges: zone_edges_to_model(self.zone_edges),
             },
             marks: DrawingSheetMarks {
-                registration: self.registration_marks,
-                folding: self.folding_marks,
+                centring: self.centring_marks,
             },
             title_block: DrawingSheetTitleBlock {
                 template: title_template_to_model(self.title_block),
@@ -1455,7 +1449,7 @@ mod tests {
         // leaves the optional microfilm arrows off.
         assert_eq!((draft.zone_columns, draft.zone_rows), (2, 2));
         assert_eq!(draft.zone_edges, ZoneEdgesChoice::All);
-        assert!(!draft.registration_marks);
+        assert!(!draft.centring_marks);
         draft.zone_mode = ZoneModeChoice::Custom;
         draft.zone_columns = 24;
         draft.zone_rows = 2;
@@ -1544,14 +1538,12 @@ mod tests {
         let mut draft = valid_draft();
         draft.set_border_template(BorderTemplateChoice::None);
         assert_eq!(draft.zone_mode, ZoneModeChoice::None);
-        assert!(!draft.registration_marks);
-        assert!(!draft.folding_marks);
+        assert!(!draft.centring_marks);
         assert!(draft.validate().is_ok());
 
         draft.set_border_template(BorderTemplateChoice::Organization);
         assert_eq!(draft.zone_mode, ZoneModeChoice::Automatic);
-        assert!(draft.registration_marks);
-        assert!(draft.folding_marks);
+        assert!(draft.centring_marks);
         assert!(draft.validate().is_ok());
     }
 

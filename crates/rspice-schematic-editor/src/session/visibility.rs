@@ -21,7 +21,11 @@ pub struct DrawingSheetLayerVisibility {
     pub margins: bool,
     pub zones: bool,
     pub title_block: bool,
-    pub registration_marks: bool,
+    /// ISO 5457 centring marks and ASME Y14.1 microfilm arrows. A session
+    /// saved when the layer also held corner registration and fold marks
+    /// keeps its choice.
+    #[serde(alias = "registration_marks")]
+    pub centring_marks: bool,
     pub dimensions_at_detail_zoom: bool,
 }
 
@@ -31,7 +35,7 @@ impl Default for DrawingSheetLayerVisibility {
             margins: true,
             zones: true,
             title_block: true,
-            registration_marks: true,
+            centring_marks: true,
             dimensions_at_detail_zoom: true,
         }
     }

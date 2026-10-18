@@ -1286,26 +1286,15 @@ fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
         });
     });
     ui.add_space(14.0);
-    let (marks_title, marks_detail) = state.draft.registration_marks_wording();
-    // ISO 5457 and ASME Y14.1 frames carry no folding marks.
-    let folds_apply = !state.draft.standard_frame();
-    two_column(ui, |left, right| {
-        toggle_card(
-            left,
-            marks_title,
-            marks_detail,
-            &mut state.draft.registration_marks,
-        );
-        right.add_enabled_ui(folds_apply, |ui| {
+    let (marks_title, marks_detail) = state.draft.centring_marks_wording();
+    let marked = state.draft.standard_frame();
+    two_column(ui, |left, _| {
+        left.add_enabled_ui(marked, |ui| {
             toggle_card(
                 ui,
-                "Folding marks",
-                if folds_apply {
-                    "Format-defined fold pitch"
-                } else {
-                    "Not part of this frame's standard"
-                },
-                &mut state.draft.folding_marks,
+                marks_title,
+                marks_detail,
+                &mut state.draft.centring_marks,
             );
         });
     });

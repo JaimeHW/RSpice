@@ -501,6 +501,33 @@ fn a_package_sealed_over_the_frames_before_the_standards_opens_and_verifies() {
 }
 
 #[test]
+fn its_presets_load_onto_todays_frames_and_seal_again_without_the_old_options() {
+    let (_, trust, _) = signed_organization_package();
+    let package = parse_package(SIGNED_REVIEW_WITH_OLD_FRAMES, &trust).unwrap();
+    let [bound, organization, plain] = [0, 1, 2].map(|index| &package.presets[index].format);
+    // Corner registration crosses asked for are centring marks; folding
+    // marks are gone.
+    assert!(!bound.marks.centring);
+    assert!(organization.marks.centring);
+    assert!(!plain.marks.centring);
+
+    let resealed = build_package(package.presets.iter().map(|preset| DrawingSheetPreset {
+        id: preset.stable_id.clone(),
+        name: preset.name.clone(),
+        scope: DrawingSheetPresetScope::Project,
+        format: preset.format.clone(),
+    }))
+    .unwrap();
+    let encoded = encode_package(&resealed).unwrap();
+    for retired in [r#""registration""#, r#""folding""#] {
+        assert!(!encoded.contains(retired), "{retired} is written again");
+    }
+    let reopened = parse_package(&encoded, &PdkPublisherTrustStore::default()).unwrap();
+    assert!(reopened.retired_spellings.written_frames.is_empty());
+    assert_eq!(reopened.presets, resealed.presets);
+}
+
+#[test]
 fn tampering_with_a_frame_as_it_was_written_is_still_caught() {
     let (_, trust, _) = signed_organization_package();
     let tampered: [(usize, &str, serde_json::Value); 6] = [

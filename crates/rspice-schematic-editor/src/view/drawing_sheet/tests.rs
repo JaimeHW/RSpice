@@ -290,21 +290,13 @@ fn the_canvas_paints_the_frame_at_the_widths_the_plot_prints() {
 #[test]
 fn the_canvas_draws_centring_marks_and_no_margin_guide_on_an_iso_frame() {
     let a4 = active(SchematicSheetFormat::default());
-    assert!(a4.format.marks.registration);
+    assert!(a4.format.marks.centring);
     let marks = a4
         .geometry
         .frame
         .layer(DrawingSheetFrameLayer::CentringMarks)
         .count();
     assert_eq!(marks, 4);
-    assert_eq!(
-        a4.geometry
-            .frame
-            .layer(DrawingSheetFrameLayer::RegistrationMarks)
-            .count(),
-        0,
-        "ISO 5457 has no corner crosses"
-    );
     // The frame lies on the margins, so no dashed guide is drawn for them.
     assert_eq!(
         a4.geometry.physical.frame_placement,

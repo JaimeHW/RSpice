@@ -500,19 +500,9 @@ fn an_iso_frame_draws_centring_marks_instead_of_corner_crosses() {
         DrawingSheetStandard::IsoA3,
         SchematicPageOrientation::Landscape,
     );
-    assert!(a3.marks.registration);
+    assert!(a3.marks.centring);
     let geometry = a3.geometry().unwrap();
     let artwork = a3.frame_artwork(&geometry);
-    assert_eq!(
-        artwork
-            .layer(DrawingSheetFrameLayer::RegistrationMarks)
-            .count(),
-        0
-    );
-    assert_eq!(
-        artwork.layer(DrawingSheetFrameLayer::FoldingMarks).count(),
-        0
-    );
     let marks = lines(&artwork, DrawingSheetFrameLayer::CentringMarks);
     // Four 0.7 mm marks on the axes of symmetry, from the grid reference
     // border to 10 mm beyond the frame.
@@ -538,19 +528,13 @@ fn an_iso_frame_draws_centring_marks_instead_of_corner_crosses() {
     assert_eq!(marks[1], ((105 * MM, 292 * MM), (105 * MM, 287 * MM), 700));
     assert_eq!(marks[0], ((105 * MM, 5 * MM), (105 * MM, 20 * MM), 700));
 
-    // An ASME format draws no corner crosses either; its microfilm arrows are
-    // an option a new sheet leaves off.
+    // On an ASME format the microfilm arrows are an option a new sheet leaves
+    // off.
     let ansi_d = sheet(
         DrawingSheetStandard::AnsiD,
         SchematicPageOrientation::Landscape,
     );
     let artwork = ansi_d.frame_artwork(&ansi_d.geometry().unwrap());
-    assert_eq!(
-        artwork
-            .layer(DrawingSheetFrameLayer::RegistrationMarks)
-            .count(),
-        0
-    );
     assert_eq!(
         artwork.layer(DrawingSheetFrameLayer::CentringMarks).count(),
         0
@@ -558,7 +542,7 @@ fn an_iso_frame_draws_centring_marks_instead_of_corner_crosses() {
     // Asked for, they are Fig 5-5 arrows centred in each margin, their points
     // on the border line.
     let arrowed = ansi_d
-        .try_update(|draft| draft.marks.registration = true)
+        .try_update(|draft| draft.marks.centring = true)
         .unwrap();
     let geometry = arrowed.geometry().unwrap();
     let heads = arrowed

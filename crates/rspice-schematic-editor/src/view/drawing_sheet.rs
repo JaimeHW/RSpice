@@ -262,7 +262,6 @@ struct DrawingSheetLod {
     show_title_block_fields: bool,
     show_grid: bool,
     show_origin: bool,
-    show_marks: bool,
     show_dimensions: bool,
 }
 
@@ -343,7 +342,6 @@ impl DrawingSheetLod {
             show_title_block_fields: data_lettering_px >= DRAWING_SHEET_LEGIBLE_LETTERING_PX,
             show_grid: tier != DrawingSheetLodTier::Thumbnail,
             show_origin: tier == DrawingSheetLodTier::Detail,
-            show_marks: tier == DrawingSheetLodTier::Detail,
             show_dimensions: tier == DrawingSheetLodTier::Detail,
         }
     }
@@ -1225,10 +1223,7 @@ fn draw_frame(
                 (lod.show_zone_labels && layers.zones, palette.zone_ink)
             }
             DrawingSheetFrameLayer::CentringMarks => {
-                (lod.show_border && layers.registration_marks, palette.border)
-            }
-            DrawingSheetFrameLayer::RegistrationMarks | DrawingSheetFrameLayer::FoldingMarks => {
-                (lod.show_marks && layers.registration_marks, palette.zone)
+                (lod.show_border && layers.centring_marks, palette.border)
             }
             DrawingSheetFrameLayer::SizeDesignation => (lod.show_zone_labels, palette.zone_ink),
             // Trimming marks belong to output that is cut to size.

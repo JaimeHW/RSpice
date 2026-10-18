@@ -1825,7 +1825,7 @@ mod tests {
         draft.zone_columns = 9;
         draft.zone_rows = 7;
         draft.zone_labels = super::super::state::ZoneLabelsChoice::Coordinates;
-        draft.registration_marks = false;
+        draft.centring_marks = false;
         draft.title_block = super::super::state::TitleBlockTemplateChoice::Compact;
         draft.title_block_anchor = super::super::state::TitleBlockAnchorChoice::TopRight;
         draft
@@ -1860,7 +1860,7 @@ mod tests {
             saved.zones.labels,
             crate::state::DrawingSheetZoneLabels::Coordinates
         );
-        assert!(!saved.marks.registration);
+        assert!(!saved.marks.centring);
         assert_eq!(
             saved.title_block.template,
             crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged

@@ -49,11 +49,6 @@ const ASME_Y14_1_D_SIZE_LONG_EDGE_UM: u64 = 863_600;
 /// binding margin is 0.75 in on the left.
 pub const DRAWING_SHEET_ASME_BINDING_MARGIN_UM: u64 = 19_050;
 
-/// Length of a registration-cross arm and a folding tick, for the frames
-/// that keep them.
-const REGISTRATION_ARM_UM: i64 = 3_000;
-const FOLDING_PITCH_UM: i64 = 105_000;
-
 /// The drawing-format standard a sheet's frame, zones and marks follow.
 ///
 /// It is not stored: a standard size takes its series' standard, ISO A and
@@ -155,10 +150,6 @@ pub enum DrawingSheetFrameLayer {
     ZoneLabels,
     /// ISO centring marks, or ASME microfilm arrows.
     CentringMarks,
-    /// Corner registration crosses on an inset frame.
-    RegistrationMarks,
-    /// Folding ticks on an inset frame.
-    FoldingMarks,
     /// The size designation in ISO's bottom border.
     SizeDesignation,
     /// Trimming marks at the paper corners, drawn only on output.
@@ -262,10 +253,9 @@ impl DrawingSheetFrameConvention {
     pub const fn default_marks(self, border: DrawingSheetBorderTemplate) -> DrawingSheetMarks {
         let marks = border.default_marks();
         match (self, border) {
-            (Self::AsmeY141, DrawingSheetBorderTemplate::Standard) => DrawingSheetMarks {
-                registration: false,
-                ..marks
-            },
+            (Self::AsmeY141, DrawingSheetBorderTemplate::Standard) => {
+                DrawingSheetMarks { centring: false }
+            }
             _ => marks,
         }
     }
@@ -401,7 +391,7 @@ impl SchematicSheetFormat {
                 self.zone_artwork(&mut artwork, geometry, &zones);
             }
             match placement {
-                DrawingSheetFramePlacement::Iso5457 if self.marks.registration => {
+                DrawingSheetFramePlacement::Iso5457 if self.marks.centring => {
                     let beyond = ISO_5457_CENTRING_BEYOND_FRAME_UM as i64;
                     for (from, at_frame, to) in [
                         (
@@ -438,40 +428,12 @@ impl SchematicSheetFormat {
                         );
                     }
                 }
-                DrawingSheetFramePlacement::AsmeY141 if self.marks.registration => {
+                DrawingSheetFramePlacement::AsmeY141 if self.marks.centring => {
                     self.asme_microfilm_arrows(&mut artwork, geometry);
                 }
-                DrawingSheetFramePlacement::Inset => {
-                    if self.marks.registration {
-                        let printable = geometry.printable;
-                        let (right, bottom) = far_corner(printable);
-                        for (x, y) in [
-                            (printable.x_um, printable.y_um),
-                            (right, printable.y_um),
-                            (printable.x_um, bottom),
-                            (right, bottom),
-                        ] {
-                            let arm = REGISTRATION_ARM_UM;
-                            let width_um = convention.zone_line_um();
-                            let layer = DrawingSheetFrameLayer::RegistrationMarks;
-                            artwork.line(layer, (x - arm, y), (x + arm, y), width_um);
-                            artwork.line(layer, (x, y - arm), (x, y + arm), width_um);
-                        }
-                    }
-                    if self.marks.folding {
-                        let mut y = paper.y_um + FOLDING_PITCH_UM;
-                        while y < paper_bottom {
-                            artwork.line(
-                                DrawingSheetFrameLayer::FoldingMarks,
-                                (paper.x_um, y),
-                                (paper.x_um + REGISTRATION_ARM_UM, y),
-                                convention.zone_line_um(),
-                            );
-                            y += FOLDING_PITCH_UM;
-                        }
-                    }
-                }
-                DrawingSheetFramePlacement::Iso5457 | DrawingSheetFramePlacement::AsmeY141 => {}
+                DrawingSheetFramePlacement::Iso5457
+                | DrawingSheetFramePlacement::AsmeY141
+                | DrawingSheetFramePlacement::Inset => {}
             }
             if placement == DrawingSheetFramePlacement::Iso5457 {
                 self.iso_size_designation(&mut artwork, geometry);

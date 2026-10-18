@@ -6,6 +6,7 @@ mod annotation_allocation;
 mod drawing_sheet_release;
 mod frame;
 mod manual_annotation;
+mod retired_frame;
 mod sheet_lifecycle;
 mod title_fields;
 mod title_layout;
@@ -191,27 +192,11 @@ fn drawing_sheet_series_margins_and_border_mark_defaults_are_normative() {
     );
     assert_eq!(
         DrawingSheetBorderTemplate::Standard.default_marks(),
-        DrawingSheetMarks {
-            registration: true,
-            folding: false,
-        }
-    );
-    assert_eq!(
-        DrawingSheetBorderTemplate::OrganizationManaged.default_marks(),
-        DrawingSheetMarks {
-            registration: true,
-            folding: true,
-        }
+        DrawingSheetMarks { centring: true }
     );
     let mut draft = SchematicSheetFormatDraft::from(&SchematicSheetFormat::default());
-    draft.apply_border_template(DrawingSheetBorderTemplate::OrganizationManaged);
-    assert_eq!(
-        draft.marks,
-        DrawingSheetMarks {
-            registration: true,
-            folding: true,
-        }
-    );
+    draft.apply_border_template(DrawingSheetBorderTemplate::None);
+    assert_eq!(draft.marks, DrawingSheetMarks { centring: false });
 }
 
 #[test]

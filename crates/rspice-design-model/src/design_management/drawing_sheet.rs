@@ -456,19 +456,8 @@ impl DrawingSheetBorderTemplate {
 
     #[must_use]
     pub const fn default_marks(self) -> DrawingSheetMarks {
-        match self {
-            Self::Standard => DrawingSheetMarks {
-                registration: true,
-                folding: false,
-            },
-            Self::Plain | Self::None => DrawingSheetMarks {
-                registration: false,
-                folding: false,
-            },
-            Self::OrganizationManaged => DrawingSheetMarks {
-                registration: true,
-                folding: true,
-            },
+        DrawingSheetMarks {
+            centring: matches!(self, Self::Standard | Self::OrganizationManaged),
         }
     }
 }
@@ -560,13 +549,26 @@ fn validate_zone_count(value: Option<u8>) -> Result<(), DesignManagementError> {
     }
 }
 
+/// The marks a frame carries besides its border and zones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetMarks {
-    #[serde(default)]
-    pub registration: bool,
-    #[serde(default)]
-    pub folding: bool,
+    /// ISO 5457's four centring marks on the axes of symmetry, or the
+    /// microfilm arrows ASME Y14.1 Fig 5-5 centres in each margin.
+    pub centring: bool,
+}
+
+/// The marks as a sheet was written. Before the standard frames, a sheet
+/// asked for corner `registration` crosses, now its centring marks, and for
+/// `folding` ticks 105 mm apart, which ISO 5457 gives no basis and ASME
+/// Y14.1 does not have: that flag is read and dropped.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DrawingSheetMarksWire {
+    #[serde(default, alias = "registration")]
+    centring: bool,
+    #[serde(default, rename = "folding")]
+    _folding: bool,
 }
 
 impl Default for DrawingSheetMarks {
@@ -1356,7 +1358,7 @@ struct SchematicSheetFormatWire {
     bleed_um: u64,
     border: DrawingSheetBorderTemplate,
     zones: PresentField<DrawingSheetZones>,
-    marks: DrawingSheetMarks,
+    marks: DrawingSheetMarksWire,
     title_block: PresentField<DrawingSheetTitleBlock>,
     inheritance: DrawingSheetInheritance,
 }
@@ -1400,7 +1402,12 @@ impl Default for SchematicSheetFormatWire {
             bleed_um: 0,
             border: DrawingSheetBorderTemplate::default(),
             zones: PresentField::default(),
-            marks: DrawingSheetBorderTemplate::Standard.default_marks(),
+            marks: DrawingSheetMarksWire {
+                centring: DrawingSheetBorderTemplate::Standard
+                    .default_marks()
+                    .centring,
+                _folding: false,
+            },
             title_block: PresentField::default(),
             inheritance: DrawingSheetInheritance::default(),
         }
@@ -1435,7 +1442,9 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             bleed_um: wire.bleed_um,
             border: wire.border,
             zones: wire.zones.0.unwrap_or_default(),
-            marks: wire.marks,
+            marks: DrawingSheetMarks {
+                centring: wire.marks.centring,
+            },
             title_block: wire.title_block.0.unwrap_or_default(),
             inheritance: wire.inheritance,
         };

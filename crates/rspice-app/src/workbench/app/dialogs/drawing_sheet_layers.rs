@@ -87,9 +87,9 @@ fn drawing_sheet_layers_body(ui: &mut Ui, layers: &mut DrawingSheetLayerVisibili
             );
             layer_row(
                 ui,
-                "Centring, registration and folding marks",
-                "ISO 5457 centring marks, ASME microfilm arrows, and an inset frame's corner targets and fold marks.",
-                &mut layers.registration_marks,
+                "Centring marks",
+                "ISO 5457 centring marks and ASME Y14.1 microfilm arrows.",
+                &mut layers.centring_marks,
             );
             layer_row(
                 ui,
