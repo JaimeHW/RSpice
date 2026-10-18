@@ -6,7 +6,7 @@ use crate::schematic::view::drawing_sheet::{
     DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, drawing_sheet_printable_preview,
 };
 use crate::state::{
-    DrawingSheetFrameLayer, DrawingSheetFrameMark, DrawingSheetFramePlacement, DrawingSheetRect,
+    DrawingSheetFrameLayer, DrawingSheetFrameMark, DrawingSheetRect,
     DrawingSheetTitleBlockRotation, SchematicSheetFormat,
 };
 use crate::ui::theme::{self, FontWeight};
@@ -228,18 +228,6 @@ fn drawing_sheet_preview_impl(
         );
     }
 
-    // An inset frame leaves its margins to a guide; a standard frame's border
-    // lies on them.
-    if geometry.frame_placement == DrawingSheetFramePlacement::Inset {
-        paint_dashed_rect(
-            ui,
-            map_rect(geometry.printable),
-            Stroke::new(0.8, palette.margin),
-            4.0,
-            3.0,
-        );
-    }
-
     let drawing_rect = map_rect(geometry.drawing_area);
     paint_frame(ui, format, &geometry, &map, scale, palette);
 
@@ -262,10 +250,9 @@ fn preview_accessible_description(
 ) -> String {
     let unit = format.display_unit;
     let mut description = format!(
-        "{label}. {} drawing sheet; paper {}; printable area {}; drawing area {}.",
+        "{label}. {} drawing sheet; paper {}; drawing area {}.",
         format.authored_size.label(),
         unit.format_size_um(geometry.paper.width_um, geometry.paper.height_um),
-        unit.format_size_um(geometry.printable.width_um, geometry.printable.height_um),
         unit.format_size_um(
             geometry.drawing_area.width_um,
             geometry.drawing_area.height_um
@@ -375,7 +362,6 @@ struct SheetPreviewPalette {
     desk: Color32,
     paper: Color32,
     edge: Color32,
-    margin: Color32,
     border: Color32,
     zone: Color32,
     zone_ink: Color32,
@@ -391,7 +377,6 @@ impl SheetPreviewPalette {
                 desk: Color32::from_rgb(4, 8, 11),
                 paper: Color32::from_rgb(11, 18, 23),
                 edge: Color32::from_rgb(77, 89, 96),
-                margin: Color32::from_rgb(48, 61, 69),
                 border: Color32::from_rgb(111, 127, 137),
                 zone: Color32::from_rgb(65, 78, 86),
                 zone_ink: Color32::from_rgb(142, 153, 159),
@@ -404,7 +389,6 @@ impl SheetPreviewPalette {
                 desk: Color32::from_rgb(213, 218, 221),
                 paper: Color32::WHITE,
                 edge: Color32::from_rgb(153, 162, 167),
-                margin: Color32::from_rgb(182, 190, 194),
                 border: Color32::from_rgb(77, 84, 89),
                 zone: Color32::from_rgb(141, 149, 154),
                 zone_ink: Color32::from_rgb(69, 75, 79),

@@ -18,9 +18,8 @@ use rspice_design_model::sheet_package::{
 
 use crate::state::{
     AuthoredDrawingSheetSize, CustomDrawingSheetSnapshot, DesignManagementCatalog,
-    DrawingSheetBorderTemplate, DrawingSheetDisplayUnit, DrawingSheetInheritance,
-    DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetTitleBlockTemplate,
-    MAX_DRAWING_SHEET_PRESET_NAME_CHARS, SchematicSheetFormat,
+    DrawingSheetDisplayUnit, DrawingSheetInheritance, DrawingSheetPreset, DrawingSheetPresetScope,
+    DrawingSheetTitleBlockTemplate, MAX_DRAWING_SHEET_PRESET_NAME_CHARS, SchematicSheetFormat,
 };
 use crate::workbench::DrawingSheetPersonalPreferences;
 
@@ -328,9 +327,6 @@ pub(super) fn prepare_import_candidates(
             .or(matching_name)
             .is_some_and(|preset| portable_from_preset(preset).ok().as_ref() == Some(portable));
         let missing_managed_dependency = matches!(
-            portable.format.border,
-            DrawingSheetBorderTemplate::OrganizationManaged
-        ) || matches!(
             portable.format.title_block.template,
             DrawingSheetTitleBlockTemplate::OrganizationManaged
         );
@@ -409,14 +405,10 @@ pub(super) fn imported_project_preset(
     format = format
         .try_update(|draft| {
             draft.inheritance = DrawingSheetInheritance::Explicit;
-            if candidate.resolution == ImportResolution::ReplaceManagedDependencies {
-                if draft.border == DrawingSheetBorderTemplate::OrganizationManaged {
-                    draft.apply_border_template(DrawingSheetBorderTemplate::Standard);
-                }
-                if draft.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged
-                {
-                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
-                }
+            if candidate.resolution == ImportResolution::ReplaceManagedDependencies
+                && draft.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged
+            {
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
             }
             if let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size {
                 snapshot.preset_id = Some(id.clone());
@@ -580,7 +572,7 @@ mod tests {
             id: "review-strip".to_owned(),
             name: "Review strip".to_owned(),
             scope: DrawingSheetPresetScope::User,
-            format: custom_format("Review strip", 210_000, 594_000, StartingFrame::Plain).unwrap(),
+            format: custom_format("Review strip", 210_000, 594_000, StartingFrame::IsoA).unwrap(),
         };
         let mut project = DesignManagementCatalog::default();
         let captured = capture_personal_preset_into_project(&mut project, &personal).unwrap();
@@ -593,11 +585,10 @@ mod tests {
 
     #[test]
     fn missing_managed_dependency_requires_an_explicit_resolution() {
-        let managed_format = custom_format("Managed panel", 250_000, 400_000, StartingFrame::Plain)
+        let managed_format = custom_format("Managed panel", 250_000, 400_000, StartingFrame::IsoA)
             .unwrap()
             .try_update(|draft| {
-                draft.border = DrawingSheetBorderTemplate::OrganizationManaged;
-                draft.marks = DrawingSheetBorderTemplate::OrganizationManaged.default_marks();
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
             })
             .unwrap();
         let portable = portable_from_preset(&DrawingSheetPreset {
@@ -620,7 +611,10 @@ mod tests {
         let resolved = imported_project_preset(&candidate, &[])
             .unwrap()
             .expect("explicit replacement produces a project preset");
-        assert_eq!(resolved.format.border, DrawingSheetBorderTemplate::Standard);
+        assert_eq!(
+            resolved.format.title_block.template,
+            DrawingSheetTitleBlockTemplate::Compact
+        );
         assert!(!unavailable(&resolved));
     }
 }

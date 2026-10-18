@@ -533,16 +533,6 @@ impl<'a> SemanticSceneCompiler<'a> {
                 None,
             )?,
         );
-        let printable_stroke = self.mapped_stroke(
-            PrintObjectKind::Layer,
-            "layer:drawing-sheet-paper",
-            StrokeStyle::try_new(
-                SemanticColor::Secondary,
-                Length::from_micrometres(120),
-                StrokePattern::Dashed,
-                None,
-            )?,
-        );
         let title_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,
             "layer:drawing-sheet-title-block",
@@ -582,15 +572,6 @@ impl<'a> SemanticSceneCompiler<'a> {
                 stroke: Some(paper_stroke),
                 fill: None,
             });
-            // A standard frame's border lies on the margins; ISO 5457 and
-            // ASME Y14.1 draw no second rectangle for them.
-            if geometry.frame_placement == DrawingSheetFramePlacement::Inset {
-                self.primitives.push(ScenePrimitive::Rect {
-                    rect: self.drawing_sheet_rect(geometry.printable)?,
-                    stroke: Some(printable_stroke),
-                    fill: None,
-                });
-            }
         }
         let frame_stroke = self.drawing_sheet_frame(format, &geometry)?;
         if self.schematic_output.includes_grid() {

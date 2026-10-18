@@ -409,38 +409,38 @@ pub struct DrawingSheetMargins {
     pub left_um: u64,
 }
 
+/// Whether a sheet has a frame. A framed sheet takes its standard's frame
+/// (see [`DrawingSheetFrameConvention`]); one without has no frame, zones,
+/// marks or margins.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DrawingSheetBorderTemplate {
     #[default]
     Standard,
-    Plain,
     None,
-    OrganizationManaged,
 }
 
 impl DrawingSheetBorderTemplate {
     #[must_use]
-    pub const fn band_width_um(self) -> u64 {
-        match self {
-            Self::Standard => 5_000,
-            Self::Plain => 2_500,
-            Self::None => 0,
-            Self::OrganizationManaged => 6_000,
-        }
-    }
-
-    #[must_use]
     pub const fn supports_zones(self) -> bool {
-        !matches!(self, Self::None)
+        matches!(self, Self::Standard)
     }
+}
 
-    #[must_use]
-    pub const fn default_marks(self) -> DrawingSheetMarks {
-        DrawingSheetMarks {
-            centring: matches!(self, Self::Standard | Self::OrganizationManaged),
-        }
-    }
+/// The border as a sheet was written. A `plain` border was an RSpice frame
+/// set inside the margins with a narrow band and no zones; a sheet saved with
+/// one takes its standard's frame with its zones off. An
+/// `organization-managed` border was the same inset frame with a wider band,
+/// corner and fold marks and a lock against editing, and no definition of
+/// its own; a sheet saved with one takes its standard's frame as it is.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum DrawingSheetBorderWire {
+    #[default]
+    Standard,
+    Plain,
+    None,
+    OrganizationManaged,
 }
 
 /// Whether a sheet's frame carries zones. Where they lie, how many there are
@@ -559,12 +559,6 @@ struct DrawingSheetMarksWire {
     centring: bool,
     #[serde(default, rename = "folding")]
     _folding: bool,
-}
-
-impl Default for DrawingSheetMarks {
-    fn default() -> Self {
-        DrawingSheetBorderTemplate::Standard.default_marks()
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1356,7 +1350,7 @@ struct SchematicSheetFormatWire {
     margins: PresentField<DrawingSheetMargins>,
     binding_margin: bool,
     bleed_um: u64,
-    border: DrawingSheetBorderTemplate,
+    border: DrawingSheetBorderWire,
     zones: PresentField<DrawingSheetZonesWire>,
     marks: DrawingSheetMarksWire,
     title_block: PresentField<DrawingSheetTitleBlock>,
@@ -1401,12 +1395,11 @@ impl Default for SchematicSheetFormatWire {
             margins: PresentField::default(),
             binding_margin: false,
             bleed_um: 0,
-            border: DrawingSheetBorderTemplate::default(),
+            border: DrawingSheetBorderWire::default(),
             zones: PresentField::default(),
+            // A sheet saved before its marks were stored drew them.
             marks: DrawingSheetMarksWire {
-                centring: DrawingSheetBorderTemplate::Standard
-                    .default_marks()
-                    .centring,
+                centring: true,
                 _folding: false,
             },
             title_block: PresentField::default(),
@@ -1433,6 +1426,21 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
                 .margins
                 .0
                 .is_some_and(|margins| margins.left_um == DRAWING_SHEET_ASME_BINDING_MARGIN_UM);
+        let zones = wire
+            .zones
+            .0
+            .map(DrawingSheetZones::from)
+            .unwrap_or_default();
+        let (border, zones) = match wire.border {
+            DrawingSheetBorderWire::Standard | DrawingSheetBorderWire::OrganizationManaged => {
+                (DrawingSheetBorderTemplate::Standard, zones)
+            }
+            DrawingSheetBorderWire::Plain => (
+                DrawingSheetBorderTemplate::Standard,
+                DrawingSheetZones::none(),
+            ),
+            DrawingSheetBorderWire::None => (DrawingSheetBorderTemplate::None, zones),
+        };
         let mut format = Self {
             size: wire.size,
             orientation: wire.orientation,
@@ -1440,12 +1448,8 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             display_unit: wire.display_unit,
             binding_margin: bound,
             bleed_um: wire.bleed_um,
-            border: wire.border,
-            zones: wire
-                .zones
-                .0
-                .map(DrawingSheetZones::from)
-                .unwrap_or_default(),
+            border,
+            zones,
             marks: DrawingSheetMarks {
                 centring: wire.marks.centring,
             },
@@ -1466,7 +1470,7 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
         {
             format.border = DrawingSheetBorderTemplate::None;
             format.zones = DrawingSheetZones::none();
-            format.marks = DrawingSheetBorderTemplate::None.default_marks();
+            format.marks = DrawingSheetMarks { centring: false };
             format.binding_margin = false;
         }
         format.title_block.normalize_title_field_set();
@@ -1642,27 +1646,24 @@ impl SchematicSheetFormat {
         snapshot.validate()?;
         let authored_size = AuthoredDrawingSheetSize::Custom { snapshot };
         let framed = dimensions[0] >= 80_000 && dimensions[1] >= 80_000;
+        let border = if framed {
+            DrawingSheetBorderTemplate::Standard
+        } else {
+            DrawingSheetBorderTemplate::None
+        };
         let mut format = Self {
             size: authored_size.legacy_projection(),
             orientation,
+            marks: authored_size.frame_convention().default_marks(border),
             authored_size,
             display_unit: DrawingSheetDisplayUnit::Millimetres,
             binding_margin: false,
             bleed_um: 0,
-            border: if framed {
-                DrawingSheetBorderTemplate::Standard
-            } else {
-                DrawingSheetBorderTemplate::None
-            },
+            border,
             zones: if framed {
                 DrawingSheetZones::default()
             } else {
                 DrawingSheetZones::none()
-            },
-            marks: if framed {
-                DrawingSheetBorderTemplate::Standard.default_marks()
-            } else {
-                DrawingSheetBorderTemplate::None.default_marks()
             },
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
@@ -1929,7 +1930,6 @@ impl SchematicSheetFormat {
             border_band_um: frame.band_um,
             effective_title_block_template,
             zone_band: frame.zone_band,
-            frame_placement: frame.placement,
         })
     }
 
@@ -2245,11 +2245,10 @@ pub struct DrawingSheetGeometry {
     /// Width of the zone band the references are lettered in.
     pub border_band_um: u64,
     pub effective_title_block_template: DrawingSheetTitleBlockTemplate,
-    /// Outer edge of the zone band: ISO 5457's grid reference border, the
-    /// trimmed edge on an ASME Y14.1 format, or the margins on an inset
-    /// frame. The band lies between it and `drawing_area`.
+    /// Outer edge of the zone band: ISO 5457's grid reference border, or the
+    /// trimmed edge on an ASME Y14.1 format. The band lies between it and
+    /// `drawing_area`; a sheet with no border has none.
     pub zone_band: DrawingSheetRect,
-    pub frame_placement: DrawingSheetFramePlacement,
 }
 
 /// Authored title-grid rows for each durable title-block template: the rows
@@ -2299,7 +2298,7 @@ pub const DRAWING_SHEET_TITLE_VALUE_POSITION: (u64, u64) = (7, 10);
 /// larger. Every renderer letters a sheet from this one table, so a field is
 /// the same physical height on the canvas and on the plot. Zone references
 /// are not in it: they belong to the frame, which does not grow with the
-/// sheet (see [`drawing_sheet_zone_lettering_um`]).
+/// sheet (see [`DrawingSheetFrameConvention::zone_lettering_um`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DrawingSheetLettering {
     /// Field captions: the smallest text on the sheet, since a caption only

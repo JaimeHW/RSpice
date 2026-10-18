@@ -3,10 +3,9 @@
 
 use super::*;
 use rspice_design_model::design_management::{
-    DRAWING_SHEET_TITLE_BLOCK_LETTERING, DrawingSheetBorderTemplate,
-    DrawingSheetTitleFieldValueAuthority, DrawingSheetTitleLettering,
-    DrawingSheetTitleLetteringRole, drawing_sheet_mono_em_um, drawing_sheet_title_layout,
-    drawing_sheet_zone_lettering_um, resolve_drawing_sheet_title_fields,
+    DRAWING_SHEET_TITLE_BLOCK_LETTERING, DrawingSheetTitleFieldValueAuthority,
+    DrawingSheetTitleLettering, DrawingSheetTitleLetteringRole, drawing_sheet_mono_em_um,
+    drawing_sheet_title_layout, resolve_drawing_sheet_title_fields,
 };
 
 /// Every line the title block plots, with the face and em it is set in.
@@ -501,19 +500,17 @@ fn plotted_title_capitals_stand_at_the_height_the_standard_names() {
 
 #[test]
 fn plotted_zone_references_stand_centred_in_their_band() {
-    for border in [
-        DrawingSheetBorderTemplate::Standard,
-        DrawingSheetBorderTemplate::Plain,
+    for standard in [
+        rspice_design_model::design_management::DrawingSheetStandard::IsoA4,
+        rspice_design_model::design_management::DrawingSheetStandard::AnsiB,
     ] {
-        let format = SchematicSheetFormat::default()
-            .try_update(|draft| draft.apply_border_template(border))
-            .unwrap();
+        let format = SchematicSheetFormat::from_standard(
+            standard,
+            rspice_design_model::SchematicPageOrientation::Landscape,
+        );
         let geometry = format.geometry().unwrap();
         let band_um = geometry.border_band_um;
-        let em_um = drawing_sheet_mono_em_um(drawing_sheet_zone_lettering_um(
-            format.frame_convention(),
-            band_um,
-        ));
+        let em_um = drawing_sheet_mono_em_um(format.frame_convention().zone_lettering_um());
         let source = resolved_blank_schematic(&format);
         // The zone band alone, so every line of text is a reference.
         let schematic = SchematicHardcopySetup::new(
@@ -560,12 +557,16 @@ fn plotted_zone_references_stand_centred_in_their_band() {
             else {
                 continue;
             };
-            assert_eq!(*font, SceneFont::Monospace, "{border:?}");
-            assert_eq!(size.micrometres(), em_um, "{border:?} plots at another em");
+            assert_eq!(*font, SceneFont::Monospace, "{standard:?}");
+            assert_eq!(
+                size.micrometres(),
+                em_um,
+                "{standard:?} plots at another em"
+            );
             assert_eq!(
                 *anchor,
                 TextAnchor::Middle,
-                "{border:?} must centre a reference"
+                "{standard:?} must centre a reference"
             );
             let baseline_um = origin.y.micrometres();
             if baseline_um > band_bottom_um {
@@ -578,17 +579,17 @@ fn plotted_zone_references_stand_centred_in_their_band() {
             let capitals_top_um = baseline_um - em_um * 698 / 1_000;
             assert!(
                 capitals_top_um >= band_top_um,
-                "{border:?} references rise out of the band"
+                "{standard:?} references rise out of the band"
             );
             let capitals_centre_um = (capitals_top_um + baseline_um) / 2;
             assert!(
                 capitals_centre_um.abs_diff((band_top_um + band_bottom_um) / 2) <= em_um / 20,
-                "{border:?} references sit off the band's centre line"
+                "{standard:?} references sit off the band's centre line"
             );
         }
         assert!(
             top_references > 0,
-            "{border:?} plots references on its top edge"
+            "{standard:?} plots references on its top edge"
         );
     }
 }

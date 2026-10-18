@@ -793,9 +793,7 @@ fn commit_governed_page_setup_candidate(
 }
 
 fn format_is_organization_managed(format: &SchematicSheetFormat) -> bool {
-    format.border == crate::state::DrawingSheetBorderTemplate::OrganizationManaged
-        || format.title_block.template
-            == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
+    format.title_block.template == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
 }
 
 fn enforce_managed_format_authority(
@@ -804,10 +802,6 @@ fn enforce_managed_format_authority(
 ) -> Result<SchematicSheetFormat, String> {
     candidate
         .try_update(|draft| {
-            if authority.border == crate::state::DrawingSheetBorderTemplate::OrganizationManaged {
-                draft.border = authority.border;
-                draft.zones.mode = authority.zones.mode;
-            }
             if authority.title_block.template
                 == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
             {
@@ -1726,9 +1720,8 @@ mod tests {
         let (mut app, key, ids) = governed_app_with_sheets(2);
         let managed_format = SchematicSheetFormat::default()
             .try_update(|draft| {
-                draft.border = crate::state::DrawingSheetBorderTemplate::OrganizationManaged;
-                draft.marks =
-                    crate::state::DrawingSheetBorderTemplate::OrganizationManaged.default_marks();
+                draft.title_block.template =
+                    crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged;
                 draft
                     .title_block
                     .fields
@@ -1784,14 +1777,10 @@ mod tests {
     }
 
     #[test]
-    fn managed_border_and_title_authorities_are_reapplied_at_commit() {
+    fn a_managed_title_authority_is_reapplied_at_commit() {
         let (mut app, key, ids) = governed_app_with_sheets(1);
         let managed = SchematicSheetFormat::default()
             .try_update(|draft| {
-                draft.apply_border_template(
-                    crate::state::DrawingSheetBorderTemplate::OrganizationManaged,
-                );
-                draft.zones.mode = crate::state::DrawingSheetZoneMode::None;
                 draft.title_block.template =
                     crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged;
                 draft
@@ -1817,8 +1806,7 @@ mod tests {
         }
         open_drawing_sheet_setup(&mut app);
         let draft = &mut app.state.dialogs.drawing_sheet_setup.draft;
-        draft.border = super::super::state::BorderTemplateChoice::Plain;
-        draft.zone_mode = super::super::state::ZoneModeChoice::Automatic;
+        draft.zone_mode = super::super::state::ZoneModeChoice::None;
         draft.centring_marks = false;
         draft.title_block = super::super::state::TitleBlockTemplateChoice::Compact;
         draft.title_block_anchor = super::super::state::TitleBlockAnchorChoice::TopRight;
@@ -1843,11 +1831,8 @@ mod tests {
             .find(ids[0])
             .unwrap()
             .page_format();
-        assert_eq!(
-            saved.border,
-            crate::state::DrawingSheetBorderTemplate::OrganizationManaged
-        );
-        assert_eq!(saved.zones.mode, managed.zones.mode);
+        // Only the title block is managed; the frame stays as edited.
+        assert_eq!(saved.zones.mode, crate::state::DrawingSheetZoneMode::None);
         assert!(!saved.marks.centring);
         assert_eq!(
             saved.title_block.template,
@@ -1881,9 +1866,8 @@ mod tests {
                 .unwrap()
                 .page_format()
                 .try_update(|draft| {
-                    draft.apply_border_template(
-                        crate::state::DrawingSheetBorderTemplate::OrganizationManaged,
-                    );
+                    draft.title_block.template =
+                        crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged;
                 })
                 .unwrap();
             catalog

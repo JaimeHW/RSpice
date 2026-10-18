@@ -29,12 +29,12 @@ use rspice_design_model::Point;
 use rspice_design_model::design_management::{
     DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_BLOCK_LETTERING,
     DRAWING_SHEET_TITLE_CELL_PADDING_UM, DRAWING_SHEET_TITLE_OUTLINE_UM,
-    DRAWING_SHEET_TITLE_RULE_UM, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
-    DrawingSheetFrameArtwork, DrawingSheetFrameLayer, DrawingSheetFrameMark,
-    DrawingSheetFramePlacement, DrawingSheetGeometry as AuthoredDrawingSheetGeometry,
-    DrawingSheetLettering, DrawingSheetRect, DrawingSheetTitleBlockRotation,
-    DrawingSheetTitleLetteringRole, DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField,
-    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_layout,
+    DRAWING_SHEET_TITLE_RULE_UM, DrawingSheetDisplayUnit, DrawingSheetFrameArtwork,
+    DrawingSheetFrameLayer, DrawingSheetFrameMark,
+    DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
+    DrawingSheetTitleBlockRotation, DrawingSheetTitleLetteringRole, DrawingSheetZoneLayout,
+    ResolvedDrawingSheetTitleField, SchematicSheetFormat, drawing_sheet_mono_em_um,
+    drawing_sheet_title_layout,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -127,7 +127,6 @@ pub struct DrawingSheetGeometry {
     /// Validated integer-micrometre geometry from the durable domain.
     pub physical: AuthoredDrawingSheetGeometry,
     pub paper: WorldRect,
-    pub printable: WorldRect,
     pub drawing_area: WorldRect,
     pub content_area: WorldRect,
     pub title_block: Option<WorldRect>,
@@ -167,7 +166,6 @@ impl DrawingSheetGeometry {
         };
         Self {
             paper: WorldRect::from_physical(physical.paper),
-            printable: WorldRect::from_physical(physical.printable),
             drawing_area: WorldRect::from_physical(physical.drawing_area),
             content_area: WorldRect::from_physical(physical.content_area),
             title_block: physical.title_block.map(WorldRect::from_physical),
@@ -257,7 +255,6 @@ enum DrawingSheetLodTier {
 struct DrawingSheetLod {
     tier: DrawingSheetLodTier,
     show_border: bool,
-    show_margins: bool,
     show_zone_labels: bool,
     show_title_block_fields: bool,
     show_grid: bool,
@@ -330,7 +327,6 @@ impl DrawingSheetLod {
         Self {
             tier,
             show_border: tier != DrawingSheetLodTier::Thumbnail,
-            show_margins: tier != DrawingSheetLodTier::Thumbnail,
             show_zone_labels: matches!(
                 tier,
                 DrawingSheetLodTier::Working | DrawingSheetLodTier::Detail
@@ -360,7 +356,6 @@ struct DrawingSheetPalette {
     paper: Color32,
     edge: Color32,
     shadow: Color32,
-    margin: Color32,
     border: Color32,
     zone: Color32,
     zone_ink: Color32,
@@ -378,7 +373,6 @@ impl DrawingSheetPalette {
                 paper: Color32::WHITE,
                 edge: Color32::from_rgb(0x99, 0xa2, 0xa7),
                 shadow: Color32::from_black_alpha(64),
-                margin: Color32::from_rgb(0xb6, 0xbe, 0xc2),
                 border: Color32::from_rgb(0x4d, 0x54, 0x59),
                 zone: Color32::from_rgb(0x8d, 0x95, 0x9a),
                 zone_ink: Color32::from_rgb(0x45, 0x4b, 0x4f),
@@ -393,7 +387,6 @@ impl DrawingSheetPalette {
                 paper: Color32::from_rgb(0x0b, 0x12, 0x17),
                 edge: Color32::from_rgb(0x4d, 0x59, 0x60),
                 shadow: Color32::from_black_alpha(96),
-                margin: Color32::from_rgb(0x30, 0x3d, 0x45),
                 border: Color32::from_rgb(0x6f, 0x7f, 0x89),
                 zone: Color32::from_rgb(0x41, 0x4e, 0x56),
                 zone_ink: Color32::from_rgb(0x8e, 0x99, 0x9f),
@@ -431,7 +424,6 @@ pub fn draw_base(
     let lettering = DRAWING_SHEET_TITLE_BLOCK_LETTERING;
     let lod = DrawingSheetLod::resolve(viewport.zoom, painter.ctx().pixels_per_point(), lettering);
     let paper = sheet.geometry.paper.screen_rect(viewport);
-    let printable = sheet.geometry.printable.screen_rect(viewport);
     let drawing_area = sheet.geometry.drawing_area.screen_rect(viewport);
 
     painter.rect_filled(available, 0.0, palette.desk);
@@ -466,15 +458,6 @@ pub fn draw_base(
             (f64::from(viewport.offset.x), f64::from(viewport.offset.y)),
             f64::from(viewport.zoom),
         );
-    }
-    // An inset frame leaves its margins to a guide; a standard frame's border
-    // lies on them, and the standards draw no second rectangle.
-    if lod.show_margins
-        && layers.margins
-        && sheet.format.border != DrawingSheetBorderTemplate::None
-        && sheet.geometry.physical.frame_placement == DrawingSheetFramePlacement::Inset
-    {
-        dashed_rect(painter, printable, Stroke::new(1.0, palette.margin));
     }
     draw_frame(painter, viewport, sheet, lod, layers, palette);
     if layers.title_block
@@ -1169,25 +1152,6 @@ fn segment_intersects_rect(start: Point, end: Point, rect: WorldRect) -> bool {
         }
     }
     true
-}
-
-fn dashed_rect(painter: &Painter, rect: Rect, stroke: Stroke) {
-    dashed_rect_pattern(painter, rect, stroke, 4.0, 3.0);
-}
-
-fn dashed_rect_pattern(
-    painter: &Painter,
-    rect: Rect,
-    stroke: Stroke,
-    dash_length: f32,
-    gap_length: f32,
-) {
-    painter.extend(Shape::dashed_line(
-        &rect_outline(rect),
-        stroke,
-        dash_length,
-        gap_length,
-    ));
 }
 
 /// A rectangle's outline as a closed polyline from its top-left corner.

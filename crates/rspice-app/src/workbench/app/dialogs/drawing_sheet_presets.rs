@@ -1190,7 +1190,6 @@ fn infer_starting_frame(preset: &DrawingSheetPreset) -> StartingFrame {
         (DrawingSheetBorderTemplate::None, DrawingSheetTitleBlockTemplate::None) => {
             StartingFrame::None
         }
-        (DrawingSheetBorderTemplate::Plain, _) => StartingFrame::Plain,
         _ if preset.format.frame_convention() == DrawingSheetFrameConvention::AsmeY141 => {
             StartingFrame::AnsiA
         }
@@ -1484,7 +1483,7 @@ mod tests {
     #[test]
     fn transfer_identity_keeps_equal_ids_in_distinct_authorities() {
         let format =
-            model::custom_format("Review strip", 210_000, 594_000, StartingFrame::Plain).unwrap();
+            model::custom_format("Review strip", 210_000, 594_000, StartingFrame::IsoA).unwrap();
         let project = DrawingSheetPreset {
             id: "review-strip".to_owned(),
             name: "Review strip".to_owned(),
@@ -1566,7 +1565,7 @@ mod tests {
                 "Existing review strip",
                 210_001,
                 594_002,
-                StartingFrame::Plain,
+                StartingFrame::IsoA,
             )
             .unwrap(),
         };
@@ -1595,7 +1594,7 @@ mod tests {
                 "Not selected panel",
                 230_001,
                 620_002,
-                StartingFrame::Plain,
+                StartingFrame::IsoA,
             )
             .unwrap(),
         };
@@ -1607,7 +1606,7 @@ mod tests {
                 "Explicitly skipped panel",
                 240_001,
                 630_002,
-                StartingFrame::Plain,
+                StartingFrame::IsoA,
             )
             .unwrap(),
         };

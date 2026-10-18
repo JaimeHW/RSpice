@@ -223,10 +223,7 @@ impl RetiredSpellings {
         }
         match border {
             DrawingSheetBorderTemplate::Standard => Some("standard"),
-            DrawingSheetBorderTemplate::Plain => Some("plain"),
-            DrawingSheetBorderTemplate::None | DrawingSheetBorderTemplate::OrganizationManaged => {
-                None
-            }
+            DrawingSheetBorderTemplate::None => None,
         }
     }
 
@@ -238,9 +235,7 @@ impl RetiredSpellings {
         }
         match border {
             DrawingSheetBorderTemplate::Standard => "builtin/standard",
-            DrawingSheetBorderTemplate::Plain => "builtin/plain",
             DrawingSheetBorderTemplate::None => "none",
-            DrawingSheetBorderTemplate::OrganizationManaged => "organization-managed",
         }
     }
 
@@ -1495,7 +1490,7 @@ mod tests {
             id: "z-strip".to_owned(),
             name: "Z strip".to_owned(),
             scope: DrawingSheetPresetScope::User,
-            format: custom_format("Z strip", 210_000, 594_000, StartingFrame::Plain).unwrap(),
+            format: custom_format("Z strip", 210_000, 594_000, StartingFrame::None).unwrap(),
         };
         let second = DrawingSheetPreset {
             id: "a-panel".to_owned(),

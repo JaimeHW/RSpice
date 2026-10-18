@@ -20,7 +20,7 @@ pub(super) fn default_print_mapping(
                 entries.push(layer_mapping(
                     "layer:drawing-sheet-paper",
                     "Drawing sheet paper",
-                    "authored paper edge and printable boundary",
+                    "authored paper edge",
                 )?);
                 if format.border != DrawingSheetBorderTemplate::None {
                     entries.push(layer_mapping(

@@ -28,6 +28,10 @@ const ISO_5457_TRIM_MARK_UM: (u64, u64) = (10_000, 5_000);
 const ISO_5457_SIZE_DESIGNATION_UM: u64 = 3_500;
 /// ISO 5457 4.4: grid references are lettered 3.5 mm high.
 const ISO_5457_ZONE_LETTERING_UM: u64 = 3_500;
+/// The grid reference band between the frame and the grid reference border.
+/// Figure 4 names the border without the text dimensioning it; 5 mm from the
+/// trimmed edge is where references to the standard draw it.
+const ISO_5457_GRID_BAND_UM: u64 = 5_000;
 
 /// ASME Y14.1 5.6(a): the border line is thick; ASME Y14.2 makes a thick line
 /// at least 0.6 mm.
@@ -109,7 +113,9 @@ impl DrawingSheetFrameConvention {
         }
     }
 
-    /// Height the standard letters zone references at.
+    /// Height the standard letters zone references at. Every surface letters
+    /// a reference at this height, centred in the band, which each standard
+    /// makes wide enough to hold it.
     #[must_use]
     pub const fn zone_lettering_um(self) -> u64 {
         match self {
@@ -145,27 +151,12 @@ impl DrawingSheetFrameConvention {
     }
 }
 
-/// Where a sheet's frame and zone band actually sit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetFramePlacement {
-    /// The frame sits a band's width inside the margins, with the zone band
-    /// between them: the plain and organization borders, and a standard
-    /// border whose margins are narrower than the band.
-    Inset,
-    /// ISO 5457: the frame at the margins and the grid reference band
-    /// outside it, closed by the grid reference border.
-    Iso5457,
-    /// ASME Y14.1: the border line at the margins, with the zones in the
-    /// margin between it and the trimmed edge.
-    AsmeY141,
-}
-
-/// The rectangles a frame placement yields: the outer edge of the zone band
-/// and the drawing area inside the frame.
+/// Where a sheet's frame puts its zone band and drawing area. ISO 5457 sets
+/// the frame at the margins with the grid reference band outside it, closed
+/// by the grid reference border; ASME Y14.1 sets the border line at the
+/// margins with the zones in the margin between it and the trimmed edge.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct DrawingSheetFrameLayout {
-    pub(super) placement: DrawingSheetFramePlacement,
     pub(super) zone_band: DrawingSheetRect,
     pub(super) drawing_area: DrawingSheetRect,
     pub(super) band_um: u64,
@@ -257,39 +248,18 @@ impl DrawingSheetFrameArtwork {
     }
 }
 
-/// Height a zone reference is lettered at in a band of the given width: the
-/// standard's height, or, in a band too narrow for it, the largest ISO 3098
-/// height whose capitals clear both of the band's rules by a stroke width (a
-/// tenth of the height), and no lower than the series goes. Every surface
-/// letters a reference at this height, centred in the band.
-#[must_use]
-pub fn drawing_sheet_zone_lettering_um(
-    convention: DrawingSheetFrameConvention,
-    border_band_um: u64,
-) -> u64 {
-    let target_um = convention.zone_lettering_um();
-    let fits = |height_um: u64| height_um * 12 / 10 <= border_band_um;
-    if fits(target_um) {
-        return target_um;
-    }
-    ISO_3098_HEIGHTS_UM
-        .into_iter()
-        .rfind(|height_um| *height_um < target_um && fits(*height_um))
-        .unwrap_or(ISO_3098_HEIGHTS_UM[0])
-}
-
 impl DrawingSheetFrameConvention {
     /// The marks a border starts with on this format. ISO 5457's centring
-    /// marks belong to the standard border; ASME Y14.1 5.7 makes its
-    /// microfilm arrows optional, and a new sheet leaves them off.
+    /// marks belong to its frame; ASME Y14.1 5.7 makes its microfilm arrows
+    /// optional, and a new sheet leaves them off. A sheet with no border has
+    /// no marks.
     #[must_use]
     pub const fn default_marks(self, border: DrawingSheetBorderTemplate) -> DrawingSheetMarks {
-        let marks = border.default_marks();
-        match (self, border) {
-            (Self::AsmeY141, DrawingSheetBorderTemplate::Standard) => {
-                DrawingSheetMarks { centring: false }
-            }
-            _ => marks,
+        DrawingSheetMarks {
+            centring: matches!(
+                (self, border),
+                (Self::Iso5457, DrawingSheetBorderTemplate::Standard)
+            ),
         }
     }
 }
@@ -317,59 +287,40 @@ impl SchematicSheetFormat {
         self.authored_size.frame_convention()
     }
 
-    /// Where this sheet's frame sits: the standard border takes its
-    /// standard's placement, and the other borders keep the frame inset.
-    #[must_use]
-    pub fn frame_placement(&self) -> DrawingSheetFramePlacement {
-        if self.border != DrawingSheetBorderTemplate::Standard {
-            return DrawingSheetFramePlacement::Inset;
-        }
-        match self.frame_convention() {
-            DrawingSheetFrameConvention::Iso5457 => DrawingSheetFramePlacement::Iso5457,
-            DrawingSheetFrameConvention::AsmeY141 => DrawingSheetFramePlacement::AsmeY141,
-        }
-    }
-
     pub(super) fn frame_layout(
         &self,
         paper: DrawingSheetRect,
         printable: DrawingSheetRect,
     ) -> Result<DrawingSheetFrameLayout, DesignManagementError> {
-        let band_um = self.border.band_width_um();
-        let placement = self.frame_placement();
-        let margins = self.margins();
-        Ok(match placement {
-            DrawingSheetFramePlacement::Iso5457 => DrawingSheetFrameLayout {
-                placement,
-                zone_band: paper.inset(
-                    margins.left_um - band_um,
-                    margins.top_um - band_um,
-                    margins.right_um - band_um,
-                    margins.bottom_um - band_um,
-                    "drawing sheet margins",
-                )?,
+        if self.border == DrawingSheetBorderTemplate::None {
+            return Ok(DrawingSheetFrameLayout {
+                zone_band: printable,
                 drawing_area: printable,
-                band_um,
-            },
+                band_um: 0,
+            });
+        }
+        let margins = self.margins();
+        Ok(match self.frame_convention() {
+            DrawingSheetFrameConvention::Iso5457 => {
+                let band_um = ISO_5457_GRID_BAND_UM;
+                DrawingSheetFrameLayout {
+                    zone_band: paper.inset(
+                        margins.left_um - band_um,
+                        margins.top_um - band_um,
+                        margins.right_um - band_um,
+                        margins.bottom_um - band_um,
+                        "drawing sheet margins",
+                    )?,
+                    drawing_area: printable,
+                    band_um,
+                }
+            }
             // The whole margin is the zone band; a binding margin widens it
             // on the left alone.
-            DrawingSheetFramePlacement::AsmeY141 => DrawingSheetFrameLayout {
-                placement,
+            DrawingSheetFrameConvention::AsmeY141 => DrawingSheetFrameLayout {
                 zone_band: paper,
                 drawing_area: printable,
                 band_um: ASME_Y14_1_FORMAT_MARGIN_UM,
-            },
-            DrawingSheetFramePlacement::Inset => DrawingSheetFrameLayout {
-                placement,
-                zone_band: printable,
-                drawing_area: printable.inset(
-                    band_um,
-                    band_um,
-                    band_um,
-                    band_um,
-                    "drawing sheet border",
-                )?,
-                band_um,
             },
         })
     }
@@ -379,7 +330,8 @@ impl SchematicSheetFormat {
     pub fn frame_artwork(&self, geometry: &DrawingSheetGeometry) -> DrawingSheetFrameArtwork {
         let mut artwork = DrawingSheetFrameArtwork::default();
         let convention = self.frame_convention();
-        let placement = geometry.frame_placement;
+        let framed = self.border != DrawingSheetBorderTemplate::None;
+        let iso_frame = framed && convention == DrawingSheetFrameConvention::Iso5457;
         let paper = geometry.paper;
         let band = geometry.zone_band;
         let area = geometry.drawing_area;
@@ -387,7 +339,7 @@ impl SchematicSheetFormat {
         let (band_right, band_bottom) = far_corner(band);
         let (area_right, area_bottom) = far_corner(area);
         let centre = (paper_right / 2, paper_bottom / 2);
-        if self.border != DrawingSheetBorderTemplate::None {
+        if framed {
             artwork.push(
                 DrawingSheetFrameLayer::Border,
                 DrawingSheetFrameMark::Rect {
@@ -395,7 +347,7 @@ impl SchematicSheetFormat {
                     width_um: convention.frame_line_um(),
                 },
             );
-            if placement == DrawingSheetFramePlacement::Iso5457 {
+            if iso_frame {
                 artwork.push(
                     DrawingSheetFrameLayer::Border,
                     DrawingSheetFrameMark::Rect {
@@ -407,8 +359,8 @@ impl SchematicSheetFormat {
             if let Some(zones) = self.zone_layout(geometry) {
                 self.zone_artwork(&mut artwork, geometry, &zones);
             }
-            match placement {
-                DrawingSheetFramePlacement::Iso5457 if self.marks.centring => {
+            match convention {
+                DrawingSheetFrameConvention::Iso5457 if self.marks.centring => {
                     let beyond = ISO_5457_CENTRING_BEYOND_FRAME_UM as i64;
                     for (from, at_frame, to) in [
                         (
@@ -445,18 +397,16 @@ impl SchematicSheetFormat {
                         );
                     }
                 }
-                DrawingSheetFramePlacement::AsmeY141 if self.marks.centring => {
+                DrawingSheetFrameConvention::AsmeY141 if self.marks.centring => {
                     self.asme_microfilm_arrows(&mut artwork, geometry);
                 }
-                DrawingSheetFramePlacement::Iso5457
-                | DrawingSheetFramePlacement::AsmeY141
-                | DrawingSheetFramePlacement::Inset => {}
+                DrawingSheetFrameConvention::Iso5457 | DrawingSheetFrameConvention::AsmeY141 => {}
             }
-            if placement == DrawingSheetFramePlacement::Iso5457 {
+            if iso_frame {
                 self.iso_size_designation(&mut artwork, geometry);
             }
         }
-        if placement == DrawingSheetFramePlacement::Iso5457 {
+        if iso_frame {
             let (long, short) = ISO_5457_TRIM_MARK_UM;
             let (long_i, short_i) = (long as i64, short as i64);
             for (x, y) in [
@@ -554,7 +504,7 @@ impl SchematicSheetFormat {
             );
         }
         let (top, right, bottom, left) = zones.lettered_edges();
-        let lettering_um = drawing_sheet_zone_lettering_um(convention, geometry.border_band_um);
+        let lettering_um = convention.zone_lettering_um();
         let mid = |a: i64, b: i64| a + (b - a) / 2;
         let mut label = |centre: (i64, i64), text: &str| {
             artwork.push(

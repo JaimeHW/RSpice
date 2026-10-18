@@ -123,29 +123,23 @@ impl SheetSizeChoice {
 pub(crate) enum BorderTemplateChoice {
     #[default]
     Standard,
-    Plain,
     None,
-    Organization,
 }
 
 impl BorderTemplateChoice {
-    pub(crate) const ALL: [Self; 4] = [Self::Standard, Self::Plain, Self::None, Self::Organization];
+    pub(crate) const ALL: [Self; 2] = [Self::Standard, Self::None];
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
-            Self::Standard => "Standard border with zones",
-            Self::Plain => "Plain border",
+            Self::Standard => "Standard frame",
             Self::None => "No border",
-            Self::Organization => "Organization border · managed",
         }
     }
 
     pub(crate) const fn summary(self) -> &'static str {
         match self {
-            Self::Standard => "Ruled frame, zone band and corner references.",
-            Self::Plain => "Ruled frame only; reviews quote sheet coordinates.",
-            Self::None => "Paper and margins only; zone references are unavailable.",
-            Self::Organization => "Managed frame with registration and folding marks.",
+            Self::Standard => "The frame of the sheet's standard, ISO 5457 or ASME Y14.1.",
+            Self::None => "Paper only; no frame, margins or zone references.",
         }
     }
 }
@@ -549,16 +543,12 @@ impl DrawingSheetDraft {
             .margins(self.binding_margin && convention == DrawingSheetFrameConvention::AsmeY141)
     }
 
-    /// Re-apply the two independently managed presentation authorities.
+    /// Re-apply the managed presentation authority.
     ///
     /// Selecting a preset or following a default may replace the rest of the
-    /// draft, but it must never replace an organization-owned border/frame or
-    /// title-block definition captured from the authored sheet.
+    /// draft, but it must never replace an organization-owned title-block
+    /// definition captured from the authored sheet.
     pub(crate) fn enforce_managed_authority(&mut self, authority: &Self) {
-        if authority.border == BorderTemplateChoice::Organization {
-            self.border = authority.border;
-            self.zone_mode = authority.zone_mode;
-        }
         if authority.title_block == TitleBlockTemplateChoice::Organization {
             self.title_block = authority.title_block;
         }
@@ -567,11 +557,10 @@ impl DrawingSheetDraft {
     pub(crate) fn set_border_template(&mut self, border: BorderTemplateChoice) {
         self.border = border;
         self.zone_mode = match border {
-            BorderTemplateChoice::Standard | BorderTemplateChoice::Organization => {
-                ZoneModeChoice::Automatic
-            }
-            BorderTemplateChoice::Plain | BorderTemplateChoice::None => ZoneModeChoice::None,
+            BorderTemplateChoice::Standard => ZoneModeChoice::Automatic,
+            BorderTemplateChoice::None => ZoneModeChoice::None,
         };
+        self.binding_margin &= border == BorderTemplateChoice::Standard;
         self.centring_marks = self
             .frame_convention()
             .default_marks(border_to_model(border))
@@ -648,13 +637,8 @@ impl DrawingSheetDraft {
                 }
             }
             let margins = self.margins();
-            let band_um = if self.standard_frame() {
-                0
-            } else {
-                border_to_model(self.border).band_width_um()
-            };
-            let horizontal_reserved = margins.left_um + margins.right_um + 2 * band_um;
-            let vertical_reserved = margins.top_um + margins.bottom_um + 2 * band_um;
+            let horizontal_reserved = margins.left_um + margins.right_um;
+            let vertical_reserved = margins.top_um + margins.bottom_um;
             if width.saturating_sub(horizontal_reserved)
                 < crate::state::DRAWING_SHEET_MIN_DRAWING_EDGE_UM
                 || height.saturating_sub(vertical_reserved)
@@ -1003,18 +987,14 @@ fn display_unit_to_model(unit: SheetDisplayUnit) -> DrawingSheetDisplayUnit {
 fn border_from_model(value: DrawingSheetBorderTemplate) -> BorderTemplateChoice {
     match value {
         DrawingSheetBorderTemplate::Standard => BorderTemplateChoice::Standard,
-        DrawingSheetBorderTemplate::Plain => BorderTemplateChoice::Plain,
         DrawingSheetBorderTemplate::None => BorderTemplateChoice::None,
-        DrawingSheetBorderTemplate::OrganizationManaged => BorderTemplateChoice::Organization,
     }
 }
 
 fn border_to_model(value: BorderTemplateChoice) -> DrawingSheetBorderTemplate {
     match value {
         BorderTemplateChoice::Standard => DrawingSheetBorderTemplate::Standard,
-        BorderTemplateChoice::Plain => DrawingSheetBorderTemplate::Plain,
         BorderTemplateChoice::None => DrawingSheetBorderTemplate::None,
-        BorderTemplateChoice::Organization => DrawingSheetBorderTemplate::OrganizationManaged,
     }
 }
 
@@ -1258,7 +1238,7 @@ mod tests {
         assert!(!draft.centring_marks);
         assert!(draft.validate().is_ok());
 
-        draft.set_border_template(BorderTemplateChoice::Organization);
+        draft.set_border_template(BorderTemplateChoice::Standard);
         assert_eq!(draft.zone_mode, ZoneModeChoice::Automatic);
         assert!(draft.centring_marks);
         assert!(draft.validate().is_ok());
@@ -1312,9 +1292,8 @@ mod tests {
     }
 
     #[test]
-    fn managed_border_and_title_authorities_survive_replacement_drafts() {
+    fn a_managed_title_authority_survives_replacement_drafts() {
         let mut authority = valid_draft();
-        authority.set_border_template(BorderTemplateChoice::Organization);
         authority.set_title_block_template(TitleBlockTemplateChoice::Organization);
         authority.title_block_anchor = TitleBlockAnchorChoice::TopRight;
 
@@ -1328,7 +1307,8 @@ mod tests {
             .value = "Edited title".to_owned();
         replacement.enforce_managed_authority(&authority);
 
-        assert_eq!(replacement.border, BorderTemplateChoice::Organization);
+        // Only the title block is managed; the border stays as edited.
+        assert_eq!(replacement.border, BorderTemplateChoice::None);
         assert_eq!(
             replacement.title_block,
             TitleBlockTemplateChoice::Organization

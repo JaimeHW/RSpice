@@ -1344,9 +1344,7 @@ fn format_sheet_transaction_skips(skipped: &[DrawingSheetTransactionSkip]) -> St
 }
 
 fn format_is_organization_managed(format: &SchematicSheetFormat) -> bool {
-    format.border == crate::state::DrawingSheetBorderTemplate::OrganizationManaged
-        || format.title_block.template
-            == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
+    format.title_block.template == crate::state::DrawingSheetTitleBlockTemplate::OrganizationManaged
 }
 
 fn apply_title_block_fields(app: &mut RSpiceApp) -> Result<String, String> {
@@ -1923,7 +1921,7 @@ fn inheritance_label(inheritance: DrawingSheetInheritance) -> &'static str {
 mod tests {
     use super::*;
     use crate::state::{
-        DrawingSheetBorderTemplate, DrawingSheetStandard, SchematicPageOrientation,
+        DrawingSheetStandard, DrawingSheetTitleBlockTemplate, SchematicPageOrientation,
         SheetDefinition, SheetPortPolicy, SheetTemplate,
     };
 
@@ -2107,8 +2105,7 @@ mod tests {
         .unwrap();
         let managed_format = SchematicSheetFormat::default()
             .try_update(|draft| {
-                draft.border = DrawingSheetBorderTemplate::OrganizationManaged;
-                draft.marks = DrawingSheetBorderTemplate::OrganizationManaged.default_marks();
+                draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
                 draft
                     .title_block
                     .fields

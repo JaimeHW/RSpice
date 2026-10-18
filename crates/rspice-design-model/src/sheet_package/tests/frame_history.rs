@@ -505,6 +505,19 @@ fn its_presets_load_onto_todays_frames_and_seal_again_without_the_old_options() 
     let (_, trust, _) = signed_organization_package();
     let package = parse_package(SIGNED_REVIEW_WITH_OLD_FRAMES, &trust).unwrap();
     let [bound, organization, plain] = [0, 1, 2].map(|index| &package.presets[index].format);
+    // Every frame is its standard's: an organization border draws it as it
+    // stands, and a plain border draws it without zones.
+    for format in [bound, organization, plain] {
+        assert_eq!(
+            format.border,
+            crate::design_management::DrawingSheetBorderTemplate::Standard
+        );
+    }
+    assert_eq!(
+        plain.zones.mode,
+        crate::design_management::DrawingSheetZoneMode::None
+    );
+    assert_eq!(plain.geometry().unwrap().zones, None);
     // Corner registration crosses asked for are centring marks; folding
     // marks are gone.
     assert!(!bound.marks.centring);
@@ -521,23 +534,20 @@ fn its_presets_load_onto_todays_frames_and_seal_again_without_the_old_options() 
             crate::design_management::DrawingSheetFrameConvention::Iso5457.margins(false)
         );
     }
-    // Custom counts, coordinate and column-lettered schemes and partial
-    // edges give way to the standard's zones.
-    for format in [organization, plain] {
-        let geometry = format.geometry().unwrap();
-        let grid = geometry.zones.unwrap();
-        assert_eq!(
-            (grid.columns, grid.rows),
-            (6, 8),
-            "ISO 5457's 50 mm fields on a 250 × 400 mm sheet"
-        );
-        assert_eq!(
-            grid.edges,
-            crate::design_management::DrawingSheetZoneEdges::All
-        );
-        let zones = format.zone_layout(&geometry).unwrap();
-        assert_eq!(zones.rows[0].label, "A");
-    }
+    // A coordinate scheme and partial edges give way to the standard's zones.
+    let geometry = organization.geometry().unwrap();
+    let grid = geometry.zones.unwrap();
+    assert_eq!(
+        (grid.columns, grid.rows),
+        (6, 8),
+        "ISO 5457's 50 mm fields on a 250 × 400 mm sheet"
+    );
+    assert_eq!(
+        grid.edges,
+        crate::design_management::DrawingSheetZoneEdges::All
+    );
+    let zones = organization.zone_layout(&geometry).unwrap();
+    assert_eq!(zones.rows[0].label, "A");
 
     let resealed = build_package(package.presets.iter().map(|preset| DrawingSheetPreset {
         id: preset.stable_id.clone(),
@@ -555,6 +565,9 @@ fn its_presets_load_onto_todays_frames_and_seal_again_without_the_old_options() 
         r#""custom_rows""#,
         r#""labels""#,
         r#""edges""#,
+        r#""plain""#,
+        "builtin/plain",
+        "organization-managed",
     ] {
         assert!(!encoded.contains(retired), "{retired} is written again");
     }

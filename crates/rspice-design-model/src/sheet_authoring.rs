@@ -13,12 +13,14 @@ use crate::design_management::{
 };
 use crate::primitives::SchematicPageOrientation;
 
+/// The frame a custom size starts from: ISO 5457's, as an ISO A sheet has;
+/// the ASME Y14.1 format, as an ANSI A sheet has; or none, with no title
+/// block either.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StartingFrame {
     #[default]
     IsoA,
     AnsiA,
-    Plain,
     None,
 }
 
@@ -71,10 +73,6 @@ pub fn custom_format(
                         snapshot.started_from = Some(DrawingSheetStandardSeries::Ansi);
                     }
                     draft.apply_border_template(DrawingSheetBorderTemplate::Standard);
-                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
-                }
-                StartingFrame::Plain => {
-                    draft.apply_border_template(DrawingSheetBorderTemplate::Plain);
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
                 }
                 StartingFrame::None => {

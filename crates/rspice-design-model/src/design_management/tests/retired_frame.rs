@@ -147,6 +147,60 @@ fn a_sheet_too_small_for_its_standards_margins_loads_without_a_frame() {
 }
 
 #[test]
+fn a_plain_border_loads_as_the_standard_frame_without_zones() {
+    let standard = SchematicSheetFormat::default()
+        .try_update(|draft| draft.zones = DrawingSheetZones::none())
+        .unwrap();
+    let plain = saved_with(|wire| {
+        wire["border"] = serde_json::json!("plain");
+        wire["margins"] = margins(10_000, 10_000, 10_000, 10_000);
+        wire["zones"] = serde_json::json!({
+            "mode": "automatic",
+            "custom_columns": null,
+            "custom_rows": null,
+            "labels": "alpha-numeric",
+            "edges": "all",
+        });
+    });
+    assert_eq!(plain.border, DrawingSheetBorderTemplate::Standard);
+    assert_eq!(plain.zones.mode, DrawingSheetZoneMode::None);
+    assert_eq!(plain.geometry().unwrap(), standard.geometry().unwrap());
+    let written = serde_json::to_value(&plain).unwrap();
+    assert_eq!(written["border"], serde_json::json!("standard"));
+}
+
+#[test]
+fn an_organization_border_loads_as_the_standard_frame() {
+    let standard = SchematicSheetFormat::default();
+    for mode in ["automatic", "none"] {
+        let managed = saved_with(|wire| {
+            wire["border"] = serde_json::json!("organization-managed");
+            wire["zones"] = serde_json::json!({
+                "mode": mode,
+                "custom_columns": null,
+                "custom_rows": null,
+                "labels": "alpha-numeric",
+                "edges": "all",
+            });
+            wire["marks"] = serde_json::json!({ "registration": true, "folding": true });
+        });
+        assert_eq!(managed.border, DrawingSheetBorderTemplate::Standard);
+        // Its zones and marks are kept as it was saved with them.
+        assert_eq!(
+            managed.zones.mode == DrawingSheetZoneMode::Automatic,
+            mode == "automatic"
+        );
+        assert!(managed.marks.centring);
+        assert_eq!(
+            managed.geometry().unwrap().drawing_area,
+            standard.geometry().unwrap().drawing_area
+        );
+        let written = serde_json::to_value(&managed).unwrap();
+        assert_eq!(written["border"], serde_json::json!("standard"));
+    }
+}
+
+#[test]
 fn registration_and_folding_flags_load_as_the_centring_marks_option() {
     for (registration, folding) in [(true, true), (true, false), (false, true), (false, false)] {
         let format = saved_with(|wire| {

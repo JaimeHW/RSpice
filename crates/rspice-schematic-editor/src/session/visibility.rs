@@ -18,7 +18,6 @@ pub use crate::view::grid::GridStyle;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DrawingSheetLayerVisibility {
-    pub margins: bool,
     pub zones: bool,
     pub title_block: bool,
     /// ISO 5457 centring marks and ASME Y14.1 microfilm arrows. A session
@@ -32,7 +31,6 @@ pub struct DrawingSheetLayerVisibility {
 impl Default for DrawingSheetLayerVisibility {
     fn default() -> Self {
         Self {
-            margins: true,
             zones: true,
             title_block: true,
             centring_marks: true,

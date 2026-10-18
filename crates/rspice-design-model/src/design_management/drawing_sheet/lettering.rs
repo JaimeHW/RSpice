@@ -50,11 +50,6 @@ pub const fn drawing_sheet_mono_baseline_offset_um(lettering_um: u64) -> u64 {
     drawing_sheet_mono_em_um(lettering_um) * 3 / 8
 }
 
-/// The ISO 3098 lettering height series, smallest first. Lettering only ever
-/// steps between these, never to a height between two of them.
-pub(in crate::design_management) const ISO_3098_HEIGHTS_UM: [u64; 8] =
-    [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
-
 /// The heights a title block letters its fields at, on every sheet: 1.8 mm
 /// captions and 2.5 mm values, the row ISO 3098 gives A4.
 ///

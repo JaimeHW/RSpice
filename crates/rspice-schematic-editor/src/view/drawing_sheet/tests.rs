@@ -294,8 +294,8 @@ fn the_canvas_draws_centring_marks_and_no_margin_guide_on_an_iso_frame() {
     assert_eq!(marks, 4);
     // The frame lies on the margins, so no dashed guide is drawn for them.
     assert_eq!(
-        a4.geometry.physical.frame_placement,
-        DrawingSheetFramePlacement::Iso5457
+        a4.geometry.physical.drawing_area,
+        a4.geometry.physical.printable
     );
 }
 
@@ -326,15 +326,6 @@ fn zone_references_letter_at_the_height_of_their_band_not_their_sheet() {
             "a {size}-unit em must letter 3.5 mm capitals"
         );
     }
-
-    // A Plain band is 2.5 mm wide, too narrow for 3.5 mm capitals, so its
-    // references step down to 1.8 mm.
-    let plain = lettered(&active(
-        SchematicSheetFormat::default()
-            .try_update(|draft| draft.apply_border_template(DrawingSheetBorderTemplate::Plain))
-            .expect("a plain border is valid"),
-    ));
-    assert!(plain.iter().all(|size| (size * 0.698 - 7.2).abs() < 0.2));
 
     // ASME Y14.2 letters zones 6 mm high in the 0.50 in margin.
     let ansi_d = lettered(&active(SchematicSheetFormat::from_standard(

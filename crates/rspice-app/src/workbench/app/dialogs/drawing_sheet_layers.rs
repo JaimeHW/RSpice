@@ -69,12 +69,6 @@ fn drawing_sheet_layers_body(ui: &mut Ui, layers: &mut DrawingSheetLayerVisibili
             ui.spacing_mut().item_spacing.y = 1.0;
             layer_row(
                 ui,
-                "Printable margin boundary",
-                "Dashed inset showing the authored printable area, where the frame does not already lie on it.",
-                &mut layers.margins,
-            );
-            layer_row(
-                ui,
                 "Zone references",
                 "Zone ticks and edge labels. The authored drawing border remains visible independently.",
                 &mut layers.zones,

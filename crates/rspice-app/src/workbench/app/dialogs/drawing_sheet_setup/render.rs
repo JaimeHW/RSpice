@@ -1109,53 +1109,33 @@ fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fi
 fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
     field_caption(ui, "Border template");
     let previous_border = state.draft.border;
-    ui.add_enabled_ui(
-        state.draft.border != BorderTemplateChoice::Organization,
-        |ui| {
-            egui::ComboBox::from_id_salt("drawing-sheet-border")
-                .width(ui.available_width())
-                .selected_text(state.draft.border.label())
-                .show_ui(ui, |ui| {
-                    for choice in BorderTemplateChoice::ALL
-                        .into_iter()
-                        .filter(|choice| *choice != BorderTemplateChoice::Organization)
-                    {
-                        ui.selectable_value(&mut state.draft.border, choice, choice.label());
-                    }
-                });
-        },
-    );
+    egui::ComboBox::from_id_salt("drawing-sheet-border")
+        .width(ui.available_width())
+        .selected_text(state.draft.border.label())
+        .show_ui(ui, |ui| {
+            for choice in BorderTemplateChoice::ALL {
+                ui.selectable_value(&mut state.draft.border, choice, choice.label());
+            }
+        });
     if previous_border != state.draft.border {
         state.draft.set_border_template(state.draft.border);
     }
     control_note(ui, state.draft.border.summary());
     ui.add_space(14.0);
-    let zones_available = !matches!(
-        state.draft.border,
-        BorderTemplateChoice::None | BorderTemplateChoice::Plain
-    );
+    let zones_available = state.draft.border != BorderTemplateChoice::None;
     let (marks_title, marks_detail) = state.draft.centring_marks_wording();
     let marked = state.draft.standard_frame();
     two_column(ui, |left, right| {
         left.add_enabled_ui(zones_available, |left| {
             field_caption(left, "Zone divisions");
-            left.add_enabled_ui(
-                state.draft.border != BorderTemplateChoice::Organization,
-                |ui| {
-                    egui::ComboBox::from_id_salt("drawing-sheet-zone-mode")
-                        .width(ui.available_width())
-                        .selected_text(state.draft.zone_mode.label())
-                        .show_ui(ui, |ui| {
-                            for choice in ZoneModeChoice::ALL {
-                                ui.selectable_value(
-                                    &mut state.draft.zone_mode,
-                                    choice,
-                                    choice.label(),
-                                );
-                            }
-                        });
-                },
-            );
+            egui::ComboBox::from_id_salt("drawing-sheet-zone-mode")
+                .width(left.available_width())
+                .selected_text(state.draft.zone_mode.label())
+                .show_ui(left, |ui| {
+                    for choice in ZoneModeChoice::ALL {
+                        ui.selectable_value(&mut state.draft.zone_mode, choice, choice.label());
+                    }
+                });
             control_note(
                 left,
                 &match state.draft.zone_mode {

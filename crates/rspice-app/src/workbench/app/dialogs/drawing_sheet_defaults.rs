@@ -1185,7 +1185,7 @@ fn frame_row(
                 let width = ui.available_width();
                 orientation_frame_block(ui, width, record, enabled, edits);
                 unit_frame_block(ui, width, record, enabled, edits);
-                border_frame_block(ui, width, record, authority, enabled, edits);
+                border_frame_block(ui, width, record, enabled, edits);
                 title_frame_block(ui, width, record, authority, enabled, edits);
                 reset_frame_block(ui, RESET_W, enabled, edits);
             } else {
@@ -1195,7 +1195,7 @@ fn frame_row(
                     ui.spacing_mut().item_spacing.x = GAP;
                     orientation_frame_block(ui, ORIENTATION_W, record, enabled, edits);
                     unit_frame_block(ui, select_w, record, enabled, edits);
-                    border_frame_block(ui, select_w, record, authority, enabled, edits);
+                    border_frame_block(ui, select_w, record, enabled, edits);
                     title_frame_block(ui, select_w, record, authority, enabled, edits);
                     reset_frame_block(ui, RESET_W, enabled, edits);
                 });
@@ -1277,39 +1277,22 @@ fn border_frame_block(
     ui: &mut Ui,
     width: f32,
     record: &SchematicSheetFormat,
-    authority: &SchematicSheetFormat,
     enabled: bool,
     edits: &mut Vec<RecordEdit>,
 ) {
-    let border_locked = authority.border == DrawingSheetBorderTemplate::OrganizationManaged;
     frame_block(ui, width, "Border", |ui| {
-        ui.add_enabled_ui(enabled && !border_locked, |ui| {
+        ui.add_enabled_ui(enabled, |ui| {
             let mut selected = record.border;
-            if border_locked {
-                enum_combo(
-                    ui,
-                    "sheet-defaults-border",
-                    &mut selected,
-                    &[(
-                        DrawingSheetBorderTemplate::OrganizationManaged,
-                        "Organization border \u{00b7} managed",
-                    )],
-                );
-            } else {
-                enum_combo(
-                    ui,
-                    "sheet-defaults-border",
-                    &mut selected,
-                    &[
-                        (
-                            DrawingSheetBorderTemplate::Standard,
-                            "Standard border with zones",
-                        ),
-                        (DrawingSheetBorderTemplate::Plain, "Plain border"),
-                        (DrawingSheetBorderTemplate::None, "No border"),
-                    ],
-                );
-            }
+            enum_combo(
+                ui,
+                "sheet-defaults-border",
+                &mut selected,
+                &[
+                    DrawingSheetBorderTemplate::Standard,
+                    DrawingSheetBorderTemplate::None,
+                ]
+                .map(|border| (border, border_template_label(border))),
+            );
             if selected != record.border {
                 edits.push(RecordEdit::Border(selected));
             }
@@ -1518,10 +1501,8 @@ fn orientation_word(orientation: SchematicPageOrientation) -> &'static str {
 
 fn border_template_label(border: DrawingSheetBorderTemplate) -> &'static str {
     match border {
-        DrawingSheetBorderTemplate::Standard => "Standard border with zones",
-        DrawingSheetBorderTemplate::Plain => "Plain border",
+        DrawingSheetBorderTemplate::Standard => "Standard frame",
         DrawingSheetBorderTemplate::None => "No border",
-        DrawingSheetBorderTemplate::OrganizationManaged => "Organization border",
     }
 }
 
@@ -1718,10 +1699,6 @@ fn enforce_managed_default_authority(
     authority: &SchematicSheetFormat,
 ) {
     let updated = candidate.clone().try_update(|draft| {
-        if authority.border == DrawingSheetBorderTemplate::OrganizationManaged {
-            draft.border = authority.border;
-            draft.zones.mode = authority.zones.mode;
-        }
         if authority.title_block.template == DrawingSheetTitleBlockTemplate::OrganizationManaged {
             draft.title_block.template = authority.title_block.template;
         }
@@ -1847,7 +1824,6 @@ mod tests {
         settings.default_format = settings
             .default_format
             .try_update(|draft| {
-                draft.apply_border_template(DrawingSheetBorderTemplate::OrganizationManaged);
                 draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
             })
             .unwrap();
@@ -1882,10 +1858,8 @@ mod tests {
             .design_management
             .drawing_sheet_settings()
             .default_format;
-        assert_eq!(
-            saved.border,
-            DrawingSheetBorderTemplate::OrganizationManaged
-        );
+        // Only the title block is managed; the border stays as edited.
+        assert_eq!(saved.border, DrawingSheetBorderTemplate::None);
         assert_eq!(
             saved.title_block.template,
             DrawingSheetTitleBlockTemplate::OrganizationManaged
@@ -1894,28 +1868,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_default_locks_are_independent_per_property() {
-        let border_authority = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.apply_border_template(DrawingSheetBorderTemplate::OrganizationManaged);
-            })
-            .unwrap();
-        let mut border_candidate = SchematicSheetFormat::default()
-            .try_update(|draft| {
-                draft.apply_border_template(DrawingSheetBorderTemplate::None);
-                draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
-            })
-            .unwrap();
-        enforce_managed_default_authority(&mut border_candidate, &border_authority);
-        assert_eq!(
-            border_candidate.border,
-            DrawingSheetBorderTemplate::OrganizationManaged
-        );
-        assert_eq!(
-            border_candidate.title_block.template,
-            DrawingSheetTitleBlockTemplate::Compact
-        );
-
+    fn a_managed_default_title_block_locks_only_the_title_block() {
         let title_authority = SchematicSheetFormat::default()
             .try_update(|draft| {
                 draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
@@ -1923,12 +1876,12 @@ mod tests {
             .unwrap();
         let mut title_candidate = SchematicSheetFormat::default()
             .try_update(|draft| {
-                draft.apply_border_template(DrawingSheetBorderTemplate::Plain);
+                draft.apply_border_template(DrawingSheetBorderTemplate::None);
                 draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
             })
             .unwrap();
         enforce_managed_default_authority(&mut title_candidate, &title_authority);
-        assert_eq!(title_candidate.border, DrawingSheetBorderTemplate::Plain);
+        assert_eq!(title_candidate.border, DrawingSheetBorderTemplate::None);
         assert_eq!(
             title_candidate.title_block.template,
             DrawingSheetTitleBlockTemplate::OrganizationManaged
@@ -1970,7 +1923,7 @@ mod tests {
         )
         .try_update(|draft| {
             draft.display_unit = DrawingSheetDisplayUnit::Inches;
-            draft.apply_border_template(DrawingSheetBorderTemplate::Plain);
+            draft.apply_border_template(DrawingSheetBorderTemplate::None);
         })
         .unwrap();
         let base = SchematicSheetFormat::try_custom(
@@ -1989,7 +1942,7 @@ mod tests {
         ));
         assert_eq!(retargeted.orientation, SchematicPageOrientation::Portrait);
         assert_eq!(retargeted.display_unit, DrawingSheetDisplayUnit::Inches);
-        assert_eq!(retargeted.border, DrawingSheetBorderTemplate::Plain);
+        assert_eq!(retargeted.border, DrawingSheetBorderTemplate::None);
         retargeted.validate().unwrap();
     }
 

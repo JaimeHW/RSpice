@@ -196,7 +196,7 @@ fn drawing_sheet_series_margins_and_border_mark_defaults_are_normative() {
         .unwrap();
     assert_eq!(borderless.margins(), DrawingSheetMargins::zero());
     assert_eq!(
-        DrawingSheetBorderTemplate::Standard.default_marks(),
+        DrawingSheetFrameConvention::Iso5457.default_marks(DrawingSheetBorderTemplate::Standard),
         DrawingSheetMarks { centring: true }
     );
     let mut draft = SchematicSheetFormatDraft::from(&SchematicSheetFormat::default());
@@ -2888,48 +2888,28 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
     }
 }
 
+/// The ISO 3098 lettering height series, smallest first.
+const ISO_3098_HEIGHTS_UM: [u64; 8] = [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
+
 #[test]
-fn zone_references_letter_at_the_iso_5457_height_their_band_can_hold() {
-    // ISO 5457 letters a grid reference 3.5 mm high on every sheet, because
-    // the band carrying it is the same width on every sheet. A band too
-    // narrow for that steps down the series until the capitals clear both
-    // rules by a tenth of their height.
-    let iso = DrawingSheetFrameConvention::Iso5457;
-    for border in [
-        DrawingSheetBorderTemplate::Standard,
-        DrawingSheetBorderTemplate::Plain,
-        DrawingSheetBorderTemplate::OrganizationManaged,
+fn zone_references_letter_at_their_standards_height_inside_its_band() {
+    // ISO 5457 letters a grid reference 3.5 mm high in its 5 mm band, and
+    // ASME Y14.2 letters zones at least 0.24 in in Y14.1's 0.50 in margin.
+    // Each band holds its lettering with a stroke width, a tenth of the
+    // height, clear of both of its rules.
+    for (standard, height_um) in [
+        (DrawingSheetStandard::IsoA3, 3_500),
+        (DrawingSheetStandard::AnsiD, 6_000),
     ] {
-        let band_um = border.band_width_um();
-        let height_um = drawing_sheet_zone_lettering_um(iso, band_um);
-        assert!(ISO_3098_HEIGHTS_UM.contains(&height_um));
-        assert!(height_um <= 3_500);
+        let format =
+            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape);
+        let band_um = format.geometry().unwrap().border_band_um;
+        assert_eq!(format.frame_convention().zone_lettering_um(), height_um);
         assert!(
             height_um + 2 * (height_um / 10) <= band_um,
-            "{border:?} letters {height_um} um references that crowd its {band_um} um band"
+            "{standard:?} letters {height_um} um references that crowd its {band_um} um band"
         );
     }
-    assert_eq!(
-        drawing_sheet_zone_lettering_um(iso, DrawingSheetBorderTemplate::Standard.band_width_um()),
-        3_500
-    );
-    assert_eq!(
-        drawing_sheet_zone_lettering_um(iso, DrawingSheetBorderTemplate::Plain.band_width_um()),
-        1_800
-    );
-    assert_eq!(
-        drawing_sheet_zone_lettering_um(
-            iso,
-            DrawingSheetBorderTemplate::OrganizationManaged.band_width_um()
-        ),
-        3_500,
-        "a wider band does not letter its references any larger"
-    );
-    // ASME Y14.2 letters zones at least 0.24 in, which the 0.50 in margin
-    // holds; an inset band too narrow for that steps down the ISO series.
-    let asme = DrawingSheetFrameConvention::AsmeY141;
-    assert_eq!(drawing_sheet_zone_lettering_um(asme, 12_700), 6_000);
-    assert_eq!(drawing_sheet_zone_lettering_um(asme, 5_000), 3_500);
 }
 
 #[test]

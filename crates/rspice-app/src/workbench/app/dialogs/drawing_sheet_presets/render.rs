@@ -852,7 +852,6 @@ fn preset_editor_form(
                     for frame in [
                         StartingFrame::IsoA,
                         StartingFrame::AnsiA,
-                        StartingFrame::Plain,
                         StartingFrame::None,
                     ] {
                         changed |= ui
@@ -1087,10 +1086,8 @@ fn import_candidate_row(ui: &mut Ui, candidate: &mut ImportCandidate) {
         );
     } else {
         ui.label(match candidate.portable.format.border {
-            crate::state::DrawingSheetBorderTemplate::Standard => "standard border",
-            crate::state::DrawingSheetBorderTemplate::Plain => "plain border",
+            crate::state::DrawingSheetBorderTemplate::Standard => "standard frame",
             crate::state::DrawingSheetBorderTemplate::None => "no border",
-            crate::state::DrawingSheetBorderTemplate::OrganizationManaged => "organization border",
         });
     }
     ui.add_enabled_ui(candidate.selected, |ui| {
@@ -1463,7 +1460,6 @@ fn frame_label(frame: StartingFrame) -> &'static str {
     match frame {
         StartingFrame::IsoA => "Copy ISO A defaults",
         StartingFrame::AnsiA => "Copy ANSI A defaults",
-        StartingFrame::Plain => "Plain border",
         StartingFrame::None => "No border or title block",
     }
 }

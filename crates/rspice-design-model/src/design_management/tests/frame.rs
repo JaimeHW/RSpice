@@ -93,10 +93,6 @@ fn an_iso_frame_bounds_the_drawing_space_iso_5457_table_1_gives() {
         ),
     ] {
         let geometry = sheet(standard, orientation).geometry().unwrap();
-        assert_eq!(
-            geometry.frame_placement,
-            DrawingSheetFramePlacement::Iso5457
-        );
         // The frame sits at the 20 mm filing border and 10 mm elsewhere.
         assert_eq!(geometry.drawing_area.x_um, 20 * MM);
         assert_eq!(geometry.drawing_area.y_um, 10 * MM);
@@ -120,17 +116,6 @@ fn an_iso_frame_bounds_the_drawing_space_iso_5457_table_1_gives() {
     assert_eq!(geometry.zone_band, rect(15.0, 5.0, 190.0, 287.0));
     assert_eq!(geometry.border_band_um, 5_000);
     assert_eq!(geometry.content_area, geometry.drawing_area);
-}
-
-#[test]
-fn a_plain_border_keeps_the_frame_inset() {
-    let plain = SchematicSheetFormat::default()
-        .try_update(|draft| draft.apply_border_template(DrawingSheetBorderTemplate::Plain))
-        .unwrap();
-    assert_eq!(
-        plain.geometry().unwrap().frame_placement,
-        DrawingSheetFramePlacement::Inset
-    );
 }
 
 #[test]
@@ -279,10 +264,6 @@ fn ansi_d_is_zoned_by_asme_y14_1_table_4_1_from_the_lower_right() {
         DrawingSheetFrameConvention::AsmeY141
     );
     let geometry = ansi_d.geometry().unwrap();
-    assert_eq!(
-        geometry.frame_placement,
-        DrawingSheetFramePlacement::AsmeY141
-    );
     // The border line 0.50 in from the trim on every side, the whole margin
     // the zone band.
     assert_eq!(geometry.drawing_area, rect(12.7, 12.7, 838.2, 533.4));
@@ -617,10 +598,8 @@ fn a_custom_size_keeps_the_frame_of_the_series_it_was_started_from() {
         ansi.frame_convention(),
         DrawingSheetFrameConvention::AsmeY141
     );
-    assert_eq!(
-        ansi.geometry().unwrap().frame_placement,
-        DrawingSheetFramePlacement::AsmeY141
-    );
+    // Framed 0.50 in in from the trim, as ASME Y14.1 frames ANSI sheets.
+    assert_eq!(ansi.geometry().unwrap().drawing_area.x_um, 12_700);
     // A size started from no series is framed to ISO 5457, and one with no
     // record writes none, so a sheet saved before the record existed reads
     // back byte for byte.
