@@ -23,24 +23,6 @@ mitigations = "This path is confined to the desktop UI font stack; backend CLI a
 exit_criteria = "Upgrade the winit/sctk-adwaita font stack as soon as an upstream release removes the unmaintained ttf-parser version."
 
 [[exceptions]]
-id = "RUSTSEC-2026-0194"
-dependency = "wayland-scanner -> quick-xml"
-owner = "@JaimeHW"
-review_after = "2026-10-17"
-reason = "The latest compatible wayland-scanner release still uses the affected quick-xml line."
-mitigations = "quick-xml is used at build time on trusted, dependency-supplied Wayland protocol XML and is not reachable from netlists, result files, or runtime network input."
-exit_criteria = "Upgrade wayland-scanner when its stable dependency graph moves to a fixed quick-xml release."
-
-[[exceptions]]
-id = "RUSTSEC-2026-0195"
-dependency = "wayland-scanner -> quick-xml"
-owner = "@JaimeHW"
-review_after = "2026-10-17"
-reason = "The latest compatible wayland-scanner release still uses the affected quick-xml line."
-mitigations = "quick-xml is used at build time on trusted, dependency-supplied Wayland protocol XML and is not reachable from netlists, result files, or runtime network input."
-exit_criteria = "Upgrade wayland-scanner when its stable dependency graph moves to a fixed quick-xml release."
-
-[[exceptions]]
 id = "RUSTSEC-2026-0206"
 dependency = "krilla -> rustybuzz"
 owner = "@JaimeHW"
