@@ -70,6 +70,16 @@ impl AppState {
         self.workspace.content.netlist_source_path = None;
         self.workspace.content.netlist_source_dirty = false;
         self.simulation = crate::state::SimulationState::default();
+        // A notice's "Open in Results" names its run by number, and the new
+        // history numbers its runs from one again: kept, the offer would
+        // open this design's run of the same number. The notices stay, as
+        // does "Show in Console": the session's log outlives the design.
+        self.ui.toasts.retire_offers(|action| {
+            matches!(
+                action,
+                crate::ui::widgets::NotificationAction::OpenRunInResults { .. }
+            )
+        });
         self.ui.netlist = Default::default();
         self.ui.code_workspace = Default::default();
         self.workbench.netlist_open_documents.clear();
@@ -567,6 +577,50 @@ mod tests {
                 viewer.name()
             );
         }
+    }
+
+    /// Run 3 announced in one design is not run 3 of the next: once run
+    /// history is replaced the notice keeps its words and loses the offer, and
+    /// following nothing cannot open the wrong run.
+    #[test]
+    fn replacing_the_design_retires_run_offers_and_keeps_the_notices() {
+        use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
+
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        state.ui.toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Success,
+            "Run 3 complete",
+            "2 analyses saved with this run.",
+            NotificationAction::OpenRunInResults { run_sequence: 3 },
+        );
+        state.ui.toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::System,
+            ToastKind::Error,
+            "Export failed",
+            "The folder is read-only.",
+            NotificationAction::ShowInConsole { log_id: 7 },
+        );
+
+        state.clear_design_execution_context();
+
+        let records = state.ui.toasts.activity();
+        assert_eq!(records.len(), 2, "what happened is still true");
+        assert_eq!(records[1].title(), "Run 3 complete");
+        assert_eq!(records[1].message(), "2 analyses saved with this run.");
+        assert_eq!(
+            records[1].action(),
+            None,
+            "the offer named a run the new history does not have"
+        );
+        assert_eq!(
+            records[0].action(),
+            Some(NotificationAction::ShowInConsole { log_id: 7 }),
+            "the session log survives the switch, and so does the way to it"
+        );
     }
 
     #[test]

@@ -596,6 +596,23 @@ impl Toasts {
         self.activity.retain(|item| !item.read);
     }
 
+    /// Take back every offer `retired` matches, from the bell's records and
+    /// from the toasts still on screen. The notices keep their title and
+    /// message: what happened is still true, but where they offered to go
+    /// is no longer there.
+    pub fn retire_offers(&mut self, retired: impl Fn(NotificationAction) -> bool) {
+        let offers = self
+            .activity
+            .iter_mut()
+            .map(|record| &mut record.action)
+            .chain(self.queue.iter_mut().map(|toast| &mut toast.action));
+        for offer in offers {
+            if offer.is_some_and(&retired) {
+                *offer = None;
+            }
+        }
+    }
+
     /// Render all live toasts and drop expired ones. Chrome metrics are passed
     /// explicitly so this reusable widget does not depend on the workbench
     /// layout module.
@@ -1362,6 +1379,55 @@ mod tests {
         assert_eq!(toasts.activity()[0].message(), "kept");
         assert_eq!(toasts.queue.len(), 1, "the dismissed notice left the stack");
         assert!(!toasts.dismiss(saved), "a record is dismissed once");
+    }
+
+    /// A retired offer leaves the record and the toast on screen alike, and
+    /// the notice itself stays; an offer the predicate spares stays too.
+    #[test]
+    fn retiring_an_offer_keeps_the_notice_and_takes_the_offer_everywhere() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        let run = NotificationAction::OpenRunInResults { run_sequence: 3 };
+        let console = NotificationAction::ShowInConsole { log_id: 9 };
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Success,
+            "Run 3 complete",
+            "2 analyses saved with this run.",
+            run,
+        );
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::System,
+            ToastKind::Warn,
+            "Library reloaded",
+            "1 model changed.",
+            console,
+        );
+
+        toasts.retire_offers(|action| action == run);
+
+        let offers = |toasts: &Toasts| {
+            (
+                toasts
+                    .activity()
+                    .iter()
+                    .map(NotificationRecord::action)
+                    .collect::<Vec<_>>(),
+                toasts
+                    .queue
+                    .iter()
+                    .map(|toast| toast.action)
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            offers(&toasts),
+            (vec![Some(console), None], vec![None, Some(console)])
+        );
+        assert_eq!(toasts.activity()[1].title(), "Run 3 complete");
+        assert_eq!(toasts.queue[0].message, "2 analyses saved with this run.");
     }
 
     #[test]
