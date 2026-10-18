@@ -8,7 +8,8 @@
 //! sit the grid and net-name characters every sheet of the schematic shares,
 //! which Preferences only chooses for new schematics. The fields RSpice fills
 //! in itself (project, cell, page, paper size) are not offered: nothing types
-//! them.
+//! them. A value its cell cannot hold says so under its row, because the
+//! block prints it cut short rather than shrinking it.
 //!
 //! What the document tab, the sheet strip, the status bar and the navigator
 //! already say about the sheet is not said again, and the toolbar's commands
@@ -23,12 +24,12 @@ use super::{
     sheet_open_pin_findings,
 };
 use crate::schematic::view::drawing_sheet::{
-    ActiveDrawingSheet, grid_pitch_label, resolve_active_drawing_sheet,
+    ActiveDrawingSheet, grid_pitch_label, resolve_active_drawing_sheet, resolved_title_block_fields,
 };
 use crate::state::{
-    AuthoredDrawingSheetSize, DrawingSheetReleaseStatus, DrawingSheetTitleBlockTemplate,
-    DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority, NetNamingPolicy,
-    SchematicGridPitch, SchematicSheetFormat, SheetId,
+    AuthoredDrawingSheetSize, DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY, DrawingSheetReleaseStatus,
+    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
+    NetNamingPolicy, SchematicGridPitch, SchematicSheetFormat, SheetId, drawing_sheet_title_layout,
 };
 use crate::workbench::AppState;
 use crate::workbench::app::drawing_sheet_edit::{
@@ -69,11 +70,12 @@ pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
     let sheet = resolve_active_drawing_sheet(state);
     let identity = sheet_identity(state);
     let editable = drawing_sheet_setup_available_for_state(state);
+    let cut = cut_fields(state, &sheet);
     let mut edit = None;
     let mut schematic_edit = None;
     format::sheet_section(ui, state, &sheet, &identity, editable, &mut edit);
-    title_block_section(ui, &sheet, &identity, editable, &mut edit);
-    document_section(ui, state, &sheet, &identity, editable, &mut edit);
+    title_block_section(ui, &sheet, &identity, editable, &cut, &mut edit);
+    document_section(ui, state, &sheet, &identity, editable, &cut, &mut edit);
     schematic_section(ui, state, editable, &mut schematic_edit);
     checks_section(ui, state);
     if let Some(edit) = edit
@@ -83,6 +85,22 @@ pub(super) fn sheet_panel(ui: &mut Ui, state: &mut AppState) {
     }
     if let Some(edit) = schematic_edit {
         apply_schematic_edit(state, edit);
+    }
+}
+
+/// The title fields the sheet's block cuts short, as the sheet prints them:
+/// lettering never shrinks to fit, so each prints with an ellipsis.
+fn cut_fields(state: &AppState, sheet: &ActiveDrawingSheet) -> Vec<DrawingSheetTitleFieldId> {
+    drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
+        .map_or_else(Vec::new, |layout| {
+            layout.cut_fields(&resolved_title_block_fields(state, sheet))
+        })
+}
+
+/// Say under a field's row when its value prints cut short.
+fn cut_advisory(ui: &mut Ui, cut: &[DrawingSheetTitleFieldId], field: DrawingSheetTitleFieldId) {
+    if cut.contains(&field) {
+        problem_line(ui, Problem::Warning, DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY);
     }
 }
 
@@ -188,6 +206,7 @@ fn title_block_section(
     sheet: &ActiveDrawingSheet,
     identity: &SheetIdentity,
     editable: bool,
+    cut: &[DrawingSheetTitleFieldId],
     edit: &mut Option<PanelEdit>,
 ) {
     section_header(ui, "Title block", None);
@@ -274,6 +293,7 @@ fn title_block_section(
                 .unwrap_or("\u{2014}");
             property_row(ui, field.display_label(), shown);
         }
+        cut_advisory(ui, cut, field);
     }
 }
 
@@ -340,6 +360,7 @@ fn document_section(
     sheet: &ActiveDrawingSheet,
     identity: &SheetIdentity,
     editable: bool,
+    cut: &[DrawingSheetTitleFieldId],
     edit: &mut Option<PanelEdit>,
 ) {
     let format = &sheet.format;
@@ -377,6 +398,7 @@ fn document_section(
             ) {
                 *edit = Some(Ok(DrawingSheetEdit::Status(status)));
             }
+            cut_advisory(ui, cut, field);
             continue;
         }
         let stored = stored_title_value(state, format, field);
@@ -408,6 +430,7 @@ fn document_section(
         {
             problem_line(ui, Problem::Warning, advisory);
         }
+        cut_advisory(ui, cut, field);
     }
     if editable {
         if let Some(typed) = text_row(

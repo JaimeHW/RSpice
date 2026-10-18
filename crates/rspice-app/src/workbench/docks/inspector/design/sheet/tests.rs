@@ -905,3 +905,34 @@ fn content_outside_the_drawing_area_is_counted_under_the_size() {
     );
     assert!(painted.contains("Review all…\nOrientation\n"), "{painted}");
 }
+
+/// Lettering never shrinks to fit, so a value longer than its cell prints cut
+/// short, and its row says so. An ANSI A sheet bound with the binding margin
+/// steps down to the form's 6.25 in block, whose Created by cell holds a
+/// twelve-character name and not a twenty-five-character one.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_value_the_block_cuts_short_says_so_under_its_row() {
+    use crate::state::DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY as CUT;
+
+    let mut panel = SheetPanel::new();
+    for edit in [
+        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiA),
+        DrawingSheetEdit::BindingMargin(true),
+    ] {
+        apply_drawing_sheet_edit(&mut panel.app.state, edit).unwrap();
+    }
+
+    panel.enter("Created by", "J. Whitfield");
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(painted.contains("Created by\nJ. Whitfield\n"), "{painted}");
+    assert!(!painted.contains(CUT), "{painted}");
+
+    panel.enter("Created by", "Christopher Featherstones");
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(
+        painted.contains(&format!("Created by\nChristopher Featherstones\n{CUT}\n")),
+        "{painted}"
+    );
+    assert_eq!(painted.matches(CUT).count(), 1, "{painted}");
+}
