@@ -40,7 +40,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
         state,
         TogglePreference::KeepSaveBackup,
         "Keep a backup when saving",
-        "A standalone schematic save first copies the old file to .rsch.bak; project saves do not.",
+        "Saving over a schematic file first copies it to .rsch.bak. Project saves do not.",
         "Keep a backup when saving a schematic file",
     );
 }
