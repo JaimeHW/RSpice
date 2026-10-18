@@ -1047,6 +1047,7 @@ fn compare_section(
         ui.separator();
         let table = ScrollArea::both()
             .id_salt("pdk-revision-diff-table")
+            .auto_shrink([false, true])
             .max_height(520.0)
             .show(ui, |ui| {
                 ui.set_min_width(DIFF_TABLE_WIDTH);
@@ -1465,6 +1466,7 @@ fn display_section(
             ui.separator();
             ScrollArea::vertical()
                 .id_salt("pdk-display-profile-editor")
+                .auto_shrink([false, true])
                 .max_height(520.0)
                 .show(ui, |ui| {
                     for entry in &mut draft.entries {
@@ -1775,6 +1777,7 @@ fn layers_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage, view: &m
             ));
             ScrollArea::vertical()
                 .id_salt("pdk-layer-table")
+                .auto_shrink([false, true])
                 .max_height(520.0)
                 .show(ui, |ui| {
                     Grid::new("pdk-layer-grid")
@@ -1812,6 +1815,7 @@ fn editable_layers_section(
             .expect("matching draft checked by caller");
         ScrollArea::vertical()
             .id_salt("pdk-draft-layer-table")
+            .auto_shrink([false, true])
             .max_height(420.0)
             .show(ui, |ui| {
                 for index in 0..draft.manifest.layers.len() {
@@ -2394,6 +2398,7 @@ fn stream_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage, view: &m
         ui.label("Every declared layer purpose has exactly one validated stream identity.");
         ScrollArea::vertical()
             .id_salt("pdk-stream-table")
+            .auto_shrink([false, true])
             .max_height(540.0)
             .show(ui, |ui| {
                 // No Status column: it read "mapped" on every row, which is
@@ -2765,6 +2770,7 @@ fn recognition_section(
         }
         ScrollArea::vertical()
             .id_salt("pdk-recognition-contracts")
+            .auto_shrink([false, true])
             .max_height(520.0)
             .show(ui, |ui| {
                 for contract in &package.manifest().recognition {
@@ -3043,6 +3049,7 @@ fn extraction_section(
         }
         ScrollArea::vertical()
             .id_salt("pdk-extraction-contracts")
+            .auto_shrink([false, true])
             .max_height(520.0)
             .show(ui, |ui| {
                 for contract in &package.manifest().extraction {
@@ -3558,6 +3565,7 @@ fn resources_section(
             } else {
                 ScrollArea::vertical()
                     .id_salt("pdk-project-callback-receipts")
+                    .auto_shrink([false, true])
                     .max_height(420.0)
                     .show(ui, |ui| {
                         for receipt in receipts.into_iter().rev() {
@@ -3796,6 +3804,7 @@ fn trust_audit_section(
         ui.label("Technology package receipts");
         ScrollArea::vertical()
             .id_salt("pdk-audit-table")
+            .auto_shrink([false, true])
             .max_height(360.0)
             .show(ui, |ui| {
                 for receipt in snapshot.audit.iter().rev() {
