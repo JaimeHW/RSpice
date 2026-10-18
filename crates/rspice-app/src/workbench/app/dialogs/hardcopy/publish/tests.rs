@@ -135,6 +135,16 @@ fn authored_sheet_formats_seed_output_media_without_reverse_coercion() {
     )
     .unwrap();
     let setup = setup_seeded_from_sheet_format(custom).unwrap();
+    // Output on paper the size of the sheet is already trimmed, so it starts
+    // without trimming marks; everything else the sheet draws stays on.
+    let schematic = setup.schematic();
+    assert!(!schematic.crop_marks());
+    assert!(
+        schematic.includes_paper()
+            && schematic.includes_border()
+            && schematic.includes_title_block()
+            && schematic.includes_zones()
+    );
     let PaperSize::Custom(paper) = setup.physical_page().paper() else {
         panic!("a custom authored sheet seeds custom output media");
     };

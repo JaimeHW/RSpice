@@ -909,12 +909,26 @@ fn setup_seeded_from_sheet_format(
         orientation,
     )
     .map_err(|error| error.to_string())?;
-    HardcopySetup::try_new(
+    // The paper is the sheet, so the output is already trimmed to it and
+    // trimming marks would only mark its edge.
+    let sheet_output = default.schematic();
+    let schematic = rspice_hardcopy_contract::SchematicHardcopySetup::new(
+        sheet_output.extent(),
+        sheet_output.outside_content(),
+        false,
+        sheet_output.includes_paper(),
+        sheet_output.includes_border(),
+        sheet_output.includes_title_block(),
+        sheet_output.includes_zones(),
+        sheet_output.includes_grid(),
+    );
+    HardcopySetup::try_new_with_schematic(
         physical_page,
         default.scale(),
         default.tiling(),
         default.render().clone(),
         default.decorations().clone(),
+        schematic,
         default.print_mapping().clone(),
     )
     .map_err(|error| error.to_string())
