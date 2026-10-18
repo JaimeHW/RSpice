@@ -166,7 +166,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
             &keys,
         );
     }
-    run_dataset_export(ctx, app);
+    run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
     if std::mem::take(&mut app.state.ui.open_producing_plan_requested) {
         commands::vocabulary::Command::OpenProducingPlan.execute(app);
     }
@@ -210,15 +210,16 @@ fn show_toasts(
 
 /// "Export dataset…" asks for a format, then writes the displayed result in
 /// it. A result document's own export button arrives here as a request.
-fn run_dataset_export(ctx: &Context, app: &mut RSpiceApp) {
-    if std::mem::take(&mut app.state.ui.export_csv_requested) {
-        crate::workbench::menu_bar::open_dataset_export_picker(&mut app.state);
+fn run_dataset_export(
+    ctx: &Context,
+    state: &mut AppState,
+    io: &dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo,
+) {
+    if std::mem::take(&mut state.ui.export_csv_requested) {
+        crate::workbench::menu_bar::open_dataset_export_picker(state);
     }
-    if crate::workbench::menu_bar::show_dataset_export_picker(ctx, &mut app.state) {
-        crate::workbench::menu_bar::action_export_csv_with_io(
-            &mut app.state,
-            app.export_workflow_io.as_ref(),
-        );
+    if crate::workbench::menu_bar::show_dataset_export_picker(ctx, state) {
+        crate::workbench::menu_bar::action_export_csv_with_io(state, io);
     }
 }
 
@@ -617,7 +618,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
             &keys,
         );
     }
-    run_dataset_export(ctx, app);
+    run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
     if std::mem::take(&mut app.state.ui.open_producing_plan_requested) {
         commands::vocabulary::Command::OpenProducingPlan.execute(app);
     }

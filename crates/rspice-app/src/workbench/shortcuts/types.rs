@@ -628,6 +628,8 @@ impl ShortcutPolicies {
         self.protected_shortcuts.get()
     }
 
+    /// No control sets this any more; the shipped value applies.
+    #[cfg(test)]
     pub fn set_protected_shortcuts(&mut self, value: ProtectedShortcutPolicy) {
         self.protected_shortcuts.set(value);
     }
@@ -637,6 +639,8 @@ impl ShortcutPolicies {
         self.context_precedence.get()
     }
 
+    /// No control sets this any more; the shipped ordering applies.
+    #[cfg(test)]
     pub fn set_context_precedence(&mut self, value: ContextPrecedencePolicy) {
         self.context_precedence.set(value);
     }

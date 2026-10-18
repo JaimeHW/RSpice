@@ -1324,7 +1324,10 @@ fn source_files_have_no_byte_order_mark() {
 /// measurement harness whose whole output is the tables a human reads through
 /// `--nocapture`. Every table the probe prints goes through that function, so
 /// the probe costs one suppression rather than one per table.
-const MAX_LINT_SUPPRESSIONS: usize = 16;
+///
+/// 16 -> 13: the shortcut import's rollback path is deleted, and with it the
+/// three `allow(dead_code)` that kept an unreachable undo compiling.
+const MAX_LINT_SUPPRESSIONS: usize = 13;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

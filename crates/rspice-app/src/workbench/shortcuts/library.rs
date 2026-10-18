@@ -320,6 +320,7 @@ impl ShortcutProfileLibrary {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn named_preset(&self, name: &str) -> Option<NamedShortcutPreset> {
         let folded = case_fold_name(name);
         self.named_presets
