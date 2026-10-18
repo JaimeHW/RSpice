@@ -1719,6 +1719,21 @@ fn render_browser_print_html(
     Ok(html)
 }
 
+/// Whether a page carries registration marks and its grid coordinate: only
+/// when it was asked for and the page's content is spread over more than one
+/// sheet, so there is a neighbour to register it against. A page that holds
+/// its content alone would only be marked at its corners with "A1".
+fn page_is_registered(plan: &HardcopyPlan, page: &PreviewPage) -> bool {
+    plan.setup().tiling().registration_marks_and_coordinates()
+        && plan
+            .pagination()
+            .pages()
+            .iter()
+            .filter(|other| other.section_ordinal() == page.section_ordinal())
+            .nth(1)
+            .is_some()
+}
+
 fn validate_plan_font_coverage(plan: &HardcopyPlan) -> Result<(), HardcopyRenderError> {
     let coverage = FontCoverage::load()?;
     if let Watermark::Custom(text) = plan.setup().decorations().watermark() {

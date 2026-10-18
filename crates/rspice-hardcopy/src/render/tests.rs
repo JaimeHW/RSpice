@@ -814,6 +814,29 @@ fn tiled_svg_is_a_complete_numbered_multi_part_publication() {
 }
 
 #[test]
+fn only_a_spread_page_carries_registration_marks_and_its_coordinate() {
+    let coordinate_mark = |svg: &str, coordinate: &str| {
+        svg.contains(&format!("font-size=\"2200\">{coordinate}</text>"))
+    };
+    let content = extent(500_000, 100_000);
+
+    let alone = plan(OutputFormat::SvgVector, content, false);
+    assert!(alone.setup().tiling().registration_marks_and_coordinates());
+    assert_eq!(alone.pagination().pages().len(), 1);
+    let publication = HardcopyRenderer::render(&alone, &scene(content)).unwrap();
+    let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+    assert!(!coordinate_mark(svg, "A1"));
+
+    let spread = plan(OutputFormat::SvgVector, content, true);
+    let publication = HardcopyRenderer::render(&spread, &scene(content)).unwrap();
+    for (part, page) in publication.parts().iter().zip(spread.pagination().pages()) {
+        let svg = std::str::from_utf8(part.bytes()).unwrap();
+        let coordinate = page.coordinate();
+        assert!(coordinate_mark(svg, coordinate), "{coordinate}");
+    }
+}
+
+#[test]
 fn browser_print_document_is_self_contained_paginated_and_digest_bound() {
     let content = extent(500_000, 100_000);
     let plan = plan(OutputFormat::BrowserPrintDocument, content, true);

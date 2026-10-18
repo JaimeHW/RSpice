@@ -816,7 +816,7 @@ pub(super) fn draw_pdf_registration_marks(
     plan: &HardcopyPlan,
     page: &PreviewPage,
 ) {
-    if !plan.setup().tiling().registration_marks_and_coordinates() {
+    if !page_is_registered(plan, page) {
         return;
     }
     let rect = page.geometry().content_rect();
