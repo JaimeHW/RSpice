@@ -129,8 +129,12 @@ pub struct Toast {
     /// Absolute time at which it leaves, or `None` for a notice that stays
     /// until it is answered. Separate from `created` because a notice under
     /// the pointer is being read, and its clock starts over when the pointer
-    /// moves away.
+    /// moves away; and because a held clock pushes it back.
     expires: Option<f64>,
+    /// Whether one of its controls had the keyboard on the last pass. A
+    /// reader tabbing to "Show in Console" is reading the notice, and it must
+    /// not leave from under the focus.
+    focus_held: bool,
 }
 
 impl Toast {
@@ -268,6 +272,11 @@ pub struct Toasts {
     activity: Vec<NotificationRecord>,
     next_notification_id: u64,
     observed_log_revision: u64,
+    /// When the stack was last drawn, and whether the window it was drawn in
+    /// had lost focus to another application then. The time since is charged
+    /// to that state: a run that finishes while the reader is in another
+    /// application is announced when they come back, not to nobody.
+    last_pass: Option<(f64, bool)>,
 }
 
 impl Toasts {
@@ -423,6 +432,7 @@ impl Toasts {
             action,
             created,
             expires: toast_lifetime(kind).map(|lifetime| created + lifetime),
+            focus_held: false,
         });
         // Past the visible three, the oldest notice that is not an error makes
         // room. An error is the notice the reader has to act on, and three
@@ -594,34 +604,20 @@ impl Toasts {
         toolbar_height: f32,
         large_targets: bool,
     ) -> Option<NotificationAction> {
-        if self.queue.is_empty() {
-            return None;
-        }
         let now = ctx.input(|i| i.time);
+        // Another application has the keyboard: nobody is reading the
+        // notices, so their clocks stand still until the reader is back.
+        let away = ctx.input(|i| i.viewport().focused) == Some(false);
+        if let Some((then, was_away)) = self.last_pass.replace((now, away)) {
+            hold_clocks(&mut self.queue, now, then, was_away);
+        }
         self.queue
             .retain(|toast| toast.expires.is_none_or(|expires| now < expires));
         if self.queue.is_empty() {
             return None;
         }
 
-        let soonest_expiry = self
-            .queue
-            .iter()
-            .filter_map(|toast| toast.expires)
-            .map(|expires| (expires - now).max(0.0))
-            .fold(f64::INFINITY, f64::min);
         let animate = ctx.global_style().animation_time > 0.0;
-        // A stack of errors has no deadline to wake for.
-        if soonest_expiry.is_finite() {
-            let expiry = Duration::from_secs_f64(soonest_expiry);
-            // The drain bar is the clock made visible, so it has to be seen
-            // moving. Reduced motion draws no bar and wakes once, at expiry.
-            ctx.request_repaint_after(if animate {
-                TOAST_DRAIN_STEP.min(expiry)
-            } else {
-                expiry
-            });
-        }
         if animate
             && self
                 .queue
@@ -640,7 +636,8 @@ impl Toasts {
         }
         let mut answered = None;
         let mut taken = None;
-        let mut held = Vec::new();
+        let mut hovered = Vec::new();
+        let mut focused = Vec::new();
 
         Area::new(Id::new("rspice.toasts"))
             .order(Order::Foreground)
@@ -678,6 +675,9 @@ impl Toasts {
                                     if outcome.dismissed || outcome.taken.is_some() {
                                         answered = Some(toast.id);
                                     }
+                                    if outcome.focused {
+                                        focused.push(toast.id);
+                                    }
                                 });
                             let card = frame.response.rect;
                             // Only a notice with a deadline has a clock to draw.
@@ -693,7 +693,7 @@ impl Toasts {
                         Sense::hover(),
                     );
                     if toast_response.contains_pointer() {
-                        held.push(toast.id);
+                        hovered.push(toast.id);
                     }
                     ui.ctx().accesskit_node_builder(toast_response.id, |node| {
                         node.set_role(egui::accesskit::Role::Status);
@@ -709,17 +709,44 @@ impl Toasts {
 
         // A notice under the pointer is being read. Its clock starts over when
         // the pointer leaves rather than resuming, so the drain bar the reader
-        // comes back to is a full one and not a sliver about to vanish.
+        // comes back to is a full one and not a sliver about to vanish. One
+        // whose control has the keyboard is held until the next pass charges
+        // the time to it.
         for toast in &mut self.queue {
-            if held.contains(&toast.id) {
+            if hovered.contains(&toast.id) {
                 toast.expires = toast_lifetime(toast.kind).map(|lifetime| now + lifetime);
             }
+            toast.focus_held = focused.contains(&toast.id);
         }
         if let Some(id) = answered {
             // Dismissing a notice, or following it, is having read it. One
             // that simply times out was not necessarily seen, and stays unread.
             self.queue.retain(|toast| toast.id != id);
             self.mark_read(id);
+        }
+
+        // Wake for the soonest clock that is running. A held clock has
+        // nothing on it that moves, and whatever releases it (the pointer
+        // leaving, the keyboard moving, the window coming back) is an event
+        // that wakes the frame on its own; so a window left in the
+        // background sleeps rather than redrawing a still bar thirty times a
+        // second. A stack of errors has no deadline to wake for at all.
+        let soonest_expiry = self
+            .queue
+            .iter()
+            .filter(|toast| !away && !toast.focus_held && !hovered.contains(&toast.id))
+            .filter_map(|toast| toast.expires)
+            .map(|expires| (expires - now).max(0.0))
+            .fold(f64::INFINITY, f64::min);
+        if soonest_expiry.is_finite() {
+            let expiry = Duration::from_secs_f64(soonest_expiry);
+            // The drain bar is the clock made visible, so it has to be seen
+            // moving. Reduced motion draws no bar and wakes once, at expiry.
+            ctx.request_repaint_after(if animate {
+                TOAST_DRAIN_STEP.min(expiry)
+            } else {
+                expiry
+            });
         }
         taken
     }
@@ -751,6 +778,21 @@ impl Toasts {
     }
 }
 
+/// Push back the deadline of every notice whose clock was held from the last
+/// pass at `then` until `now`: all of them while the window was away, and one
+/// whose control had the keyboard. A notice is charged only for the time it
+/// was on the stack, so one raised while the reader was away gets its whole
+/// lifetime once they are back.
+fn hold_clocks(queue: &mut [Toast], now: f64, then: f64, window_away: bool) {
+    for toast in queue {
+        if let Some(expires) = &mut toast.expires
+            && (window_away || toast.focus_held)
+        {
+            *expires += (now - then.max(toast.created)).max(0.0);
+        }
+    }
+}
+
 /// The drain bar, cut from the card's own rounded shape so it follows the
 /// card's corners instead of squaring them off.
 ///
@@ -772,6 +814,8 @@ fn paint_drain_bar(ui: &Ui, card: Rect, remaining: f32) {
 struct ToastOutcome {
     dismissed: bool,
     taken: Option<NotificationAction>,
+    /// One of its controls has the keyboard.
+    focused: bool,
 }
 
 fn toast_entry_opacity(age: f64, animate_entry: bool) -> f32 {
@@ -786,6 +830,7 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutco
     let t = Tokens::get(ui.ctx());
     let mut dismissed = false;
     let mut taken = None;
+    let mut focused = false;
     let dismiss_side = if large_targets {
         tokens::TOUCH_TARGET
     } else {
@@ -829,22 +874,29 @@ fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutco
             // the corner strip would make it a second dismissal.
             if let Some(action) = toast.action {
                 ui.add_space(1.0);
-                if notice::offer_link(ui, action.label(), &toast.title, large_targets).clicked() {
+                let offer = notice::offer_link(ui, action.label(), &toast.title, large_targets);
+                focused |= offer.has_focus();
+                if offer.clicked() {
                     taken = Some(action);
                 }
             }
         });
 
         let (close_rect, _) = ui.allocate_exact_size(Vec2::splat(dismiss_side), Sense::hover());
-        dismissed = notice::dismiss_button(
+        let dismiss = notice::dismiss_button(
             ui,
             close_rect.translate(vec2(0.0, -2.0)),
             ui.id().with(("toast-dismiss", toast.id)),
             &format!("Dismiss {}", toast.title),
-        )
-        .clicked();
+        );
+        focused |= dismiss.has_focus();
+        dismissed = dismiss.clicked();
     });
-    ToastOutcome { dismissed, taken }
+    ToastOutcome {
+        dismissed,
+        taken,
+        focused,
+    }
 }
 
 #[cfg(test)]
@@ -1295,15 +1347,161 @@ mod tests {
 
     /// One frame of the toast stack at `time` on the egui clock.
     fn pass(ctx: &Context, toasts: &mut Toasts, time: f64) {
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                time: Some(time),
+        let _ = frame(ctx, toasts, time, None, Vec::new());
+    }
+
+    /// One frame at `time`, in a window that does or does not have the
+    /// keyboard (`None`: a platform that does not say).
+    fn frame(
+        ctx: &Context,
+        toasts: &mut Toasts,
+        time: f64,
+        focused: Option<bool>,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let mut input = egui::RawInput {
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        input.viewports.insert(
+            egui::ViewportId::ROOT,
+            egui::ViewportInfo {
+                focused,
                 ..Default::default()
             },
-            |ui| {
-                let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
-            },
         );
+        ctx.run_ui(input, |ui| {
+            let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
+        })
+    }
+
+    /// A run that finishes while the reader is in another application is
+    /// announced when they come back, for its whole lifetime: the clock stands
+    /// still while the window is in the background.
+    #[test]
+    fn a_window_in_the_background_holds_every_clock() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.info(&ctx, "Run 4 complete");
+
+        let _ = frame(&ctx, &mut toasts, 0.0, Some(false), Vec::new());
+        let _ = frame(&ctx, &mut toasts, 600.0, Some(false), Vec::new());
+        assert_eq!(toasts.queue.len(), 1, "nobody was there to read it");
+
+        let _ = frame(&ctx, &mut toasts, 601.0, Some(true), Vec::new());
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            601.0 + TOAST_LIFETIME - 0.1,
+            Some(true),
+            Vec::new(),
+        );
+        assert_eq!(
+            toasts.queue.len(),
+            1,
+            "it runs its lifetime once they are back"
+        );
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            601.0 + TOAST_LIFETIME + 0.1,
+            Some(true),
+            Vec::new(),
+        );
+        assert!(toasts.queue.is_empty());
+    }
+
+    /// A held clock has nothing on it that moves, so a window in the
+    /// background does not redraw its toasts thirty times a second.
+    #[test]
+    fn a_window_in_the_background_does_not_redraw_a_still_drain_bar() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.info(&ctx, "Run 4 complete");
+        let wake = |output: &egui::FullOutput| {
+            output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+        };
+
+        for time in [0.0, 0.5] {
+            let _ = frame(&ctx, &mut toasts, time, Some(true), Vec::new());
+        }
+        let running = frame(&ctx, &mut toasts, 1.0, Some(true), Vec::new());
+        assert!(
+            wake(&running) <= TOAST_DRAIN_STEP,
+            "a running clock is drawn moving: {:?}",
+            wake(&running)
+        );
+
+        let _ = frame(&ctx, &mut toasts, 1.5, Some(false), Vec::new());
+        let held = frame(&ctx, &mut toasts, 2.0, Some(false), Vec::new());
+        assert!(
+            wake(&held) > Duration::from_secs(60),
+            "a held clock asks for no frames: {:?}",
+            wake(&held)
+        );
+    }
+
+    /// A reader who tabbed to a toast's control is reading it, and it does
+    /// not leave from under the keyboard; it resumes when the keyboard moves on.
+    #[test]
+    fn a_toast_whose_control_has_the_keyboard_holds_its_clock() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::Job,
+            ToastKind::Info,
+            "Run 4 complete",
+            "2 analyses saved with this run.",
+            NotificationAction::OpenRunInResults { run_sequence: 4 },
+        );
+        let tab = egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        // The stack measures itself first; then Tab, and a pass at the same
+        // instant for the focus to settle.
+        for events in [Vec::new(), Vec::new(), vec![tab], Vec::new()] {
+            let _ = frame(&ctx, &mut toasts, 0.0, Some(true), events);
+        }
+        assert!(
+            ctx.memory(|memory| memory.focused()).is_some(),
+            "Tab reaches the toast's controls"
+        );
+        let _ = frame(&ctx, &mut toasts, 20.0, Some(true), Vec::new());
+        assert_eq!(toasts.queue.len(), 1, "the focused notice is held");
+
+        ctx.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+        // Held through 21 s, so it leaves at 21 s plus its whole lifetime.
+        let _ = frame(&ctx, &mut toasts, 21.0, Some(true), Vec::new());
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            21.0 + TOAST_LIFETIME - 0.1,
+            Some(true),
+            Vec::new(),
+        );
+        assert_eq!(toasts.queue.len(), 1, "the clock resumed where it stood");
+        let _ = frame(
+            &ctx,
+            &mut toasts,
+            21.0 + TOAST_LIFETIME + 0.1,
+            Some(true),
+            Vec::new(),
+        );
+        assert!(toasts.queue.is_empty());
     }
 
     /// A confirmation is a glance, a warning a second look, and an error
