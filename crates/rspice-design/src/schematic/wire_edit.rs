@@ -506,19 +506,56 @@ pub fn move_vertices_at(document: &mut SchematicDocument, old_pos: Point, new_po
 /// A pin exactly where wire interiors cross with no junction is left alone:
 /// splitting there would join both wires, and which one the pin means is the
 /// user's call, which the design check asks for.
+///
+/// `parts` holds each part's pins. Where two pins of one part land inside
+/// one straight run of a wire, the piece of it between them would run under
+/// the part's body from pin to pin and short the part; that piece goes, so
+/// the part stands in series where it was dropped.
 pub fn split_wires_under_pins(
     document: &mut SchematicDocument,
     identity: &mut SchematicIdentity,
-    pins: &[Point],
+    parts: &[Vec<Point>],
 ) -> bool {
     let crossings = super::junction_edit::CrossingIndex::new(&document.wires, &document.junctions);
+    let splits = |pin: Point| !crossings.is_unmarked_crossing(pin);
+    let mut bridged = Vec::new();
+    for pins in parts {
+        for (index, &first) in pins.iter().enumerate() {
+            for &second in &pins[index + 1..] {
+                let one_run = document.wires.iter().any(|wire| {
+                    !wire.points.contains(&first)
+                        && !wire.points.contains(&second)
+                        && wire.segments().any(|segment| {
+                            segment.contains_point(first) && segment.contains_point(second)
+                        })
+                });
+                if first != second && one_run && splits(first) && splits(second) {
+                    bridged.push((first, second));
+                }
+            }
+        }
+    }
+    let before = document
+        .wires
+        .iter()
+        .map(|wire| wire.id)
+        .collect::<HashSet<_>>();
     let mut changed = false;
-    for &pin in pins {
-        if crossings.is_unmarked_crossing(pin) {
+    for &pin in parts.iter().flatten() {
+        if !splits(pin) {
             continue;
         }
         for wire in wires_to_split_at(document, pin) {
             changed |= split_wire(document, identity, wire, pin).is_some();
+        }
+    }
+    for (first, second) in bridged {
+        if let Some(index) = document.wires.iter().position(|wire| {
+            !before.contains(&wire.id)
+                && (wire.points == [first, second] || wire.points == [second, first])
+        }) {
+            document.wires.remove(index);
+            changed = true;
         }
     }
     changed

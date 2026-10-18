@@ -30,22 +30,23 @@ impl SchematicState {
 
     /// Split the wires that pins of `components` land inside, so each pin
     /// owns a vertex there and the wire follows the part. A pin on an
-    /// unmarked crossing of two wires is left for the user to resolve.
+    /// unmarked crossing of two wires is left for the user to resolve, and a
+    /// part with two pins inside one run of a wire stands in series on it.
     pub fn split_wires_under_pins(
         &mut self,
         components: &std::collections::HashSet<u64>,
         mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
         _scope: &ActiveSheetTopology,
     ) -> bool {
-        let pins = self
+        let parts = self
             .design
             .document()
             .components
             .iter()
             .filter(|component| components.contains(&component.id))
-            .flat_map(&mut terminal_points_for)
+            .map(&mut terminal_points_for)
             .collect::<Vec<_>>();
-        let changed = self.design.split_wires_under_pins(&pins);
+        let changed = self.design.split_wires_under_pins(&parts);
         if changed {
             self.session.is_dirty = true;
         }
