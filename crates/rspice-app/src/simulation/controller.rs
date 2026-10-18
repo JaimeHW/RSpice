@@ -108,6 +108,8 @@ struct ActiveSimulationCampaign {
     failed_count: u32,
     cancelled: bool,
     pending: VecDeque<PreparedCampaignMember>,
+    /// When the campaign was queued, for the time its summary reports.
+    started: crate::time_compat::Instant,
 }
 
 /// Reviewed forecast returned after a campaign has been frozen and its first

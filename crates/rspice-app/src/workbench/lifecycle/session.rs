@@ -186,8 +186,8 @@ pub(crate) struct SchematicVisibilityRecovery {
     pub(crate) selection: crate::state::Selection,
 }
 
-/// What the shell has seen of runs, so that each one's end is announced
-/// exactly once.
+/// What the shell has seen of runs and campaigns, so that each one's end is
+/// announced exactly once.
 ///
 /// Every run seen before it ended is watched, not just the newest: a
 /// campaign starts its next member in the same update that finishes the
@@ -199,6 +199,9 @@ pub(crate) struct RunWatch {
     /// when it was first seen, such as history opened with a project, is
     /// never in here, so it is never announced as having just finished.
     running: std::collections::HashSet<crate::product::RunId>,
+    /// Campaign outcomes the controller reported that the shell has not
+    /// announced yet, oldest first.
+    campaign_outcomes: Vec<crate::simulation::controller::prepared_run::CampaignOutcome>,
 }
 
 impl RunWatch {
@@ -234,6 +237,21 @@ impl RunWatch {
         self.running = running;
         ended.reverse();
         ended
+    }
+
+    /// Hold a campaign outcome until the shell announces it.
+    pub(crate) fn campaign_outcome(
+        &mut self,
+        outcome: crate::simulation::controller::prepared_run::CampaignOutcome,
+    ) {
+        self.campaign_outcomes.push(outcome);
+    }
+
+    /// The campaign outcomes not yet announced, oldest first.
+    pub(crate) fn take_campaign_outcomes(
+        &mut self,
+    ) -> Vec<crate::simulation::controller::prepared_run::CampaignOutcome> {
+        std::mem::take(&mut self.campaign_outcomes)
     }
 }
 

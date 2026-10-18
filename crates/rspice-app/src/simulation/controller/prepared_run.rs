@@ -295,6 +295,33 @@ impl FrozenRunInputs {
     }
 }
 
+/// A campaign outcome for the shell to announce.
+///
+/// A member that never became a run, and the end of the campaign itself,
+/// are not runs a frame can watch reach their end, so the controller hands
+/// the shell the fact rather than leaving it to a Console line.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum CampaignOutcome {
+    /// A member that could not be started, with the Console line that says
+    /// why.
+    MemberRefused {
+        campaign: String,
+        plan: String,
+        reason: String,
+        log_id: u64,
+    },
+    /// A campaign that ran out of members without being cancelled, with the
+    /// Console line that sums it up. `completed` and `failed` count each
+    /// member once.
+    Finished {
+        name: String,
+        completed: u32,
+        failed: u32,
+        elapsed_seconds: f64,
+        log_id: u64,
+    },
+}
+
 fn activate_campaign_plan(
     state: &mut AppState,
     plan_id: crate::product::SimulationPlanId,
@@ -731,6 +758,7 @@ impl SimulationController {
             failed_count: 0,
             cancelled: false,
             pending: members,
+            started: crate::time_compat::Instant::now(),
         });
         state.record(
             LogSeverity::Info,
@@ -761,15 +789,33 @@ impl SimulationController {
                 } else {
                     ("completed with errors", LogSeverity::Error)
                 };
-                state.record(
+                // Every member that finished is counted in `completed_count`,
+                // the failed ones too; the summary counts each member once.
+                let completed = campaign
+                    .completed_count
+                    .saturating_sub(campaign.failed_count);
+                let summary = state.record(
                     severity,
                     crate::diagnostics::LogSource::Run,
                     format!(
-                        "Campaign '{}' {outcome}: {} completed, {} failed",
-                        campaign.name, campaign.completed_count, campaign.failed_count
+                        "Campaign '{}' {outcome}: {completed} completed, {} failed",
+                        campaign.name, campaign.failed_count
                     ),
                 );
                 state.simulation.execution.status = format!("Campaign {outcome}");
+                // A campaign the reader cancelled is not news to them.
+                if !campaign.cancelled {
+                    state
+                        .ui
+                        .run_watch
+                        .campaign_outcome(CampaignOutcome::Finished {
+                            name: campaign.name,
+                            completed,
+                            failed: campaign.failed_count,
+                            elapsed_seconds: campaign.started.elapsed().as_secs_f64(),
+                            log_id: summary,
+                        });
+                }
                 return Ok(());
             };
             campaign.dispatched_count = campaign.dispatched_count.saturating_add(1);
@@ -783,7 +829,7 @@ impl SimulationController {
                 Err(error) => {
                     let member_index = campaign.dispatched_count;
                     self.active_campaign = Some(campaign);
-                    state.record(
+                    let line = state.record(
                         LogSeverity::Error,
                         crate::diagnostics::LogSource::Run,
                         format!(
@@ -797,6 +843,7 @@ impl SimulationController {
                         &member.plan_name,
                         super::CampaignMemberRefusal::Start,
                         &error,
+                        line,
                     );
                     continue;
                 }
@@ -809,7 +856,7 @@ impl SimulationController {
             let dispatch = match dispatch {
                 Ok(dispatch) => dispatch,
                 Err(error) => {
-                    state.record(
+                    let line = state.record(
                         LogSeverity::Error,
                         crate::diagnostics::LogSource::Run,
                         format!("Campaign member '{member_name}' could not be authorized: {error}"),
@@ -820,6 +867,7 @@ impl SimulationController {
                         &member_name,
                         super::CampaignMemberRefusal::Authorization,
                         &error,
+                        line,
                     );
                     continue;
                 }
@@ -829,7 +877,7 @@ impl SimulationController {
             {
                 Ok(()) => return Ok(()),
                 Err(error) => {
-                    state.record(
+                    let line = state.record(
                         LogSeverity::Error,
                         crate::diagnostics::LogSource::Run,
                         format!("Campaign member '{member_name}' could not start: {error}"),
@@ -840,6 +888,7 @@ impl SimulationController {
                         &member_name,
                         super::CampaignMemberRefusal::Start,
                         &error.to_string(),
+                        line,
                     );
                 }
             }
@@ -851,8 +900,10 @@ impl SimulationController {
     ///
     /// The Console line is the caller's, which knows what refused it, and it
     /// is the event. This is the condition the event leaves: the campaign's
-    /// outcome is short one member, and the Problems page names that member
-    /// beside the ones that ran until a later run supersedes them all.
+    /// outcome is short one member, the Problems page names that member
+    /// beside the ones that ran until a later run supersedes them all, and
+    /// the shell announces it as a member that failed, since no run of it
+    /// will ever end for the shell to see.
     fn refuse_campaign_member(
         &mut self,
         state: &mut AppState,
@@ -860,6 +911,7 @@ impl SimulationController {
         member_name: &str,
         refusal: super::CampaignMemberRefusal,
         error: &str,
+        line: u64,
     ) {
         let campaign = self
             .active_campaign
@@ -874,6 +926,15 @@ impl SimulationController {
             refusal,
             error,
         );
+        state
+            .ui
+            .run_watch
+            .campaign_outcome(CampaignOutcome::MemberRefused {
+                campaign: campaign.name.clone(),
+                plan: member_name.to_owned(),
+                reason: format!("It could not be started: {error}"),
+                log_id: line,
+            });
     }
 
     pub(super) fn complete_campaign_member(&mut self, state: &mut AppState, succeeded: bool) {

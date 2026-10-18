@@ -207,12 +207,14 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     apply_platform_full_screen_request(ctx, app);
 }
 
-/// Announce each run the moment it stops running, and offer what it left.
+/// Announce each run the moment it stops running, and each campaign when it
+/// ends, and offer what they left.
 ///
 /// The console already records the batch outcome, but a console line is not a
 /// notice and carries nowhere to go. This watches every run's lifecycle
 /// rather than reading the log, so the offer is bound to a run identity
-/// instead of to the wording of a message.
+/// instead of to the wording of a message. A campaign's end is not a run, so
+/// the controller reports it.
 fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     let runs = app
         .state
@@ -222,12 +224,14 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         .iter()
         .map(|run| (run.run_id, run.lifecycle));
     let ended = app.state.ui.run_watch.observe(runs);
-    if ended.is_empty() {
+    let campaigns = app.state.ui.run_watch.take_campaign_outcomes();
+    if ended.is_empty() && campaigns.is_empty() {
         return;
     }
     let notices = ended
         .into_iter()
         .filter_map(|run_id| run_notice(&app.state, run_id))
+        .chain(campaigns.into_iter().map(campaign_notice))
         .collect::<Vec<_>>();
     for notice in notices {
         let category = crate::ui::widgets::NotificationCategory::Job;
@@ -248,7 +252,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     }
 }
 
-/// One run's outcome, in the words the shell announces it with.
+/// One run or campaign outcome, in the words the shell announces it with.
 struct RunNotice {
     kind: crate::ui::widgets::ToastKind,
     title: String,
@@ -272,15 +276,24 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
     let run = state.simulation.retained.run_by_stable_id(run_id)?;
     let sequence = run.id;
     let retained = run.analyses.len();
+    let membership = run.campaign_membership();
     let plan = run
         .prepared_receipt()
         .and_then(|receipt| receipt.simulation_plan_id())
         .and_then(|plan_id| plan_name(state, plan_id));
-    let saved = saved_detail(plan.as_deref(), retained, run.elapsed_time);
+    // A campaign member's plan is in its title instead.
+    let saved = saved_detail(
+        plan.as_deref().filter(|_| membership.is_none()),
+        retained,
+        run.elapsed_time,
+    );
     let (kind, title, detail) = match run.lifecycle {
         // The reader's own Stop. The Console and the status bar already say
         // it, and a warning for doing what they asked would be noise.
         Lifecycle::Aborted => return None,
+        // A member that finished is counted in its campaign's summary; a
+        // notice per member would bury the one that failed.
+        Lifecycle::Completed if membership.is_some() => return None,
         Lifecycle::Completed => match run.log.count(LogSeverity::Warning) {
             0 => (
                 ToastKind::Success,
@@ -328,6 +341,23 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
         ),
         _ => return None,
     };
+    // A member that failed is announced as its campaign's, under the plan
+    // the reader queued; what the run itself would have said follows.
+    let (title, detail) = match membership {
+        Some(member) if kind == ToastKind::Error => (
+            match &plan {
+                Some(plan) => format!("Campaign '{}': '{plan}' failed", member.name()),
+                None => format!(
+                    "Campaign '{}': member {} of {} failed",
+                    member.name(),
+                    member.member_index(),
+                    member.member_count()
+                ),
+            },
+            format!("{title} \u{b7} {detail}"),
+        ),
+        _ => (title, detail),
+    };
     let action = if retained > 0 {
         Some(NotificationAction::OpenRunInResults {
             run_sequence: sequence,
@@ -357,6 +387,45 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
         detail,
         action,
     })
+}
+
+/// What a campaign outcome the controller reported announces. Both offer the
+/// Console line that says what happened.
+fn campaign_notice(
+    outcome: crate::simulation::controller::prepared_run::CampaignOutcome,
+) -> RunNotice {
+    use crate::simulation::controller::prepared_run::CampaignOutcome;
+    use crate::ui::widgets::{NotificationAction, ToastKind};
+
+    match outcome {
+        CampaignOutcome::MemberRefused {
+            campaign,
+            plan,
+            reason,
+            log_id,
+        } => RunNotice {
+            kind: ToastKind::Error,
+            title: format!("Campaign '{campaign}': '{plan}' failed"),
+            detail: reason,
+            action: Some(NotificationAction::ShowInConsole { log_id }),
+        },
+        CampaignOutcome::Finished {
+            name,
+            completed,
+            failed,
+            elapsed_seconds,
+            log_id,
+        } => RunNotice {
+            kind: if failed == 0 {
+                ToastKind::Success
+            } else {
+                ToastKind::Error
+            },
+            title: format!("Campaign '{name}' finished"),
+            detail: format!("{completed} completed, {failed} failed \u{b7} {elapsed_seconds:.2} s"),
+            action: Some(NotificationAction::ShowInConsole { log_id }),
+        },
+    }
 }
 
 /// `Nightly AC · 3 analyses saved · 12.40 s`. The plan is left out for a run
@@ -1256,6 +1325,138 @@ mod tests {
             app.state.ui.toasts.activity()[0].message(),
             NOTHING_RETAINED
         );
+    }
+
+    /// A campaign is announced by what the reader has to act on: a member
+    /// that failed, as it fails, and the campaign's end. A member that
+    /// finished cleanly is counted in the summary and raises nothing of its
+    /// own, so the failure is not buried among a column of successes.
+    #[test]
+    fn a_two_member_campaign_announces_its_failed_member_and_its_end() {
+        use crate::diagnostics::LogAnchor;
+        use crate::simulation::controller::prepared_run::CampaignOutcome;
+        use crate::state::{SimulationCampaignMembership, SimulationRunLifecycle as Lifecycle};
+        use crate::ui::widgets::{NotificationAction, ToastKind};
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        let campaign = crate::product::SimulationCampaignId::new();
+        let bias = app.state.sim_setup.create_plan("Bias").expect("a plan");
+        let sweep = app.state.sim_setup.create_plan("Sweep").expect("a plan");
+        let start_member =
+            |app: &mut RSpiceApp, plan: crate::product::SimulationPlanId, index: u32| -> u64 {
+                let run = app
+                    .state
+                    .simulation
+                    .start_prepared_run(plan_receipt(plan))
+                    .expect("a member run");
+                run.set_campaign_membership(
+                    SimulationCampaignMembership::new(campaign, "Nightly", index, 2)
+                        .expect("a membership"),
+                )
+                .expect("the run joins the campaign");
+                run.lifecycle = Lifecycle::Running;
+                run.id
+            };
+        let first = start_member(&mut app, bias, 1);
+        announce_run_completion(&ctx, &mut app);
+
+        // One update: the first member fails and the second starts.
+        let run = app
+            .state
+            .simulation
+            .retained
+            .run_by_sequence_mut(first)
+            .expect("the first member");
+        run.log.push(run_log_line(
+            LogSeverity::Error,
+            "Operating point: no convergence",
+        ));
+        run.lifecycle = Lifecycle::Failed;
+        let end_line = app.state.log_buffer.log_anchored(
+            LogSeverity::Error,
+            LogSource::Run,
+            "Run 1 failed after 0.20 s: Operating point: no convergence",
+            Some(LogAnchor::ResultRun {
+                run_sequence: first,
+            }),
+        );
+        let second = start_member(&mut app, sweep, 2);
+        announce_run_completion(&ctx, &mut app);
+
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1, "the failed member, as it fails");
+        assert_eq!(activity[0].title(), "Campaign 'Nightly': 'Bias' failed");
+        assert_eq!(activity[0].kind(), ToastKind::Error);
+        assert_eq!(
+            activity[0].message(),
+            format!("Run {first} failed \u{b7} Operating point: no convergence")
+        );
+        assert_eq!(
+            activity[0].action(),
+            Some(NotificationAction::ShowInConsole { log_id: end_line }),
+            "the run's own offer"
+        );
+
+        // The second member finishes cleanly, which ends the campaign.
+        app.state
+            .simulation
+            .retained
+            .run_by_sequence_mut(second)
+            .expect("the second member")
+            .lifecycle = Lifecycle::Completed;
+        let summary = app.state.log_buffer.log(
+            LogSeverity::Error,
+            LogSource::Run,
+            "Campaign 'Nightly' completed with errors: 1 completed, 1 failed",
+        );
+        app.state
+            .ui
+            .run_watch
+            .campaign_outcome(CampaignOutcome::Finished {
+                name: "Nightly".to_owned(),
+                completed: 1,
+                failed: 1,
+                elapsed_seconds: 42.5,
+                log_id: summary,
+            });
+        announce_run_completion(&ctx, &mut app);
+        announce_run_completion(&ctx, &mut app);
+
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(
+            activity.len(),
+            2,
+            "the clean member raises nothing of its own: {:?}",
+            activity
+                .iter()
+                .map(|record| record.title())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(activity[0].title(), "Campaign 'Nightly' finished");
+        assert_eq!(activity[0].kind(), ToastKind::Error, "a member failed");
+        assert_eq!(
+            activity[0].message(),
+            "1 completed, 1 failed \u{b7} 42.50 s"
+        );
+        assert_eq!(
+            activity[0].action(),
+            Some(NotificationAction::ShowInConsole { log_id: summary })
+        );
+
+        // A campaign nothing failed in finished as a success.
+        app.state
+            .ui
+            .run_watch
+            .campaign_outcome(CampaignOutcome::Finished {
+                name: "Nightly".to_owned(),
+                completed: 2,
+                failed: 0,
+                elapsed_seconds: 40.0,
+                log_id: summary,
+            });
+        announce_run_completion(&ctx, &mut app);
+        assert_eq!(app.state.ui.toasts.activity()[0].kind(), ToastKind::Success);
     }
 
     #[test]
