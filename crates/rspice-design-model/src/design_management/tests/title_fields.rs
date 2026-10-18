@@ -29,7 +29,7 @@ fn paper_size_names_the_sheet_as_iso_7200_writes_it() {
     assert_eq!(DrawingSheetStandard::ArchD.paper_size(), "ARCH D");
     for standard in DrawingSheetStandard::ALL {
         assert!(
-            standard.paper_size().chars().count() <= 6,
+            standard.paper_size().chars().count() <= 7,
             "{standard:?} is called {:?}",
             standard.paper_size()
         );
@@ -221,14 +221,14 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     // its paper is called.
     for narrow in [
         SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::IsoA4,
+            DrawingSheetStandard::IsoA5,
             SchematicPageOrientation::Portrait,
         ),
         SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::AnsiA,
+            DrawingSheetStandard::JisB5,
             SchematicPageOrientation::Portrait,
         ),
-        crate::custom_format("Panel", 210_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
+        crate::custom_format("Panel", 200_000, 400_000, crate::StartingFrame::IsoA).unwrap(),
     ] {
         assert!(narrow.geometry().unwrap().drawing_area.width_um < 180_000);
         assert_eq!(
@@ -302,13 +302,15 @@ fn each_title_block_template_goes_by_one_name() {
 
 #[test]
 fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
-    // A4 portrait keeps a 20 mm filing margin and 10 mm opposite, and a 5 mm
-    // zone band runs inside both, which leaves 170 mm: too narrow for ISO
-    // 7200's 180 mm block, which gives way to the compact one.
+    // A4 portrait with a 30 mm filing margin and 10 mm opposite leaves a
+    // 170 mm drawing space: too narrow for ISO 7200's 180 mm block, which
+    // gives way to the compact one.
     let a4_portrait = SchematicSheetFormat::from_standard(
         DrawingSheetStandard::IsoA4,
         SchematicPageOrientation::Portrait,
-    );
+    )
+    .try_update(|draft| draft.margins.left_um = 30_000)
+    .unwrap();
     assert_eq!(
         a4_portrait.geometry().unwrap().drawing_area.width_um,
         170_000
@@ -348,15 +350,15 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
         .unwrap();
     assert_eq!(
         narrow_margins.geometry().unwrap().drawing_area.width_um,
-        190_000
+        200_000
     );
     assert!(!narrow_margins.title_block_substituted());
 
     // A drawing area too short for the block gives way as well.
     let short = SchematicSheetFormat::default()
         .try_update(|draft| {
-            draft.margins.top_um = 80_000;
-            draft.margins.bottom_um = 80_000;
+            draft.margins.top_um = 85_000;
+            draft.margins.bottom_um = 85_000;
         })
         .unwrap();
     assert_eq!(short.geometry().unwrap().drawing_area.height_um, 40_000);

@@ -10,8 +10,9 @@ use egui::{
 };
 
 use crate::state::{
-    AuthoredDrawingSheetSize, DrawingSheetPresetScope, DrawingSheetStandard,
-    DrawingSheetStandardSeries, SchematicPageOrientation, SchematicSheetFormat,
+    AuthoredDrawingSheetSize, DrawingSheetFrameConvention, DrawingSheetPresetScope,
+    DrawingSheetStandard, DrawingSheetStandardSeries, SchematicPageOrientation,
+    SchematicSheetFormat,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -1034,6 +1035,9 @@ fn orientation_field(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
             state.draft.set_orientation(selected);
         }
     });
+    if let Some(advisory) = state.draft.orientation_advisory() {
+        control_note(ui, advisory);
+    }
 }
 
 fn display_units_field(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
@@ -1124,6 +1128,16 @@ fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fi
         if linked.changed() && state.draft.margins_linked {
             state.draft.link_margins_from(MarginEdge::Top);
         }
+        // ASME Y14.1 4.1.3 lets a bound drawing widen its margins.
+        if state.draft.frame_convention() == DrawingSheetFrameConvention::AsmeY141 {
+            let mut binding = state.draft.binding_margin();
+            if right
+                .checkbox(&mut binding, "Binding margin · 0.75 in left")
+                .changed()
+            {
+                state.draft.set_binding_margin(binding);
+            }
+        }
     });
     ui.add_space(14.0);
     ui.horizontal_wrapped(|ui| {
@@ -1203,8 +1217,17 @@ fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
                 left,
                 &match state.draft.zone_mode {
                     ZoneModeChoice::Automatic => format!(
-                        "Even counts nearest a 140 mm pitch — {} × {} on this sheet.",
-                        state.draft.zone_columns, state.draft.zone_rows
+                        "{} — {} × {} on this sheet.",
+                        match state.draft.frame_convention() {
+                            DrawingSheetFrameConvention::Iso5457 => {
+                                "ISO 5457 50 mm fields from the centre"
+                            }
+                            DrawingSheetFrameConvention::AsmeY141 => {
+                                "ASME Y14.1 Table 4-1 zones from the lower right"
+                            }
+                        },
+                        state.draft.zone_columns,
+                        state.draft.zone_rows
                     ),
                     ZoneModeChoice::Custom => {
                         "Fixed counts, kept through size and orientation changes.".to_owned()
@@ -1263,19 +1286,28 @@ fn frame_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
         });
     });
     ui.add_space(14.0);
+    let (marks_title, marks_detail) = state.draft.registration_marks_wording();
+    // ISO 5457 and ASME Y14.1 frames carry no folding marks.
+    let folds_apply = !state.draft.standard_frame();
     two_column(ui, |left, right| {
         toggle_card(
             left,
-            "Registration marks",
-            "Paper-alignment targets",
+            marks_title,
+            marks_detail,
             &mut state.draft.registration_marks,
         );
-        toggle_card(
-            right,
-            "Folding marks",
-            "Format-defined fold pitch",
-            &mut state.draft.folding_marks,
-        );
+        right.add_enabled_ui(folds_apply, |ui| {
+            toggle_card(
+                ui,
+                "Folding marks",
+                if folds_apply {
+                    "Format-defined fold pitch"
+                } else {
+                    "Not part of this frame's standard"
+                },
+                &mut state.draft.folding_marks,
+            );
+        });
     });
 }
 
@@ -1683,7 +1715,7 @@ const fn standard_series_heading(series: DrawingSheetStandardSeries) -> &'static
         DrawingSheetStandardSeries::Iso => "ISO A series — international engineering",
         DrawingSheetStandardSeries::Ansi => "ANSI series — North American engineering",
         DrawingSheetStandardSeries::Architectural => {
-            "Architectural series — North American large format"
+            "Architectural series — North American large format, ASME Y14.1 format"
         }
         DrawingSheetStandardSeries::Jis => "JIS B series — Japanese engineering",
     }

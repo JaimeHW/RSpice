@@ -521,6 +521,7 @@ impl DrawingSheetPreset {
         );
         let id = self.id.clone();
         let name = self.name.clone();
+        let started_from = self.format.authored_size.series_for_custom_size();
         self.format = self.format.try_update(|draft| {
             draft.inheritance = DrawingSheetInheritance::Explicit;
             draft.authored_size = AuthoredDrawingSheetSize::Custom {
@@ -530,6 +531,7 @@ impl DrawingSheetPreset {
                     portrait_width_um,
                     portrait_height_um,
                     source_preset_unavailable,
+                    started_from,
                 },
             };
             for field in draft.title_block.fields.values_mut() {

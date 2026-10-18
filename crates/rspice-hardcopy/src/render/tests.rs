@@ -7,6 +7,7 @@ mod legend;
 mod plot_overlay;
 mod provenance;
 mod schematic_labels;
+mod sheet_frame;
 mod title_lettering;
 
 use lopdf::Document as ParsedPdf;
@@ -1478,10 +1479,47 @@ fn a_plotted_title_block_declares_no_scale() {
 
 #[test]
 fn hardcopy_zone_alphabet_matches_engineering_drawing_overflow_rules() {
-    assert_eq!(compiler::zone_alpha_label(0), "A");
-    assert_eq!(compiler::zone_alpha_label(8), "J");
-    assert_eq!(compiler::zone_alpha_label(21), "Y");
-    assert_eq!(compiler::zone_alpha_label(22), "23");
+    // ISO 5457 omits only I and O; past Z the letters double rather than
+    // turning into numerals that read as the other axis.
+    use rspice_design_model::design_management::drawing_sheet_zone_letters;
+    assert_eq!(drawing_sheet_zone_letters(0), "A");
+    assert_eq!(drawing_sheet_zone_letters(8), "J");
+    assert_eq!(drawing_sheet_zone_letters(14), "Q");
+    assert_eq!(drawing_sheet_zone_letters(23), "Z");
+    assert_eq!(drawing_sheet_zone_letters(24), "AA");
+    // A0's sixteen plotted rows end P, Q, R.
+    let a0 = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA0,
+        SchematicPageOrientation::Landscape,
+    );
+    let source = resolved_blank_schematic(&a0);
+    let zones_only = SchematicHardcopySetup::new(
+        SchematicHardcopyExtent::AuthoredDrawingSheet,
+        OutsideSheetContentPolicy::Ask,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+    );
+    let scene = scene_from_resolved(
+        &source,
+        source.default_print_mapping(),
+        zones_only,
+        resolved_metadata(),
+    )
+    .unwrap();
+    let lettered = scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(lettered.contains(&"Q") && lettered.contains(&"R"));
+    assert!(!lettered.contains(&"S") && !lettered.contains(&"I") && !lettered.contains(&"O"));
 }
 
 #[test]
@@ -1813,6 +1851,7 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
     let zone_edges = [
         DrawingSheetZoneEdges::All,
         DrawingSheetZoneEdges::TopAndLeft,
+        DrawingSheetZoneEdges::TopAndRight,
         DrawingSheetZoneEdges::BottomAndRight,
     ];
     let mut cases = 0usize;
@@ -1894,7 +1933,7 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
         }
     }
 
-    assert_eq!(cases, 480);
+    assert_eq!(cases, 504);
 }
 
 #[test]

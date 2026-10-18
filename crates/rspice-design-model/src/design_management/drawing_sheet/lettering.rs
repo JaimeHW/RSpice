@@ -55,33 +55,6 @@ pub const fn drawing_sheet_mono_baseline_offset_um(lettering_um: u64) -> u64 {
 pub(in crate::design_management) const ISO_3098_HEIGHTS_UM: [u64; 8] =
     [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
 
-/// Height ISO 5457 letters a grid reference at, on every sheet size.
-const ZONE_REFERENCE_UM: u64 = 3_500;
-
-/// The ISO 3098 height a zone reference in a border band of the given width
-/// is lettered at.
-///
-/// ISO 5457 letters grid references 3.5 mm high whatever the paper: they
-/// label a frame of fixed width rather than the drawing inside it, so unlike
-/// the drawing's own lettering they do not grow with the sheet. A band too
-/// narrow for that steps down the series to the largest height whose
-/// capitals clear both of its rules by a stroke width, a tenth of the
-/// height, and no lower than the series goes. Canvas and hardcopy both
-/// letter a reference at this height, centred in the band.
-#[must_use]
-pub fn drawing_sheet_zone_lettering_um(border_band_um: u64) -> u64 {
-    let mut fitted_um = ISO_3098_HEIGHTS_UM[0];
-    for height_um in ISO_3098_HEIGHTS_UM {
-        if height_um > ZONE_REFERENCE_UM {
-            break;
-        }
-        if height_um * 12 / 10 <= border_band_um {
-            fitted_um = height_um;
-        }
-    }
-    fitted_um
-}
-
 /// The heights a title block letters its fields at, on every sheet: 1.8 mm
 /// captions and 2.5 mm values, the row ISO 3098 gives A4.
 ///

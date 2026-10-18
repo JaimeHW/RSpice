@@ -218,23 +218,3 @@ pub(in crate::render) fn authored_title_block_rect(
         height_um: block.width_um,
     })
 }
-
-pub(in crate::render) fn zone_alpha_label(index: u8) -> String {
-    // Match canvas and preview: engineering drawing zones omit ambiguous
-    // letters and fall back to the numeric ordinal once the alphabet ends.
-    const LETTERS: &[u8] = b"ABCDEFGHJKLMNPRSTUVWXY";
-    LETTERS.get(usize::from(index)).map_or_else(
-        || (usize::from(index) + 1).to_string(),
-        |letter| char::from(*letter).to_string(),
-    )
-}
-
-pub(in crate::render) fn midpoint_coordinate(
-    start: i64,
-    end: i64,
-    context: &'static str,
-) -> Result<i64, HardcopyRenderError> {
-    end.checked_sub(start)
-        .and_then(|distance| start.checked_add(distance / 2))
-        .ok_or_else(|| conversion_error(format!("{context} coordinate overflow")))
-}

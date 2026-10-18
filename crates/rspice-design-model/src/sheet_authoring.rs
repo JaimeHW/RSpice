@@ -6,8 +6,9 @@
 //! to produce a format that will survive validation.
 
 use crate::design_management::{
-    DRAWING_SHEET_MAX_ASPECT_RATIO, DRAWING_SHEET_MAX_EDGE_UM, DRAWING_SHEET_MIN_EDGE_UM,
-    DrawingSheetBorderTemplate, DrawingSheetInheritance, DrawingSheetMargins,
+    AuthoredDrawingSheetSize, DRAWING_SHEET_MAX_ASPECT_RATIO, DRAWING_SHEET_MAX_EDGE_UM,
+    DRAWING_SHEET_MIN_EDGE_UM, DrawingSheetBorderTemplate, DrawingSheetInheritance,
+    DrawingSheetMargins, DrawingSheetStandard, DrawingSheetStandardSeries,
     DrawingSheetTitleBlockTemplate, DrawingSheetZones, SchematicSheetFormat,
 };
 use crate::primitives::SchematicPageOrientation;
@@ -70,12 +71,12 @@ pub fn custom_format(
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
                 }
                 StartingFrame::AnsiA => {
-                    draft.margins = DrawingSheetMargins {
-                        top_um: 12_700,
-                        right_um: 12_700,
-                        bottom_um: 12_700,
-                        left_um: 19_050,
-                    };
+                    // The size keeps the ASME Y14.1 format it was started on.
+                    if let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size
+                    {
+                        snapshot.started_from = Some(DrawingSheetStandardSeries::Ansi);
+                    }
+                    draft.margins = DrawingSheetStandard::AnsiA.default_margins();
                     draft.apply_border_template(DrawingSheetBorderTemplate::Standard);
                     draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
                 }

@@ -53,7 +53,8 @@ impl DrawingSheetTitleFieldId {
             // Fixed forms, held whole.
             Self::Page => 8,
             Self::Revision => 3,
-            Self::PaperSize => 6,
+            // The longest designation, ARCH E1.
+            Self::PaperSize => 7,
             Self::Date => 10,
             Self::DocumentStatus => longest_release_status_chars(),
             Self::Classification => 12,

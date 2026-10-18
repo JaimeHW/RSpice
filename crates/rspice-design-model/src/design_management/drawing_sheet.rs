@@ -68,6 +68,8 @@ pub enum DrawingSheetStandard {
     ArchC,
     ArchD,
     ArchE,
+    /// 30 × 42 in, the architectural size between D and E.
+    ArchE1,
     JisB5,
     JisB4,
     JisB3,
@@ -75,7 +77,7 @@ pub enum DrawingSheetStandard {
 }
 
 impl DrawingSheetStandard {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::IsoA5,
         Self::IsoA4,
         Self::IsoA3,
@@ -92,6 +94,7 @@ impl DrawingSheetStandard {
         Self::ArchC,
         Self::ArchD,
         Self::ArchE,
+        Self::ArchE1,
         Self::JisB5,
         Self::JisB4,
         Self::JisB3,
@@ -117,6 +120,7 @@ impl DrawingSheetStandard {
             Self::ArchC => "ARCH C",
             Self::ArchD => "ARCH D",
             Self::ArchE => "ARCH E",
+            Self::ArchE1 => "ARCH E1",
             Self::JisB5 => "JIS B5",
             Self::JisB4 => "JIS B4",
             Self::JisB3 => "JIS B3",
@@ -150,7 +154,7 @@ impl DrawingSheetStandard {
             Self::AnsiA | Self::AnsiB | Self::AnsiC | Self::AnsiD | Self::AnsiE => {
                 DrawingSheetStandardSeries::Ansi
             }
-            Self::ArchA | Self::ArchB | Self::ArchC | Self::ArchD | Self::ArchE => {
+            Self::ArchA | Self::ArchB | Self::ArchC | Self::ArchD | Self::ArchE | Self::ArchE1 => {
                 DrawingSheetStandardSeries::Architectural
             }
             Self::JisB5 | Self::JisB4 | Self::JisB3 | Self::JisB2 => {
@@ -179,6 +183,7 @@ impl DrawingSheetStandard {
             Self::ArchC => (457_200, 609_600),
             Self::ArchD => (609_600, 914_400),
             Self::ArchE => (914_400, 1_219_200),
+            Self::ArchE1 => (762_000, 1_066_800),
             Self::JisB5 => (182_000, 257_000),
             Self::JisB4 => (257_000, 364_000),
             Self::JisB3 => (364_000, 515_000),
@@ -186,6 +191,10 @@ impl DrawingSheetStandard {
         }
     }
 
+    /// The margins a sheet of this size starts with: ISO 5457 4.2's 20 mm
+    /// filing border on the left and 10 mm elsewhere, and ASME Y14.1 Table
+    /// 4-1's 0.50 in format margin on every side. A binding margin is the
+    /// author's choice (see [`DRAWING_SHEET_ASME_BINDING_MARGIN_UM`]).
     #[must_use]
     pub const fn default_margins(self) -> DrawingSheetMargins {
         match self.series() {
@@ -197,18 +206,24 @@ impl DrawingSheetStandard {
                     left_um: 20_000,
                 }
             }
-            DrawingSheetStandardSeries::Ansi => DrawingSheetMargins {
-                top_um: 12_700,
-                right_um: 12_700,
-                bottom_um: 12_700,
-                left_um: 19_050,
-            },
-            DrawingSheetStandardSeries::Architectural => DrawingSheetMargins {
-                top_um: 12_700,
-                right_um: 12_700,
-                bottom_um: 12_700,
-                left_um: 25_400,
-            },
+            DrawingSheetStandardSeries::Ansi | DrawingSheetStandardSeries::Architectural => {
+                DrawingSheetMargins {
+                    top_um: 12_700,
+                    right_um: 12_700,
+                    bottom_um: 12_700,
+                    left_um: 12_700,
+                }
+            }
+        }
+    }
+
+    /// The zone edges a sheet of this size letters by default: ISO 5457 4.4
+    /// letters A4 at the top and the right side only.
+    #[must_use]
+    pub const fn default_zone_edges(self) -> DrawingSheetZoneEdges {
+        match self {
+            Self::IsoA4 => DrawingSheetZoneEdges::TopAndRight,
+            _ => DrawingSheetZoneEdges::All,
         }
     }
 }
@@ -232,6 +247,11 @@ pub struct CustomDrawingSheetSnapshot {
     /// Keeps a captured preset publishable after its source is unavailable.
     #[serde(default)]
     pub source_preset_unavailable: bool,
+    /// The standard series the size was started from, whose frame and zone
+    /// convention it keeps. A size started from none, and every size saved
+    /// before this was recorded, is framed to ISO 5457.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_from: Option<DrawingSheetStandardSeries>,
 }
 
 impl CustomDrawingSheetSnapshot {
@@ -292,6 +312,21 @@ impl AuthoredDrawingSheetSize {
         match self {
             Self::Standard { standard } => standard.paper_size(),
             Self::Custom { snapshot } => &snapshot.name,
+        }
+    }
+
+    /// What a custom size taken from this one records as the series it was
+    /// started from: the series whose frame it keeps. ISO 5457 is what a
+    /// custom size without a record is framed to, so a size taken from an
+    /// ISO or JIS sheet records nothing and is stored as it always was.
+    #[must_use]
+    pub const fn series_for_custom_size(&self) -> Option<DrawingSheetStandardSeries> {
+        match self {
+            Self::Standard { standard } => match standard.series() {
+                DrawingSheetStandardSeries::Iso | DrawingSheetStandardSeries::Jis => None,
+                series => Some(series),
+            },
+            Self::Custom { snapshot } => snapshot.started_from,
         }
     }
 
@@ -462,6 +497,8 @@ pub enum DrawingSheetZoneEdges {
     #[default]
     All,
     TopAndLeft,
+    /// ISO 5457 4.4's edges for A4.
+    TopAndRight,
     BottomAndRight,
 }
 
@@ -1284,7 +1321,7 @@ impl SchematicSheetFormatDraft {
     /// Apply a border template together with its normative mark defaults.
     pub fn apply_border_template(&mut self, border: DrawingSheetBorderTemplate) {
         self.border = border;
-        self.marks = border.default_marks();
+        self.marks = self.authored_size.frame_convention().default_marks(border);
         if border.supports_zones() {
             if self.zones.mode == DrawingSheetZoneMode::None {
                 self.zones = DrawingSheetZones::default();
@@ -1537,8 +1574,12 @@ impl SchematicSheetFormat {
             margins: standard.default_margins(),
             bleed_um: 0,
             border: DrawingSheetBorderTemplate::Standard,
-            zones: DrawingSheetZones::default(),
-            marks: DrawingSheetBorderTemplate::Standard.default_marks(),
+            zones: DrawingSheetZones {
+                edges: standard.default_zone_edges(),
+                ..DrawingSheetZones::default()
+            },
+            marks: DrawingSheetFrameConvention::for_series(standard.series())
+                .default_marks(DrawingSheetBorderTemplate::Standard),
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
         };
@@ -1562,6 +1603,7 @@ impl SchematicSheetFormat {
             portrait_width_um: dimensions[0],
             portrait_height_um: dimensions[1],
             source_preset_unavailable: false,
+            started_from: None,
         };
         snapshot.validate()?;
         let authored_size = AuthoredDrawingSheetSize::Custom { snapshot };
@@ -1684,20 +1726,22 @@ impl SchematicSheetFormat {
         }
     }
 
-    /// Width and height of the drawing area: the paper less its margins and
-    /// the border's zone band on every side, or `None` when they leave none.
+    /// Width and height of the drawing area inside the frame, or `None` when
+    /// the margins and the frame leave none.
     fn drawing_area_extent_um(&self) -> Option<(u64, u64)> {
         let (paper_width_um, paper_height_um) = self.oriented_dimensions_um();
-        let bands_um = self.border.band_width_um().checked_mul(2)?;
-        let width_um = paper_width_um
-            .checked_sub(self.margins.left_um)?
-            .checked_sub(self.margins.right_um)?
-            .checked_sub(bands_um)?;
-        let height_um = paper_height_um
-            .checked_sub(self.margins.top_um)?
-            .checked_sub(self.margins.bottom_um)?
-            .checked_sub(bands_um)?;
-        Some((width_um, height_um))
+        let paper = DrawingSheetRect::new(0, 0, paper_width_um, paper_height_um);
+        let printable = paper
+            .inset(
+                self.margins.left_um,
+                self.margins.top_um,
+                self.margins.right_um,
+                self.margins.bottom_um,
+                "drawing sheet margins",
+            )
+            .ok()?;
+        let area = self.frame_layout(paper, printable).ok()?.drawing_area;
+        Some((area.width_um, area.height_um))
     }
 
     #[must_use]
@@ -1798,14 +1842,8 @@ impl SchematicSheetFormat {
             self.margins.bottom_um,
             "drawing sheet margins",
         )?;
-        let border_band_um = self.border.band_width_um();
-        let drawing_area = printable.inset(
-            border_band_um,
-            border_band_um,
-            border_band_um,
-            border_band_um,
-            "drawing sheet border",
-        )?;
+        let frame = self.frame_layout(paper, printable)?;
+        let drawing_area = frame.drawing_area;
         if drawing_area.width_um < DRAWING_SHEET_MIN_DRAWING_EDGE_UM
             || drawing_area.height_um < DRAWING_SHEET_MIN_DRAWING_EDGE_UM
         {
@@ -1817,12 +1855,15 @@ impl SchematicSheetFormat {
         let title_block = self.title_block_rect(drawing_area, effective_title_block_template)?;
         let zones = match self.zones.mode {
             DrawingSheetZoneMode::None => None,
-            DrawingSheetZoneMode::Automatic => Some(DrawingSheetZoneGrid {
-                columns: automatic_zone_count(paper_width),
-                rows: automatic_zone_count(paper_height),
-                labels: self.zones.labels,
-                edges: self.zones.edges,
-            }),
+            DrawingSheetZoneMode::Automatic => {
+                let (columns, rows) = self.automatic_zone_counts();
+                Some(DrawingSheetZoneGrid {
+                    columns,
+                    rows,
+                    labels: self.zones.labels,
+                    edges: self.zones.edges,
+                })
+            }
             DrawingSheetZoneMode::Custom => Some(DrawingSheetZoneGrid {
                 columns: self.zones.custom_columns.unwrap_or_default(),
                 rows: self.zones.custom_rows.unwrap_or_default(),
@@ -1838,8 +1879,10 @@ impl SchematicSheetFormat {
             content_area: drawing_area,
             title_block,
             zones,
-            border_band_um,
+            border_band_um: frame.band_um,
             effective_title_block_template,
+            zone_band: frame.zone_band,
+            frame_placement: frame.placement,
         })
     }
 
@@ -1998,6 +2041,7 @@ fn authored_size_from_legacy(size: &SchematicSheetSize) -> AuthoredDrawingSheetS
                 portrait_width_um: *portrait_width_um,
                 portrait_height_um: *portrait_height_um,
                 source_preset_unavailable: false,
+                started_from: None,
             },
         },
     }
@@ -2017,16 +2061,6 @@ fn validate_physical_dimensions(
     } else {
         Ok(())
     }
-}
-
-fn automatic_zone_count(edge_um: u64) -> u8 {
-    const TARGET_ZONE_PITCH_UM: u64 = 140_000;
-    let rounded = edge_um
-        .saturating_add(TARGET_ZONE_PITCH_UM / 2)
-        .checked_div(TARGET_ZONE_PITCH_UM)
-        .unwrap_or(1)
-        .clamp(1, (DRAWING_SHEET_MAX_ZONE_COUNT / 2) as u64);
-    (rounded as u8) * 2
 }
 
 fn format_micrometres(value: u64, unit: DrawingSheetDisplayUnit) -> String {
@@ -2146,8 +2180,14 @@ pub struct DrawingSheetGeometry {
     pub content_area: DrawingSheetRect,
     pub title_block: Option<DrawingSheetRect>,
     pub zones: Option<DrawingSheetZoneGrid>,
+    /// Width of the zone band the references are lettered in.
     pub border_band_um: u64,
     pub effective_title_block_template: DrawingSheetTitleBlockTemplate,
+    /// Outer edge of the zone band: ISO 5457's grid reference border, the
+    /// trimmed edge on an ASME Y14.1 format, or the margins on an inset
+    /// frame. The band lies between it and `drawing_area`.
+    pub zone_band: DrawingSheetRect,
+    pub frame_placement: DrawingSheetFramePlacement,
 }
 
 /// Authored title-grid rows for each durable title-block template.
@@ -2184,16 +2224,17 @@ pub const DRAWING_SHEET_TITLE_CAPTION_POSITION: (u64, u64) = (1, 3);
 /// [`DRAWING_SHEET_TITLE_CAPTION_POSITION`].
 pub const DRAWING_SHEET_TITLE_VALUE_POSITION: (u64, u64) = (7, 10);
 
-/// The ISO 3098 lettering heights a sheet letters its annotation at.
+/// The lettering heights, from the ISO 3098 series, a sheet letters its
+/// annotation at.
 ///
-/// The standard's height series is 1.8, 2.5, 3.5, 5, 7, 10, 14, and 20 mm,
-/// each step larger than the last by about the square root of two, and the
-/// recommended minimum rises with the sheet: text that is legible on A4 at
-/// arm's length is not legible on a drawing twice the size read from the
-/// same distance. Every renderer letters a sheet from this one table, so a
-/// field is the same physical height on the canvas and on the plot. Zone
-/// references are not in it: they belong to the frame, which does not grow
-/// with the sheet (see [`drawing_sheet_zone_lettering_um`]).
+/// ISO 3098's height series is 1.8, 2.5, 3.5, 5, 7, 10, 14, and 20 mm, each
+/// step larger than the last by about the square root of two. Text that is
+/// legible on A4 at arm's length is not legible on a drawing twice the size
+/// read from the same distance, so RSpice letters a larger sheet a step
+/// larger. Every renderer letters a sheet from this one table, so a field is
+/// the same physical height on the canvas and on the plot. Zone references
+/// are not in it: they belong to the frame, which does not grow with the
+/// sheet (see [`drawing_sheet_zone_lettering_um`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DrawingSheetLettering {
     /// Field captions: the smallest text on the sheet, since a caption only
@@ -2206,14 +2247,15 @@ pub struct DrawingSheetLettering {
 impl DrawingSheetLettering {
     /// Heights for a sheet of the given portrait dimensions.
     ///
-    /// ISO 3098 states its recommended minimums per A-series size — one row
-    /// for A4, one for A1 through A3, one for A0 — and the A series is a
-    /// progression in area, each size twice the one below it. Selecting on
-    /// area therefore reproduces the standard's own rows while also placing
-    /// the ANSI, architectural, JIS, and custom sheets RSpice supports, none
-    /// of which appear in the table. The thresholds sit at the geometric
-    /// means of the bounding sizes, so each sheet falls in the row of the
-    /// A-series size it is closest to.
+    /// The rows — one for A4, one for A1 through A3, one for A0 — are
+    /// RSpice's own choice. ISO 3098-0 gives the height series but no table
+    /// tying a height to a sheet size; the table these rows follow circulates
+    /// in secondary sources attributed to it, and its text does not contain
+    /// one. The A series is a progression in area, each size twice the one
+    /// below it, so selecting on area places the ANSI, architectural, JIS,
+    /// and custom sheets RSpice supports as well. The thresholds sit at the
+    /// geometric means of the bounding sizes, so each sheet falls in the row
+    /// of the A-series size it is closest to.
     #[must_use]
     pub const fn for_sheet(portrait_width_um: u64, portrait_height_um: u64) -> Self {
         /// Halfway between A4 and A3, in square micrometres.
@@ -2250,6 +2292,9 @@ impl AuthoredDrawingSheetSize {
     }
 }
 
+pub(super) mod frame;
+pub use frame::*;
+
 pub(super) mod lettering;
 pub use lettering::*;
 
@@ -2261,3 +2306,6 @@ pub use title_fields::*;
 
 pub(super) mod title_layout;
 pub use title_layout::*;
+
+pub(super) mod zones;
+pub use zones::*;

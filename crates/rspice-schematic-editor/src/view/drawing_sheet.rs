@@ -30,10 +30,11 @@ use rspice_design_model::design_management::{
     DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_BLOCK_LETTERING,
     DRAWING_SHEET_TITLE_CAPTION_POSITION, DRAWING_SHEET_TITLE_CELL_PADDING_UM,
     DRAWING_SHEET_TITLE_VALUE_POSITION, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
-    DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
-    DrawingSheetTitleBlockRotation, DrawingSheetZoneEdges, DrawingSheetZoneGrid,
-    DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField, SchematicSheetFormat,
-    drawing_sheet_mono_em_um, drawing_sheet_title_layout, drawing_sheet_zone_lettering_um,
+    DrawingSheetFrameArtwork, DrawingSheetFrameLayer, DrawingSheetFrameMark,
+    DrawingSheetFramePlacement, DrawingSheetGeometry as AuthoredDrawingSheetGeometry,
+    DrawingSheetLettering, DrawingSheetRect, DrawingSheetTitleBlockRotation,
+    DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField, SchematicSheetFormat,
+    drawing_sheet_mono_em_um, drawing_sheet_title_layout,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -130,6 +131,21 @@ pub struct DrawingSheetGeometry {
     pub drawing_area: WorldRect,
     pub content_area: WorldRect,
     pub title_block: Option<WorldRect>,
+    /// The sheet's zones, from the one model every surface quotes them by.
+    pub zones: Option<DrawingSheetZoneLayout>,
+    /// Everything the sheet's frame draws, as the plot draws it.
+    pub frame: DrawingSheetFrameArtwork,
+}
+
+/// The screen position of a point given in sheet micrometres.
+fn sheet_point_to_screen(viewport: &Viewport, (x_um, y_um): (i64, i64)) -> Pos2 {
+    let unit_um = DRAWING_SHEET_WORLD_UNIT_UM as f64;
+    let world_x = DRAWING_SHEET_ORIGIN.0 + x_um as f64 / unit_um;
+    let world_y = DRAWING_SHEET_ORIGIN.1 + y_um as f64 / unit_um;
+    pos2(
+        viewport.bounds.min.x + viewport.offset.x + world_x as f32 * viewport.zoom,
+        viewport.bounds.min.y + viewport.offset.y + world_y as f32 * viewport.zoom,
+    )
 }
 
 impl DrawingSheetGeometry {
@@ -138,18 +154,25 @@ impl DrawingSheetGeometry {
         // constructors, deserialization, or `try_update`. If a caller ever
         // violates that invariant in memory, retain a usable canvas by falling
         // back to the independently validated built-in format.
-        let physical = format.geometry().unwrap_or_else(|error| {
-            debug_assert!(false, "invalid drawing-sheet geometry: {error}");
-            SchematicSheetFormat::default()
-                .geometry()
-                .expect("the built-in drawing-sheet format must remain valid")
-        });
+        let (format, physical) = match format.geometry() {
+            Ok(physical) => (Cow::Borrowed(format), physical),
+            Err(error) => {
+                debug_assert!(false, "invalid drawing-sheet geometry: {error}");
+                let fallback = SchematicSheetFormat::default();
+                let physical = fallback
+                    .geometry()
+                    .expect("the built-in drawing-sheet format must remain valid");
+                (Cow::Owned(fallback), physical)
+            }
+        };
         Self {
             paper: WorldRect::from_physical(physical.paper),
             printable: WorldRect::from_physical(physical.printable),
             drawing_area: WorldRect::from_physical(physical.drawing_area),
             content_area: WorldRect::from_physical(physical.content_area),
             title_block: physical.title_block.map(WorldRect::from_physical),
+            zones: format.zone_layout(&physical),
+            frame: format.frame_artwork(&physical),
             physical,
         }
     }
@@ -162,26 +185,10 @@ impl DrawingSheetGeometry {
     }
 
     fn zone_reference(&self, world_x: f64, world_y: f64) -> Option<String> {
-        let zones = self.physical.zones?;
-        if zones.labels == DrawingSheetZoneLabels::Coordinates {
-            return None;
-        }
-        if world_x < self.drawing_area.min_x
-            || world_x > self.drawing_area.max_x
-            || world_y < self.drawing_area.min_y
-            || world_y > self.drawing_area.max_y
-        {
-            return None;
-        }
-        let x_fraction = (world_x - self.drawing_area.min_x)
-            / (self.drawing_area.max_x - self.drawing_area.min_x).max(f64::EPSILON);
-        let y_fraction = (world_y - self.drawing_area.min_y)
-            / (self.drawing_area.max_y - self.drawing_area.min_y).max(f64::EPSILON);
-        let column = ((x_fraction * f64::from(zones.columns)).floor() as usize)
-            .min(usize::from(zones.columns.saturating_sub(1)));
-        let row = ((y_fraction * f64::from(zones.rows)).floor() as usize)
-            .min(usize::from(zones.rows.saturating_sub(1)));
-        Some(zone_reference_label(zones.labels, column, row))
+        let unit_um = DRAWING_SHEET_WORLD_UNIT_UM as f64;
+        let x_um = ((world_x - DRAWING_SHEET_ORIGIN.0) * unit_um).round() as i64;
+        let y_um = ((world_y - DRAWING_SHEET_ORIGIN.1) * unit_um).round() as i64;
+        self.zones.as_ref()?.reference_at(x_um, y_um)
     }
 }
 
@@ -283,15 +290,22 @@ fn authored_lettering(lettering_um: u64) -> f32 {
     drawing_sheet_mono_em_um(lettering_um) as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
 }
 
-/// Font a zone reference in the border band is lettered in: the height and
-/// weight the plot letters it at, which depend on the band and not on the
-/// sheet.
-fn zone_label_font(sheet: &ActiveDrawingSheet, zoom: f32) -> FontId {
-    let lettering_um = drawing_sheet_zone_lettering_um(sheet.geometry.physical.border_band_um);
+/// Font frame lettering of the given height is painted in: the height and
+/// weight the plot letters it at.
+fn frame_lettering_font(lettering_um: u64, zoom: f32) -> FontId {
     theme::mono(
         drawing_sheet_font_size(zoom, authored_lettering(lettering_um)),
         theme::FontWeight::Regular,
     )
+}
+
+/// Width on screen, in points, of a frame line of the given physical width:
+/// the width the plot prints it at, magnified with the sheet, and never
+/// thinner than one physical pixel so a line the print carries never
+/// vanishes from the screen.
+fn frame_line_width(width_um: u64, zoom: f32, pixels_per_point: f32) -> f32 {
+    let points = width_um as f32 / 1_000.0 * DRAWING_SHEET_UNITS_PER_MM as f32 * zoom.max(0.0);
+    points.max(1.0 / pixels_per_point.max(0.5))
 }
 
 /// Smallest em height, in physical pixels, at which title-block lettering is
@@ -455,32 +469,16 @@ pub fn draw_base(
             f64::from(viewport.zoom),
         );
     }
-    if lod.show_margins && layers.margins && sheet.format.border != DrawingSheetBorderTemplate::None
+    // An inset frame leaves its margins to a guide; a standard frame's border
+    // lies on them, and the standards draw no second rectangle.
+    if lod.show_margins
+        && layers.margins
+        && sheet.format.border != DrawingSheetBorderTemplate::None
+        && sheet.geometry.physical.frame_placement == DrawingSheetFramePlacement::Inset
     {
         dashed_rect(painter, printable, Stroke::new(1.0, palette.margin));
     }
-    if lod.show_border && sheet.format.border != DrawingSheetBorderTemplate::None {
-        let border_width = match sheet.format.border {
-            DrawingSheetBorderTemplate::Plain => 1.0,
-            DrawingSheetBorderTemplate::Standard => 1.25,
-            DrawingSheetBorderTemplate::OrganizationManaged => 1.5,
-            DrawingSheetBorderTemplate::None => 0.0,
-        };
-        painter.rect_stroke(
-            drawing_area,
-            0.0,
-            Stroke::new(border_width, palette.border),
-            StrokeKind::Middle,
-        );
-        if layers.zones
-            && let Some(zones) = sheet.geometry.physical.zones
-        {
-            let label_font = lod
-                .show_zone_labels
-                .then(|| zone_label_font(sheet, viewport.zoom));
-            draw_zone_band(painter, printable, drawing_area, zones, label_font, palette);
-        }
-    }
+    draw_frame(painter, viewport, sheet, lod, layers, palette);
     if layers.title_block
         && let Some(block) = sheet
             .geometry
@@ -496,14 +494,6 @@ pub fn draw_base(
             resolve_title_fields,
             sheet,
         );
-    }
-    if lod.show_marks && layers.registration_marks {
-        if sheet.format.marks.registration {
-            draw_registration_marks(painter, paper, printable, palette);
-        }
-        if sheet.format.marks.folding {
-            draw_folding_marks(painter, paper, viewport.zoom, palette);
-        }
     }
     if lod.show_origin {
         draw_origin(painter, paper, viewport.zoom, palette, lettering);
@@ -1213,150 +1203,83 @@ fn rect_outline(rect: Rect) -> [Pos2; 5] {
     ]
 }
 
-fn draw_zone_band(
+/// Paint the sheet's frame: the border, the zone band, its references and
+/// the marks, each from the artwork the plot prints and at the physical width
+/// the plot prints it, so the screen previews the print.
+fn draw_frame(
     painter: &Painter,
-    printable: Rect,
-    drawing_area: Rect,
-    zones: DrawingSheetZoneGrid,
-    label_font: Option<FontId>,
+    viewport: &Viewport,
+    sheet: &ActiveDrawingSheet,
+    lod: DrawingSheetLod,
+    layers: DrawingSheetLayerVisibility,
     palette: DrawingSheetPalette,
 ) {
-    let column_width = drawing_area.width() / f32::from(zones.columns);
-    let row_height = drawing_area.height() / f32::from(zones.rows);
-    let stroke = Stroke::new(1.0, palette.zone);
-    let (top, right, bottom, left) = zone_edges(zones.edges);
-    for index in 1..zones.columns {
-        let x = drawing_area.left() + column_width * f32::from(index);
-        if top {
-            painter.line_segment(
-                [pos2(x, printable.top()), pos2(x, drawing_area.top())],
-                stroke,
-            );
+    let pixels_per_point = painter.ctx().pixels_per_point();
+    let zoom = viewport.zoom;
+    let to_screen = |point: (i64, i64)| sheet_point_to_screen(viewport, point);
+    for item in &sheet.geometry.frame.items {
+        let (shown, ink) = match item.layer {
+            DrawingSheetFrameLayer::Border => (lod.show_border, palette.border),
+            DrawingSheetFrameLayer::Zones => (lod.show_border && layers.zones, palette.zone),
+            DrawingSheetFrameLayer::ZoneLabels => {
+                (lod.show_zone_labels && layers.zones, palette.zone_ink)
+            }
+            DrawingSheetFrameLayer::CentringMarks => {
+                (lod.show_border && layers.registration_marks, palette.border)
+            }
+            DrawingSheetFrameLayer::RegistrationMarks | DrawingSheetFrameLayer::FoldingMarks => {
+                (lod.show_marks && layers.registration_marks, palette.zone)
+            }
+            DrawingSheetFrameLayer::SizeDesignation => (lod.show_zone_labels, palette.zone_ink),
+            // Trimming marks belong to output that is cut to size.
+            DrawingSheetFrameLayer::TrimMarks => (false, palette.zone),
+        };
+        if !shown {
+            continue;
         }
-        if bottom {
-            painter.line_segment(
-                [pos2(x, drawing_area.bottom()), pos2(x, printable.bottom())],
-                stroke,
-            );
+        match &item.mark {
+            DrawingSheetFrameMark::Line { from, to, width_um } => {
+                painter.line_segment(
+                    [to_screen(*from), to_screen(*to)],
+                    Stroke::new(frame_line_width(*width_um, zoom, pixels_per_point), ink),
+                );
+            }
+            DrawingSheetFrameMark::Rect { rect, width_um } => {
+                painter.rect_stroke(
+                    WorldRect::from_physical(*rect).screen_rect(viewport),
+                    0.0,
+                    Stroke::new(frame_line_width(*width_um, zoom, pixels_per_point), ink),
+                    StrokeKind::Middle,
+                );
+            }
+            DrawingSheetFrameMark::FilledRect { rect } => {
+                painter.rect_filled(
+                    WorldRect::from_physical(*rect).screen_rect(viewport),
+                    0.0,
+                    ink,
+                );
+            }
+            DrawingSheetFrameMark::FilledPolygon { points } => {
+                painter.add(Shape::convex_polygon(
+                    points.iter().copied().map(to_screen).collect(),
+                    ink,
+                    Stroke::NONE,
+                ));
+            }
+            DrawingSheetFrameMark::Text {
+                centre,
+                text,
+                lettering_um,
+            } => {
+                painter.text(
+                    to_screen(*centre),
+                    Align2::CENTER_CENTER,
+                    text,
+                    frame_lettering_font(*lettering_um, zoom),
+                    ink,
+                );
+            }
         }
-    }
-    for index in 1..zones.rows {
-        let y = drawing_area.top() + row_height * f32::from(index);
-        if left {
-            painter.line_segment(
-                [pos2(printable.left(), y), pos2(drawing_area.left(), y)],
-                stroke,
-            );
-        }
-        if right {
-            painter.line_segment(
-                [pos2(drawing_area.right(), y), pos2(printable.right(), y)],
-                stroke,
-            );
-        }
-    }
-    let Some(font) = label_font.filter(|_| zone_edge_labels_visible(zones.labels)) else {
-        return;
-    };
-    let top_y = (printable.top() + drawing_area.top()) * 0.5;
-    let bottom_y = (drawing_area.bottom() + printable.bottom()) * 0.5;
-    for column in 0..zones.columns {
-        let x = drawing_area.left() + column_width * (f32::from(column) + 0.5);
-        let label = zone_column_label(zones.labels, usize::from(column));
-        if top {
-            painter.text(
-                pos2(x, top_y),
-                Align2::CENTER_CENTER,
-                &label,
-                font.clone(),
-                palette.zone_ink,
-            );
-        }
-        if bottom {
-            painter.text(
-                pos2(x, bottom_y),
-                Align2::CENTER_CENTER,
-                label,
-                font.clone(),
-                palette.zone_ink,
-            );
-        }
-    }
-    let left_x = (printable.left() + drawing_area.left()) * 0.5;
-    let right_x = (drawing_area.right() + printable.right()) * 0.5;
-    for row in 0..zones.rows {
-        let y = drawing_area.top() + row_height * (f32::from(row) + 0.5);
-        let label = zone_row_label(zones.labels, usize::from(row));
-        if left {
-            painter.text(
-                pos2(left_x, y),
-                Align2::CENTER_CENTER,
-                &label,
-                font.clone(),
-                palette.zone_ink,
-            );
-        }
-        if right {
-            painter.text(
-                pos2(right_x, y),
-                Align2::CENTER_CENTER,
-                label,
-                font.clone(),
-                palette.zone_ink,
-            );
-        }
-    }
-}
-
-const fn zone_edge_labels_visible(labels: DrawingSheetZoneLabels) -> bool {
-    !matches!(labels, DrawingSheetZoneLabels::Coordinates)
-}
-
-fn zone_edges(edges: DrawingSheetZoneEdges) -> (bool, bool, bool, bool) {
-    match edges {
-        DrawingSheetZoneEdges::All => (true, true, true, true),
-        DrawingSheetZoneEdges::TopAndLeft => (true, false, false, true),
-        DrawingSheetZoneEdges::BottomAndRight => (false, true, true, false),
-    }
-}
-
-fn zone_alpha_label(index: usize) -> String {
-    // Engineering drawing zones omit I, O, Q, and Z to avoid ambiguous
-    // references in printed reviews.
-    const LETTERS: &[u8] = b"ABCDEFGHJKLMNPRSTUVWXY";
-    LETTERS.get(index).map_or_else(
-        || (index + 1).to_string(),
-        |letter| char::from(*letter).to_string(),
-    )
-}
-
-fn zone_column_label(labels: DrawingSheetZoneLabels, index: usize) -> String {
-    match labels {
-        DrawingSheetZoneLabels::AlphaNumeric | DrawingSheetZoneLabels::Coordinates => {
-            (index + 1).to_string()
-        }
-        DrawingSheetZoneLabels::NumericAlpha => zone_alpha_label(index),
-    }
-}
-
-fn zone_row_label(labels: DrawingSheetZoneLabels, index: usize) -> String {
-    match labels {
-        DrawingSheetZoneLabels::AlphaNumeric => zone_alpha_label(index),
-        DrawingSheetZoneLabels::NumericAlpha | DrawingSheetZoneLabels::Coordinates => {
-            (index + 1).to_string()
-        }
-    }
-}
-
-fn zone_reference_label(labels: DrawingSheetZoneLabels, column: usize, row: usize) -> String {
-    match labels {
-        DrawingSheetZoneLabels::AlphaNumeric => {
-            format!("{}{}", zone_alpha_label(row), column + 1)
-        }
-        DrawingSheetZoneLabels::NumericAlpha => {
-            format!("{}{}", row + 1, zone_alpha_label(column))
-        }
-        DrawingSheetZoneLabels::Coordinates => format!("X{} Y{}", column + 1, row + 1),
     }
 }
 
@@ -1612,51 +1535,6 @@ fn paint_title_text(
             .with_override_text_color(color)
             .with_angle_and_anchor(angle, anchor),
     );
-}
-
-fn draw_registration_marks(
-    painter: &Painter,
-    _paper: Rect,
-    printable: Rect,
-    palette: DrawingSheetPalette,
-) {
-    let arm = 7.0;
-    let stroke = Stroke::new(1.0, palette.zone);
-    for (point, dx, dy) in [
-        (printable.left_top(), 1.0, 1.0),
-        (printable.right_top(), -1.0, 1.0),
-        (printable.left_bottom(), 1.0, -1.0),
-        (printable.right_bottom(), -1.0, -1.0),
-    ] {
-        painter.line_segment(
-            [
-                point - vec2(dx * arm * 0.4, 0.0),
-                point + vec2(dx * arm, 0.0),
-            ],
-            stroke,
-        );
-        painter.line_segment(
-            [
-                point - vec2(0.0, dy * arm * 0.4),
-                point + vec2(0.0, dy * arm),
-            ],
-            stroke,
-        );
-    }
-}
-
-fn draw_folding_marks(painter: &Painter, paper: Rect, zoom: f32, palette: DrawingSheetPalette) {
-    let stroke = Stroke::new(1.0, palette.zone);
-    let arm = 6.0;
-    let fold_pitch = 105.0 * DRAWING_SHEET_UNITS_PER_MM as f32 * zoom;
-    if !fold_pitch.is_finite() || fold_pitch <= 0.0 {
-        return;
-    }
-    let mut y = paper.top() + fold_pitch;
-    while y < paper.bottom() - fold_pitch * 0.25 {
-        painter.line_segment([pos2(paper.left(), y), pos2(paper.left() + arm, y)], stroke);
-        y += fold_pitch;
-    }
 }
 
 fn draw_origin(

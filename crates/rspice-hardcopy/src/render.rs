@@ -50,11 +50,10 @@ use rspice_design::symbol_artwork::{PathCommand, SymbolLibrary};
 use rspice_design_model::Point as SchematicPoint;
 use rspice_design_model::design_management::{
     DRAWING_SHEET_TITLE_CAPTION_POSITION, DRAWING_SHEET_TITLE_CELL_PADDING_UM,
-    DRAWING_SHEET_TITLE_VALUE_POSITION, DrawingSheetBorderTemplate, DrawingSheetRect,
-    DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
-    DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels, SchematicSheetFormat,
-    drawing_sheet_mono_baseline_offset_um, drawing_sheet_mono_em_um,
-    drawing_sheet_zone_lettering_um,
+    DRAWING_SHEET_TITLE_VALUE_POSITION, DrawingSheetBorderTemplate, DrawingSheetFramePlacement,
+    DrawingSheetRect, DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate,
+    DrawingSheetTitleFieldId, SchematicSheetFormat, drawing_sheet_mono_baseline_offset_um,
+    drawing_sheet_mono_em_um,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_hardcopy_contract::RenderTarget;

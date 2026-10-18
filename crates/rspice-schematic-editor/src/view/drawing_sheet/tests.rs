@@ -8,7 +8,9 @@ use rspice_design::schematic::{
     net_label::{Junction, NetLabel},
     wire::Wire,
 };
-use rspice_design_model::design_management::DrawingSheetStandard;
+use rspice_design_model::design_management::{
+    DrawingSheetStandard, DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels,
+};
 use rspice_design_model::{SchematicPageOrientation, SchematicPageSize};
 
 fn test_sheet() -> ActiveDrawingSheet {
@@ -54,15 +56,8 @@ fn a4_landscape_geometry_uses_the_mockup_origin_and_exact_calibration() {
             height_um: 190_000,
         }
     );
-    assert_eq!(
-        geometry.physical.drawing_area,
-        DrawingSheetRect {
-            x_um: 25_000,
-            y_um: 15_000,
-            width_um: 257_000,
-            height_um: 180_000,
-        }
-    );
+    // ISO 5457: the frame at the borders, the grid reference band outside.
+    assert_eq!(geometry.physical.drawing_area, geometry.physical.printable);
     assert_eq!(geometry.paper.min_x, -140.0);
     assert_eq!(geometry.paper.min_y, -40.0);
     assert_eq!(geometry.paper.max_x, 1_048.0);
@@ -70,10 +65,10 @@ fn a4_landscape_geometry_uses_the_mockup_origin_and_exact_calibration() {
     assert_eq!(
         geometry.physical.zones,
         Some(DrawingSheetZoneGrid {
-            columns: 4,
+            columns: 6,
             rows: 4,
             labels: DrawingSheetZoneLabels::AlphaNumeric,
-            edges: DrawingSheetZoneEdges::All,
+            edges: DrawingSheetZoneEdges::TopAndRight,
         })
     );
 }
@@ -139,29 +134,21 @@ fn coordinates_only_zones_retain_bands_but_suppress_labels_and_references() {
         sheet.geometry.drawing_area.min_y + 1.0,
     );
 
-    assert!(!zone_edge_labels_visible(
-        DrawingSheetZoneLabels::Coordinates
-    ));
-    let context = egui::Context::default();
-    let output = context.run_ui(Default::default(), |context| {
-        draw_zone_band(
-            &context.layer_painter(egui::LayerId::background()),
-            Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0)),
-            Rect::from_min_max(pos2(10.0, 10.0), pos2(90.0, 90.0)),
-            DrawingSheetZoneGrid {
-                columns: 4,
-                rows: 4,
-                labels: DrawingSheetZoneLabels::Coordinates,
-                edges: DrawingSheetZoneEdges::All,
-            },
-            Some(theme::mono(12.0, theme::FontWeight::Regular)),
-            DrawingSheetPalette::resolve(&Tokens::get(context)),
-        );
-    });
+    let shapes = painted_frame(&sheet, 1.5);
+    let ticks = sheet
+        .geometry
+        .frame
+        .layer(DrawingSheetFrameLayer::Zones)
+        .count();
     assert_eq!(
-        output.shapes.len(),
-        12,
-        "coordinates-only mode retains all twelve ruled band segments"
+        ticks,
+        2 * (5 + 3),
+        "every field boundary is ruled on both sides"
+    );
+    assert_eq!(
+        lettered_text(&shapes),
+        ["A4"],
+        "coordinates-only mode letters no zone references, only the sheet size"
     );
     assert_eq!(sheet.geometry.zone_reference(point.0, point.1), None);
     assert!(
@@ -218,43 +205,157 @@ fn drawing_sheet_lettering_keeps_its_authored_height_on_the_page() {
     }
 }
 
-#[test]
-fn zone_references_letter_at_the_height_of_their_band_not_their_sheet() {
-    let sheet = |format: SchematicSheetFormat| ActiveDrawingSheet {
+fn active(format: SchematicSheetFormat) -> ActiveDrawingSheet {
+    ActiveDrawingSheet {
         geometry: DrawingSheetGeometry::from_format(&format),
         format,
         sheet_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
+    }
+}
+
+/// The shapes the canvas paints for `sheet`'s frame at `zoom`, with the
+/// sheet's top left at the screen origin.
+fn painted_frame(sheet: &ActiveDrawingSheet, zoom: f32) -> Vec<Shape> {
+    let viewport = Viewport {
+        offset: pos2(
+            -(DRAWING_SHEET_ORIGIN.0 as f32) * zoom,
+            -(DRAWING_SHEET_ORIGIN.1 as f32) * zoom,
+        ),
+        zoom,
+        bounds: Rect::from_min_size(Pos2::ZERO, vec2(4_000.0, 4_000.0)),
+    };
+    let context = egui::Context::default();
+    context
+        .run_ui(Default::default(), |context| {
+            let painter = context.layer_painter(egui::LayerId::background());
+            let lod = DrawingSheetLod::resolve(zoom, 1.0, test_lettering());
+            let palette = DrawingSheetPalette::resolve(&Tokens::get(context));
+            draw_frame(
+                &painter,
+                &viewport,
+                sheet,
+                lod,
+                DrawingSheetLayerVisibility::default(),
+                palette,
+            );
+        })
+        .shapes
+        .into_iter()
+        .map(|clipped| clipped.shape)
+        .collect()
+}
+
+fn stroke_widths(shapes: &[Shape]) -> Vec<f32> {
+    shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::LineSegment { stroke, .. } => Some(stroke.width),
+            Shape::Rect(rect) => Some(rect.stroke.width),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_canvas_paints_the_frame_at_the_widths_the_plot_prints() {
+    // Four world units per millimetre: at zoom 1.5 a 0.7 mm frame is 4.2
+    // points and a 0.35 mm grid line 2.1.
+    let a4 = active(SchematicSheetFormat::default());
+    let widths = stroke_widths(&painted_frame(&a4, 1.5));
+    assert!(widths.iter().any(|width| (width - 4.2).abs() < 1e-3));
+    assert!(widths.iter().any(|width| (width - 2.1).abs() < 1e-3));
+    assert!(
+        widths
+            .iter()
+            .all(|width| (width - 4.2).abs() < 1e-3 || (width - 2.1).abs() < 1e-3),
+        "ISO 5457 draws 0.7 mm and 0.35 mm lines only: {widths:?}"
+    );
+    // ASME Y14.1: a 0.6 mm border and 0.3 mm zone markers.
+    let ansi_d = active(SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiD,
+        SchematicPageOrientation::Landscape,
+    ));
+    let widths = stroke_widths(&painted_frame(&ansi_d, 1.5));
+    assert!(widths.iter().any(|width| (width - 3.6).abs() < 1e-3));
+    assert!(widths.iter().any(|width| (width - 1.8).abs() < 1e-3));
+    // Zoomed far out a line keeps one physical pixel rather than vanishing.
+    assert!(
+        stroke_widths(&painted_frame(&a4, 0.1))
+            .iter()
+            .all(|width| *width >= 1.0)
+    );
+}
+
+#[test]
+fn the_canvas_draws_centring_marks_and_no_margin_guide_on_an_iso_frame() {
+    let a4 = active(SchematicSheetFormat::default());
+    assert!(a4.format.marks.registration);
+    let marks = a4
+        .geometry
+        .frame
+        .layer(DrawingSheetFrameLayer::CentringMarks)
+        .count();
+    assert_eq!(marks, 4);
+    assert_eq!(
+        a4.geometry
+            .frame
+            .layer(DrawingSheetFrameLayer::RegistrationMarks)
+            .count(),
+        0,
+        "ISO 5457 has no corner crosses"
+    );
+    // The frame lies on the margins, so no dashed guide is drawn for them.
+    assert_eq!(
+        a4.geometry.physical.frame_placement,
+        DrawingSheetFramePlacement::Iso5457
+    );
+}
+
+#[test]
+fn zone_references_letter_at_the_height_of_their_band_not_their_sheet() {
+    let lettered = |sheet: &ActiveDrawingSheet| {
+        painted_frame(sheet, 1.0)
+            .into_iter()
+            .filter_map(|shape| match shape {
+                Shape::Text(text) => Some(text.galley.job.sections[0].format.font_id.size),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     };
     // ISO 5457 letters a grid reference 3.5 mm high whatever the paper, and
     // a Standard band is 5 mm wide on A0 as on A4. Fourteen world units of
-    // capitals is that 3.5 mm.
-    let a4 = zone_label_font(&test_sheet(), 1.0);
-    let a0 = zone_label_font(
-        &sheet(SchematicSheetFormat::from_standard(
-            DrawingSheetStandard::IsoA0,
-            SchematicPageOrientation::Landscape,
-        )),
-        1.0,
-    );
-    assert_eq!(a4, a0, "a zone reference must not grow with the sheet");
-    assert!(
-        (a4.size * 0.698 - 14.0).abs() < 0.1,
-        "a {}-unit em must letter 3.5 mm capitals",
-        a4.size
-    );
+    // capitals is that 3.5 mm; the A4 size designation beside them is
+    // lettered at the same height.
+    let a4 = lettered(&test_sheet());
+    let a0 = lettered(&active(SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA0,
+        SchematicPageOrientation::Landscape,
+    )));
+    assert!(!a4.is_empty());
+    for size in a4.iter().chain(&a0) {
+        assert!(
+            (size * 0.698 - 14.0).abs() < 0.2,
+            "a {size}-unit em must letter 3.5 mm capitals"
+        );
+    }
 
     // A Plain band is 2.5 mm wide, too narrow for 3.5 mm capitals, so its
     // references step down to 1.8 mm.
-    let plain = zone_label_font(
-        &sheet(
-            SchematicSheetFormat::default()
-                .try_update(|draft| draft.apply_border_template(DrawingSheetBorderTemplate::Plain))
-                .expect("a plain border is valid"),
-        ),
-        1.0,
-    );
-    assert!((plain.size * 0.698 - 7.2).abs() < 0.1);
+    let plain = lettered(&active(
+        SchematicSheetFormat::default()
+            .try_update(|draft| draft.apply_border_template(DrawingSheetBorderTemplate::Plain))
+            .expect("a plain border is valid"),
+    ));
+    assert!(plain.iter().all(|size| (size * 0.698 - 7.2).abs() < 0.2));
+
+    // ASME Y14.2 letters zones 6 mm high in the 0.50 in margin.
+    let ansi_d = lettered(&active(SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiD,
+        SchematicPageOrientation::Landscape,
+    )));
+    assert_eq!(ansi_d.len(), 2 * (8 + 4));
+    assert!(ansi_d.iter().all(|size| (size * 0.698 - 24.0).abs() < 0.2));
 }
 
 #[test]

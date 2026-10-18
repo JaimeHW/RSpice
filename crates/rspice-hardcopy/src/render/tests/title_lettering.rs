@@ -378,7 +378,10 @@ fn plotted_zone_references_stand_centred_in_their_band() {
             .unwrap();
         let geometry = format.geometry().unwrap();
         let band_um = geometry.border_band_um;
-        let em_um = drawing_sheet_mono_em_um(drawing_sheet_zone_lettering_um(band_um));
+        let em_um = drawing_sheet_mono_em_um(drawing_sheet_zone_lettering_um(
+            format.frame_convention(),
+            band_um,
+        ));
         let source = resolved_blank_schematic(&format);
         // The zone band alone, so every line of text is a reference.
         let schematic = SchematicHardcopySetup::new(

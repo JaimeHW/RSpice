@@ -4,6 +4,7 @@ use super::*;
 
 mod annotation_allocation;
 mod drawing_sheet_release;
+mod frame;
 mod manual_annotation;
 mod sheet_lifecycle;
 mod title_fields;
@@ -129,6 +130,7 @@ fn drawing_sheet_standards_are_exact_valid_and_round_trip() {
         (DrawingSheetStandard::ArchC, (457_200, 609_600)),
         (DrawingSheetStandard::ArchD, (609_600, 914_400)),
         (DrawingSheetStandard::ArchE, (914_400, 1_219_200)),
+        (DrawingSheetStandard::ArchE1, (762_000, 1_066_800)),
         (DrawingSheetStandard::JisB5, (182_000, 257_000)),
         (DrawingSheetStandard::JisB4, (257_000, 364_000)),
         (DrawingSheetStandard::JisB3, (364_000, 515_000)),
@@ -158,13 +160,15 @@ fn drawing_sheet_series_margins_and_border_mark_defaults_are_normative() {
             left_um: 20_000,
         }
     );
+    // ASME Y14.1 Table 4-1: a 0.50 in format margin on every side; a
+    // binding margin is the author's option.
     assert_eq!(
         DrawingSheetStandard::AnsiA.default_margins(),
         DrawingSheetMargins {
             top_um: 12_700,
             right_um: 12_700,
             bottom_um: 12_700,
-            left_um: 19_050,
+            left_um: 12_700,
         }
     );
     assert_eq!(
@@ -173,7 +177,7 @@ fn drawing_sheet_series_margins_and_border_mark_defaults_are_normative() {
             top_um: 12_700,
             right_um: 12_700,
             bottom_um: 12_700,
-            left_um: 25_400,
+            left_um: 12_700,
         }
     );
     assert_eq!(
@@ -684,32 +688,35 @@ fn drawing_sheet_geometry_is_canonical_and_bounded() {
             height_um: 190_000,
         }
     );
+    // ISO 5457: the frame at the borders, the grid reference band outside it.
+    assert_eq!(geometry.drawing_area, geometry.printable);
     assert_eq!(
-        geometry.drawing_area,
+        geometry.zone_band,
         DrawingSheetRect {
-            x_um: 25_000,
-            y_um: 15_000,
-            width_um: 257_000,
-            height_um: 180_000,
+            x_um: 15_000,
+            y_um: 5_000,
+            width_um: 277_000,
+            height_um: 200_000,
         }
     );
     assert_eq!(
         geometry.title_block,
         Some(DrawingSheetRect {
-            x_um: 102_000,
-            y_um: 150_000,
+            x_um: 107_000,
+            y_um: 155_000,
             width_um: 180_000,
             height_um: 45_000,
         })
     );
-    assert_eq!(geometry.zones.unwrap().columns, 4);
+    assert_eq!(geometry.zones.unwrap().columns, 6);
     assert_eq!(geometry.zones.unwrap().rows, 4);
 }
 
 #[test]
 fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
+    // A5 portrait's 118 mm drawing space cannot hold ISO 7200's 180 mm block.
     let format = SchematicSheetFormat::from_standard(
-        DrawingSheetStandard::IsoA4,
+        DrawingSheetStandard::IsoA5,
         SchematicPageOrientation::Portrait,
     )
     .try_update(|draft| {
@@ -2846,13 +2853,14 @@ fn zone_references_letter_at_the_iso_5457_height_their_band_can_hold() {
     // the band carrying it is the same width on every sheet. A band too
     // narrow for that steps down the series until the capitals clear both
     // rules by a tenth of their height.
+    let iso = DrawingSheetFrameConvention::Iso5457;
     for border in [
         DrawingSheetBorderTemplate::Standard,
         DrawingSheetBorderTemplate::Plain,
         DrawingSheetBorderTemplate::OrganizationManaged,
     ] {
         let band_um = border.band_width_um();
-        let height_um = drawing_sheet_zone_lettering_um(band_um);
+        let height_um = drawing_sheet_zone_lettering_um(iso, band_um);
         assert!(ISO_3098_HEIGHTS_UM.contains(&height_um));
         assert!(height_um <= 3_500);
         assert!(
@@ -2861,20 +2869,26 @@ fn zone_references_letter_at_the_iso_5457_height_their_band_can_hold() {
         );
     }
     assert_eq!(
-        drawing_sheet_zone_lettering_um(DrawingSheetBorderTemplate::Standard.band_width_um()),
+        drawing_sheet_zone_lettering_um(iso, DrawingSheetBorderTemplate::Standard.band_width_um()),
         3_500
     );
     assert_eq!(
-        drawing_sheet_zone_lettering_um(DrawingSheetBorderTemplate::Plain.band_width_um()),
+        drawing_sheet_zone_lettering_um(iso, DrawingSheetBorderTemplate::Plain.band_width_um()),
         1_800
     );
     assert_eq!(
         drawing_sheet_zone_lettering_um(
+            iso,
             DrawingSheetBorderTemplate::OrganizationManaged.band_width_um()
         ),
         3_500,
         "a wider band does not letter its references any larger"
     );
+    // ASME Y14.2 letters zones at least 0.24 in, which the 0.50 in margin
+    // holds; an inset band too narrow for that steps down the ISO series.
+    let asme = DrawingSheetFrameConvention::AsmeY141;
+    assert_eq!(drawing_sheet_zone_lettering_um(asme, 12_700), 6_000);
+    assert_eq!(drawing_sheet_zone_lettering_um(asme, 5_000), 3_500);
 }
 
 #[test]

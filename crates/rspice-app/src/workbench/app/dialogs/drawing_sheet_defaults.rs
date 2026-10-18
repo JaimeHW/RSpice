@@ -698,7 +698,7 @@ fn build_chip_series(
         (
             DrawingSheetStandardSeries::Architectural,
             "ARCH",
-            "Architectural inch series",
+            "Architectural inch series \u{00b7} ASME Y14.1 format",
         ),
         (
             DrawingSheetStandardSeries::Jis,

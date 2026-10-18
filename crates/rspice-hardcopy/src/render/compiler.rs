@@ -543,16 +543,6 @@ impl<'a> SemanticSceneCompiler<'a> {
                 None,
             )?,
         );
-        let frame_stroke = self.mapped_stroke(
-            PrintObjectKind::Layer,
-            "layer:drawing-sheet-frame",
-            StrokeStyle::try_new(
-                SemanticColor::Foreground,
-                Length::from_micrometres(160),
-                StrokePattern::Solid,
-                None,
-            )?,
-        );
         let title_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,
             "layer:drawing-sheet-title-block",
@@ -592,41 +582,17 @@ impl<'a> SemanticSceneCompiler<'a> {
                 stroke: Some(paper_stroke),
                 fill: None,
             });
-            self.primitives.push(ScenePrimitive::Rect {
-                rect: self.drawing_sheet_rect(geometry.printable)?,
-                stroke: Some(printable_stroke),
-                fill: None,
-            });
+            // A standard frame's border lies on the margins; ISO 5457 and
+            // ASME Y14.1 draw no second rectangle for them.
+            if geometry.frame_placement == DrawingSheetFramePlacement::Inset {
+                self.primitives.push(ScenePrimitive::Rect {
+                    rect: self.drawing_sheet_rect(geometry.printable)?,
+                    stroke: Some(printable_stroke),
+                    fill: None,
+                });
+            }
         }
-        if self.schematic_output.includes_border()
-            && format.border != DrawingSheetBorderTemplate::None
-        {
-            self.primitives.push(ScenePrimitive::Rect {
-                rect: self.drawing_sheet_rect(geometry.drawing_area)?,
-                stroke: Some(frame_stroke),
-                fill: None,
-            });
-        }
-        if self.schematic_output.includes_zones()
-            && let Some(zones) = geometry.zones
-        {
-            self.drawing_sheet_zones(
-                geometry.printable,
-                geometry.drawing_area,
-                zones,
-                geometry.border_band_um,
-                frame_stroke,
-            )?;
-        }
-        if self.schematic_output.crop_marks() {
-            self.drawing_sheet_crop_marks(geometry.paper, frame_stroke)?;
-        }
-        if self.schematic_output.crop_marks() && format.marks.registration {
-            self.drawing_sheet_registration_marks(geometry.printable, frame_stroke)?;
-        }
-        if self.schematic_output.includes_border() && format.marks.folding {
-            self.drawing_sheet_folding_marks(geometry.paper, frame_stroke)?;
-        }
+        let frame_stroke = self.drawing_sheet_frame(format, &geometry)?;
         if self.schematic_output.includes_grid() {
             self.drawing_sheet_grid(geometry.drawing_area, grid_pitch_units, grid_stroke)?;
         }
@@ -698,50 +664,6 @@ impl<'a> SemanticSceneCompiler<'a> {
         )
     }
 
-    /// Draw physical trim references at the authored paper corners. The marks
-    /// remain inside the authenticated sheet extent so the immutable scene and
-    /// pagination contract describe the same physical bounds.
-    fn drawing_sheet_crop_marks(
-        &mut self,
-        paper: DrawingSheetRect,
-        stroke: StrokeStyle,
-    ) -> Result<(), HardcopyRenderError> {
-        let right = paper
-            .x_um
-            .checked_add(
-                i64::try_from(paper.width_um)
-                    .map_err(|_| conversion_error("drawing-sheet crop-mark width overflow"))?,
-            )
-            .ok_or_else(|| conversion_error("drawing-sheet crop-mark width overflow"))?;
-        let bottom = paper
-            .y_um
-            .checked_add(
-                i64::try_from(paper.height_um)
-                    .map_err(|_| conversion_error("drawing-sheet crop-mark height overflow"))?,
-            )
-            .ok_or_else(|| conversion_error("drawing-sheet crop-mark height overflow"))?;
-        let arm = i64::try_from((paper.width_um.min(paper.height_um) / 8).min(4_000))
-            .map_err(|_| conversion_error("drawing-sheet crop-mark arm overflow"))?;
-        for (x, y, dx, dy) in [
-            (paper.x_um, paper.y_um, 1_i64, 1_i64),
-            (right, paper.y_um, -1, 1),
-            (paper.x_um, bottom, 1, -1),
-            (right, bottom, -1, -1),
-        ] {
-            self.primitives.push(ScenePrimitive::Line {
-                from: self.drawing_sheet_point(x, y)?,
-                to: self.drawing_sheet_point(x + dx * arm, y)?,
-                stroke,
-            });
-            self.primitives.push(ScenePrimitive::Line {
-                from: self.drawing_sheet_point(x, y)?,
-                to: self.drawing_sheet_point(x, y + dy * arm)?,
-                stroke,
-            });
-        }
-        Ok(())
-    }
-
     fn drawing_sheet_grid(
         &mut self,
         drawing_area: DrawingSheetRect,
@@ -810,229 +732,6 @@ impl<'a> SemanticSceneCompiler<'a> {
             y = y
                 .checked_add(pitch_um)
                 .ok_or_else(|| conversion_error("drawing-sheet grid Y overflow"))?;
-        }
-        Ok(())
-    }
-
-    fn drawing_sheet_zones(
-        &mut self,
-        printable: DrawingSheetRect,
-        drawing_area: DrawingSheetRect,
-        zones: DrawingSheetZoneGrid,
-        border_band_um: u64,
-        stroke: StrokeStyle,
-    ) -> Result<(), HardcopyRenderError> {
-        let right =
-            drawing_area
-                .x_um
-                .checked_add(i64::try_from(drawing_area.width_um).map_err(|_| {
-                    conversion_error("drawing-sheet zone horizontal extent overflow")
-                })?)
-                .ok_or_else(|| conversion_error("drawing-sheet zone horizontal extent overflow"))?;
-        let bottom = drawing_area
-            .y_um
-            .checked_add(
-                i64::try_from(drawing_area.height_um)
-                    .map_err(|_| conversion_error("drawing-sheet zone vertical extent overflow"))?,
-            )
-            .ok_or_else(|| conversion_error("drawing-sheet zone vertical extent overflow"))?;
-        let printable_right = printable
-            .x_um
-            .checked_add(
-                i64::try_from(printable.width_um)
-                    .map_err(|_| conversion_error("drawing-sheet zone printable width overflow"))?,
-            )
-            .ok_or_else(|| conversion_error("drawing-sheet zone printable width overflow"))?;
-        let printable_bottom =
-            printable
-                .y_um
-                .checked_add(i64::try_from(printable.height_um).map_err(|_| {
-                    conversion_error("drawing-sheet zone printable height overflow")
-                })?)
-                .ok_or_else(|| conversion_error("drawing-sheet zone printable height overflow"))?;
-        let show_top_left = matches!(
-            zones.edges,
-            DrawingSheetZoneEdges::All | DrawingSheetZoneEdges::TopAndLeft
-        );
-        let show_bottom_right = matches!(
-            zones.edges,
-            DrawingSheetZoneEdges::All | DrawingSheetZoneEdges::BottomAndRight
-        );
-        for index in 1..zones.columns {
-            let x = drawing_area.x_um
-                + i64::try_from(
-                    drawing_area.width_um * u64::from(index) / u64::from(zones.columns),
-                )
-                .map_err(|_| conversion_error("drawing-sheet zone column overflow"))?;
-            if show_top_left {
-                self.primitives.push(ScenePrimitive::Line {
-                    from: self.drawing_sheet_point(x, printable.y_um)?,
-                    to: self.drawing_sheet_point(x, drawing_area.y_um)?,
-                    stroke,
-                });
-            }
-            if show_bottom_right {
-                self.primitives.push(ScenePrimitive::Line {
-                    from: self.drawing_sheet_point(x, bottom)?,
-                    to: self.drawing_sheet_point(x, printable_bottom)?,
-                    stroke,
-                });
-            }
-        }
-        for index in 1..zones.rows {
-            let y = drawing_area.y_um
-                + i64::try_from(drawing_area.height_um * u64::from(index) / u64::from(zones.rows))
-                    .map_err(|_| conversion_error("drawing-sheet zone row overflow"))?;
-            if show_top_left {
-                self.primitives.push(ScenePrimitive::Line {
-                    from: self.drawing_sheet_point(printable.x_um, y)?,
-                    to: self.drawing_sheet_point(drawing_area.x_um, y)?,
-                    stroke,
-                });
-            }
-            if show_bottom_right {
-                self.primitives.push(ScenePrimitive::Line {
-                    from: self.drawing_sheet_point(right, y)?,
-                    to: self.drawing_sheet_point(printable_right, y)?,
-                    stroke,
-                });
-            }
-        }
-        if zones.labels != DrawingSheetZoneLabels::Coordinates {
-            let label_color = stroke.color;
-            // A reference is lettered at the canvas's height and centred in
-            // the band as the canvas centres it: across the zone, and with
-            // its baseline converted from the band's centre line.
-            let lettering_um = drawing_sheet_zone_lettering_um(border_band_um);
-            let label_em_um = drawing_sheet_mono_em_um(lettering_um);
-            let baseline_um = drawing_sheet_mono_baseline_offset_um(lettering_um) as i64;
-            let centred = (TextAnchor::Middle, SceneTextRotation::Upright);
-            let top_label_y = midpoint_coordinate(
-                printable.y_um,
-                drawing_area.y_um,
-                "drawing-sheet top zone label",
-            )?;
-            let bottom_label_y =
-                midpoint_coordinate(bottom, printable_bottom, "drawing-sheet bottom zone label")?;
-            let left_label_x = midpoint_coordinate(
-                printable.x_um,
-                drawing_area.x_um,
-                "drawing-sheet left zone label",
-            )?;
-            let right_label_x =
-                midpoint_coordinate(right, printable_right, "drawing-sheet right zone label")?;
-            for column in 0..zones.columns {
-                let center_x = drawing_area.x_um
-                    + i64::try_from(
-                        drawing_area.width_um * (u64::from(column) * 2 + 1)
-                            / (u64::from(zones.columns) * 2),
-                    )
-                    .map_err(|_| conversion_error("drawing-sheet zone label overflow"))?;
-                let text = match zones.labels {
-                    DrawingSheetZoneLabels::AlphaNumeric => (column + 1).to_string(),
-                    DrawingSheetZoneLabels::NumericAlpha => zone_alpha_label(column),
-                    DrawingSheetZoneLabels::Coordinates => unreachable!(),
-                };
-                if show_top_left {
-                    self.add_text_placed(
-                        self.drawing_sheet_point(center_x, top_label_y + baseline_um)?,
-                        &text,
-                        SceneFont::Monospace,
-                        label_em_um,
-                        label_color,
-                        centred,
-                    )?;
-                }
-                if show_bottom_right {
-                    self.add_text_placed(
-                        self.drawing_sheet_point(center_x, bottom_label_y + baseline_um)?,
-                        &text,
-                        SceneFont::Monospace,
-                        label_em_um,
-                        label_color,
-                        centred,
-                    )?;
-                }
-            }
-            for row in 0..zones.rows {
-                let center_y = drawing_area.y_um
-                    + i64::try_from(
-                        drawing_area.height_um * (u64::from(row) * 2 + 1)
-                            / (u64::from(zones.rows) * 2),
-                    )
-                    .map_err(|_| conversion_error("drawing-sheet zone label overflow"))?;
-                let text = match zones.labels {
-                    DrawingSheetZoneLabels::AlphaNumeric => zone_alpha_label(row),
-                    DrawingSheetZoneLabels::NumericAlpha => (row + 1).to_string(),
-                    DrawingSheetZoneLabels::Coordinates => unreachable!(),
-                };
-                if show_top_left {
-                    self.add_text_placed(
-                        self.drawing_sheet_point(left_label_x, center_y + baseline_um)?,
-                        &text,
-                        SceneFont::Monospace,
-                        label_em_um,
-                        label_color,
-                        centred,
-                    )?;
-                }
-                if show_bottom_right {
-                    self.add_text_placed(
-                        self.drawing_sheet_point(right_label_x, center_y + baseline_um)?,
-                        &text,
-                        SceneFont::Monospace,
-                        label_em_um,
-                        label_color,
-                        centred,
-                    )?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn drawing_sheet_registration_marks(
-        &mut self,
-        printable: DrawingSheetRect,
-        stroke: StrokeStyle,
-    ) -> Result<(), HardcopyRenderError> {
-        let right = printable.x_um + printable.width_um as i64;
-        let bottom = printable.y_um + printable.height_um as i64;
-        let arm = 3_000_i64;
-        for (x, y, dx, dy) in [
-            (printable.x_um, printable.y_um, 1, 1),
-            (right, printable.y_um, -1, 1),
-            (printable.x_um, bottom, 1, -1),
-            (right, bottom, -1, -1),
-        ] {
-            self.primitives.push(ScenePrimitive::Line {
-                from: self.drawing_sheet_point(x - dx * arm, y)?,
-                to: self.drawing_sheet_point(x + dx * arm, y)?,
-                stroke,
-            });
-            self.primitives.push(ScenePrimitive::Line {
-                from: self.drawing_sheet_point(x, y - dy * arm)?,
-                to: self.drawing_sheet_point(x, y + dy * arm)?,
-                stroke,
-            });
-        }
-        Ok(())
-    }
-
-    fn drawing_sheet_folding_marks(
-        &mut self,
-        paper: DrawingSheetRect,
-        stroke: StrokeStyle,
-    ) -> Result<(), HardcopyRenderError> {
-        let bottom = paper.y_um + paper.height_um as i64;
-        let mut y = paper.y_um + 105_000;
-        while y < bottom {
-            self.primitives.push(ScenePrimitive::Line {
-                from: self.drawing_sheet_point(paper.x_um, y)?,
-                to: self.drawing_sheet_point(paper.x_um + 3_000, y)?,
-                stroke,
-            });
-            y += 105_000;
         }
         Ok(())
     }
@@ -2299,8 +1998,8 @@ impl<'a> SemanticSceneCompiler<'a> {
 }
 
 mod plot_grid;
-mod title_block;
-pub(super) use title_block::*;
 mod schematic_marks;
 mod schematic_text;
+mod sheet_frame;
 mod symbol_document;
+mod title_block;

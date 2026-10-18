@@ -6,8 +6,8 @@ use crate::schematic::view::drawing_sheet::{
     DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, drawing_sheet_printable_preview,
 };
 use crate::state::{
-    DrawingSheetRect, DrawingSheetTitleBlockRotation, DrawingSheetZoneEdges, DrawingSheetZoneGrid,
-    DrawingSheetZoneLabels, SchematicSheetFormat,
+    DrawingSheetFrameLayer, DrawingSheetFrameMark, DrawingSheetFramePlacement, DrawingSheetRect,
+    DrawingSheetTitleBlockRotation, SchematicSheetFormat,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -228,27 +228,20 @@ fn drawing_sheet_preview_impl(
         );
     }
 
-    let printable_rect = map_rect(geometry.printable);
-    paint_dashed_rect(
-        ui,
-        printable_rect,
-        Stroke::new(0.8, palette.margin),
-        4.0,
-        3.0,
-    );
+    // An inset frame leaves its margins to a guide; a standard frame's border
+    // lies on them.
+    if geometry.frame_placement == DrawingSheetFramePlacement::Inset {
+        paint_dashed_rect(
+            ui,
+            map_rect(geometry.printable),
+            Stroke::new(0.8, palette.margin),
+            4.0,
+            3.0,
+        );
+    }
 
     let drawing_rect = map_rect(geometry.drawing_area);
-    if geometry.border_band_um > 0 {
-        ui.painter().rect_stroke(
-            drawing_rect,
-            0.0,
-            Stroke::new(1.0, palette.border),
-            egui::StrokeKind::Inside,
-        );
-        if let Some(zones) = geometry.zones {
-            paint_zone_band(ui, printable_rect, drawing_rect, zones, palette);
-        }
-    }
+    paint_frame(ui, format, &geometry, &map, scale, palette);
 
     if let Some(content) = content {
         paint_content_silhouette(ui, content, drawing_rect, &map, palette);
@@ -423,157 +416,78 @@ impl SheetPreviewPalette {
     }
 }
 
-fn paint_zone_band(
+/// Paint the sheet's frame from the artwork the canvas and the plot draw,
+/// scaled to the preview. Lines keep their physical proportions down to a
+/// hairline, and references are lettered only where the band can carry
+/// legible text.
+fn paint_frame(
     ui: &Ui,
-    printable: Rect,
-    drawing: Rect,
-    zones: DrawingSheetZoneGrid,
+    format: &SchematicSheetFormat,
+    geometry: &crate::state::DrawingSheetGeometry,
+    map: &impl Fn(f32, f32) -> Pos2,
+    scale: f32,
     palette: SheetPreviewPalette,
 ) {
-    let columns = usize::from(zones.columns);
-    let rows = usize::from(zones.rows);
-    if columns == 0 || rows == 0 {
-        return;
-    }
-    let top = matches!(
-        zones.edges,
-        DrawingSheetZoneEdges::All | DrawingSheetZoneEdges::TopAndLeft
-    );
-    let bottom = matches!(
-        zones.edges,
-        DrawingSheetZoneEdges::All | DrawingSheetZoneEdges::BottomAndRight
-    );
-    let left = matches!(
-        zones.edges,
-        DrawingSheetZoneEdges::All | DrawingSheetZoneEdges::TopAndLeft
-    );
-    let right = matches!(
-        zones.edges,
-        DrawingSheetZoneEdges::All | DrawingSheetZoneEdges::BottomAndRight
-    );
-    let stroke = Stroke::new(0.75, palette.zone);
-
-    for index in 1..columns {
-        let x = egui::lerp(
-            drawing.left()..=drawing.right(),
-            index as f32 / columns as f32,
-        );
-        if top {
-            ui.painter()
-                .line_segment([pos2(x, printable.top()), pos2(x, drawing.top())], stroke);
-        }
-        if bottom {
-            ui.painter().line_segment(
-                [pos2(x, drawing.bottom()), pos2(x, printable.bottom())],
-                stroke,
-            );
-        }
-    }
-    for index in 1..rows {
-        let y = egui::lerp(drawing.top()..=drawing.bottom(), index as f32 / rows as f32);
-        if left {
-            ui.painter()
-                .line_segment([pos2(printable.left(), y), pos2(drawing.left(), y)], stroke);
-        }
-        if right {
-            ui.painter().line_segment(
-                [pos2(drawing.right(), y), pos2(printable.right(), y)],
-                stroke,
-            );
-        }
-    }
-
-    if zones.labels == DrawingSheetZoneLabels::Coordinates {
-        return;
-    }
-    let horizontal_band =
-        (drawing.top() - printable.top()).max(printable.bottom() - drawing.bottom());
-    let vertical_band =
-        (drawing.left() - printable.left()).max(printable.right() - drawing.right());
-    let column_step = drawing.width() / columns as f32;
-    let row_step = drawing.height() / rows as f32;
-    let font_size = horizontal_band
-        .max(vertical_band)
-        .mul_add(0.8, 0.0)
-        .clamp(5.0, 8.0);
-    let font = FontId::monospace(font_size);
-
-    if horizontal_band >= 4.5 && column_step >= 7.0 {
-        let top_y = (printable.top() + drawing.top()) * 0.5;
-        let bottom_y = (drawing.bottom() + printable.bottom()) * 0.5;
-        for index in 0..columns {
-            let x = drawing.left() + column_step * (index as f32 + 0.5);
-            let label = zone_column_label(index, zones.labels);
-            if top {
-                ui.painter().text(
-                    pos2(x, top_y),
-                    Align2::CENTER_CENTER,
-                    &label,
-                    font.clone(),
-                    palette.zone_ink,
+    let at = |(x_um, y_um): (i64, i64)| map(x_um as f32, y_um as f32);
+    let width = |width_um: u64| (width_um as f32 * scale).max(0.55);
+    let lettered = geometry.border_band_um as f32 * scale >= 4.5;
+    for item in &format.frame_artwork(geometry).items {
+        let ink = match item.layer {
+            DrawingSheetFrameLayer::Border | DrawingSheetFrameLayer::CentringMarks => {
+                palette.border
+            }
+            DrawingSheetFrameLayer::ZoneLabels | DrawingSheetFrameLayer::SizeDesignation => {
+                palette.zone_ink
+            }
+            DrawingSheetFrameLayer::Zones
+            | DrawingSheetFrameLayer::RegistrationMarks
+            | DrawingSheetFrameLayer::FoldingMarks => palette.zone,
+            // Trimming marks belong to output that is cut to size.
+            DrawingSheetFrameLayer::TrimMarks => continue,
+        };
+        match &item.mark {
+            DrawingSheetFrameMark::Line { from, to, width_um } => {
+                ui.painter()
+                    .line_segment([at(*from), at(*to)], Stroke::new(width(*width_um), ink));
+            }
+            DrawingSheetFrameMark::Rect { rect, width_um } => {
+                let (right, bottom) = (
+                    rect.x_um + rect.width_um as i64,
+                    rect.y_um + rect.height_um as i64,
+                );
+                ui.painter().rect_stroke(
+                    Rect::from_min_max(at((rect.x_um, rect.y_um)), at((right, bottom))),
+                    0.0,
+                    Stroke::new(width(*width_um), ink),
+                    egui::StrokeKind::Middle,
                 );
             }
-            if bottom {
-                ui.painter().text(
-                    pos2(x, bottom_y),
-                    Align2::CENTER_CENTER,
-                    &label,
-                    font.clone(),
-                    palette.zone_ink,
-                );
+            DrawingSheetFrameMark::FilledRect { .. } => {}
+            DrawingSheetFrameMark::FilledPolygon { points } => {
+                ui.painter().add(Shape::convex_polygon(
+                    points.iter().copied().map(at).collect(),
+                    ink,
+                    Stroke::NONE,
+                ));
+            }
+            DrawingSheetFrameMark::Text {
+                centre,
+                text,
+                lettering_um,
+            } => {
+                if lettered {
+                    let font_size = (*lettering_um as f32 * scale / 0.698).clamp(5.0, 8.0);
+                    ui.painter().text(
+                        at(*centre),
+                        Align2::CENTER_CENTER,
+                        text,
+                        FontId::monospace(font_size),
+                        ink,
+                    );
+                }
             }
         }
     }
-    if vertical_band >= 4.5 && row_step >= 7.0 {
-        let left_x = (printable.left() + drawing.left()) * 0.5;
-        let right_x = (drawing.right() + printable.right()) * 0.5;
-        for index in 0..rows {
-            let y = drawing.top() + row_step * (index as f32 + 0.5);
-            let label = zone_row_label(index, zones.labels);
-            if left {
-                ui.painter().text(
-                    pos2(left_x, y),
-                    Align2::CENTER_CENTER,
-                    &label,
-                    font.clone(),
-                    palette.zone_ink,
-                );
-            }
-            if right {
-                ui.painter().text(
-                    pos2(right_x, y),
-                    Align2::CENTER_CENTER,
-                    &label,
-                    font.clone(),
-                    palette.zone_ink,
-                );
-            }
-        }
-    }
-}
-
-fn zone_column_label(index: usize, labels: DrawingSheetZoneLabels) -> String {
-    match labels {
-        DrawingSheetZoneLabels::AlphaNumeric => (index + 1).to_string(),
-        DrawingSheetZoneLabels::NumericAlpha => alphabetic_zone_label(index),
-        DrawingSheetZoneLabels::Coordinates => String::new(),
-    }
-}
-
-fn zone_row_label(index: usize, labels: DrawingSheetZoneLabels) -> String {
-    match labels {
-        DrawingSheetZoneLabels::AlphaNumeric => alphabetic_zone_label(index),
-        DrawingSheetZoneLabels::NumericAlpha => (index + 1).to_string(),
-        DrawingSheetZoneLabels::Coordinates => String::new(),
-    }
-}
-
-fn alphabetic_zone_label(index: usize) -> String {
-    const LETTERS: &[u8] = b"ABCDEFGHJKLMNPRSTUVWXY";
-    LETTERS.get(index).map_or_else(
-        || (index + 1).to_string(),
-        |letter| char::from(*letter).to_string(),
-    )
 }
 
 fn paint_title_block(
@@ -770,11 +684,43 @@ mod tests {
     };
 
     #[test]
-    fn zone_labels_use_the_engineering_alphabet_and_numeric_overflow() {
-        assert_eq!(alphabetic_zone_label(0), "A");
-        assert_eq!(alphabetic_zone_label(8), "J");
-        assert_eq!(alphabetic_zone_label(21), "Y");
-        assert_eq!(alphabetic_zone_label(22), "23");
+    fn the_preview_letters_the_zones_the_sheet_model_letters() {
+        // Page Setup's preview keeps no alphabet of its own: it letters the
+        // references the canvas and the plot letter, from the sheet model.
+        let format = SchematicSheetFormat::from_standard(
+            crate::state::DrawingSheetStandard::IsoA0,
+            crate::state::SchematicPageOrientation::Landscape,
+        );
+        let geometry = format.geometry().unwrap();
+        let expected = format
+            .frame_artwork(&geometry)
+            .layer(DrawingSheetFrameLayer::ZoneLabels)
+            .filter_map(|mark| match mark {
+                DrawingSheetFrameMark::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(expected.contains("Q") && expected.contains("R") && expected.contains("24"));
+        // Wide enough that the 5 mm band carries legible references.
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(6_000.0, 4_500.0))),
+            ..Default::default()
+        };
+        let output = egui::Context::default().run_ui(input, |ui| {
+            drawing_sheet_preview(ui, &format, 4_000.0, "");
+        });
+        let lettered = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            expected.is_subset(&lettered),
+            "the preview letters {lettered:?}, not the model's {expected:?}"
+        );
     }
 
     #[test]
