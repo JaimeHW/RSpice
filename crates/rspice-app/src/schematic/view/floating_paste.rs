@@ -4,7 +4,7 @@
 
 use super::super::symbols::SymbolLibrary;
 use super::preview::{preview_view, transform_preview_style};
-use super::sheet_visibility::with_active_wire_topology_in;
+use super::sheet_visibility::{off_active_sheet, with_active_wire_topology_in};
 use super::snap_resolution::resolve_grid_pointer;
 use super::{AppState, SchematicSymbolContext, viewport::Viewport};
 use crate::state::Point;
@@ -97,7 +97,8 @@ pub(super) fn draw_floating_paste_preview(
     if floating.current_preview(content_version).is_none() {
         let at = floating.at();
         let mut candidate = state.schematic.clone();
-        let result = candidate.paste_at_checked(&floating.objects, at);
+        let result =
+            candidate.paste_at_checked(&floating.objects, at, off_active_sheet(&state.workspace));
         if matches!(result, Ok(true)) {
             with_active_wire_topology_in(&state.workspace, &mut candidate, |candidate, scope| {
                 candidate.connect_pasted_selection(

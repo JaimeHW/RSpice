@@ -56,7 +56,7 @@ mod tests {
         let clipboard = state.copy_selection();
         assert!(
             state
-                .paste_at_checked(&clipboard, Point::new(0, 1000))
+                .paste_at_checked(&clipboard, Point::new(0, 1000), |_| false)
                 .unwrap()
         );
         let netlist = generate_netlist(&state).netlist;

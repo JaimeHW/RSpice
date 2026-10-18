@@ -305,6 +305,64 @@ fn a_wire_edited_on_one_sheet_leaves_another_sheets_tap_where_it_was() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// A dot copied alone pastes only where two of the open sheet's wires
+/// meet, and not onto a dot that sheet already has. Sheet 2 draws a
+/// crossing at (300, 100); pasted there on Sheet 1, which draws nothing
+/// there, the dot was placed on Sheet 1 and only its cleanup took it away
+/// again, and the paste said it had pasted it. With Sheet 1 drawing the
+/// crossing too and Sheet 2 dotting it, the paste on Sheet 1 was refused:
+/// the paste read every sheet's wires and dots.
+#[test]
+fn a_dot_pasted_alone_reads_only_the_open_sheets_wires_and_dots() {
+    let mut wrong = Vec::new();
+    for sheet_one_crosses_there in [false, true] {
+        let mut bench = Bench::new(&[]);
+        let cross = |bench: &mut Bench, x: i32| {
+            bench.draw_wire(&[p(x - 40, 100), p(x + 40, 100)]);
+            bench.draw_wire(&[p(x, 60), p(x, 140)]);
+        };
+        cross(&mut bench, 100);
+        bench.click_junction(p(100, 100));
+        if sheet_one_crosses_there {
+            cross(&mut bench, 300);
+        }
+        bench.activate_sheet(1);
+        cross(&mut bench, 300);
+        if sheet_one_crosses_there {
+            bench.click_junction(p(300, 100));
+        }
+        bench.activate_sheet(0);
+        bench.select(|selection| selection.select_junction(p(100, 100)));
+        bench.copy_selection();
+        let mut expected = bench.dots();
+        if sheet_one_crosses_there {
+            expected.insert((0, 300, 100));
+        }
+
+        bench.paste_at(p(300, 100));
+
+        let prompt = bench.state().prompt_text();
+        if !sheet_one_crosses_there && prompt != Some("Nothing was pasted.") {
+            wrong.push(format!(
+                "with Sheet 1 empty at (300, 100), the paste said {prompt:?}"
+            ));
+        }
+        if bench.dots() != expected {
+            wrong.push(format!(
+                "with Sheet 1 {} at (300, 100), the paste left dots {:?}, not {expected:?}\n{}",
+                if sheet_one_crosses_there {
+                    "crossing"
+                } else {
+                    "empty"
+                },
+                bench.dots(),
+                bench.describe()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// Opening Sheet 2 is a step in the one undo order. A part placed there
 /// gave the part its sheet, which moved the project's revision, and the
 /// switch could never be undone after that: undo stopped with "the latest

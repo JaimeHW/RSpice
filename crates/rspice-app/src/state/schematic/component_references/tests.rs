@@ -180,7 +180,7 @@ fn paste_rebinds_forward_references_in_one_undo_step() {
     let clipboard = state.copy_selection();
     assert!(
         state
-            .paste_at_checked(&clipboard, Point::new(0, 1000))
+            .paste_at_checked(&clipboard, Point::new(0, 1000), |_| false)
             .unwrap()
     );
     let pasted = state.design.document().components.clone();
@@ -310,7 +310,7 @@ fn rejected_copy_and_array_leave_the_document_history_and_allocators_unchanged()
         let clipboard = state.copy_selection();
         let mut before = state.clone();
         let error = state
-            .paste_at_checked(&clipboard, Point::new(0, 1000))
+            .paste_at_checked(&clipboard, Point::new(0, 1000), |_| false)
             .unwrap_err();
         assert!(error.contains("K1"), "{error}");
         assert_eq!(

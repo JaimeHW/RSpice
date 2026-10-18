@@ -10,7 +10,6 @@ use super::{
     documentation_shape::{DocumentationShape, clamped_documentation_shape_translation},
     identity::SchematicIdentity,
     junction_candidates::{collect_junction_candidates, nearest_junction_candidate},
-    junction_edit,
     net_label::{Junction, NetLabel},
     probe::SchematicProbe,
     wire::Wire,
@@ -201,6 +200,9 @@ pub struct ClipboardPaste<'document, 'clipboard> {
     references: PreparedCopyReferences,
     paste_pos: Point,
     junction_candidates: Option<Vec<Point>>,
+    /// The other sheets' wires and dots. They share the paste's coordinates,
+    /// but a pasted dot joins the open sheet's wires and nothing else.
+    elsewhere: HashSet<u64>,
 }
 
 /// Borrowed objects appended by one paste, for editor selection and notification.
@@ -238,15 +240,27 @@ impl PastedObjects<'_> {
 }
 
 impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
+    /// Prepare a paste at `pos`. `hidden` names the objects of the cell
+    /// view's other sheets, which share these coordinates: where a pasted dot
+    /// may go is read from the open sheet's wires and dots alone, while fresh
+    /// reference names are still drawn against every sheet.
     pub fn prepare(
         document: &'document mut SchematicDocument,
         identity: &'document mut SchematicIdentity,
         clipboard: &'clipboard ClipboardData,
         pos: Point,
+        hidden: impl Fn(u64) -> bool,
     ) -> Result<Option<Self>, String> {
         if clipboard.is_empty() {
             return Ok(None);
         }
+        let elsewhere = document
+            .wires
+            .iter()
+            .map(|wire| wire.id)
+            .chain(document.junctions.iter().map(|junction| junction.id))
+            .filter(|id| hidden(*id))
+            .collect::<HashSet<_>>();
         let junction_only = clipboard.components.is_empty()
             && clipboard.wires.is_empty()
             && clipboard.buses.is_empty()
@@ -255,7 +269,15 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
             && clipboard.design_notes.is_empty()
             && clipboard.documentation_shapes.is_empty()
             && clipboard.probes.is_empty();
-        let candidates = junction_only.then(|| collect_junction_candidates(&document.wires));
+        let candidates = junction_only.then(|| {
+            let here = document
+                .wires
+                .iter()
+                .filter(|wire| !elsewhere.contains(&wire.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            collect_junction_candidates(&here)
+        });
         // A junction-only clipboard is a connectivity edit, not decoration.
         // Snap its anchor through the same ambiguous-crossing candidate set as
         // the junction tool, then reject it before opening an undo transaction
@@ -283,7 +305,7 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
                 !document
                     .junctions
                     .iter()
-                    .any(|junction| junction.pos == target)
+                    .any(|junction| junction.pos == target && !elsewhere.contains(&junction.id))
                     && nearest_junction_candidate(
                         candidates.as_deref().unwrap_or_default(),
                         target,
@@ -304,6 +326,7 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
             references,
             paste_pos,
             junction_candidates: candidates,
+            elsewhere,
         }))
     }
 
@@ -319,6 +342,7 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
             references,
             paste_pos,
             junction_candidates,
+            elsewhere,
         } = self;
         let components_start = document.components.len();
         let wires_start = document.wires.len();
@@ -480,9 +504,11 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
             }
         }
 
-        // Re-create junction dots only where at least two distinct wires
-        // meet. This makes junction-only copy/paste useful without ever
-        // manufacturing an electrically meaningless floating marker.
+        // Re-create junction dots only where at least two distinct wires of
+        // the open sheet meet. This makes junction-only copy/paste useful
+        // without ever manufacturing an electrically meaningless floating
+        // marker; another sheet's wires and dots at the same point are not
+        // this sheet's.
         for junction in clipboard_junctions {
             let target = Point::new(
                 junction.x.saturating_add(offset_x),
@@ -494,9 +520,9 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
                 document
                     .wires
                     .iter()
-                    .filter(|wire| wire.contains_point(target))
+                    .filter(|wire| !elsewhere.contains(&wire.id) && wire.contains_point(target))
                     .map(|wire| wire.id)
-                    .collect::<std::collections::HashSet<_>>()
+                    .collect::<HashSet<_>>()
                     .len()
                     >= 2
             };
@@ -504,10 +530,11 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
                 && !document
                     .junctions
                     .iter()
-                    .any(|junction| junction.pos == target)
+                    .any(|junction| junction.pos == target && !elsewhere.contains(&junction.id))
             {
                 electrical_committed = true;
-                junction_edit::add_junction(document, identity, target);
+                let id = identity.allocate(document);
+                document.junctions.push(Junction::new(id, target));
             }
         }
 
@@ -553,6 +580,7 @@ mod tests {
             &mut identity,
             &clipboard,
             Point::new(100, 200),
+            |_| false,
         )
         .unwrap()
         .unwrap();
@@ -572,6 +600,7 @@ mod tests {
             &mut identity,
             &clipboard,
             Point::new(100, 200),
+            |_| false,
         )
         .unwrap()
         .unwrap()

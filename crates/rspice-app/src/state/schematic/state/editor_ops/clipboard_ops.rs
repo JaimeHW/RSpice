@@ -81,23 +81,31 @@ impl SchematicState {
         )
     }
 
-    /// Paste `clipboard` at the given position (one undo entry)
+    /// Paste `clipboard` at the given position (one undo entry) into a
+    /// document with one sheet.
     pub fn paste_at(&mut self, clipboard: &ClipboardData, pos: Point) -> bool {
-        self.paste_at_checked(clipboard, pos).unwrap_or(false)
+        self.paste_at_checked(clipboard, pos, |_| false)
+            .unwrap_or(false)
     }
 
     /// Paste with a diagnostic when structural references cannot be preserved.
     /// Returns whether anything was pasted; the pasted objects become the
     /// selection. Inside a caller's open operation the paste joins it.
+    ///
+    /// The paste runs with every sheet present, because a fresh reference
+    /// name must be unique across the cell view. `hidden` names the other
+    /// sheets' objects, which share these coordinates: a pasted dot goes only
+    /// where the open sheet's wires meet.
     pub fn paste_at_checked(
         &mut self,
         clipboard: &ClipboardData,
         pos: Point,
+        hidden: impl Fn(u64) -> bool,
     ) -> Result<bool, String> {
         if self.session.read_only || !clipboard.has_content() {
             return Ok(false);
         }
-        let Some(edit) = self.design.paste_at(clipboard, pos)? else {
+        let Some(edit) = self.design.paste_at(clipboard, pos, hidden)? else {
             return Ok(false);
         };
         let pasted = edit.value;

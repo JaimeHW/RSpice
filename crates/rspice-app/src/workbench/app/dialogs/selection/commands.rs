@@ -13,7 +13,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::sheet_visibility::{
-    selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
+    off_active_sheet, selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
     with_active_wire_topology,
 };
 use crate::state::{CellViewRef, DuplicateExternalNets, Point, SchematicState, Selection};
@@ -209,9 +209,12 @@ impl AppState {
         let symbols = schematic_symbol_context(self);
         // The undo step opens with every sheet present; the cell view's other
         // sheets, which share these coordinates, step out of reach only while
-        // the pasted wires and pins are joined to this one.
+        // the pasted wires and pins are joined to this one. The paste itself
+        // names its parts against every sheet and places its dots on this one.
         self.schematic.begin_operation("paste");
-        let pasted = self.schematic.paste_at_checked(&objects, anchor);
+        let pasted =
+            self.schematic
+                .paste_at_checked(&objects, anchor, off_active_sheet(&self.workspace));
         if matches!(pasted, Ok(true)) {
             with_active_wire_topology(self, |schematic, scope| {
                 schematic.connect_pasted_selection(

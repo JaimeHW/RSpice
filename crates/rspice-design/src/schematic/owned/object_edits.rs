@@ -19,13 +19,22 @@ use crate::resolved_symbol::ResolvedCellSymbol;
 use rspice_design_model::{Point, port::PortSpec};
 
 impl Schematic {
+    /// Paste `clipboard` at `pos` as one undo step. `hidden` names the cell
+    /// view's other sheets' objects: a pasted dot goes only where the open
+    /// sheet's wires meet, while fresh reference names avoid every sheet's.
     pub fn paste_at(
         &mut self,
         clipboard: &ClipboardData,
         pos: Point,
+        hidden: impl Fn(u64) -> bool,
     ) -> Result<Option<DocumentEdit<PastedObjects<'_>>>, String> {
-        let Some(paste) =
-            ClipboardPaste::prepare(&mut self.document, &mut self.identity, clipboard, pos)?
+        let Some(paste) = ClipboardPaste::prepare(
+            &mut self.document,
+            &mut self.identity,
+            clipboard,
+            pos,
+            hidden,
+        )?
         else {
             return Ok(None);
         };
