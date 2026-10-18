@@ -58,8 +58,7 @@ const SORT_MARK_WIDTH: f32 = 7.0;
 const FITTED_MAX_SHARE: f32 = 0.24;
 
 /// The least the message keeps, in characters. Fitted columns that would
-/// leave it less give way, each in proportion to what it holds beyond its
-/// heading.
+/// leave it less give way, the widest first.
 const MESSAGE_MIN_CHARACTERS: f32 = 16.0;
 
 /// The least a column can be dragged to, in characters of its face.
@@ -150,23 +149,47 @@ impl Columns {
             };
         }
         // Columns that would leave the message less than its least give way,
-        // each in proportion to what it holds beyond its heading. A width a
-        // reader set is theirs, and stays.
+        // the widest first: one ceiling is lowered over them until the
+        // excess is taken, none below its heading. A short column — the
+        // severity word, a net's name — keeps its cells whole while a long
+        // rule or path is cut; taking from every column in proportion cut
+        // "Critical" to "Critic…" to spare a forty-character rule two
+        // characters. A width a reader set is theirs, and stays.
         let message_least = MESSAGE_MIN_CHARACTERS * advance + 2.0 * CONSOLE_CELL_INSET;
         let fitted: f32 = widths[..FITTED.len()].iter().sum();
         let excess = fitted + message_least - room;
         let yielding = |index: &usize| resized.0[*index].is_none();
         if excess > 0.0 {
-            let slack: f32 = (0..FITTED.len())
-                .filter(yielding)
-                .map(|index| (widths[index] - floors[index]).max(0.0))
-                .sum();
-            if slack > 0.0 {
-                let share = (excess / slack).min(1.0);
-                for index in (0..FITTED.len()).filter(yielding) {
-                    widths[index] -= (widths[index] - floors[index]).max(0.0) * share;
+            let under = |ceiling: f32, index: usize| widths[index].min(ceiling).max(floors[index]);
+            let taken = |ceiling: f32| -> f32 {
+                (0..FITTED.len())
+                    .filter(yielding)
+                    .map(|index| widths[index] - under(ceiling, index))
+                    .sum()
+            };
+            let (mut low, mut high) = (
+                0.0_f32,
+                widths[..FITTED.len()]
+                    .iter()
+                    .copied()
+                    .fold(0.0_f32, f32::max),
+            );
+            for _ in 0..32 {
+                let ceiling = (low + high) * 0.5;
+                if taken(ceiling) > excess {
+                    low = ceiling;
+                } else {
+                    high = ceiling;
                 }
             }
+            let capped: [f32; FITTED.len()] = std::array::from_fn(|index| {
+                if yielding(&index) {
+                    under(high, index)
+                } else {
+                    widths[index]
+                }
+            });
+            widths[..FITTED.len()].copy_from_slice(&capped);
         }
         let fitted: f32 = widths[..FITTED.len()].iter().sum();
         widths[5] = (room - fitted).max(message_least);
@@ -1085,6 +1108,36 @@ mod tests {
             narrow.columns.width(ProblemColumn::Message)
                 >= MESSAGE_MIN_CHARACTERS * narrow.advance + 2.0 * CONSOLE_CELL_INSET - 0.01,
             "the message keeps room for its least at 640 px",
+        );
+    }
+
+    /// Where the columns must give way, the widest gives first: the severity
+    /// word and a short name keep their cells whole, and the long rule is
+    /// what is cut.
+    #[test]
+    fn on_a_narrow_table_the_widest_column_gives_way_first() {
+        let widest = [8, 39, 10, 12, 10];
+        let narrow = measured(640.0, widest, Resized::default());
+        let message_least = MESSAGE_MIN_CHARACTERS * narrow.advance + 2.0 * CONSOLE_CELL_INSET;
+        assert!(
+            (narrow.columns.width(ProblemColumn::Message) - message_least).abs() < 0.5,
+            "precondition: at 640 px the columns give way to the message",
+        );
+        let whole = |index: usize| {
+            let mark = if index == 0 { CONSOLE_MARK_GUTTER } else { 0.0 };
+            (mark + widest[index] as f32 * narrow.advance).max(narrow.headings[index])
+                + 2.0 * CONSOLE_CELL_INSET
+        };
+        for index in [0, 2, 3, 4] {
+            assert!(
+                (narrow.columns.width(FITTED[index]) - whole(index)).abs() < 0.01,
+                "{} keeps its cells whole at 760 px",
+                FITTED[index].label(),
+            );
+        }
+        assert!(
+            narrow.columns.width(ProblemColumn::Code) < whole(1) - narrow.advance,
+            "the rule is cut",
         );
     }
 
