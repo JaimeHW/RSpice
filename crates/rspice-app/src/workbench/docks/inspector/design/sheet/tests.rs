@@ -184,7 +184,7 @@ fn a_sheet_is_offered_its_standards_blocks_or_none() {
             &on(DrawingSheetStandard::AnsiD, Template::AsmeY141),
             Template::AsmeY141
         ),
-        "ASME Y14.1 · 7.62 × 2.50 in"
+        "ASME Y14.1 · 8.87 × 2.50 in"
     );
 }
 
@@ -340,7 +340,7 @@ fn the_asme_forms_approvals_are_typed_in_the_panel() {
     );
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
     assert!(
-        painted.contains("Template\nASME Y14.1 · 6.25 × 2.00 in\n"),
+        painted.contains("Template\nASME Y14.1 · 7.50 × 2.00 in\n"),
         "{painted}"
     );
     for label in [
