@@ -469,15 +469,9 @@ fn apply_record_edits(
                 }
             }
             RecordEdit::TitleBlock(template) => {
-                if let Ok(updated) = record.try_update(|draft| {
-                    draft.title_block.template = template;
-                    if template == DrawingSheetTitleBlockTemplate::None {
-                        draft.title_block.offset_x_um = 0;
-                        draft.title_block.offset_y_um = 0;
-                        draft.title_block.rotation =
-                            crate::state::DrawingSheetTitleBlockRotation::Upright;
-                    }
-                }) {
+                if let Ok(updated) =
+                    record.try_update(|draft| draft.title_block.template = template)
+                {
                     *record = updated;
                 }
             }
@@ -1543,13 +1537,11 @@ fn new_sheet_policy_note(value: DrawingSheetNewSheetPolicy) -> &'static str {
     }
 }
 
-/// Move a reusable default to another base format without trusting placement
-/// offsets that were authored for a differently sized sheet.
+/// Move a reusable default to another base format.
 ///
-/// Keep the requested presentation whenever it still fits. If only the
-/// retained offsets make the new base invalid, normalize those offsets to the
-/// template anchor. The final fallback is the base's own valid title block;
-/// format selection must never panic or leave a corrupt draft.
+/// Keep the requested presentation whenever it still fits. The fallback is
+/// the base's own valid title block; format selection must never panic or
+/// leave a corrupt draft.
 fn retarget_default_to_standard(
     source: &SchematicSheetFormat,
     standard: DrawingSheetStandard,
@@ -1585,14 +1577,7 @@ fn retarget_default(
     {
         title_block.template = base.title_block.template;
     }
-    if let Ok(candidate) = rebuild(title_block.clone()) {
-        return candidate;
-    }
-
-    let mut anchored = title_block;
-    anchored.offset_x_um = 0;
-    anchored.offset_y_um = 0;
-    if let Ok(candidate) = rebuild(anchored) {
+    if let Ok(candidate) = rebuild(title_block) {
         return candidate;
     }
 
@@ -1905,18 +1890,12 @@ mod tests {
     }
 
     #[test]
-    fn changing_default_standard_normalizes_an_offset_that_no_longer_fits() {
+    fn changing_default_standard_keeps_the_title_block() {
         let source = SchematicSheetFormat::from_standard(
             DrawingSheetStandard::IsoA0,
             SchematicPageOrientation::Landscape,
-        )
-        .try_update(|draft| {
-            draft.title_block.offset_x_um = -300_000;
-        })
-        .unwrap();
+        );
 
-        // A sheet that still carries the ISO 7200 block: one too small for it
-        // carries none, and so has no placement for an offset to miss.
         let retargeted = retarget_default_to_standard(&source, DrawingSheetStandard::IsoA4);
 
         assert_eq!(
@@ -1926,8 +1905,6 @@ mod tests {
             }
         );
         assert_eq!(retargeted.title_block.template, source.title_block.template);
-        assert_eq!(retargeted.title_block.offset_x_um, 0);
-        assert_eq!(retargeted.title_block.offset_y_um, 0);
         retargeted.validate().unwrap();
     }
 

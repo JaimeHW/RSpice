@@ -328,9 +328,10 @@ fn canonical_entry(key: &str, visible: bool) -> String {
 
 /// `canonical` as a build without the language code wrote it: it lacks the
 /// language code and every field the ASME form has added since, which are
-/// the fields written last, and each preset's frame, the ISO 5457 frame of
-/// a custom size, is written as every build before the standard frames
-/// wrote it.
+/// the fields written last, places its title block upright in the lower
+/// right corner in so many words, as every build did before the placement
+/// was retired, and writes each preset's frame, the ISO 5457 frame of a
+/// custom size, as every build before the standard frames wrote it.
 fn without_language(canonical: &[u8]) -> String {
     const FRAME_AS_WRITTEN: &str = concat!(
         r#""margins":{"top_um":10000,"right_um":10000,"bottom_um":10000,"left_um":20000},"#,
@@ -340,6 +341,14 @@ fn without_language(canonical: &[u8]) -> String {
         r#""marks":{"registration":true,"folding":false}"#,
     );
     let mut today = String::from_utf8(canonical.to_vec()).unwrap();
+    let opening = r#""title_block":{"template":"standard""#;
+    assert!(today.contains(opening), "{today}");
+    today = today.replace(
+        opening,
+        &format!(
+            r#"{opening},"anchor":"bottom-right","rotation":"upright","offset_x_um":0,"offset_y_um":0"#
+        ),
+    );
     for key in [
         "language",
         "cage-code",

@@ -2557,16 +2557,10 @@ fn drawing_sheet_transactions_retain_complete_revisioned_project_receipts() {
 }
 
 #[test]
-fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
+fn drawing_sheet_title_cell_budget_is_physical() {
     let upright = SchematicSheetFormat::default();
     let upright_layout =
         drawing_sheet_title_layout(&upright, &upright.geometry().unwrap()).unwrap();
-    let rotated = upright
-        .try_update(|draft| {
-            draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
-        })
-        .unwrap();
-    let rotated_geometry = rotated.geometry().unwrap();
 
     assert_eq!(
         drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::Standard),
@@ -2583,11 +2577,6 @@ fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
     assert_eq!(
         drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::None),
         None
-    );
-    assert_eq!(
-        drawing_sheet_title_layout(&rotated, &rotated_geometry),
-        Some(upright_layout.clone()),
-        "rotating the complete block must not change a field's cell or text budget"
     );
     for cell in &upright_layout.cells {
         let caption = cell.caption.unwrap();

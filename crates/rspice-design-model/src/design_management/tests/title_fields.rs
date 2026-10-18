@@ -232,11 +232,6 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
                 DrawingSheetTitleBlockTemplate::Standard,
                 "{standard:?} {orientation:?}"
             );
-            assert_eq!(
-                sheet.title_block.rotation,
-                DrawingSheetTitleBlockRotation::Upright,
-                "{standard:?} {orientation:?} turns ISO 7200's block"
-            );
             assert!(matches!(
                 sheet.geometry().unwrap().effective_title_block_template,
                 DrawingSheetTitleBlockTemplate::Standard | DrawingSheetTitleBlockTemplate::None
@@ -344,10 +339,6 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
         a5_portrait.title_block.template,
         DrawingSheetTitleBlockTemplate::Standard
     );
-    assert_eq!(
-        a5_portrait.title_block.rotation,
-        DrawingSheetTitleBlockRotation::Upright
-    );
     assert!(a5_portrait.title_block_substituted());
     let geometry = a5_portrait.geometry().unwrap();
     assert_eq!(
@@ -357,22 +348,9 @@ fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
     assert_eq!(geometry.title_block, None);
     assert!(drawing_sheet_title_layout(&a5_portrait, &geometry).is_none());
 
-    // A sheet may still turn the block itself; turned on its side it stands
-    // 45 mm across, and fits.
-    let turned = a5_portrait
-        .try_update(|draft| {
-            draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90
-        })
-        .unwrap();
-    assert!(!turned.title_block_substituted());
-    assert_eq!(
-        turned.geometry().unwrap().title_block.unwrap().width_um,
-        45_000
-    );
-
     // What decides is the drawing area, not the paper: a binding margin
     // leaves a sheet started from ANSI A too narrow for the block, and
-    // without it the block fits upright again.
+    // without it the block fits again.
     let ansi_portrait =
         crate::custom_format("Narrow ANSI", 208_000, 279_400, crate::StartingFrame::AnsiA)
             .unwrap()
@@ -433,10 +411,39 @@ fn a4_portrait_carries_the_whole_iso_7200_block() {
         DrawingSheetTitleBlockTemplate::Standard
     );
     assert_eq!(geometry.title_block.unwrap().width_um, 180_000);
-    assert_eq!(
-        a4_portrait.title_block.rotation,
-        DrawingSheetTitleBlockRotation::Upright
-    );
+}
+
+#[test]
+fn a_sheet_saved_placing_its_block_elsewhere_loads_upright_in_the_lower_right_corner() {
+    // Both standards put the title block upright in the lower right corner
+    // of the drawing area. A sheet saved anchoring it elsewhere, turning it
+    // or offsetting it loads with it there, its choices otherwise kept.
+    let format = SchematicSheetFormat::default();
+    let placed = format.geometry().unwrap().title_block.unwrap();
+    for (anchor, rotation, offset_um) in [
+        ("bottom-left", "upright", 0),
+        ("bottom-strip", "clockwise90", -4_000),
+        ("top-right", "counter-clockwise90", 6_000),
+        ("bottom-right", "upright", 0),
+    ] {
+        let mut saved = serde_json::to_value(&format).unwrap();
+        saved["title_block"]["anchor"] = serde_json::json!(anchor);
+        saved["title_block"]["rotation"] = serde_json::json!(rotation);
+        saved["title_block"]["offset_x_um"] = serde_json::json!(offset_um);
+        saved["title_block"]["offset_y_um"] = serde_json::json!(-offset_um);
+        let reopened: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
+        assert_eq!(reopened, format, "{anchor} {rotation}");
+        assert_eq!(reopened.geometry().unwrap().title_block.unwrap(), placed);
+        // Saved again, it is written without them.
+        let rewritten = serde_json::to_value(&reopened).unwrap();
+        for key in ["anchor", "rotation", "offset_x_um", "offset_y_um"] {
+            assert!(rewritten["title_block"].get(key).is_none(), "{key}");
+        }
+    }
+    // A placement the product never wrote is still refused.
+    let mut unknown = serde_json::to_value(&format).unwrap();
+    unknown["title_block"]["anchor"] = serde_json::json!("middle");
+    assert!(serde_json::from_value::<SchematicSheetFormat>(unknown).is_err());
 }
 
 #[test]

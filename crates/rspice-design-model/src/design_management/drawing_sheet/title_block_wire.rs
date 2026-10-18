@@ -2,20 +2,25 @@
 //!
 //! The product has retired some of what it once wrote, and every sheet and
 //! package that names it still loads: the `compact` block reads as the
-//! sheet's standard block.
+//! sheet's standard block, and a block placed anywhere but upright in the
+//! lower right corner, turned or offset, reads as placed there.
 
 use super::*;
 
 /// A title block as it was written, which names the retired `compact` block
-/// among the templates.
+/// among the templates and may place the block as RSpice no longer does.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DrawingSheetTitleBlockWire {
     template: DrawingSheetTitleBlockTemplateWire,
-    anchor: DrawingSheetTitleBlockAnchor,
-    rotation: DrawingSheetTitleBlockRotation,
-    offset_x_um: i64,
-    offset_y_um: i64,
+    #[serde(default)]
+    anchor: Option<RetiredTitleBlockAnchor>,
+    #[serde(default)]
+    rotation: Option<RetiredTitleBlockRotation>,
+    #[serde(default)]
+    offset_x_um: Option<i64>,
+    #[serde(default)]
+    offset_y_um: Option<i64>,
     scale: DrawingSheetScale,
     #[serde(default)]
     managed_template: Option<DrawingSheetManagedTemplateSnapshot>,
@@ -36,14 +41,44 @@ enum DrawingSheetTitleBlockTemplateWire {
     AsmeY141,
 }
 
+/// Retired: the corner, or strip along the foot, a sheet once anchored its
+/// title block in. Read so the sheets that name one load; every block now
+/// stands in the lower right corner.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetiredTitleBlockAnchor {
+    BottomRight,
+    BottomLeft,
+    BottomStrip,
+    TopRight,
+}
+
+/// Retired: the quarter turn a sheet once gave its title block. Read so the
+/// sheets that name one load; every block now stands upright.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetiredTitleBlockRotation {
+    Upright,
+    Clockwise90,
+    CounterClockwise90,
+}
+
 impl DrawingSheetTitleBlockWire {
     /// The title block as the product draws it: a block written as the
     /// retired compact one is `convention`'s standard block, ISO 7200's or
-    /// ASME Y14.1's, its field values and choices kept.
+    /// ASME Y14.1's, its field values and choices kept, and every block
+    /// stands upright in the lower right corner, wherever it was placed.
     pub(super) fn into_title_block(
         self,
         convention: DrawingSheetFrameConvention,
     ) -> DrawingSheetTitleBlock {
+        // The retired placement is read only to be let go.
+        let _ = (
+            self.anchor,
+            self.rotation,
+            self.offset_x_um,
+            self.offset_y_um,
+        );
         let template = match self.template {
             DrawingSheetTitleBlockTemplateWire::Compact => {
                 DrawingSheetTitleBlockTemplate::for_convention(convention)
@@ -61,10 +96,6 @@ impl DrawingSheetTitleBlockWire {
         };
         DrawingSheetTitleBlock {
             template,
-            anchor: self.anchor,
-            rotation: self.rotation,
-            offset_x_um: self.offset_x_um,
-            offset_y_um: self.offset_y_um,
             scale: self.scale,
             managed_template: self.managed_template,
             fields: self.fields,

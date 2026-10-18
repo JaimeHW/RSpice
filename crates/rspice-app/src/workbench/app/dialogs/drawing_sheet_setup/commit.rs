@@ -1840,7 +1840,6 @@ mod tests {
         draft.zone_mode = super::super::state::ZoneModeChoice::None;
         draft.centring_marks = false;
         draft.title_block = super::super::state::TitleBlockTemplateChoice::None;
-        draft.title_block_anchor = super::super::state::TitleBlockAnchorChoice::TopRight;
         draft
             .title_fields
             .get_mut(&crate::state::DrawingSheetTitleFieldId::SheetTitle)
@@ -1872,10 +1871,6 @@ mod tests {
         assert_eq!(
             saved.title_block.fields[&crate::state::DrawingSheetTitleFieldId::SheetTitle].value,
             "Edited managed sheet"
-        );
-        assert_eq!(
-            saved.title_block.anchor,
-            crate::state::DrawingSheetTitleBlockAnchor::TopRight
         );
         assert_eq!(saved.authored_size.label(), "ISO A3");
     }

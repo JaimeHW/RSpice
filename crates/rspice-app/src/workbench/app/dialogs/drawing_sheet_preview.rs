@@ -6,8 +6,7 @@ use crate::schematic::view::drawing_sheet::{
     DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, drawing_sheet_printable_preview,
 };
 use crate::state::{
-    DrawingSheetFrameLayer, DrawingSheetFrameMark, DrawingSheetRect,
-    DrawingSheetTitleBlockRotation, SchematicSheetFormat,
+    DrawingSheetFrameLayer, DrawingSheetFrameMark, DrawingSheetRect, SchematicSheetFormat,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -503,30 +502,12 @@ fn paint_title_block(
     };
     let template = geometry.effective_title_block_template;
     let line_stroke = Stroke::new(0.55, palette.zone);
-    let angle = match format.title_block.rotation {
-        DrawingSheetTitleBlockRotation::Upright => 0.0,
-        DrawingSheetTitleBlockRotation::Clockwise90 => std::f32::consts::FRAC_PI_2,
-        DrawingSheetTitleBlockRotation::CounterClockwise90 => -std::f32::consts::FRAC_PI_2,
-    };
-    let authored = if angle == 0.0 {
-        title
-    } else {
-        Rect::from_center_size(title.center(), vec2(title.height(), title.width()))
-    };
-    let transform = |point: Pos2| {
-        let offset = point - authored.center();
-        let (sin, cos) = angle.sin_cos();
-        authored.center()
-            + vec2(
-                offset.x * cos - offset.y * sin,
-                offset.x * sin + offset.y * cos,
-            )
-    };
+    let authored = title;
     let outline = [
-        transform(authored.left_top()),
-        transform(authored.right_top()),
-        transform(authored.right_bottom()),
-        transform(authored.left_bottom()),
+        authored.left_top(),
+        authored.right_top(),
+        authored.right_bottom(),
+        authored.left_bottom(),
     ];
     // The plot's widths in proportion: ISO 7200's 0.7 mm outline and 0.35 mm
     // rules draw at 1 and 0.55 points, and the ASME form's thick and thin
@@ -553,8 +534,8 @@ fn paint_title_block(
     if let Some(logo) = format.title_block_logo(template) {
         ui.painter().line_segment(
             [
-                transform(pos2(field_grid.left(), authored.top())),
-                transform(pos2(field_grid.left(), authored.bottom())),
+                pos2(field_grid.left(), authored.top()),
+                pos2(field_grid.left(), authored.bottom()),
             ],
             line_stroke,
         );
@@ -571,7 +552,7 @@ fn paint_title_block(
                     .points()
                     .iter()
                     .map(|point| {
-                        transform(pos2(
+                        pos2(
                             egui::lerp(
                                 content.left()..=content.right(),
                                 f32::from(point.x()) / basis,
@@ -580,7 +561,7 @@ fn paint_title_block(
                                 content.top()..=content.bottom(),
                                 f32::from(point.y()) / basis,
                             ),
-                        ))
+                        )
                     })
                     .collect::<Vec<_>>();
                 if primitive.filled() {
@@ -601,8 +582,8 @@ fn paint_title_block(
     for rule in &layout.rules {
         ui.painter().line_segment(
             [
-                transform(pos2(x_at(rule.from_x_um), y_at(rule.from_y_um))),
-                transform(pos2(x_at(rule.to_x_um), y_at(rule.to_y_um))),
+                pos2(x_at(rule.from_x_um), y_at(rule.from_y_um)),
+                pos2(x_at(rule.to_x_um), y_at(rule.to_y_um)),
             ],
             rule_stroke(rule.width_um),
         );
@@ -625,10 +606,7 @@ fn paint_title_block(
             let end_x = (cell_left + cell_width * width_ratio).min(cell_right - inset);
             let y = y_at(value.seat_um);
             ui.painter().line_segment(
-                [
-                    transform(pos2(cell_left + inset, y)),
-                    transform(pos2(end_x, y)),
-                ],
+                [pos2(cell_left + inset, y), pos2(end_x, y)],
                 Stroke::new(0.65, palette.block_ink),
             );
         }

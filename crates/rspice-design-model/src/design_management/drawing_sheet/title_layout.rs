@@ -223,8 +223,7 @@ pub struct DrawingSheetTitleLettering {
 }
 
 /// A title block's form: its cells and the rules between them. Distances are
-/// from the top-left corner of the block in its upright, authored frame; a
-/// rotated block is laid out upright and turned whole.
+/// from the top-left corner of the block, which always stands upright.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingSheetTitleLayout {
     pub width_um: u64,
@@ -366,11 +365,7 @@ pub fn drawing_sheet_title_layout(
 ) -> Option<DrawingSheetTitleLayout> {
     let block = geometry.title_block?;
     let template = geometry.effective_title_block_template;
-    let (width_um, height_um) = match format.title_block.rotation {
-        DrawingSheetTitleBlockRotation::Upright => (block.width_um, block.height_um),
-        DrawingSheetTitleBlockRotation::Clockwise90
-        | DrawingSheetTitleBlockRotation::CounterClockwise90 => (block.height_um, block.width_um),
-    };
+    let (width_um, height_um) = (block.width_um, block.height_um);
     match template {
         DrawingSheetTitleBlockTemplate::Standard => {
             Some(iso_7200_form_layout(format, width_um, height_um))

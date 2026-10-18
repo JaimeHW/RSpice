@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use egui::{
     Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind,
-    epaint::{TessellationOptions, Tessellator, TextShape},
+    epaint::{TessellationOptions, Tessellator},
     pos2, vec2,
 };
 
@@ -31,9 +31,8 @@ use rspice_design_model::design_management::{
     DRAWING_SHEET_TITLE_RULE_UM, DrawingSheetDisplayUnit, DrawingSheetFrameArtwork,
     DrawingSheetFrameLayer, DrawingSheetFrameMark,
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
-    DrawingSheetTitleBlockRotation, DrawingSheetTitleLetteringRole, DrawingSheetZoneLayout,
-    ResolvedDrawingSheetTitleField, SchematicSheetFormat, drawing_sheet_mono_em_um,
-    drawing_sheet_title_layout,
+    DrawingSheetTitleLetteringRole, DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField,
+    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_layout,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -1285,23 +1284,6 @@ fn draw_title_block(
     resolve_title_fields: impl FnOnce() -> Vec<ResolvedDrawingSheetTitleField>,
     sheet: &ActiveDrawingSheet,
 ) {
-    let rotation = sheet.format.title_block.rotation;
-    let angle = title_block_rotation_angle(rotation);
-    // Domain geometry exposes the rotated bounding box. Author the complete
-    // block in its natural orientation, then rotate every primitive around
-    // the shared center so the outline, grid, and text cannot drift.
-    let authored_block = if angle == 0.0 {
-        block
-    } else {
-        Rect::from_center_size(block.center(), vec2(block.height(), block.width()))
-    };
-    let transform = |point: Pos2| rotate_title_block_point(point, authored_block.center(), angle);
-    let outline = [
-        transform(authored_block.left_top()),
-        transform(authored_block.right_top()),
-        transform(authored_block.right_bottom()),
-        transform(authored_block.left_bottom()),
-    ];
     // The plot's line widths, magnified with the sheet as its lettering is.
     let pixels_per_point = painter.ctx().pixels_per_point();
     let effective_template = sheet.geometry.physical.effective_title_block_template;
@@ -1316,38 +1298,35 @@ fn draw_title_block(
         )
     };
     painter.add(Shape::convex_polygon(
-        outline.to_vec(),
+        vec![
+            block.left_top(),
+            block.right_top(),
+            block.right_bottom(),
+            block.left_bottom(),
+        ],
         palette.block,
         outline_stroke,
     ));
     // The form hardcopy and Page Setup draw too, in physical units on the
-    // upright block; the authored block maps those onto the screen.
+    // block, mapped onto the screen.
     let Some(layout) = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical) else {
         return;
     };
-    let x_at = |x_um: u64| {
-        authored_block.left() + authored_block.width() * x_um as f32 / layout.width_um as f32
-    };
-    let y_at = |y_um: u64| {
-        authored_block.top() + authored_block.height() * y_um as f32 / layout.height_um as f32
-    };
-    let mut field_grid = authored_block;
+    let x_at = |x_um: u64| block.left() + block.width() * x_um as f32 / layout.width_um as f32;
+    let y_at = |y_um: u64| block.top() + block.height() * y_um as f32 / layout.height_um as f32;
+    let mut field_grid = block;
     field_grid.min.x = x_at(layout.grid_x_um);
     if let Some(logo) = sheet.format.title_block_logo(effective_template) {
         painter.line_segment(
             [
-                transform(pos2(field_grid.left(), authored_block.top())),
-                transform(pos2(field_grid.left(), authored_block.bottom())),
+                pos2(field_grid.left(), block.top()),
+                pos2(field_grid.left(), block.bottom()),
             ],
             rule_stroke(DRAWING_SHEET_TITLE_RULE_UM),
         );
         draw_managed_title_logo(
             painter,
-            Rect::from_min_max(
-                authored_block.left_top(),
-                pos2(field_grid.left(), authored_block.bottom()),
-            ),
-            &transform,
+            Rect::from_min_max(block.left_top(), pos2(field_grid.left(), block.bottom())),
             logo,
             palette,
         );
@@ -1363,8 +1342,8 @@ fn draw_title_block(
     for rule in &layout.rules {
         painter.line_segment(
             [
-                transform(pos2(x_at(rule.from_x_um), y_at(rule.from_y_um))),
-                transform(pos2(x_at(rule.to_x_um), y_at(rule.to_y_um))),
+                pos2(x_at(rule.from_x_um), y_at(rule.from_y_um)),
+                pos2(x_at(rule.to_x_um), y_at(rule.to_y_um)),
             ],
             rule_stroke(rule.width_um),
         );
@@ -1372,7 +1351,7 @@ fn draw_title_block(
     let padding = authored_title_cell_padding(layout.padding_um) * zoom;
     for line in layout.lettering(&fields) {
         let cell = &layout.cells[line.cell];
-        let authored_cell = Rect::from_min_max(
+        let clip = Rect::from_min_max(
             pos2(x_at(cell.x_um), y_at(cell.y_um)),
             pos2(
                 x_at(cell.x_um + cell.width_um),
@@ -1380,10 +1359,6 @@ fn draw_title_block(
             ),
         )
         .shrink2(vec2(padding, 0.0));
-        let clip = Rect::from_two_pos(
-            transform(authored_cell.left_top()),
-            transform(authored_cell.right_bottom()),
-        );
         // Each line sits on the seat hardcopy also places it on. Anchoring a
         // line on its own centre leaves the vertical placement to the font's
         // real metrics rather than to a guessed line box. The text is the
@@ -1402,9 +1377,8 @@ fn draw_title_block(
                 (palette.block_ink, theme::FontWeight::Regular)
             }
         };
-        paint_title_text(
-            &painter.with_clip_rect(clip),
-            transform(pos2(x_at(line.x_um), y_at(line.seat_um))),
+        painter.with_clip_rect(clip).text(
+            pos2(x_at(line.x_um), y_at(line.seat_um)),
             Align2::LEFT_CENTER,
             line.text,
             theme::mono(
@@ -1412,7 +1386,6 @@ fn draw_title_block(
                 weight,
             ),
             color,
-            rotation,
         );
     }
 }
@@ -1466,7 +1439,6 @@ fn authored_title_cell_padding(padding_um: u64) -> f32 {
 fn draw_managed_title_logo(
     painter: &Painter,
     reserved: Rect,
-    transform: &impl Fn(Pos2) -> Pos2,
     logo: &rspice_design_model::design_management::DrawingSheetManagedLogo,
     palette: DrawingSheetPalette,
 ) {
@@ -1482,7 +1454,7 @@ fn draw_managed_title_logo(
             .points()
             .iter()
             .map(|point| {
-                transform(pos2(
+                pos2(
                     egui::lerp(
                         content.left()..=content.right(),
                         f32::from(point.x()) / basis,
@@ -1491,7 +1463,7 @@ fn draw_managed_title_logo(
                         content.top()..=content.bottom(),
                         f32::from(point.y()) / basis,
                     ),
-                ))
+                )
             })
             .collect::<Vec<_>>();
         if primitive.filled() {
@@ -1502,50 +1474,6 @@ fn draw_managed_title_logo(
             painter.add(Shape::line(points, stroke));
         }
     }
-}
-
-fn title_block_rotation_angle(rotation: DrawingSheetTitleBlockRotation) -> f32 {
-    match rotation {
-        DrawingSheetTitleBlockRotation::Upright => 0.0,
-        DrawingSheetTitleBlockRotation::Clockwise90 => std::f32::consts::FRAC_PI_2,
-        DrawingSheetTitleBlockRotation::CounterClockwise90 => -std::f32::consts::FRAC_PI_2,
-    }
-}
-
-fn rotate_title_block_point(point: Pos2, center: Pos2, angle: f32) -> Pos2 {
-    if angle == 0.0 {
-        return point;
-    }
-    let offset = point - center;
-    let (sin, cos) = angle.sin_cos();
-    center
-        + vec2(
-            offset.x * cos - offset.y * sin,
-            offset.x * sin + offset.y * cos,
-        )
-}
-
-fn paint_title_text(
-    painter: &Painter,
-    position: Pos2,
-    anchor: Align2,
-    text: impl ToString,
-    font: egui::FontId,
-    color: Color32,
-    rotation: DrawingSheetTitleBlockRotation,
-) {
-    let angle = title_block_rotation_angle(rotation);
-    if angle == 0.0 {
-        painter.text(position, anchor, text, font, color);
-        return;
-    }
-    let galley = painter.layout_no_wrap(text.to_string(), font, color);
-    let rect = anchor.anchor_size(position, galley.size());
-    painter.add(
-        TextShape::new(rect.min, galley, color)
-            .with_override_text_color(color)
-            .with_angle_and_anchor(angle, anchor),
-    );
 }
 
 fn draw_origin(

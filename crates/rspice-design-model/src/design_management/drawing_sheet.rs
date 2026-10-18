@@ -634,25 +634,6 @@ impl DrawingSheetTitleBlockTemplate {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetTitleBlockAnchor {
-    #[default]
-    BottomRight,
-    BottomLeft,
-    BottomStrip,
-    TopRight,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DrawingSheetTitleBlockRotation {
-    #[default]
-    Upright,
-    Clockwise90,
-    CounterClockwise90,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum DrawingSheetScale {
@@ -1125,14 +1106,14 @@ impl DrawingSheetManagedTemplateSnapshot {
     }
 }
 
+/// A sheet's title block. Both standards put it upright in the lower right
+/// corner of the drawing area, ISO 5457 4.1 and ASME Y14.1 6.1 alike, so it
+/// stands nowhere else; a sheet saved placing it elsewhere loads placed
+/// there (see the `title_block_wire` module).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetTitleBlock {
     pub template: DrawingSheetTitleBlockTemplate,
-    pub anchor: DrawingSheetTitleBlockAnchor,
-    pub rotation: DrawingSheetTitleBlockRotation,
-    pub offset_x_um: i64,
-    pub offset_y_um: i64,
     /// The scale a sheet declared before the title block stopped lettering
     /// one. Nothing reads or edits it now; it is kept so the sheets and
     /// presets that carry it load and save unchanged.
@@ -1160,10 +1141,6 @@ impl Default for DrawingSheetTitleBlock {
             // A sheet starts on its format's standard block (see
             // `SchematicSheetFormat::start_on_standard_title_block`).
             template: DrawingSheetTitleBlockTemplate::Standard,
-            anchor: DrawingSheetTitleBlockAnchor::BottomRight,
-            rotation: DrawingSheetTitleBlockRotation::Upright,
-            offset_x_um: 0,
-            offset_y_um: 0,
             scale: DrawingSheetScale::default(),
             managed_template: None,
             fields,
@@ -1198,18 +1175,6 @@ impl DrawingSheetTitleBlock {
             self.managed_template.get_or_insert_with(Default::default);
         } else {
             self.managed_template = None;
-        }
-    }
-
-    /// ASME Y14.1 6.1 puts its block in the lower right corner of the
-    /// format, and its figures letter it upright, so a sheet on the ASME
-    /// form places it nowhere else.
-    fn normalize_placement(&mut self) {
-        if self.template == DrawingSheetTitleBlockTemplate::AsmeY141 {
-            self.anchor = DrawingSheetTitleBlockAnchor::BottomRight;
-            self.rotation = DrawingSheetTitleBlockRotation::Upright;
-            self.offset_x_um = 0;
-            self.offset_y_um = 0;
         }
     }
 
@@ -1264,13 +1229,6 @@ impl DrawingSheetTitleBlock {
                     value: state.value.clone(),
                 });
             }
-        }
-        if self.template == DrawingSheetTitleBlockTemplate::None
-            && (self.offset_x_um != 0 || self.offset_y_um != 0)
-        {
-            return Err(DesignManagementError::NumericRange(
-                "title block offset without a template",
-            ));
         }
         Ok(())
     }
@@ -1534,7 +1492,6 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
         }
         format.title_block.normalize_title_field_set();
         format.title_block.normalize_managed_template();
-        format.title_block.normalize_placement();
         if legacy_title_block {
             // A sheet saved before title blocks were stored has always been
             // drawn naming its project, and keeps doing so: only new sheets
@@ -1546,7 +1503,6 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             {
                 project.visible = true;
             }
-            format.fit_default_title_block();
         }
         format.validate().map_err(D::Error::custom)?;
         Ok(format)
@@ -1565,7 +1521,6 @@ impl SchematicSheetFormat {
     ) -> Result<Self, DesignManagementError> {
         draft.title_block.normalize_managed_template();
         draft.title_block.normalize_title_field_set();
-        draft.title_block.normalize_placement();
         let mut format = Self {
             size: draft.authored_size.legacy_projection(),
             orientation: draft.orientation,
@@ -1683,7 +1638,6 @@ impl SchematicSheetFormat {
             inheritance: DrawingSheetInheritance::Explicit,
         };
         format.start_on_standard_title_block();
-        format.fit_default_title_block();
         debug_assert!(format.validate().is_ok());
         format
     }
@@ -1730,7 +1684,6 @@ impl SchematicSheetFormat {
             inheritance: DrawingSheetInheritance::Explicit,
         };
         format.start_on_standard_title_block();
-        format.fit_default_title_block();
         format.validate()?;
         Ok(format)
     }
@@ -1819,12 +1772,11 @@ impl SchematicSheetFormat {
     /// Title-block template actually painted on this physical sheet.
     ///
     /// The requested choice is never silently rewritten. A block that does
-    /// not fit, turned as the sheet turns it, inside the drawing area it sits
-    /// in gives way to no block at all, and `title_block_substituted` reports
-    /// that fact to Page Setup and inspection surfaces: ISO 7200's block is
-    /// the same on every sheet. The ASME form steps down from Fig 5-2's block
-    /// to Fig 5-1's, and gives way only where neither fits; it is never
-    /// turned.
+    /// not fit upright inside the drawing area gives way to no block at all,
+    /// and `title_block_substituted` reports that fact to Page Setup and
+    /// inspection surfaces: ISO 7200's block is the same on every sheet. The
+    /// ASME form steps down from Fig 5-2's block to Fig 5-1's, and gives way
+    /// only where neither fits.
     #[must_use]
     pub fn effective_title_block_template(&self) -> DrawingSheetTitleBlockTemplate {
         let requested = self.title_block.template;
@@ -1838,15 +1790,10 @@ impl SchematicSheetFormat {
         let Some((width_um, height_um)) = self.title_block_dimensions_um(requested) else {
             return DrawingSheetTitleBlockTemplate::None;
         };
-        let (across_um, down_um) = match self.title_block.rotation {
-            DrawingSheetTitleBlockRotation::Upright => (width_um, height_um),
-            DrawingSheetTitleBlockRotation::Clockwise90
-            | DrawingSheetTitleBlockRotation::CounterClockwise90 => (height_um, width_um),
-        };
         let fits = self
             .drawing_area_extent_um()
             .is_some_and(|(area_width_um, area_height_um)| {
-                across_um <= area_width_um && down_um <= area_height_um
+                width_um <= area_width_um && height_um <= area_height_um
             });
         if fits {
             requested
@@ -2016,71 +1963,25 @@ impl SchematicSheetFormat {
         drawing_area: DrawingSheetRect,
         template: DrawingSheetTitleBlockTemplate,
     ) -> Result<Option<DrawingSheetRect>, DesignManagementError> {
-        let Some((template_width, template_height)) = self.title_block_dimensions_um(template)
-        else {
+        let Some((width, height)) = self.title_block_dimensions_um(template) else {
             return Ok(None);
         };
-        let (rotated_width, height) = match self.title_block.rotation {
-            DrawingSheetTitleBlockRotation::Upright => (template_width, template_height),
-            DrawingSheetTitleBlockRotation::Clockwise90
-            | DrawingSheetTitleBlockRotation::CounterClockwise90 => {
-                (template_height, template_width)
-            }
-        };
-        let requested_width =
-            if self.title_block.anchor == DrawingSheetTitleBlockAnchor::BottomStrip {
-                drawing_area.width_um
-            } else {
-                rotated_width
-            };
         // A block that does not fit gives way before it is placed (see
         // `effective_title_block_template`); clipping it to the drawing area
         // keeps a placement that would overlap the frame from ever being
         // made.
-        let width = requested_width.min(drawing_area.width_um);
+        let width = width.min(drawing_area.width_um);
         let height = height.min(drawing_area.height_um);
         if width == 0 || height == 0 {
-            Ok(None)
-        } else {
-            self.position_title_block(drawing_area, width, height)
-                .map(Some)
+            return Ok(None);
         }
-    }
-
-    fn position_title_block(
-        &self,
-        drawing_area: DrawingSheetRect,
-        width: u64,
-        height: u64,
-    ) -> Result<DrawingSheetRect, DesignManagementError> {
-        let right = drawing_area.right_um()?;
-        let bottom = drawing_area.bottom_um()?;
-        let (base_x, base_y) = match self.title_block.anchor {
-            DrawingSheetTitleBlockAnchor::BottomRight => {
-                (right - width as i64, bottom - height as i64)
-            }
-            DrawingSheetTitleBlockAnchor::BottomLeft
-            | DrawingSheetTitleBlockAnchor::BottomStrip => {
-                (drawing_area.x_um, bottom - height as i64)
-            }
-            DrawingSheetTitleBlockAnchor::TopRight => (right - width as i64, drawing_area.y_um),
-        };
-        let rect = DrawingSheetRect::new(
-            base_x.checked_add(self.title_block.offset_x_um).ok_or(
-                DesignManagementError::NumericRange("drawing sheet title block offset"),
-            )?,
-            base_y.checked_add(self.title_block.offset_y_um).ok_or(
-                DesignManagementError::NumericRange("drawing sheet title block offset"),
-            )?,
+        // Upright in the lower right corner of the drawing area.
+        Ok(Some(DrawingSheetRect::new(
+            drawing_area.right_um()? - width as i64,
+            drawing_area.bottom_um()? - height as i64,
             width,
             height,
-        );
-        if !drawing_area.contains(rect)? {
-            return Err(DesignManagementError::NumericRange(
-                "drawing sheet title block placement",
-            ));
-        }
-        Ok(rect)
+        )))
     }
 
     /// Start a new sheet on its format's standard title block: ISO 7200's
@@ -2093,28 +1994,6 @@ impl SchematicSheetFormat {
     fn start_on_standard_title_block(&mut self) {
         self.title_block.template =
             DrawingSheetTitleBlockTemplate::for_convention(self.frame_convention());
-    }
-
-    /// Give a block the sheet's drawing area cannot place a way to fit: turn
-    /// it on its side, or else carry none. ISO 5457 has the drawing read the
-    /// way its title block does, so ISO 7200's block is never turned, and
-    /// ASME Y14.1 letters its block upright.
-    fn fit_default_title_block(&mut self) {
-        if self.title_block.template == DrawingSheetTitleBlockTemplate::None
-            || self.geometry().is_ok()
-        {
-            return;
-        }
-        if !matches!(
-            self.title_block.template,
-            DrawingSheetTitleBlockTemplate::Standard | DrawingSheetTitleBlockTemplate::AsmeY141
-        ) {
-            self.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
-            if self.geometry().is_ok() {
-                return;
-            }
-        }
-        self.title_block = DrawingSheetTitleBlock::none();
     }
 }
 
@@ -2135,16 +2014,6 @@ impl DrawingSheetZones {
     pub const fn none() -> Self {
         Self {
             mode: DrawingSheetZoneMode::None,
-        }
-    }
-}
-
-impl DrawingSheetTitleBlock {
-    #[must_use]
-    pub fn none() -> Self {
-        Self {
-            template: DrawingSheetTitleBlockTemplate::None,
-            ..Self::default()
         }
     }
 }
@@ -2291,13 +2160,6 @@ impl DrawingSheetRect {
             .ok_or(DesignManagementError::NumericRange(
                 "drawing sheet rectangle",
             ))
-    }
-
-    fn contains(self, other: Self) -> Result<bool, DesignManagementError> {
-        Ok(other.x_um >= self.x_um
-            && other.y_um >= self.y_um
-            && other.right_um()? <= self.right_um()?
-            && other.bottom_um()? <= self.bottom_um()?)
     }
 }
 

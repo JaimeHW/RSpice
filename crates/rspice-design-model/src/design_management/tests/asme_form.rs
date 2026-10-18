@@ -132,10 +132,6 @@ fn the_block_takes_fig_5_1_on_a_to_c_and_fig_5_2_on_d_and_larger() {
                 block.y_um + block.height_um as i64,
                 area.y_um + area.height_um as i64
             );
-            assert_eq!(
-                format.title_block.rotation,
-                DrawingSheetTitleBlockRotation::Upright
-            );
         }
     }
 }
@@ -499,7 +495,7 @@ fn every_line_of_the_form_stays_inside_its_cell() {
 }
 
 #[test]
-fn the_form_is_never_turned_and_steps_down_to_fig_5_1_where_fig_5_2_does_not_fit() {
+fn the_form_steps_down_to_fig_5_1_where_fig_5_2_does_not_fit() {
     // A custom size started from ANSI, long enough to take Fig 5-2's block
     // but too narrow for its 7.62 in: 200 mm less two 0.5 in margins leaves
     // 174.6 mm across, under Fig 5-2's 193.55 mm, over Fig 5-1's 158.75 mm.
@@ -513,20 +509,10 @@ fn the_form_is_never_turned_and_steps_down_to_fig_5_1_where_fig_5_2_does_not_fit
         .unwrap()
         .try_update(|draft| {
             draft.title_block.template = DrawingSheetTitleBlockTemplate::AsmeY141;
-            draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
-            draft.title_block.anchor = DrawingSheetTitleBlockAnchor::TopRight;
         })
         .unwrap()
     };
     let narrowed = narrow(200_000);
-    assert_eq!(
-        narrowed.title_block.rotation,
-        DrawingSheetTitleBlockRotation::Upright
-    );
-    assert_eq!(
-        narrowed.title_block.anchor,
-        DrawingSheetTitleBlockAnchor::BottomRight
-    );
     let form = narrowed.asme_title_block_form().unwrap();
     assert_eq!(form.size, AsmeY141TitleBlockSize::Small);
     assert!(!narrowed.title_block_substituted());

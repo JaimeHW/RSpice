@@ -153,3 +153,57 @@ fn a_preset_sealed_on_the_retired_compact_block_opens_on_its_standard_block() {
         "{resealed}"
     );
 }
+
+#[test]
+fn a_preset_sealed_with_a_retired_placement_opens_upright_in_the_lower_right() {
+    // Anchors other than the lower right corner, turned blocks and offsets
+    // are retired: each preset opens with its block upright in the lower
+    // right corner of its drawing area, while its package still verifies
+    // against the placement that was written.
+    let (_, trust, _) = signed_organization_package();
+    for (fixture, trust) in [
+        (PROJECT, PdkPublisherTrustStore::default()),
+        (PROJECT_REVIEW, PdkPublisherTrustStore::default()),
+        (ORGANIZATION, trust),
+    ] {
+        let package = parse_package(fixture, &trust).unwrap();
+        let mut placed = 0;
+        for preset in &package.presets {
+            let geometry = preset.format.geometry().unwrap();
+            let Some(block) = geometry.title_block else {
+                continue;
+            };
+            let area = geometry.drawing_area;
+            assert_eq!(
+                block.x_um + block.width_um as i64,
+                area.x_um + area.width_um as i64,
+                "{}",
+                preset.stable_id
+            );
+            assert_eq!(
+                block.y_um + block.height_um as i64,
+                area.y_um + area.height_um as i64,
+                "{}",
+                preset.stable_id
+            );
+            placed += 1;
+        }
+        assert_eq!(placed, package.presets.len());
+    }
+    let project = parse_package(PROJECT, &PdkPublisherTrustStore::default()).unwrap();
+    let presets = project.presets.iter().map(|preset| DrawingSheetPreset {
+        id: preset.stable_id.clone(),
+        name: preset.name.clone(),
+        scope: preset.source_scope,
+        format: preset.format.clone(),
+    });
+    let resealed = encode_package(&build_package(presets).unwrap()).unwrap();
+    for retired in [
+        r#""anchor""#,
+        r#""rotation""#,
+        r#""offset_x_um""#,
+        r#""offset_y_um""#,
+    ] {
+        assert!(!resealed.contains(retired), "{retired}: {resealed}");
+    }
+}

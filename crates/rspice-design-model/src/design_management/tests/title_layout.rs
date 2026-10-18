@@ -551,21 +551,6 @@ fn a_long_legal_owner_wraps_in_its_cell() {
 }
 
 #[test]
-fn a_stretched_iso_block_keeps_its_proportions() {
-    let strip = SchematicSheetFormat::default()
-        .try_update(|draft| {
-            draft.title_block.anchor = DrawingSheetTitleBlockAnchor::BottomStrip;
-        })
-        .unwrap();
-    let layout = layout_of(&strip);
-    assert!(layout.width_um > 180_000);
-    let owner = layout.cell(Field::Organization).unwrap();
-    assert_eq!(owner.width_um, 47_500 * layout.width_um / 180_000);
-    let page = layout.cell(Field::Page).unwrap();
-    assert_eq!(page.x_um + page.width_um, layout.width_um);
-}
-
-#[test]
 fn every_lettered_line_stays_inside_its_cell() {
     // A line's capitals rise 7/20 of its em above its seat and its deepest
     // descender reaches 12/20 below; lines under one another in a cell keep
@@ -753,63 +738,55 @@ fn an_overfull_block_cuts_free_text_and_keeps_fixed_forms_whole() {
 fn every_flowed_row_spans_the_field_grid_exactly() {
     let every = DrawingSheetTitleFieldId::ALL;
     let template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
-    for block in [small_flowed_block(), on(template)] {
-        for rotation in [
-            DrawingSheetTitleBlockRotation::Upright,
-            DrawingSheetTitleBlockRotation::Clockwise90,
+    for placed in [small_flowed_block(), on(template)] {
+        for format in [
+            placed.clone(),
+            showing(&placed, &[]),
+            showing(&placed, &every),
         ] {
-            let placed = block
-                .try_update(|draft| draft.title_block.rotation = rotation)
-                .unwrap();
-            for format in [
-                placed.clone(),
-                showing(&placed, &[]),
-                showing(&placed, &every),
-            ] {
-                let layout = layout_of(&format);
-                let resolved = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new())
-                    .into_iter()
-                    .map(|field| field.id)
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    layout
-                        .cells
-                        .iter()
-                        .filter_map(DrawingSheetTitleCell::field)
-                        .collect::<Vec<_>>(),
-                    resolved,
-                    "{template:?} lays out the fields it resolves, in order"
-                );
-                let rows = rows_of(&layout);
-                let rows_expected = format.title_block_rows(template).unwrap();
-                assert_eq!(rows.len(), rows_expected, "{template:?}");
-                let filled = rows.iter().take_while(|row| !row.is_empty()).count();
-                assert_eq!(filled, rows_expected.min(resolved.len()), "{template:?}");
-                assert!(rows[filled..].iter().all(Vec::is_empty));
-                let mut tops = layout
+            let layout = layout_of(&format);
+            let resolved = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new())
+                .into_iter()
+                .map(|field| field.id)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                layout
                     .cells
                     .iter()
-                    .map(|cell| cell.y_um)
-                    .collect::<Vec<_>>();
-                tops.sort_unstable();
-                tops.dedup();
-                for top in tops {
-                    let mut x_um = layout.grid_x_um;
-                    for cell in layout.cells.iter().filter(|cell| cell.y_um == top) {
-                        assert_eq!(cell.x_um, x_um, "{template:?} row at {top} has a gap");
-                        assert!(cell.width_um > 0);
-                        x_um += cell.width_um;
-                    }
-                    assert_eq!(x_um, layout.width_um, "{template:?} row misses the edge");
+                    .filter_map(DrawingSheetTitleCell::field)
+                    .collect::<Vec<_>>(),
+                resolved,
+                "{template:?} lays out the fields it resolves, in order"
+            );
+            let rows = rows_of(&layout);
+            let rows_expected = format.title_block_rows(template).unwrap();
+            assert_eq!(rows.len(), rows_expected, "{template:?}");
+            let filled = rows.iter().take_while(|row| !row.is_empty()).count();
+            assert_eq!(filled, rows_expected.min(resolved.len()), "{template:?}");
+            assert!(rows[filled..].iter().all(Vec::is_empty));
+            let mut tops = layout
+                .cells
+                .iter()
+                .map(|cell| cell.y_um)
+                .collect::<Vec<_>>();
+            tops.sort_unstable();
+            tops.dedup();
+            for top in tops {
+                let mut x_um = layout.grid_x_um;
+                for cell in layout.cells.iter().filter(|cell| cell.y_um == top) {
+                    assert_eq!(cell.x_um, x_um, "{template:?} row at {top} has a gap");
+                    assert!(cell.width_um > 0);
+                    x_um += cell.width_um;
                 }
-                // Every row is ruled under the one above it.
-                for top in 1..rows_expected as u64 {
-                    let y_um = layout.height_um * top / rows_expected as u64;
-                    assert!(layout.rules.iter().any(|rule| rule.from_y_um == y_um
-                        && rule.to_y_um == y_um
-                        && rule.from_x_um == layout.grid_x_um
-                        && rule.to_x_um == layout.width_um));
-                }
+                assert_eq!(x_um, layout.width_um, "{template:?} row misses the edge");
+            }
+            // Every row is ruled under the one above it.
+            for top in 1..rows_expected as u64 {
+                let y_um = layout.height_um * top / rows_expected as u64;
+                assert!(layout.rules.iter().any(|rule| rule.from_y_um == y_um
+                    && rule.to_y_um == y_um
+                    && rule.from_x_um == layout.grid_x_um
+                    && rule.to_x_um == layout.width_um));
             }
         }
     }

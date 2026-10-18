@@ -131,7 +131,10 @@ pub struct DrawingSheetPresetPackage {
 /// A preset saved naming a retired title block, the 230 mm `wide` block or
 /// the 130 mm `compact` one, loads on a block the product draws, but its
 /// package's digest, signature, frame-reference manifest and review rows
-/// were all written naming the retired one. Likewise a preset written before
+/// were all written naming the retired one. A preset saved anchoring,
+/// turning or offsetting its block, as every preset once wrote, loads with
+/// the block upright in the lower right corner, but its package was sealed
+/// over the placement it was written with. Likewise a preset written before
 /// the product gained a title-block field, such as the language code, loads
 /// with that field supplied, and one written with a field since retired
 /// loads without it, but its package was sealed over the fields it was
@@ -175,7 +178,7 @@ struct WrittenTitleBlockHead {
 impl WrittenTitleBlockHead {
     /// How `title_block`, a preset's title block as written, opened, when
     /// the product would open it otherwise today: when it names a retired
-    /// block, whose placement loading may have moved.
+    /// block, or places the block as the product no longer does.
     fn of(title_block: &serde_json::Value) -> Option<Self> {
         let template = title_block
             .get("template")
@@ -183,7 +186,12 @@ impl WrittenTitleBlockHead {
         let retired_template = RETIRED_TITLE_BLOCKS
             .into_iter()
             .find(|(name, _)| template == Some(*name));
-        retired_template?;
+        let retired_placement = ["anchor", "rotation", "offset_x_um", "offset_y_um"]
+            .into_iter()
+            .any(|key| title_block.get(key).is_some());
+        if retired_template.is_none() && !retired_placement {
+            return None;
+        }
         // Each key the title block was written with, in the order it was
         // written in: a value serializes as it was written, the scale by
         // its own type so its tag stays first.

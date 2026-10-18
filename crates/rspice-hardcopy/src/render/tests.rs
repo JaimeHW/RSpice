@@ -21,8 +21,8 @@ use crate::sources::{
 use rspice_design_model::SchematicPageOrientation;
 use rspice_design_model::design_management::{
     DrawingSheetManagedLogo, DrawingSheetManagedLogoPoint, DrawingSheetManagedLogoPrimitive,
-    DrawingSheetManagedTemplateSnapshot, DrawingSheetStandard, DrawingSheetTitleBlockRotation,
-    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, SchematicSheetFormat,
+    DrawingSheetManagedTemplateSnapshot, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
+    DrawingSheetTitleFieldId, SchematicSheetFormat,
 };
 use rspice_hardcopy_contract::sources::{
     HardcopySourceIdentity, HardcopySourceSet, HardcopySourceSetMember,
@@ -1603,52 +1603,6 @@ fn clipped_sheet_set_reflows_each_child_and_compiles_with_matching_sections() {
 }
 
 #[test]
-fn rotated_title_block_rotates_grid_text_and_published_svg() {
-    let mut format = SchematicSheetFormat::default();
-    format.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
-    let source = resolved_blank_schematic(&format);
-    let schematic = SchematicHardcopySetup::new(
-        SchematicHardcopyExtent::AuthoredDrawingSheet,
-        OutsideSheetContentPolicy::Ask,
-        false,
-        false,
-        false,
-        true,
-        false,
-        false,
-    );
-    let setup = setup_with_schematic_output(OutputFormat::SvgVector, schematic);
-    let plan =
-        HardcopyPlan::compile(source.authority().clone(), setup, source.content_extent()).unwrap();
-    let scene = scene_from_resolved(
-        &source,
-        plan.setup().print_mapping(),
-        plan.setup().schematic(),
-        resolved_metadata(),
-    )
-    .unwrap();
-    let rotated_text = scene
-        .primitives()
-        .iter()
-        .filter_map(|primitive| match primitive {
-            ScenePrimitive::Text { rotation, .. } => Some(*rotation),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert!(!rotated_text.is_empty());
-    assert!(
-        rotated_text
-            .iter()
-            .all(|rotation| *rotation == SceneTextRotation::Clockwise90)
-    );
-
-    let publication =
-        HardcopyRenderer::render_resolved(&plan, &source, resolved_metadata()).unwrap();
-    let svg = String::from_utf8_lossy(publication.single_part().unwrap().bytes());
-    assert!(svg.contains("transform=\"rotate(90 "));
-}
-
-#[test]
 fn managed_title_logo_is_digest_bound_and_rendered_as_search_safe_vector_geometry() {
     let logo = DrawingSheetManagedLogo::try_new(
         "Example Labs mark",
@@ -1848,11 +1802,6 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
         DrawingSheetTitleBlockTemplate::OrganizationManaged,
         DrawingSheetTitleBlockTemplate::None,
     ];
-    let rotations = [
-        DrawingSheetTitleBlockRotation::Upright,
-        DrawingSheetTitleBlockRotation::Clockwise90,
-        DrawingSheetTitleBlockRotation::CounterClockwise90,
-    ];
     let orientations = [
         SchematicPageOrientation::Portrait,
         SchematicPageOrientation::Landscape,
@@ -1862,79 +1811,76 @@ fn drawing_sheet_publication_matrix_covers_every_standard_orientation_and_title_
     for standard in DrawingSheetStandard::ALL {
         for orientation in orientations {
             for template in title_templates {
-                for rotation in rotations {
-                    let format = SchematicSheetFormat::from_standard(standard, orientation)
-                            .try_update(|draft| {
-                                draft.title_block.template = template;
-                                draft.title_block.rotation = rotation;
-                                draft
-                                    .title_block
-                                    .fields
-                                    .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
-                                    .expect("canonical title field")
-                                    .value = format!("Qualification {}", cases + 1);
-                            })
-                            .unwrap_or_else(|error| {
-                                panic!(
-                                    "invalid matrix format for {} {} {template:?} {rotation:?}: {error}",
-                                    standard.label(),
-                                    orientation.label()
-                                )
-                            });
-                    let geometry = format.geometry().unwrap_or_else(|error| {
+                let format = SchematicSheetFormat::from_standard(standard, orientation)
+                    .try_update(|draft| {
+                        draft.title_block.template = template;
+                        draft
+                            .title_block
+                            .fields
+                            .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
+                            .expect("canonical title field")
+                            .value = format!("Qualification {}", cases + 1);
+                    })
+                    .unwrap_or_else(|error| {
                         panic!(
-                            "invalid matrix geometry for {} {} {template:?} {rotation:?}: {error}",
+                            "invalid matrix format for {} {} {template:?}: {error}",
                             standard.label(),
                             orientation.label()
                         )
                     });
-                    assert!(geometry.paper.width_um > 0);
-                    assert!(geometry.paper.height_um > 0);
-                    assert!(geometry.drawing_area.width_um > 0);
-                    assert!(geometry.drawing_area.height_um > 0);
+                let geometry = format.geometry().unwrap_or_else(|error| {
+                    panic!(
+                        "invalid matrix geometry for {} {} {template:?}: {error}",
+                        standard.label(),
+                        orientation.label()
+                    )
+                });
+                assert!(geometry.paper.width_um > 0);
+                assert!(geometry.paper.height_um > 0);
+                assert!(geometry.drawing_area.width_um > 0);
+                assert!(geometry.drawing_area.height_um > 0);
 
-                    let source = resolved_blank_schematic(&format);
-                    let setup = setup_with_schematic_output(OutputFormat::SvgVector, schematic);
-                    let plan = HardcopyPlan::compile(
-                        source.authority().clone(),
-                        setup,
-                        source.content_extent(),
+                let source = resolved_blank_schematic(&format);
+                let setup = setup_with_schematic_output(OutputFormat::SvgVector, schematic);
+                let plan = HardcopyPlan::compile(
+                    source.authority().clone(),
+                    setup,
+                    source.content_extent(),
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "matrix plan failed for {} {} {template:?}: {error}",
+                        standard.label(),
+                        orientation.label()
                     )
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "matrix plan failed for {} {} {template:?} {rotation:?}: {error}",
-                            standard.label(),
-                            orientation.label()
-                        )
-                    });
-                    let scene = scene_from_resolved(
-                        &source,
-                        plan.setup().print_mapping(),
-                        plan.setup().schematic(),
-                        resolved_metadata(),
+                });
+                let scene = scene_from_resolved(
+                    &source,
+                    plan.setup().print_mapping(),
+                    plan.setup().schematic(),
+                    resolved_metadata(),
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "matrix scene failed for {} {} {template:?}: {error}",
+                        standard.label(),
+                        orientation.label()
                     )
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "matrix scene failed for {} {} {template:?} {rotation:?}: {error}",
-                            standard.label(),
-                            orientation.label()
-                        )
-                    });
-                    assert_eq!(scene.extent, plan.content_extent());
-                    HardcopyRenderer::render(&plan, &scene).unwrap_or_else(|error| {
-                            panic!(
-                                "matrix publication failed for {} {} {template:?} {rotation:?}: {error}",
-                                standard.label(),
-                                orientation.label()
-                            )
-                        });
-                    cases += 1;
-                }
+                });
+                assert_eq!(scene.extent, plan.content_extent());
+                HardcopyRenderer::render(&plan, &scene).unwrap_or_else(|error| {
+                    panic!(
+                        "matrix publication failed for {} {} {template:?}: {error}",
+                        standard.label(),
+                        orientation.label()
+                    )
+                });
+                cases += 1;
             }
         }
     }
 
-    assert_eq!(cases, 504);
+    assert_eq!(cases, 168);
 }
 
 #[test]

@@ -427,24 +427,6 @@ fn overflow_advisories_remain_visible_in_thumbnail_views() {
     assert!(overflow_advisories_visible(thumbnail.tier));
 }
 
-#[test]
-fn title_block_rotation_preserves_center_and_swaps_complete_block_extent() {
-    let target = Rect::from_center_size(pos2(200.0, 120.0), vec2(40.0, 100.0));
-    let authored = Rect::from_center_size(target.center(), vec2(target.height(), target.width()));
-    let angle = title_block_rotation_angle(DrawingSheetTitleBlockRotation::Clockwise90);
-    let corners = [
-        rotate_title_block_point(authored.left_top(), authored.center(), angle),
-        rotate_title_block_point(authored.right_top(), authored.center(), angle),
-        rotate_title_block_point(authored.right_bottom(), authored.center(), angle),
-        rotate_title_block_point(authored.left_bottom(), authored.center(), angle),
-    ];
-    let bounds = Rect::from_points(&corners);
-
-    assert_eq!(bounds.center(), target.center());
-    assert!((bounds.width() - target.width()).abs() < f32::EPSILON);
-    assert!((bounds.height() - target.height()).abs() < f32::EPSILON);
-}
-
 /// Every shape the canvas paints for `sheet`'s title block at one world unit
 /// per point, lettering `fields`.
 fn painted_title_block(

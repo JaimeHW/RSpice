@@ -11,10 +11,10 @@ use crate::state::{
     DrawingSheetInheritance, DrawingSheetManagedTemplateSnapshot, DrawingSheetMargins,
     DrawingSheetMarks, DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetScale,
     DrawingSheetStandard, DrawingSheetStandardSeries, DrawingSheetTitleBlock,
-    DrawingSheetTitleBlockAnchor, DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate,
-    DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, DrawingSheetZoneMode,
-    DrawingSheetZones, SchematicPageOrientation, SchematicSheetFormat, SchematicSheetFormatDraft,
-    SheetId, drawing_sheet_automatic_zone_counts, drawing_sheet_sizes_mixed,
+    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldState,
+    DrawingSheetZoneMode, DrawingSheetZones, SchematicPageOrientation, SchematicSheetFormat,
+    SchematicSheetFormatDraft, SheetId, drawing_sheet_automatic_zone_counts,
+    drawing_sheet_sizes_mixed,
 };
 use crate::workbench::app::SchematicEditAuthority;
 
@@ -214,61 +214,6 @@ impl TitleBlockTemplateChoice {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum TitleBlockAnchorChoice {
-    #[default]
-    BottomRight,
-    BottomLeft,
-    BottomStrip,
-    TopRight,
-}
-
-impl TitleBlockAnchorChoice {
-    pub(crate) const ALL: [Self; 4] = [
-        Self::BottomRight,
-        Self::BottomLeft,
-        Self::BottomStrip,
-        Self::TopRight,
-    ];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::BottomRight => "Bottom right",
-            Self::BottomLeft => "Bottom left",
-            Self::BottomStrip => "Bottom strip · full width",
-            Self::TopRight => "Top right",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum TitleBlockRotationChoice {
-    #[default]
-    Upright,
-    Clockwise,
-    CounterClockwise,
-}
-
-impl TitleBlockRotationChoice {
-    pub(crate) const ALL: [Self; 3] = [Self::Upright, Self::Clockwise, Self::CounterClockwise];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Upright => "Upright",
-            Self::Clockwise => "Rotated 90° CW",
-            Self::CounterClockwise => "Rotated 90° CCW",
-        }
-    }
-
-    pub(crate) const fn note(self) -> &'static str {
-        match self {
-            Self::Upright => "Reads from the bottom edge of the sheet.",
-            Self::Clockwise => "Reads from the right edge of the sheet.",
-            Self::CounterClockwise => "Reads from the left edge of the sheet.",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum PageSetupScope {
     #[default]
     CurrentSheet,
@@ -327,10 +272,6 @@ pub(crate) struct DrawingSheetDraft {
     pub(crate) zone_rows: u8,
     pub(crate) centring_marks: bool,
     pub(crate) title_block: TitleBlockTemplateChoice,
-    pub(crate) title_block_anchor: TitleBlockAnchorChoice,
-    pub(crate) title_block_rotation: TitleBlockRotationChoice,
-    pub(crate) title_block_offset_x: String,
-    pub(crate) title_block_offset_y: String,
     /// Carried through unedited. A schematic is not drawn to scale and the
     /// title block no longer letters one, so nothing offers this for editing;
     /// a sheet keeps the value it was saved with.
@@ -387,10 +328,6 @@ impl DrawingSheetDraft {
             zone_rows,
             centring_marks: format.marks.centring,
             title_block: title_template_from_model(format.title_block.template),
-            title_block_anchor: title_anchor_from_model(format.title_block.anchor),
-            title_block_rotation: title_rotation_from_model(format.title_block.rotation),
-            title_block_offset_x: format_signed_um(format.title_block.offset_x_um, display_unit),
-            title_block_offset_y: format_signed_um(format.title_block.offset_y_um, display_unit),
             scale: format.title_block.scale,
             managed_title_template: format.title_block.managed_template.clone(),
             title_fields: format.title_block.fields.clone(),
@@ -409,13 +346,9 @@ impl DrawingSheetDraft {
             parse_length_um(&self.height, current)?,
             parse_length_um(&self.bleed, current)?,
         ];
-        let offset_x = parse_signed_length_um(&self.title_block_offset_x, current)?;
-        let offset_y = parse_signed_length_um(&self.title_block_offset_y, current)?;
         self.width = format_um(physical[0], next);
         self.height = format_um(physical[1], next);
         self.bleed = format_um(physical[2], next);
-        self.title_block_offset_x = format_signed_um(offset_x, next);
-        self.title_block_offset_y = format_signed_um(offset_y, next);
         self.display_unit = next;
         Ok(())
     }
@@ -609,18 +542,6 @@ impl DrawingSheetDraft {
 
     pub(crate) fn set_title_block_template(&mut self, template: TitleBlockTemplateChoice) {
         self.title_block = template;
-        if matches!(
-            template,
-            TitleBlockTemplateChoice::None | TitleBlockTemplateChoice::Asme
-        ) {
-            self.title_block_offset_x = "0".to_owned();
-            self.title_block_offset_y = "0".to_owned();
-            self.title_block_rotation = TitleBlockRotationChoice::Upright;
-        }
-        // ASME Y14.1 6.1: the lower right corner of the format.
-        if template == TitleBlockTemplateChoice::Asme {
-            self.title_block_anchor = TitleBlockAnchorChoice::BottomRight;
-        }
     }
 
     /// The title blocks Page Setup offers the draft's sheet: ISO 7200's
@@ -644,10 +565,6 @@ impl DrawingSheetDraft {
             .collect()
     }
 
-    pub(crate) fn set_title_block_anchor(&mut self, anchor: TitleBlockAnchorChoice) {
-        self.title_block_anchor = anchor;
-    }
-
     pub(crate) fn validate(&self) -> Result<ValidatedDrawingSheetDraft, Vec<FieldProblem>> {
         let mut problems = Vec::new();
         let parse = |field: &'static str, value: &str, problems: &mut Vec<FieldProblem>| {
@@ -658,22 +575,6 @@ impl DrawingSheetDraft {
         let width_um = parse("width", &self.width, &mut problems);
         let height_um = parse("height", &self.height, &mut problems);
         let bleed_um = parse("bleed", &self.bleed, &mut problems);
-        let offset_x_um = parse_signed_length_um(&self.title_block_offset_x, self.display_unit)
-            .map_err(|message| {
-                problems.push(FieldProblem {
-                    field: "title-offset-x",
-                    message,
-                });
-            })
-            .ok();
-        let offset_y_um = parse_signed_length_um(&self.title_block_offset_y, self.display_unit)
-            .map_err(|message| {
-                problems.push(FieldProblem {
-                    field: "title-offset-y",
-                    message,
-                });
-            })
-            .ok();
 
         if let (Some(width), Some(height)) = (width_um, height_um) {
             if !(50_800..=2_540_000).contains(&width) || !(50_800..=2_540_000).contains(&height) {
@@ -770,10 +671,6 @@ impl DrawingSheetDraft {
             },
             title_block: DrawingSheetTitleBlock {
                 template: title_template_to_model(self.title_block),
-                anchor: title_anchor_to_model(self.title_block_anchor),
-                rotation: title_rotation_to_model(self.title_block_rotation),
-                offset_x_um: offset_x_um.expect("validated horizontal title offset"),
-                offset_y_um: offset_y_um.expect("validated vertical title offset"),
                 scale: self.scale,
                 managed_template: self.managed_title_template.clone(),
                 fields: self.title_fields.clone(),
@@ -782,20 +679,6 @@ impl DrawingSheetDraft {
         })
         .map_err(|error| {
             let message = error.to_string();
-            if message.contains("drawing sheet title block placement")
-                || message.contains("drawing sheet title block offset")
-            {
-                return vec![
-                    FieldProblem {
-                        field: "title-offset-x",
-                        message: message.clone(),
-                    },
-                    FieldProblem {
-                        field: "title-offset-y",
-                        message,
-                    },
-                ];
-            }
             // The margins are the standard's, so a sheet they leave too
             // little room inside is too small.
             let field = if message.contains("drawing sheet margin")
@@ -813,8 +696,6 @@ impl DrawingSheetDraft {
             width_um,
             height_um,
             bleed_um: bleed_um.expect("validated bleed"),
-            title_block_offset_x_um: offset_x_um.expect("validated horizontal title offset"),
-            title_block_offset_y_um: offset_y_um.expect("validated vertical title offset"),
         })
     }
 }
@@ -831,8 +712,6 @@ pub(crate) struct ValidatedDrawingSheetDraft {
     pub(crate) width_um: u64,
     pub(crate) height_um: u64,
     pub(crate) bleed_um: u64,
-    pub(crate) title_block_offset_x_um: i64,
-    pub(crate) title_block_offset_y_um: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -1019,27 +898,6 @@ pub(crate) fn format_um(value_um: u64, unit: SheetDisplayUnit) -> String {
         .to_owned()
 }
 
-pub(crate) fn parse_signed_length_um(value: &str, unit: SheetDisplayUnit) -> Result<i64, String> {
-    let normalized = value.trim();
-    let (negative, magnitude) = normalized
-        .strip_prefix('-')
-        .map_or((false, normalized), |value| (true, value));
-    let magnitude = parse_length_um(magnitude, unit)?;
-    let magnitude =
-        i64::try_from(magnitude).map_err(|_| "The physical offset is too large.".to_owned())?;
-    Ok(if negative { -magnitude } else { magnitude })
-}
-
-pub(crate) fn format_signed_um(value_um: i64, unit: SheetDisplayUnit) -> String {
-    let magnitude = value_um.unsigned_abs();
-    let formatted = format_um(magnitude, unit);
-    if value_um < 0 {
-        format!("-{formatted}")
-    } else {
-        formatted
-    }
-}
-
 pub(super) fn display_unit_from_model(unit: DrawingSheetDisplayUnit) -> SheetDisplayUnit {
     match unit {
         DrawingSheetDisplayUnit::Millimetres => SheetDisplayUnit::Millimetres,
@@ -1105,44 +963,6 @@ fn title_template_to_model(value: TitleBlockTemplateChoice) -> DrawingSheetTitle
             DrawingSheetTitleBlockTemplate::OrganizationManaged
         }
         TitleBlockTemplateChoice::None => DrawingSheetTitleBlockTemplate::None,
-    }
-}
-
-fn title_anchor_from_model(value: DrawingSheetTitleBlockAnchor) -> TitleBlockAnchorChoice {
-    match value {
-        DrawingSheetTitleBlockAnchor::BottomRight => TitleBlockAnchorChoice::BottomRight,
-        DrawingSheetTitleBlockAnchor::BottomLeft => TitleBlockAnchorChoice::BottomLeft,
-        DrawingSheetTitleBlockAnchor::BottomStrip => TitleBlockAnchorChoice::BottomStrip,
-        DrawingSheetTitleBlockAnchor::TopRight => TitleBlockAnchorChoice::TopRight,
-    }
-}
-
-fn title_anchor_to_model(value: TitleBlockAnchorChoice) -> DrawingSheetTitleBlockAnchor {
-    match value {
-        TitleBlockAnchorChoice::BottomRight => DrawingSheetTitleBlockAnchor::BottomRight,
-        TitleBlockAnchorChoice::BottomLeft => DrawingSheetTitleBlockAnchor::BottomLeft,
-        TitleBlockAnchorChoice::BottomStrip => DrawingSheetTitleBlockAnchor::BottomStrip,
-        TitleBlockAnchorChoice::TopRight => DrawingSheetTitleBlockAnchor::TopRight,
-    }
-}
-
-fn title_rotation_from_model(value: DrawingSheetTitleBlockRotation) -> TitleBlockRotationChoice {
-    match value {
-        DrawingSheetTitleBlockRotation::Upright => TitleBlockRotationChoice::Upright,
-        DrawingSheetTitleBlockRotation::Clockwise90 => TitleBlockRotationChoice::Clockwise,
-        DrawingSheetTitleBlockRotation::CounterClockwise90 => {
-            TitleBlockRotationChoice::CounterClockwise
-        }
-    }
-}
-
-fn title_rotation_to_model(value: TitleBlockRotationChoice) -> DrawingSheetTitleBlockRotation {
-    match value {
-        TitleBlockRotationChoice::Upright => DrawingSheetTitleBlockRotation::Upright,
-        TitleBlockRotationChoice::Clockwise => DrawingSheetTitleBlockRotation::Clockwise90,
-        TitleBlockRotationChoice::CounterClockwise => {
-            DrawingSheetTitleBlockRotation::CounterClockwise90
-        }
     }
 }
 
@@ -1317,31 +1137,6 @@ mod tests {
     }
 
     #[test]
-    fn title_block_changes_normalize_inaccessible_values() {
-        let mut draft = valid_draft();
-        draft.title_block_offset_x = "-4".to_owned();
-        draft.title_block_offset_y = "2".to_owned();
-        draft.title_block_rotation = TitleBlockRotationChoice::Clockwise;
-        draft.set_title_block_template(TitleBlockTemplateChoice::None);
-        assert_eq!(draft.title_block_offset_x, "0");
-        assert_eq!(draft.title_block_offset_y, "0");
-        assert_eq!(
-            draft.title_block_rotation,
-            TitleBlockRotationChoice::Upright
-        );
-        assert!(draft.validate().is_ok());
-
-        draft.set_title_block_template(TitleBlockTemplateChoice::Standard);
-        draft.title_block_rotation = TitleBlockRotationChoice::CounterClockwise;
-        draft.set_title_block_anchor(TitleBlockAnchorChoice::BottomStrip);
-        assert_eq!(
-            draft.title_block_rotation,
-            TitleBlockRotationChoice::CounterClockwise
-        );
-        assert!(draft.validate().is_ok());
-    }
-
-    #[test]
     fn a_sheet_keeps_the_scale_it_was_saved_with() {
         let saved = SchematicSheetFormat::default()
             .try_update(|draft| {
@@ -1367,7 +1162,6 @@ mod tests {
     fn a_managed_title_authority_survives_replacement_drafts() {
         let mut authority = valid_draft();
         authority.set_title_block_template(TitleBlockTemplateChoice::Organization);
-        authority.title_block_anchor = TitleBlockAnchorChoice::TopRight;
 
         let mut replacement = valid_draft();
         replacement.set_border_template(BorderTemplateChoice::None);
@@ -1384,10 +1178,6 @@ mod tests {
         assert_eq!(
             replacement.title_block,
             TitleBlockTemplateChoice::Organization
-        );
-        assert_eq!(
-            replacement.title_block_anchor,
-            TitleBlockAnchorChoice::BottomRight
         );
         assert_eq!(
             replacement.title_fields[&DrawingSheetTitleFieldId::SheetTitle].value,
@@ -1446,7 +1236,7 @@ mod tests {
     fn validation_retains_every_field_problem_for_complete_surface_feedback() {
         let mut draft = valid_draft();
         draft.width = "not-a-length".to_owned();
-        draft.title_block_offset_x = "not-an-offset".to_owned();
+        draft.bleed = "not-a-bleed".to_owned();
         draft
             .title_fields
             .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
@@ -1457,11 +1247,7 @@ mod tests {
         let problems = draft.validate().unwrap_err();
 
         assert!(problems.iter().any(|problem| problem.field == "width"));
-        assert!(
-            problems
-                .iter()
-                .any(|problem| problem.field == "title-offset-x")
-        );
+        assert!(problems.iter().any(|problem| problem.field == "bleed"));
         assert!(
             problems
                 .iter()

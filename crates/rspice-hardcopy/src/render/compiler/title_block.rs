@@ -1,7 +1,7 @@
 //! Canonical title-block projection into hardcopy scene primitives.
 //!
-//! Rotation, clipping, managed logos, and field layout are resolved here so
-//! every publication backend consumes identical geometry.
+//! Managed logos and field layout are resolved here so every publication
+//! backend consumes identical geometry. The block always stands upright.
 
 use super::*;
 
@@ -28,18 +28,6 @@ impl SemanticSceneCompiler<'_> {
             ..stroke
         };
         let rule = rule_of(rspice_design_model::design_management::DRAWING_SHEET_TITLE_RULE_UM);
-        let rotation = format.title_block.rotation;
-        let authored_block = authored_title_block_rect(block, rotation)?;
-        let transform = |this: &Self, x: i64, y: i64| {
-            this.drawing_sheet_title_block_point(x, y, authored_block, rotation)
-        };
-        let text_rotation = match rotation {
-            DrawingSheetTitleBlockRotation::Upright => SceneTextRotation::Upright,
-            DrawingSheetTitleBlockRotation::Clockwise90 => SceneTextRotation::Clockwise90,
-            DrawingSheetTitleBlockRotation::CounterClockwise90 => {
-                SceneTextRotation::CounterClockwise90
-            }
-        };
         // The form the canvas and Page Setup draw too: every rule and every
         // cell's width come from the one layout, so a field is cut short on
         // paper exactly where it is on screen.
@@ -52,13 +40,13 @@ impl SemanticSceneCompiler<'_> {
         let at_x = |x_um: u64| {
             i64::try_from(x_um)
                 .ok()
-                .and_then(|x_um| authored_block.x_um.checked_add(x_um))
+                .and_then(|x_um| block.x_um.checked_add(x_um))
                 .ok_or_else(|| conversion_error("drawing-sheet title-block X geometry overflow"))
         };
         let at_y = |y_um: u64| {
             i64::try_from(y_um)
                 .ok()
-                .and_then(|y_um| authored_block.y_um.checked_add(y_um))
+                .and_then(|y_um| block.y_um.checked_add(y_um))
                 .ok_or_else(|| conversion_error("drawing-sheet title-block Y geometry overflow"))
         };
         let logo = format.title_block_logo(template);
@@ -66,21 +54,15 @@ impl SemanticSceneCompiler<'_> {
         let field_grid_x = at_x(layout.grid_x_um)?;
         if let Some(logo) = logo {
             self.primitives.push(ScenePrimitive::Line {
-                from: transform(self, field_grid_x, authored_block.y_um)?,
-                to: transform(
-                    self,
-                    field_grid_x,
-                    authored_block.y_um + authored_block.height_um as i64,
-                )?,
+                from: self.drawing_sheet_point(field_grid_x, block.y_um)?,
+                to: self.drawing_sheet_point(field_grid_x, block.y_um + block.height_um as i64)?,
                 stroke: rule,
             });
             let inset = 3_000u64
                 .min(logo_reserved_width_um / 10)
-                .min(authored_block.height_um / 10);
+                .min(block.height_um / 10);
             let logo_width = logo_reserved_width_um.saturating_sub(inset.saturating_mul(2));
-            let logo_height = authored_block
-                .height_um
-                .saturating_sub(inset.saturating_mul(2));
+            let logo_height = block.height_um.saturating_sub(inset.saturating_mul(2));
             let basis = u64::from(
                 rspice_design_model::design_management::DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS,
             );
@@ -93,10 +75,9 @@ impl SemanticSceneCompiler<'_> {
                             inset + logo_width.saturating_mul(u64::from(point.x())) / basis;
                         let y_offset =
                             inset + logo_height.saturating_mul(u64::from(point.y())) / basis;
-                        transform(
-                            self,
-                            authored_block.x_um + x_offset as i64,
-                            authored_block.y_um + y_offset as i64,
+                        self.drawing_sheet_point(
+                            block.x_um + x_offset as i64,
+                            block.y_um + y_offset as i64,
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -121,8 +102,9 @@ impl SemanticSceneCompiler<'_> {
         // Each cell's own rules, each drawn once at its own width.
         for cell_rule in &layout.rules {
             self.primitives.push(ScenePrimitive::Line {
-                from: transform(self, at_x(cell_rule.from_x_um)?, at_y(cell_rule.from_y_um)?)?,
-                to: transform(self, at_x(cell_rule.to_x_um)?, at_y(cell_rule.to_y_um)?)?,
+                from: self
+                    .drawing_sheet_point(at_x(cell_rule.from_x_um)?, at_y(cell_rule.from_y_um)?)?,
+                to: self.drawing_sheet_point(at_x(cell_rule.to_x_um)?, at_y(cell_rule.to_y_um)?)?,
                 stroke: rule_of(cell_rule.width_um),
             });
         }
@@ -137,8 +119,7 @@ impl SemanticSceneCompiler<'_> {
         // nothing: the cell is a box to fill in.
         for line in layout.lettering(&fields) {
             self.add_text_rotated(
-                transform(
-                    self,
+                self.drawing_sheet_point(
                     at_x(line.x_um)?,
                     at_y(line.seat_um + drawing_sheet_mono_baseline_offset_um(line.lettering_um))?,
                 )?,
@@ -150,45 +131,9 @@ impl SemanticSceneCompiler<'_> {
                 },
                 drawing_sheet_mono_em_um(line.lettering_um),
                 stroke.color,
-                text_rotation,
+                SceneTextRotation::Upright,
             )?;
         }
         Ok(())
     }
-}
-
-pub(in crate::render) fn authored_title_block_rect(
-    block: DrawingSheetRect,
-    rotation: DrawingSheetTitleBlockRotation,
-) -> Result<DrawingSheetRect, HardcopyRenderError> {
-    if rotation == DrawingSheetTitleBlockRotation::Upright {
-        return Ok(block);
-    }
-    let block_width = i64::try_from(block.width_um)
-        .map_err(|_| conversion_error("drawing-sheet title-block width overflow"))?;
-    let block_height = i64::try_from(block.height_um)
-        .map_err(|_| conversion_error("drawing-sheet title-block height overflow"))?;
-    let x_twice = block
-        .x_um
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(block_width))
-        .and_then(|value| value.checked_sub(block_height))
-        .ok_or_else(|| conversion_error("drawing-sheet title-block X geometry overflow"))?;
-    let y_twice = block
-        .y_um
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(block_height))
-        .and_then(|value| value.checked_sub(block_width))
-        .ok_or_else(|| conversion_error("drawing-sheet title-block Y geometry overflow"))?;
-    if x_twice % 2 != 0 || y_twice % 2 != 0 {
-        return Err(conversion_error(
-            "drawing-sheet title-block geometry requires half-micrometre coordinates",
-        ));
-    }
-    Ok(DrawingSheetRect {
-        x_um: x_twice / 2,
-        y_um: y_twice / 2,
-        width_um: block.height_um,
-        height_um: block.width_um,
-    })
 }

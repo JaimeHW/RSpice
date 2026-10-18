@@ -1810,10 +1810,6 @@ fn title_field_summary_facts(
                 .title_block_template_label(format.title_block.template)
                 .to_owned(),
         ),
-        (
-            "Placement",
-            title_anchor_label(format.title_block.anchor).to_owned(),
-        ),
         ("Automatic fields", format!("{automatic} linked to source")),
         (
             "Editable fields",
@@ -1825,7 +1821,7 @@ fn title_field_summary_facts(
     ];
     // The reference panel is an unbordered grid on the panel surface whose rows
     // divide its height evenly, so it stands level with the preview beside it
-    // instead of hugging four lines of text in the middle of the card.
+    // instead of hugging three lines of text in the middle of the card.
     let rows = facts.len() as f32;
     let height = min_height.max(rows * 30.0);
     let (rect, _) = ui.allocate_exact_size(vec2(width.max(1.0), height), egui::Sense::hover());
@@ -1909,15 +1905,6 @@ fn manager_apply_note(ui: &mut Ui, heading: &str, body: &str) {
         )
         .wrap(),
     );
-}
-
-fn title_anchor_label(anchor: crate::state::DrawingSheetTitleBlockAnchor) -> &'static str {
-    match anchor {
-        crate::state::DrawingSheetTitleBlockAnchor::BottomRight => "bottom right",
-        crate::state::DrawingSheetTitleBlockAnchor::BottomLeft => "bottom left",
-        crate::state::DrawingSheetTitleBlockAnchor::BottomStrip => "bottom strip",
-        crate::state::DrawingSheetTitleBlockAnchor::TopRight => "top right",
-    }
 }
 
 fn inheritance_label(inheritance: DrawingSheetInheritance) -> &'static str {

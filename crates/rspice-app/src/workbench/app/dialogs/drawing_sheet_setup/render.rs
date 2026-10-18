@@ -27,7 +27,7 @@ use super::commit::{
 use super::state::{
     BorderTemplateChoice, DrawingSheetDraft, DrawingSheetSection, DrawingSheetSetupState,
     DrawingSheetSupportRequest, FieldProblem, PageSetupScope, SheetDisplayUnit, SheetSizeChoice,
-    TitleBlockAnchorChoice, TitleBlockRotationChoice, TitleBlockTemplateChoice, ZoneModeChoice,
+    TitleBlockTemplateChoice, ZoneModeChoice,
     display_unit_from_model, format_um,
 };
 
@@ -570,9 +570,7 @@ fn field_section(field: &str) -> Option<DrawingSheetSection> {
     match field {
         "width" | "height" | "custom-name" => Some(DrawingSheetSection::Format),
         "bleed" => Some(DrawingSheetSection::Margins),
-        "title-offset-x" | "title-offset-y" | "title-fields" | "scale" => {
-            Some(DrawingSheetSection::TitleBlock)
-        }
+        "title-fields" | "scale" => Some(DrawingSheetSection::TitleBlock),
         _ => None,
     }
 }
@@ -765,7 +763,7 @@ fn active_panel_header(ui: &mut Ui, section: DrawingSheetSection) {
             ui,
             "SHEET IDENTITY",
             "Title block",
-            "Select the printed identity form, its reading direction and location on the authored sheet.",
+            "Select the printed identity form. It sits upright in the lower right corner of the frame.",
         ),
         DrawingSheetSection::Scope => panel_header(
             ui,
@@ -1241,70 +1239,6 @@ fn title_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[Fiel
             .wrap(),
         );
     }
-    ui.add_space(14.0);
-    // ASME Y14.1 places its block upright in the lower right corner, so the
-    // ASME form is placed nowhere else.
-    let enabled = !matches!(
-        state.draft.title_block,
-        TitleBlockTemplateChoice::None | TitleBlockTemplateChoice::Asme
-    );
-    ui.add_enabled_ui(enabled, |ui| {
-        two_column(ui, |left, right| {
-            field_caption(left, "Anchor");
-            let previous_anchor = state.draft.title_block_anchor;
-            egui::ComboBox::from_id_salt("drawing-sheet-title-anchor")
-                .width(left.available_width())
-                .selected_text(state.draft.title_block_anchor.label())
-                .show_ui(left, |ui| {
-                    for choice in TitleBlockAnchorChoice::ALL {
-                        ui.selectable_value(
-                            &mut state.draft.title_block_anchor,
-                            choice,
-                            choice.label(),
-                        );
-                    }
-                });
-            if previous_anchor != state.draft.title_block_anchor {
-                state
-                    .draft
-                    .set_title_block_anchor(state.draft.title_block_anchor);
-            }
-            field_caption(right, "Reading direction");
-            egui::ComboBox::from_id_salt("drawing-sheet-title-rotation")
-                .width(right.available_width())
-                .selected_text(state.draft.title_block_rotation.label())
-                .show_ui(right, |ui| {
-                    for choice in TitleBlockRotationChoice::ALL {
-                        ui.selectable_value(
-                            &mut state.draft.title_block_rotation,
-                            choice,
-                            choice.label(),
-                        );
-                    }
-                });
-            control_note(right, state.draft.title_block_rotation.note());
-        });
-        ui.add_space(11.0);
-        let unit = state.draft.display_unit.suffix();
-        two_column(ui, |left, right| {
-            length_field(
-                left,
-                "Horizontal offset",
-                &mut state.draft.title_block_offset_x,
-                "0",
-                field_error(problems, "title-offset-x"),
-                unit,
-            );
-            length_field(
-                right,
-                "Vertical offset",
-                &mut state.draft.title_block_offset_y,
-                "0",
-                field_error(problems, "title-offset-y"),
-                unit,
-            );
-        });
-    });
     ui.add_space(14.0);
     if resource_action(
         ui,
