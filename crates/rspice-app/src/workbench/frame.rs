@@ -189,22 +189,37 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.ui.canvas_hover = None;
         app.state.ui.canvas_view_center = None;
     }
-    // An open panel lists a notice the moment it is raised, in the corner the
-    // toast would land on. Drawing both would stack one record on itself; the
-    // toast keeps its clock and shows for whatever is left of it afterwards.
-    if !app.state.workbench.notification_center_showing() {
-        let large_targets = tools::notification_center::large_targets(ctx, &app.state);
-        if let Some(action) = app.state.ui.toasts.show(
-            ctx,
-            layout.title_bar_height,
-            layout.toolbar_height,
-            large_targets,
-        ) {
-            commands::result_navigation::perform_notification_action(app, action);
-        }
+    if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
+        commands::result_navigation::perform_notification_action(app, action);
     }
     app.state.reconcile_schematic_drag(ctx, true);
     apply_platform_full_screen_request(ctx, app);
+}
+
+/// Draw the toasts if this is the window they belong in: the one with the
+/// keyboard, or the main window when none has it, so they are never drawn in
+/// two windows at once. Returns the offer the reader took.
+///
+/// An open panel lists a notice the moment it is raised, in the corner the
+/// toast would land on. Drawing both would stack one record on itself; the
+/// toast keeps its clock and shows for whatever is left of it afterwards.
+fn show_toasts(
+    ctx: &Context,
+    state: &mut AppState,
+    layout: LayoutSpec,
+) -> Option<crate::ui::widgets::NotificationAction> {
+    if tools::notification_center::focused_window(ctx) != ctx.viewport_id()
+        || tools::notification_center::showing_here(ctx, state)
+    {
+        return None;
+    }
+    let large_targets = tools::notification_center::large_targets(ctx, state);
+    state.ui.toasts.show(
+        ctx,
+        layout.title_bar_height,
+        layout.toolbar_height,
+        large_targets,
+    )
 }
 
 /// Announce each run the moment it stops running, and each campaign when it
@@ -608,18 +623,23 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         app.state.ui.canvas_hover = None;
         app.state.ui.canvas_view_center = None;
     }
-    let large_targets = tools::notification_center::large_targets(ctx, &app.state);
-    if let Some(action) = app.state.ui.toasts.show(ctx, 0.0, 0.0, large_targets) {
-        commands::result_navigation::perform_notification_action(app, action);
+    // A detached window with the keyboard draws the toasts instead.
+    if tools::notification_center::focused_window(ctx) == ctx.viewport_id() {
+        let large_targets = tools::notification_center::large_targets(ctx, &app.state);
+        if let Some(action) = app.state.ui.toasts.show(ctx, 0.0, 0.0, large_targets) {
+            commands::result_navigation::perform_notification_action(app, action);
+        }
     }
     apply_platform_full_screen_request(ctx, app);
 }
 
 /// Render one secondary native application viewport.
 ///
-/// Application-global modal owners, notifications, exports, and toasts remain
-/// in the primary viewport. The window still receives the complete workbench
-/// chrome, dock composition, active document, and workspace surface.
+/// Application-global modal owners and exports remain in the primary
+/// viewport. The window still receives the complete workbench chrome, dock
+/// composition, active document, and workspace surface; the notification
+/// panel when its own bell opened it; and the toasts while it has the
+/// keyboard.
 pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
@@ -676,6 +696,10 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         });
     if layout.has_overlay_drawer {
         docks::show_drawers(root, app, layout);
+    }
+    tools::notification_center::show(ctx, app, layout.title_bar_height);
+    if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
+        commands::result_navigation::perform_notification_action(app, action);
     }
     app.state.reconcile_schematic_drag(ctx, true);
     apply_platform_full_screen_request(ctx, app);

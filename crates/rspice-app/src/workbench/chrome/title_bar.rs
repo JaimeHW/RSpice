@@ -11,7 +11,7 @@ use crate::workbench::RSpiceApp;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
-use super::super::state::{ModelsPage, VerificationPage, Workspace};
+use super::super::state::{ModelsPage, VerificationPage, WorkbenchState, Workspace};
 use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
 mod arrange;
@@ -174,9 +174,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             ui,
                             app.state.ui.toasts.unread_count(),
                             large_targets,
-                            app.state.workbench.notification_center_showing(),
+                            panel_hangs_here(ui.ctx(), &app.state.workbench),
                         ) {
-                            app.state.workbench.toggle_notification_center();
+                            press_bell(ui.ctx(), &mut app.state.workbench);
                         }
                         if icon_action(
                             ui,
@@ -2326,18 +2326,44 @@ fn account_action(ui: &mut Ui, initials: &str, large_target: bool) -> bool {
 /// last pass that drew one, and the bell's identity so closing the panel from
 /// the keyboard can hand focus back to it. `None` wherever the title bar draws
 /// no bell — a phone-width shell, full-screen presentation — and the panel
-/// then anchors itself to the shell's trailing edge.
+/// then anchors itself to the shell's trailing edge. Each window has its own
+/// bell, so it is the bell of the window `ctx` is drawing.
 pub(in crate::workbench) fn notification_anchor(ctx: &egui::Context) -> Option<(Rect, egui::Id)> {
-    let (pass, rect, id) =
-        ctx.data(|data| data.get_temp::<(u64, Rect, egui::Id)>(notification_anchor_id()))?;
+    let anchor_id = notification_anchor_id(ctx);
+    let (pass, rect, id) = ctx.data(|data| data.get_temp::<(u64, Rect, egui::Id)>(anchor_id))?;
     // A rectangle from an older pass is a bell that is no longer on screen.
     (ctx.cumulative_pass_nr() <= pass + 1).then_some((rect, id))
 }
 
 const NOTIFICATION_BADGE_HEIGHT: f32 = 12.0;
 
-fn notification_anchor_id() -> egui::Id {
-    egui::Id::new("rspice.title-bar.notification-anchor")
+fn notification_anchor_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new("rspice.title-bar.notification-anchor").with(ctx.viewport_id())
+}
+
+/// Which window's bell the open notification panel hangs from. The panel is
+/// drawn in that window only, and claims one when no bell opened it.
+pub(in crate::workbench) fn notification_window_id() -> egui::Id {
+    egui::Id::new("rspice.title-bar.notification-window")
+}
+
+/// Whether the open panel hangs from the bell of the window `ctx` is drawing.
+fn panel_hangs_here(ctx: &egui::Context, workbench: &WorkbenchState) -> bool {
+    let here = ctx.viewport_id();
+    workbench.notification_center_showing()
+        && ctx.data(|data| data.get_temp::<egui::ViewportId>(notification_window_id()))
+            == Some(here)
+}
+
+/// The bell of the window `ctx` is drawing was pressed. The panel opens under
+/// it, comes to it from another window's bell, or, hanging here already, goes
+/// away.
+pub(in crate::workbench) fn press_bell(ctx: &egui::Context, workbench: &mut WorkbenchState) {
+    let here = ctx.viewport_id();
+    if !workbench.notification_center_showing() || panel_hangs_here(ctx, workbench) {
+        workbench.toggle_notification_center();
+    }
+    ctx.data_mut(|data| data.insert_temp(notification_window_id(), here));
 }
 
 fn notification_action(
@@ -2354,8 +2380,9 @@ fn notification_action(
     };
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let pass = ui.ctx().cumulative_pass_nr();
+    let anchor_id = notification_anchor_id(ui.ctx());
     ui.ctx().data_mut(|data| {
-        data.insert_temp(notification_anchor_id(), (pass, rect, response.id));
+        data.insert_temp(anchor_id, (pass, rect, response.id));
     });
     let accessible_label = if unread_count == 0 {
         "Notifications".to_owned()

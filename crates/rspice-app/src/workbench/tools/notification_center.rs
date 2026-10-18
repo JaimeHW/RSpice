@@ -18,7 +18,7 @@ use std::time::Duration;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
     Align, Area, Color32, CornerRadius, Frame, Galley, Id, Layout, Order, Pos2, Rect, Response,
-    Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Sense, Stroke, Ui, UiBuilder, Vec2, ViewportId, pos2, vec2,
 };
 
 use crate::ui::theme::{self, FontWeight, mix};
@@ -122,20 +122,66 @@ struct PanelView {
     unread_only: bool,
 }
 
+/// The window with the keyboard, or the main window when none of the
+/// application's windows has it. Toasts are drawn there, and so is a panel
+/// that no bell opened.
+pub(in crate::workbench) fn focused_window(ctx: &egui::Context) -> ViewportId {
+    ctx.input(|input| {
+        input
+            .raw
+            .viewports
+            .iter()
+            .find_map(|(window, info)| (info.focused == Some(true)).then_some(*window))
+    })
+    .unwrap_or(ViewportId::ROOT)
+}
+
+/// The window the panel is drawn in: the one whose bell opened it, or, for a
+/// panel a command or a route opened, the window that had the keyboard when
+/// it was first drawn. Claimed once, so the open panel does not follow the
+/// keyboard from window to window, and claimed again if its window closes.
+fn owner(ctx: &egui::Context) -> ViewportId {
+    let window_id = title_bar::notification_window_id();
+    let held = ctx.data(|data| data.get_temp::<ViewportId>(window_id));
+    if let Some(window) = held
+        && (window == ViewportId::ROOT
+            || ctx.input(|input| input.raw.viewports.contains_key(&window)))
+    {
+        return window;
+    }
+    let claimed = focused_window(ctx);
+    ctx.data_mut(|data| data.insert_temp(window_id, claimed));
+    claimed
+}
+
+/// Whether the panel is on screen in the window this pass draws. It is
+/// drawn in one window only, whichever bell it hangs from.
+pub(in crate::workbench) fn showing_here(ctx: &egui::Context, state: &AppState) -> bool {
+    state.workbench.notification_center_showing() && owner(ctx) == ctx.viewport_id()
+}
+
 pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrome_bottom: f32) {
-    let was_open_id = panel_id().with("was-open");
+    // Which window drew the panel on the last pass that drew it.
+    let drawn_in_id = panel_id().with("drawn-in");
     let enter_id = panel_id().with("enter");
     if !app.state.workbench.notification_center_showing() {
-        ctx.data_mut(|data| data.insert_temp(was_open_id, false));
+        ctx.data_mut(|data| {
+            data.remove::<ViewportId>(drawn_in_id);
+            data.remove::<ViewportId>(title_bar::notification_window_id());
+        });
         // Walk the entrance back to zero while closed, so the next opening
         // has somewhere to animate from.
         let _ = ctx.animate_bool_with_time(enter_id, false, 0.0);
         return;
     }
-    let opening = !ctx
-        .data(|data| data.get_temp::<bool>(was_open_id))
-        .unwrap_or(false);
-    ctx.data_mut(|data| data.insert_temp(was_open_id, true));
+    let here = ctx.viewport_id();
+    if owner(ctx) != here {
+        return;
+    }
+    // Arriving in a window, by opening or by moving from another window's
+    // bell, is an opening: the press that did it landed on a bell.
+    let opening = ctx.data(|data| data.get_temp::<ViewportId>(drawn_in_id)) != Some(here);
+    ctx.data_mut(|data| data.insert_temp(drawn_in_id, here));
 
     let anchor = title_bar::notification_anchor(ctx);
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {

@@ -601,6 +601,179 @@ fn the_bell_is_a_toggle() {
     assert!(!state.workbench.notification_center_showing());
 }
 
+/// A detached application window, as egui names it.
+fn detached() -> ViewportId {
+    ViewportId::from_hash_of("detached workbench window")
+}
+
+/// Input for one pass drawn for `window`, among `open` windows, while
+/// `keyboard` (if any) has the keyboard.
+fn window_input(
+    window: ViewportId,
+    open: &[ViewportId],
+    keyboard: Option<ViewportId>,
+) -> egui::RawInput {
+    let mut input = egui::RawInput {
+        viewport_id: window,
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(DESKTOP.0, DESKTOP.1))),
+        ..egui::RawInput::default()
+    };
+    for &id in open {
+        input.viewports.insert(
+            id,
+            egui::ViewportInfo {
+                parent: (id != ViewportId::ROOT).then_some(ViewportId::ROOT),
+                focused: Some(keyboard == Some(id)),
+                ..Default::default()
+            },
+        );
+    }
+    input
+}
+
+/// One session drawn across the main window and a detached one.
+struct Windows {
+    ctx: egui::Context,
+    app: RSpiceApp,
+}
+
+impl Windows {
+    fn new() -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        seed_session(&ctx, &mut app.state.ui.toasts);
+        Self { ctx, app }
+    }
+
+    /// Press the bell of `window`, with both windows open.
+    fn press_bell_in(&mut self, window: ViewportId) {
+        let workbench = &mut self.app.state.workbench;
+        let both = [ViewportId::ROOT, detached()];
+        let _ = self
+            .ctx
+            .run_ui(window_input(window, &both, Some(window)), |ui| {
+                title_bar::press_bell(ui.ctx(), workbench);
+            });
+    }
+
+    /// Draw the panel for `window`, among `open` windows, and say whether it
+    /// put the panel there: two passes, so a panel arriving in the window has
+    /// measured itself.
+    fn panel_drawn_in(&mut self, window: ViewportId, open: &[ViewportId]) -> bool {
+        fn heads(shape: &egui::Shape) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.text() == "Notifications",
+                egui::Shape::Vec(shapes) => shapes.iter().any(heads),
+                _ => false,
+            }
+        }
+        let app = &mut self.app;
+        let mut drawn = false;
+        for _ in 0..2 {
+            let output = with_pinned_clock(|| {
+                self.ctx
+                    .run_ui(window_input(window, open, Some(window)), |ui| {
+                        show(ui.ctx(), app, TITLE_BAR);
+                    })
+            });
+            drawn = output.shapes.iter().any(|clipped| heads(&clipped.shape));
+        }
+        drawn
+    }
+
+    fn showing(&self) -> bool {
+        self.app.state.workbench.notification_center_showing()
+    }
+}
+
+/// Toasts are drawn in the window with the keyboard, and in the main window
+/// when no window of the application has it; never in two at once.
+#[test]
+fn toasts_go_to_the_window_with_the_keyboard() {
+    let ctx = egui::Context::default();
+    let both = [ViewportId::ROOT, detached()];
+    let mut seen = Vec::new();
+    for keyboard in [Some(detached()), Some(ViewportId::ROOT), None] {
+        let _ = ctx.run_ui(window_input(ViewportId::ROOT, &both, keyboard), |ui| {
+            seen.push(focused_window(ui.ctx()));
+        });
+    }
+    assert_eq!(seen, [detached(), ViewportId::ROOT, ViewportId::ROOT]);
+}
+
+/// The bell pressed in a detached window opens the panel in that window,
+/// under that bell, and nowhere else; the main window's bell brings it back,
+/// and pressing that bell again puts it away.
+#[test]
+fn the_panel_opens_in_the_window_whose_bell_was_pressed() {
+    let mut windows = Windows::new();
+    let both = [ViewportId::ROOT, detached()];
+    assert!(!windows.panel_drawn_in(ViewportId::ROOT, &both));
+
+    windows.press_bell_in(detached());
+    assert!(windows.showing());
+    assert!(windows.panel_drawn_in(detached(), &both));
+    assert!(
+        !windows.panel_drawn_in(ViewportId::ROOT, &both),
+        "the main window does not draw a panel another window's bell opened"
+    );
+
+    windows.press_bell_in(ViewportId::ROOT);
+    assert!(
+        windows.showing(),
+        "another window's bell moves the panel rather than closing it"
+    );
+    assert!(windows.panel_drawn_in(ViewportId::ROOT, &both));
+    assert!(!windows.panel_drawn_in(detached(), &both));
+
+    windows.press_bell_in(ViewportId::ROOT);
+    assert!(!windows.showing());
+}
+
+/// A panel whose window closed comes back in a window that is still open,
+/// rather than staying open where nobody can see it or close it.
+#[test]
+fn a_panel_whose_window_closed_comes_back_in_the_main_window() {
+    let mut windows = Windows::new();
+    let both = [ViewportId::ROOT, detached()];
+    assert!(!windows.panel_drawn_in(ViewportId::ROOT, &both));
+    windows.press_bell_in(detached());
+    assert!(!windows.panel_drawn_in(ViewportId::ROOT, &both));
+
+    assert!(windows.panel_drawn_in(ViewportId::ROOT, &[ViewportId::ROOT]));
+}
+
+/// Each window has its own bell, and the panel hangs from the bell of the
+/// window it is drawn in: a bell drawn in a detached window is not where the
+/// main window's panel points.
+#[test]
+fn each_window_has_its_own_bell_to_hang_the_panel_from() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    let both = [ViewportId::ROOT, detached()];
+    let layout =
+        crate::workbench::layout::LayoutSpec::resolve(DESKTOP.0, DESKTOP.1, &app.state.workbench);
+    let _ = ctx.run_ui(window_input(ViewportId::ROOT, &both, None), |_| {});
+    let mut anchors = Vec::new();
+    for _ in 0..2 {
+        let _ = ctx.run_ui(window_input(detached(), &both, Some(detached())), |ui| {
+            title_bar::show(ui, &mut app, layout);
+            anchors.push(title_bar::notification_anchor(ui.ctx()).is_some());
+        });
+    }
+    let _ = ctx.run_ui(window_input(ViewportId::ROOT, &both, None), |ui| {
+        anchors.push(title_bar::notification_anchor(ui.ctx()).is_some());
+    });
+    assert_eq!(
+        anchors.last(),
+        Some(&false),
+        "the main window has no bell drawn: {anchors:?}"
+    );
+    assert!(anchors[1], "the detached window's bell is its anchor");
+}
+
 /// A phone-width shell draws no bell, so the panel must be reachable by name:
 /// a registered command is what the palette searches.
 #[test]
