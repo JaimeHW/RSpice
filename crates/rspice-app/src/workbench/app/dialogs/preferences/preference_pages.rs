@@ -23,8 +23,8 @@ use crate::workbench::{
 };
 
 use super::preferences_shell::{
-    PreferenceCategory, control_width, preference_row, preference_switch, searchable_row,
-    section_heading, segmented, value_column,
+    PreferenceCategory, action_buttons, control_width, preference_row, preference_switch,
+    searchable_row, section_heading, segmented, value_column,
 };
 use super::{AppState, PreferencePageActions};
 
@@ -747,40 +747,20 @@ fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActio
         "Settings file",
         "Move your preferences and shortcuts to another machine.",
         |ui| {
-            value_column(ui, |ui| {
-                let phone = ui.ctx().content_rect().width() <= 560.0;
-                let width = ui.available_width();
-                let height = if phone {
-                    44.0
-                } else {
-                    Tokens::get(ui.ctx()).metrics.ctl_h
-                };
-                ui.allocate_ui_with_layout(
-                    egui::vec2(width, height),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        let button = |ui: &mut Ui, id: &'static str, label: &'static str| {
-                            ui.push_id(id, |ui| {
-                                Button::new(label).min_height(height).show(ui).clicked()
-                            })
-                            .inner
-                        };
-                        if button(ui, "preferences.projects.settings-import", "Import\u{2026}") {
-                            actions.import_settings_file = true;
-                        }
-                        if button(ui, "preferences.projects.settings-export", "Export\u{2026}") {
-                            actions.export_settings_file = true;
-                        }
-                        // A browser keeps the file in its own storage, which
-                        // no file manager can open.
-                        #[cfg(not(target_arch = "wasm32"))]
-                        if button(ui, "preferences.projects.settings-show", "Show file") {
-                            actions.show_settings_file = true;
-                        }
-                    },
-                );
-            });
+            let buttons = [
+                ("preferences.projects.settings-import", "Import\u{2026}"),
+                ("preferences.projects.settings-export", "Export\u{2026}"),
+                // A browser keeps the file in its own storage, which no file
+                // manager can open.
+                #[cfg(not(target_arch = "wasm32"))]
+                ("preferences.projects.settings-show", "Show file"),
+            ];
+            match action_buttons(ui, &buttons) {
+                Some(0) => actions.import_settings_file = true,
+                Some(1) => actions.export_settings_file = true,
+                Some(_) => actions.show_settings_file = true,
+                None => {}
+            }
         },
     );
     preference_row(ui, "Autosave interval", AUTOSAVE_HELP, |ui| {

@@ -1359,6 +1359,42 @@ pub(super) fn value_column<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R 
         .inner
 }
 
+/// A row's buttons, `(id, label)` each, left to right from the control column
+/// like every other value. They are as tall as the page's controls, or as the
+/// Accessibility touch target on a phone. Returns the index of the button
+/// pressed this frame.
+pub(super) fn action_buttons(
+    ui: &mut Ui,
+    buttons: &[(&'static str, &'static str)],
+) -> Option<usize> {
+    value_column(ui, |ui| {
+        let height = if ui.ctx().content_rect().width() <= PHONE_MAX_WIDTH {
+            touch_target(ui.ctx())
+        } else {
+            Tokens::get(ui.ctx()).metrics.ctl_h
+        };
+        let mut pressed = None;
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), height),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                for (index, &(id, label)) in buttons.iter().enumerate() {
+                    let clicked = ui
+                        .push_id(id, |ui| {
+                            Button::new(label).min_height(height).show(ui).clicked()
+                        })
+                        .inner;
+                    if clicked {
+                        pressed = Some(index);
+                    }
+                }
+            },
+        );
+        pressed
+    })
+}
+
 /// How wide a select or numeric field is on this row.
 ///
 /// Capped so a wide dialog does not stretch one page's selects to twice the

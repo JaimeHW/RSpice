@@ -26,7 +26,7 @@ use crate::workbench::{
 };
 
 use super::preferences_shell::{
-    control_width, preference_row, searchable_row, section_heading, value_column,
+    action_buttons, control_width, preference_row, searchable_row, section_heading, value_column,
 };
 use super::{AppState, PreferencePageActions};
 use crate::workbench::app::dialogs::state::{
@@ -67,49 +67,16 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
         ui,
         "Shortcut file",
         "Share key bindings between machines or with your team.",
-        |ui| {
-            value_column(ui, |ui| {
-                let phone = ui.ctx().content_rect().width() <= 560.0;
-                let width = ui.available_width();
-                let action_height = if phone {
-                    44.0
-                } else {
-                    Tokens::get(ui.ctx()).metrics.ctl_h
-                };
-                // Both buttons start at the page's control column, like every
-                // other value on it. They used to be pushed to the far right
-                // of the row, which put the only pair of controls on the page
-                // four hundred pixels clear of the column the rest share.
-                ui.allocate_ui_with_layout(
-                    egui::vec2(width, action_height),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        if ui
-                            .push_id("preferences.shortcuts.import", |ui| {
-                                Button::new("Import\u{2026}")
-                                    .min_height(action_height)
-                                    .show(ui)
-                                    .clicked()
-                            })
-                            .inner
-                        {
-                            actions.open_shortcut_import = true;
-                        }
-                        if ui
-                            .push_id("preferences.shortcuts.export", |ui| {
-                                Button::new("Export\u{2026}")
-                                    .min_height(action_height)
-                                    .show(ui)
-                                    .clicked()
-                            })
-                            .inner
-                        {
-                            actions.open_shortcut_export = true;
-                        }
-                    },
-                );
-            });
+        |ui| match action_buttons(
+            ui,
+            &[
+                ("preferences.shortcuts.import", "Import\u{2026}"),
+                ("preferences.shortcuts.export", "Export\u{2026}"),
+            ],
+        ) {
+            Some(0) => actions.open_shortcut_import = true,
+            Some(_) => actions.open_shortcut_export = true,
+            None => {}
         },
     );
 
