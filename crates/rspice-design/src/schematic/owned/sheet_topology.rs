@@ -82,17 +82,29 @@ impl Schematic {
     }
 }
 
+/// Take the items `hidden` names out of `items`, each with the place it held.
+///
+/// Each taken item moves once, into the returned list. The kept items stay in
+/// the list's own storage, closing up behind each taken one, so those ahead
+/// of the first taken one never move: a part is close to a kilobyte, and a
+/// drag takes the other sheets out on every frame.
 fn take_hidden<T>(items: &mut Vec<T>, hidden: impl Fn(&T) -> bool) -> Vec<(usize, T)> {
-    let mut retained = Vec::with_capacity(items.len());
+    // The filter sees each item in order, just before the item it takes is
+    // handed over, so the place it last took is that item's.
+    let next = std::cell::Cell::new(0);
+    let taken_at = std::cell::Cell::new(0);
     let mut removed = Vec::new();
-    for (index, item) in std::mem::take(items).into_iter().enumerate() {
-        if hidden(&item) {
-            removed.push((index, item));
-        } else {
-            retained.push(item);
+    for item in items.extract_if(.., |item| {
+        let place = next.get();
+        next.set(place + 1);
+        let take = hidden(item);
+        if take {
+            taken_at.set(place);
         }
+        take
+    }) {
+        removed.push((taken_at.get(), item));
     }
-    *items = retained;
     removed
 }
 
