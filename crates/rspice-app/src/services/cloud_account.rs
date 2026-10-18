@@ -83,6 +83,27 @@ pub(crate) enum CloudSessionPhase {
     OfflineLicensed,
 }
 
+impl CloudSessionPhase {
+    /// Whether a session is held: verified by the server, or by the stored
+    /// license lease while the server is out of reach.
+    pub(crate) const fn is_held(&self) -> bool {
+        matches!(self, Self::Active | Self::OfflineLicensed)
+    }
+
+    /// Why a session that was held ended without the reader asking: expired,
+    /// revoked, or refused on refresh. `None` while one is still held, for a
+    /// sign-in attempt that failed, and for a sign-out the reader chose, which
+    /// carries no error.
+    pub(crate) fn lost_session_reason(&self, held_before: bool) -> Option<&str> {
+        match self {
+            Self::SignedOut {
+                last_error: Some(reason),
+            } if held_before => Some(reason),
+            _ => None,
+        }
+    }
+}
+
 /// Server-owned identity facts about the signed-in principal.
 ///
 /// Carries exactly what the console renders; richer projections arrive with
@@ -1155,6 +1176,39 @@ impl CloudAccountService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only a held session that ended on its own is a loss worth saying.
+    #[test]
+    fn a_session_is_lost_only_when_one_was_held_and_ended_with_a_reason() {
+        let expired = CloudSessionPhase::SignedOut {
+            last_error: Some("Your session has expired; sign in again to reconnect.".to_owned()),
+        };
+        for held in [
+            CloudSessionPhase::Active,
+            CloudSessionPhase::OfflineLicensed,
+        ] {
+            assert_eq!(
+                expired.lost_session_reason(held.is_held()),
+                Some("Your session has expired; sign in again to reconnect."),
+                "{held:?}"
+            );
+        }
+        // A sign-in that failed never held a session.
+        for before in [
+            CloudSessionPhase::WaitingForBrowser,
+            CloudSessionPhase::ExchangingTokens,
+            CloudSessionPhase::Bootstrapping,
+            expired.clone(),
+        ] {
+            assert!(!before.is_held(), "{before:?}");
+            assert_eq!(expired.lost_session_reason(before.is_held()), None);
+        }
+        // The reader signed out.
+        let chosen = CloudSessionPhase::SignedOut { last_error: None };
+        assert_eq!(chosen.lost_session_reason(true), None);
+        // Still held.
+        assert_eq!(CloudSessionPhase::Active.lost_session_reason(true), None);
+    }
 
     #[test]
     fn executor_mailboxes_coalesce_to_finite_latest_state() {
