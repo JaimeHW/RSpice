@@ -15,7 +15,7 @@ use crate::state::{
 };
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
-use rspice_design::connectivity::{extract, summary::projection_nets};
+use rspice_design::connectivity::{open_terminals, summary::projection_nets};
 use rspice_schematic_editor::view::{
     cross_probe::wrapped_signal_name,
     pointer_target::{self, PointerTarget},
@@ -320,31 +320,27 @@ fn open_pins(
 /// The open sheet's terminals that nothing meets, where the canvas draws them.
 ///
 /// Open means `ExtractedTerminal::attached == false`, the judgement the design
-/// check reports as an unconnected pin, made by the one [`extract`]. It runs
-/// on the open sheet's own objects, in the canvas's coordinates, with each
-/// instance's pins resolved through the symbols the frame draws, so a mark
-/// sits on the terminal it is about. Seeing one sheet, it does not join what
-/// only the whole cell joins: same-named interface ports, and ground symbols,
-/// on different sheets.
+/// check reports as an unconnected pin, made by the pass
+/// [`rspice_design::connectivity::extract`] makes, without naming the nets it
+/// finds. It runs on the open sheet's own objects, in the canvas's
+/// coordinates, with each instance's pins resolved through the symbols the
+/// frame draws, so a mark sits on the terminal it is about. Seeing one sheet,
+/// it does not join what only the whole cell joins: same-named interface
+/// ports, and ground symbols, on different sheets.
 fn extract_open_pins(
     state: &AppState,
     symbol_context: &SchematicSymbolContext,
 ) -> std::collections::HashMap<u64, Vec<Point>> {
     let sheet = super::sheet_visibility::active_sheet_connectivity(state);
-    let connectivity = extract(
+    let mut open = std::collections::HashMap::<u64, Vec<Point>>::new();
+    for (component_id, point) in open_terminals(
         &sheet,
         |binding| symbol_context.resolved_binding_symbol(binding).cloned(),
         // A name decides which net a terminal is on, never whether anything
         // meets it.
         |_| None,
-    );
-    let mut open = std::collections::HashMap::<u64, Vec<Point>>::new();
-    for terminal in connectivity.terminals {
-        if !terminal.attached {
-            open.entry(terminal.component_id)
-                .or_default()
-                .push(terminal.point);
-        }
+    ) {
+        open.entry(component_id).or_default().push(point);
     }
     open
 }

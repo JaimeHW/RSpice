@@ -224,13 +224,48 @@ pub fn extract(
     resolve_symbol: impl Fn(&LibraryCellInstance) -> Option<ResolvedCellSymbol>,
     promote_label: impl Fn(&str) -> Option<String>,
 ) -> ExtractedConnectivity {
-    let mut pass = Pass::new(schematic, &resolve_symbol, &promote_label);
+    joined(schematic, &resolve_symbol, &promote_label).finish()
+}
+
+/// Each placed terminal that nothing else in the drawing meets, an open pin,
+/// as its component and its point, in drawing order.
+///
+/// The judgement is [`ExtractedTerminal::attached`], made by the pass
+/// [`extract`] makes: every phase that can join a terminal's net runs as it
+/// runs there. Only naming the finished nets, which never decides whether
+/// anything meets a terminal, is left out.
+pub fn open_terminals(
+    schematic: &SchematicDocument,
+    resolve_symbol: impl Fn(&LibraryCellInstance) -> Option<ResolvedCellSymbol>,
+    promote_label: impl Fn(&str) -> Option<String>,
+) -> Vec<(u64, Point)> {
+    let mut pass = joined(schematic, &resolve_symbol, &promote_label);
+    pass.bind_terminals()
+        .into_iter()
+        .filter(|terminal| !terminal.attached)
+        .map(|terminal| (terminal.component_id, terminal.point))
+        .collect()
+}
+
+/// The pass with every phase that joins nets run: conductors traced, vectors
+/// projected, then ports, labels and ground applied, in the label-winner
+/// order.
+fn joined<'a, S, G>(
+    schematic: &'a SchematicDocument,
+    resolve_symbol: &'a S,
+    promote_label: &'a G,
+) -> Pass<'a, S, G>
+where
+    S: Fn(&LibraryCellInstance) -> Option<ResolvedCellSymbol>,
+    G: Fn(&str) -> Option<String>,
+{
+    let mut pass = Pass::new(schematic, resolve_symbol, promote_label);
     pass.trace_conductors();
     pass.project_vector_nets();
     pass.apply_interface_ports();
     pass.apply_net_labels();
     pass.identify_ground();
-    pass.finish()
+    pass
 }
 
 /// One component's terminal names and positions, resolved through the authored
@@ -288,6 +323,15 @@ fn net_names_equal(left: &str, right: &str) -> bool {
 
 fn validate_net_name(name: &str, policy: NetNamingPolicy) -> Result<(), &'static str> {
     NetLabel::validate_name(name, policy)
+}
+
+/// A placed terminal bound to its net, and whether anything else meets it.
+struct BoundTerminal {
+    component_id: u64,
+    pin: String,
+    point: Point,
+    net: usize,
+    attached: bool,
 }
 
 /// The extraction in progress.
@@ -1032,6 +1076,53 @@ where
         }
     }
 
+    /// Bind every placed terminal to its net, in drawing order, and judge
+    /// whether anything else meets it: another point of its net, another
+    /// terminal on it, or a name written onto its point.
+    fn bind_terminals(&mut self) -> Vec<BoundTerminal> {
+        let schematic = self.schematic;
+
+        // An annotation is a name written onto a point: it holds a terminal
+        // that meets no conductor into the drawing rather than leaving it open.
+        let annotations: HashSet<Point> = schematic
+            .net_labels
+            .iter()
+            .map(|label| label.pos)
+            .chain(self.buses.scalar_taps.iter().map(|binding| binding.point))
+            .collect();
+
+        let mut bound: Vec<(u64, String, Point, usize)> = Vec::new();
+        let mut terminal_counts: HashMap<usize, usize> = HashMap::new();
+        let terminals = std::mem::take(&mut self.terminals);
+        for (component, terminals) in schematic.components.iter().zip(terminals) {
+            for (pin, point) in terminals {
+                let Some(&net_id) = self.point_to_net.get(&point) else {
+                    continue;
+                };
+                *terminal_counts.entry(net_id).or_default() += 1;
+                bound.push((component.id, pin, point, net_id));
+            }
+        }
+
+        let spans: HashMap<usize, usize> = self
+            .nets
+            .iter()
+            .map(|net| (net.id, net.points.len()))
+            .collect();
+        bound
+            .into_iter()
+            .map(|(component_id, pin, point, net)| BoundTerminal {
+                component_id,
+                pin,
+                point,
+                net,
+                attached: spans.get(&net).copied().unwrap_or_default() > 1
+                    || terminal_counts.get(&net).copied().unwrap_or_default() > 1
+                    || annotations.contains(&point),
+            })
+            .collect()
+    }
+
     fn finish(mut self) -> ExtractedConnectivity {
         let schematic = self.schematic;
 
@@ -1059,28 +1150,7 @@ where
             .filter_map(|binding| self.point_to_net.get(&binding.point).copied())
             .collect();
 
-        // An annotation is a name written onto a point: it holds a terminal
-        // that meets no conductor into the drawing rather than leaving it open.
-        let annotations: HashSet<Point> = schematic
-            .net_labels
-            .iter()
-            .map(|label| label.pos)
-            .chain(self.buses.scalar_taps.iter().map(|binding| binding.point))
-            .collect();
-
-        let mut bound: Vec<(u64, String, Point, usize)> = Vec::new();
-        let mut terminal_counts: HashMap<usize, usize> = HashMap::new();
-        let terminals = std::mem::take(&mut self.terminals);
-        for (component, terminals) in schematic.components.iter().zip(terminals) {
-            for (pin, point) in terminals {
-                let Some(&net_id) = self.point_to_net.get(&point) else {
-                    continue;
-                };
-                *terminal_counts.entry(net_id).or_default() += 1;
-                bound.push((component.id, pin, point, net_id));
-            }
-        }
-
+        let bound = self.bind_terminals();
         let names: HashMap<usize, String> = self
             .nets
             .iter()
@@ -1093,24 +1163,17 @@ where
                 (shown != *name).then(|| (name.clone(), shown))
             })
             .collect();
-        let spans: HashMap<usize, usize> = self
-            .nets
-            .iter()
-            .map(|net| (net.id, net.points.len()))
-            .collect();
         let terminals = bound
             .into_iter()
-            .map(|(component_id, pin, point, net)| ExtractedTerminal {
-                component_id,
-                pin,
-                point,
+            .map(|terminal| ExtractedTerminal {
+                component_id: terminal.component_id,
+                pin: terminal.pin,
+                point: terminal.point,
                 net_name: names
-                    .get(&net)
+                    .get(&terminal.net)
                     .cloned()
-                    .unwrap_or_else(|| format!("net{net}")),
-                attached: spans.get(&net).copied().unwrap_or_default() > 1
-                    || terminal_counts.get(&net).copied().unwrap_or_default() > 1
-                    || annotations.contains(&point),
+                    .unwrap_or_else(|| format!("net{}", terminal.net)),
+                attached: terminal.attached,
             })
             .collect();
 
