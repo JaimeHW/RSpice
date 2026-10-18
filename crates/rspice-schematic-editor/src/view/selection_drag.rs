@@ -127,14 +127,19 @@ pub fn start(
         position,
     )
     .snapped_position;
-    let wire = resolve_target_pointer(
-        &view.design,
-        &view.editor.snap_engine,
-        symbols,
-        viewport,
-        position,
-    )
-    .snapped_position;
+    // Where a wire vertex is picked up. Only a press on a wire or a junction
+    // reads it, and resolving it scans every pin on the sheet for the snap,
+    // so a part's drag does not pay for it.
+    let wire = || {
+        resolve_target_pointer(
+            &view.design,
+            &view.editor.snap_engine,
+            symbols,
+            viewport,
+            position,
+        )
+        .snapped_position
+    };
     let target = pointer_target(
         &view.design,
         PointerQuery {
@@ -153,7 +158,7 @@ pub fn start(
     if canvas_touch_mode(ui.ctx()) {
         let start = TouchDragStart {
             grid,
-            wire,
+            wire: wire(),
             band,
             read_only,
             box_latched: touch_latches(ui.ctx()).select_box,
@@ -176,10 +181,13 @@ pub fn start(
             target,
             position: grid,
         },
-        Some(PointerTarget::Junction(_) | PointerTarget::Wire(_))
-            if view.filter.wires && view.design.active_wire_point_is_draggable(wire) =>
-        {
-            SelectionDragAction::BeginWireVertex(wire)
+        Some(PointerTarget::Junction(_) | PointerTarget::Wire(_)) if view.filter.wires => {
+            let wire = wire();
+            if view.design.active_wire_point_is_draggable(wire) {
+                SelectionDragAction::BeginWireVertex(wire)
+            } else {
+                SelectionDragAction::BeginMarquee(band)
+            }
         }
         _ => SelectionDragAction::BeginMarquee(band),
     })
