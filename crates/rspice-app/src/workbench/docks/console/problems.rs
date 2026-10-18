@@ -48,7 +48,10 @@ use std::borrow::Cow;
 
 use egui::{Key, Modifiers, Ui, Vec2};
 
-use super::{AppState, CONSOLE_FONT_SIZE, CONSOLE_ROW_MIN_HEIGHT, muted};
+use super::{
+    AppState, CONSOLE_BODY_PADDING_X, CONSOLE_FONT_SIZE, CONSOLE_ROW_MIN_HEIGHT, muted, padded,
+    toolbar,
+};
 use crate::diagnostics::LogAnchor;
 use crate::ui::theme::{self, FontWeight};
 use crate::workbench::app_state::diagnostic_store::listing::{
@@ -196,21 +199,30 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
         if total == 0 {
             // Nothing to list is not a table with no rows: it is one claim,
             // and a toolbar over it would offer to filter nothing.
-            muted(ui, &empty_state(listed.empty_reason()));
+            padded(ui, |ui| muted(ui, &empty_state(listed.empty_reason())));
             return false;
         }
         let (arrangement, current) = arrange::arrange(ui.ctx(), &listed, &view, selection.finding);
+        toolbar(ui, |ui| {
+            strip::filter_strip(ui, &mut view, &arrangement.tally);
+            if view.is_filtered() && strip::filtered_out(ui, arrangement.listed, total) {
+                view.clear_filters();
+            }
+        });
         let columns = Columns::measure(
             ui,
-            arrangement.tally.widest_code,
-            arrangement.tally.widest_producer,
-            listed.unavailable().is_some(),
+            &arrangement.tally.widest,
+            ui.available_rect_before_wrap().x_range(),
         );
-        strip::filter_strip(ui, &mut view, &arrangement.tally);
-        if view.is_filtered() && strip::filtered_out(ui, arrangement.listed, total) {
-            view.clear_filters();
-        }
-        if let Some(column) = grid::header(ui, &columns, &view) {
+        let note = note(&listed);
+        let note_height = note.as_deref().map_or(0.0, |note| note_height(ui, note));
+        // The header, the rows and the note under them show only where the
+        // header, one whole row and the note fit under the toolbar. A dock
+        // dragged shorter shows the toolbar alone, rather than a header band
+        // or a row cut by its bottom edge.
+        let shows_table = ui.available_height() + 0.5
+            >= grid::HEADER_HEIGHT + CONSOLE_ROW_MIN_HEIGHT + note_height;
+        if shows_table && let Some(column) = grid::header(ui, &columns, &view) {
             view.order_by(column);
         }
 
@@ -238,13 +250,26 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
             &mut selection,
             &mut intent,
         );
-        let note = note(&listed);
-        let detail_height = selection
+        // What is left under the header, above the page's bottom inset. The
+        // detail region takes its share of it only where a row of the table
+        // still shows above it; where it would not, it yields, and a selected
+        // row is still marked in the table.
+        let room = if shows_table {
+            (ui.available_height() - note_height).max(0.0)
+        } else {
+            0.0
+        };
+        let pitch = CONSOLE_ROW_MIN_HEIGHT + ui.spacing().item_spacing.y;
+        let wanted = selection
             .listed
-            .map_or(0.0, |_| detail::height(ui.available_height()));
-        let note_height = note.as_deref().map_or(0.0, |note| note_height(ui, note));
-        let table_height =
-            (ui.available_height() - detail_height - note_height).max(CONSOLE_ROW_MIN_HEIGHT);
+            .and_then(|_| detail::height(ui, room - pitch));
+        // Whole rows: at rest, the body's bottom edge falls between two rows
+        // rather than through one. The detail region takes what the whole
+        // rows leave, so a line of the finding that fits is shown rather than
+        // left under empty space; with no region, what is left stays empty
+        // above the page's bottom inset.
+        let table_height = ((room - wanted.unwrap_or(0.0)) / pitch).floor().max(0.0) * pitch;
+        let detail_height = wanted.map_or(0.0, |_| room - table_height);
         // What the table's height was reserved against. A click inside the
         // table can select a row the height was not reserved for, and drawing
         // the region anyway would paint it over the rows it displaces: the
@@ -264,12 +289,14 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
             &mut intent,
             state,
         );
-        if let Some(note) = note {
-            muted(ui, &note);
+        if shows_table && let Some(note) = note {
+            padded(ui, |ui| muted(ui, &note));
         }
         if selection.listed != reserved_for {
             ui.ctx().request_repaint();
-        } else if let Some(row) = selection.listed.and_then(|index| listed.row(index)) {
+        } else if detail_height > 0.0
+            && let Some(row) = selection.listed.and_then(|index| listed.row(index))
+        {
             let refusal = row
                 .route
                 .as_ref()
@@ -428,13 +455,17 @@ fn table(
     intent: &mut PageIntent,
     state: &AppState,
 ) {
-    let mut area = egui::ScrollArea::vertical()
-        .id_salt("workbench.problems")
-        .max_height(table.height);
     // The pitch the body lays rows out at, which is the row height plus
     // whatever the enclosing dock spaces its rows by — the same arithmetic
     // `show_rows` does, read from the same place rather than assumed.
     let pitch = CONSOLE_ROW_MIN_HEIGHT + ui.spacing().item_spacing.y;
+    // Never taller than it was given: egui otherwise keeps a scrolled area
+    // at least 64 points tall, and a body that overran its room pushed the
+    // detail region under it off the bottom of the dock.
+    let mut area = egui::ScrollArea::vertical()
+        .id_salt("workbench.problems")
+        .max_height(table.height)
+        .min_scrolled_height(0.0);
     let cursor = cursor_group(table.arrangement, selection, view);
     let header = view.current_group.as_deref().map(grid::group_id);
     let moved = body.finding != selection.finding || body.group != header;
@@ -904,16 +935,17 @@ fn note(listed: &DiagnosticListing<'_>) -> Option<String> {
     })
 }
 
-/// The height `note` takes, wrapped at the width the page has. A reason is
-/// the producer's own words and can run to more than one line, and a note
-/// reserved one line would push the detail region off the bottom of the dock.
+/// The height `note` takes, wrapped at the width of the page's text column. A
+/// reason is the producer's own words and can run to more than one line, and
+/// a note reserved one line would push the detail region off the bottom of
+/// the dock.
 fn note_height(ui: &Ui, note: &str) -> f32 {
     ui.painter()
         .layout(
             note.to_owned(),
             theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
             egui::Color32::WHITE,
-            ui.available_width(),
+            (ui.available_width() - 2.0 * CONSOLE_BODY_PADDING_X).max(0.0),
         )
         .size()
         .y

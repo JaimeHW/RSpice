@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use egui::{Ui, Vec2};
 
-use super::super::{CONSOLE_COLUMN_GAP, CONSOLE_FONT_SIZE, CONSOLE_ROW_MIN_HEIGHT};
+use super::super::{CONSOLE_COLUMN_GAP, CONSOLE_FONT_SIZE, padded};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Button;
@@ -28,10 +28,27 @@ use crate::workbench::app_state::waivers::WaiverAction;
 /// The height of the verb row above the detail lines.
 const ACTION_ROW_HEIGHT: f32 = 24.0;
 
+/// The space between the rule over the region and its verbs.
+const RULE_GAP: f32 = 3.0;
+
+/// The space between two of the region's lines.
+const LINE_GAP: f32 = 1.0;
+
 /// The detail region's share of the page, in lines of its own face.
 const MIN_DETAIL_LINES: f32 = 2.0;
 const MAX_DETAIL_LINES: f32 = 6.0;
 const DETAIL_SHARE: f32 = 0.38;
+
+/// Where each of last frame's lines ended, below the top of the lines: what
+/// this frame sizes the lines' view by.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct LineEnds(Vec<f32>);
+
+impl LineEnds {
+    fn id() -> egui::Id {
+        egui::Id::new("workbench.problems.detail.ends")
+    }
+}
 
 /// What the reader asked the page to do with the current finding.
 #[derive(Debug, Clone, Default)]
@@ -92,12 +109,52 @@ pub(super) struct Listed {
     pub(super) collapsed: bool,
 }
 
-/// How tall the detail region is in a page of `available` height.
-pub(super) fn height(available: f32) -> f32 {
-    let lines = (available * DETAIL_SHARE / CONSOLE_ROW_MIN_HEIGHT)
+/// The height of one line of the region's face.
+fn line_height(ui: &Ui) -> f32 {
+    ui.fonts_mut(|fonts| fonts.row_height(&theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular)))
+}
+
+/// How tall the detail region is in `room`, the height the page can give it,
+/// or `None` where it does not fit: its rule, its verbs and one whole line
+/// of the finding. A region that would cut its verbs or its first line in
+/// half yields its room to the table instead.
+///
+/// The lines are counted with the gap between them, so a region sized for
+/// two lines shows two: counted without it, the second line came up a point
+/// short and was left to the scroll.
+pub(super) fn height(ui: &Ui, room: f32) -> Option<f32> {
+    let pitch = line_height(ui) + LINE_GAP;
+    let chrome = RULE_GAP + ACTION_ROW_HEIGHT;
+    let fits = ((room - chrome + LINE_GAP) / pitch).floor();
+    if fits < 1.0 {
+        return None;
+    }
+    let share = (room * DETAIL_SHARE / pitch)
         .floor()
         .clamp(MIN_DETAIL_LINES, MAX_DETAIL_LINES);
-    ACTION_ROW_HEIGHT + lines * CONSOLE_ROW_MIN_HEIGHT
+    Some(chrome + share.min(fits) * pitch - LINE_GAP)
+}
+
+/// How tall the view of the region's lines is in `room`: all of it where
+/// every line fits, and otherwise down to the end of the last line that fits
+/// whole, so the view's edge never cuts a line and the rest scrolls into it.
+/// `ends` are last frame's; with none yet, the view is whole lines of the
+/// region's face.
+fn view_height(ui: &Ui, room: f32, ends: &[f32]) -> f32 {
+    if ends.last().is_some_and(|last| *last <= room + 0.5) {
+        return room;
+    }
+    let whole = ends
+        .iter()
+        .copied()
+        .filter(|end| *end <= room + 0.5)
+        .fold(0.0, f32::max);
+    if whole > 0.0 {
+        whole
+    } else {
+        let pitch = line_height(ui) + LINE_GAP;
+        (((room + LINE_GAP) / pitch).floor() * pitch - LINE_GAP).max(0.0)
+    }
 }
 
 /// Draw the region for the current finding.
@@ -119,12 +176,42 @@ pub(super) fn detail(
 ) -> DetailActions {
     let tokens = Tokens::get(ui.ctx());
     let mut actions = DetailActions::default();
+    // The rule runs from side to side of the dock, as the table's rows do;
+    // what is under it stands in the page's text column.
     ui.painter().hline(
         ui.max_rect().x_range(),
         ui.max_rect().top(),
         egui::Stroke::new(1.0, tokens.color.border),
     );
-    ui.add_space(3.0);
+    ui.add_space(RULE_GAP);
+    padded(ui, |ui| {
+        verbs(
+            ui,
+            row,
+            explaining,
+            listed,
+            refusal,
+            waiving,
+            waiver_refusal,
+            &mut actions,
+        );
+        lines(ui, row, explaining, refusal, waiver_refusal, &mut actions);
+    });
+    actions
+}
+
+/// The verb row: what can be done with the current finding, or the reason
+/// field of the waiver being written for it.
+fn verbs(
+    ui: &mut Ui,
+    row: &DiagnosticRow<'_>,
+    explaining: bool,
+    listed: Listed,
+    refusal: Option<&str>,
+    waiving: Option<&mut WaiverDraft>,
+    waiver_refusal: Option<&str>,
+    actions: &mut DetailActions,
+) {
     ui.allocate_ui_with_layout(
         Vec2::new(ui.available_width(), ACTION_ROW_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -200,19 +287,64 @@ pub(super) fn detail(
             }
         },
     );
+}
+
+/// Everything the finding says, under the verbs, in a view that scrolls.
+///
+/// The view ends where a line ends: in a region shorter than what it holds,
+/// the line the bottom would have cut is left to the scroll, and the space it
+/// would have taken stays empty above the page's bottom inset.
+fn lines(
+    ui: &mut Ui,
+    row: &DiagnosticRow<'_>,
+    explaining: bool,
+    refusal: Option<&str>,
+    waiver_refusal: Option<&str>,
+    actions: &mut DetailActions,
+) {
+    let tokens = Tokens::get(ui.ctx());
+    let previous: LineEnds = ui
+        .ctx()
+        .data(|data| data.get_temp(LineEnds::id()))
+        .unwrap_or_default();
+    let view = view_height(ui, ui.available_height(), &previous.0);
+    let mut ends = Ends::default();
     egui::ScrollArea::vertical()
         .id_salt("workbench.problems.detail")
+        .max_height(view)
+        .min_scrolled_height(0.0)
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 1.0;
-            line(ui, row.message, tokens.color.text, FontWeight::Regular);
+            ui.spacing_mut().item_spacing.y = LINE_GAP;
+            ends.top = ui.min_rect().top();
+            let ends = &mut ends;
+            line(
+                ui,
+                ends,
+                row.message,
+                tokens.color.text,
+                FontWeight::Regular,
+            );
             if explaining && !row.rule.is_empty() {
-                line(ui, row.rule, tokens.color.text_dim, FontWeight::Regular);
+                line(
+                    ui,
+                    ends,
+                    row.rule,
+                    tokens.color.text_dim,
+                    FontWeight::Regular,
+                );
             }
             if !row.details.is_empty() {
-                line(ui, row.details, tokens.color.text_dim, FontWeight::Regular);
+                line(
+                    ui,
+                    ends,
+                    row.details,
+                    tokens.color.text_dim,
+                    FontWeight::Regular,
+                );
             }
             line(
                 ui,
+                ends,
                 &rule_reference(row),
                 tokens.color.text_faint,
                 FontWeight::Medium,
@@ -220,25 +352,44 @@ pub(super) fn detail(
             if let Some(waiver) = row.suppression {
                 line(
                     ui,
+                    ends,
                     &format!("Waived \u{00b7} {}", waiver_text(waiver)),
                     tokens.color.text_faint,
                     FontWeight::Medium,
                 );
             }
             if let Some(standing) = standing(row) {
-                line(ui, &standing, tokens.color.text_faint, FontWeight::Medium);
+                line(
+                    ui,
+                    ends,
+                    &standing,
+                    tokens.color.text_faint,
+                    FontWeight::Medium,
+                );
             }
             if let Some(refusal) = refusal {
-                line(ui, refusal, tokens.color.text_faint, FontWeight::Medium);
+                line(
+                    ui,
+                    ends,
+                    refusal,
+                    tokens.color.text_faint,
+                    FontWeight::Medium,
+                );
             }
             if row.waiver_action.is_some()
                 && let Some(refusal) = waiver_refusal
             {
-                line(ui, refusal, tokens.color.text_faint, FontWeight::Medium);
+                line(
+                    ui,
+                    ends,
+                    refusal,
+                    tokens.color.text_faint,
+                    FontWeight::Medium,
+                );
             }
             for related in row.related {
                 let route = related_route(row, related);
-                if related_line(ui, related, route.is_some()) {
+                if related_line(ui, ends, related, route.is_some()) {
                     actions.related = route;
                 }
             }
@@ -246,19 +397,51 @@ pub(super) fn detail(
             // with and what it is to the finding, followed the way the row is.
             for place in row.related_places {
                 let route = row.place_route(place);
-                if place_line(ui, &place.label, route.is_some()) {
+                if place_line(ui, ends, &place.label, route.is_some()) {
                     actions.related = route;
                 }
             }
             // The line of the run's log that states it. What a run logged
             // does not move under an edit, so a stale finding offers it too.
             if let Some(place) = row.log_place
-                && place_line(ui, &place.label(), true)
+                && place_line(ui, ends, &place.label(), true)
             {
                 actions.related = Some(place.route());
             }
         });
-    actions
+    // The next frame sizes the view by where these lines ended. A change is
+    // drawn again at once, so a view sized for other lines lasts one frame.
+    let ends = LineEnds(ends.ends);
+    if ends != previous {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(LineEnds::id(), ends));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Where the region's lines end, as they are drawn, below `top`, the top of
+/// the first.
+#[derive(Debug, Default)]
+struct Ends {
+    top: f32,
+    ends: Vec<f32>,
+}
+
+impl Ends {
+    /// Every row of a laid-out text drawn in `rect`.
+    fn text(&mut self, rect: egui::Rect, galley: &egui::Galley) {
+        self.ends.extend(
+            galley
+                .rows
+                .iter()
+                .map(|row| rect.top() + row.rect().bottom() - self.top),
+        );
+    }
+
+    /// A line drawn in `rect` that is not text alone: a verb beside a place.
+    fn line(&mut self, rect: egui::Rect) {
+        self.ends.push(rect.bottom() - self.top);
+    }
 }
 
 /// The rule the finding is an instance of, and who reported it.
@@ -404,6 +587,7 @@ fn related_route(
 /// One related place. Returns true when the reader asked to go there.
 fn related_line(
     ui: &mut Ui,
+    ends: &mut Ends,
     related: &rspice_app_types::diagnostics::DiagnosticRelatedLocation,
     followable: bool,
 ) -> bool {
@@ -411,43 +595,52 @@ fn related_line(
         format!(" · line {}", range.start.line + 1)
     });
     let text = format!("{}{position} · {}", related.document_id, related.message);
-    place_line(ui, &text, followable)
+    place_line(ui, ends, &text, followable)
 }
 
 /// One place the finding names, with a verb to go there where it can be
 /// followed. Returns true when the reader asked to go there.
-fn place_line(ui: &mut Ui, text: &str, followable: bool) -> bool {
+fn place_line(ui: &mut Ui, ends: &mut Ends, text: &str, followable: bool) -> bool {
     let tokens = Tokens::get(ui.ctx());
     if !followable {
-        line(ui, text, tokens.color.text_faint, FontWeight::Regular);
+        line(ui, ends, text, tokens.color.text_faint, FontWeight::Regular);
         return false;
     }
     let mut followed = false;
-    ui.horizontal(|ui| {
+    let placed = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = CONSOLE_COLUMN_GAP;
         followed = Button::new("Go")
             .compact()
             .accessible_label(&format!("Go to {text}"))
             .show(ui)
             .clicked();
-        line(ui, text, tokens.color.text_dim, FontWeight::Regular);
+        // The verb and its place are one line, ended by the taller of the two.
+        line(
+            ui,
+            &mut Ends::default(),
+            text,
+            tokens.color.text_dim,
+            FontWeight::Regular,
+        );
     });
+    ends.line(placed.response.rect);
     followed
 }
 
-/// One line of detail, in the page's own face.
-fn line(ui: &mut Ui, text: &str, color: egui::Color32, weight: FontWeight) {
+/// One line of detail, in the page's own face, wrapped at the region's width.
+/// Where each of its rows ends is added to `ends`.
+fn line(ui: &mut Ui, ends: &mut Ends, text: &str, color: egui::Color32, weight: FontWeight) {
     if text.is_empty() {
         return;
     }
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(text)
-                .font(theme::mono(CONSOLE_FONT_SIZE, weight))
-                .color(color),
-        )
-        .wrap(),
+    let galley = ui.painter().layout(
+        text.to_owned(),
+        theme::mono(CONSOLE_FONT_SIZE, weight),
+        color,
+        ui.available_width(),
     );
+    let drawn = ui.add(egui::Label::new(Arc::clone(&galley)));
+    ends.text(drawn.rect, &galley);
 }
 
 #[cfg(test)]

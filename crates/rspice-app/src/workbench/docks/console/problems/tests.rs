@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use egui::accesskit::Role;
 
-use super::super::{CONSOLE_COLUMN_GAP, CONSOLE_MARK_GUTTER};
+use super::super::{CONSOLE_CELL_INSET, CONSOLE_MARK_GUTTER};
 use super::*;
 use crate::state::{ComponentType, Point};
 use crate::workbench::app_state::diagnostic_store::listing::listing;
@@ -540,20 +540,27 @@ fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
         "every column of the row is painted: {row:?}",
     );
     let scroll = harness_scrollbar();
-    let row_end = render.header_band().right() - scroll;
+    let row_end = render.header_band().right() - scroll - CONSOLE_CELL_INSET;
     for (index, (cell, heading)) in row.iter().zip(&headings).enumerate() {
+        // The severity word stands after its mark; every other cell's text
+        // stands where its heading does.
+        let start = if index == 0 {
+            heading.x + CONSOLE_MARK_GUTTER
+        } else {
+            heading.x
+        };
         assert!(
-            (cell.1.min.x - heading.x).abs() < 0.5,
-            "the cell {:?} at {} is not under its heading at {}",
+            (cell.1.min.x - start).abs() < 0.5,
+            "the cell {:?} at {} is not under its heading at {start}",
             cell.0,
             cell.1.min.x,
-            heading.x,
         );
-        // A column ends one gap short of the next heading; the last one ends
-        // where the scrollbar's allowance begins.
+        // A column's text ends a cell inset short of its cell's edge, and the
+        // next heading stands a cell inset past it; the last one ends an inset
+        // short of the scrollbar's allowance.
         let column_end = headings
             .get(index + 1)
-            .map_or(row_end, |next| next.x - CONSOLE_COLUMN_GAP);
+            .map_or(row_end, |next| next.x - 2.0 * CONSOLE_CELL_INSET);
         assert!(
             cell.1.right() <= column_end + 0.5,
             "the cell {:?} ends at {} past its column's end at {column_end}",
@@ -565,7 +572,7 @@ fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
         if cell.0 != whole[index] {
             let advance = cell.1.width() / cell.0.chars().count() as f32;
             let needed = whole[index].chars().count() as f32 * advance;
-            let room = column_end - heading.x;
+            let room = column_end - start;
             assert!(
                 cell.0.contains('…') && needed > room + 0.5,
                 "{:?} is cut to {:?} though its {needed} fits the column's {room}",
@@ -661,8 +668,8 @@ fn with_a_scrollbar_the_rows_still_line_up_and_stop_short_of_it() {
     );
     let first = render.row_at(cut.1.min.y);
     assert!(
-        (first[0].1.min.x - severity_heading.x).abs() < 0.5,
-        "and every row's severity is under its heading: {first:?}",
+        (first[0].1.min.x - (severity_heading.x + CONSOLE_MARK_GUTTER)).abs() < 0.5,
+        "and every row's severity word is under its heading, after its mark: {first:?}",
     );
 }
 
@@ -973,8 +980,10 @@ fn a_waived_error_is_marked_without_the_failure_colour() {
     let palette = crate::ui::tokens::Tokens::default().color;
 
     let render = render(&mut state, sized(egui::RawInput::default()));
-    let row = row_of(render.cell("a waived error").expect("listed"));
-    let gutter_end = render.header_band().left() + CONSOLE_MARK_GUTTER;
+    let cell = render.cell("a waived error").expect("listed");
+    let row = row_of(cell);
+    // The gutter ends where the row's severity word begins.
+    let gutter_end = render.row_at(cell.min.y)[0].1.left();
     let marked = |color: egui::Color32| {
         render
             .segments
@@ -1837,38 +1846,31 @@ fn a_finding_made_current_elsewhere_is_scrolled_into_view() {
 fn a_half_shown_row_made_current_is_scrolled_whole() {
     let mut state = state_with_findings(60);
     let order = reported(&state);
-    // Standing on a finding far down leaves the body scrolled to wherever that
-    // finding's bottom edge put it. Whether its top edge then cuts a row
-    // depends on the body's height, so the page is tried at heights a point
-    // apart until one does.
-    for height in (400_u16..440).map(f32::from) {
-        let input = || sized_to(egui::RawInput::default(), height);
-        let harness = Harness::new();
-        state.diagnostics.set_current_finding(Some(order[45]));
-        let _ = harness.frame(&mut state, input());
-        let _ = harness.frame(&mut state, input());
-        let render = harness.frame(&mut state, input());
-        let table = harness.table();
-        let Some(cut) = (0..order.len())
-            .map(|index| format!("finding {index:02}"))
-            .find(|message| {
-                render.cell(message).is_some_and(|cell| {
-                    let row = row_of(cell);
-                    row.top() < table.top() - 0.5 && row.bottom() > table.top() + 0.5
-                })
+    // The body holds whole rows, so standing on a finding far down leaves no
+    // row cut at rest. A reader's scrolling can stop anywhere: scrolled back
+    // by less than a row, the body's top edge cuts one.
+    let harness = Harness::new();
+    state.diagnostics.set_current_finding(Some(order[45]));
+    harness.settle(&mut state);
+    harness.settle(&mut state);
+    harness.scroll_body_to(harness.body_offset() - 7.0);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    let table = harness.table();
+    let cut = (0..order.len())
+        .map(|index| format!("finding {index:02}"))
+        .find(|message| {
+            render.cell(message).is_some_and(|cell| {
+                let row = row_of(cell);
+                row.top() < table.top() - 0.5 && row.bottom() > table.top() + 0.5
             })
-        else {
-            continue;
-        };
+        })
+        .expect("precondition: the body's top edge cuts a row");
 
-        let index: usize = cut["finding ".len()..].parse().expect("a numbered finding");
-        state.diagnostics.set_current_finding(Some(order[index]));
-        let _ = harness.frame(&mut state, input());
-        let render = harness.frame(&mut state, input());
-        assert!(harness.shows_whole(&render, &cut), "{cut} shows whole");
-        return;
-    }
-    panic!("precondition: some page height between 400 and 440 points cuts a row");
+    let index: usize = cut["finding ".len()..].parse().expect("a numbered finding");
+    state.diagnostics.set_current_finding(Some(order[index]));
+    harness.settle(&mut state);
+    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
+    assert!(harness.shows_whole(&render, &cut), "{cut} shows whole");
 }
 
 /// Clicking a row low in a full body opens the detail region under it, which
@@ -2043,10 +2045,25 @@ fn a_wrapped_note_takes_its_wrapped_height_from_the_body() {
         note.height() > 1.5 * CONSOLE_ROW_MIN_HEIGHT,
         "precondition: the note wraps at this width: {note:?}",
     );
+    // The body holds whole rows, so it gives up whole rows for the note:
+    // within a row of the note's height either way, as the room left under
+    // the last whole row absorbs the rest.
+    let mut tops: Vec<f32> = render
+        .texts
+        .iter()
+        .filter(|(text, _)| text.starts_with("wire "))
+        .map(|(_, rect)| rect.top())
+        .collect();
+    tops.sort_by(f32::total_cmp);
+    let pitch = tops
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f32::INFINITY, f32::min);
     let given_up = without_note - harness.table().height();
+    let rows = given_up / pitch;
     assert!(
-        (given_up - note.height()).abs() < 0.5,
-        "the body gave up {given_up} for a note {} tall",
+        (rows - rows.round()).abs() < 0.01 && (given_up - note.height()).abs() < pitch,
+        "the body gave up {given_up} ({rows} rows of {pitch}) for a note {} tall",
         note.height(),
     );
 }
@@ -2214,50 +2231,34 @@ fn the_severity_cell_tells_an_unreadable_finding_from_a_stale_one() {
     );
 }
 
-/// Every severity cell the page can print fits the cell the column is
-/// measured against: the evaluable cells the narrower one, and a finding that
-/// cannot be evaluated the wider one the column takes while such a finding is
-/// listed.
+/// The severity column is measured against the longest severity cell the
+/// listed rows print, not the longest the page could print: an error and a
+/// warning ask for "Warning", and only a listed waived error asks for
+/// "Waived Error". A waived finding the filter hides asks for nothing.
 #[test]
-fn every_severity_cell_fits_the_widest_measured_cell() {
-    let mut widest = String::new();
-    let mut widest_unavailable = String::new();
-    for level in DiagnosticLevel::ALL {
-        for standing in [
-            RowStanding::Current,
-            RowStanding::Stale("inputs".to_owned()),
-            RowStanding::Unavailable("unreadable".to_owned()),
-        ] {
-            for waiver in [None, Some(waiver("T-1"))] {
-                let cell = severity_cell(&bare_row(level, standing.clone(), waiver.as_ref()));
-                let (bound, longest) = if matches!(standing, RowStanding::Unavailable(_)) {
-                    (
-                        grid::WIDEST_UNAVAILABLE_SEVERITY_CELL,
-                        &mut widest_unavailable,
-                    )
-                } else {
-                    (grid::WIDEST_SEVERITY_CELL, &mut widest)
-                };
-                assert!(
-                    cell.chars().count() <= bound.chars().count(),
-                    "{cell} is wider than the cell the column is measured against",
-                );
-                if cell.chars().count() > longest.chars().count() {
-                    *longest = cell;
-                }
-            }
-        }
-    }
-    assert_eq!(
-        widest.chars().count(),
-        grid::WIDEST_SEVERITY_CELL.chars().count(),
-        "the measured cell must be the longest one the page can print",
+fn the_severity_column_is_measured_against_the_listed_cells() {
+    let mut state = open_state();
+    let mut waived = record(
+        &state,
+        "T-WAIVED",
+        DiagnosticLevel::Error,
+        "a waived finding",
     );
-    assert_eq!(
-        widest_unavailable.chars().count(),
-        grid::WIDEST_UNAVAILABLE_SEVERITY_CELL.chars().count(),
-        "and the wider one the longest a finding that cannot be evaluated prints",
-    );
+    waived.canonical.suppression = Some(waiver("T-WAIVED"));
+    let error = record(&state, "T-ERROR", DiagnosticLevel::Error, "an error");
+    let warning = record(&state, "T-WARN", DiagnosticLevel::Warning, "a warning");
+    publish(&mut state, vec![waived, error, warning]);
+
+    let widest = |state: &AppState| {
+        let listed = listing(state);
+        Arrangement::build(&listed, &state.problems_view)
+            .tally
+            .widest[0]
+    };
+    state.problems_view.waived = false;
+    assert_eq!(widest(&state), "Warning".chars().count());
+    state.problems_view.waived = true;
+    assert_eq!(widest(&state), "Waived Error".chars().count());
 }
 
 /// A frame whose listing and reading position match the last one reuses the

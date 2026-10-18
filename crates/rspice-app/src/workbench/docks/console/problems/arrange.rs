@@ -2,11 +2,12 @@
 //!
 //! One pass over the canonical list answers every question the page asks of
 //! it: which findings the filters admit, what each filter toggle would list if
-//! the reader moved it, which producers are present, and how wide the rule and
-//! producer columns have to be. They are answered together because they are
-//! all answers about the same rows, and because the list is sized for a
+//! the reader moved it, which producers are present, and how wide each column
+//! fitted to its content has to be. They are answered together because they
+//! are all answers about the same rows, and because the list is sized for a
 //! million records — a page that walked it once per question would walk it six
-//! times a frame.
+//! times a frame. Measuring the subject and location spells each listed row
+//! out, which is a cost only a build pays.
 //!
 //! That pass, and the order and groups built from it, are kept between frames
 //! and rebuilt only when the list or the reading position changed. Each frame
@@ -19,6 +20,10 @@
 //! subject — also folds the editors' row text into the stamp, because one of
 //! their rows can be republished saying something else under the same
 //! identity; a stored batch's fingerprint already covers what its rows say.
+//! Any other position measures the editors' rows as the build found them: an
+//! editor mints a finding's identity from its message and the revision it
+//! validated, so a row that says something else is a new identity, and the
+//! facets fold that.
 //!
 //! The rows are always ordered. The order producers happened to report in
 //! says nothing a reader can use, so a page opens worst first.
@@ -108,11 +113,11 @@ pub(super) struct Tally {
     pub(super) waived: usize,
     /// Every producer present, with what narrowing to it would list.
     pub(super) producers: Vec<(String, usize)>,
-    /// The longest rule code and producer identity among the listed rows, in
-    /// characters. The face is monospace, so a character count is what the
-    /// column measurement needs.
-    pub(super) widest_code: usize,
-    pub(super) widest_producer: usize,
+    /// The longest cell each column fitted to its content prints among the
+    /// listed rows, in characters, in [`super::grid::FITTED`] order. The face
+    /// is monospace, so a character count is what the column measurement
+    /// needs.
+    pub(super) widest: [usize; super::grid::FITTED.len()],
 }
 
 impl Tally {
@@ -253,8 +258,7 @@ impl Arrangement {
         let mut severities = [0_usize; DiagnosticLevel::ALL.len()];
         let mut waived = 0;
         let mut producers: BTreeMap<&str, usize> = BTreeMap::new();
-        let mut widest_code = 0;
-        let mut widest_producer = 0;
+        let mut widest = [0_usize; super::grid::FITTED.len()];
         let mut admitted: Vec<usize> = Vec::new();
         let mut count = 0;
 
@@ -280,8 +284,21 @@ impl Arrangement {
             }
             if severity_ok && producer_ok && waiver_ok {
                 count += 1;
-                widest_code = widest_code.max(facet.code.chars().count());
-                widest_producer = widest_producer.max(facet.producer.chars().count());
+                // What a listed row prints, measured: the rule and producer
+                // from the facet, and the severity word, subject and location
+                // from the row spelled out. Only a rebuild spells them.
+                if let Some(row) = listed.row(index) {
+                    let cells = [
+                        super::severity_cell(&row).chars().count(),
+                        facet.code.chars().count(),
+                        row.subject.chars().count(),
+                        facet.producer.chars().count(),
+                        row.location.chars().count(),
+                    ];
+                    for (widest, cell) in widest.iter_mut().zip(cells) {
+                        *widest = (*widest).max(cell);
+                    }
+                }
                 admitted.push(index);
             }
         }
@@ -299,8 +316,7 @@ impl Arrangement {
                     .into_iter()
                     .map(|(producer, count)| (producer.to_owned(), count))
                     .collect(),
-                widest_code,
-                widest_producer,
+                widest,
             },
             view: view.clone(),
             needle,
