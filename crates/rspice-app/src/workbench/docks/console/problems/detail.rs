@@ -311,6 +311,9 @@ fn lines(
     let mut ends = Ends::default();
     egui::ScrollArea::vertical()
         .id_salt("workbench.problems.detail")
+        // The dock's width, not the widest line's, so its bar sits at the
+        // dock's edge with the table's rather than beside the text.
+        .auto_shrink([false, true])
         .max_height(view)
         .min_scrolled_height(0.0)
         .show(ui, |ui| {
