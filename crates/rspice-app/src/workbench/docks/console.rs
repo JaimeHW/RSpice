@@ -1226,13 +1226,14 @@ fn paint_header_band(ui: &Ui, rect: egui::Rect, dividers: &[f32], hovered: Optio
 ///
 /// A row is laid out inside its scroll area, which gives up the scrollbar's
 /// width while the bar is drawn; the fill is not given up with it. It runs
-/// on under the bar, and the bar is drawn over it.
+/// on under the bar, and the bar is drawn over it. The widened clip is set,
+/// not passed to `with_clip_rect`, which only ever narrows the clip in force.
 fn paint_row_fill(ui: &Ui, row: egui::Rect, right: f32, fill: egui::Color32) {
     let mut clip = ui.clip_rect();
     clip.max.x = clip.max.x.max(right);
-    ui.painter()
-        .with_clip_rect(clip)
-        .rect_filled(row.with_max_x(right), 0.0, fill);
+    let mut painter = ui.painter().clone();
+    painter.set_clip_rect(clip);
+    painter.rect_filled(row.with_max_x(right), 0.0, fill);
 }
 
 /// A run's lifecycle word, and the mark it earns. Lifecycle words are states,
