@@ -87,10 +87,15 @@ impl ConsoleLaunchBehavior {
     }
 }
 
-/// Amount of retained background activity allowed to request user attention.
+/// Which run and campaign outcomes may interrupt the reader.
 ///
-/// RSpice never raises or focuses a host window from this policy. The runtime
-/// consumer only controls the in-application activity stream and badge.
+/// An outcome it admits raises a toast and, when it ends a long run out of
+/// sight, marks the window in the taskbar or dock, or raises the browser's
+/// notification where the reader turned those on. An outcome it holds back
+/// still lands in the notification panel, unannounced. A failure of the
+/// studio's own, such as a save that did not happen, is not a background
+/// task and always toasts. RSpice never raises or focuses a window from
+/// this policy.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackgroundTaskAttention {
