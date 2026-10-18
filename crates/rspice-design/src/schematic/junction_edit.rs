@@ -25,12 +25,14 @@ struct SegmentIndex {
     cols: std::collections::HashMap<i32, Vec<(i32, i32, u64)>>,
     /// Segments that are neither horizontal nor vertical.
     diagonals: Vec<(WireSegment, u64)>,
-    /// (wire id, vertex) pairs — distinguishes interiors from vertices.
+    /// (wire id, vertex) pairs — distinguishes interiors from vertices. Left
+    /// empty for an index that only asks where interiors cross.
     vertices: HashSet<(u64, Point)>,
 }
 
 impl SegmentIndex {
-    fn build(wires: &[Wire]) -> Self {
+    /// The index over `wires`, with each wire's vertices when `vertices`.
+    fn build(wires: &[Wire], vertices: bool) -> Self {
         let mut index = Self {
             rows: std::collections::HashMap::new(),
             cols: std::collections::HashMap::new(),
@@ -38,8 +40,10 @@ impl SegmentIndex {
             vertices: HashSet::new(),
         };
         for wire in wires {
-            for point in &wire.points {
-                index.vertices.insert((wire.id, *point));
+            if vertices {
+                for point in &wire.points {
+                    index.vertices.insert((wire.id, *point));
+                }
             }
             for seg in wire.points.windows(2) {
                 let (a, b) = (seg[0], seg[1]);
@@ -150,7 +154,7 @@ impl CrossingIndex {
     /// The crossings among `wires`, given the dots in `junctions`.
     pub fn new(wires: &[Wire], junctions: &[Junction]) -> Self {
         Self {
-            index: SegmentIndex::build(wires),
+            index: SegmentIndex::build(wires, false),
             vertices: wires
                 .iter()
                 .flat_map(|wire| wire.points.iter().copied())
@@ -205,7 +209,7 @@ impl JunctionRule {
             *pin_counts.entry(pin).or_insert(0) += 1;
         }
         Self {
-            index: SegmentIndex::build(&document.wires),
+            index: SegmentIndex::build(&document.wires, true),
             vertex_ends,
             pins: pin_counts,
         }
