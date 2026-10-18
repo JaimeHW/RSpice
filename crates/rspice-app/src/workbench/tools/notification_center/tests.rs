@@ -587,6 +587,74 @@ fn escape_and_a_press_elsewhere_close_the_panel_and_a_press_inside_does_not() {
     assert!(!panel.showing());
 }
 
+/// The browser's alert switch says what it does, flips the reader's choice
+/// with a press, and cannot be pressed once the site's permission is refused,
+/// where its words say why instead. The desktop never draws it, so the band
+/// is drawn here on its own, in each state a browser can be in.
+#[test]
+fn the_browser_alert_switch_flips_the_choice_and_says_when_it_cannot() {
+    const SWITCHABLE: &str = "Notify outside this tab when a run ends";
+    for (alerts, label, pressed) in [
+        (
+            BackgroundAlerts::Off,
+            SWITCHABLE,
+            Some(Intent::BackgroundAlerts(true)),
+        ),
+        (
+            BackgroundAlerts::On,
+            SWITCHABLE,
+            Some(Intent::BackgroundAlerts(false)),
+        ),
+        (
+            BackgroundAlerts::Asking,
+            "Waiting for the browser's permission",
+            Some(Intent::BackgroundAlerts(false)),
+        ),
+        (
+            BackgroundAlerts::Blocked,
+            "Notifications are blocked for this site",
+            None,
+        ),
+    ] {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let draw = |events: Vec<egui::Event>| {
+            let mut intents = Vec::new();
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(420.0, 200.0))),
+                    events,
+                    ..egui::RawInput::default()
+                },
+                |ui| background_alerts_band(ui, alerts, false, &mut intents),
+            );
+            let switch = output
+                .platform_output
+                .accesskit_update
+                .and_then(|update| {
+                    update.nodes.iter().find_map(|(_, node)| {
+                        (node.label() == Some(label))
+                            .then(|| node.bounds())
+                            .flatten()
+                    })
+                })
+                .map(|bounds| {
+                    pos2(
+                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                    )
+                });
+            (switch, intents)
+        };
+        draw(Vec::new());
+        let (switch, _) = draw(Vec::new());
+        let switch = switch.unwrap_or_else(|| panic!("{alerts:?} announces {label:?}"));
+        let (_, intents) = draw(click_events(switch));
+        assert_eq!(intents.first().copied(), pressed, "{alerts:?}");
+    }
+}
+
 #[test]
 fn the_bell_is_a_toggle() {
     let mut state = AppState::default();

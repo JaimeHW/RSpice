@@ -236,8 +236,9 @@ uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
 wasm-bindgen-futures = "0.4"
 # The Request/Response/AbortController/ReadableStream group backs the browser
 # identity Fetch in `services::cloud_account::oidc`, WebSocket/CloseEvent the
-# live-session relay, and Crypto the PKCE verifier's entropy.
-web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
+# live-session relay, and Crypto the PKCE verifier's entropy. The
+# Notification group is the run alert a hidden tab raises.
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "Notification", "NotificationOptions", "NotificationPermission", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
 js-sys = "0.3"
 
 # Cloud account boundary, browser half. The typed client, `url` for callback

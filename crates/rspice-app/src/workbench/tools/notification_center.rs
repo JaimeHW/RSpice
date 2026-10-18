@@ -28,6 +28,7 @@ use crate::ui::widgets::{
     NotificationAction, NotificationCategory, NotificationRecord, SWITCH_WIDTH, Toasts,
     mark_response_disabled, paint_switch,
 };
+use crate::workbench::browser::background_alerts::{self, BackgroundAlerts};
 use crate::workbench::chrome::title_bar;
 use crate::workbench::design_system::{WorkbenchIcon, elide_text};
 use crate::workbench::state::NotificationFilter;
@@ -113,6 +114,8 @@ enum Intent {
     Follow(u64, NotificationAction),
     MarkAllRead,
     ClearRead,
+    /// The reader turned the browser's run alerts on or off.
+    BackgroundAlerts(bool),
 }
 
 /// The panel's two view axes, copied out of the session for the pass.
@@ -224,6 +227,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
     };
     let mut intents = Vec::new();
     let records = app.state.ui.toasts.activity();
+    let alerts = background_alerts::background_alerts();
 
     let area = Area::new(panel_id())
         .order(Order::Foreground)
@@ -245,6 +249,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
                         &mut view,
                         records,
                         clock,
+                        alerts,
                         large,
                         placement.max_height - 2.0,
                         &mut intents,
@@ -274,6 +279,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
             }
             Intent::MarkAllRead => toasts.mark_all_read(),
             Intent::ClearRead => toasts.clear_read(),
+            Intent::BackgroundAlerts(on) => background_alerts::set_background_alerts(ctx, on),
             Intent::Follow(id, action) => {
                 // Following a notice is having read it.
                 toasts.mark_read(id);
@@ -384,6 +390,7 @@ fn panel_contents(
     view: &mut PanelView,
     records: &[NotificationRecord],
     clock: Clock,
+    alerts: BackgroundAlerts,
     large: bool,
     max_height: f32,
     intents: &mut Vec<Intent>,
@@ -395,8 +402,10 @@ fn panel_contents(
     head(ui, unread, large, intents);
     filters(ui, view, records, large);
 
-    let foot_height = band_height(FOOT_HEIGHT, large);
-    let used = ui.cursor().top() - top + foot_height;
+    // The foot, with the browser's alert switch over it where there is one.
+    let alerts_shown = alerts != BackgroundAlerts::Unavailable;
+    let below = band_height(FOOT_HEIGHT, large) * if alerts_shown { 2.0 } else { 1.0 };
+    let used = ui.cursor().top() - top + below;
     let visible: Vec<&NotificationRecord> = records
         .iter()
         .filter(|record| {
@@ -415,6 +424,9 @@ fn panel_contents(
             (max_height - used).max(0.0),
             intents,
         );
+    }
+    if alerts_shown {
+        background_alerts_band(ui, alerts, large, intents);
     }
     foot(ui, records.len(), has_read, large, intents);
 }
@@ -1304,6 +1316,93 @@ fn empty_state(ui: &mut Ui, no_records: bool, unread_only: bool) -> Response {
     ui.painter()
         .galley(pos2(center_x, y), detail, t.color.text_dim);
     response
+}
+
+/// The switch for the browser's own notification when a run ends while the
+/// tab is out of sight. It sits with the notices because it is about where
+/// they reach the reader; Preferences' Task attention still decides which
+/// outcomes are worth it.
+fn background_alerts_band(
+    ui: &mut Ui,
+    alerts: BackgroundAlerts,
+    large: bool,
+    intents: &mut Vec<Intent>,
+) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), band_height(FOOT_HEIGHT, large)),
+        Sense::hover(),
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top() + 0.5,
+        Stroke::new(1.0, t.color.border),
+    );
+    let label = match alerts {
+        BackgroundAlerts::Blocked => "Notifications are blocked for this site",
+        BackgroundAlerts::Asking => "Waiting for the browser's permission",
+        _ => "Notify outside this tab when a run ends",
+    };
+    let enabled = alerts != BackgroundAlerts::Blocked;
+    let mut response = ui.interact(
+        rect,
+        panel_id().with("background-alerts"),
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    if !enabled {
+        mark_response_disabled(&mut response);
+    }
+    let on = alerts.is_chosen();
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, on, label));
+    if response.clicked() {
+        intents.push(Intent::BackgroundAlerts(!on));
+    }
+    let lit = enabled && (response.hovered() || response.has_focus());
+    let switch_center = pos2(
+        rect.right() - BAND_PADDING_RIGHT - SWITCH_PADDING_X - SWITCH_WIDTH * 0.5,
+        rect.center().y,
+    );
+    paint_switch(ui, switch_center, on, lit, ui.clip_rect());
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let label_left = rect.left() + BAND_PADDING_LEFT;
+    let room = switch_center.x - SWITCH_WIDTH * 0.5 - SWITCH_LABEL_GAP - label_left;
+    ui.painter().text(
+        pos2(label_left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        elide_text(ui, label, &font, room),
+        font,
+        if !enabled {
+            t.color.text_faint
+        } else if lit {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    let ring = Rect::from_center_size(rect.center(), vec2(rect.width() - 8.0, SEGMENT_HEIGHT));
+    theme::paint_focus_ring(ui, &response, ring);
+    let explained = match alerts {
+        BackgroundAlerts::Blocked => "The browser refuses notifications from this site. Allow \
+                                      them in its site settings, then turn this on."
+            .to_owned(),
+        _ => format!(
+            "When this tab is hidden or the browser is in the background, a run that took \
+             {} s or more raises a browser notification.",
+            background_alerts::AWAY_AFTER_SECONDS
+        ),
+    };
+    if enabled {
+        response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(explained);
+    } else {
+        response.on_disabled_hover_text(explained);
+    }
 }
 
 fn foot(ui: &mut Ui, held: usize, has_read: bool, large: bool, intents: &mut Vec<Intent>) {

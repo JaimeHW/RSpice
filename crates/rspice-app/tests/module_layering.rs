@@ -575,6 +575,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // Contracts, routes, and policy. These describe the shell without
     // operating it.
     "platform",
+    // The browser's notification permission and the reader's choice about
+    // it: a host channel like `platform`, reaching nothing of the shell's.
+    "browser/background_alerts",
     "state",
     "routing/surface_route",
     "routing/surface_catalog",

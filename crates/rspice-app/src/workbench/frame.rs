@@ -261,6 +261,11 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     let mut request = None;
     for notice in notices {
         let wanted = attention_request(focused, notice.elapsed_seconds, notice.kind, attention);
+        if wanted.is_some() {
+            // A tab has no taskbar to mark. Its own notification says it,
+            // where the reader turned those on.
+            crate::workbench::browser::background_alerts::alert(&notice.title, &notice.detail);
+        }
         request = match (request, wanted) {
             (Some(egui::UserAttentionType::Critical), _)
             | (_, Some(egui::UserAttentionType::Critical)) => {
@@ -296,7 +301,8 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         }
     }
     // Once a frame, as urgently as the most serious outcome asks. The window
-    // is marked in the taskbar or dock; it never takes focus.
+    // is marked in the taskbar or dock; it never takes focus. A browser has
+    // neither, and ignores the request.
     if let Some(urgency) = request {
         ctx.send_viewport_cmd_to(
             egui::ViewportId::ROOT,
@@ -310,8 +316,8 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
 ///
 /// Only an outcome that raised a toast, only while the main window is not
 /// the one in front, and only for work long enough that the reader may have
-/// turned to something else. Never in the browser, where the tab's title
-/// already changes.
+/// turned to something else. A browser tab out of sight is a window not in
+/// front; it raises the browser's notification instead of a taskbar mark.
 fn attention_request(
     window_focused: Option<bool>,
     elapsed_seconds: f64,
@@ -319,11 +325,9 @@ fn attention_request(
     attention: BackgroundTaskAttention,
 ) -> Option<egui::UserAttentionType> {
     use crate::ui::widgets::ToastKind;
+    use crate::workbench::browser::background_alerts::AWAY_AFTER_SECONDS;
 
-    /// Work shorter than this was watched rather than waited for.
-    const AWAY_AFTER_SECONDS: f64 = 5.0;
-    if cfg!(target_arch = "wasm32")
-        || window_focused != Some(false)
+    if window_focused != Some(false)
         || elapsed_seconds.is_nan()
         || elapsed_seconds < AWAY_AFTER_SECONDS
         || !attention.retains(kind != ToastKind::Success)
