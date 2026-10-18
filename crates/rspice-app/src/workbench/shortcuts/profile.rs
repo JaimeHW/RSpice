@@ -193,9 +193,16 @@ impl ShortcutPreferences {
         self.clear_protected_override_acknowledgement(command);
     }
 
+    /// Put every command this build knows back on its shipped keys and every
+    /// binding policy back on its shipped value. Commands and fields from a
+    /// newer build are kept as they are.
+    pub fn restore_shipped(&mut self) {
+        self.reset_all();
+        self.policies_mut().restore_shipped();
+    }
+
     /// Reset every command understood by this build. Unknown future commands
     /// stay byte-semantically intact when an older build edits the profile.
-    #[cfg(test)]
     pub fn reset_all(&mut self) {
         self.malformed_root = None;
         self.validation_cache.set(None);

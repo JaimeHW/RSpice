@@ -25,7 +25,9 @@ use crate::workbench::{
     ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
 
-use super::preferences_shell::{control_width, preference_row, section_heading, value_column};
+use super::preferences_shell::{
+    control_width, preference_row, searchable_row, section_heading, value_column,
+};
 use super::{AppState, PreferencePageActions};
 use crate::workbench::app::dialogs::state::{
     ShortcutCaptureTarget, ShortcutEditorContext, ShortcutEditorState,
@@ -43,10 +45,11 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
     // open this page. The editor below it is the searchable list of every
     // command in the registry, so the table was a sample of the real thing
     // presented as the thing itself, and nothing on it could be changed.
-    preference_row(
+    searchable_row(
         ui,
         "Key bindings",
         "Record keys, resolve conflicts, set alternates and reset individual commands.",
+        &["keyboard", "shortcuts", "hotkeys", "keymap"],
         |ui| {
             value_column(ui, |ui| {
                 if Button::new("Edit shortcuts\u{2026}")

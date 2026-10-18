@@ -578,6 +578,15 @@ pub struct ShortcutPolicies {
 }
 
 impl ShortcutPolicies {
+    /// Every policy this build knows back on its shipped value. Policies from
+    /// a newer build are kept.
+    pub fn restore_shipped(&mut self) {
+        self.single_key_canvas = StoredPolicy::default();
+        self.chord_timeout = StoredPolicy::default();
+        self.protected_shortcuts = StoredPolicy::default();
+        self.context_precedence = StoredPolicy::default();
+    }
+
     #[must_use]
     pub const fn single_key_canvas(&self) -> SingleKeyCanvasPolicy {
         self.single_key_canvas.get()

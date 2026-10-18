@@ -63,17 +63,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // Touch target inflation is capability-driven. A fine-pointer browser
     // resized through tablet/phone widths retains the compact mockup metrics.
     let large_targets = app.state.workbench.coarse_pointer;
-    let requested_target = if app
-        .state
-        .ui
-        .preferences
-        .choice(ChoicePreference::MinimumTouchTarget)
-        == 1
-    {
-        48.0
-    } else {
-        44.0
-    };
+    let requested_target = app.state.ui.preferences.minimum_touch_target();
     app.state
         .ui
         .theme

@@ -19,14 +19,22 @@ use crate::workbench::{
 };
 
 use super::preferences_shell::{
-    PreferenceCategory, control_width, preference_row, preference_switch, section_heading,
-    segmented, value_column,
+    PreferenceCategory, control_width, preference_row, preference_switch, searchable_row,
+    section_heading, segmented, value_column,
 };
 use super::{AppState, PreferencePageActions};
 
 /// Width of a numeric field, which is sized to the digits it holds rather
 /// than to the control column the selects share.
 const NUMERIC_FIELD_WIDTH: f32 = 88.0;
+
+/// What the autosave timer writes. The desktop also keeps a recovery copy of
+/// a changed schematic that has a file; the browser keeps only the session.
+#[cfg(not(target_arch = "wasm32"))]
+const AUTOSAVE_HELP: &str =
+    "Saves the working session. A changed schematic saved once also gets a recovery copy.";
+#[cfg(target_arch = "wasm32")]
+const AUTOSAVE_HELP: &str = "Saves the working session in this browser.";
 
 pub(super) fn render(
     ui: &mut Ui,
@@ -115,7 +123,7 @@ fn solver_threads_row(ui: &mut Ui, state: &mut AppState) {
         "Concurrent workers for one run. {detected} logical core{} on this machine.",
         if detected == 1 { "" } else { "s" }
     );
-    preference_row(ui, "Solver threads", &help, |ui| {
+    searchable_row(ui, "Solver threads", &help, &["cpu", "workers"], |ui| {
         value_column(ui, |ui| {
             let mut value = state
                 .ui
@@ -177,7 +185,22 @@ fn choice_row(
     detail: &'static str,
     options: &'static [&'static str],
 ) {
-    preference_row(ui, title, detail, |ui| {
+    keyword_choice_row(ui, state, key, title, detail, options, &[]);
+}
+
+/// A [`choice_row`] a search also finds by `keywords`, the words people type
+/// for the setting. Its option labels are searched either way.
+fn keyword_choice_row(
+    ui: &mut Ui,
+    state: &mut AppState,
+    key: ChoicePreference,
+    title: &'static str,
+    detail: &'static str,
+    options: &'static [&'static str],
+    keywords: &[&str],
+) {
+    let terms = options.iter().chain(keywords).copied().collect::<Vec<_>>();
+    searchable_row(ui, title, detail, &terms, |ui| {
         value_column(ui, |ui| {
             let active = state.ui.preferences.choice(key);
             let labels = options
@@ -199,54 +222,70 @@ fn choice_row(
 }
 
 fn appearance(ui: &mut Ui, state: &mut AppState) {
-    preference_row(ui, "Color mode", "", |ui| {
-        value_column(ui, |ui| {
-            let mut selected = Mode::ALL
-                .iter()
-                .position(|mode| *mode == state.ui.theme.mode)
-                .unwrap_or_default();
-            if segmented(
-                ui,
-                "preferences.appearance.color-mode",
-                &["Dark", "Light", "System"],
-                &mut selected,
-            ) {
-                state.ui.theme.mode = Mode::ALL[selected];
-            }
-        });
-    });
-    preference_row(ui, "Density", "", |ui| {
-        value_column(ui, |ui| {
-            let mut selected = usize::from(state.ui.theme.density == Density::Relaxed);
-            if segmented(
-                ui,
-                "preferences.appearance.density",
-                &["Compact", "Comfortable"],
-                &mut selected,
-            ) {
-                state.ui.theme.density = if selected == 0 {
-                    Density::Compact
-                } else {
-                    Density::Relaxed
-                };
-            }
-        });
-    });
+    const COLOR_MODES: [&str; 3] = ["Dark", "Light", "System"];
+    searchable_row(
+        ui,
+        "Color mode",
+        "Dark, light, or follow the system setting.",
+        &["theme", "night", "appearance"],
+        |ui| {
+            value_column(ui, |ui| {
+                let mut selected = Mode::ALL
+                    .iter()
+                    .position(|mode| *mode == state.ui.theme.mode)
+                    .unwrap_or_default();
+                if segmented(
+                    ui,
+                    "preferences.appearance.color-mode",
+                    &COLOR_MODES,
+                    &mut selected,
+                ) {
+                    state.ui.theme.mode = Mode::ALL[selected];
+                }
+            });
+        },
+    );
+    const DENSITIES: [&str; 2] = ["Compact", "Comfortable"];
+    searchable_row(
+        ui,
+        "Density",
+        "Control and row height with a mouse. Touch screens use the touch-target size.",
+        &["Compact", "Comfortable", "spacing", "padding"],
+        |ui| {
+            value_column(ui, |ui| {
+                let mut selected = usize::from(state.ui.theme.density == Density::Relaxed);
+                if segmented(
+                    ui,
+                    "preferences.appearance.density",
+                    &DENSITIES,
+                    &mut selected,
+                ) {
+                    state.ui.theme.density = if selected == 0 {
+                        Density::Compact
+                    } else {
+                        Density::Relaxed
+                    };
+                }
+            });
+        },
+    );
     // The zoom factor the shell applies on every frame. It has been a stored
     // preference with no control since the dialog was written, so the only way
     // to change it was to edit the session file.
-    choice_row(
+    keyword_choice_row(
         ui,
         state,
         ChoicePreference::InterfaceScale,
         "Interface scale",
-        "",
+        "Zoom for every panel and dialog.",
         &["100%", "110%", "125%", "150%"],
+        &["size", "font", "text", "dpi", "magnify"],
     );
-    preference_row(
+    searchable_row(
         ui,
         "Engineering canvas theme",
-        "Schematic, layout, waveform and field-view backgrounds, as one palette.",
+        "Background and ink for schematic, layout and waveform canvases.",
+        &["colors", "palette", "background"],
         |ui| {
             let themes = EngineeringCanvasTheme::ALL;
             let labels = themes
@@ -271,10 +310,11 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
             });
         },
     );
-    preference_row(
+    searchable_row(
         ui,
         "Canvas contrast",
-        "Separation between symbols, wires and the grid.",
+        "How strongly the grid and symbol ink stand out from the canvas.",
+        &["brightness", "grid"],
         |ui| {
             value_column(ui, |ui| {
                 // A slider sizes itself from `spacing.slider_width` and
@@ -387,7 +427,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     preference_row(
         ui,
         "Console on launch",
-        "Errors and explicit Problem navigation always open it.",
+        "Problems navigation and run blockers always open it.",
         |ui| {
             value_column(ui, |ui| {
                 let mut selected = state
@@ -437,11 +477,11 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     preference_row(
         ui,
         "Task attention",
-        "Whether a finished or failed background run may take the foreground.",
+        "How finished background runs are announced. A run never takes focus.",
         |ui| {
             value_column(ui, |ui| {
                 let options = [
-                    "Badge and notify; never steal focus",
+                    "Notify on completion and failure",
                     "Notify on failure only",
                     "Silent",
                 ];
@@ -718,7 +758,7 @@ fn results(ui: &mut Ui, state: &mut AppState) {
         state,
         ScalarPreference::DisplayedSignificantDigits,
         "Displayed significant digits",
-        "Copy retains full stored precision.",
+        "Digits in readouts and tables. Copied values keep full precision.",
         3..=17,
     );
     choice_row(
@@ -726,7 +766,7 @@ fn results(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::CursorInterpolation,
         "Cursor interpolation",
-        "Method used between accepted solver points.",
+        "How cursor readouts estimate values between simulated points.",
         &[
             "Monotone cubic where valid",
             "Linear",
@@ -836,34 +876,29 @@ fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActio
         "The preset a new project starts from. Each plan may override it.",
         &["Balanced", "Fast", "Accurate", "Robust"],
     );
-    preference_row(
-        ui,
-        "Autosave interval",
-        "Checkpoints open editable documents.",
-        |ui| {
-            let values = [5_u8, 2, 10];
-            let labels = ["5 minutes", "2 minutes", "10 minutes"]
-                .map(str::to_owned)
-                .to_vec();
-            let normalized = super::normalize_autosave_minutes(state.ui.autosave_minutes);
-            let active = values
-                .iter()
-                .position(|minutes| *minutes == normalized)
-                .unwrap_or_default();
-            value_column(ui, |ui| {
-                if let Some(selected) = select(
-                    ui,
-                    "preferences.projects.autosave",
-                    "Autosave interval",
-                    &labels[active],
-                    &labels,
-                    control_width(ui),
-                ) {
-                    state.ui.autosave_minutes = values[selected];
-                }
-            });
-        },
-    );
+    preference_row(ui, "Autosave interval", AUTOSAVE_HELP, |ui| {
+        let values = [5_u8, 2, 10];
+        let labels = ["5 minutes", "2 minutes", "10 minutes"]
+            .map(str::to_owned)
+            .to_vec();
+        let normalized = super::normalize_autosave_minutes(state.ui.autosave_minutes);
+        let active = values
+            .iter()
+            .position(|minutes| *minutes == normalized)
+            .unwrap_or_default();
+        value_column(ui, |ui| {
+            if let Some(selected) = select(
+                ui,
+                "preferences.projects.autosave",
+                "Autosave interval",
+                &labels[active],
+                &labels,
+                control_width(ui),
+            ) {
+                state.ui.autosave_minutes = values[selected];
+            }
+        });
+    });
     toggle_row(
         ui,
         state,
@@ -899,7 +934,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
     preference_row(
         ui,
         "Canvas keyboard navigation",
-        "Traverse symbols, nets, markers, traces and annotations without a pointer.",
+        "Move between parts, wires, labels and probes on the schematic with the arrow keys.",
         |ui| {
             value_column(ui, |ui| {
                 let mut value = state
@@ -934,8 +969,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
                     "Speak control changes (browser)",
                     &mut value,
                 ) {
-                    state.ui.browser_spoken_feedback = value;
-                    crate::workbench::browser::accessibility::set_spoken_feedback(value);
+                    set_browser_spoken_feedback(state, value);
                 }
             });
         },
@@ -948,6 +982,14 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
         "Applied automatically on coarse pointers.",
         &["44 px · WCAG recommended", "48 px"],
     );
+}
+
+/// Store the browser speech opt-in and hand it to the browser in the same
+/// step, so the row and Restore defaults cannot disagree about either.
+fn set_browser_spoken_feedback(state: &mut AppState, enabled: bool) {
+    state.ui.browser_spoken_feedback = enabled;
+    #[cfg(target_arch = "wasm32")]
+    crate::workbench::browser::accessibility::set_spoken_feedback(enabled);
 }
 
 /// A line derived from the control above it, wrapped to that control's own
@@ -974,21 +1016,34 @@ fn setting_detail(ui: &mut Ui, text: &str, width: f32) {
 /// their key bindings. The lists below are the settings each page shows, so a
 /// row added to a page without being added here is a row the footer's control
 /// silently skips — which the test at the bottom of this file checks for.
-pub(super) fn restore_defaults(category: PreferenceCategory, state: &mut AppState) {
+///
+/// Shortcuts are the one page this does not write directly: their shipped
+/// profile is handed to `actions` and saved before it goes live, the same
+/// way an edit made on the page is.
+pub(super) fn restore_defaults(
+    category: PreferenceCategory,
+    state: &mut AppState,
+    actions: &mut PreferencePageActions,
+) {
     let preferences = &mut state.ui.preferences;
     match category {
         PreferenceCategory::Appearance => {
             state.ui.theme = crate::ui::Theme::default();
             preferences.restore_defaults(&[ChoicePreference::InterfaceScale], &[], &[]);
         }
-        PreferenceCategory::Accessibility => preferences.restore_defaults(
-            &[ChoicePreference::MinimumTouchTarget],
-            &[
-                TogglePreference::ReducedMotion,
-                TogglePreference::CanvasKeyboardNavigation,
-            ],
-            &[],
-        ),
+        PreferenceCategory::Accessibility => {
+            preferences.restore_defaults(
+                &[ChoicePreference::MinimumTouchTarget],
+                &[
+                    TogglePreference::ReducedMotion,
+                    TogglePreference::CanvasKeyboardNavigation,
+                ],
+                &[],
+            );
+            // Applied the way the row applies it, so the browser stops
+            // speaking on the same frame the switch turns off.
+            set_browser_spoken_feedback(state, false);
+        }
         PreferenceCategory::Workspace => {
             state.workbench.engineering_profile = crate::workbench::EngineeringProfile::default();
             preferences.restore_defaults(&[], &[], &[ScalarPreference::LocalParallelSlots]);
@@ -1004,9 +1059,12 @@ pub(super) fn restore_defaults(category: PreferenceCategory, state: &mut AppStat
             }
         }
         PreferenceCategory::Shortcuts => {
-            // The bindings and the three binding policies are one profile, and
-            // replacing it has to go through the persist-before-live owner that
-            // the editor and the policy rows already use.
+            // The bindings and the binding policies are one profile, and
+            // replacing it has to go through the persist-before-live owner
+            // that the editor and the policy rows already use.
+            let mut shipped = preferences.shortcuts().clone();
+            shipped.restore_shipped();
+            actions.shortcut_policy_candidate = Some(shipped);
         }
         PreferenceCategory::Units => preferences.restore_defaults(
             &[
@@ -1294,11 +1352,20 @@ mod tests {
                 "{} set no stored override to restore",
                 category.label()
             );
-            restore_defaults(category, &mut app.state);
+            restore_defaults(
+                category,
+                &mut app.state,
+                &mut PreferencePageActions::default(),
+            );
             assert_eq!(
                 serde_json::to_value(&app.state.ui.preferences).expect("preferences serialize"),
                 shipped,
                 "{} left a stored override behind",
+                category.label()
+            );
+            assert!(
+                !app.state.ui.browser_spoken_feedback,
+                "{} left the browser speaking control changes",
                 category.label()
             );
             assert_eq!(
@@ -1314,6 +1381,134 @@ mod tests {
                 category.label()
             );
         }
+    }
+
+    /// Every label and text the real pages publish while `query` is typed
+    /// into the search field.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn labels_found_by(query: &str) -> Vec<String> {
+        use super::super::preferences_shell::{set_filter_for_review, show};
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        set_filter_for_review(&ctx, query);
+        let mut app = RSpiceApp::test_instance();
+        let mut category = PreferenceCategory::Appearance;
+        let mut update = None;
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1_060.0, 760.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    let state = &mut app.state;
+                    let mut actions = PreferencePageActions::default();
+                    let _ = show(ctx, &mut category, true, 44.0, |ui, category| {
+                        render(ui, category, state, &mut actions);
+                    });
+                },
+            );
+            update = output.platform_output.accesskit_update;
+        }
+        update
+            .expect("AccessKit update")
+            .nodes
+            .into_iter()
+            .filter_map(|(_, node)| {
+                node.label()
+                    .or_else(|| node.value())
+                    .map(std::string::ToString::to_string)
+            })
+            .collect()
+    }
+
+    /// A search finds a setting by the word people type for it, which is
+    /// often neither its label nor anything in its help.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_search_finds_settings_by_what_people_type() {
+        for (query, row) in [
+            ("dark", "Color mode"),
+            ("theme", "Color mode"),
+            ("zoom", "Interface scale"),
+            ("font", "Interface scale"),
+            ("threads", "Solver threads"),
+            ("cpu", "Solver threads"),
+            ("hotkeys", "Key bindings"),
+        ] {
+            assert!(
+                labels_found_by(query).iter().any(|label| label == row),
+                "searching {query:?} did not find {row}"
+            );
+        }
+    }
+
+    /// Shortcuts restore to the shipped bindings and policies, and only by
+    /// saving that profile first: the reset hands the page a candidate and
+    /// leaves the live profile alone until the save has gone through.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn restoring_shortcuts_saves_the_shipped_profile_before_it_goes_live() {
+        use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
+        use crate::workbench::{
+            ChordTimeoutPolicy, ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence,
+            ShortcutStroke,
+        };
+
+        let ctx = egui::Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state.enable_volatile_test_shortcut_persistence();
+        let mut edited = app.state.ui.preferences.shortcuts().clone();
+        edited
+            .policies_mut()
+            .set_chord_timeout(ChordTimeoutPolicy::ThreeSeconds);
+        edited
+            .set_binding(
+                Command::Save,
+                ShortcutBindingSlot::Primary,
+                vec![CommandPlatform::Desktop],
+                Some(ShortcutSequence::single(ShortcutStroke::new(
+                    egui::Key::F6,
+                    false,
+                    false,
+                    false,
+                ))),
+            )
+            .expect("F6 is a valid binding");
+        app.execute_preference_page_actions(
+            &ctx,
+            PreferencePageActions {
+                shortcut_policy_candidate: Some(edited.clone()),
+                ..PreferencePageActions::default()
+            },
+        );
+        assert_eq!(app.state.ui.preferences.shortcuts(), &edited);
+
+        let mut actions = PreferencePageActions::default();
+        restore_defaults(PreferenceCategory::Shortcuts, &mut app.state, &mut actions);
+        assert_eq!(
+            app.state.ui.preferences.shortcuts(),
+            &edited,
+            "the reset must not write the live profile directly"
+        );
+        app.execute_preference_page_actions(&ctx, actions);
+
+        let shipped = ShortcutPreferences::default();
+        assert_eq!(app.state.ui.preferences.shortcuts(), &shipped);
+        assert_eq!(
+            app.state
+                .shortcut_library_persistence
+                .persisted()
+                .expect("volatile shortcut snapshot")
+                .library()
+                .active(),
+            &shipped
+        );
     }
 
     /// Move every setting shown on `category` off its default. Returns `false`
@@ -1360,6 +1555,9 @@ mod tests {
         }
         if category == PreferenceCategory::Projects {
             state.ui.autosave_minutes = 10;
+        }
+        if category == PreferenceCategory::Accessibility {
+            state.ui.browser_spoken_feedback = true;
         }
         if category == PreferenceCategory::Workspace
             && let Ok(workspace) = state.ui.preferences.workspace_mut()

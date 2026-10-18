@@ -1331,6 +1331,12 @@ impl UserPreferences {
         [1.0, 1.1, 1.25, 1.5][self.choice(ChoicePreference::InterfaceScale)]
     }
 
+    /// The smallest control a coarse pointer gets, in points.
+    #[must_use]
+    pub fn minimum_touch_target(&self) -> f32 {
+        [44.0, 48.0][self.choice(ChoicePreference::MinimumTouchTarget)]
+    }
+
     /// The ceiling the reader put on concurrent solver workers, if any.
     ///
     /// `None` is not "no limit" — it means nobody has chosen one, so the

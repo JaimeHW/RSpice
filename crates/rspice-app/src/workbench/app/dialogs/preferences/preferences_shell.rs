@@ -34,7 +34,9 @@ const FOOTER_HEIGHT: f32 = 48.0;
 const CATEGORY_RAIL_WIDTH: f32 = 196.0;
 const CATEGORY_ROW_HEIGHT: f32 = 30.0;
 const CATEGORY_GROUP_HEIGHT: f32 = 28.0;
-const TOUCH_TARGET: f32 = 44.0;
+/// The smaller of the two minimum touch targets Accessibility offers, used
+/// when no session has said which one the reader picked.
+const DEFAULT_TOUCH_TARGET: f32 = 44.0;
 const FOOTER_ITEM_GAP: f32 = 8.0;
 
 /// One inset for the header, every page row and the footer, so a title, a
@@ -110,14 +112,19 @@ fn active_query(ctx: &Context) -> Option<String> {
     (!query.is_empty()).then_some(query)
 }
 
-/// Whether a row answers `query`, on its label or on the help under it.
+/// Whether a row answers `query`, on its label, the help under it, or one of
+/// its `terms`: the labels of the options it offers and the words a reader
+/// types for it ("dark" for a colour mode, "zoom" for a scale).
 ///
 /// The query is folded here rather than trusted to arrive folded: a predicate
 /// that is only correct when its caller remembered to lowercase is one
 /// refactor away from matching nothing, and silently.
-fn row_matches(title: &str, help: &str, query: &str) -> bool {
+fn row_matches(title: &str, help: &str, terms: &[&str], query: &str) -> bool {
     let query = query.trim().to_lowercase();
-    title.to_lowercase().contains(&query) || help.to_lowercase().contains(&query)
+    [title, help]
+        .into_iter()
+        .chain(terms.iter().copied())
+        .any(|text| text.to_lowercase().contains(&query))
 }
 
 /// The two things a reader is looking for when they open Preferences: how the
@@ -255,7 +262,21 @@ impl PreferencesLayout {
     }
 }
 
-/// Temporarily raises controls to the mockup's 44 px narrow/coarse target.
+fn touch_target_id() -> Id {
+    Id::new(SHELL_ID).with("touch-target")
+}
+
+/// The minimum touch target the reader chose under Accessibility, as the
+/// shell was last told it. Every raised control in the dialog reads this one
+/// number, so the close button, the switches and the rows agree with the
+/// rest of the application on a coarse pointer.
+fn touch_target(ctx: &Context) -> f32 {
+    ctx.data(|data| data.get_temp::<f32>(touch_target_id()))
+        .unwrap_or(DEFAULT_TOUCH_TARGET)
+}
+
+/// Temporarily raises controls to the touch target on narrow and coarse
+/// layouts.
 struct LargeControlTargetOverride {
     ctx: Context,
     original: Option<Tokens>,
@@ -264,14 +285,15 @@ struct LargeControlTargetOverride {
 impl LargeControlTargetOverride {
     fn new(ctx: &Context, enabled: bool) -> Self {
         let original = (*Tokens::get(ctx)).clone();
-        if !enabled || original.metrics.ctl_h >= TOUCH_TARGET {
+        let target = touch_target(ctx);
+        if !enabled || original.metrics.ctl_h >= target {
             return Self {
                 ctx: ctx.clone(),
                 original: None,
             };
         }
         let mut adjusted = original.clone();
-        adjusted.metrics.ctl_h = TOUCH_TARGET;
+        adjusted.metrics.ctl_h = target;
         adjusted.install(ctx);
         Self {
             ctx: ctx.clone(),
@@ -289,12 +311,17 @@ impl Drop for LargeControlTargetOverride {
 }
 
 /// Render the complete Preferences shell around one category page.
+///
+/// `touch_target` is the minimum target from Accessibility, which the shell
+/// raises its controls to on narrow and coarse layouts.
 pub(super) fn show(
     ctx: &Context,
     category: &mut PreferenceCategory,
     allow_escape_close: bool,
+    touch_target: f32,
     render_page: impl FnMut(&mut Ui, PreferenceCategory),
 ) -> PreferencesShellResponse {
+    ctx.data_mut(|data| data.insert_temp(touch_target_id(), touch_target));
     let viewport = ctx.content_rect();
     let layout = PreferencesLayout::resolve(viewport);
     // The mockup raises interactive targets at either side of its combined
@@ -502,6 +529,11 @@ fn render_header(surface: &mut Ui, rect: Rect, large_targets: bool) -> egui::Res
             node.set_label("Preferences");
             node.set_level(2);
         });
+    let close_side = if large_targets {
+        touch_target(surface.ctx())
+    } else {
+        28.0
+    };
     let mut close_ui = surface.new_child(
         egui::UiBuilder::new()
             // The button frame is wider than the glyph inside it, so insetting
@@ -515,7 +547,7 @@ fn render_header(surface: &mut Ui, rect: Rect, large_targets: bool) -> egui::Res
         .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.push_id("neutral-close-preferences-1af3c6ff0446", |ui| {
                 IconButton::new(Icon::Close)
-                    .side(if large_targets { TOUCH_TARGET } else { 28.0 })
+                    .side(close_side)
                     .tooltip("Close preferences")
                     .show(ui)
             })
@@ -997,13 +1029,18 @@ fn render_footer(surface: &mut Ui, rect: Rect) -> FooterResponse {
             Button::new("Done").accent().show(ui).clicked()
         })
         .inner;
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        response.restore_defaults = ui
-            .push_id("preferences.restore-defaults", |ui| {
-                Button::new("Restore defaults").ghost().show(ui).clicked()
-            })
-            .inner;
-    });
+    // A search shows rows from every page at once, so there is no one page
+    // for the reset to mean; offering it would reset the rail page the reader
+    // cannot currently see.
+    if active_query(surface.ctx()).is_none() {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            response.restore_defaults = ui
+                .push_id("preferences.restore-defaults", |ui| {
+                    Button::new("Restore defaults").ghost().show(ui).clicked()
+                })
+                .inner;
+        });
+    }
     response
 }
 
@@ -1115,8 +1152,21 @@ pub(super) fn preference_row<R>(
     help: &str,
     add_value: impl FnOnce(&mut Ui) -> R,
 ) {
+    searchable_row(ui, title, help, &[], add_value);
+}
+
+/// A [`preference_row`] a search also finds by `terms`: the labels of the
+/// options it offers and the words people type for it. The terms sit at the
+/// row's own call, so they cannot drift from the row they describe.
+pub(super) fn searchable_row<R>(
+    ui: &mut Ui,
+    title: &str,
+    help: &str,
+    terms: &[&str],
+    add_value: impl FnOnce(&mut Ui) -> R,
+) {
     if let Some(query) = active_query(ui.ctx()) {
-        if !row_matches(title, help, &query) {
+        if !row_matches(title, help, terms, &query) {
             return;
         }
         accept_filtered_row(ui);
@@ -1342,7 +1392,7 @@ pub(super) fn preference_switch(
     let large_target = ui.ctx().content_rect().width() <= NARROW_MAX_WIDTH
         || ui.ctx().input(|input| input.has_touch_screen());
     let hit = if large_target {
-        let target = TOUCH_TARGET.max(ui.spacing().interact_size.y);
+        let target = touch_target(ui.ctx()).max(ui.spacing().interact_size.y);
         vec2(target, target)
     } else {
         vec2(SWITCH_WIDTH, Tokens::get(ui.ctx()).metrics.ctl_h)
@@ -1398,7 +1448,7 @@ mod tests {
         };
         let mut category = PreferenceCategory::Appearance;
         let output = ctx.run_ui(input, |ctx| {
-            let _ = show(ctx, &mut category, true, |_, _| {});
+            let _ = show(ctx, &mut category, true, DEFAULT_TOUCH_TARGET, |_, _| {});
         });
         let update = output
             .platform_output
@@ -1566,21 +1616,27 @@ mod tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    let _ = show(ctx, &mut category, true, |ui, category| {
-                        // Two pages' worth of rows, enough to prove a query
-                        // reaches past the page that happens to be open.
-                        match category {
-                            PreferenceCategory::Appearance => {
-                                section_heading(ui, "Appearance section");
-                                preference_row(ui, "Color mode", "", |_| {});
-                                preference_row(ui, "Canvas contrast", "", |_| {});
+                    let _ = show(
+                        ctx,
+                        &mut category,
+                        true,
+                        DEFAULT_TOUCH_TARGET,
+                        |ui, category| {
+                            // Two pages' worth of rows, enough to prove a query
+                            // reaches past the page that happens to be open.
+                            match category {
+                                PreferenceCategory::Appearance => {
+                                    section_heading(ui, "Appearance section");
+                                    preference_row(ui, "Color mode", "", |_| {});
+                                    preference_row(ui, "Canvas contrast", "", |_| {});
+                                }
+                                PreferenceCategory::Results => {
+                                    preference_row(ui, "Cursor interpolation", "", |_| {});
+                                }
+                                _ => {}
                             }
-                            PreferenceCategory::Results => {
-                                preference_row(ui, "Cursor interpolation", "", |_| {});
-                            }
-                            _ => {}
-                        }
-                    });
+                        },
+                    );
                 },
             );
             update = output.platform_output.accesskit_update;
@@ -1656,10 +1712,33 @@ mod tests {
         assert!(row_matches(
             "Solver threads",
             "Concurrent workers",
+            &[],
             "worker"
         ));
-        assert!(row_matches("Solver threads", "", "SOLVER"));
-        assert!(!row_matches("Solver threads", "Concurrent workers", "grid"));
+        assert!(row_matches("Solver threads", "", &[], "SOLVER"));
+        assert!(!row_matches(
+            "Solver threads",
+            "Concurrent workers",
+            &[],
+            "grid"
+        ));
+    }
+
+    /// A row is also found by the options it offers and by the words people
+    /// type for it, neither of which is in its label.
+    #[test]
+    fn a_query_matches_a_rows_options_and_keywords() {
+        assert!(row_matches("Color mode", "", &["Dark", "theme"], "dark"));
+        assert!(row_matches("Color mode", "", &["Dark", "theme"], "THEME"));
+        assert!(!row_matches("Color mode", "", &["Dark", "theme"], "grid"));
+    }
+
+    /// A search shows rows from every page, so the footer's page reset has
+    /// no page to mean and is withdrawn until the search is cleared.
+    #[test]
+    fn restore_defaults_is_withdrawn_while_a_search_is_active() {
+        assert!(labelled(&published_labels(""), "Restore defaults"));
+        assert!(!labelled(&published_labels("cursor"), "Restore defaults"));
     }
 
     #[test]
@@ -1704,7 +1783,13 @@ mod tests {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(background))
                 .show(ui, |ui| {
-                    let _ = show(ui.ctx(), &mut category, true, |_, _| {});
+                    let _ = show(
+                        ui.ctx(),
+                        &mut category,
+                        true,
+                        DEFAULT_TOUCH_TARGET,
+                        |_, _| {},
+                    );
                 });
         });
         // Appearance is the first category, so its row opens the rail under
@@ -1879,7 +1964,7 @@ mod tests {
         let mut category = PreferenceCategory::Appearance;
         let mut switch = false;
         let output = ctx.run_ui(input, |ctx| {
-            let _ = show(ctx, &mut category, true, |ui, _| {
+            let _ = show(ctx, &mut category, true, DEFAULT_TOUCH_TARGET, |ui, _| {
                 setting_row(ui, "First row", "", |ui| {
                     value_column(ui, |ui| {
                         preference_switch(ui, "first", "First switch", &mut switch);
@@ -1944,7 +2029,7 @@ mod tests {
         };
         let mut category = PreferenceCategory::Appearance;
         let output = ctx.run_ui(input, |ctx| {
-            let _ = show(ctx, &mut category, true, |ui, _| {
+            let _ = show(ctx, &mut category, true, DEFAULT_TOUCH_TARGET, |ui, _| {
                 setting_row(
                     ui,
                     "Expandable fidelity row",
@@ -1988,7 +2073,7 @@ mod tests {
         let mut category = PreferenceCategory::Appearance;
 
         let output = ctx.run_ui(input, |ctx| {
-            let _ = show(ctx, &mut category, true, |ui, _| {
+            let _ = show(ctx, &mut category, true, DEFAULT_TOUCH_TARGET, |ui, _| {
                 section_heading(ui, "Visual system");
             });
         });
@@ -2062,7 +2147,7 @@ mod tests {
         };
         let mut category = PreferenceCategory::Appearance;
         let output = ctx.run_ui(input, |ctx| {
-            let _ = show(ctx, &mut category, true, |ui, _| {
+            let _ = show(ctx, &mut category, true, DEFAULT_TOUCH_TARGET, |ui, _| {
                 setting_row(ui, "Contained row", "", |_| {});
             });
         });

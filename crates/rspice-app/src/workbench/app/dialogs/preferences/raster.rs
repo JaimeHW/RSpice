@@ -14,6 +14,8 @@ use super::preferences_shell::{self, PreferenceCategory};
 
 const DIALOG_WIDTH: f32 = 1_060.0;
 const DIALOG_HEIGHT: f32 = 760.0;
+/// The shipped minimum touch target; the review renders use a fine pointer.
+const TOUCH_TARGET: f32 = 44.0;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
@@ -59,6 +61,7 @@ fn render_every_preferences_category_for_review() {
                                 ui.ctx(),
                                 &mut active,
                                 true,
+                                TOUCH_TARGET,
                                 |ui, category| {
                                     preference_pages::render(ui, category, state, &mut actions);
                                 },
@@ -102,10 +105,15 @@ fn render_preferences_search_for_review() {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(background))
                     .show(ui, |ui| {
-                        let _ =
-                            preferences_shell::show(ui.ctx(), &mut active, true, |ui, category| {
+                        let _ = preferences_shell::show(
+                            ui.ctx(),
+                            &mut active,
+                            true,
+                            TOUCH_TARGET,
+                            |ui, category| {
                                 preference_pages::render(ui, category, state, &mut actions);
-                            });
+                            },
+                        );
                     });
             });
         let path = directory.join(format!("preferences-search-{name}.png"));
@@ -149,9 +157,15 @@ fn report_preferences_geometry() {
                 |ctx| {
                     let state = &mut app.state;
                     let mut actions = super::PreferencePageActions::default();
-                    let _ = preferences_shell::show(ctx, &mut active, true, |ui, category| {
-                        preference_pages::render(ui, category, state, &mut actions);
-                    });
+                    let _ = preferences_shell::show(
+                        ctx,
+                        &mut active,
+                        true,
+                        TOUCH_TARGET,
+                        |ui, category| {
+                            preference_pages::render(ui, category, state, &mut actions);
+                        },
+                    );
                 },
             );
             update = output.platform_output.accesskit_update;

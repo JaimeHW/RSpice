@@ -32,6 +32,24 @@ use crate::workbench::app_state::session::shortcut_library::{
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
 const SETTINGS_IMPORT_ID: &str = "rspice.preferences.settings-file.import";
 const SETTINGS_EXPORT_ID: &str = "rspice.preferences.settings-file.export";
+const PENDING_RESTORE_ID: &str = "rspice.preferences.pending-restore";
+
+/// The page whose Restore defaults is waiting on the reader's answer.
+fn pending_restore(ctx: &Context) -> Option<PreferenceCategory> {
+    ctx.data(|data| data.get_temp::<PreferenceCategory>(Id::new(PENDING_RESTORE_ID)))
+}
+
+fn set_pending_restore(ctx: &Context, category: Option<PreferenceCategory>) {
+    let id = Id::new(PENDING_RESTORE_ID);
+    ctx.data_mut(|data| match category {
+        Some(category) => {
+            data.insert_temp(id, category);
+        }
+        None => {
+            data.remove_temp::<PreferenceCategory>(id);
+        }
+    });
+}
 
 #[derive(Debug, Default)]
 pub(in crate::workbench) struct PreferencePageActions {
@@ -93,6 +111,7 @@ impl RSpiceApp {
             }
             self.state.dialogs.workspace_layout_manager.close();
             ctx.data_mut(|data| data.remove_temp::<PreferenceCategory>(category_id));
+            set_pending_restore(ctx, None);
             preferences_shell::unmount(ctx);
             return;
         }
@@ -110,12 +129,20 @@ impl RSpiceApp {
                 .dialogs
                 .shortcut_portability
                 .application_modal_open()
-            || self.state.dialogs.workspace_layout_manager.open;
+            || self.state.dialogs.workspace_layout_manager.open
+            || pending_restore(ctx).is_some();
+        let touch_target = self.state.ui.preferences.minimum_touch_target();
         let shell_response = {
             let state = &mut self.state;
-            preferences_shell::show(ctx, &mut category, !nested_modal_open, |ui, category| {
-                preference_pages::render(ui, category, state, &mut actions);
-            })
+            preferences_shell::show(
+                ctx,
+                &mut category,
+                !nested_modal_open,
+                touch_target,
+                |ui, category| {
+                    preference_pages::render(ui, category, state, &mut actions);
+                },
+            )
         };
         if shell_response.close_requested {
             ctx.data_mut(|data| data.remove_temp::<PreferenceCategory>(category_id));
@@ -128,14 +155,16 @@ impl RSpiceApp {
                 .prompt(engineering_profile_updated_message(label));
         }
         if shell_response.restore_defaults_requested {
-            preference_pages::restore_defaults(category, &mut self.state);
+            set_pending_restore(ctx, Some(category));
         }
         if shell_response.close_requested {
             self.state.dialogs.preferences_open = false;
+            set_pending_restore(ctx, None);
             if route_owned {
                 close_preferences(&mut self.state);
             }
         }
+        self.render_restore_defaults_confirmation(ctx, &mut actions);
         self.execute_preference_page_actions(ctx, actions);
         shortcut_preferences::render_editor(ctx, &mut self.state);
         workspace_layout_manager::render(ctx, &mut self.state);
@@ -177,6 +206,51 @@ impl RSpiceApp {
         }
     }
 
+    /// Ask before the footer's Restore defaults discards a page's settings.
+    ///
+    /// The question names the page because the reset covers only that page:
+    /// a reader who reads "restore defaults" as the whole dialog is told
+    /// otherwise before anything changes.
+    fn render_restore_defaults_confirmation(
+        &mut self,
+        ctx: &Context,
+        actions: &mut PreferencePageActions,
+    ) {
+        use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+
+        let Some(category) = pending_restore(ctx) else {
+            return;
+        };
+        let title = format!("Restore {} settings to their defaults?", category.label());
+        let consequence = "Settings on the other pages are kept.";
+        let choice = Dialog::new(&title, "Restore")
+            .description(consequence)
+            .size(DialogSize::Confirmation)
+            .ghost("Cancel")
+            .show(ctx, |ui| {
+                let t = crate::ui::tokens::Tokens::get(ui.ctx());
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(consequence)
+                            .font(crate::ui::theme::sans(
+                                crate::ui::tokens::FS_2,
+                                crate::ui::theme::FontWeight::Regular,
+                            ))
+                            .color(t.color.text),
+                    )
+                    .wrap(),
+                );
+            });
+        match choice {
+            DialogChoice::Primary => {
+                set_pending_restore(ctx, None);
+                preference_pages::restore_defaults(category, &mut self.state, actions);
+            }
+            DialogChoice::Ghost | DialogChoice::Cancelled => set_pending_restore(ctx, None),
+            DialogChoice::Secondary | DialogChoice::None => {}
+        }
+    }
+
     fn begin_shortcut_policy_publication(
         &mut self,
         ctx: &Context,
@@ -185,7 +259,7 @@ impl RSpiceApp {
         let mut candidate = self.state.ui.preferences.shortcut_profiles().clone();
         if let Err(error) = candidate.replace_active(profile.clone()) {
             self.state
-                .prompt(format!("Shortcut policy was not saved: {error}"));
+                .prompt(format!("Shortcut settings were not saved: {error}"));
             return;
         }
         self.state.dialogs.shortcut_policy_candidate = Some(profile);
@@ -547,12 +621,12 @@ impl AppState {
             ShortcutLibraryPublicationContinuation::Policy => {
                 self.dialogs.shortcut_policy_candidate = None;
                 match result {
-                    Ok(()) => self.prompt("Shortcut policy saved."),
+                    Ok(()) => self.prompt("Shortcut settings saved."),
                     Err(error) => {
                         self.record(
                             LogSeverity::Error,
                             LogSource::Studio,
-                            format!("Shortcut policy was not saved: {error}"),
+                            format!("Shortcut settings were not saved: {error}"),
                         );
                     }
                 }
@@ -1105,6 +1179,60 @@ mod tests {
             app.state
                 .shortcut_library_publication_continuation
                 .is_none()
+        );
+    }
+
+    /// Restore defaults asks first, names the page it covers, and changes
+    /// nothing until the reader answers; Escape answers Cancel.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn restore_defaults_asks_before_it_resets_the_page() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = test_app();
+        app.state
+            .workbench
+            .navigate(preferences_route(), RouteTransitionSource::User)
+            .unwrap();
+        app.state.dialogs.preferences_open = true;
+        app.state.ui.theme.mode = crate::ui::Mode::Light;
+        set_pending_restore(&ctx, Some(PreferenceCategory::Appearance));
+
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            app.render_preferences_dialog(ctx);
+        });
+        assert_eq!(app.state.ui.theme.mode, crate::ui::Mode::Light);
+        assert!(
+            output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update")
+                .nodes
+                .iter()
+                .any(|(_, node)| node.role() == egui::accesskit::Role::Dialog
+                    && node.label() == Some("Restore Appearance settings to their defaults?")),
+            "the question names the page it resets"
+        );
+
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..egui::RawInput::default()
+            },
+            |ctx| app.render_preferences_dialog(ctx),
+        );
+        assert!(pending_restore(&ctx).is_none());
+        assert_eq!(app.state.ui.theme.mode, crate::ui::Mode::Light);
+        assert!(
+            app.state.dialogs.preferences_open,
+            "Escape answers the question; it does not also close Preferences"
         );
     }
 
