@@ -49,7 +49,10 @@ fn assert_gained_fields_supplied(package: &DrawingSheetPresetPackage) {
 #[test]
 fn a_package_sealed_before_the_asme_fields_still_opens_and_verifies() {
     for fixture in [PROJECT, PROJECT_REVIEW, ORGANIZATION] {
-        assert!(!fixture.contains("cage-code"), "sealed without the new fields");
+        assert!(
+            !fixture.contains("cage-code"),
+            "sealed without the new fields"
+        );
     }
 
     let project = parse_package(PROJECT, &PdkPublisherTrustStore::default()).unwrap();
