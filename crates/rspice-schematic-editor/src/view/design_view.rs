@@ -33,6 +33,28 @@ impl<'a> DesignView<'a> {
     pub fn object_is_visible(&self, object_id: u64) -> bool {
         object_is_on_active_sheet(self.sheet_catalog, object_id)
     }
+
+    /// [`Self::object_is_visible`] for a pass over every object: the objects
+    /// the catalog assigns to another sheet are listed once, in id order, so
+    /// each question searches that list rather than the catalog's map.
+    pub fn visibility_test(&self) -> impl Fn(u64) -> bool + use<> {
+        let elsewhere = self
+            .sheet_catalog
+            .and_then(|catalog| {
+                let active = catalog.active_sheet_id()?;
+                Some(
+                    catalog
+                        .object_assignments()
+                        .iter()
+                        .filter(|&(_, &sheet)| sheet != active)
+                        .map(|(&id, _)| id)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .unwrap_or_default();
+        move |object_id| elsewhere.binary_search(&object_id).is_err()
+    }
+
     pub fn objects_on_active_sheet<'b, T: Clone>(
         &self,
         objects: &'b [T],

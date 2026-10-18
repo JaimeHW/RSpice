@@ -283,7 +283,14 @@ fn table_row(
                 let Some(item) = item else {
                     return;
                 };
-                table_cell(ui, widths[0], row_height, &item.identity, false, true);
+                table_cell(
+                    ui,
+                    widths[0],
+                    row_height,
+                    &item.identity.to_string(),
+                    false,
+                    true,
+                );
                 table_cell(ui, widths[1], row_height, item.kind, false, false);
                 table_status_cell(ui, widths[2], row_height, item);
                 table_cell(

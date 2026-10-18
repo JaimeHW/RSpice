@@ -681,7 +681,7 @@ fn overflow_report_retains_exact_item_identity_severity_coordinates_and_zone() {
         Some(DrawingSheetOverflowTarget::Component(11))
     );
     let instance = &report.items[0];
-    assert_eq!(instance.identity, "R_OUT");
+    assert_eq!(instance.identity.to_string(), "R_OUT");
     assert_eq!(instance.kind, "Instance");
     assert!(instance.outside_border);
     assert!(instance.off_paper);

@@ -726,10 +726,30 @@ impl DrawingSheetOverflowSeverity {
     }
 }
 
+/// How an overflow report names its object. A part drag finds every report
+/// afresh each frame and the list shows a few of them, so a name made of a
+/// kind and an id keeps the two and is spelt only when it is shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DrawingSheetOverflowIdentity {
+    /// The object's kind and id, spelt `wire:7`.
+    Numbered { kind: &'static str, id: u64 },
+    /// A name spelt from the object itself.
+    Named(String),
+}
+
+impl std::fmt::Display for DrawingSheetOverflowIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Numbered { kind, id } => write!(formatter, "{kind}:{id}"),
+            Self::Named(name) => formatter.write_str(name),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DrawingSheetOverflowItem {
     pub target: DrawingSheetOverflowTarget,
-    pub identity: String,
+    pub identity: DrawingSheetOverflowIdentity,
     pub kind: &'static str,
     pub outside_border: bool,
     pub off_paper: bool,
@@ -808,27 +828,40 @@ enum PrintableObject<'a> {
 
 impl PrintableObject<'_> {
     /// How an overflow report names the object.
-    fn identity(self) -> String {
+    fn identity(self) -> DrawingSheetOverflowIdentity {
+        use DrawingSheetOverflowIdentity::{Named, Numbered};
         match self {
-            Self::Component(component) if component.name.trim().is_empty() => {
-                format!("instance:{}", component.id)
+            Self::Component(component) if component.name.trim().is_empty() => Numbered {
+                kind: "instance",
+                id: component.id,
+            },
+            Self::Component(component) => Named(component.name.clone()),
+            Self::Wire(id) => Numbered { kind: "wire", id },
+            Self::Bus(bus) => bus.declaration.as_ref().map_or(
+                Numbered {
+                    kind: "bus",
+                    id: bus.id,
+                },
+                |declaration| Named(declaration.to_string()),
+            ),
+            Self::BusTap(tap) => Named(format!("tap:{} \u{00b7} {}", tap.id, tap.slice)),
+            Self::Junction(id) => Numbered {
+                kind: "junction",
+                id,
+            },
+            Self::NetLabel(label) if label.name.trim().is_empty() => Numbered {
+                kind: "net-label",
+                id: label.id,
+            },
+            Self::NetLabel(label) => Named(label.name.clone()),
+            Self::DesignNote(note) => {
+                Named(format!("note:{} \u{00b7} {}", note.id, note.kind.label()))
             }
-            Self::Component(component) => component.name.clone(),
-            Self::Wire(id) => format!("wire:{id}"),
-            Self::Bus(bus) => bus
-                .declaration
-                .as_ref()
-                .map_or_else(|| format!("bus:{}", bus.id), ToString::to_string),
-            Self::BusTap(tap) => format!("tap:{} \u{00b7} {}", tap.id, tap.slice),
-            Self::Junction(id) => format!("junction:{id}"),
-            Self::NetLabel(label) if label.name.trim().is_empty() => {
-                format!("net-label:{}", label.id)
-            }
-            Self::NetLabel(label) => label.name.clone(),
-            Self::DesignNote(note) => format!("note:{} \u{00b7} {}", note.id, note.kind.label()),
-            Self::DocumentationShape(shape) => {
-                format!("shape:{} \u{00b7} {}", shape.id, shape.kind().label())
-            }
+            Self::DocumentationShape(shape) => Named(format!(
+                "shape:{} \u{00b7} {}",
+                shape.id,
+                shape.kind().label()
+            )),
         }
     }
 }
@@ -930,9 +963,10 @@ fn active_object_bounds<'a>(
     view: &DesignView<'a>,
     symbol_context: &SchematicSymbolContext,
 ) -> Vec<PrintableObjectBounds<'a>> {
+    let visible = view.visibility_test();
     let mut bounds = Vec::new();
     for component in &view.document.components {
-        if view.object_is_visible(component.id) {
+        if visible(component.id) {
             let (min, max) = symbol_context.component_bounds(component);
             // Hardcopy always emits the retained instance name and value at
             // the instance anchor. Its semantic bounds authority gives the
@@ -960,7 +994,7 @@ fn active_object_bounds<'a>(
         }
     }
     for wire in &view.document.wires {
-        if view.object_is_visible(wire.id)
+        if visible(wire.id)
             && let Some(rect) = points_bounds(&wire.points)
         {
             bounds.push(PrintableObjectBounds {
@@ -973,7 +1007,7 @@ fn active_object_bounds<'a>(
         }
     }
     for bus in &view.document.buses {
-        if view.object_is_visible(bus.id)
+        if visible(bus.id)
             && let Some(rect) = points_bounds(&bus.points)
         {
             bounds.push(PrintableObjectBounds {
@@ -986,7 +1020,7 @@ fn active_object_bounds<'a>(
         }
     }
     for tap in &view.document.bus_taps {
-        if view.object_is_visible(tap.id) {
+        if visible(tap.id) {
             let route = crate::bus_geometry::bus_tap_route_points(tap);
             let Some(rect) = points_bounds(&route) else {
                 continue;
@@ -1001,7 +1035,7 @@ fn active_object_bounds<'a>(
         }
     }
     for junction in &view.document.junctions {
-        if view.object_is_visible(junction.id) {
+        if visible(junction.id) {
             // Hardcopy renders an exact 900 µm filled junction dot. Include
             // that physical radius rather than treating the junction as a
             // dimensionless point at the paper edge.
@@ -1021,7 +1055,7 @@ fn active_object_bounds<'a>(
         }
     }
     for label in &view.document.net_labels {
-        if view.object_is_visible(label.id) {
+        if visible(label.id) {
             let (min, max) = super::net_labels::world_bounds(label);
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::NetLabel(label.id),
@@ -1033,7 +1067,7 @@ fn active_object_bounds<'a>(
         }
     }
     for note in &view.document.design_notes {
-        if view.object_is_visible(note.id) {
+        if visible(note.id) {
             let (min, max) = super::design_notes::conservative_world_bounds(note);
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::DesignNote(note.id),
@@ -1045,7 +1079,7 @@ fn active_object_bounds<'a>(
         }
     }
     for shape in &view.document.documentation_shapes {
-        if view.object_is_visible(shape.id) {
+        if visible(shape.id) {
             let (min, max) = super::documentation_shapes::world_bounds(shape);
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::DocumentationShape(shape.id),
