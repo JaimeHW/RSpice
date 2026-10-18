@@ -520,7 +520,10 @@ fn campaign_notice(
                 ToastKind::Error
             },
             title: format!("Campaign '{name}' finished"),
-            detail: format!("{completed} completed, {failed} failed \u{b7} {elapsed_seconds:.2} s"),
+            detail: format!(
+                "{completed} completed, {failed} failed \u{b7} {}",
+                crate::quantity::format_elapsed(elapsed_seconds)
+            ),
             action: Some(NotificationAction::ShowInConsole { log_id }),
             elapsed_seconds,
         },
@@ -538,7 +541,7 @@ fn saved_detail(plan: Option<&str>, retained: usize, elapsed_seconds: f64) -> St
     };
     plan.map(str::to_owned)
         .into_iter()
-        .chain([saved, format!("{elapsed_seconds:.2} s")])
+        .chain([saved, crate::quantity::format_elapsed(elapsed_seconds)])
         .collect::<Vec<_>>()
         .join(" \u{b7} ")
 }
@@ -1056,7 +1059,7 @@ mod tests {
         assert_eq!(activity[0].title(), "Run 1 complete");
         assert_eq!(
             activity[0].message(),
-            "1 analysis saved \u{b7} 0.00 s",
+            "1 analysis saved \u{b7} 0.000 s",
             "one analysis is an analysis, not an \"analys\"; a run with no plan names none"
         );
         assert_eq!(activity[0].kind(), ToastKind::Success);
@@ -1734,7 +1737,7 @@ mod tests {
                 [
                     NOTHING_RETAINED.to_owned(),
                     "The project could not be saved".to_owned(),
-                    "no analyses saved \u{b7} 0.00 s".to_owned(),
+                    "no analyses saved \u{b7} 0.000 s".to_owned(),
                 ],
                 "{attention:?}: every outcome is kept in the bell"
             );

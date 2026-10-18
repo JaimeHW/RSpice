@@ -144,7 +144,7 @@ pub(super) fn announce_run_end(state: &mut AppState, run_sequence: u64) {
     let unix_ms = now_ms();
     run.log.seal(unix_ms);
     let id = run.id;
-    let elapsed = run.elapsed_time;
+    let elapsed = crate::quantity::format_elapsed(run.elapsed_time);
     let counts = || {
         let errors = run.log.count(LogSeverity::Error);
         let warnings = run.log.count(LogSeverity::Warning);
@@ -164,27 +164,24 @@ pub(super) fn announce_run_end(state: &mut AppState, run_sequence: u64) {
     let (severity, summary) = match run.lifecycle {
         SimulationRunLifecycle::Aborted => (
             LogSeverity::Warning,
-            format!("Run {id} was cancelled after {elapsed:.2} s"),
+            format!("Run {id} was cancelled after {elapsed}"),
         ),
         SimulationRunLifecycle::Completed => (
             LogSeverity::Info,
-            format!("Run {id} completed in {elapsed:.2} s: {}", counts()),
+            format!("Run {id} completed in {elapsed}: {}", counts()),
         ),
         // An interrupted run did not complete, whatever it finished first.
         SimulationRunLifecycle::Failed if run.analyses.iter().any(|analysis| analysis.success) => (
             LogSeverity::Error,
-            format!(
-                "Run {id} completed with errors in {elapsed:.2} s: {}",
-                counts()
-            ),
+            format!("Run {id} completed with errors in {elapsed}: {}", counts()),
         ),
         _ => {
             let failure = SimulationController::run_failure(id, &run.log).map(str::to_owned);
             (
                 LogSeverity::Error,
                 match failure {
-                    Some(failure) => format!("Run {id} failed after {elapsed:.2} s: {failure}"),
-                    None => format!("Run {id} failed after {elapsed:.2} s"),
+                    Some(failure) => format!("Run {id} failed after {elapsed}: {failure}"),
+                    None => format!("Run {id} failed after {elapsed}"),
                 },
             )
         }
@@ -217,7 +214,7 @@ pub(super) fn analysis_figures(
     use crate::simulation::SimulationResult;
 
     let mut figures = Vec::new();
-    figures.extend(elapsed.map(|elapsed| format!("{:.2} s", elapsed.as_secs_f64())));
+    figures.extend(elapsed.map(|elapsed| crate::quantity::format_elapsed(elapsed.as_secs_f64())));
     // A transient-derived spectrum or FFT carries its source transient's
     // report; those steps were not this analysis's, so only a transient
     // solve states them.
@@ -368,7 +365,7 @@ mod tests {
         };
         assert_eq!(
             analysis_figures("AC", Some(std::time::Duration::from_millis(210)), &result),
-            "AC: 0.21 s"
+            "AC: 0.210 s"
         );
     }
 }

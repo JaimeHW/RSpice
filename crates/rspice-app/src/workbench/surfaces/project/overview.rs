@@ -627,7 +627,7 @@ impl OverviewSnapshot {
                                 || "execution target not retained".to_owned(),
                                 |target| target.label().to_owned(),
                             ),
-                            format_duration(run.elapsed_time),
+                            crate::quantity::format_elapsed(run.elapsed_time),
                         ),
                         tone: lifecycle_tone(run.lifecycle, run.success),
                         intent: Some(OverviewIntent::OpenRun(index)),
@@ -2278,19 +2278,6 @@ fn run_title(sequence: u64, label: &str) -> String {
         label.to_owned()
     } else {
         format!("{prefix} · {label}")
-    }
-}
-
-fn format_duration(seconds: f64) -> String {
-    if !seconds.is_finite() || seconds < 0.0 {
-        return "unavailable".to_owned();
-    }
-    if seconds >= 60.0 {
-        let minutes = (seconds / 60.0).floor() as u64;
-        let remainder = seconds - minutes as f64 * 60.0;
-        format!("{minutes} min {remainder:.1} s")
-    } else {
-        format!("{seconds:.3} s")
     }
 }
 

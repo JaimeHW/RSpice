@@ -648,13 +648,13 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     status,
                     &run.label,
                     &format!(
-                        "{analyses} {} · {:.3} s{progress} · {revision}",
+                        "{analyses} {} · {}{progress} · {revision}",
                         if analyses == 1 {
                             "analysis"
                         } else {
                             "analyses"
                         },
-                        run.elapsed_time
+                        crate::quantity::format_elapsed(run.elapsed_time)
                     ),
                 );
                 row.context_menu(|ui| {

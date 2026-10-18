@@ -3,12 +3,14 @@
 //! This policy is separate from the simulator's deck lexer and from PDK
 //! database-unit authority. It never rewrites stored result values.
 
+mod elapsed;
 pub mod engineering;
 mod format;
 mod layout;
 mod parse;
 mod preferences;
 
+pub use elapsed::format_elapsed;
 pub use engineering::{
     EngineeringPrecision, format_engineering_display, format_engineering_display_with,
     format_engineering_value, format_engineering_value_with, parse_engineering_value,

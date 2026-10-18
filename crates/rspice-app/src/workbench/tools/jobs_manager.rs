@@ -198,7 +198,7 @@ impl RunRow {
             } else if run.lifecycle == SimulationRunLifecycle::LegacyUnknown {
                 "not retained".to_owned()
             } else {
-                format_duration(run.elapsed_time)
+                crate::quantity::format_elapsed(run.elapsed_time)
             },
             status,
             tone,
@@ -1353,20 +1353,6 @@ fn legacy_task_rows(run: &SimulationRun) -> Vec<TaskRow> {
             },
         })
         .collect()
-}
-
-fn format_duration(seconds: f64) -> String {
-    if !seconds.is_finite() || seconds < 0.0 {
-        return "not available".to_owned();
-    }
-    if seconds < 1.0 {
-        return format!("{:.3} s", seconds);
-    }
-    if seconds < 60.0 {
-        return format!("{:.2} s", seconds);
-    }
-    let minutes = (seconds / 60.0).floor();
-    format!("{minutes:.0} min {:.1} s", seconds - minutes * 60.0)
 }
 
 fn export_selected_manifest(app: &mut RSpiceApp) {

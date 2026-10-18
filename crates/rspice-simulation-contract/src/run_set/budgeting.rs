@@ -85,18 +85,36 @@ pub const fn modelled_cost_ms(task_count: usize, cost_per_task_ms: u64) -> u64 {
 }
 
 /// A duration in the form the forecast tile shows.
+///
+/// Past a minute it reads as a finished run's time does, so a forecast and
+/// its outcome compare. Under one it keeps two decimals: a modelled per-task
+/// budget has no millisecond to state.
 #[must_use]
 pub fn format_duration_ms(milliseconds: u64) -> String {
     let seconds = milliseconds as f64 / 1000.0;
-    if seconds < 60.0 {
+    if (seconds * 100.0).round() < 6_000.0 {
         format!("{seconds:.2} s")
-    } else if seconds < 3600.0 {
-        format!("{:.0} m {:02.0} s", seconds / 60.0, seconds % 60.0)
     } else {
-        format!(
-            "{:.0} h {:02.0} m",
-            seconds / 3600.0,
-            (seconds % 3600.0) / 60.0
-        )
+        rspice_app_types::quantity::format_elapsed(seconds)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_duration_ms;
+
+    #[test]
+    fn a_forecast_past_a_minute_counts_whole_minutes() {
+        for (milliseconds, expected) in [
+            (250, "0.25 s"),
+            (3_550, "3.55 s"),
+            (59_994, "59.99 s"),
+            (59_996, "1 min 0 s"),
+            // Rounding the minutes once read this as "2 m 30 s".
+            (90_000, "1 min 30 s"),
+            (3_725_000, "1 h 2 min 5 s"),
+        ] {
+            assert_eq!(format_duration_ms(milliseconds), expected, "{milliseconds}");
+        }
     }
 }
