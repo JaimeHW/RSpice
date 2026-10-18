@@ -439,7 +439,7 @@ mod tests {
             crate::ui::Theme::default().apply(&ctx);
             // How far the dragged dock reaches from its window edge, read off
             // its splitter, which egui centres on the dock's free edge.
-            let frame = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
+            let mut frame = |events: Vec<egui::Event>| {
                 let layout = LayoutSpec::resolve(SCREEN.x, SCREEN.y, &app.state.workbench);
                 let _ = ctx.run_ui(
                     egui::RawInput {
@@ -448,10 +448,10 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        synchronize_panel_memory(ui.ctx(), app, layout);
-                        show_navigator(ui, app, layout);
-                        show_inspector(ui, app, layout);
-                        show_console(ui, app, layout);
+                        synchronize_panel_memory(ui.ctx(), &app, layout);
+                        show_navigator(ui, &mut app, layout);
+                        show_inspector(ui, &mut app, layout);
+                        show_console(ui, &mut app, layout);
                     },
                 );
                 let edge = ctx
@@ -467,18 +467,15 @@ mod tests {
                 (edge, size)
             };
 
-            let (grab, opened) = frame(&mut app, Vec::new());
+            let (grab, opened) = frame(Vec::new());
             let dropped = grab + grow * DRAG;
-            frame(&mut app, vec![egui::Event::PointerMoved(grab)]);
-            frame(&mut app, vec![button(grab, true)]);
-            frame(
-                &mut app,
-                vec![egui::Event::PointerMoved(grab + grow * DRAG * 0.5)],
-            );
-            frame(&mut app, vec![egui::Event::PointerMoved(dropped)]);
-            frame(&mut app, vec![button(dropped, false)]);
+            frame(vec![egui::Event::PointerMoved(grab)]);
+            frame(vec![button(grab, true)]);
+            frame(vec![egui::Event::PointerMoved(grab + grow * DRAG * 0.5)]);
+            frame(vec![egui::Event::PointerMoved(dropped)]);
+            frame(vec![button(dropped, false)]);
             for _ in 0..4 {
-                let (_, held) = frame(&mut app, Vec::new());
+                let (_, held) = frame(Vec::new());
                 assert!(
                     (held - opened - DRAG).abs() < 1.0,
                     "{panel_id} was dragged from {opened} to {} px and now stands {held} px",
