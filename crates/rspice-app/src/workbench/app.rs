@@ -463,6 +463,7 @@ impl RSpiceApp {
         state.workspace.content.migrate_owned_netlist_deck_ids();
 
         state.initialize_shortcut_library_persistence(&cc.egui_ctx);
+        state.ui.toast_context = cc.egui_ctx.clone();
         state
             .ui
             .set_number_locale(crate::quantity::platform_number_locale());

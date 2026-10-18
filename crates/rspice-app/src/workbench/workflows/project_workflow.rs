@@ -1729,14 +1729,13 @@ fn finish_browser_canonical_open(
 ///
 /// A guard that refused the command (no project, a run in progress, another
 /// operation pending) answers the gesture; a project that could not be read
-/// or written is a failure the session records.
+/// or written is a failure the session records and tells the user about.
 fn lifecycle_error(state: &mut AppState, error: ProjectLifecycleError, context: &str) {
-    let text = format!("{context}: {error}");
     match error {
         ProjectLifecycleError::InvalidState(_) | ProjectLifecycleError::Persistence(_) => {
-            state.record(LogSeverity::Error, LogSource::Studio, text);
+            state.report_failure(context, error.to_string());
         }
-        _ => state.prompt(text),
+        _ => state.prompt(format!("{context}: {error}")),
     }
 }
 

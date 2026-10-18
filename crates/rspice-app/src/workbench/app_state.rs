@@ -1087,6 +1087,37 @@ impl AppState {
             .log_anchored(severity, source, text, Some(anchor))
     }
 
+    /// Report a failure of something the user asked for: a save, an open, an
+    /// export. The Console keeps the line; the toast says it now and offers
+    /// that line, so the mirrored copy of it is the same notice, not another.
+    pub(crate) fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.report(
+            crate::ui::widgets::ToastKind::Error,
+            title.into(),
+            detail.into(),
+        );
+    }
+
+    fn report(&mut self, kind: crate::ui::widgets::ToastKind, title: String, detail: String) {
+        use crate::diagnostics::{LogSeverity, LogSource};
+        use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
+
+        let severity = match kind {
+            ToastKind::Error => LogSeverity::Error,
+            _ => LogSeverity::Warning,
+        };
+        let log_id = self.record(severity, LogSource::Studio, format!("{title}: {detail}"));
+        let ctx = self.ui.toast_context.clone();
+        self.ui.toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::System,
+            kind,
+            title,
+            detail,
+            NotificationAction::ShowInConsole { log_id },
+        );
+    }
+
     /// Announce a committed plan command on the lifecycle status line and
     /// record it in the Console.
     ///

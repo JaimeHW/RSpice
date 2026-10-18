@@ -457,16 +457,6 @@ impl Toasts {
             {
                 continue;
             }
-            // Two records naming the same destination are two reports of one
-            // event, not two events. The shell announces a finished run in
-            // its own words — with the run's identity and what it retained —
-            // and this line is the same completion said again; keeping both
-            // counted one run twice in the unread badge.
-            if entry.action.is_some()
-                && self.activity.iter().any(|held| held.action == entry.action)
-            {
-                continue;
-            }
             // A line that names nowhere still came from somewhere. A warning
             // or a failure is one sentence here and sits among the lines that
             // explain it in the Console, so that is where it offers to go. An
@@ -479,6 +469,14 @@ impl Toasts {
                     },
                 )
             });
+            // Two records offering the same destination are two reports of one
+            // event, not two events. The shell announces a finished run in
+            // its own words — with the run's identity and what it retained —
+            // and a failure it toasted already offers this very line; keeping
+            // both counted one event twice in the unread badge.
+            if offer.is_some() && self.activity.iter().any(|held| held.action == offer) {
+                continue;
+            }
             self.record_activity(
                 // A mirrored line has no title of its own, so it is filed
                 // under its severity. An entry that does name a destination
@@ -989,6 +987,57 @@ mod tests {
             "a line that names a destination is filed under it, not under its severity"
         );
         assert_eq!(toasts.activity()[0].action(), Some(action));
+    }
+
+    /// One failure, one record. A failure is toasted in its own words with an
+    /// offer to show the Console line it wrote, and that same line is then
+    /// mirrored; the line is the failure said again, not a second failure.
+    #[test]
+    fn a_toasted_failure_and_its_console_line_are_retained_once() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        let action = NotificationAction::ShowInConsole { log_id: 7 };
+        toasts.notify_with_action(
+            &ctx,
+            NotificationCategory::System,
+            ToastKind::Error,
+            "Could not save project",
+            "The disk is full.",
+            action,
+        );
+
+        toasts.synchronize_activity(
+            8,
+            [mirrored(
+                7,
+                NotificationCategory::System,
+                ToastKind::Error,
+                "Could not save project: The disk is full.",
+                1.0,
+            )],
+        );
+
+        assert_eq!(
+            toasts.activity().len(),
+            1,
+            "a toasted failure and its mirrored line must leave one record"
+        );
+        assert_eq!(toasts.activity()[0].title(), "Could not save project");
+        assert_eq!(toasts.activity()[0].action(), Some(action));
+        assert_eq!(toasts.unread_count(), 1, "so the badge counts it once");
+
+        // A different line is a different event and is still kept.
+        toasts.synchronize_activity(
+            9,
+            [mirrored(
+                8,
+                NotificationCategory::System,
+                ToastKind::Error,
+                "Could not save project: The disk is full.",
+                2.0,
+            )],
+        );
+        assert_eq!(toasts.activity().len(), 2);
     }
 
     #[test]

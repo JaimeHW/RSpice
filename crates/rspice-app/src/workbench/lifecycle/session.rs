@@ -208,6 +208,10 @@ pub struct UiSessionState {
     pub browser_spoken_feedback: bool,
     /// Toast queue.
     pub toasts: Toasts,
+    /// The shell's egui context, kept so that a failure reported by a
+    /// workflow that holds no frame (a save, an open) is still toasted on the
+    /// frame clock. Set once when the shell starts. Transient.
+    pub(crate) toast_context: egui::Context,
     /// A retained result document asked to be taken back to the plan that
     /// produced it.
     ///

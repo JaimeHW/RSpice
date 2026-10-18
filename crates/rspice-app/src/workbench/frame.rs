@@ -630,6 +630,38 @@ mod tests {
         assert!(Workspace::ALL.contains(&Workspace::Stimulus));
     }
 
+    /// A reported failure is toasted with an offer to show its Console line,
+    /// and the mirror then meets that same line: one failure, one record.
+    #[test]
+    fn a_reported_failure_leaves_one_activity_record() {
+        use crate::ui::widgets::{NotificationAction, ToastKind};
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .report_failure("Project save failed", "The disk is full.");
+        synchronize_activity_stream(&ctx, &mut app);
+        synchronize_activity_stream(&ctx, &mut app);
+
+        let line = app
+            .state
+            .log_buffer
+            .entries()
+            .last()
+            .expect("the failure is in the Console");
+        assert_eq!(line.severity, LogSeverity::Error);
+        assert_eq!(line.message, "Project save failed: The disk is full.");
+        let line = line.id;
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1, "the mirrored line is the same notice");
+        assert_eq!(activity[0].title(), "Project save failed");
+        assert_eq!(activity[0].kind(), ToastKind::Error);
+        assert_eq!(
+            activity[0].action(),
+            Some(NotificationAction::ShowInConsole { log_id: line })
+        );
+    }
+
     /// A completion is announced on the transition into a terminal lifecycle,
     /// not on the terminal state itself. Opening a project whose history
     /// already holds a finished run must not claim one just completed — and
