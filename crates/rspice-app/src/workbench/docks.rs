@@ -448,7 +448,10 @@ mod tests {
         let dropped = egui::pos2(640.0, top - 150.0);
         frame(&mut app, vec![egui::Event::PointerMoved(grab)]);
         frame(&mut app, vec![button(grab, true)]);
-        frame(&mut app, vec![egui::Event::PointerMoved(grab - egui::vec2(0.0, 75.0))]);
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(grab - egui::vec2(0.0, 75.0))],
+        );
         frame(&mut app, vec![egui::Event::PointerMoved(dropped)]);
         frame(&mut app, vec![button(dropped, false)]);
         for _ in 0..4 {
