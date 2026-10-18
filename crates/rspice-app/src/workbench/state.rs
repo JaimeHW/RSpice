@@ -1417,8 +1417,12 @@ const fn default_inspector_width() -> f32 {
     312.0
 }
 
-const fn default_console_height() -> f32 {
-    145.0
+/// The console dock's height on a desktop until the reader drags it: the
+/// least that shows the Problems page's toolbar, its header, three whole
+/// rows and the selected finding's message with the line under it. At the
+/// 145 points it was, the page had room for two rows and no detail at all.
+pub(crate) const fn default_console_height() -> f32 {
+    208.0
 }
 
 const fn default_analysis_index() -> usize {
