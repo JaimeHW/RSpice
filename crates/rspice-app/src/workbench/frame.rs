@@ -233,9 +233,29 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         .filter_map(|run_id| run_notice(&app.state, run_id))
         .chain(campaigns.into_iter().map(campaign_notice))
         .collect::<Vec<_>>();
+    // The reader's Task attention setting says which outcomes may interrupt
+    // them. Every outcome is kept in the bell whatever it says.
+    let attention = app
+        .state
+        .ui
+        .preferences
+        .workspace()
+        .map(WorkspacePreferences::background_task_attention)
+        .unwrap_or_default();
     for notice in notices {
         let category = crate::ui::widgets::NotificationCategory::Job;
         let toasts = &mut app.state.ui.toasts;
+        if !attention.retains(notice.is_failure()) {
+            toasts.record_quietly(
+                ctx,
+                category,
+                notice.kind,
+                notice.title,
+                notice.detail,
+                notice.action,
+            );
+            continue;
+        }
         match notice.action {
             Some(action) => toasts.notify_with_action(
                 ctx,
@@ -258,6 +278,14 @@ struct RunNotice {
     title: String,
     detail: String,
     action: Option<crate::ui::widgets::NotificationAction>,
+}
+
+impl RunNotice {
+    /// Anything short of a clean finish, for the Task attention setting
+    /// that notifies on failure only: a warning is something to look at.
+    fn is_failure(&self) -> bool {
+        self.kind != crate::ui::widgets::ToastKind::Success
+    }
 }
 
 /// What a run that kept no analysis has to say for itself.
@@ -642,20 +670,8 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
     if revision == observed {
         return;
     }
-    let attention = app
-        .state
-        .ui
-        .preferences
-        .workspace()
-        .map(WorkspacePreferences::background_task_attention)
-        .unwrap_or_default();
-    if !attention.retains(true) {
-        app.state
-            .ui
-            .toasts
-            .synchronize_activity(revision, Vec::new());
-        return;
-    }
+    // Not subject to the Task attention setting: a studio or netlist failure
+    // is not a background run, and is always kept in the bell.
     let now = ctx.input(|input| input.time);
     let wall_now = crate::time_compat::unix_epoch();
     let entries = app
@@ -1554,36 +1570,100 @@ mod tests {
         );
     }
 
+    /// Every accessibility label the toast stack draws this frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn toasts_on_screen(ctx: &Context, app: &mut RSpiceApp) -> Vec<String> {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                app.state.ui.toasts.show(ctx, 32.0, 40.0, false);
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .map(|update| {
+                update
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, node)| node.label().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The Task attention setting governs run and campaign notices, and
+    /// only them. Every outcome is kept in the bell however it is set; the
+    /// setting decides which also raise a toast. A studio or netlist failure
+    /// is not a background run, and reaches the bell however it is set.
+    ///
+    /// This used to be the other way round: the setting was consulted only
+    /// by the console mirror, where "Silent" dropped studio failures, while
+    /// every run outcome toasted whatever it said.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn background_attention_filters_the_live_activity_stream() {
-        let ctx = Context::default();
-        let mut app = RSpiceApp::test_instance();
-        app.state
-            .ui
-            .preferences
-            .workspace_mut()
-            .unwrap()
-            .set_background_task_attention(BackgroundTaskAttention::NotifyOnFailureOnly);
-        app.state
-            .log_buffer
-            .log(LogSeverity::Error, LogSource::Studio, "failed");
+    fn background_attention_governs_run_toasts_and_never_the_studio_stream() {
+        use crate::state::SimulationRunLifecycle as Lifecycle;
 
-        synchronize_activity_stream(&ctx, &mut app);
-        assert_eq!(app.state.ui.toasts.activity().len(), 1);
-        assert_eq!(app.state.ui.toasts.activity()[0].message(), "failed");
+        for (attention, clean_toasts, failure_toasts) in [
+            (BackgroundTaskAttention::BadgeAndNotify, true, true),
+            (BackgroundTaskAttention::NotifyOnFailureOnly, false, true),
+            (BackgroundTaskAttention::Silent, false, false),
+        ] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut app = RSpiceApp::test_instance();
+            app.state
+                .ui
+                .preferences
+                .workspace_mut()
+                .unwrap()
+                .set_background_task_attention(attention);
+            app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+            app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+            announce_run_completion(&ctx, &mut app);
+            app.state.simulation.retained.runs[1].lifecycle = Lifecycle::Completed;
+            app.state.simulation.retained.runs[0].lifecycle = Lifecycle::Failed;
+            app.state.log_buffer.log(
+                LogSeverity::Error,
+                LogSource::Studio,
+                "The project could not be saved",
+            );
 
-        app.state
-            .ui
-            .preferences
-            .workspace_mut()
-            .unwrap()
-            .set_background_task_attention(BackgroundTaskAttention::Silent);
-        app.state
-            .log_buffer
-            .log(LogSeverity::Error, LogSource::Studio, "second failure");
-        synchronize_activity_stream(&ctx, &mut app);
-        assert_eq!(app.state.ui.toasts.activity().len(), 1);
+            announce_run_completion(&ctx, &mut app);
+            synchronize_activity_stream(&ctx, &mut app);
+
+            let mut kept = app
+                .state
+                .ui
+                .toasts
+                .activity()
+                .iter()
+                .map(|record| record.message().to_owned())
+                .collect::<Vec<_>>();
+            kept.sort();
+            assert_eq!(
+                kept,
+                [
+                    NOTHING_RETAINED.to_owned(),
+                    "The project could not be saved".to_owned(),
+                    "no analyses saved \u{b7} 0.00 s".to_owned(),
+                ],
+                "{attention:?}: every outcome is kept in the bell"
+            );
+            assert_eq!(app.state.ui.toasts.unread_count(), 3, "{attention:?}");
+            let on_screen = toasts_on_screen(&ctx, &mut app);
+            let shows = |title: &str| on_screen.iter().any(|label| label.contains(title));
+            assert_eq!(shows("Run 1 complete"), clean_toasts, "{attention:?}");
+            assert_eq!(shows("Run 2 failed"), failure_toasts, "{attention:?}");
+        }
     }
 
     /// The notice centre is for failures the reader has to be told about, so
