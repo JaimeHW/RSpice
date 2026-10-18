@@ -444,8 +444,11 @@ pub(super) fn commit_create_plan(
         options: setup.options.clone(),
         save_policy: setup.save_policy,
     };
+    let preferred_options = crate::workbench::app_state::SimSetupState::preferred_solver_options(
+        &app.state.ui.preferences,
+    );
     let id = setup.create_plan(name).map_err(|error| error.to_string())?;
-    apply_new_plan_configuration(&mut setup, new_plan, inherited)?;
+    apply_new_plan_configuration(&mut setup, new_plan, inherited, preferred_options)?;
     workspace.content.migrate_inactive_plan_data(id);
     workspace.content.sync_legacy_specs_projection(id);
     workspace
@@ -500,12 +503,17 @@ fn apply_new_plan_configuration(
     setup: &mut crate::workbench::app_state::SimSetupState,
     new_plan: &NewSimulationPlanDraft,
     inherited: InheritedPlanConfiguration,
+    preferred_options: crate::simulation::dialog::SimulationOptions,
 ) -> Result<(), String> {
-    if new_plan.inherit_solver_options {
-        setup.options = inherited.options;
-        setup.session.options_draft =
-            crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
-    }
+    // A plan that does not copy the active plan's options starts from the
+    // user's default solver preset, as a new project's first plan does.
+    setup.options = if new_plan.inherit_solver_options {
+        inherited.options
+    } else {
+        preferred_options
+    };
+    setup.session.options_draft =
+        crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
     if new_plan.inherit_model_closure {
         setup.model_bindings = inherited.model_bindings;
     }
@@ -806,6 +814,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A plan that does not copy the active plan's options opens at the
+    /// user's default solver preset, the same one a new project starts from.
+    #[test]
+    fn a_new_plan_starts_from_the_default_solver_preset() {
+        let mut app = app_with_a_distinctive_active_plan();
+        app.state
+            .ui
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::DefaultSolverPreset, 2)
+            .expect("accurate is a solver preset");
+        commit_create_plan(&mut app, "Accurate plan", &draft_with(false, false, false))
+            .expect("the create transaction commits");
+        let setup = &app.state.sim_setup;
+        assert_eq!(setup.options.reltol, SimulationOptions::accurate().reltol);
+        assert_ne!(setup.options.reltol, SimulationOptions::default().reltol);
+        assert_eq!(setup.options.temp, CHOSEN_POINT.temperature_celsius);
     }
 
     /// The exclusion the surface states: no result reference is copied, and the

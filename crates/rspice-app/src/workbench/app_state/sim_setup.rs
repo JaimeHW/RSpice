@@ -88,20 +88,27 @@ impl SimSetupState {
     /// default. The resulting options are copied into the plan: later changes
     /// to Preferences never mutate an existing plan or its reproducibility.
     pub fn new_with_user_preferences(preferences: &crate::workbench::UserPreferences) -> Self {
-        use crate::workbench::ChoicePreference;
-
         let mut setup = Self::new();
-        let mut options = match preferences.choice(ChoicePreference::DefaultSolverPreset) {
-            1 => crate::simulation::dialog::SimulationOptions::fast(),
-            2 => crate::simulation::dialog::SimulationOptions::accurate(),
-            3 => crate::simulation::dialog::SimulationOptions::robust(),
-            _ => crate::simulation::dialog::SimulationOptions::default(),
-        };
+        let mut options = Self::preferred_solver_options(preferences);
         options.temp = setup.reference_pvt.temperature_celsius;
         setup.options = options;
         setup.session.options_draft =
             crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
         setup
+    }
+
+    /// The solver options of the user's default preset, which every new plan
+    /// starts from unless it copies another plan's.
+    pub(crate) fn preferred_solver_options(
+        preferences: &crate::workbench::UserPreferences,
+    ) -> crate::simulation::dialog::SimulationOptions {
+        use crate::simulation::dialog::SimulationOptions;
+        match preferences.choice(crate::workbench::ChoicePreference::DefaultSolverPreset) {
+            1 => SimulationOptions::fast(),
+            2 => SimulationOptions::accurate(),
+            3 => SimulationOptions::robust(),
+            _ => SimulationOptions::default(),
+        }
     }
 
     /// Rebuild portable setup state and the current editor session after load.
