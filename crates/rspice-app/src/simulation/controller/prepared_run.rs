@@ -99,6 +99,7 @@ fn run_preparation_inputs_reading<'a>(
         imported_transient_checkpoints: &state.simulation.retained.imported_transient_checkpoints,
         display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
         max_parallel_workers: state.ui.preferences.solver_worker_limit(),
+        library_folders: state.library_folders(),
         compilation: state
             .ui
             .code_workspace
@@ -150,6 +151,7 @@ struct FrozenRunInputs {
     imported_transient_checkpoints:
         rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     max_parallel_workers: Option<usize>,
+    library_folders: Vec<std::path::PathBuf>,
     compilation: Option<rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
     design_checks: rspice_design::drc::DrcConfig,
     /// The data-file host, which the worker reads as it is when it reads,
@@ -215,6 +217,7 @@ impl FrozenRunPreparation {
                     .imported_transient_checkpoints
                     .clone(),
                 max_parallel_workers: state.ui.preferences.solver_worker_limit(),
+                library_folders: state.library_folders().to_vec(),
                 compilation: state
                     .ui
                     .code_workspace
@@ -289,6 +292,7 @@ impl FrozenRunInputs {
             imported_transient_checkpoints: &self.imported_transient_checkpoints,
             display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
             max_parallel_workers: self.max_parallel_workers,
+            library_folders: &self.library_folders,
             compilation: self.compilation.as_ref(),
             design_checks: self.design_checks.clone(),
         }

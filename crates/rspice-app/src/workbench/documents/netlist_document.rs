@@ -2340,6 +2340,9 @@ pub struct NetlistDocumentState {
     pub revision: u64,
     /// Revision the diagnostics were parsed for.
     diag_revision: Option<u64>,
+    /// Library folders the diagnostics resolved includes through; a change
+    /// in Preferences stales them as an edit does.
+    diag_library_folders: Vec<std::path::PathBuf>,
     /// `ui.input(..).time` of the last edit, for parse debounce.
     last_edit_time: f64,
     /// Current parse diagnostics.

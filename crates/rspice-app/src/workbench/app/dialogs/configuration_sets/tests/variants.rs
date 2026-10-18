@@ -13,6 +13,7 @@ fn an_omitted_missing_master_does_not_block_the_configuration_receipt() {
             &state.workspace,
             &state.library_manager,
             &state.model_library_manager,
+            state.library_folders(),
             &state.schematic,
             fixture.configuration,
             None,
@@ -49,6 +50,7 @@ fn a_retained_receipt_refreshes_when_a_variant_removes_its_dut() {
             &state.workspace,
             &state.library_manager,
             &state.model_library_manager,
+            state.library_folders(),
             &state.schematic,
         )
         .unwrap()
@@ -107,6 +109,7 @@ fn a_retained_receipt_tracks_live_values_without_topology_counter_changes() {
             &state.workspace,
             &state.library_manager,
             &state.model_library_manager,
+            state.library_folders(),
             &state.schematic,
         )
         .unwrap()
@@ -152,6 +155,7 @@ fn a_failed_projection_has_no_invented_resolution_count() {
         &fixture.state.workspace,
         &fixture.state.library_manager,
         &fixture.state.model_library_manager,
+        fixture.state.library_folders(),
         &fixture.state.schematic,
         fixture.configuration,
         Some(&invalid),

@@ -360,13 +360,22 @@ impl AppState {
         }
     }
 
-    /// The chain the project's `.include` and `.lib` files resolve through.
+    /// The chain the project's `.include` and `.lib` files resolve through:
+    /// its own search paths, then the library folders set in Preferences.
     pub(crate) fn include_search_chain(
         &self,
     ) -> rspice_simulation::netlist_preparation::IncludeSearchChain {
         rspice_simulation::netlist_preparation::IncludeSearchChain::for_project(
             &self.workspace.content.project,
+            self.library_folders(),
         )
+    }
+
+    /// The folders searched for includes after every project's own paths.
+    pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
+        self.ui
+            .preferences
+            .folders(crate::workbench::FolderListPreference::LibraryFolders)
     }
 
     /// Resolve the project-owned technology contract against both mutable

@@ -74,14 +74,36 @@ impl IncludeSearchChain {
         }
     }
 
-    /// The chain a project's includes resolve through.
+    /// The chain a project's includes resolve through: the project's own
+    /// entries in its order, then the library folders this host adds, in
+    /// theirs. The project's come first, so where both hold a name the
+    /// project's file wins.
     ///
     /// Every surface that resolves a project's includes — a run, a check, a
     /// configuration's seal and the live editor — builds its chain here, so
     /// no two of them can walk different ones.
+    ///
+    /// A library folder belongs to the host, not the project, so only one
+    /// named by a full path is searched. One the chain already holds is not
+    /// added again, so the engine numbers its search paths as the chain does.
     #[must_use]
-    pub fn for_project(project: &rspice_project_contract::ProjectDescriptor) -> Self {
-        Self::resolve(project.include_search_paths(), project.data_root())
+    pub fn for_project(
+        project: &rspice_project_contract::ProjectDescriptor,
+        library_folders: &[PathBuf],
+    ) -> Self {
+        let mut chain = Self::resolve(project.include_search_paths(), project.data_root());
+        for folder in library_folders {
+            if !folder.is_absolute() || chain.entries.iter().any(|entry| entry.resolved == *folder)
+            {
+                continue;
+            }
+            chain.entries.push(IncludeSearchEntry {
+                authored: folder.clone(),
+                resolved: folder.clone(),
+                exists: directory_exists(folder),
+            });
+        }
+        chain
     }
 
     /// Every entry, in the order the resolver walks them.
@@ -169,6 +191,29 @@ mod tests {
             !chain.entries()[0].exists(),
             "an unsaved project must not resolve a relative entry against the process directory"
         );
+    }
+
+    #[test]
+    fn library_folders_follow_the_project_paths_and_are_searched_once() {
+        let root = std::env::temp_dir().join("rspice-include-search-project");
+        let mut project = rspice_project_contract::ProjectDescriptor::default();
+        project
+            .set_include_search_paths(vec![PathBuf::from("models")])
+            .expect("a relative project path");
+        project.path = Some(root.join("design.rspice"));
+        let library = std::env::temp_dir().join("rspice-include-search-library");
+
+        let chain = IncludeSearchChain::for_project(
+            &project,
+            &[
+                library.clone(),
+                PathBuf::from("relative"),
+                library.clone(),
+                root.join("models"),
+            ],
+        );
+
+        assert_eq!(chain.directories(), vec![root.join("models"), library]);
     }
 
     #[test]

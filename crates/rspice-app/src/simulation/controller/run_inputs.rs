@@ -137,6 +137,7 @@ struct CapturedInputs {
     layouts: BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>,
     project_sources: rspice_design::project_sources::ProjectSourceRegistry,
     max_parallel_workers: Option<usize>,
+    library_folders: Vec<PathBuf>,
     compilation: Option<rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
     reads: KindReads,
 }
@@ -185,6 +186,7 @@ struct LiveInputs<'a> {
     layouts: &'a BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>,
     project_sources: &'a rspice_design::project_sources::ProjectSourceRegistry,
     max_parallel_workers: Option<usize>,
+    library_folders: &'a [PathBuf],
     compilation: Option<&'a rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
     design_management: &'a rspice_design_model::design_management::DesignManagementCatalog,
     configuration_sets: &'a rspice_design::configuration_set::ConfigurationSetCatalog,
@@ -220,6 +222,7 @@ impl<'a> LiveInputs<'a> {
             imported_transient_checkpoints,
             display_waveform_cache_samples,
             max_parallel_workers,
+            library_folders,
             compilation,
             design_checks,
         } = super::prepared_run::run_preparation_inputs(state);
@@ -262,6 +265,7 @@ impl<'a> LiveInputs<'a> {
             layouts,
             project_sources,
             max_parallel_workers,
+            library_folders,
             compilation,
             design_management,
             configuration_sets,
@@ -334,6 +338,7 @@ impl RunInputIdentity {
             layouts: live.layouts.clone(),
             project_sources: live.project_sources.clone(),
             max_parallel_workers: live.max_parallel_workers,
+            library_folders: live.library_folders.to_vec(),
             compilation: live.compilation.cloned(),
             reads,
         }))
@@ -412,6 +417,10 @@ impl RunInputIdentity {
             (
                 captured.max_parallel_workers == live.max_parallel_workers,
                 "the solver limits",
+            ),
+            (
+                captured.library_folders == live.library_folders,
+                "the library folders",
             ),
             (compilation_unchanged, "the Verilog-A compilation"),
         ];

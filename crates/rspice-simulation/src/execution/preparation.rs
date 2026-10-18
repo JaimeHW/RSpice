@@ -60,6 +60,10 @@ pub struct RunPreparationInputs<'a, R, A> {
     /// engine takes the smaller of whatever it ends up with and the
     /// parallelism the host reports.
     pub max_parallel_workers: Option<usize>,
+    /// Folders this host searches for a deck's `.include` and `.lib` files
+    /// after the project's own include search paths. Device-local like the
+    /// worker ceiling: the reader's, not the project's.
+    pub library_folders: &'a [std::path::PathBuf],
     pub compilation: Option<&'a crate::project_veriloga::receipt::ProjectCompileReceipt>,
     /// The configuration the project checks the configured root under — its
     /// rule deck and its connectivity policy — which the source-check gate
@@ -76,7 +80,10 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
 
     /// The chain this run's includes resolve through.
     fn include_search(&self) -> crate::netlist_preparation::IncludeSearchChain {
-        crate::netlist_preparation::IncludeSearchChain::for_project(self.technology.project)
+        crate::netlist_preparation::IncludeSearchChain::for_project(
+            self.technology.project,
+            self.library_folders,
+        )
     }
 
     fn plan_data(

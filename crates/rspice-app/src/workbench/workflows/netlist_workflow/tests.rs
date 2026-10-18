@@ -1,6 +1,8 @@
 //! Netlist workflow tests.
 
 #[cfg(not(target_arch = "wasm32"))]
+mod library_folders;
+#[cfg(not(target_arch = "wasm32"))]
 mod vendor_profiles;
 
 use super::bundle::*;

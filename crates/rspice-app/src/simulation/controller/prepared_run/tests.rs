@@ -9,12 +9,15 @@ use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::workbench::{
-    documents::code_workspace::compile_project_bundle_receipt, examples::load_example,
-    lifecycle::project_lifecycle, workflows::netlist_workflow::apply_imported_netlist,
+    FolderListPreference, documents::code_workspace::compile_project_bundle_receipt,
+    examples::load_example, lifecycle::project_lifecycle,
+    workflows::netlist_workflow::apply_imported_netlist,
 };
 use rspice_design::drc::DrcResult;
 
 mod campaign;
+#[cfg(not(target_arch = "wasm32"))]
+mod library_folders;
 
 static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 

@@ -526,7 +526,9 @@ fn diagnostic_problem(severity: DiagnosticSeverity) -> Option<Problem> {
 /// this one result.
 fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     let revision = state.ui.netlist.revision;
-    if state.ui.netlist.diag_revision == Some(revision) {
+    if state.ui.netlist.diag_revision == Some(revision)
+        && state.ui.netlist.diag_library_folders == state.library_folders()
+    {
         return;
     }
     let now = ui.input(|input| input.time);
@@ -545,6 +547,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
 /// Validate the visible source as it stands and publish the result, bound to
 /// `revision`.
 fn validate_visible_source(state: &mut AppState, revision: u64) {
+    state.ui.netlist.diag_library_folders = state.library_folders().to_vec();
     if state.ui.netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
         Arc::make_mut(&mut state.ui.netlist.diagnostics).clear();
         state.ui.netlist.diag_revision = Some(revision);
@@ -2365,6 +2368,9 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert!(state.ui.netlist.edited_lines.contains(&1));
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod library_folder_tests;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod include_shadow_tests {

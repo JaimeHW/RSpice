@@ -373,6 +373,10 @@ impl RSpiceApp {
                 &self.state.workspace,
                 &self.state.library_manager,
                 &self.state.model_library_manager,
+                self.state
+                    .ui
+                    .preferences
+                    .folders(crate::workbench::FolderListPreference::LibraryFolders),
                 &self.state.schematic,
                 write_allowed,
             );
@@ -720,6 +724,7 @@ fn configuration_body(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
     model_libraries: &crate::state::ModelLibraryManager,
+    library_folders: &[std::path::PathBuf],
     active_schematic: &crate::state::SchematicState,
     write_allowed: bool,
 ) -> BodyAction {
@@ -737,6 +742,7 @@ fn configuration_body(
             workspace,
             libraries,
             model_libraries,
+            library_folders,
             active_schematic,
             write_allowed,
         ),
@@ -761,6 +767,7 @@ fn configuration_body(
             workspace,
             libraries,
             model_libraries,
+            library_folders,
             active_schematic,
             write_allowed,
         ),
@@ -773,6 +780,7 @@ fn manager_body(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
     model_libraries: &crate::state::ModelLibraryManager,
+    library_folders: &[std::path::PathBuf],
     active_schematic: &crate::state::SchematicState,
     write_allowed: bool,
 ) -> BodyAction {
@@ -784,6 +792,7 @@ fn manager_body(
         workspace,
         libraries,
         model_libraries,
+        library_folders,
         active_schematic,
     );
     Frame::NONE
@@ -984,6 +993,7 @@ fn selected_configuration_receipt(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
     model_libraries: &crate::state::ModelLibraryManager,
+    library_folders: &[std::path::PathBuf],
     active_schematic: &crate::state::SchematicState,
 ) -> Option<ConfigurationReceiptView> {
     let id = dialog.selected_id?;
@@ -991,6 +1001,7 @@ fn selected_configuration_receipt(
         workspace,
         libraries,
         model_libraries,
+        library_folders,
         active_schematic,
         id,
         dialog.draft.as_ref(),
@@ -1005,6 +1016,7 @@ fn selected_configuration_receipt(
         workspace,
         libraries,
         model_libraries,
+        library_folders,
         active_schematic,
         id,
         dialog.draft.as_ref(),
@@ -1020,6 +1032,7 @@ fn configuration_receipt_cache_key(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
     model_libraries: &crate::state::ModelLibraryManager,
+    library_folders: &[std::path::PathBuf],
     active_schematic: &crate::state::SchematicState,
     id: ConfigurationSetId,
     draft: Option<&ConfigurationSetDefinition>,
@@ -1032,8 +1045,14 @@ fn configuration_receipt_cache_key(
     // The receipt adds the selected draft and dependency-expansion environment
     // to the projection's content authority. Topology counters cannot describe
     // a live value edit or an active-variant change.
-    let publication =
-        serde_json::to_vec(&(id, draft, &workspace.content.project, model_libraries)).ok()?;
+    let publication = serde_json::to_vec(&(
+        id,
+        draft,
+        &workspace.content.project,
+        model_libraries,
+        library_folders,
+    ))
+    .ok()?;
     Some(ConfigurationReceiptCacheKey {
         design,
         publication: crate::product::ContentDigest::from_bytes(Sha256::digest(publication).into()),
@@ -1043,6 +1062,7 @@ fn configuration_receipt(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
     model_libraries: &crate::state::ModelLibraryManager,
+    library_folders: &[std::path::PathBuf],
     active_schematic: &crate::state::SchematicState,
     id: ConfigurationSetId,
     draft: Option<&ConfigurationSetDefinition>,
@@ -1095,7 +1115,13 @@ fn configuration_receipt(
         )
     };
     let (netlist_digest, diagnostic) = if resolution.is_valid() {
-        match configuration_netlist_digest(&projected, libraries, &inspection, model_libraries) {
+        match configuration_netlist_digest(
+            &projected,
+            libraries,
+            &inspection,
+            model_libraries,
+            library_folders,
+        ) {
             Ok(digest) => (digest, None),
             Err(error) => {
                 status = "generation blocked".to_owned();
@@ -1163,6 +1189,7 @@ fn configuration_netlist_digest(
     libraries: &crate::state::LibraryManager,
     projection: &crate::state::workspace::DesignProjection,
     model_libraries: &crate::state::ModelLibraryManager,
+    library_folders: &[std::path::PathBuf],
 ) -> Result<String, String> {
     let root = projection
         .root_schematic()
@@ -1191,6 +1218,7 @@ fn configuration_netlist_digest(
             root.current_file(),
             &rspice_simulation::netlist_preparation::IncludeSearchChain::for_project(
                 &workspace.content.project,
+                library_folders,
             ),
             model_libraries.catalog(),
             model_libraries.resolution_records(),
@@ -1559,6 +1587,7 @@ fn binding_body(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
     model_libraries: &crate::state::ModelLibraryManager,
+    library_folders: &[std::path::PathBuf],
     active_schematic: &crate::state::SchematicState,
     write_allowed: bool,
 ) -> BodyAction {
@@ -1584,6 +1613,7 @@ fn binding_body(
             workspace,
             libraries,
             model_libraries,
+            library_folders,
             active_schematic,
         );
         if let Some(receipt) = receipt.as_ref() {
