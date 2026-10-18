@@ -21,6 +21,7 @@ fn target(kind: ComponentType, model: Option<&str>, library: Option<&str>) -> Mo
         reference: "D1".to_owned(),
         kind,
         current: model.map(|model| (model.to_owned(), library.map(str::to_owned))),
+        geometry: InstanceGeometry::default(),
     }
 }
 
@@ -28,8 +29,16 @@ fn listed(groups: &[Group<'_>]) -> Vec<String> {
     groups
         .iter()
         .flat_map(|group| &group.rows)
-        .map(|row| format!("{}/{}", row.library.name, row.model.name))
+        .map(|row| format!("{}/{}", row.library.name, row.entry.name()))
         .collect()
+}
+
+/// `L × W` in metres.
+fn sized(length: f64, width: f64) -> InstanceGeometry {
+    InstanceGeometry {
+        length: Some(length),
+        width: Some(width),
+    }
 }
 
 /// A second library that defines the foundation's diode under the same name.
@@ -193,8 +202,9 @@ fn a_rows_figures_lead_with_what_tells_two_cards_of_its_family_apart() {
         .get_library("RSpice Foundation")
         .expect("foundation");
     let zener = library.get_model("RSPICE_ZENER").expect("zener");
-    assert_eq!(meta_line(zener, false), ["IS 10f", "N 1.2", "BV 5.6"]);
-    assert_eq!(meta_line(zener, true)[0], "Diode");
+    let row = Entry::Card(zener);
+    assert_eq!(meta_line(&row, false), ["IS 10f", "N 1.2", "BV 5.6"]);
+    assert_eq!(meta_line(&row, true)[0], "Diode");
 
     let names: Vec<String> = parameters(zener)
         .into_iter()
@@ -223,6 +233,197 @@ fn a_value_past_the_ladder_is_spelled_as_an_exponent() {
     assert_eq!(spelled(2.29e-18), "2.29e-18");
     assert_eq!(spelled(1.12e5), "112k");
     assert_eq!(spelled(-0.0234), "-23.4m");
+}
+
+fn kit_manager() -> ModelLibraryManager {
+    let mut manager = foundation();
+    manager.add_library(foundry_kit());
+    manager
+}
+
+fn family_row<'a>(groups: &'a [Group<'a>], name: &str) -> &'a Row<'a> {
+    groups
+        .iter()
+        .flat_map(|group| &group.rows)
+        .find(|row| row.entry.name() == name)
+        .expect("listed row")
+}
+
+/// A kit's bins are one row named for their family, beside the kit's cards
+/// that are no bin, and a lone numbered card is a family of one. A bin's own
+/// name still finds its family.
+#[test]
+fn a_binned_family_is_one_row_named_for_the_family() {
+    let manager = kit_manager();
+    let nmos = target(ComponentType::Nmos, None, None);
+    let rows = catalog(&manager, Some(&nmos), "");
+    assert_eq!(
+        listed(&rows),
+        [
+            "RSpice Foundation/RSPICE_NMOS",
+            "gpdk090/nch",
+            "gpdk090/nch_25"
+        ]
+    );
+    assert_eq!(
+        family_row(&rows, "nch").meta,
+        [
+            "BSIM4 4.5",
+            "12 bins",
+            "L 100nm\u{2013}20µm",
+            "W 120nm\u{2013}100µm"
+        ]
+    );
+    assert_eq!(
+        listed(&catalog(&manager, Some(&nmos), "nch.11")),
+        ["gpdk090/nch"]
+    );
+    let pmos = catalog(
+        &manager,
+        Some(&target(ComponentType::Pmos, None, None)),
+        "gpdk",
+    );
+    assert_eq!(listed(&pmos), ["gpdk090/pch"]);
+    assert_eq!(family_row(&pmos, "pch").meta[1], "1 bin");
+}
+
+#[test]
+fn a_bin_window_reads_its_unit_once() {
+    assert_eq!(window_label(Some(0.1e-6), Some(0.5e-6)), "100\u{2013}500nm");
+    assert_eq!(window_label(Some(0.5e-6), Some(2e-6)), "500nm\u{2013}2µm");
+    assert_eq!(window_label(Some(1e-6), None), "min 1µm");
+    assert_eq!(window_label(None, None), "\u{2014}");
+}
+
+/// Opened on an instance pinned to one bin, the browser picks its family and
+/// says which bin the instance's size runs; Select binds the family's name.
+#[test]
+fn a_pinned_bin_is_replaced_by_its_family_and_the_size_names_the_bin() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let manager = kit_manager();
+    let mut state = ModelBrowserState::default();
+    state.open_for_instance(
+        "M3",
+        ComponentType::Nmos,
+        Some("nch.2".to_owned()),
+        Some("gpdk090".to_owned()),
+        sized(1e-6, 5e-6),
+    );
+    let _ = frame(&ctx, &mut state, &manager, Vec::new());
+    assert_eq!(state.pick, Some(key("gpdk090", "nch")));
+
+    let target = state.target.clone().expect("target");
+    let library = manager.get_library("gpdk090").expect("kit");
+    let family = entry(library, "nch").expect("family");
+    let status = footer(&manager, Some(&target), Some((library, &family)), &[], "");
+    assert!(status.can_select);
+    assert!(matches!(status.tone, DialogHintTone::Neutral));
+    // L 1µm falls in the second L window and W 5µm in the second W window.
+    assert_eq!(
+        status.hint,
+        "Replaces nch.2 on M3 with nch from gpdk090; its L and W run nch.5"
+    );
+    assert_eq!(family.card(target.geometry).name, "nch.5");
+
+    let mut result = ModelBrowserResult::None;
+    for _ in 0..3 {
+        result = frame(&ctx, &mut state, &manager, vec![press(Key::Enter)]);
+        if result != ModelBrowserResult::None {
+            break;
+        }
+    }
+    assert_eq!(
+        result,
+        ModelBrowserResult::Selected {
+            library: "gpdk090".to_owned(),
+            model: "nch".to_owned(),
+        }
+    );
+}
+
+/// A size no bin holds is what the simulator refuses, at the run: the footer
+/// says so, in the warning tone, and Select still binds the family, since the
+/// size is what has to change. The sheet falls back to the first bin.
+#[test]
+fn a_size_no_bin_holds_is_warned_of_before_the_run_refuses_it() {
+    let manager = kit_manager();
+    let library = manager.get_library("gpdk090").expect("kit");
+    let family = entry(library, "nch").expect("family");
+    let mut uncovered = target(ComponentType::Nmos, Some("nch"), Some("gpdk090"));
+    uncovered.reference = "M3".to_owned();
+    uncovered.geometry = sized(25e-6, 5e-6);
+    let status = footer(
+        &manager,
+        Some(&uncovered),
+        Some((library, &family)),
+        &[],
+        "",
+    );
+    assert!(matches!(status.tone, DialogHintTone::Warn));
+    assert_eq!(
+        status.hint,
+        "M3 already uses nch; no nch bin holds L 25µm, W 5µm, so a run refuses M3"
+    );
+    assert_eq!(family.card(uncovered.geometry).name, "nch.1");
+
+    uncovered.current = None;
+    let status = footer(
+        &manager,
+        Some(&uncovered),
+        Some((library, &family)),
+        &[],
+        "",
+    );
+    assert!(status.can_select);
+    assert!(
+        status
+            .hint
+            .starts_with("Binds nch from gpdk090 to M3; no nch bin")
+    );
+}
+
+/// A family competes for its name as a card does: a second library's card of
+/// that name leaves both unbindable until the project decides which one runs.
+#[test]
+fn a_family_another_library_names_as_a_card_waits_for_the_projects_decision() {
+    let mut manager = kit_manager();
+    let mut vendor = ModelLibrary::new("vendor");
+    let mut card = DeviceModel::new("nch", ModelType::Nmos).with_level(ModelLevel::Bsim4);
+    card.spice_type = Some("NMOS".to_owned());
+    vendor.add_model(card);
+    manager.add_library(vendor);
+    let nmos = target(ComponentType::Nmos, None, None);
+    let tags = |manager: &ModelLibraryManager| {
+        catalog(manager, Some(&nmos), "nch")
+            .iter()
+            .flat_map(|group| &group.rows)
+            .filter(|row| row.entry.name() == "nch")
+            .map(|row| {
+                (
+                    row.library.name.clone(),
+                    row.refusal.as_ref().map(|refusal| refusal.tag),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        tags(&manager),
+        [
+            ("gpdk090".to_owned(), Some("unresolved")),
+            ("vendor".to_owned(), Some("unresolved")),
+        ]
+    );
+    manager
+        .resolve_definition_provider(ModelConsumerScope::PrimitiveModel, "nch", "gpdk090", "test")
+        .expect("the family is a provider of its name");
+    assert_eq!(
+        tags(&manager),
+        [
+            ("gpdk090".to_owned(), None),
+            ("vendor".to_owned(), Some("shadowed")),
+        ]
+    );
 }
 
 fn press(key: Key) -> egui::Event {
@@ -269,6 +470,7 @@ fn the_pick_opens_on_the_model_in_use_and_select_binds_a_different_one() {
         ComponentType::Diode,
         Some("RSPICE_DIODE".to_owned()),
         Some("RSpice Foundation".to_owned()),
+        InstanceGeometry::default(),
     );
 
     assert_eq!(
@@ -280,10 +482,11 @@ fn the_pick_opens_on_the_model_in_use_and_select_binds_a_different_one() {
     let library = manager
         .get_library("RSpice Foundation")
         .expect("foundation");
+    let card = |name: &str| Entry::Card(library.get_model(name).expect("card"));
     let unchanged = footer(
         &manager,
         Some(&target),
-        Some((library, library.get_model("RSPICE_DIODE").expect("diode"))),
+        Some((library, &card("RSPICE_DIODE"))),
         &[],
         "",
     );
@@ -295,7 +498,7 @@ fn the_pick_opens_on_the_model_in_use_and_select_binds_a_different_one() {
     let changed = footer(
         &manager,
         Some(&target),
-        Some((library, library.get_model("RSPICE_ZENER").expect("zener"))),
+        Some((library, &card("RSPICE_ZENER"))),
         &[],
         "",
     );
@@ -330,7 +533,13 @@ fn typing_narrows_and_escape_cancels() {
     crate::ui::Theme::default().apply(&ctx);
     let manager = foundation();
     let mut state = ModelBrowserState::default();
-    state.open_for_instance("D1", ComponentType::Diode, None, None);
+    state.open_for_instance(
+        "D1",
+        ComponentType::Diode,
+        None,
+        None,
+        InstanceGeometry::default(),
+    );
     let _ = frame(&ctx, &mut state, &manager, Vec::new());
     let _ = frame(
         &ctx,
@@ -351,17 +560,25 @@ fn typing_narrows_and_escape_cancels() {
     assert!(!state.open);
 }
 
-/// A library shaped like a foundry kit: binned BSIM4 cards with geometry
-/// windows and a full parameter set, for the review renders.
-#[cfg(not(target_arch = "wasm32"))]
+/// The L and W windows of the foundry kit's twelve `nch` bins, in metres: a
+/// four-by-three grid, numbered across W within each L.
+const KIT_LENGTHS: [(f64, f64); 4] = [
+    (0.1e-6, 0.5e-6),
+    (0.5e-6, 2e-6),
+    (2e-6, 10e-6),
+    (10e-6, 20e-6),
+];
+const KIT_WIDTHS: [(f64, f64); 3] = [(0.12e-6, 1e-6), (1e-6, 10e-6), (10e-6, 100e-6)];
+
+/// A library shaped like a foundry kit: a twelve-bin BSIM4 family with a full
+/// parameter set, an unbinned thick-oxide card, and a PMOS family of one.
 fn foundry_kit() -> ModelLibrary {
     let mut library = ModelLibrary::new("gpdk090");
-    for (bin, (l_min, l_max, w_min, w_max)) in [
-        (1, (0.1e-6, 0.5e-6, 0.12e-6, 1e-6)),
-        (2, (0.5e-6, 2e-6, 0.12e-6, 1e-6)),
-        (3, (0.1e-6, 0.5e-6, 1e-6, 10e-6)),
-        (10, (2e-6, 20e-6, 1e-6, 10e-6)),
-    ] {
+    let windows = KIT_LENGTHS
+        .iter()
+        .flat_map(|length| KIT_WIDTHS.iter().map(move |width| (*length, *width)));
+    for (index, ((l_min, l_max), (w_min, w_max))) in windows.enumerate() {
+        let bin = index + 1;
         let mut card = DeviceModel::new(format!("nch.{bin}"), ModelType::Nmos)
             .with_level(ModelLevel::Bsim4)
             .with_geometry(l_min, l_max, w_min, w_max);
@@ -373,8 +590,8 @@ fn foundry_kit() -> ModelLibrary {
             "C:/pdk/gpdk090/models/spectre/gpdk090.scs",
         ));
         card.source_line = Some(118 + 96 * bin);
+        card.add_parameter("vth0", 0.3923 + 0.004 * bin as f64);
         for (name, value) in [
-            ("vth0", 0.3923),
             ("toxe", 2.05e-9),
             ("u0", 0.0352),
             ("k1", 0.4421),
@@ -463,7 +680,8 @@ fn print_model_browser_renders_for_review() {
     let stderr = std::io::stderr();
     let mut report = stderr.lock();
 
-    let scenes: [(&str, Mode, egui::Vec2, ModelBrowserState); 6] = [
+    let no_size = InstanceGeometry::default();
+    let scenes: [(&str, Mode, egui::Vec2, ModelBrowserState); 8] = [
         ("diode-dark", Mode::Dark, vec2(1100.0, 760.0), {
             let mut state = ModelBrowserState::default();
             state.open_for_instance(
@@ -471,6 +689,7 @@ fn print_model_browser_renders_for_review() {
                 ComponentType::Diode,
                 Some("RSPICE_DIODE".to_owned()),
                 Some("RSpice Foundation".to_owned()),
+                no_size,
             );
             state.pick = Some(key("RSpice Foundation", "RSPICE_ZENER"));
             state.seeded = true;
@@ -478,11 +697,13 @@ fn print_model_browser_renders_for_review() {
         }),
         ("diode-light", Mode::Light, vec2(1100.0, 760.0), {
             let mut state = ModelBrowserState::default();
-            state.open_for_instance("D1", ComponentType::Diode, None, None);
+            state.open_for_instance("D1", ComponentType::Diode, None, None, no_size);
             state.pick = Some(key("RSpice Foundation", "RSPICE_DIODE"));
             state.seeded = true;
             state
         }),
+        // Pinned to one bin: the browser opens on the family, which Select
+        // binds in its place, with the bin the instance's size selects marked.
         ("nmos-pdk", Mode::Dark, vec2(1100.0, 760.0), {
             let mut state = ModelBrowserState::default();
             state.open_for_instance(
@@ -490,7 +711,26 @@ fn print_model_browser_renders_for_review() {
                 ComponentType::Nmos,
                 Some("nch.2".to_owned()),
                 Some("gpdk090".to_owned()),
+                sized(1e-6, 5e-6),
             );
+            state
+        }),
+        ("nch-family-light", Mode::Light, vec2(1100.0, 760.0), {
+            let mut state = ModelBrowserState::default();
+            state.open_for_instance(
+                "M3",
+                ComponentType::Nmos,
+                Some("nch".to_owned()),
+                Some("gpdk090".to_owned()),
+                sized(4e-6, 20e-6),
+            );
+            state
+        }),
+        ("nch-family-uncovered", Mode::Dark, vec2(1100.0, 760.0), {
+            let mut state = ModelBrowserState::default();
+            state.open_for_instance("M3", ComponentType::Nmos, None, None, sized(25e-6, 5e-6));
+            state.pick = Some(key("gpdk090", "nch"));
+            state.seeded = true;
             state
         }),
         ("browse-all", Mode::Dark, vec2(1100.0, 760.0), {
@@ -504,7 +744,7 @@ fn print_model_browser_renders_for_review() {
         }),
         ("filter-empty", Mode::Dark, vec2(1100.0, 760.0), {
             let mut state = ModelBrowserState::default();
-            state.open_for_instance("Q1", ComponentType::NpnBjt, None, None);
+            state.open_for_instance("Q1", ComponentType::NpnBjt, None, None, no_size);
             state.filter = "bsim".to_owned();
             state
         }),
@@ -515,6 +755,7 @@ fn print_model_browser_renders_for_review() {
                 ComponentType::Nmos,
                 Some("nch.2".to_owned()),
                 Some("gpdk090".to_owned()),
+                sized(1e-6, 5e-6),
             );
             state
         }),

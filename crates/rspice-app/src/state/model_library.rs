@@ -52,6 +52,7 @@ pub(crate) use manager::model_library_source_digest;
 pub use manager::{
     ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
 };
+pub(crate) use rspice_model_library::BinFamily;
 pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::ProjectModelRevisionDefinition;
 pub(crate) use rspice_model_library::first_unreachable_source;

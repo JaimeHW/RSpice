@@ -763,6 +763,50 @@ mod tests {
         assert!(error.contains("project-global provider 'beta'"));
     }
 
+    /// A binned family is bound by its name, the way a foundry deck binds it:
+    /// the library holding `nch.1` and `nch.2` provides `nch`, and the commit
+    /// that names it with that library is accepted.
+    #[test]
+    fn a_binned_family_commits_under_its_own_name() {
+        use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+
+        let mut state = AppState::default();
+        state.model_library_manager.clear();
+        let mut kit = ModelLibrary::new("kit");
+        for (bin, (l_min, l_max)) in [(1, (0.1e-6, 1e-6)), (2, (1e-6, 10e-6))] {
+            kit.add_model(
+                DeviceModel::new(format!("nch.{bin}"), ModelType::Nmos)
+                    .with_geometry(l_min, l_max, 0.1e-6, 100e-6),
+            );
+        }
+        state.model_library_manager.add_library(kit);
+        let mut component =
+            Component::new(1, ComponentType::Nmos, Point::origin()).with_name_value("M1", "nch");
+        component.params = "model_library=kit".to_owned();
+        let values = HashMap::from([(
+            "model_library".to_owned(),
+            PropertyValue::String("kit".to_owned()),
+        )]);
+        validate_model_binding_authority(&state, &component, &values)
+            .expect("the kit provides the family it holds the bins of");
+
+        let elsewhere = HashMap::from([(
+            "model_library".to_owned(),
+            PropertyValue::String("other".to_owned()),
+        )]);
+        let error = validate_model_binding_authority(&state, &component, &elsewhere)
+            .expect_err("only the kit provides nch");
+        assert!(error.contains("project-global provider 'kit'"), "{error}");
+
+        component.value = "pch".to_owned();
+        let error = validate_model_binding_authority(&state, &component, &values)
+            .expect_err("no library provides a family it holds no bin of");
+        assert!(
+            error.contains("does not provide executable model 'pch'"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn retained_component_properties_reject_changed_context_without_committing() {
         for change in [

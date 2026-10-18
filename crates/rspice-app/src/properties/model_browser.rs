@@ -14,18 +14,26 @@
 //! The right pane is the picked model's sheet: what it is, where it comes
 //! from, and every parameter its card sets.
 //!
+//! A binned family — `nch.1` … `nch.48`, each card valid over its own L×W
+//! window — is one row named `nch`, and binding it binds that name, as a
+//! Spectre or HSPICE deck binds a foundry device: the simulator chooses the
+//! bin from the instance's L and W. A row per bin invited pinning the instance
+//! to one card, which then runs at every size. The family's sheet lays out
+//! its coverage, bin by bin, and the parameters of the bin the instance's
+//! geometry selects.
+//!
 //! Opened without an instance, the same surface browses every loaded model.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use egui::{Align, Context, Key, Layout, Modifiers, Rect, Sense, Ui, vec2};
 
 use crate::quantity::{EngineeringPrecision, engineering};
 use crate::state::ComponentType;
 use crate::state::model_library::{
-    DeviceModel, ModelConsumerScope, ModelLevel, ModelLibrary, ModelLibraryManager, ModelType,
-    validate_component_model_compatibility,
+    BinFamily, DeviceModel, ModelConsumerScope, ModelLevel, ModelLibrary, ModelLibraryManager,
+    ModelType, validate_component_model_compatibility,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -71,6 +79,22 @@ struct ModelTarget {
     /// The model the instance names now, with the library it was bound from
     /// when it was bound from one.
     current: Option<(String, Option<String>)>,
+    geometry: InstanceGeometry,
+}
+
+/// The instance's drawn size, in metres: what selects the bin of a binned
+/// family. A dimension the dialog cannot evaluate — an expression of design
+/// variables — is `None`, and selects no bin.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct InstanceGeometry {
+    pub length: Option<f64>,
+    pub width: Option<f64>,
+}
+
+impl InstanceGeometry {
+    fn known(self) -> Option<(f64, f64)> {
+        self.length.zip(self.width)
+    }
 }
 
 impl ModelBrowserState {
@@ -81,6 +105,7 @@ impl ModelBrowserState {
         kind: ComponentType,
         model: Option<String>,
         library: Option<String>,
+        geometry: InstanceGeometry,
     ) {
         *self = Self {
             open: true,
@@ -88,6 +113,7 @@ impl ModelBrowserState {
                 reference: reference.to_owned(),
                 kind,
                 current: model.map(|model| (model, library)),
+                geometry,
             }),
             ..Self::default()
         };
@@ -120,10 +146,56 @@ pub enum ModelBrowserResult {
 // Catalog
 // =============================================================================
 
+/// What a row binds: one card, or a binned family whose bin the simulator
+/// chooses from the instance's geometry.
+#[derive(Debug, Clone)]
+enum Entry<'a> {
+    Card(&'a DeviceModel),
+    Family(BinFamily<'a>),
+}
+
+impl<'a> Entry<'a> {
+    /// The name binding the row gives the instance.
+    fn name(&self) -> &'a str {
+        match *self {
+            Self::Card(model) => &model.name,
+            Self::Family(ref family) => family.name,
+        }
+    }
+
+    /// The card that speaks for the row: the card itself, or the bin this
+    /// geometry selects — the first bin when it selects none.
+    fn card(&self, geometry: InstanceGeometry) -> &'a DeviceModel {
+        match *self {
+            Self::Card(model) => model,
+            Self::Family(ref family) => family
+                .selected(geometry.length, geometry.width)
+                // A family holds at least one bin.
+                .unwrap_or(family.bins[0]),
+        }
+    }
+
+    /// Every card the row can run.
+    fn cards(&self) -> &[&'a DeviceModel] {
+        match self {
+            Self::Card(model) => std::slice::from_ref(model),
+            Self::Family(family) => &family.bins,
+        }
+    }
+}
+
+/// What `name` binds in `library`: its card, or the family it names.
+fn entry<'a>(library: &'a ModelLibrary, name: &str) -> Option<Entry<'a>> {
+    match library.get_model(name) {
+        Some(model) => Some(Entry::Card(model)),
+        None => library.bin_family(name).map(Entry::Family),
+    }
+}
+
 /// One listed model.
 struct Row<'a> {
     library: &'a ModelLibrary,
-    model: &'a DeviceModel,
+    entry: Entry<'a>,
     /// The dim line under the name, as whole facts in the order a narrow row
     /// gives them up.
     meta: Vec<String>,
@@ -137,12 +209,12 @@ impl Row<'_> {
     fn key(&self) -> ModelKey {
         ModelKey {
             library: self.library.name.clone(),
-            model: self.model.name.clone(),
+            model: self.entry.name().to_owned(),
         }
     }
 
     fn is(&self, key: &ModelKey) -> bool {
-        self.library.name == key.library && self.model.name == key.model
+        self.library.name == key.library && self.entry.name() == key.model
     }
 }
 
@@ -170,47 +242,57 @@ fn catalog<'a>(
 ) -> Vec<Group<'a>> {
     let terms: Vec<String> = filter.split_whitespace().map(str::to_lowercase).collect();
     let libraries = manager.libraries_sorted();
-    // How many libraries define each name. Only a name defined twice can be
-    // shadowed, so only those rows pay for the project's provider decision.
+    let entries: Vec<(&ModelLibrary, Vec<Entry<'a>>)> = libraries
+        .into_iter()
+        .map(|library| (library, entries_of(library)))
+        .collect();
+    // How many libraries define each name, as a card or as a family. Only a
+    // name defined twice can be shadowed, so only those rows pay for the
+    // project's provider decision.
     let mut definitions: HashMap<String, usize> = HashMap::new();
-    for library in &libraries {
-        for model in library.models.values() {
-            *definitions
-                .entry(model.name.to_ascii_lowercase())
-                .or_default() += 1;
+    for (library, library_entries) in &entries {
+        let names = library.models.values().map(|model| model.name.as_str());
+        let families = library_entries.iter().filter_map(|entry| match entry {
+            Entry::Family(family) => Some(family.name),
+            Entry::Card(_) => None,
+        });
+        for name in names.chain(families) {
+            *definitions.entry(name.to_ascii_lowercase()).or_default() += 1;
         }
     }
-    libraries
+    entries
         .into_iter()
-        .filter_map(|library| {
-            let mut rows: Vec<Row<'a>> = library
-                .models
-                .values()
-                .filter(|model| {
+        .filter_map(|(library, library_entries)| {
+            let mut rows: Vec<Row<'a>> = library_entries
+                .into_iter()
+                .filter(|entry| {
                     target.is_none_or(|target| {
-                        validate_component_model_compatibility(target.kind, model).is_ok()
+                        entry.cards().iter().all(|model| {
+                            validate_component_model_compatibility(target.kind, model).is_ok()
+                        })
                     })
                 })
-                .filter(|model| matches(library, model, &terms))
-                .map(|model| {
+                .filter(|entry| matches(library, entry, &terms))
+                .map(|entry| {
+                    let name = entry.name();
                     let shared = definitions
-                        .get(&model.name.to_ascii_lowercase())
+                        .get(&name.to_ascii_lowercase())
                         .is_some_and(|count| *count > 1);
                     let refusal = (target.is_some() && shared)
-                        .then(|| provider_refusal(manager, library, model))
+                        .then(|| provider_refusal(manager, library, name))
                         .flatten();
                     let current = target
-                        .is_some_and(|target| runs_now(target, library, model, refusal.is_none()));
+                        .is_some_and(|target| runs_now(target, library, name, refusal.is_none()));
                     Row {
                         library,
-                        model,
-                        meta: meta_line(model, target.is_none()),
+                        meta: meta_line(&entry, target.is_none()),
+                        entry,
                         refusal,
                         current,
                     }
                 })
                 .collect();
-            rows.sort_by(|left, right| natural_cmp(&left.model.name, &right.model.name));
+            rows.sort_by(|left, right| natural_cmp(left.entry.name(), right.entry.name()));
             (!rows.is_empty()).then_some(Group {
                 library: &library.name,
                 rows,
@@ -219,21 +301,46 @@ fn catalog<'a>(
         .collect()
 }
 
-/// Whether every filter term appears in something the row says.
-fn matches(library: &ModelLibrary, model: &DeviceModel, terms: &[String]) -> bool {
+/// What a library offers to bind: each family it provides, and each card
+/// that is not a bin of one.
+fn entries_of(library: &ModelLibrary) -> Vec<Entry<'_>> {
+    let families = library.bin_families();
+    let bins: HashSet<&str> = families
+        .iter()
+        .flat_map(|family| family.bins.iter().map(|bin| bin.name.as_str()))
+        .collect();
+    library
+        .models
+        .values()
+        .filter(|model| !bins.contains(model.name.as_str()))
+        .map(Entry::Card)
+        .chain(families.into_iter().map(Entry::Family))
+        .collect()
+}
+
+/// Whether every filter term appears in something the row says. A family is
+/// found by any of its bins' names as well as by its own.
+fn matches(library: &ModelLibrary, entry: &Entry<'_>, terms: &[String]) -> bool {
     if terms.is_empty() {
         return true;
     }
-    let haystack = format!(
+    let model = entry.card(InstanceGeometry::default());
+    let mut haystack = format!(
         "{} {} {} {} {} {}",
-        model.name,
+        entry.name(),
         model.model_type.display_name(),
         level_label(model).unwrap_or_default(),
         model.spice_type.as_deref().unwrap_or_default(),
         library.name,
         model.description,
-    )
-    .to_lowercase();
+    );
+    if let Entry::Family(family) = entry {
+        for bin in &family.bins {
+            haystack.push(' ');
+            haystack.push_str(&bin.name);
+        }
+    }
+    let haystack = haystack.to_lowercase();
     terms.iter().all(|term| haystack.contains(term.as_str()))
 }
 
@@ -245,29 +352,28 @@ fn matches(library: &ModelLibrary, model: &DeviceModel, terms: &[String]) -> boo
 fn provider_refusal(
     manager: &ModelLibraryManager,
     library: &ModelLibrary,
-    model: &DeviceModel,
+    name: &str,
 ) -> Option<Refusal> {
-    match manager.effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model.name) {
+    match manager.effective_definition_provider(ModelConsumerScope::PrimitiveModel, name) {
         Ok(Some(provider)) if provider.library.eq_ignore_ascii_case(&library.name) => None,
         Ok(Some(provider)) => Some(Refusal {
             tag: "shadowed",
             reason: format!(
-                "This project runs {} from {}. Choose that library as its provider in Models to bind this copy.",
-                model.name, provider.library
+                "This project runs {name} from {}. Choose that library as its provider in Models to bind this copy.",
+                provider.library
             ),
         }),
         Ok(None) => None,
         Err(_) => {
             let libraries: Vec<String> = manager
-                .definition_providers(ModelConsumerScope::PrimitiveModel, &model.name)
+                .definition_providers(ModelConsumerScope::PrimitiveModel, name)
                 .into_iter()
                 .map(|provider| provider.library)
                 .collect();
             Some(Refusal {
                 tag: "unresolved",
                 reason: format!(
-                    "{} is defined in {}, and the project has not chosen which one runs. Choose its provider in Models.",
-                    model.name,
+                    "{name} is defined in {}, and the project has not chosen which one runs. Choose its provider in Models.",
                     libraries.join(" and ")
                 ),
             })
@@ -279,19 +385,29 @@ fn provider_refusal(
 ///
 /// An instance bound from a library names it; one whose model was typed
 /// names only the model, and runs whichever copy the project provides.
-fn runs_now(
-    target: &ModelTarget,
-    library: &ModelLibrary,
-    model: &DeviceModel,
-    provided: bool,
-) -> bool {
-    let Some((name, bound_from)) = &target.current else {
+fn runs_now(target: &ModelTarget, library: &ModelLibrary, name: &str, provided: bool) -> bool {
+    let Some((current, bound_from)) = &target.current else {
         return false;
     };
-    name.eq_ignore_ascii_case(&model.name)
+    current.eq_ignore_ascii_case(name)
         && bound_from.as_deref().map_or(provided, |bound_from| {
             bound_from.eq_ignore_ascii_case(&library.name)
         })
+}
+
+/// Whether the instance is pinned to one bin of this row's family: the row a
+/// rebinding replaces that bin with, and where the browser opens.
+fn pins_a_bin_of(target: &ModelTarget, row: &Row<'_>) -> bool {
+    let (Some((current, bound_from)), Entry::Family(family)) = (&target.current, &row.entry) else {
+        return false;
+    };
+    family
+        .bins
+        .iter()
+        .any(|bin| bin.name.eq_ignore_ascii_case(current))
+        && bound_from
+            .as_deref()
+            .is_none_or(|bound_from| bound_from.eq_ignore_ascii_case(&row.library.name))
 }
 
 /// Name order that reads bins and part numbers the way a designer counts:
@@ -430,14 +546,25 @@ fn parameters(model: &DeviceModel) -> Vec<Parameter> {
         .collect()
 }
 
-/// A row's meta line: the family when the list mixes families, the level, and
-/// up to three key figures.
-fn meta_line(model: &DeviceModel, with_family: bool) -> Vec<String> {
+/// A row's meta line: the device family when the list mixes them, the level,
+/// and up to three key figures — or, for a binned family, how many bins it
+/// holds and the L and W they cover together.
+fn meta_line(entry: &Entry<'_>, with_family: bool) -> Vec<String> {
+    let model = entry.card(InstanceGeometry::default());
     let mut parts = Vec::new();
     if with_family {
         parts.push(model.model_type.display_name().to_owned());
     }
     parts.extend(level_label(model));
+    if let Entry::Family(family) = entry {
+        parts.push(counted(family.bins.len(), "bin", "bins"));
+        for (axis, (min, max)) in ["L", "W"].into_iter().zip(coverage(family)) {
+            if min.is_some() || max.is_some() {
+                parts.push(format!("{axis} {}", window_label(min, max)));
+            }
+        }
+        return parts;
+    }
     parts.extend(
         key_names(model.model_type)
             .iter()
@@ -482,6 +609,52 @@ fn format_si_value(value: f64) -> String {
     } else {
         format!("{:.2}{}", scaled, suffix)
     }
+}
+
+/// A bin's window on one axis, short enough for a table cell: the unit once
+/// when both ends share it, `100–500nm`, and a dash for an axis it leaves
+/// open.
+fn window_label(min: Option<f64>, max: Option<f64>) -> String {
+    // Where the unit `format_si_value` writes after the digits starts.
+    let unit = |text: &str| text.find(char::is_alphabetic).unwrap_or(text.len());
+    match (min, max) {
+        (Some(min), Some(max)) => {
+            let (low, high) = (format_si_value(min), format_si_value(max));
+            let (low_value, low_unit) = low.split_at(unit(&low));
+            let (_, high_unit) = high.split_at(unit(&high));
+            if !low_unit.is_empty() && low_unit == high_unit {
+                format!("{low_value}\u{2013}{high}")
+            } else {
+                format!("{low}\u{2013}{high}")
+            }
+        }
+        (Some(min), None) => format!("min {}", format_si_value(min)),
+        (None, Some(max)) => format!("max {}", format_si_value(max)),
+        (None, None) => "\u{2014}".to_owned(),
+    }
+}
+
+/// The L and W windows a family's bins cover together, from the smallest
+/// bound to the largest. An end some bin leaves open is open for the family.
+fn coverage(family: &BinFamily<'_>) -> [(Option<f64>, Option<f64>); 2] {
+    let bound = |side: fn(&DeviceModel) -> Option<f64>, widest: fn(f64, f64) -> f64| {
+        family
+            .bins
+            .iter()
+            .map(|bin| side(bin))
+            .collect::<Option<Vec<f64>>>()
+            .and_then(|bounds| bounds.into_iter().reduce(widest))
+    };
+    [
+        (
+            bound(|bin| bin.l_min, f64::min),
+            bound(|bin| bin.l_max, f64::max),
+        ),
+        (
+            bound(|bin| bin.w_min, f64::min),
+            bound(|bin| bin.w_max, f64::max),
+        ),
+    ]
 }
 
 /// A geometry window as one fact, open at either end when the card bounds only
@@ -579,10 +752,20 @@ pub fn render_model_browser(
         state.seeded = true;
         state.reveal_pick = true;
         if state.pick.is_none() {
-            state.pick = groups
-                .iter()
-                .flat_map(|group| &group.rows)
-                .find(|row| row.current && row.refusal.is_none())
+            // The model in use, or — for an instance pinned to one bin — the
+            // family that bin belongs to, which Select then binds instead.
+            let rows = || {
+                groups
+                    .iter()
+                    .flat_map(|group| &group.rows)
+                    .filter(|row| row.refusal.is_none())
+            };
+            state.pick = rows()
+                .find(|row| row.current)
+                .or_else(|| {
+                    let target = target.as_ref()?;
+                    rows().find(|row| pins_a_bin_of(target, row))
+                })
                 .map(Row::key);
         }
     }
@@ -591,9 +774,18 @@ pub fn render_model_browser(
     // that hides it does not also take its sheet away.
     let picked = state.pick.as_ref().and_then(|key| {
         let library = manager.get_library(&key.library)?;
-        Some((library, library.get_model(&key.model)?))
+        Some((library, entry(library, &key.model)?))
     });
-    let status = footer(manager, target.as_ref(), picked, &groups, &state.filter);
+    let geometry = target
+        .as_ref()
+        .map_or_else(InstanceGeometry::default, |target| target.geometry);
+    let status = footer(
+        manager,
+        target.as_ref(),
+        picked.as_ref().map(|(library, entry)| (*library, entry)),
+        &groups,
+        &state.filter,
+    );
     let binding = target.is_some();
     let title = target.as_ref().map_or_else(
         || "Model browser".to_owned(),
@@ -635,7 +827,12 @@ pub fn render_model_browser(
         } else {
             LIST_WIDTH
         };
-        let body = body_height(ui, whole, split.then_some(width - list_width - 1.0));
+        let body = body_height(
+            ui,
+            whole,
+            split.then_some(width - list_width - 1.0),
+            geometry,
+        );
         let mut list = |ui: &mut Ui| {
             list_pane(
                 ui,
@@ -648,7 +845,9 @@ pub fn render_model_browser(
             )
         };
         let focus = if split {
-            panes(ui, list_width, body, list, |ui| sheet_pane(ui, picked))
+            panes(ui, list_width, body, list, |ui| {
+                sheet_pane(ui, picked.as_ref(), geometry);
+            })
         } else {
             ui.allocate_ui_with_layout(vec2(width, body), Layout::top_down(Align::Min), |ui| {
                 ui.set_min_size(vec2(width, body));
@@ -677,13 +876,13 @@ pub fn render_model_browser(
                 };
                 manager
                     .get_library(&key.library)
-                    .and_then(|library| Some((library, library.get_model(&key.model)?)))
-                    .is_some_and(|(library, model)| {
+                    .filter(|library| entry(library, &key.model).is_some())
+                    .is_some_and(|library| {
                         !runs_now(
                             target,
                             library,
-                            model,
-                            provider_refusal(manager, library, model).is_none(),
+                            &key.model,
+                            provider_refusal(manager, library, &key.model).is_none(),
                         )
                     })
             });
@@ -713,10 +912,15 @@ struct Footer {
 
 /// The footer's sentence: what Select would do, or why there is nothing to
 /// select.
+///
+/// For a binned family it also says which bin the instance's L and W run —
+/// or, when no bin holds them, that a run refuses the instance: circuit
+/// construction rejects a geometry its family does not cover. Select stays
+/// live, since the binding is right and the geometry is what has to change.
 fn footer(
     manager: &ModelLibraryManager,
     target: Option<&ModelTarget>,
-    picked: Option<(&ModelLibrary, &DeviceModel)>,
+    picked: Option<(&ModelLibrary, &Entry<'_>)>,
     groups: &[Group<'_>],
     filter: &str,
 ) -> Footer {
@@ -734,21 +938,43 @@ fn footer(
         ));
     };
     let reference = &target.reference;
-    if let Some((library, model)) = picked {
-        let provided = provider_refusal(manager, library, model).is_none();
-        if runs_now(target, library, model, provided) {
-            return neutral(format!("{reference} already uses {}", model.name));
-        }
+    if let Some((library, entry)) = picked {
+        let name = entry.name();
+        let provided = provider_refusal(manager, library, name).is_none();
+        let unchanged = runs_now(target, library, name, provided);
+        let action = match &target.current {
+            _ if unchanged => format!("{reference} already uses {name}"),
+            Some((current, _)) => {
+                format!(
+                    "Replaces {current} on {reference} with {name} from {}",
+                    library.name
+                )
+            }
+            None => format!("Binds {name} from {} to {reference}", library.name),
+        };
+        let (hint, tone) = match (entry, target.geometry.known()) {
+            (Entry::Family(family), Some((length, width))) => {
+                match family.selected(Some(length), Some(width)) {
+                    Some(bin) => (
+                        format!("{action}; its L and W run {}", bin.name),
+                        DialogHintTone::Neutral,
+                    ),
+                    None => (
+                        format!(
+                            "{action}; no {name} bin holds L {}, W {}, so a run refuses {reference}",
+                            format_si_value(length),
+                            format_si_value(width)
+                        ),
+                        DialogHintTone::Warn,
+                    ),
+                }
+            }
+            _ => (action, DialogHintTone::Neutral),
+        };
         return Footer {
-            hint: match &target.current {
-                Some((current, _)) => format!(
-                    "Replaces {current} on {reference} with {} from {}",
-                    model.name, library.name
-                ),
-                None => format!("Binds {} from {} to {reference}", model.name, library.name),
-            },
-            tone: DialogHintTone::Neutral,
-            can_select: true,
+            hint,
+            tone,
+            can_select: !unchanged,
         };
     }
     if let Some((current, _)) = &target.current
@@ -1016,10 +1242,11 @@ fn model_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui::Response {
     } else {
         row.refusal.as_ref().map(|refusal| refusal.tag)
     };
+    let name = row.entry.name();
     let announcement = match (&row.refusal, row.current) {
-        (Some(refusal), _) => format!("{} {meta}. {}", row.model.name, refusal.reason),
-        (None, true) => format!("{} {meta}, current", row.model.name),
-        (None, false) => format!("{} {meta}", row.model.name),
+        (Some(refusal), _) => format!("{name} {meta}. {}", refusal.reason),
+        (None, true) => format!("{name} {meta}, current"),
+        (None, false) => format!("{name} {meta}"),
     };
     response.widget_info(|| {
         egui::WidgetInfo::selected(
@@ -1075,7 +1302,7 @@ fn model_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui::Response {
             vec2(text_width, 15.0),
         ),
         false,
-        &row.model.name,
+        name,
         theme::mono(tokens::FS_0, FontWeight::Medium),
         if enabled {
             t.color.text
@@ -1119,8 +1346,13 @@ fn fitted_meta(ui: &mut Ui, parts: &[String], width: f32, font: egui::FontId) ->
 }
 
 /// The sheet pane: the picked model's identity, where it comes from, and every
-/// parameter its card sets.
-fn sheet_pane(ui: &mut Ui, picked: Option<(&ModelLibrary, &DeviceModel)>) {
+/// parameter its card sets — for a binned family, its bins' windows and the
+/// parameters of the bin the instance's geometry selects.
+fn sheet_pane(
+    ui: &mut Ui,
+    picked: Option<&(&ModelLibrary, Entry<'_>)>,
+    geometry: InstanceGeometry,
+) {
     let width = ui.available_width();
     egui::Frame::NONE
         .inner_margin(egui::Margin {
@@ -1133,12 +1365,13 @@ fn sheet_pane(ui: &mut Ui, picked: Option<(&ModelLibrary, &DeviceModel)>) {
             ui.set_width(width - 2.0 * PANE_INSET);
             ui.spacing_mut().item_spacing.y = 0.0;
             let t = Tokens::get(ui.ctx());
-            let Some((library, model)) = picked else {
+            let Some((library, entry)) = picked else {
                 // On the filter's own line, as the model's name would be.
                 ui.add_space((t.metrics.ctl_h - NOTE_HEIGHT) * 0.5);
                 note(ui, "Pick a model to read its parameters");
                 return;
             };
+            let model = entry.card(geometry);
             let line = |ui: &mut Ui, height: f32, text: &str, font: egui::FontId, color| {
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
@@ -1151,19 +1384,21 @@ fn sheet_pane(ui: &mut Ui, picked: Option<(&ModelLibrary, &DeviceModel)>) {
             // The name sits on the filter's centreline, so across the hairline
             // the two first lines read as one, and keeps none of the control
             // height below its own line.
+            let name = entry.name();
             let name_font = theme::mono(tokens::FS_3, FontWeight::Medium);
             let height = name_height(ui, &name_font);
             let (rect, response) =
                 ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-            response.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, model.name.as_str())
-            });
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, name));
             let centred = Rect::from_min_size(rect.min, vec2(rect.width(), t.metrics.ctl_h));
-            if run(ui, centred, false, &model.name, name_font, t.color.text) {
-                response.on_hover_text(model.name.as_str());
+            if run(ui, centred, false, name, name_font, t.color.text) {
+                response.on_hover_text(name);
             }
             let mut kind = vec![model.model_type.display_name().to_owned()];
             kind.extend(level_label(model));
+            if let Entry::Family(family) = entry {
+                kind.push(counted(family.bins.len(), "bin", "bins"));
+            }
             line(
                 ui,
                 KIND_HEIGHT,
@@ -1178,35 +1413,201 @@ fn sheet_pane(ui: &mut Ui, picked: Option<(&ModelLibrary, &DeviceModel)>) {
 
             ui.add_space(FACTS_GAP);
             let column = fact_column(ui);
-            for (label, value, hover) in &sheet_facts(library, model) {
+            for (label, value, hover) in &sheet_facts(library, entry, model) {
                 fact(ui, column, label, value, hover.as_deref());
             }
 
             let parameters = parameters(model);
+            let family = match entry {
+                Entry::Family(family) => Some(family),
+                Entry::Card(_) => None,
+            };
+            let selected =
+                family.and_then(|family| family.selected(geometry.length, geometry.width));
+            let label = match (family, selected) {
+                (None, _) => "Parameters".to_owned(),
+                (Some(_), Some(bin)) => format!("Parameters of {}", bin.name),
+                (Some(_), None) => format!("Parameters of {}, the first bin", model.name),
+            };
+            let parameter_head = |ui: &mut Ui| {
+                caption(ui, &label, &parameters.len().to_string());
+                rule(ui);
+            };
             ui.add_space(PARAMETERS_GAP);
-            caption(ui, "Parameters", &parameters.len().to_string());
-            ui.add_space(RULE_GAP);
-            let (rule, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-            ui.painter().rect_filled(rule, 0.0, t.color.border);
-            ui.add_space(RULE_GAP);
-            if parameters.is_empty() {
-                note(
-                    ui,
-                    "The card sets no parameters; every one takes its default",
-                );
-                return;
-            }
-            egui::ScrollArea::vertical()
+            let scroll = egui::ScrollArea::vertical()
                 .id_salt("model-browser-parameters")
-                .auto_shrink([false, false])
-                .show(ui, |ui| parameter_grid(ui, &parameters));
+                .auto_shrink([false, false]);
+            let Some(family) = family else {
+                // A card's head stays put while its grid scrolls under it.
+                parameter_head(ui);
+                if parameters.is_empty() {
+                    note(ui, NO_PARAMETERS);
+                    return;
+                }
+                scroll.show(ui, |ui| parameter_grid(ui, &parameters));
+                return;
+            };
+            // A family's bins and its parameters scroll as one: 48 bins are
+            // taller than the pane, and two scroll regions in one sheet would
+            // leave the reader working out which one the wheel moves.
+            scroll.show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                caption(ui, "Bins", &family.bins.len().to_string());
+                rule(ui);
+                bin_table(ui, family, selected);
+                ui.add_space(PARAMETERS_GAP);
+                parameter_head(ui);
+                if parameters.is_empty() {
+                    note(ui, NO_PARAMETERS);
+                } else {
+                    parameter_grid(ui, &parameters);
+                }
+            });
         });
+}
+
+/// What the sheet says of a card that sets no parameters.
+const NO_PARAMETERS: &str = "The card sets no parameters; every one takes its default";
+
+/// A hairline under a caption, with the air the sheet keeps on each side of it.
+fn rule(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(RULE_GAP);
+    let (rule, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().rect_filled(rule, 0.0, t.color.border);
+    ui.add_space(RULE_GAP);
+}
+
+/// The bin table's inset inside a cell, so a marked cell's fill frames its
+/// text, and the air between two of a group's columns.
+const BIN_CELL_INSET: f32 = 4.0;
+const BIN_CELL_GAP: f32 = 16.0;
+
+/// The bin table's three columns, each as wide as the widest bin name, L
+/// window and W window it lays out: a kit's names and windows vary too much
+/// for fixed columns, which either elide `nch_lvt.48` or leave room for one
+/// column group where two fit.
+fn bin_columns(ui: &mut Ui, family: &BinFamily<'_>) -> [f32; 3] {
+    let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let mut widths = [0.0_f32; 3];
+    for bin in &family.bins {
+        let texts = [
+            bin.name.clone(),
+            window_label(bin.l_min, bin.l_max),
+            window_label(bin.w_min, bin.w_max),
+        ];
+        for (width, text) in widths.iter_mut().zip(texts) {
+            *width = width.max(measured_width(ui, &text, mono.clone()));
+        }
+    }
+    widths
+}
+
+/// How many column groups of the bin table a pane `width` across holds.
+fn bin_groups(columns: [f32; 3], width: f32, bins: usize) -> usize {
+    let group = 2.0 * BIN_CELL_INSET + columns.iter().sum::<f32>() + 2.0 * BIN_CELL_GAP;
+    (((width + PARAMETER_GUTTER) / (group + PARAMETER_GUTTER)).floor() as usize)
+        .clamp(1, bins.max(1))
+}
+
+/// Rows the bin table takes at `width`, its head included.
+fn bin_table_rows(ui: &mut Ui, family: &BinFamily<'_>, width: f32) -> usize {
+    let groups = bin_groups(bin_columns(ui, family), width, family.bins.len());
+    1 + family.bins.len().div_ceil(groups)
+}
+
+/// Every bin with the L and W window it holds, read down each column group
+/// and then across, with the bin the instance's geometry selects marked.
+fn bin_table(ui: &mut Ui, family: &BinFamily<'_>, selected: Option<&DeviceModel>) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let widths = bin_columns(ui, family);
+    let groups = bin_groups(widths, width, family.bins.len());
+    let rows = family.bins.len().div_ceil(groups);
+    let group_width = (width - PARAMETER_GUTTER * (groups - 1) as f32) / groups as f32;
+    let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
+    // Each column's left edge and width in a group whose cell starts at `left`.
+    let columns = |left: f32| {
+        let name = left + BIN_CELL_INSET;
+        let length = name + widths[0] + BIN_CELL_GAP;
+        let width = length + widths[1] + BIN_CELL_GAP;
+        [(name, widths[0]), (length, widths[1]), (width, widths[2])]
+    };
+    let column = |(x, width): (f32, f32), top: f32| {
+        Rect::from_min_size(egui::pos2(x, top), vec2(width, PARAMETER_PITCH))
+    };
+    let (head, _) = ui.allocate_exact_size(vec2(width, PARAMETER_PITCH), Sense::hover());
+    for group in 0..groups {
+        let left = head.left() + group as f32 * (group_width + PARAMETER_GUTTER);
+        for (place, label) in columns(left).into_iter().zip(["Bin", "L", "W"]) {
+            run(
+                ui,
+                column(place, head.top()),
+                false,
+                label,
+                theme::sans(tokens::FS_MICRO, FontWeight::Medium),
+                t.color.text_faint,
+            );
+        }
+    }
+    for row_index in 0..rows {
+        let (row, _) = ui.allocate_exact_size(vec2(width, PARAMETER_PITCH), Sense::hover());
+        if !ui.is_rect_visible(row) {
+            continue;
+        }
+        for group in 0..groups {
+            let Some(bin) = family.bins.get(group * rows + row_index) else {
+                continue;
+            };
+            let left = row.left() + group as f32 * (group_width + PARAMETER_GUTTER);
+            let cell = Rect::from_min_size(
+                egui::pos2(left, row.top()),
+                vec2(group_width, PARAMETER_PITCH),
+            );
+            let runs = selected.is_some_and(|selected| std::ptr::eq(selected, *bin));
+            if runs {
+                ui.painter().rect_filled(cell, 0.0, t.color.accent_dim);
+            }
+            let length_window = window_label(bin.l_min, bin.l_max);
+            let width_window = window_label(bin.w_min, bin.w_max);
+            let name_color = if runs { t.color.text } else { t.color.text_dim };
+            for (place, (text, color)) in columns(left).into_iter().zip([
+                (bin.name.as_str(), name_color),
+                (length_window.as_str(), t.color.text),
+                (width_window.as_str(), t.color.text),
+            ]) {
+                run(
+                    ui,
+                    column(place, cell.top()),
+                    false,
+                    text,
+                    mono.clone(),
+                    color,
+                );
+            }
+            let id = ui.id().with(("model-browser-bin", row_index, group));
+            let response = ui.interact(cell, id, Sense::hover());
+            let announcement = format!(
+                "{} L {length_window} W {width_window}{}",
+                bin.name,
+                if runs { ", runs at this geometry" } else { "" }
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &announcement)
+            });
+        }
+    }
 }
 
 /// What the sheet states about where a card comes from and what it covers,
 /// each with the whole value for the hover where the row shows less.
+///
+/// A family's source is the card that speaks for it, and its length and
+/// width are what its bins cover together; each bin's own window is in the
+/// table below.
 fn sheet_facts(
     library: &ModelLibrary,
+    entry: &Entry<'_>,
     model: &DeviceModel,
 ) -> Vec<(&'static str, String, Option<String>)> {
     let source = match &model.file_path {
@@ -1239,10 +1640,14 @@ fn sheet_facts(
             .join(" \u{00b7} ");
         facts.push(("Corners", corners, None));
     }
-    if let Some(length) = range_label(model.l_min, model.l_max) {
+    let [length, width] = match entry {
+        Entry::Card(_) => [(model.l_min, model.l_max), (model.w_min, model.w_max)],
+        Entry::Family(family) => coverage(family),
+    };
+    if let Some(length) = range_label(length.0, length.1) {
         facts.push(("Length", length, None));
     }
-    if let Some(width) = range_label(model.w_min, model.w_max) {
+    if let Some(width) = range_label(width.0, width.1) {
         facts.push(("Width", width, None));
     }
     if let Some(vdd) = model.vdd {
@@ -1274,7 +1679,12 @@ fn grid_columns(width: f32) -> usize {
 /// its frame while the reader moves through it. Written as the same sums the
 /// panes paint, in the same order, so a band added to one is visibly missing
 /// from the other.
-fn body_height(ui: &mut Ui, groups: &[Group<'_>], sheet_width: Option<f32>) -> f32 {
+fn body_height(
+    ui: &mut Ui,
+    groups: &[Group<'_>],
+    sheet_width: Option<f32>,
+    geometry: InstanceGeometry,
+) -> f32 {
     let control = Tokens::get(ui.ctx()).metrics.ctl_h;
     let mut height = FILTER_TOP + control + FILTER_GAP + PANE_INSET;
     if groups.is_empty() {
@@ -1292,7 +1702,7 @@ fn body_height(ui: &mut Ui, groups: &[Group<'_>], sheet_width: Option<f32>) -> f
             if height >= MAX_BODY {
                 break;
             }
-            height = height.max(sheet_height(ui, row.library, row.model, inner));
+            height = height.max(sheet_height(ui, row.library, &row.entry, geometry, inner));
         }
     }
     height.clamp(MIN_BODY, MAX_BODY)
@@ -1306,7 +1716,14 @@ fn name_height(ui: &mut Ui, font: &egui::FontId) -> f32 {
 }
 
 /// The height one model's sheet paints at `width` inside its insets.
-fn sheet_height(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel, width: f32) -> f32 {
+fn sheet_height(
+    ui: &mut Ui,
+    library: &ModelLibrary,
+    entry: &Entry<'_>,
+    geometry: InstanceGeometry,
+    width: f32,
+) -> f32 {
+    let model = entry.card(geometry);
     let name_font = theme::mono(tokens::FS_3, FontWeight::Medium);
     let mut height = FILTER_TOP + name_height(ui, &name_font) + KIND_HEIGHT;
     let description = model.description.trim();
@@ -1314,8 +1731,13 @@ fn sheet_height(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel, width:
         let job = description_job(description, width, egui::Color32::WHITE);
         height += DESCRIPTION_GAP + ui.fonts_mut(|fonts| fonts.layout_job(job)).size().y;
     }
-    height += FACTS_GAP + sheet_facts(library, model).len() as f32 * FACT_PITCH;
-    height += PARAMETERS_GAP + CAPTION_HEIGHT + RULE_GAP + 1.0 + RULE_GAP;
+    height += FACTS_GAP + sheet_facts(library, entry, model).len() as f32 * FACT_PITCH;
+    let head = CAPTION_HEIGHT + RULE_GAP + 1.0 + RULE_GAP;
+    height += PARAMETERS_GAP + head;
+    if let Entry::Family(family) = entry {
+        height +=
+            bin_table_rows(ui, family, width) as f32 * PARAMETER_PITCH + PARAMETERS_GAP + head;
+    }
     let count = parameter_count(model);
     height += if count == 0 {
         NOTE_HEIGHT

@@ -281,10 +281,12 @@ pub(super) fn catalog_model_location(
         .ok()
         .flatten()?;
     let library = state.model_library_manager.get_library(&provider.library)?;
+    // A binned family opens at its first bin; which bin runs is the
+    // simulator's choice from the instance's geometry.
     let model = library
-        .models
-        .values()
-        .find(|model| model.name == provider.definition)?;
+        .executable_cards(&provider.definition)
+        .into_iter()
+        .next()?;
     Some((library.name.clone(), model.name.clone()))
 }
 

@@ -1161,6 +1161,8 @@ pub(crate) mod thread_preparations {
 }
 
 #[cfg(test)]
+mod binned_family_tests;
+#[cfg(test)]
 mod dispatch_parity_tests;
 #[cfg(test)]
 mod recorded_fft_tests;

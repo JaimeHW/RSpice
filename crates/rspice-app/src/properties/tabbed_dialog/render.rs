@@ -114,11 +114,30 @@ impl ComponentPropertyServices for ComponentDialogServices<'_> {
                 let reference = text("name")
                     .or_else(|| self.reference.map(str::to_owned))
                     .unwrap_or_else(|| kind.display_name().to_owned());
+                // The drawn size as the draft holds it, which selects the bin
+                // of a binned family. An expression of design variables is
+                // not evaluated here, and selects none.
+                let dimension = |name: &str| {
+                    let value = draft.get_value(name)?;
+                    value.as_number().or_else(|| {
+                        let text = value.display_string();
+                        let text = text.trim();
+                        let literal = text
+                            .strip_prefix('{')
+                            .and_then(|text| text.strip_suffix('}'))
+                            .unwrap_or(text);
+                        crate::quantity::parse_engineering_value(literal).ok()
+                    })
+                };
                 self.model_browser.open_for_instance(
                     &reference,
                     kind,
                     text("model"),
                     text("model_library"),
+                    crate::properties::model_browser::InstanceGeometry {
+                        length: dimension("l"),
+                        width: dimension("w"),
+                    },
                 );
             }
         }

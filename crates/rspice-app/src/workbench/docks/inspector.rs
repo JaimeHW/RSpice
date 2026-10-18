@@ -108,13 +108,14 @@ pub(crate) fn validate_component_model_catalog_binding(
         .model_library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
-    let candidate = library
-        .models
-        .values()
-        .find(|model| model.name.eq_ignore_ascii_case(model_name))
-        .ok_or_else(|| {
-            format!("Model '{model_name}' is no longer present in library '{library_name}'.")
-        })?;
+    // The card of that name, or every bin of the family it names: an instance
+    // naming a binned family can run any of them, so each must suit it.
+    let candidates = library.executable_cards(model_name);
+    if candidates.is_empty() {
+        return Err(format!(
+            "Model '{model_name}' is no longer present in library '{library_name}'."
+        ));
+    }
 
     if let Some(binding) = component.library_cell.as_ref() {
         if !binding.library.eq_ignore_ascii_case(library_name) {
@@ -128,15 +129,17 @@ pub(crate) fn validate_component_model_catalog_binding(
             .as_deref()
             .unwrap_or(binding.cell.as_str());
         let current = library
-            .models
-            .values()
-            .find(|model| model.name.eq_ignore_ascii_case(current_name))
+            .executable_cards(current_name)
+            .into_iter()
+            .next()
             .ok_or_else(|| {
                 format!(
                     "The selected cell's current model '{current_name}' no longer resolves in library '{library_name}'."
                 )
             })?;
-        if !crate::state::model_library::models_have_compatible_device_family(current, candidate) {
+        if !candidates.iter().all(|candidate| {
+            crate::state::model_library::models_have_compatible_device_family(current, candidate)
+        }) {
             return Err(format!(
                 "Model '{model_name}' is incompatible with the selected cell's current model family."
             ));
@@ -144,7 +147,12 @@ pub(crate) fn validate_component_model_catalog_binding(
         return Ok(());
     }
 
-    crate::state::model_library::validate_component_model_compatibility(component.kind, candidate)?;
+    for candidate in &candidates {
+        crate::state::model_library::validate_component_model_compatibility(
+            component.kind,
+            candidate,
+        )?;
+    }
     let effective = state.model_library_manager.effective_definition_provider(
         crate::state::model_library::ModelConsumerScope::PrimitiveModel,
         model_name,
@@ -940,15 +948,22 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
             .model_library_manager
             .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model_name)
         {
+            // A binned family is as sound as its least sound bin, since the
+            // instance's geometry may select any of them.
             Ok(Some(provider)) => state
                 .model_library_manager
                 .get_library(&provider.library)
                 .and_then(|library| {
-                    library
-                        .models
-                        .values()
-                        .find(|model| model.name == provider.definition)
-                        .map(|model| catalog_model_evidence(library, model))
+                    let cards = library.executable_cards(&provider.definition);
+                    (!cards.is_empty()).then(|| {
+                        cards
+                            .into_iter()
+                            .map(|model| catalog_model_evidence(library, model))
+                            .find(|evidence| evidence.problem.is_some())
+                            .unwrap_or_else(|| {
+                                ComponentModelEvidence::resolved(provider.definition.clone())
+                            })
+                    })
                 })
                 .unwrap_or_else(|| not_found(model_name)),
             Ok(None) => not_found(model_name),
