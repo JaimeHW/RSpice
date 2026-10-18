@@ -3,7 +3,8 @@
 
 use super::*;
 use rspice_design_model::design_management::{
-    DRAWING_SHEET_TITLE_BLOCK_LETTERING, DrawingSheetBorderTemplate, drawing_sheet_mono_em_um,
+    DRAWING_SHEET_TITLE_BLOCK_LETTERING, DrawingSheetBorderTemplate,
+    DrawingSheetTitleFieldValueAuthority, drawing_sheet_mono_em_um,
     drawing_sheet_zone_lettering_um,
 };
 
@@ -44,9 +45,21 @@ fn plotted_title_lines(format: &SchematicSheetFormat) -> Vec<(SceneFont, u64, St
 }
 
 /// Em of every caption and every value the title block plots. The block
-/// letters each field's caption and then its value, so the two alternate.
+/// letters each field's caption and then its value, so with every field
+/// filled in the two alternate.
 fn plotted_title_ems(format: &SchematicSheetFormat) -> (Vec<u64>, Vec<u64>) {
-    let lines = plotted_title_lines(format);
+    let filled = format
+        .try_update(|draft| {
+            for (field, state) in &mut draft.title_block.fields {
+                if field.policy().value_authority == DrawingSheetTitleFieldValueAuthority::Authored
+                    && state.value.is_empty()
+                {
+                    state.value = "Filled in".to_owned();
+                }
+            }
+        })
+        .unwrap();
+    let lines = plotted_title_lines(&filled);
     assert!(
         lines.len().is_multiple_of(2),
         "every caption is followed by its value"
@@ -160,6 +173,34 @@ fn a_plotted_caption_letters_the_field_name_and_nothing_else() {
         .collect::<Vec<_>>();
     assert!(expected.contains(&"Page".to_owned()));
     assert_eq!(captions, expected);
+}
+
+#[test]
+fn an_empty_authored_field_plots_its_caption_alone() {
+    // A title block is a form: Drawn by and Approved by start on a sheet
+    // empty, boxes to sign on the print, with no dash in them.
+    let lines = plotted_title_lines(&SchematicSheetFormat::default());
+    let value_em = drawing_sheet_mono_em_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um);
+    assert!(
+        lines.iter().all(|(_, _, text)| !text.trim().is_empty()),
+        "no line of the block is blank: {lines:?}"
+    );
+    let after = |caption: &str| {
+        let at = lines
+            .iter()
+            .position(|(_, _, text)| text == caption)
+            .unwrap_or_else(|| panic!("{caption} is plotted: {lines:?}"));
+        lines.get(at + 1).cloned()
+    };
+    for caption in ["Drawn by", "Approved by"] {
+        assert!(
+            after(caption).is_none_or(|(_, em_um, _)| em_um != value_em),
+            "{caption} plots a value: {:?}",
+            after(caption)
+        );
+    }
+    // A date RSpice does not have yet still reads as not yet known.
+    assert_eq!(after("Date").map(|(_, _, text)| text).as_deref(), Some("—"));
 }
 
 #[test]

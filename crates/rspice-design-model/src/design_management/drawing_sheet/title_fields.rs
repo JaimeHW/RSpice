@@ -200,6 +200,9 @@ pub enum DrawingSheetTitleFieldValueAuthority {
 
 /// One visible title-field value after ownership and migration fallback rules
 /// have been resolved. This semantic value is renderer-independent.
+///
+/// `value` is empty for an authored field nobody has filled in, and every
+/// renderer letters such a cell with its caption alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedDrawingSheetTitleField {
     pub id: DrawingSheetTitleFieldId,
@@ -245,10 +248,16 @@ pub fn resolve_drawing_sheet_title_fields(
                 };
                 ResolvedDrawingSheetTitleField {
                     id,
-                    value: if value.trim().is_empty() {
-                        "—".to_owned()
-                    } else {
-                        value.to_owned()
+                    value: match authority {
+                        _ if !value.trim().is_empty() => value.to_owned(),
+                        // A value RSpice supplies and does not have yet, such
+                        // as the date of a document never issued, reads as
+                        // not yet known.
+                        DrawingSheetTitleFieldValueAuthority::Automatic => "—".to_owned(),
+                        // A title block is a form: an empty authored cell is a
+                        // box to fill in or sign on the print. A dash there
+                        // would read as an answer, such as no approval needed.
+                        DrawingSheetTitleFieldValueAuthority::Authored => String::new(),
                     },
                     authority,
                 }

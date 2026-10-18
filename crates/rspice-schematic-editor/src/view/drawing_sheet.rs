@@ -1451,6 +1451,11 @@ fn draw_title_block(
             palette.block_label,
             rotation,
         );
+        // An authored field nobody has filled in is a box to fill in or sign
+        // on the print, lettered with its caption alone.
+        if field.value.is_empty() {
+            continue;
+        }
         paint_title_text(
             &clipped,
             transform(pos2(

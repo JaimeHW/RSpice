@@ -367,8 +367,8 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
         value(DrawingSheetTitleFieldId::SheetTitle),
         Some("Power tree")
     );
-    assert_eq!(value(DrawingSheetTitleFieldId::DrawnBy), Some("—"));
-    assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), Some("—"));
+    assert_eq!(value(DrawingSheetTitleFieldId::DrawnBy), Some(""));
+    assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), Some(""));
     assert_eq!(
         value(DrawingSheetTitleFieldId::Organization),
         Some("RSpice Engineering")
@@ -2711,7 +2711,7 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
     let format = SchematicSheetFormat::default();
     let visible = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new());
     // ISO 7200 makes the creator and the approval person mandatory, so a
-    // sheet names both before anyone has signed it.
+    // sheet carries both, as boxes to sign, before anyone has signed it.
     for field in [
         DrawingSheetTitleFieldId::DrawnBy,
         DrawingSheetTitleFieldId::ApprovedBy,
@@ -2719,7 +2719,7 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
         assert!(
             visible
                 .iter()
-                .any(|resolved| resolved.id == field && resolved.value == "—"),
+                .any(|resolved| resolved.id == field && resolved.value.is_empty()),
             "{field:?} is mandatory in ISO 7200 and must start on the sheet"
         );
     }

@@ -128,6 +128,71 @@ fn document_status_holds_the_release_state_revision_and_date_used_to() {
 }
 
 #[test]
+fn an_empty_authored_field_letters_blank_and_an_unknown_automatic_one_a_dash() {
+    // A title block is a form: an empty Drawn by, Checked by or Approved by,
+    // and an empty project identity, is a box to fill in or sign on the
+    // print. A dash there would read as an answer — in Approved by, as no
+    // approval needed.
+    let authored = [
+        DrawingSheetTitleFieldId::DrawnBy,
+        DrawingSheetTitleFieldId::CheckedBy,
+        DrawingSheetTitleFieldId::ApprovedBy,
+        DrawingSheetTitleFieldId::Organization,
+        DrawingSheetTitleFieldId::DocumentId,
+        DrawingSheetTitleFieldId::Classification,
+    ];
+    let format = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            for field in authored {
+                draft.title_block.fields.get_mut(&field).unwrap().visible = true;
+            }
+        })
+        .unwrap();
+    let resolved = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new());
+    let value = |id| {
+        resolved
+            .iter()
+            .find(|resolved| resolved.id == id)
+            .map(|resolved| resolved.value.as_str())
+    };
+    for field in authored {
+        assert_eq!(
+            field.policy().value_authority,
+            DrawingSheetTitleFieldValueAuthority::Authored
+        );
+        assert_eq!(value(field), Some(""), "{field:?} must letter blank");
+    }
+    // A value RSpice fills in and does not have yet, such as the revision and
+    // date of a document never issued, reads as not yet known.
+    for field in [
+        DrawingSheetTitleFieldId::Revision,
+        DrawingSheetTitleFieldId::Date,
+        DrawingSheetTitleFieldId::DocumentStatus,
+    ] {
+        assert_eq!(value(field), Some("—"), "{field:?}");
+    }
+    // A filled-in field letters what it holds.
+    let signed = format
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::ApprovedBy)
+                .unwrap()
+                .value = "J. Whitfield".to_owned();
+        })
+        .unwrap();
+    assert_eq!(
+        resolve_drawing_sheet_title_fields(&signed, &BTreeMap::new())
+            .into_iter()
+            .find(|resolved| resolved.id == DrawingSheetTitleFieldId::ApprovedBy)
+            .map(|resolved| resolved.value)
+            .as_deref(),
+        Some("J. Whitfield")
+    );
+}
+
+#[test]
 fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     let format = SchematicSheetFormat::default();
     assert_eq!(

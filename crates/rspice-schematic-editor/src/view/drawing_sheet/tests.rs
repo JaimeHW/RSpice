@@ -445,6 +445,28 @@ fn an_automatic_field_is_lettered_like_any_other() {
 }
 
 #[test]
+fn an_empty_authored_field_is_painted_as_its_caption_alone() {
+    // Drawn by and Approved by start on a new sheet empty: boxes to sign on
+    // the print, with no dash or empty line of text in them.
+    let sheet = test_sheet();
+    let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
+        &sheet.format,
+        &std::collections::BTreeMap::new(),
+    );
+    let blank = fields.iter().filter(|field| field.value.is_empty()).count();
+    assert!(blank >= 2, "a new sheet starts with unsigned fields");
+    let text = lettered_text(&painted_title_block(&sheet, &fields));
+    assert!(
+        text.iter().all(|line| !line.trim().is_empty()),
+        "an empty value paints no text: {text:?}"
+    );
+    assert_eq!(text.len(), fields.len() * 2 - blank);
+    for caption in ["Drawn by", "Approved by"] {
+        assert!(text.iter().any(|line| line == caption), "{text:?}");
+    }
+}
+
+#[test]
 fn title_block_text_uses_an_ellipsis_instead_of_a_clipped_final_glyph() {
     assert_eq!(truncate_title_text("ABCDEFG", 5), "ABCD…");
     assert_eq!(truncate_title_text("ABCD", 5), "ABCD");
