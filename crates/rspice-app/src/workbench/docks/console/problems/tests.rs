@@ -23,6 +23,7 @@ use crate::workbench::documents::netlist_document::{Diagnostic, NetlistDiagnosti
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
 mod detail_region;
+mod review;
 mod waivers;
 
 const WIDTH: f32 = 900.0;
