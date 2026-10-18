@@ -61,7 +61,7 @@ use crate::workbench::app_state::session::shortcuts::{
 };
 use crate::workbench::app_state::waivers::{WaiverAction, WaiverTarget};
 
-use crate::ui::widgets::Problem;
+use crate::ui::widgets::{Problem, StatusMark};
 use arrange::{Arrangement, Line};
 use grid::{Columns, RowMark};
 
@@ -953,14 +953,22 @@ fn severity_cell(row: &DiagnosticRow<'_>) -> String {
     }
 }
 
-/// The mark a row carries in its gutter. A waived finding keeps the shape of
-/// its severity without its colour: it is still an error, and it is not
+/// The mark a row carries in its gutter. Every severity has one, so a column
+/// of marks reads as a column of severities. A waived finding keeps the shape
+/// of its severity without its colour: it is still an error, and it is not
 /// counted against the design, and a red cross would say only the first.
 fn row_mark(row: &DiagnosticRow<'_>) -> RowMark {
-    match (row.current(), row.waived(), level_mark(row.level)) {
-        (true, false, Some(problem)) => RowMark::Problem(problem),
-        (true, true, Some(problem)) => RowMark::Waived(problem),
-        (false, _, _) | (true, _, None) => RowMark::None,
+    match (row.current(), row.waived()) {
+        (false, _) => RowMark::None,
+        (true, true) => RowMark::Waived(level_shape(row.level)),
+        (true, false) => match row.level {
+            DiagnosticLevel::Critical | DiagnosticLevel::Error => {
+                RowMark::Problem(Problem::Failure)
+            }
+            DiagnosticLevel::Warning => RowMark::Problem(Problem::Warning),
+            DiagnosticLevel::Info => RowMark::Info,
+            DiagnosticLevel::Hint => RowMark::Hint,
+        },
     }
 }
 
@@ -1039,10 +1047,12 @@ fn copy_of_listed(listed: &DiagnosticListing<'_>, arrangement: &Arrangement) -> 
     text
 }
 
-const fn level_mark(level: DiagnosticLevel) -> Option<Problem> {
+/// The shape a severity is marked with: a cross for what stops the design, a
+/// triangle for a warning, and the note's `i` for an advisory below that.
+const fn level_shape(level: DiagnosticLevel) -> StatusMark {
     match level {
-        DiagnosticLevel::Critical | DiagnosticLevel::Error => Some(Problem::Failure),
-        DiagnosticLevel::Warning => Some(Problem::Warning),
-        DiagnosticLevel::Info | DiagnosticLevel::Hint => None,
+        DiagnosticLevel::Critical | DiagnosticLevel::Error => StatusMark::Failure,
+        DiagnosticLevel::Warning => StatusMark::Warning,
+        DiagnosticLevel::Info | DiagnosticLevel::Hint => StatusMark::Info,
     }
 }

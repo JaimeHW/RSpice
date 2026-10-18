@@ -943,6 +943,46 @@ fn a_waived_error_is_marked_without_the_failure_colour() {
     );
 }
 
+/// Every severity has a mark in the gutter: a note carries the outlined `i`
+/// in the note tone, and a hint the same `i` a step quieter. Before, a note's
+/// gutter was empty, so a column of marks read as a column with gaps in it.
+#[test]
+fn a_note_and_a_hint_are_marked_like_every_other_severity() {
+    let mut state = open_state();
+    let note = record(&state, "T-NOTE", DiagnosticLevel::Info, "a note");
+    let hint = record(&state, "T-HINT", DiagnosticLevel::Hint, "a hint");
+    publish(&mut state, vec![note, hint]);
+    let palette = crate::ui::tokens::Tokens::default().color;
+
+    let render = render(&mut state, sized(egui::RawInput::default()));
+    // Strokes inside the row and left of its severity cell: the gutter.
+    let stems = |message: &str, color: egui::Color32| {
+        let cell = render.cell(message).expect("listed");
+        let row = row_of(cell);
+        let severity = render.row_at(cell.min.y)[0].1.left();
+        render
+            .segments
+            .iter()
+            .filter(|(points, stroke)| {
+                *stroke == color
+                    && points.iter().all(|point| {
+                        point.y >= row.top() && point.y <= row.bottom() && point.x < severity
+                    })
+            })
+            .count()
+    };
+    assert_eq!(
+        stems("a note", palette.info),
+        1,
+        "the note's `i`, in its tone"
+    );
+    assert_eq!(
+        stems("a hint", palette.text_dim),
+        1,
+        "the hint's `i`, in the dim ink"
+    );
+}
+
 /// The text filter matches the rule, the subject and the message, and lists
 /// nothing else.
 #[test]

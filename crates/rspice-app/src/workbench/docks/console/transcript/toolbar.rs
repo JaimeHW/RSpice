@@ -1,7 +1,7 @@
 //! The Console page's controls, set in the dock's header band: the channel,
 //! the three severity toggles and the find field.
 
-use egui::{Key, Modifiers, Rect, Sense, Stroke, Ui, Vec2, pos2};
+use egui::{Key, Modifiers, Rect, Sense, Ui, Vec2, pos2};
 
 use super::lines::Rows;
 use super::{body_id, find_id, source};
@@ -9,7 +9,8 @@ use crate::state::SimulationRun;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    PROBLEM_MARK_SIDE, Problem, paint_problem_mark, paint_status_mark, select_mono_with_response,
+    PROBLEM_MARK_SIDE, Problem, StatusMark, paint_problem_mark, paint_status_mark,
+    select_mono_with_response,
 };
 use crate::workbench::AppState;
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
@@ -154,7 +155,10 @@ fn severity_toggle(
         (ConsoleSeverity::Warnings, false) => {
             paint_status_mark(ui.painter(), mark, Problem::Warning.mark(), ink);
         }
-        (ConsoleSeverity::Info, _) => paint_info_mark(ui.painter(), mark, ink),
+        // A note's mark carries no colour, because a note is not a problem.
+        (ConsoleSeverity::Info, _) => {
+            paint_status_mark(ui.painter(), mark, StatusMark::Info, ink);
+        }
     }
     ui.painter().galley(
         pos2(
@@ -169,23 +173,6 @@ fn severity_toggle(
         theme::paint_focus_ring(ui, &response, rect);
     }
     response.on_hover_text(format!("{}: {count}", severity.label()))
-}
-
-/// An outlined `i`: the note's mark, which carries no colour because a note
-/// is not a problem.
-fn paint_info_mark(painter: &egui::Painter, rect: Rect, color: egui::Color32) {
-    let center = rect.center();
-    let radius = rect.width() * 0.5 - 0.5;
-    let stroke = Stroke::new(1.0, color);
-    painter.circle_stroke(center, radius, stroke);
-    painter.line_segment(
-        [
-            pos2(center.x, center.y - radius * 0.1),
-            pos2(center.x, center.y + radius * 0.55),
-        ],
-        Stroke::new(1.2, color),
-    );
-    painter.circle_filled(pos2(center.x, center.y - radius * 0.45), 0.8, color);
 }
 
 /// The find field. Escape clears it and gives the keyboard back to the log.

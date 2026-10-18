@@ -23,12 +23,15 @@ use crate::tokens::{self, Tokens};
 
 /// The vector shape a status mark is drawn as.
 ///
-/// Only the two a [`Problem`] can be. There is no success mark and no neutral
-/// dot: success is the absence of a problem, so nothing is painted for it.
+/// The two a [`Problem`] can be, and the note's outlined `i`, which a list of
+/// findings sets in front of an advisory so that every severity it prints has
+/// a shape. There is no success mark and no neutral dot: success is the
+/// absence of a problem, so nothing is painted for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusMark {
     Warning,
     Failure,
+    Info,
 }
 
 /// A problem the reader has to notice.
@@ -120,6 +123,18 @@ pub fn paint_status_mark(painter: &egui::Painter, rect: Rect, mark: StatusMark, 
                 ],
                 stroke,
             );
+        }
+        StatusMark::Info => {
+            let radius = side * 0.5 - 0.5;
+            painter.circle_stroke(center, radius, Stroke::new(1.0, color));
+            painter.line_segment(
+                [
+                    Pos2::new(center.x, center.y - radius * 0.1),
+                    Pos2::new(center.x, center.y + radius * 0.55),
+                ],
+                Stroke::new(1.2, color),
+            );
+            painter.circle_filled(Pos2::new(center.x, center.y - radius * 0.45), 0.8, color);
         }
     }
 }

@@ -16,7 +16,7 @@ use super::super::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
-use crate::ui::widgets::{Problem, paint_status_mark};
+use crate::ui::widgets::{Problem, StatusMark, paint_status_mark};
 use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemsView};
 
 use super::arrange::Group;
@@ -279,8 +279,12 @@ pub(super) enum RowMark {
     None,
     /// A problem that counts against the design, in its own colour.
     Problem(Problem),
-    /// A problem a waiver covers: its shape, without its colour.
-    Waived(Problem),
+    /// A note: the `i`, in the note tone.
+    Info,
+    /// A hint: the note's `i`, a step quieter than a note.
+    Hint,
+    /// A finding a waiver covers: its severity's shape, without its colour.
+    Waived(StatusMark),
 }
 
 /// One finding, as the grid prints it.
@@ -399,7 +403,7 @@ pub(super) fn row(
     let response = ui.interact(rect, id, Sense::CLICK);
     let announced = match cells.mark {
         RowMark::Problem(problem) => Some(problem),
-        RowMark::Waived(_) | RowMark::None => None,
+        RowMark::Info | RowMark::Hint | RowMark::Waived(_) | RowMark::None => None,
     };
     let label = announced_row(
         announced,
@@ -435,20 +439,22 @@ pub(super) fn row(
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
     }
+    let mark = egui::Rect::from_center_size(
+        egui::pos2(
+            rect.left() + CONSOLE_MARK_SIDE * 0.5,
+            rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5,
+        ),
+        Vec2::splat(CONSOLE_MARK_SIDE),
+    );
     match cells.mark {
         RowMark::Problem(problem) => paint_row_mark(ui, rect.left(), rect.top(), Some(problem)),
-        RowMark::Waived(problem) => paint_status_mark(
-            ui.painter(),
-            egui::Rect::from_center_size(
-                egui::pos2(
-                    rect.left() + CONSOLE_MARK_SIDE * 0.5,
-                    rect.top() + CONSOLE_ROW_MIN_HEIGHT * 0.5,
-                ),
-                Vec2::splat(CONSOLE_MARK_SIDE),
-            ),
-            problem.mark(),
-            tokens.color.text_faint,
-        ),
+        RowMark::Info => {
+            paint_status_mark(ui.painter(), mark, StatusMark::Info, tokens.color.info);
+        }
+        RowMark::Hint => paint_status_mark(ui.painter(), mark, StatusMark::Info, dim),
+        RowMark::Waived(shape) => {
+            paint_status_mark(ui.painter(), mark, shape, tokens.color.text_faint);
+        }
         RowMark::None => {}
     }
     let center_y = rect.center().y;
