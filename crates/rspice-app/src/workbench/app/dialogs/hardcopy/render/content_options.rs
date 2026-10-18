@@ -521,7 +521,7 @@ pub(super) fn drawing_sheet_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) 
         columns[0].checkbox(&mut draft.crop_marks, "Crop marks");
         columns[1].checkbox(
             &mut draft.include_sheet_paper,
-            "Include paper and printable boundary",
+            "Include paper and bleed edges",
         );
         columns[0].checkbox(&mut draft.include_sheet_border, "Include border");
         columns[1].checkbox(&mut draft.include_sheet_title_block, "Include title block");

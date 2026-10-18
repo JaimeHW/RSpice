@@ -851,6 +851,39 @@ mod symbol_selection_tests {
         );
     }
 
+    /// Before every sheet took its standard's frame, the drawing-sheet layers
+    /// held a guide to the printable margins around an inset frame, and the
+    /// centring-mark layer was the registration-mark layer. An eframe session
+    /// written then still loads, keeping the mark choice.
+    #[test]
+    fn a_ron_session_saved_with_retired_drawing_sheet_layers_still_loads() {
+        let session = UiSessionState::new();
+        let today = ron::to_string(&session.drawing_sheet_layers).unwrap();
+        let written = ron::to_string(&UiSessionStateSer::from(&session)).unwrap();
+        assert!(written.contains(&today), "the session holds its layers");
+        let legacy = written.replacen(
+            &today,
+            "(margins:false,zones:false,title_block:true,registration_marks:false,\
+             dimensions_at_detail_zoom:true)",
+            1,
+        );
+
+        let restored = UiSessionState::from(
+            ron::from_str::<UiSessionStateSer>(&legacy)
+                .expect("a session carrying the retired layers loads"),
+        );
+
+        assert_eq!(
+            restored.drawing_sheet_layers,
+            crate::state::DrawingSheetLayerVisibility {
+                zones: false,
+                title_block: true,
+                centring_marks: false,
+                dimensions_at_detail_zoom: true,
+            }
+        );
+    }
+
     #[test]
     fn grid_cycle_is_dots_then_lines_then_off_and_round_trips_exactly() {
         let mut session = UiSessionState::new();

@@ -7,7 +7,7 @@
 //! Setup transaction, with the dialog's validation and undo entry, so the two
 //! cannot disagree. Below them sit the grid and net-name characters every
 //! sheet of the schematic shares, which Preferences only chooses for new
-//! schematics. Margins, frames, zones, custom sizes and which fields a block
+//! schematics. The frame and its zones, custom sizes and which fields a block
 //! shows stay in Page Setup. The fields RSpice fills in itself (project,
 //! cell, page, paper size) are not offered: nothing types them.
 //!

@@ -1356,7 +1356,7 @@ fn reset_frame_block(ui: &mut Ui, width: f32, enabled: bool, edits: &mut Vec<Rec
                 .enabled(enabled)
                 .show(ui)
                 .on_hover_text(format!(
-                    "Restore the built-in default: A4 landscape, standard border with zones, {} title block.",
+                    "Restore the built-in default: A4 landscape, ISO 5457 frame with zones, {} title block.",
                     SchematicSheetFormat::default().title_block.template.label(),
                 ))
                 .clicked()

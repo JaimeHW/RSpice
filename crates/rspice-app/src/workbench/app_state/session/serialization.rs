@@ -901,6 +901,48 @@ mod tests {
         );
     }
 
+    /// An eframe session written before every sheet took its standard's
+    /// frame held each sheet format with margins of its own, a plain border,
+    /// custom zones lettered down the top and left, and corner and fold
+    /// marks. It restores, every format on its standard's frame.
+    #[test]
+    fn a_ron_session_saved_with_retired_drawing_sheet_frames_restores() {
+        let format = ron::to_string(&crate::state::SchematicSheetFormat::default()).unwrap();
+        let start = format.find("bleed_um:").expect("a format writes its bleed");
+        let end = format
+            .find(",title_block:")
+            .expect("a format writes its title block");
+        let frame = &format[start..end];
+        let written = ron::to_string(&AppState::default()).expect("eframe RON session serializes");
+        assert!(written.contains(frame), "the session holds a sheet format");
+        let legacy = written.replace(
+            frame,
+            "margins:(top_um:5000,right_um:5000,bottom_um:5000,left_um:5000),bleed_um:0,\
+             border:plain,zones:(mode:custom,custom_columns:Some(7),custom_rows:Some(5),\
+             labels:r#numeric-alpha,edges:r#top-and-left),\
+             marks:(registration:true,folding:true)",
+        );
+
+        let restored = ron::from_str::<Box<AppState>>(&legacy).expect("the session restores");
+
+        let default = &restored
+            .workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .default_format;
+        assert_eq!(
+            default.border,
+            crate::state::DrawingSheetBorderTemplate::Standard
+        );
+        assert_eq!(default.zones.mode, crate::state::DrawingSheetZoneMode::None);
+        assert!(default.marks.centring);
+        assert_eq!(
+            default.margins(),
+            crate::state::DrawingSheetFrameConvention::Iso5457.margins(false)
+        );
+    }
+
     #[test]
     fn legacy_session_without_results_loads_empty_result_history() {
         let restored: AppState = serde_json::from_str("{}").expect("legacy session loads");

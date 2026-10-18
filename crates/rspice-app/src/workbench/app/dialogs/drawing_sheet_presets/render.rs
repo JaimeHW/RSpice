@@ -844,7 +844,7 @@ fn preset_editor_form(
         });
 
         editor_section(ui, "Starting frame", |form| {
-            field_label(form, "Margins and frame");
+            field_label(form, "Frame");
             ComboBox::from_id_salt("custom-sheet-editor-frame")
                 .width(form.available_width())
                 .selected_text(frame_label(draft.frame))
@@ -1226,7 +1226,7 @@ fn export_body(
                         });
                         ui.label(scope_label(preset.scope));
                         ui.label(portrait_dimensions(preset));
-                        ui.label("margins \u{00b7} frame contract");
+                        ui.label("frame \u{00b7} title block");
                         ui.end_row();
                     }
                 });

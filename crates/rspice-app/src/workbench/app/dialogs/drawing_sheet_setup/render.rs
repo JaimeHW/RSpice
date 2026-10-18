@@ -757,7 +757,7 @@ fn active_panel_header(ui: &mut Ui, section: DrawingSheetSection) {
             ui,
             "ENGINEERING FRAME",
             "Border, zones and marks",
-            "Configure drawing references independently from the paper and printable boundary.",
+            "The sheet's standard draws the frame. Choose whether it carries zones and marks.",
         ),
         DrawingSheetSection::TitleBlock => panel_header(
             ui,
