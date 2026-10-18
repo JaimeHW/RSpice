@@ -186,7 +186,8 @@ fn resolution_bandwidth(data: &crate::fft::data::FftData) -> Option<f64> {
 // center view
 // ---------------------------------------------------------------------------
 
-/// Render the spectrum; its cursor reads at the reader's significant digits.
+/// Render the spectrum; its cursor reads at the reader's significant digits
+/// and by the reader's cursor interpolation.
 pub fn show(
     ui: &mut Ui,
     fft: &mut FftState,
@@ -368,7 +369,7 @@ pub fn show(
             (
                 "level".to_owned(),
                 plain_readout(
-                    sample_at(&model.frequency, &model.magnitude_db, x),
+                    presentation.cursor_sample(&model.frequency, &model.magnitude_db, x),
                     level_unit,
                     digits,
                 ),

@@ -49,7 +49,8 @@ pub fn show_absent(ui: &mut Ui, selected_periodic_noise_without_phase_trace: boo
 }
 
 /// Draw the retained spectrum and request navigation without mutating host
-/// state; its cursor reads at the reader's significant digits.
+/// state; its cursor reads at the reader's significant digits and by the
+/// reader's cursor interpolation.
 pub fn show(
     ui: &mut Ui,
     model: &PhaseNoiseTrace<'_>,
@@ -129,7 +130,7 @@ pub fn show(
             (
                 "L(f)".to_owned(),
                 plain_readout(
-                    rspice_ui_kit::plot::sample_at(model.offset_hz, model.level_dbc_per_hz, offset),
+                    presentation.cursor_sample(model.offset_hz, model.level_dbc_per_hz, offset),
                     "dBc/Hz",
                     digits,
                 ),

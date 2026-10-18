@@ -7,7 +7,7 @@ use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout, sample_at};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout};
 use std::sync::Arc;
 
 pub mod recorded_fft;
@@ -101,7 +101,8 @@ fn automatic_y_range(model: &HarmonicBalanceModel) -> Option<(f64, f64)> {
 }
 
 /// Render the qualified coefficient spectrum and request navigation; its
-/// cursor reads at the reader's significant digits.
+/// cursor reads at the reader's significant digits and by the reader's
+/// cursor interpolation.
 pub fn show(
     ui: &mut Ui,
     model: &HarmonicBalanceModel,
@@ -233,7 +234,7 @@ pub fn show(
             rows.push((
                 trace.name.clone(),
                 fmt_si_readout(
-                    sample_at(&trace.frequency, &trace.magnitude, frequency),
+                    presentation.cursor_sample(&trace.frequency, &trace.magnitude, frequency),
                     "",
                     digits,
                 ),
