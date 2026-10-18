@@ -233,25 +233,118 @@ impl JunctionRule {
         vertex_ends + 2 * interiors + pins >= 3
     }
 
-    /// Every point where a dot belongs, given the dots `document` has, in a
-    /// stable order.
+    /// Every point where a dot belongs, given the dots `document` has, in
+    /// (x, y) order.
+    ///
+    /// The answer at each point is [`JunctionRule::dot_belongs`]'s, found for
+    /// all of them at once: rather than asking every segment on a point's
+    /// row and column about that point, each segment finds the points
+    /// strictly inside it among the sorted candidates.
     pub fn points(&self, document: &SchematicDocument) -> Vec<Point> {
-        let marked = document
-            .junctions
-            .iter()
-            .map(|junction| junction.pos)
-            .collect::<HashSet<_>>();
-        let mut points = self
+        // Every point a dot could belong at, once, with what meets it there.
+        let mut entries = self
             .vertex_ends
-            .keys()
-            .chain(self.pins.keys())
-            .chain(marked.iter())
-            .copied()
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .filter(|point| self.dot_belongs(*point, marked.contains(point)))
+            .iter()
+            .map(|(&point, &ends)| (point, ends, 0, false))
+            .chain(
+                self.pins
+                    .iter()
+                    .map(|(&point, &pins)| (point, 0, pins, false)),
+            )
+            .chain(
+                document
+                    .junctions
+                    .iter()
+                    .map(|junction| (junction.pos, 0, 0, true)),
+            )
             .collect::<Vec<_>>();
-        points.sort_by_key(|point| (point.x, point.y));
+        entries.sort_unstable_by_key(|&(point, ..)| (point.x, point.y));
+        let mut candidates: Vec<(Point, usize, usize, bool)> = Vec::with_capacity(entries.len());
+        for (point, ends, pins, marked) in entries {
+            match candidates.last_mut() {
+                Some(last) if last.0 == point => {
+                    last.1 += ends;
+                    last.2 += pins;
+                    last.3 |= marked;
+                }
+                _ => candidates.push((point, ends, pins, marked)),
+            }
+        }
+
+        // Each segment's strict interior, as (candidate, wire, direction).
+        // A column's candidates are a run of the (x, y) order; a row's, a
+        // run of a (y, x) order of their indices.
+        let mut incidences: Vec<(usize, u64, (i64, i64))> = Vec::new();
+        let mut by_row = (0..candidates.len()).collect::<Vec<_>>();
+        by_row.sort_unstable_by_key(|&index| (candidates[index].0.y, candidates[index].0.x));
+        for (&y, segments) in &self.index.rows {
+            let start = by_row.partition_point(|&index| candidates[index].0.y < y);
+            let end = by_row.partition_point(|&index| candidates[index].0.y <= y);
+            let row = &by_row[start..end];
+            for &(x0, x1, wire) in segments {
+                let low = row.partition_point(|&index| candidates[index].0.x <= x0);
+                let high = row
+                    .partition_point(|&index| candidates[index].0.x < x1)
+                    .max(low);
+                for &index in &row[low..high] {
+                    incidences.push((index, wire, (1, 0)));
+                }
+            }
+        }
+        for (&x, segments) in &self.index.cols {
+            let start = candidates.partition_point(|candidate| candidate.0.x < x);
+            let end = candidates.partition_point(|candidate| candidate.0.x <= x);
+            let column = &candidates[start..end];
+            for &(y0, y1, wire) in segments {
+                let low = column.partition_point(|candidate| candidate.0.y <= y0);
+                let high = column
+                    .partition_point(|candidate| candidate.0.y < y1)
+                    .max(low);
+                for index in start + low..start + high {
+                    incidences.push((index, wire, (0, 1)));
+                }
+            }
+        }
+        for (segment, wire) in &self.index.diagonals {
+            for (index, &(point, ..)) in candidates.iter().enumerate() {
+                if point != segment.start && point != segment.end && segment.contains_point(point) {
+                    incidences.push((index, *wire, line_direction(segment.start, segment.end)));
+                }
+            }
+        }
+        incidences.sort_unstable();
+
+        let mut points = Vec::new();
+        let mut next = 0;
+        let mut directions: Vec<(i64, i64)> = Vec::new();
+        for (index, &(point, ends, pins, marked)) in candidates.iter().enumerate() {
+            // The wires whose interior holds the point and that have no
+            // vertex there, and the directions of every segment whose
+            // interior holds it.
+            let mut interiors = 0;
+            directions.clear();
+            let mut previous_wire = None;
+            while let Some(&(at, wire, direction)) = incidences.get(next)
+                && at == index
+            {
+                next += 1;
+                if !directions.contains(&direction) {
+                    directions.push(direction);
+                }
+                if previous_wire != Some(wire) {
+                    previous_wire = Some(wire);
+                    if !self.index.vertices.contains(&(wire, point)) {
+                        interiors += 1;
+                    }
+                }
+            }
+            if ends == 0 && !marked && directions.len() >= 2 {
+                continue;
+            }
+            if ends + 2 * interiors + pins >= 3 {
+                points.push(point);
+            }
+        }
         points
     }
 }
