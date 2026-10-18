@@ -88,12 +88,19 @@ impl SchematicSymbolContext {
     pub fn resolved_symbol(&self, component: &Component) -> Option<&ResolvedCellSymbol> {
         self.resolved_by_component_id
             .get(&component.id)
-            .or_else(|| {
-                let binding = component.library_cell.as_ref()?;
-                self.resolved_by_binding
-                    .iter()
-                    .find_map(|(candidate, symbol)| (candidate == binding).then_some(symbol))
-            })
+            .or_else(|| self.resolved_binding_symbol(component.library_cell.as_ref()?))
+    }
+
+    /// The authored symbol an instance bound to `binding` is drawn with. A
+    /// connectivity extraction that resolves terminals through this judges
+    /// the pins where the canvas draws them.
+    pub fn resolved_binding_symbol(
+        &self,
+        binding: &LibraryCellInstance,
+    ) -> Option<&ResolvedCellSymbol> {
+        self.resolved_by_binding
+            .iter()
+            .find_map(|(candidate, symbol)| (candidate == binding).then_some(symbol))
     }
 
     pub fn pending_library_symbol(&self) -> Option<&ResolvedCellSymbol> {

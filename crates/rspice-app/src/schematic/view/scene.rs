@@ -15,8 +15,7 @@ use crate::state::{
 };
 use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
-use rspice_design::connectivity::{extract_with_hierarchy, summary::projection_nets};
-use rspice_design::hierarchy::HierarchySource;
+use rspice_design::connectivity::{extract, summary::projection_nets};
 use rspice_schematic_editor::view::{
     cross_probe::wrapped_signal_name,
     pointer_target::{self, PointerTarget},
@@ -158,7 +157,7 @@ pub(super) fn draw_scene(
             operating_point_layout: Some(state.schematic.session.operating_point_badges.layout()),
             probe_status: &probe_status,
             selected_trace_expression: &selected_trace_expression,
-            open_pins: &open_pins(painter.ctx(), state),
+            open_pins: &open_pins(painter.ctx(), state, symbol_context),
         },
         || state.workspace.content.active_view.display_path(),
     );
@@ -289,49 +288,58 @@ fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
 /// identity moves with instance values and port parameters, which deliberately
 /// do not advance the schematic topology version.
 /// The open-pin set: every terminal nothing meets, by instance. One per
-/// topology and symbol revision.
+/// topology, symbol revision and sheet.
 type OpenPins = std::sync::Arc<std::collections::HashMap<u64, Vec<Point>>>;
 
-/// Each instance's open terminals: `ExtractedTerminal::attached == false`,
-/// the same judgement the design check reports as an unconnected pin, so
-/// the mark and the finding cannot disagree. Extracted once per topology
-/// and symbol revision, not per frame.
-fn open_pins(ctx: &egui::Context, state: &AppState) -> OpenPins {
-    let key = (
+/// What an open-pin set was extracted from.
+type OpenPinsKey = (u64, u64, Option<crate::state::SheetId>);
+
+/// Each instance's open terminals on the open sheet. Extracted once per
+/// topology, symbol revision and sheet, not per frame.
+fn open_pins(
+    ctx: &egui::Context,
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+) -> OpenPins {
+    let key: OpenPinsKey = (
         state.schematic.topology_version(),
         super::symbol_context_revision(state),
+        super::sheet_visibility::active_sheet_id(state),
     );
     let id = egui::Id::new("rspice.schematic.open_pins");
-    if let Some((cached, pins)) = ctx.data(|data| data.get_temp::<((u64, u64), OpenPins)>(id))
+    if let Some((cached, pins)) = ctx.data(|data| data.get_temp::<(OpenPinsKey, OpenPins)>(id))
         && cached == key
     {
         return pins;
     }
-    let pins = OpenPins::new(extract_open_pins(state));
+    let pins = OpenPins::new(extract_open_pins(state, symbol_context));
     ctx.data_mut(|data| data.insert_temp(id, (key, OpenPins::clone(&pins))));
     pins
 }
 
-fn extract_open_pins(state: &AppState) -> std::collections::HashMap<u64, Vec<Point>> {
+/// The open sheet's terminals that nothing meets, where the canvas draws them.
+///
+/// Open means `ExtractedTerminal::attached == false`, the judgement the design
+/// check reports as an unconnected pin, made by the one [`extract`]. It runs
+/// on the open sheet's own objects, in the canvas's coordinates, with each
+/// instance's pins resolved through the symbols the frame draws, so a mark
+/// sits on the terminal it is about. Seeing one sheet, it does not join what
+/// only the whole cell joins: same-named interface ports, and ground symbols,
+/// on different sheets.
+fn extract_open_pins(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+) -> std::collections::HashMap<u64, Vec<Point>> {
+    let sheet = super::sheet_visibility::active_sheet_connectivity(state);
+    let connectivity = extract(
+        &sheet,
+        |binding| symbol_context.resolved_binding_symbol(binding).cloned(),
+        // A name decides which net a terminal is on, never whether anything
+        // meets it.
+        |_| None,
+    );
     let mut open = std::collections::HashMap::<u64, Vec<Point>>::new();
-    let Ok(projection) = state.workspace.design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
-    ) else {
-        return open;
-    };
-    let key = state.workspace.content.active_view.key();
-    let Some((_, schematic)) = projection
-        .schematic_buffers()
-        .iter()
-        .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))
-    else {
-        return open;
-    };
-    let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
-    for terminal in extract_with_hierarchy(schematic, Some(&hierarchy)).terminals {
+    for terminal in connectivity.terminals {
         if !terminal.attached {
             open.entry(terminal.component_id)
                 .or_default()
@@ -1322,6 +1330,92 @@ mod tests {
             occurrence_net_points(&state, None, "n1"),
             None,
             "a descended tab with no receipt borrows nothing from the root"
+        );
+    }
+
+    /// The centres of the open-pin squares one canvas frame paints, in
+    /// schematic units: the view is at 100 % with the origin at the canvas's
+    /// top-left corner.
+    fn open_pin_marks(ctx: &egui::Context, state: &mut AppState) -> Vec<Point> {
+        let editor = &mut state.schematic.session.editor;
+        (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
+        (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);
+        let mut canvas = Rect::NOTHING;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                canvas = ui.available_rect_before_wrap();
+                super::super::render_schematic_view(ui, state, None);
+            },
+        );
+        let mut marks = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(square)
+                    if square.fill == egui::Color32::TRANSPARENT
+                        && square.rect.width() < 10.0
+                        && (square.rect.width() - square.rect.height()).abs() < 0.01 =>
+                {
+                    let centre = square.rect.center() - canvas.min;
+                    Some(Point::new(centre.x.round() as i32, centre.y.round() as i32))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        marks.sort_by_key(|point| (point.x, point.y));
+        marks
+    }
+
+    /// An open pin is marked on the terminal it belongs to, on every sheet.
+    /// The marks used to be read off the whole cell's projection, which lays
+    /// the sheet at catalog index k a stride along x, so Sheet 2's marks were
+    /// drawn a stride away from its pins, off the canvas. Switching sheets
+    /// changes no topology, and the marks still follow the sheet.
+    #[test]
+    fn an_open_pin_on_sheet_two_is_marked_at_its_own_point() {
+        let mut state = super::super::sheet_visibility::two_sheet_state(&[6], &[7]);
+        state.ui.grid = crate::state::GridStyle::Off;
+        let first = Component::new(6, ComponentType::Resistor, Point::new(100, 100));
+        let second = Component::new(7, ComponentType::Capacitor, Point::new(300, 200));
+        let terminals = |component: &Component| {
+            let mut points = component
+                .terminal_positions()
+                .into_iter()
+                .map(|(_, point)| point)
+                .collect::<Vec<_>>();
+            points.sort_by_key(|point| (point.x, point.y));
+            points
+        };
+        let (first_pins, second_pins) = (terminals(&first), terminals(&second));
+        let document = state.schematic.document_mut_for_test();
+        document.components.extend([first, second]);
+        state.schematic.bump_topology_version();
+        state.sync_active_schematic_to_workspace();
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+
+        assert_eq!(open_pin_marks(&ctx, &mut state), first_pins, "Sheet 1");
+
+        let key = state.workspace.content.active_schematic_reference().key();
+        let catalog = state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog_mut(&key)
+            .expect("two sheets");
+        let sheet_two = catalog.sheets()[1].id();
+        catalog.set_active(sheet_two).expect("Sheet 2 opens");
+        assert_eq!(
+            open_pin_marks(&ctx, &mut state),
+            second_pins,
+            "Sheet 2's open pins are marked where the canvas draws them"
         );
     }
 
