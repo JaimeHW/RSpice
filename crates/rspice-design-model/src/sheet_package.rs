@@ -10,7 +10,7 @@
 //! stored digest and the signature bytes themselves sit outside that
 //! projection and so cannot influence what was signed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
@@ -19,8 +19,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::design_management::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetPreset,
-    DrawingSheetPresetScope, DrawingSheetTitleBlockTemplate, MAX_DRAWING_SHEET_PROJECT_PRESETS,
-    SchematicSheetFormat,
+    DrawingSheetPresetScope, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
+    DrawingSheetTitleFieldState, MAX_DRAWING_SHEET_PROJECT_PRESETS, SchematicSheetFormat,
 };
 
 pub const PACKAGE_SCHEMA: &str = "rspice-sheet-formats";
@@ -121,41 +121,70 @@ pub struct DrawingSheetPresetPackage {
     retired_spellings: RetiredSpellings,
 }
 
-/// Names a package was written with that the product has since retired.
+/// How a package was written where the product has since changed what it
+/// writes.
 ///
 /// A preset saved naming the retired 230 mm `wide` title block loads as ISO
 /// 7200's block, but its package's digest, signature, frame-reference
-/// manifest and review rows were all written naming `wide`. They are checked
-/// against the name they were written with, so retiring the block costs no
-/// one a package they already hold, and a package sealed again is written
-/// with today's name throughout.
+/// manifest and review rows were all written naming `wide`. Likewise a
+/// preset written before the product gained a title-block field, such as the
+/// language code, loads with that field supplied, and one written with a
+/// field since retired loads without it, but its package was sealed over the
+/// fields it was written with. Each is checked against what was written, so
+/// changing the product costs no one a package they already hold, and a
+/// package sealed again is written with today's names and fields throughout.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct RetiredSpellings {
     /// Positions of the presets whose title block was written as `wide`.
     wide_title_blocks: BTreeSet<usize>,
+    /// The title-block fields each preset was written with, for the presets
+    /// written with another set than the product has today.
+    written_title_fields: BTreeMap<usize, WrittenTitleFields>,
 }
 
+type WrittenTitleFields = BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>;
+
 impl RetiredSpellings {
-    /// The retired names the package written as `package` uses.
+    /// The retired names and field sets the package written as `package`
+    /// uses.
     fn of(package: &serde_json::Value) -> Self {
-        let wide_title_blocks = package
+        let presets = package
             .get("presets")
             .and_then(serde_json::Value::as_array)
-            .map(|presets| {
-                presets
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, preset)| {
-                        preset
-                            .pointer("/format/title_block/template")
-                            .and_then(serde_json::Value::as_str)
-                            == Some("wide")
-                    })
-                    .map(|(index, _)| index)
-                    .collect()
-            })
+            .map(Vec::as_slice)
             .unwrap_or_default();
-        Self { wide_title_blocks }
+        let wide_title_blocks = presets
+            .iter()
+            .enumerate()
+            .filter(|(_, preset)| {
+                preset
+                    .pointer("/format/title_block/template")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("wide")
+            })
+            .map(|(index, _)| index)
+            .collect();
+        let current = DrawingSheetTitleFieldId::ALL
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let written_title_fields = presets
+            .iter()
+            .enumerate()
+            .filter_map(|(index, preset)| {
+                // A field set that does not read as fields is refused when
+                // the preset itself is decoded.
+                let written = preset
+                    .pointer("/format/title_block/fields")
+                    .cloned()
+                    .and_then(|fields| serde_json::from_value::<WrittenTitleFields>(fields).ok())?;
+                (written.keys().copied().collect::<BTreeSet<_>>() != current)
+                    .then_some((index, written))
+            })
+            .collect();
+        Self {
+            wide_title_blocks,
+            written_title_fields,
+        }
     }
 
     /// The name the frame-reference manifest gives the title block of the
@@ -195,12 +224,63 @@ impl RetiredSpellings {
     }
 
     /// `canonical`, the contract `presets` serialize to, as the package was
-    /// written: each preset written as `wide` names it again.
+    /// written: each preset written with another field set lists exactly the
+    /// fields it was written with, and each preset written as `wide` names it
+    /// again.
+    fn respell(&self, canonical: Vec<u8>, presets: &[PortableDrawingSheetPreset]) -> Vec<u8> {
+        let canonical = self.respell_title_fields(canonical, presets);
+        self.respell_wide_title_blocks(canonical, presets)
+    }
+
+    /// `canonical` with each preset's title-block fields as it was written.
+    ///
+    /// Every preset serializes exactly one field set, and serializes it the
+    /// same way whether alone or within the contract, so the field set of
+    /// each preset in turn is found, in order, as its own serialization.
+    fn respell_title_fields(
+        &self,
+        canonical: Vec<u8>,
+        presets: &[PortableDrawingSheetPreset],
+    ) -> Vec<u8> {
+        if self.written_title_fields.is_empty() {
+            return canonical;
+        }
+        let as_written = |fields: &WrittenTitleFields| {
+            let mut bytes = br#""fields":"#.to_vec();
+            bytes.extend(serde_json::to_vec(fields).unwrap_or_default());
+            bytes
+        };
+        let mut written = Vec::with_capacity(canonical.len());
+        let mut rest = canonical.as_slice();
+        for (index, preset) in presets.iter().enumerate() {
+            let current = as_written(&preset.format.title_block.fields);
+            let Some(at) = rest
+                .windows(current.len())
+                .position(|window| window == current.as_slice())
+            else {
+                break;
+            };
+            written.extend_from_slice(&rest[..at]);
+            match self.written_title_fields.get(&index) {
+                Some(fields) => written.extend(as_written(fields)),
+                None => written.extend_from_slice(&current),
+            }
+            rest = &rest[at + current.len()..];
+        }
+        written.extend_from_slice(rest);
+        written
+    }
+
+    /// `canonical` with each preset written as `wide` naming it again.
     ///
     /// Every preset serializes exactly one title block, whose template is its
     /// first field, so the n-th standard block in the contract belongs to the
     /// n-th preset whose block is standard.
-    fn respell(&self, canonical: Vec<u8>, presets: &[PortableDrawingSheetPreset]) -> Vec<u8> {
+    fn respell_wide_title_blocks(
+        &self,
+        canonical: Vec<u8>,
+        presets: &[PortableDrawingSheetPreset],
+    ) -> Vec<u8> {
         const STANDARD_BLOCK: &[u8] = br#""title_block":{"template":"standard""#;
         const WIDE_BLOCK: &[u8] = br#""title_block":{"template":"wide""#;
         if self.wide_title_blocks.is_empty() {
@@ -1514,4 +1594,6 @@ mod tests {
         .unwrap();
         assert!(!published.encoded.contains("\"wide\""));
     }
+
+    mod field_history;
 }
