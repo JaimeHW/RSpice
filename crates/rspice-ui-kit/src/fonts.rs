@@ -60,8 +60,14 @@ pub fn mono_medium() -> FontFamily {
 /// feature. Shipping Ubuntu, Hack, and two emoji fonts behind these complete
 /// product faces added more than a megabyte to every browser image and made
 /// typography depend on an unused fallback set.
+///
+/// The set starts empty rather than from egui's default, which is the same
+/// thing only while that feature stays off. A build that unifies features
+/// with a crate keeping it (rspice-viewer, in a workspace build) would
+/// otherwise letter what Plex lacks from egui's emoji faces instead of the
+/// replacement every shipped build shows.
 pub fn font_definitions() -> FontDefinitions {
-    let mut fonts = FontDefinitions::default();
+    let mut fonts = FontDefinitions::empty();
 
     fonts.font_data.insert(
         "plex-sans".to_owned(),
@@ -104,18 +110,17 @@ pub fn font_definitions() -> FontDefinitions {
         .into(),
     );
 
-    // Prepend our faces so they take priority; egui defaults stay as fallback.
+    // Plex Sans letters every proportional run.
     let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
     proportional.insert(0, "plex-sans".to_owned());
 
     // Plex Mono carries no Greek: Δ, Ω and μ would letter as a replacement
-    // box. Plex Sans carries them, so the mono families fall back to it
-    // before egui's defaults.
+    // box. Plex Sans carries them, so the mono families fall back to it.
     let monospace = fonts.families.entry(FontFamily::Monospace).or_default();
     monospace.insert(0, "plex-mono".to_owned());
     monospace.insert(1, "plex-sans".to_owned());
 
-    // Weighted families fall back to the regular cut, then egui defaults.
+    // Weighted families fall back to the regular cut.
     let base_proportional = fonts.families[&FontFamily::Proportional].clone();
     let mut base_monospace = fonts.families[&FontFamily::Monospace].clone();
     // A medium mono run borrows from the medium sans, so a borrowed glyph
@@ -169,16 +174,12 @@ mod tests {
     #[test]
     fn weighted_families_are_registered() {
         let fonts = font_definitions();
-        // Measured against egui's own default set rather than as a bare
-        // count: this crate disables egui's `default_fonts`, but a workspace
-        // build unifies features with crates that keep them (rspice-viewer),
-        // and then `FontDefinitions::default()` already carries egui's four
-        // faces. What this crate owns is that it adds exactly its five
-        // governed IBM Plex faces on top of whatever egui provides.
-        let egui_default_faces = FontDefinitions::default().font_data.len();
+        // A bare count, in every build: a workspace build unifies features
+        // with crates that keep egui's `default_fonts` (rspice-viewer), and
+        // the set must not take on egui's four faces there.
         assert_eq!(
             fonts.font_data.len(),
-            egui_default_faces + 5,
+            5,
             "the product embeds exactly its five governed IBM Plex faces"
         );
         for face in [
@@ -225,8 +226,7 @@ mod tests {
     /// Whether `font` letters `glyph` from a face that carries it. A missing
     /// glyph does not leave a blank: it letters the family's replacement,
     /// which has ink. So the glyph is compared with the last private-use code
-    /// point, which no face carries (egui's icon font fills part of the
-    /// first private-use block) and so letters exactly that replacement.
+    /// point, which no face carries and so letters exactly that replacement.
     pub(crate) fn letters(glyph: &str, font: egui::FontId) -> bool {
         let painted = ink(glyph, font.clone());
         let blank = ink(" ", font.clone());
