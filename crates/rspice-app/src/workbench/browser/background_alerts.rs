@@ -90,6 +90,21 @@ pub(crate) fn alert(title: &str, body: &str) {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn alert(_title: &str, _body: &str) {}
 
+/// Whether the reader is at the page: its tab is in front and the browser
+/// window has the keyboard. The browser's frame loop says neither in the
+/// window focus a desktop window reports, so the page is asked directly.
+/// `None` off the browser, where the window reports its own focus.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn reader_present() -> Option<bool> {
+    let document = web_sys::window()?.document()?;
+    Some(!document.hidden() && document.has_focus().unwrap_or(true))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const fn reader_present() -> Option<bool> {
+    None
+}
+
 #[cfg(target_arch = "wasm32")]
 mod web {
     use wasm_bindgen::{JsCast as _, JsValue};

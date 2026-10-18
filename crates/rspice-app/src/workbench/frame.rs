@@ -261,7 +261,11 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         .workspace()
         .map(WorkspacePreferences::background_task_attention)
         .unwrap_or_default();
-    let focused = ctx.input(|input| input.viewport().focused);
+    // A browser reports no window focus, so there the page says whether the
+    // reader is at it.
+    let focused = ctx
+        .input(|input| input.viewport().focused)
+        .or_else(crate::workbench::browser::background_alerts::reader_present);
     let mut request = None;
     for notice in notices {
         let wanted = attention_request(focused, notice.elapsed_seconds, notice.kind, attention);

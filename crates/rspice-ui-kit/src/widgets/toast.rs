@@ -628,9 +628,14 @@ impl Toasts {
         large_targets: bool,
     ) -> Option<NotificationAction> {
         let now = ctx.input(|i| i.time);
-        // Another application has the keyboard: nobody is reading the
-        // notices, so their clocks stand still until the reader is back.
-        let away = ctx.input(|i| i.viewport().focused) == Some(false);
+        // Another application has the keyboard, or the window cannot be
+        // seen at all: minimised, or a browser tab in the background, which
+        // is all a browser says. Nobody is reading the notices, so their
+        // clocks stand still until the reader is back.
+        let away = ctx.input(|i| {
+            let viewport = i.viewport();
+            viewport.focused == Some(false) || viewport.occluded == Some(true)
+        });
         if let Some((then, was_away)) = self.last_pass.replace((now, away)) {
             hold_clocks(&mut self.queue, now, then, was_away);
         }
@@ -1481,21 +1486,56 @@ mod tests {
         focused: Option<bool>,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
+        let viewport = egui::ViewportInfo {
+            focused,
+            ..Default::default()
+        };
+        frame_in(ctx, toasts, time, viewport, events)
+    }
+
+    /// One frame at `time` in a window the platform describes as `viewport`.
+    fn frame_in(
+        ctx: &Context,
+        toasts: &mut Toasts,
+        time: f64,
+        viewport: egui::ViewportInfo,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
         let mut input = egui::RawInput {
             time: Some(time),
             events,
             ..Default::default()
         };
-        input.viewports.insert(
-            egui::ViewportId::ROOT,
-            egui::ViewportInfo {
-                focused,
-                ..Default::default()
-            },
-        );
+        input.viewports.insert(egui::ViewportId::ROOT, viewport);
         ctx.run_ui(input, |ui| {
             let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
         })
+    }
+
+    /// A browser never says whether its window has the keyboard, only
+    /// whether its tab can be seen. A run that finishes in a tab in the
+    /// background is announced when the reader comes back to it.
+    #[test]
+    fn a_window_that_cannot_be_seen_holds_every_clock() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.info(&ctx, "Run 4 complete");
+        let tab = |hidden: bool| egui::ViewportInfo {
+            occluded: Some(hidden),
+            ..Default::default()
+        };
+
+        let _ = frame_in(&ctx, &mut toasts, 0.0, tab(true), Vec::new());
+        let _ = frame_in(&ctx, &mut toasts, 600.0, tab(true), Vec::new());
+        assert_eq!(toasts.queue.len(), 1, "nobody could see it");
+
+        let _ = frame_in(&ctx, &mut toasts, 601.0, tab(false), Vec::new());
+        let back = 601.0 + TOAST_LIFETIME;
+        let _ = frame_in(&ctx, &mut toasts, back - 0.1, tab(false), Vec::new());
+        assert_eq!(toasts.queue.len(), 1, "it runs its lifetime once seen");
+        let _ = frame_in(&ctx, &mut toasts, back + 0.1, tab(false), Vec::new());
+        assert!(toasts.queue.is_empty());
     }
 
     /// A run that finishes while the reader is in another application is
