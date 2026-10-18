@@ -180,7 +180,10 @@ fn the_compact_block_is_offered_only_to_a_sheet_on_it() {
 fn a_revision_index_with_an_o_is_flagged_and_kept() {
     let mut panel = SheetPanel::new();
     panel.enter("Revision", "O");
-    assert_eq!(panel.document_value(DrawingSheetTitleFieldId::Revision), "O");
+    assert_eq!(
+        panel.document_value(DrawingSheetTitleFieldId::Revision),
+        "O"
+    );
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
     assert!(
         painted.contains(
@@ -253,7 +256,10 @@ fn the_document_date_and_status_are_held_to_page_setups_rules() {
         DrawingSheetEdit::Status(DrawingSheetReleaseStatus::Released),
     )
     .unwrap_err();
-    assert_eq!(refused, "A released or withdrawn document needs a revision.");
+    assert_eq!(
+        refused,
+        "A released or withdrawn document needs a revision."
+    );
 
     panel.enter("Revision", "A");
     panel.enter("Date of issue", "2026-10-18");
