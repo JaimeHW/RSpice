@@ -352,10 +352,17 @@ pub(crate) fn with_active_wire_topology<R>(
 }
 
 /// Whether an object belongs to one of the cell view's other sheets.
+///
+/// The catalog is found once, not once per object: a topology scope asks
+/// this of every object in the document, on every frame of a drag, and
+/// spelling the cell view's key and looking its catalog up afresh for each
+/// of them cost 13 ms of every drag frame at production scale.
 pub(crate) fn off_active_sheet(
     workspace: &crate::state::ProjectWorkspace,
 ) -> impl Fn(u64) -> bool + '_ {
-    |id| !object_is_on_active_sheet_in_workspace(workspace, id)
+    let key = workspace.content.active_schematic_reference().key();
+    let catalog = workspace.content.design_management.sheet_catalog(&key);
+    move |id| !rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
 }
 
 /// The same operation on a schematic borrowed apart from its workspace: a
