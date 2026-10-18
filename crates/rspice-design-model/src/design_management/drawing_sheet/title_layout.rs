@@ -361,7 +361,30 @@ impl DrawingSheetTitleLayout {
         }
         lettering
     }
+
+    /// The fields among `fields`, the resolved values of the sheet, that the
+    /// block cuts short. Lettering never shrinks to fit, so each of them
+    /// prints with an ellipsis, and the place that checks a sheet's title
+    /// values says so beside it with [`DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY`].
+    #[must_use]
+    pub fn cut_fields(
+        &self,
+        fields: &[ResolvedDrawingSheetTitleField],
+    ) -> Vec<DrawingSheetTitleFieldId> {
+        fields
+            .iter()
+            .filter(|field| {
+                self.value(field.id)
+                    .is_some_and(|value| value.elides(&field.value))
+            })
+            .map(|field| field.id)
+            .collect()
+    }
 }
+
+/// What a sheet says of a title value its block cuts short.
+pub const DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY: &str =
+    "Longer than its cell in this sheet's title block holds; it prints cut short.";
 
 /// Lay out the title block `geometry` places on the sheet `format` authors,
 /// or `None` when it carries none.

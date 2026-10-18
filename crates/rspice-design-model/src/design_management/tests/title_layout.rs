@@ -978,3 +978,29 @@ fn a_cell_view_path_is_cut_at_its_start_on_every_block() {
     assert!(lettered[0].starts_with("…/"), "{lettered:?}");
     assert!(lettered[0].ends_with("/bandgap/schematic"), "{lettered:?}");
 }
+
+#[test]
+fn the_layout_names_the_fields_it_cuts_short() {
+    let format = SchematicSheetFormat::default();
+    let layout = layout_of(&format);
+    let values = |extra: &[(DrawingSheetTitleFieldId, &str)]| {
+        let values = TYPICAL_VALUES
+            .iter()
+            .chain(extra)
+            .map(|(field, value)| (*field, (*value).to_owned()))
+            .collect();
+        resolve_drawing_sheet_title_fields(&format, &values)
+    };
+    assert!(layout.cut_fields(&values(&[])).is_empty());
+    // Created by spans Checked by's cell too while the sheet hides it.
+    let fields = values(&[
+        (
+            Field::DrawnBy,
+            "Maximilian Alexander Featherstonehaugh-Smythe III",
+        ),
+        (Field::DocumentId, "RS-0001-SCH-0042-ALT-REVISION-B"),
+    ]);
+    let mut cut = layout.cut_fields(&fields);
+    cut.sort_unstable();
+    assert_eq!(cut, [Field::DrawnBy, Field::DocumentId]);
+}
