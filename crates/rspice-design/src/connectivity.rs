@@ -23,7 +23,7 @@ use crate::schematic::document_policy::NetNamingPolicy;
 use crate::schematic::ground_names::is_ground_reference;
 use crate::schematic::junction_edit::CrossingIndex;
 use crate::schematic::net_label::NetLabel;
-use crate::schematic::wire::{Wire, WireSegment};
+use crate::schematic::wire::{WireSegment, WiresThrough};
 use rspice_design_model::Point;
 
 pub mod bus;
@@ -290,97 +290,6 @@ fn validate_net_name(name: &str, policy: NetNamingPolicy) -> Result<(), &'static
     NetLabel::validate_name(name, policy)
 }
 
-/// Which wires pass through a point, answered from the segments' rows and
-/// columns instead of by asking every wire.
-///
-/// The shorted-part check asks this for both pins of every two-terminal
-/// part, and asking every wire made it the product of the part count and
-/// the wire count: most of an extraction at production scale. A wire with a
-/// slanted segment, or with no segment at all, is asked directly, exactly as
-/// before.
-struct WiresThrough<'a> {
-    wires: &'a [Wire],
-    /// Horizontal segments by row: the span they cover and their wire.
-    rows: HashMap<i32, Vec<(i32, i32, usize)>>,
-    /// Vertical segments by column, likewise.
-    columns: HashMap<i32, Vec<(i32, i32, usize)>>,
-    /// Wires the rows and columns cannot answer for.
-    others: Vec<usize>,
-}
-
-impl<'a> WiresThrough<'a> {
-    fn new(wires: &'a [Wire]) -> Self {
-        let mut index = Self {
-            wires,
-            rows: HashMap::new(),
-            columns: HashMap::new(),
-            others: Vec::new(),
-        };
-        for (position, wire) in wires.iter().enumerate() {
-            let square = wire.points.len() >= 2
-                && wire
-                    .points
-                    .windows(2)
-                    .all(|pair| pair[0].x == pair[1].x || pair[0].y == pair[1].y);
-            if !square {
-                index.others.push(position);
-                continue;
-            }
-            for pair in wire.points.windows(2) {
-                let (a, b) = (pair[0], pair[1]);
-                if a.y == b.y {
-                    index
-                        .rows
-                        .entry(a.y)
-                        .or_default()
-                        .push((a.x.min(b.x), a.x.max(b.x), position));
-                } else {
-                    index.columns.entry(a.x).or_default().push((
-                        a.y.min(b.y),
-                        a.y.max(b.y),
-                        position,
-                    ));
-                }
-            }
-        }
-        index
-    }
-
-    /// The positions in the wire list of every wire through `point`, in
-    /// list order.
-    fn indices(&self, point: Point) -> Vec<usize> {
-        let mut found = Vec::new();
-        spanning(&self.rows, point.y, point.x, &mut found);
-        spanning(&self.columns, point.x, point.y, &mut found);
-        found.extend(
-            self.others
-                .iter()
-                .copied()
-                .filter(|position| self.wires[*position].contains_point(point)),
-        );
-        found.sort_unstable();
-        found.dedup();
-        found
-    }
-}
-
-/// Push the wire of every segment on `line` whose span covers `along`.
-fn spanning(
-    lines: &HashMap<i32, Vec<(i32, i32, usize)>>,
-    line: i32,
-    along: i32,
-    found: &mut Vec<usize>,
-) {
-    if let Some(segments) = lines.get(&line) {
-        found.extend(
-            segments
-                .iter()
-                .filter(|(low, high, _)| (*low..=*high).contains(&along))
-                .map(|(_, _, position)| *position),
-        );
-    }
-}
-
 /// The extraction in progress.
 ///
 /// The phases run in one fixed order, and the order is the label-winner rule:
@@ -488,6 +397,8 @@ where
     /// joining neither wire of an unmarked crossing is not on the wire.
     fn find_shorted_parts(&mut self) {
         let schematic = self.schematic;
+        // Asking every wire about both pins of every part would make this
+        // the product of the part and wire counts.
         let wires_at = WiresThrough::new(&schematic.wires);
         let mut found = Vec::new();
         for component in &schematic.components {

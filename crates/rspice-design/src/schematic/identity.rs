@@ -61,10 +61,16 @@ impl SchematicIdentity {
 
     /// Generate a unique ID
     pub fn allocate(&mut self, document: &SchematicDocument) -> u64 {
+        self.allocate_unless(|id| live_id_in_use(document, id))
+    }
+
+    /// [`Self::allocate`] for a drawing that is being rewritten and has not
+    /// been written back yet: `in_use` says which ids it holds.
+    pub(crate) fn allocate_unless(&mut self, in_use: impl Fn(u64) -> bool) -> u64 {
         loop {
             let id = self.next_id.max(1);
             self.next_id = id.checked_add(1).unwrap_or(1);
-            if !live_id_in_use(document, id) {
+            if !in_use(id) {
                 return id;
             }
         }
@@ -384,7 +390,7 @@ fn reference_number(name: &str, prefix: &str) -> Option<u32> {
     name[prefix.len()..].parse().ok()
 }
 
-fn live_id_in_use(document: &SchematicDocument, id: u64) -> bool {
+pub(crate) fn live_id_in_use(document: &SchematicDocument, id: u64) -> bool {
     document.components.iter().any(|item| item.id == id)
         || document.wires.iter().any(|item| item.id == id)
         || document.junctions.iter().any(|item| item.id == id)
