@@ -141,6 +141,15 @@ fn a_frame_without_zones_letters_no_references_and_quotes_none() {
         .count();
     assert_eq!(ticks, 0, "no field boundary is ruled");
     assert_eq!(
+        sheet
+            .geometry
+            .frame
+            .layer(DrawingSheetFrameLayer::Border)
+            .count(),
+        1,
+        "only the frame is ruled: with no zones there is no band for a grid reference border to close"
+    );
+    assert_eq!(
         lettered_text(&shapes),
         ["A4"],
         "no zone reference is lettered, only the sheet size"

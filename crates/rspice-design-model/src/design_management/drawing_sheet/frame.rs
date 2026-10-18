@@ -347,7 +347,10 @@ impl SchematicSheetFormat {
                     width_um: convention.frame_line_um(),
                 },
             );
-            if iso_frame {
+            let zones = self.zone_layout(geometry);
+            // The grid reference border closes the band the zones are
+            // lettered in; a sheet without zones has no band to close.
+            if iso_frame && zones.is_some() {
                 artwork.push(
                     DrawingSheetFrameLayer::Border,
                     DrawingSheetFrameMark::Rect {
@@ -356,7 +359,7 @@ impl SchematicSheetFormat {
                     },
                 );
             }
-            if let Some(zones) = self.zone_layout(geometry) {
+            if let Some(zones) = zones {
                 self.zone_artwork(&mut artwork, geometry, &zones);
             }
             match convention {
