@@ -40,11 +40,11 @@ fn open_symbol() -> AppState {
 }
 
 fn viewport() -> SymbolViewport {
-    SymbolViewport {
-        rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0)),
-        zoom: 2.0,
-        pan: egui::Vec2::ZERO,
-    }
+    SymbolViewport::new(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0)),
+        2.0,
+        egui::Vec2::ZERO,
+    )
 }
 
 fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {

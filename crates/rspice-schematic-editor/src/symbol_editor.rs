@@ -3,12 +3,14 @@
 pub mod commands;
 pub mod inspector;
 pub mod interaction;
+pub mod placement;
 pub mod session;
 pub mod surface;
 
 use crate::view::navigation::{CanvasNavigation, WheelAction};
 use crate::view::resolved_symbol_render::draw_resolved_symbol;
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2, pos2, vec2};
+use placement::SymbolPlacement;
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
     schematic::{
@@ -41,24 +43,63 @@ const PREVIEW_TILE_MARGIN: f32 = 12.0;
 const PREVIEW_TILE_HEADER: f32 = 26.0;
 const PREVIEW_FIT_PADDING: f32 = 10.0;
 
+/// The map between symbol coordinates and the screen.
+///
+/// `placement` takes a symbol point to the plane `zoom` and `pan` frame. In
+/// the symbol's own view it is the identity; edited in place, it is the
+/// instance's transform and the plane is the parent sheet, so the symbol is
+/// drawn where the instance stands and the pointer is read back in symbol
+/// coordinates.
 #[derive(Debug, Clone, Copy)]
 pub struct SymbolViewport {
     pub rect: Rect,
     pub zoom: f32,
     pub pan: Vec2,
+    pub placement: SymbolPlacement,
 }
 
 impl SymbolViewport {
+    /// The symbol's own view, framed by `zoom` and `pan`.
+    pub fn new(rect: Rect, zoom: f32, pan: Vec2) -> Self {
+        Self {
+            rect,
+            zoom,
+            pan,
+            placement: SymbolPlacement::default(),
+        }
+    }
+
+    /// The symbol as `placement` puts it on the sheet `viewport` frames.
+    pub fn on_sheet(
+        viewport: &crate::view::viewport::Viewport,
+        placement: SymbolPlacement,
+    ) -> Self {
+        let rect = viewport.bounds;
+        Self {
+            rect,
+            zoom: viewport.zoom,
+            pan: rect.min + viewport.offset.to_vec2() - rect.center(),
+            placement,
+        }
+    }
+
     pub fn world_to_screen(self, point: Point) -> Pos2 {
-        self.rect.center() + self.pan + vec2(point.x as f32 * self.zoom, point.y as f32 * self.zoom)
+        let (x, y) = self.placement.place_f(point);
+        self.rect.center() + self.pan + vec2(x * self.zoom, y * self.zoom)
     }
 
     pub fn screen_to_world(self, pos: Pos2) -> Point {
         let rel = pos - self.rect.center() - self.pan;
-        Point::new(
-            (rel.x / self.zoom).round() as i32,
-            (rel.y / self.zoom).round() as i32,
-        )
+        let (x, y) = self
+            .placement
+            .unplace_f(rel.x / self.zoom, rel.y / self.zoom);
+        Point::new(x.round() as i32, y.round() as i32)
+    }
+
+    /// Which way a symbol-space direction points on screen.
+    fn screen_direction(self, x: f32, y: f32) -> Vec2 {
+        let (x, y) = self.placement.orient_f(x, y);
+        vec2(x, y)
     }
 }
 
@@ -99,11 +140,7 @@ pub fn update_viewport(
         session.pan.0 += delta.x;
         session.pan.1 += delta.y;
     }
-    SymbolViewport {
-        rect,
-        zoom: session.zoom,
-        pan: vec2(session.pan.0, session.pan.1),
-    }
+    SymbolViewport::new(rect, session.zoom, vec2(session.pan.0, session.pan.1))
 }
 
 fn symbol_scroll_zoom_factor(scroll: f32) -> Option<f32> {
@@ -135,27 +172,43 @@ pub fn draw_canvas(
     reference: &CellViewRef,
 ) {
     let t = Tokens::get(ui.ctx());
-    let c = t.color;
     let painter = ui.painter_at(viewport.rect);
-    painter.rect_filled(viewport.rect, 0.0, c.canvas_bg);
+    painter.rect_filled(viewport.rect, 0.0, t.color.canvas_bg);
+    draw_in_place(&painter, viewport, document, editor, ports, session);
+    if session.preview_as_placed {
+        draw_preview_tile(ui, viewport.rect, document, ports, reference, &t);
+    }
+}
+
+/// Every editable layer of the symbol — grid, artwork, pins, labels, the
+/// origin and the band — through `viewport`, over whatever `painter` already
+/// holds. The symbol's own view lays it on a bare canvas; editing in place
+/// lays it over the parent sheet that places it.
+pub fn draw_in_place(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    document: &SymbolDocument,
+    editor: &SymbolEditorMetadata,
+    ports: &[PortSpec],
+    session: &SymbolEditorSession,
+) {
+    let t = Tokens::get(painter.ctx());
+    let c = t.color;
     if session.show_grid {
-        draw_grid(&painter, viewport, c.canvas_grid, session.grid_spacing);
+        draw_grid(painter, viewport, c.canvas_grid, session.grid_spacing);
     }
     draw_body(
-        &painter,
+        painter,
         viewport,
         document,
         c.symbol,
         &session.effective_selection().shapes,
         c.accent,
     );
-    draw_bbox_and_origin(&painter, viewport, document, &t);
-    draw_pins(&painter, viewport, document, ports, session);
-    draw_labels(&painter, viewport, editor, session, &t);
-    draw_marquee(&painter, viewport, session, &t);
-    if session.preview_as_placed {
-        draw_preview_tile(ui, viewport.rect, document, ports, reference, &t);
-    }
+    draw_bbox_and_origin(painter, viewport, document, &t);
+    draw_pins(painter, viewport, document, ports, session);
+    draw_labels(painter, viewport, editor, session, &t);
+    draw_marquee(painter, viewport, session, &t);
 }
 
 fn draw_grid(
@@ -166,6 +219,10 @@ fn draw_grid(
 ) {
     let step = spacing.model_step() * viewport.zoom;
     if step < 8.0 {
+        return;
+    }
+    if !viewport.placement.is_identity() {
+        draw_placed_grid(painter, viewport, color, spacing.model_step());
         return;
     }
     let min = viewport.rect.min;
@@ -185,6 +242,45 @@ fn draw_grid(
             y += step;
         }
         x += step;
+    }
+}
+
+/// The symbol's grid where an instance puts it. The lattice stays in symbol
+/// coordinates, because that is where every edit made in place snaps.
+fn draw_placed_grid(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    color: Color32,
+    model_step: f32,
+) {
+    let rect = viewport.rect;
+    let mut low = (f32::INFINITY, f32::INFINITY);
+    let mut high = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for corner in [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ] {
+        let rel = corner - rect.center() - viewport.pan;
+        let (x, y) = viewport
+            .placement
+            .unplace_f(rel.x / viewport.zoom, rel.y / viewport.zoom);
+        low = (low.0.min(x), low.1.min(y));
+        high = (high.0.max(x), high.1.max(y));
+    }
+    let span =
+        |from: f32, to: f32| (from / model_step).floor() as i64..=(to / model_step).ceil() as i64;
+    for column in span(low.0, high.0) {
+        for row in span(low.1, high.1) {
+            let (x, y) = viewport
+                .placement
+                .place_xy(column as f32 * model_step, row as f32 * model_step);
+            let dot = rect.center() + viewport.pan + vec2(x * viewport.zoom, y * viewport.zoom);
+            if rect.contains(dot) {
+                painter.circle_filled(dot, 1.1, color);
+            }
+        }
     }
 }
 
@@ -259,7 +355,7 @@ fn draw_body(
             } => {
                 painter.text(
                     viewport.world_to_screen(*anchor),
-                    editor_text_align(*align),
+                    editor_text_align(viewport.placement, *align),
                     text,
                     theme::mono(
                         (size.height() as f32 * viewport.zoom).max(1.0),
@@ -272,13 +368,17 @@ fn draw_body(
     }
 }
 
-/// How a text run hangs off its anchor with the symbol unrotated, which is
-/// the only orientation the editor draws.
-fn editor_text_align(align: SymbolTextAlign) -> Align2 {
-    match align {
-        SymbolTextAlign::Left => Align2::LEFT_CENTER,
-        SymbolTextAlign::Center => Align2::CENTER_CENTER,
-        SymbolTextAlign::Right => Align2::RIGHT_CENTER,
+/// How a text run hangs off its anchor once `placement` has turned the
+/// symbol: glyphs stay upright and the run moves around its anchor, by the
+/// rule every placed instance is drawn with.
+fn editor_text_align(placement: SymbolPlacement, align: SymbolTextAlign) -> Align2 {
+    use rspice_design::symbol::SymbolTextPlacement;
+    match align.placement(|point| placement.orient(point)) {
+        SymbolTextPlacement::On => Align2::CENTER_CENTER,
+        SymbolTextPlacement::After => Align2::LEFT_CENTER,
+        SymbolTextPlacement::Before => Align2::RIGHT_CENTER,
+        SymbolTextPlacement::Below => Align2::CENTER_TOP,
+        SymbolTextPlacement::Above => Align2::CENTER_BOTTOM,
     }
 }
 
@@ -291,7 +391,8 @@ fn draw_bbox_and_origin(
     let (min, max) = document_bounds(document);
     let min = viewport.world_to_screen(min);
     let max = viewport.world_to_screen(max);
-    let rect = Rect::from_min_max(min, max);
+    // A turned symbol swaps which corner is the minimum on screen.
+    let rect = Rect::from_two_pos(min, max);
     draw_dashed_rect(
         painter,
         rect,
@@ -561,11 +662,11 @@ fn preview_viewport_for_tile(rect: Rect, document: &SymbolDocument) -> SymbolVie
         .min(fit_rect.height() / height)
         .clamp(0.05, 1.8);
     let center = Point::new((min.x + max.x) / 2, (min.y + max.y) / 2);
-    SymbolViewport {
+    SymbolViewport::new(
         rect,
         zoom,
-        pan: vec2(-(center.x as f32) * zoom, -(center.y as f32) * zoom),
-    }
+        vec2(-(center.x as f32) * zoom, -(center.y as f32) * zoom),
+    )
 }
 
 fn preview_effective_bounds(document: &SymbolDocument) -> (Point, Point) {
@@ -704,17 +805,19 @@ pub fn snap_to_terminal_grid(point: Point) -> Point {
     Point::new(snap(point.x), snap(point.y))
 }
 
+/// Where a pin's name stands: out past its terminal, on the side the
+/// terminal faces once the symbol is turned.
 fn pin_label_pos(position: Point, viewport: SymbolViewport) -> Pos2 {
     let pad = SYMBOL_TERMINAL_GRID as f32 * viewport.zoom * 0.75;
     let base = viewport.world_to_screen(position);
-    if position.x < 0 {
-        base + vec2(-pad, -8.0)
-    } else if position.x > 0 {
-        base + vec2(pad, -8.0)
-    } else if position.y < 0 {
-        base + vec2(26.0, -pad * 0.4)
+    let outward = match (position.x.signum(), position.y.signum()) {
+        (0, y) => viewport.screen_direction(0.0, if y < 0 { -1.0 } else { 1.0 }),
+        (x, _) => viewport.screen_direction(x as f32, 0.0),
+    };
+    if outward.x.abs() > outward.y.abs() {
+        base + vec2(pad * outward.x.signum(), -8.0)
     } else {
-        base + vec2(26.0, pad * 0.4)
+        base + vec2(26.0, pad * 0.4 * outward.y.signum())
     }
 }
 
@@ -777,8 +880,13 @@ fn draw_arrow(
     color: Color32,
 ) {
     let tip = viewport.world_to_screen(tip);
-    let angle = rotation_quarters.rem_euclid(4) as f32 * std::f32::consts::FRAC_PI_2;
-    let dir = vec2(angle.cos(), angle.sin());
+    let (x, y) = match rotation_quarters.rem_euclid(4) {
+        0 => (1.0, 0.0),
+        1 => (0.0, 1.0),
+        2 => (-1.0, 0.0),
+        _ => (0.0, -1.0),
+    };
+    let dir = viewport.screen_direction(x, y);
     let side = vec2(-dir.y, dir.x);
     painter.add(Shape::convex_polygon(
         vec![
