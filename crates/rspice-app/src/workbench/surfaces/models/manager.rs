@@ -232,7 +232,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
     if app.state.workbench.models_view.model_import_in_progress {
         ui.horizontal(|ui| {
-            ui.add(egui::Spinner::new().size(14.0));
+            crate::ui::widgets::busy_mark(ui, 14.0);
             ui.label(
                 app.state
                     .workbench

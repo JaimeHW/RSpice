@@ -821,7 +821,7 @@ fn render_progress(ui: &mut egui::Ui, publish_state: Option<&PublishState>) {
     match publish_state {
         None | Some(PublishState::Publishing) => {
             ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().size(14.0));
+                crate::ui::widgets::busy_mark(ui, 14.0);
                 ui.label(
                     egui::RichText::new("Uploading the snapshot")
                         .font(theme::sans(tokens::FS_1, FontWeight::Regular))
@@ -831,7 +831,7 @@ fn render_progress(ui: &mut egui::Ui, publish_state: Option<&PublishState>) {
         }
         Some(PublishState::AwaitingPage { url_path }) => {
             ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().size(14.0));
+                crate::ui::widgets::busy_mark(ui, 14.0);
                 ui.label(
                     egui::RichText::new("Rendering the page")
                         .font(theme::sans(tokens::FS_1, FontWeight::Regular))

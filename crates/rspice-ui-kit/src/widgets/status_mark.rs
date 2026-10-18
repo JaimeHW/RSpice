@@ -139,6 +139,35 @@ pub fn paint_status_mark(painter: &egui::Painter, rect: Rect, mark: StatusMark, 
     }
 }
 
+/// Work in progress, set in front of the words that say what is under way.
+///
+/// egui's spinner while motion is allowed. When reduced motion has stopped
+/// animation, the spinner's arc stands still, so nothing on the screen moves
+/// and nothing asks for a repaint every frame.
+pub fn busy_mark(ui: &mut Ui, size: f32) -> Response {
+    if ui.style().animation_time > 0.0 {
+        return ui.add(egui::Spinner::new().size(size));
+    }
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        // The spinner's own geometry: radius, stroke and colour, with three
+        // quarters of the ring drawn from the top.
+        let radius = (rect.height() / 2.0) - 2.0;
+        let start = -std::f32::consts::FRAC_PI_2;
+        let points = (0..=24)
+            .map(|step| {
+                let angle = start + std::f32::consts::PI * 1.5 * (step as f32 / 24.0);
+                rect.center() + radius * vec2(angle.cos(), angle.sin())
+            })
+            .collect();
+        ui.painter().add(Shape::line(
+            points,
+            Stroke::new(3.0, ui.visuals().strong_text_color()),
+        ));
+    }
+    response
+}
+
 /// Paint a problem's mark, in the problem's own colour from the active theme.
 pub fn paint_problem_mark(painter: &egui::Painter, rect: Rect, problem: Problem) {
     let palette = Tokens::get(painter.ctx()).color;
@@ -319,6 +348,39 @@ mod tests {
                     .iter()
                     .any(|(_, node)| node.value() == Some(wanted) || node.label() == Some(wanted)),
                 "nothing announces {wanted:?}"
+            );
+        }
+    }
+
+    /// With reduced motion the busy mark is still drawn but stands still: it
+    /// asks for no repaint, where the spinner it replaces asks every frame.
+    #[test]
+    fn the_busy_mark_stands_still_under_reduced_motion() {
+        for (animation_time, moves) in [(0.16, true), (0.0, false)] {
+            let ctx = egui::Context::default();
+            crate::Theme::default().apply(&ctx);
+            ctx.global_style_mut(|style| style.animation_time = animation_time);
+            // The second pass, after anything the first one settled.
+            let output = (0..2)
+                .map(|_| {
+                    ctx.run_ui(Default::default(), |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            busy_mark(ui, 14.0);
+                        });
+                    })
+                })
+                .last()
+                .expect("two passes");
+            let painted = output
+                .shapes
+                .iter()
+                .any(|clipped| matches!(clipped.shape, Shape::Path(_)));
+            assert!(painted, "the mark is drawn at {animation_time}");
+            let repaint = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            assert_eq!(
+                repaint.is_zero(),
+                moves,
+                "repaint {repaint:?} at {animation_time}"
             );
         }
     }

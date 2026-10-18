@@ -772,7 +772,7 @@ fn describe_run(status: &crate::services::live_protocol::RunStatusPayload) -> St
 fn busy_row(ui: &mut egui::Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        ui.add(egui::Spinner::new().size(14.0));
+        crate::ui::widgets::busy_mark(ui, 14.0);
         ui.label(
             egui::RichText::new(label)
                 .font(theme::sans(tokens::FS_1, FontWeight::Regular))
