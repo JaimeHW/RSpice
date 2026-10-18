@@ -110,6 +110,19 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
         .as_ref()
         .ok_or_else(|| "The hierarchy edit authority is missing.".to_owned())?;
     authority.validate(state, "Descend into hierarchy")?;
+    // The symbol is edited on this sheet rather than descended into, so the
+    // instance it is edited at is the whole target.
+    if draft.edit_mode == HierarchyDescendEditMode::EditSymbolInPlace {
+        if let Err(refusal) = state.selected_symbol_in_place_target() {
+            return Err(format!(
+                "Edit symbol in place is unavailable: {}.",
+                refusal.reason()
+            ));
+        }
+        state.dialogs.descend_hierarchy.close();
+        state.edit_selected_symbol_in_place();
+        return Ok(());
+    }
     let reference = draft
         .reference
         .clone()
@@ -135,6 +148,7 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
             state.open_workspace_view(reference);
             state.workspace.content.set_active_read_only_reference(true);
         }
+        HierarchyDescendEditMode::EditSymbolInPlace => {}
     }
     state.dialogs.descend_hierarchy.close();
     state.prompt("Descended into the instance; the parent's unsaved changes are kept.");
@@ -160,12 +174,14 @@ fn descend_body(
             "Edit in place",
             "Open isolated cell view",
             "Read-only reference",
+            "Edit symbol in place",
         ],
     );
     if let Some(index) = edit_mode.0 {
         draft.edit_mode = match index {
             1 => HierarchyDescendEditMode::OpenIsolated,
             2 => HierarchyDescendEditMode::ReadOnlyReference,
+            3 => HierarchyDescendEditMode::EditSymbolInPlace,
             _ => HierarchyDescendEditMode::EditInPlace,
         };
         draft.validation_error = None;
@@ -370,6 +386,7 @@ const fn edit_mode_label(mode: HierarchyDescendEditMode) -> &'static str {
         HierarchyDescendEditMode::EditInPlace => "Edit in place",
         HierarchyDescendEditMode::OpenIsolated => "Open isolated cell view",
         HierarchyDescendEditMode::ReadOnlyReference => "Read-only reference",
+        HierarchyDescendEditMode::EditSymbolInPlace => "Edit symbol in place",
     }
 }
 
@@ -426,6 +443,10 @@ mod tests {
         assert_eq!(
             edit_mode_label(HierarchyDescendEditMode::ReadOnlyReference),
             "Read-only reference"
+        );
+        assert_eq!(
+            edit_mode_label(HierarchyDescendEditMode::EditSymbolInPlace),
+            "Edit symbol in place"
         );
     }
 
@@ -509,6 +530,35 @@ mod tests {
         assert_eq!(
             state.workspace.content.occurrence_labels().last().unwrap(),
             "XAFE"
+        );
+    }
+
+    #[test]
+    fn the_symbol_mode_edits_the_instance_symbol_on_this_sheet() {
+        let (mut state, parent, _) = hierarchy_state();
+        assert!(open_descend_hierarchy_dialog(&mut state));
+        state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditSymbolInPlace;
+        let error = commit_descend_context(&mut state).expect_err("afe_core has no symbol view");
+        assert!(error.contains("the cell has no symbol view"), "{error}");
+        assert_eq!(state.workspace.content.active_view, parent);
+
+        state
+            .library_manager
+            .get_library_mut("hierarchy_test")
+            .and_then(|library| library.get_cell_mut("afe_core"))
+            .expect("the instance's cell")
+            .add_view(View::new("symbol", ViewType::Symbol));
+        commit_descend_context(&mut state).expect("the symbol is editable");
+
+        assert!(!state.dialogs.descend_hierarchy.open);
+        assert_eq!(
+            state.workspace.content.active_view,
+            CellViewRef::new("hierarchy_test", "afe_core", "symbol")
+        );
+        assert_eq!(
+            state.symbol_in_place().map(|session| &session.parent),
+            Some(&parent),
+            "the symbol is edited on the sheet, not descended into"
         );
     }
 

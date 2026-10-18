@@ -626,6 +626,9 @@ pub(crate) enum HierarchyDescendEditMode {
     EditInPlace,
     OpenIsolated,
     ReadOnlyReference,
+    /// Edit the instance's symbol master on the parent, through the
+    /// instance's transform.
+    EditSymbolInPlace,
 }
 
 /// Isolated task draft for Design ▸ Descend into selected instance.

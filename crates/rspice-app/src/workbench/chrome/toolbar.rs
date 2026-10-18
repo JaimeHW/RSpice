@@ -781,6 +781,10 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         "Save symbol",
         layout,
     );
+    if app.state.symbol_in_place().is_some() {
+        let (icon, label) = (WorkbenchIcon::ArrowUp, "Return to parent");
+        toolbar_text_command(ui, app, Command::ExitSymbolInPlace, icon, label, layout);
+    }
 }
 
 /// Toolbar of an open Verilog-A cell view.
