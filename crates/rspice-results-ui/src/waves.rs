@@ -273,7 +273,10 @@ impl StripModel {
         quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
     ) -> String {
         if self.x_unit == "Hz" {
-            return quantity_policy.format_frequency(x, significant_digits);
+            // The digit preference counts significant digits, in whichever
+            // unit Frequency display chose.
+            let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
+            return fmt_si_significant(x * scale + offset, unit, significant_digits);
         }
         fmt_si_significant(
             x,
@@ -331,9 +334,9 @@ impl StripModel {
                 fmt_significant(value, significant_digits, suffix)
             }
             TraceKind::PhaseDeg => {
-                quantity_policy.format_angle(value.to_radians(), significant_digits)
+                phase_sample(value.to_radians(), significant_digits, quantity_policy)
             }
-            TraceKind::PhaseRad => quantity_policy.format_angle(value, significant_digits),
+            TraceKind::PhaseRad => phase_sample(value, significant_digits, quantity_policy),
             TraceKind::NoiseDensity => fmt_in_unit(value, NOISE_DENSITY_UNIT, significant_digits),
         }
     }
@@ -485,6 +488,20 @@ impl StripModel {
     }
 }
 
+/// A phase at the reader's significant digits, in the unit Angle display
+/// chose. The digit preference counts digits, not decimal places.
+fn phase_sample(
+    radians: f64,
+    significant_digits: usize,
+    quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+) -> String {
+    use rspice_app_types::quantity::AngleDisplay;
+    match quantity_policy.angle_display {
+        AngleDisplay::Degrees => fmt_significant(radians.to_degrees(), significant_digits, " °"),
+        AngleDisplay::Radians => fmt_significant(radians, significant_digits, " rad"),
+    }
+}
+
 /// Stable per-trace identity shared by the decimation, range, and
 /// measurement caches. Phase traces fold in the wrapped/continuous choice
 /// so a toggle never serves stale envelopes, ranges, or stats.
@@ -546,4 +563,26 @@ pub(crate) fn grid_is_ascending(model: &StripModel) -> bool {
             ordered
         })
     })
+}
+
+#[cfg(test)]
+mod phase_digit_tests {
+    use super::*;
+    use rspice_app_types::quantity::{AngleDisplay, QuantityPresentationPolicy};
+
+    /// The digit preference counts significant digits in a phase, not
+    /// places after the point: four digits of 45.678° is 45.68.
+    #[test]
+    fn a_phase_reads_at_significant_digits_in_the_chosen_unit() {
+        let mut policy = QuantityPresentationPolicy::default();
+        policy.angle_display = AngleDisplay::Degrees;
+        let degrees = phase_sample(45.678_f64.to_radians(), 4, policy);
+        assert!(degrees.starts_with("45.68"), "{degrees}");
+        policy.angle_display = AngleDisplay::Radians;
+        let radians = phase_sample(1.234_567, 4, policy);
+        assert!(
+            radians.starts_with("1.235") && radians.ends_with("rad"),
+            "{radians}"
+        );
+    }
 }
