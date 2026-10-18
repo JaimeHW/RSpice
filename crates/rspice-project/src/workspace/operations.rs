@@ -708,6 +708,22 @@ impl ProjectWorkspace {
             )
             .chain(schematic.as_ref().probes.iter().map(|object| object.id))
             .collect::<Vec<_>>();
+        // Every synchronization reconciles, and nearly every one finds
+        // membership in step. That is found on the catalog as it stands, by
+        // the same checks, before the design authority is copied to commit.
+        let preview = catalog
+            .reconcile_object_assignments_preview(
+                catalog.revision(),
+                live_object_ids.iter().copied(),
+                Some(active_sheet_id),
+            )
+            .map_err(invalid_design_management)?;
+        if preview.added_assignments == 0
+            && preview.removed_assignments == 0
+            && preview.removed_cross_sheet_ports == 0
+        {
+            return Ok(None);
+        }
 
         let mut candidate = (*self.design_management).clone();
         let catalog = candidate

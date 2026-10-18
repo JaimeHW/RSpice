@@ -391,6 +391,14 @@ pub struct SheetReconcileReceipt {
     pub removed_cross_sheet_ports: usize,
 }
 
+/// What one reconciliation would do: its receipt, the live identities
+/// sorted, and the sheet a newly seen object goes to.
+struct ReconciliationPlan {
+    receipt: SheetReconcileReceipt,
+    live: Vec<u64>,
+    destination: Option<SheetId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SheetCatalog {
@@ -1256,6 +1264,72 @@ impl SheetCatalog {
         recorded: &BTreeMap<u64, SheetId>,
         default_sheet_id: Option<SheetId>,
     ) -> Result<SheetReconcileReceipt, DesignManagementError> {
+        let plan =
+            self.plan_reconciliation(expected_catalog_revision, live_object_ids, default_sheet_id)?;
+        let receipt = plan.receipt;
+        if receipt.added_assignments
+            + receipt.removed_assignments
+            + receipt.removed_cross_sheet_ports
+            == 0
+        {
+            return Ok(receipt);
+        }
+
+        let live = |object_id: &u64| plan.live.binary_search(object_id).is_ok();
+        let mut candidate = self.clone();
+        candidate
+            .object_assignments
+            .retain(|object_id, _| live(object_id));
+        if let Some(destination) = plan.destination {
+            for object_id in &plan.live {
+                if candidate.object_assignments.contains_key(object_id) {
+                    continue;
+                }
+                let sheet_id = recorded
+                    .get(object_id)
+                    .copied()
+                    .filter(|recorded| self.find(*recorded).is_some())
+                    .unwrap_or(destination);
+                candidate.object_assignments.insert(*object_id, sheet_id);
+            }
+        }
+        candidate.cross_sheet_ports.retain(|port| {
+            live(&port.definition.first.object_id()) && live(&port.definition.second.object_id())
+        });
+        candidate.bump_revision("sheet catalog")?;
+        candidate.validate()?;
+        *self = candidate;
+        Ok(SheetReconcileReceipt {
+            catalog_revision: self.revision,
+            ..receipt
+        })
+    }
+
+    /// What [`SheetCatalog::reconcile_object_assignments_with`] would change,
+    /// refused for exactly what it refuses, with nothing changed.
+    ///
+    /// Reconciliation runs on every synchronization and almost always finds
+    /// membership already in step, so a caller that would otherwise copy its
+    /// whole design authority to reconcile into asks this first.
+    pub fn reconcile_object_assignments_preview(
+        &self,
+        expected_catalog_revision: u64,
+        live_object_ids: impl IntoIterator<Item = u64>,
+        default_sheet_id: Option<SheetId>,
+    ) -> Result<SheetReconcileReceipt, DesignManagementError> {
+        self.plan_reconciliation(expected_catalog_revision, live_object_ids, default_sheet_id)
+            .map(|plan| plan.receipt)
+    }
+
+    /// Every check reconciliation makes, and what it would change: each
+    /// count is found by walking the sorted live identities beside the
+    /// assignments, which are sorted too.
+    fn plan_reconciliation(
+        &self,
+        expected_catalog_revision: u64,
+        live_object_ids: impl IntoIterator<Item = u64>,
+        default_sheet_id: Option<SheetId>,
+    ) -> Result<ReconciliationPlan, DesignManagementError> {
         self.validate()?;
         require_revision(
             expected_catalog_revision,
@@ -1263,9 +1337,7 @@ impl SheetCatalog {
             "sheet catalog",
             "catalog".to_owned(),
         )?;
-        let live = unique_object_ids(live_object_ids)?
-            .into_iter()
-            .collect::<BTreeSet<_>>();
+        let live = unique_object_ids(live_object_ids)?;
         let destination = default_sheet_id
             .or(self.active_sheet_id)
             .or_else(|| self.sheets.first().map(|sheet| sheet.id));
@@ -1281,43 +1353,41 @@ impl SheetCatalog {
             });
         }
 
-        let mut candidate = self.clone();
-        let assignments_before = candidate.object_assignments.len();
-        candidate
-            .object_assignments
-            .retain(|object_id, _| live.contains(object_id));
-        let removed_assignments = assignments_before - candidate.object_assignments.len();
-        let mut added_assignments = 0;
-        if let Some(destination) = destination {
-            for object_id in &live {
-                if candidate.object_assignments.contains_key(object_id) {
-                    continue;
-                }
-                let sheet_id = recorded
-                    .get(object_id)
-                    .copied()
-                    .filter(|recorded| self.find(*recorded).is_some())
-                    .unwrap_or(destination);
-                candidate.object_assignments.insert(*object_id, sheet_id);
+        let mut assigned = self.object_assignments.keys().copied().peekable();
+        let (mut added_assignments, mut removed_assignments) = (0, 0);
+        for &object_id in &live {
+            while assigned.next_if(|&assigned| assigned < object_id).is_some() {
+                removed_assignments += 1;
+            }
+            if assigned.next_if_eq(&object_id).is_none() {
                 added_assignments += 1;
             }
         }
-        let ports_before = candidate.cross_sheet_ports.len();
-        candidate.cross_sheet_ports.retain(|port| {
-            live.contains(&port.definition.first.object_id())
-                && live.contains(&port.definition.second.object_id())
-        });
-        let removed_cross_sheet_ports = ports_before - candidate.cross_sheet_ports.len();
-        if added_assignments + removed_assignments + removed_cross_sheet_ports > 0 {
-            candidate.bump_revision("sheet catalog")?;
-            candidate.validate()?;
-            *self = candidate;
-        }
-        Ok(SheetReconcileReceipt {
-            catalog_revision: self.revision,
-            added_assignments,
-            removed_assignments,
-            removed_cross_sheet_ports,
+        removed_assignments += assigned.count();
+        let is_live = |object_id: u64| live.binary_search(&object_id).is_ok();
+        let removed_cross_sheet_ports = self
+            .cross_sheet_ports
+            .iter()
+            .filter(|port| {
+                !(is_live(port.definition.first.object_id())
+                    && is_live(port.definition.second.object_id()))
+            })
+            .count();
+        Ok(ReconciliationPlan {
+            receipt: SheetReconcileReceipt {
+                catalog_revision: self.revision,
+                // Nothing is assigned without a destination, and with none
+                // there is nothing live to assign.
+                added_assignments: if destination.is_some() {
+                    added_assignments
+                } else {
+                    0
+                },
+                removed_assignments,
+                removed_cross_sheet_ports,
+            },
+            live,
+            destination,
         })
     }
 

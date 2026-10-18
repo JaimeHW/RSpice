@@ -875,16 +875,23 @@ pub(super) fn case_fold(value: &str) -> String {
 pub(super) fn unique_object_ids(
     ids: impl IntoIterator<Item = u64>,
 ) -> Result<Vec<u64>, DesignManagementError> {
+    let ids = ids.into_iter().collect::<Vec<_>>();
+    let mut values = ids.clone();
+    values.sort_unstable();
+    // Sorted, a zero comes first and a repeat sits beside its twin, so a
+    // well-formed list is accepted without hashing every identity. Only a
+    // list with a fault is scanned in the caller's order, which is what
+    // decides the fault reported.
+    if values.first() != Some(&0) && values.windows(2).all(|pair| pair[0] != pair[1]) {
+        return Ok(values);
+    }
     let mut seen = HashSet::new();
-    let mut values = Vec::new();
     for id in ids {
         require_object_id(id)?;
         if !seen.insert(id) {
             return Err(DesignManagementError::DuplicateSchematicObject(id));
         }
-        values.push(id);
     }
-    values.sort_unstable();
     Ok(values)
 }
 
