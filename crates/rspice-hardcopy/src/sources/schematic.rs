@@ -445,7 +445,7 @@ pub fn resolve_schematic_source(
     }
 
     let bounds = if content_empty {
-        drawing_sheet_artwork_bounds(
+        authored_sheet_bounds(
             semantic
                 .drawing_sheet
                 .as_ref()
@@ -457,7 +457,7 @@ pub fn resolve_schematic_source(
             .drawing_sheet
             .as_ref()
             .map_or(Ok(content_bounds), |format| {
-                drawing_sheet_artwork_bounds(format)
+                authored_sheet_bounds(format)
                     .map(|sheet_bounds| union_bounds(content_bounds, sheet_bounds))
             })?
     };

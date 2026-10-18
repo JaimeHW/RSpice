@@ -143,7 +143,10 @@ pub struct DrawingSheetPresetPackage {
 /// standard frame loads onto that frame, but its package was sealed over the
 /// frame it was written with: its margins, its plain or organization border,
 /// its zone counts, labels and edges, and its registration and folding
-/// flags. Each is checked against what was written, so changing the product
+/// flags. A preset written with an export bleed, as every preset was until
+/// bleed became the print setup's alone, loads with none, but its package was
+/// sealed over the bleed it was written with. Each is checked against what
+/// was written, so changing the product
 /// costs no one a package they already hold, and a package sealed again is
 /// written with today's names, fields and frames throughout.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -157,6 +160,9 @@ struct RetiredSpellings {
     /// The frame each preset was written with, for the presets whose frame
     /// the product writes differently today.
     written_frames: BTreeMap<usize, WrittenFrame>,
+    /// The export bleed each preset written on today's frame was written
+    /// with, before a format stopped carrying one.
+    written_bleeds: BTreeMap<usize, u64>,
 }
 
 type WrittenTitleFields = BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>;
@@ -275,11 +281,22 @@ impl RetiredSpellings {
                 let today = serde_json::from_value::<SchematicSheetFormat>(format.clone()).ok()?;
                 (frame_span(&today)? != written.span()).then_some((index, written))
             })
+            .collect::<BTreeMap<_, _>>();
+        // A preset written on another frame is written again with all of it,
+        // bleed included.
+        let written_bleeds = presets
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !written_frames.contains_key(index))
+            .filter_map(|(index, preset)| {
+                Some((index, preset.pointer("/format/bleed_um")?.as_u64()?))
+            })
             .collect();
         Self {
             written_heads,
             written_title_fields,
             written_frames,
+            written_bleeds,
         }
     }
 
@@ -366,7 +383,9 @@ impl RetiredSpellings {
         self.respell_title_block_heads(canonical, presets)
     }
 
-    /// `canonical` with each preset's frame as it was written.
+    /// `canonical` with each preset's frame as it was written, and the
+    /// export bleed each preset on today's frame was written with ahead of
+    /// its border.
     ///
     /// Every preset serializes exactly one frame, and serializes it the same
     /// way whether alone or within the contract, so the frame of each preset
@@ -376,7 +395,8 @@ impl RetiredSpellings {
         canonical: Vec<u8>,
         presets: &[PortableDrawingSheetPreset],
     ) -> Vec<u8> {
-        if self.written_frames.is_empty() {
+        const BORDER: &[u8] = br#""border":"#;
+        if self.written_frames.is_empty() && self.written_bleeds.is_empty() {
             return canonical;
         }
         let mut written = Vec::with_capacity(canonical.len());
@@ -388,9 +408,18 @@ impl RetiredSpellings {
                 break;
             };
             written.extend_from_slice(&rest[..at]);
-            match self.written_frames.get(&index) {
-                Some(frame) => written.extend(frame.span()),
-                None => written.extend_from_slice(&current),
+            match (
+                self.written_frames.get(&index),
+                self.written_bleeds.get(&index),
+                written_frame::find(&current, BORDER),
+            ) {
+                (Some(frame), _, _) => written.extend(frame.span()),
+                (None, Some(bleed_um), Some(border)) => {
+                    written.extend_from_slice(&current[..border]);
+                    written.extend(format!(r#""bleed_um":{bleed_um},"#).into_bytes());
+                    written.extend_from_slice(&current[border..]);
+                }
+                _ => written.extend_from_slice(&current),
             }
             rest = &rest[at + current.len()..];
         }

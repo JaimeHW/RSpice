@@ -2347,7 +2347,8 @@ mod tests {
             .update_drawing_sheet_settings(revision, settings)
             .unwrap();
         assert!(open_drawing_sheet_setup_for_state(&mut app.state));
-        app.state.dialogs.drawing_sheet_setup.draft.bleed = "2".to_owned();
+        app.state.dialogs.drawing_sheet_setup.draft.zone_mode =
+            crate::workbench::app::drawing_sheet_edit::ZoneModeChoice::None;
         let design_revision = app.state.workspace.content.design_management.revision();
         let sheet_revision = app
             .state
@@ -2448,7 +2449,7 @@ mod tests {
             .find(sheet_id)
             .unwrap()
             .page_format();
-        assert_eq!(saved.bleed_um, 2_000);
+        assert_eq!(saved.zones.mode, crate::state::DrawingSheetZoneMode::None);
         assert_eq!(
             saved.title_block.fields[&DrawingSheetTitleFieldId::SheetTitle].value,
             "Nested accepted title"

@@ -12,8 +12,8 @@ use crate::state::{
     DrawingSheetMarks, DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetStandard,
     DrawingSheetStandardSeries, DrawingSheetTitleBlock, DrawingSheetTitleBlockTemplate,
     DrawingSheetTitleFieldId, DrawingSheetTitleFieldState, DrawingSheetZoneMode, DrawingSheetZones,
-    SchematicPageOrientation, SchematicSheetFormat, SchematicSheetFormatDraft, SheetId,
-    drawing_sheet_automatic_zone_counts, drawing_sheet_sizes_mixed,
+    RetiredExportBleed, SchematicPageOrientation, SchematicSheetFormat, SchematicSheetFormatDraft,
+    SheetId, drawing_sheet_automatic_zone_counts, drawing_sheet_sizes_mixed,
 };
 use crate::workbench::app::SchematicEditAuthority;
 
@@ -39,7 +39,7 @@ impl DrawingSheetSection {
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Format => "Size & orientation",
-            Self::Margins => "Margins & bleed",
+            Self::Margins => "Margins",
             Self::Frame => "Frame & zones",
             Self::TitleBlock => "Title block",
             Self::Scope => "Scope & inheritance",
@@ -262,7 +262,9 @@ pub(crate) struct DrawingSheetDraft {
     /// ASME Y14.1 4.1.3's binding margin. The margins are otherwise the
     /// standard's, and nothing here edits them.
     pub(crate) binding_margin: bool,
-    pub(crate) bleed: String,
+    /// The export bleed the sheet was saved with, if it was: never edited
+    /// here, carried so the sheet keeps it for its first print setup.
+    pub(crate) retired_export_bleed: RetiredExportBleed,
     pub(crate) border: BorderTemplateChoice,
     pub(crate) zone_mode: ZoneModeChoice,
     /// The zones the sheet's standard gives its size and orientation, shown
@@ -316,7 +318,7 @@ impl DrawingSheetDraft {
             save_custom_preset: false,
             custom_preset_scope: DrawingSheetPresetScope::Project,
             binding_margin: format.binding_margin,
-            bleed: format_um(format.bleed_um, display_unit),
+            retired_export_bleed: format.retired_export_bleed,
             border: border_from_model(format.border),
             zone_mode: zone_mode_from_model(format.zones.mode),
             zone_columns,
@@ -338,11 +340,9 @@ impl DrawingSheetDraft {
         let physical = [
             parse_length_um(&self.width, current)?,
             parse_length_um(&self.height, current)?,
-            parse_length_um(&self.bleed, current)?,
         ];
         self.width = format_um(physical[0], next);
         self.height = format_um(physical[1], next);
-        self.bleed = format_um(physical[2], next);
         self.display_unit = next;
         Ok(())
     }
@@ -567,7 +567,6 @@ impl DrawingSheetDraft {
         };
         let width_um = parse("width", &self.width, &mut problems);
         let height_um = parse("height", &self.height, &mut problems);
-        let bleed_um = parse("bleed", &self.bleed, &mut problems);
 
         if let (Some(width), Some(height)) = (width_um, height_um) {
             if !(50_800..=2_540_000).contains(&width) || !(50_800..=2_540_000).contains(&height) {
@@ -634,13 +633,6 @@ impl DrawingSheetDraft {
                 });
             }
         }
-        if bleed_um.is_some_and(|bleed| bleed > 25_400) {
-            problems.push(FieldProblem {
-                field: "bleed",
-                message: "Export bleed must be between 0 and 25.4 mm.".to_owned(),
-            });
-        }
-
         if !problems.is_empty() {
             return Err(problems);
         }
@@ -654,7 +646,6 @@ impl DrawingSheetDraft {
             orientation: self.orientation,
             display_unit: display_unit_to_model(self.display_unit),
             binding_margin: self.binding_margin,
-            bleed_um: bleed_um.expect("validated bleed"),
             border: border_to_model(self.border),
             zones: DrawingSheetZones {
                 mode: zone_mode_to_model(self.zone_mode),
@@ -668,6 +659,7 @@ impl DrawingSheetDraft {
                 fields: self.title_fields.clone(),
             },
             inheritance: self.inheritance,
+            retired_export_bleed: self.retired_export_bleed,
         })
         .map_err(|error| {
             let message = error.to_string();
@@ -687,7 +679,6 @@ impl DrawingSheetDraft {
             page_format,
             width_um,
             height_um,
-            bleed_um: bleed_um.expect("validated bleed"),
         })
     }
 }
@@ -703,7 +694,6 @@ pub(crate) struct ValidatedDrawingSheetDraft {
     pub(crate) page_format: SchematicSheetFormat,
     pub(crate) width_um: u64,
     pub(crate) height_um: u64,
-    pub(crate) bleed_um: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -1289,7 +1279,7 @@ mod tests {
     fn validation_retains_every_field_problem_for_complete_surface_feedback() {
         let mut draft = valid_draft();
         draft.width = "not-a-length".to_owned();
-        draft.bleed = "not-a-bleed".to_owned();
+        draft.height = "not-a-height".to_owned();
         draft
             .title_fields
             .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
@@ -1300,7 +1290,7 @@ mod tests {
         let problems = draft.validate().unwrap_err();
 
         assert!(problems.iter().any(|problem| problem.field == "width"));
-        assert!(problems.iter().any(|problem| problem.field == "bleed"));
+        assert!(problems.iter().any(|problem| problem.field == "height"));
         assert!(
             problems
                 .iter()

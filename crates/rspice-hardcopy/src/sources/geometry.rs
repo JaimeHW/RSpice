@@ -209,28 +209,17 @@ pub fn schematic_bounds(
     bounds.finish(SCHEMATIC_EDGE_ALLOWANCE_UNITS)
 }
 
-pub(crate) fn authored_sheet_bounds(
+/// Bounds of the authored sheet: its paper, which bounds every drawing-sheet
+/// primitive the scene compiler emits and governs authored-sheet clipping.
+/// Bleed is the print setup's, laid around the output page rather than the
+/// sheet.
+pub fn authored_sheet_bounds(
     format: &SchematicSheetFormat,
 ) -> Result<SemanticBounds, HardcopySourceError> {
     let geometry = format
         .geometry()
         .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
-    // Authored-sheet clipping is governed by the physical paper edge. Bleed
-    // is publication artwork and must never make off-sheet schematic content
-    // appear to be on the authored sheet.
     drawing_sheet_rect_bounds(geometry.paper)
-}
-
-/// Bounds of every drawing-sheet primitive emitted by the scene compiler.
-/// Unlike authored-sheet clipping bounds, this includes configured bleed so
-/// signed bleed coordinates are authenticated before scene compilation.
-pub fn drawing_sheet_artwork_bounds(
-    format: &SchematicSheetFormat,
-) -> Result<SemanticBounds, HardcopySourceError> {
-    let geometry = format
-        .geometry()
-        .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
-    drawing_sheet_rect_bounds(geometry.bleed)
 }
 
 fn drawing_sheet_rect_bounds(
@@ -707,28 +696,17 @@ mod drawing_sheet_geometry_tests {
         assert!(clip_line_to_axis_rect((-2.0, 2.0), (-1.0, 3.0), 0.0, 1.0, 0.0, 1.0).is_none());
     }
 
+    /// The sheet's artwork stops at its paper: bleed is the print setup's,
+    /// and a sheet saved with one of its own draws none.
     #[test]
-    fn authored_sheet_bounds_stop_at_paper_even_when_bleed_is_configured() {
-        let format = SchematicSheetFormat::default()
-            .try_update(|draft| draft.bleed_um = 5_000)
-            .unwrap();
+    fn authored_sheet_bounds_are_the_paper_even_for_a_sheet_saved_with_a_bleed() {
+        let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
+        saved["bleed_um"] = serde_json::json!(5_000);
+        let format: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
         let bounds = authored_sheet_bounds(&format).unwrap();
         let (width_um, height_um) = format.oriented_dimensions_um();
         assert_eq!(bounds.maximum.x_um - bounds.minimum.x_um, width_um as i64);
         assert_eq!(bounds.maximum.y_um - bounds.minimum.y_um, height_um as i64);
-    }
-
-    #[test]
-    fn drawing_sheet_artwork_bounds_include_configured_bleed() {
-        let format = SchematicSheetFormat::default()
-            .try_update(|draft| draft.bleed_um = 5_000)
-            .unwrap();
-        let paper = authored_sheet_bounds(&format).unwrap();
-        let artwork = drawing_sheet_artwork_bounds(&format).unwrap();
-        assert_eq!(artwork.minimum.x_um, paper.minimum.x_um - 5_000);
-        assert_eq!(artwork.minimum.y_um, paper.minimum.y_um - 5_000);
-        assert_eq!(artwork.maximum.x_um, paper.maximum.x_um + 5_000);
-        assert_eq!(artwork.maximum.y_um, paper.maximum.y_um + 5_000);
     }
 
     #[test]

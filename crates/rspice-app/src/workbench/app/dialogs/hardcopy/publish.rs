@@ -902,13 +902,34 @@ fn setup_seeded_from_sheet_format(
         SchematicPageOrientation::Portrait => Orientation::Portrait,
         SchematicPageOrientation::Landscape => Orientation::Landscape,
     };
-    let physical_page = PhysicalPageSetup::try_new(
-        paper,
-        default.physical_page().margins(),
-        default.physical_page().bleed(),
-        orientation,
-    )
-    .map_err(|error| error.to_string())?;
+    // A sheet saved with an export bleed of its own, before bleed became the
+    // print setup's alone, starts its first print setup with that bleed when
+    // the page's margins can hold it.
+    let sheet_bleed = format
+        .retired_export_bleed
+        .micrometres()
+        .map(|bleed_um| {
+            rspice_hardcopy_contract::Bleed::Uniform(Length::from_micrometres(bleed_um))
+        })
+        .and_then(|bleed| {
+            PhysicalPageSetup::try_new(
+                paper.clone(),
+                default.physical_page().margins(),
+                bleed,
+                orientation,
+            )
+            .ok()
+        });
+    let physical_page = match sheet_bleed {
+        Some(physical_page) => physical_page,
+        None => PhysicalPageSetup::try_new(
+            paper,
+            default.physical_page().margins(),
+            default.physical_page().bleed(),
+            orientation,
+        )
+        .map_err(|error| error.to_string())?,
+    };
     // The paper is the sheet, so the output is already trimmed to it and
     // trimming marks would only mark its edge.
     let sheet_output = default.schematic();

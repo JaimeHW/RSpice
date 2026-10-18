@@ -18,7 +18,6 @@ mod schematic_text;
 mod semantic;
 mod visualization;
 
-pub(crate) use geometry::authored_sheet_bounds;
 pub(crate) use schematic_text::{
     SchematicText, SchematicTextClass, bus_declaration_text, instance_texts, net_label_bounds,
     net_label_text, tap_slice_text,
@@ -27,13 +26,13 @@ pub(crate) use schematic_text::{
 pub use aggregation::resolve_hardcopy_source_set_with;
 use artifacts::validate_frozen_report_png;
 pub use design::{drawing_sheet_title_values, resolve_symbol_document};
+pub use geometry::{
+    authored_sheet_bounds, clipped_plot_paths, compact_display, map_plot_point, schematic_bounds,
+    semantic_is_empty, source_set_member_from_resolved, union_bounds,
+};
 use geometry::{
     canonical_annotation_semantics, canonical_cursor_semantics, canonical_marker_semantics,
     layer_mapping, mapping_entry, symbol_bounds,
-};
-pub use geometry::{
-    clipped_plot_paths, compact_display, drawing_sheet_artwork_bounds, map_plot_point,
-    schematic_bounds, semantic_is_empty, source_set_member_from_resolved, union_bounds,
 };
 use mapping::default_print_mapping;
 pub(crate) use mapping::{SYMBOL_PRINT_INK, WIRE_PRINT_INK};

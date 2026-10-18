@@ -10,7 +10,6 @@ use serde::de::Error as _;
 pub const DRAWING_SHEET_MIN_EDGE_UM: u64 = 50_800;
 pub const DRAWING_SHEET_MAX_EDGE_UM: u64 = 2_540_000;
 pub const DRAWING_SHEET_MAX_ASPECT_RATIO: u64 = 20;
-pub const DRAWING_SHEET_MAX_BLEED_UM: u64 = 25_400;
 pub const DRAWING_SHEET_MIN_DRAWING_EDGE_UM: u64 = 25_000;
 pub const MAX_DRAWING_SHEET_PROJECT_PRESETS: usize = 4_096;
 pub const MAX_DRAWING_SHEET_PRESET_NAME_CHARS: usize = 48;
@@ -1236,15 +1235,43 @@ pub struct SchematicSheetFormat {
     /// margins are otherwise its standard's (see [`Self::margins`]).
     #[serde(skip_serializing_if = "core::ops::Not::not")]
     pub binding_margin: bool,
-    pub bleed_um: u64,
     pub border: DrawingSheetBorderTemplate,
     pub zones: DrawingSheetZones,
     pub marks: DrawingSheetMarks,
     pub title_block: DrawingSheetTitleBlock,
     pub inheritance: DrawingSheetInheritance,
+    /// The export bleed the sheet was saved with, if it was (see
+    /// [`RetiredExportBleed`]). Never written.
+    #[serde(skip)]
+    pub retired_export_bleed: RetiredExportBleed,
 }
 
-/// Canonical editable payload for Page Setup.
+/// Retired: the export bleed a sheet carried before the print setup became
+/// bleed's one home. Bleed is output media, which Print and Export own, so a
+/// sheet no longer has one. A sheet saved with one is read so a print setup
+/// first made for it can start from it; it is never written, so it lasts
+/// until the sheet is saved again, and it never makes two sheets differ.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RetiredExportBleed(Option<u64>);
+
+impl RetiredExportBleed {
+    /// The bleed the sheet was saved with, when it was saved with one.
+    #[must_use]
+    pub const fn micrometres(self) -> Option<u64> {
+        self.0
+    }
+}
+
+impl PartialEq for RetiredExportBleed {
+    /// A sheet is the same sheet whatever bleed it was once saved with.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for RetiredExportBleed {}
+
+/// Canonical editable payload for a sheet's format.
 ///
 /// It deliberately omits the legacy `size` projection. Applying this draft
 /// derives that projection from `authored_size` and validates the complete
@@ -1257,12 +1284,14 @@ pub struct SchematicSheetFormatDraft {
     pub display_unit: DrawingSheetDisplayUnit,
     /// Kept only where the sheet takes the ASME Y14.1 format and a border.
     pub binding_margin: bool,
-    pub bleed_um: u64,
     pub border: DrawingSheetBorderTemplate,
     pub zones: DrawingSheetZones,
     pub marks: DrawingSheetMarks,
     pub title_block: DrawingSheetTitleBlock,
     pub inheritance: DrawingSheetInheritance,
+    /// Carried through an edit so the sheet keeps it until it is saved.
+    #[serde(skip)]
+    pub retired_export_bleed: RetiredExportBleed,
 }
 
 impl From<&SchematicSheetFormat> for SchematicSheetFormatDraft {
@@ -1272,12 +1301,12 @@ impl From<&SchematicSheetFormat> for SchematicSheetFormatDraft {
             orientation: format.orientation,
             display_unit: format.display_unit,
             binding_margin: format.binding_margin,
-            bleed_um: format.bleed_um,
             border: format.border,
             zones: format.zones,
             marks: format.marks,
             title_block: format.title_block.clone(),
             inheritance: format.inheritance,
+            retired_export_bleed: format.retired_export_bleed,
         }
     }
 }
@@ -1319,6 +1348,9 @@ struct SchematicSheetFormatWire {
     /// was on the sheet.
     margins: PresentField<DrawingSheetMargins>,
     binding_margin: bool,
+    /// Retired: the export bleed every sheet stored before the print setup
+    /// became bleed's one home. Read so a print setup first made for the
+    /// sheet can start from it (see [`RetiredExportBleed`]).
     bleed_um: u64,
     border: DrawingSheetBorderWire,
     zones: PresentField<DrawingSheetZonesWire>,
@@ -1418,7 +1450,6 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             authored_size,
             display_unit: wire.display_unit,
             binding_margin: bound,
-            bleed_um: wire.bleed_um,
             border,
             zones,
             marks: DrawingSheetMarks {
@@ -1435,6 +1466,7 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
                 |title_block| title_block.into_title_block(convention),
             ),
             inheritance: wire.inheritance,
+            retired_export_bleed: RetiredExportBleed((wire.bleed_um > 0).then_some(wire.bleed_um)),
         };
         format.binding_margin &= format.can_bind();
         // A sheet saved with margins narrower than its standard's may be too
@@ -1490,12 +1522,12 @@ impl SchematicSheetFormat {
             authored_size: draft.authored_size,
             display_unit: draft.display_unit,
             binding_margin: draft.binding_margin,
-            bleed_um: draft.bleed_um,
             border: draft.border,
             zones: draft.zones,
             marks: draft.marks,
             title_block: draft.title_block,
             inheritance: draft.inheritance,
+            retired_export_bleed: draft.retired_export_bleed,
         };
         // A sheet that leaves the ASME format, or its border, leaves the
         // binding margin with it.
@@ -1592,13 +1624,13 @@ impl SchematicSheetFormat {
             authored_size,
             display_unit: DrawingSheetDisplayUnit::Millimetres,
             binding_margin: false,
-            bleed_um: 0,
             border: DrawingSheetBorderTemplate::Standard,
             zones: DrawingSheetZones::default(),
             marks: DrawingSheetFrameConvention::for_series(standard.series())
                 .default_marks(DrawingSheetBorderTemplate::Standard),
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
+            retired_export_bleed: RetiredExportBleed::default(),
         };
         format.start_on_standard_title_block();
         debug_assert!(format.validate().is_ok());
@@ -1636,7 +1668,6 @@ impl SchematicSheetFormat {
             authored_size,
             display_unit: DrawingSheetDisplayUnit::Millimetres,
             binding_margin: false,
-            bleed_um: 0,
             border,
             zones: if framed {
                 DrawingSheetZones::default()
@@ -1645,6 +1676,7 @@ impl SchematicSheetFormat {
             },
             title_block: DrawingSheetTitleBlock::default(),
             inheritance: DrawingSheetInheritance::Explicit,
+            retired_export_bleed: RetiredExportBleed::default(),
         };
         format.start_on_standard_title_block();
         format.validate()?;
@@ -1659,9 +1691,6 @@ impl SchematicSheetFormat {
             return Err(DesignManagementError::NumericRange(
                 "drawing sheet compatibility projection",
             ));
-        }
-        if self.bleed_um > DRAWING_SHEET_MAX_BLEED_UM {
-            return Err(DesignManagementError::NumericRange("drawing sheet bleed"));
         }
         if self.binding_margin && !self.can_bind() {
             return Err(DesignManagementError::NumericRange(
@@ -1870,20 +1899,6 @@ impl SchematicSheetFormat {
     pub fn geometry(&self) -> Result<DrawingSheetGeometry, DesignManagementError> {
         let (paper_width, paper_height) = self.oriented_dimensions_um();
         let paper = DrawingSheetRect::new(0, 0, paper_width, paper_height);
-        let bleed_diameter = self
-            .bleed_um
-            .checked_mul(2)
-            .ok_or(DesignManagementError::NumericRange("drawing sheet bleed"))?;
-        let bleed = DrawingSheetRect::new(
-            -(self.bleed_um as i64),
-            -(self.bleed_um as i64),
-            paper_width
-                .checked_add(bleed_diameter)
-                .ok_or(DesignManagementError::NumericRange("drawing sheet bleed"))?,
-            paper_height
-                .checked_add(bleed_diameter)
-                .ok_or(DesignManagementError::NumericRange("drawing sheet bleed"))?,
-        );
         let printable = paper.inset_by(self.margins())?;
         let frame = self.frame_layout(paper, printable)?;
         let drawing_area = frame.drawing_area;
@@ -1908,7 +1923,6 @@ impl SchematicSheetFormat {
             }
         };
         Ok(DrawingSheetGeometry {
-            bleed,
             paper,
             printable,
             drawing_area,
@@ -2137,7 +2151,6 @@ pub struct DrawingSheetZoneGrid {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetGeometry {
-    pub bleed: DrawingSheetRect,
     pub paper: DrawingSheetRect,
     pub printable: DrawingSheetRect,
     pub drawing_area: DrawingSheetRect,

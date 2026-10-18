@@ -797,13 +797,51 @@ fn drawing_sheet_drafts_derive_compatibility_and_reject_invalid_edits_atomically
     ));
 
     let invalid = original.try_update(|draft| {
-        draft.bleed_um = 2_000_000;
+        draft.authored_size = AuthoredDrawingSheetSize::Custom {
+            snapshot: CustomDrawingSheetSnapshot {
+                preset_id: None,
+                name: "Too small".to_owned(),
+                portrait_width_um: 10_000,
+                portrait_height_um: 10_000,
+                source_preset_unavailable: false,
+                started_from: None,
+            },
+        };
     });
     assert!(matches!(
         invalid,
         Err(DesignManagementError::NumericRange(_))
     ));
     assert_eq!(original, SchematicSheetFormat::default());
+}
+
+/// Bleed is output media, which the print setup owns, so a sheet has none.
+/// A sheet saved with one still loads, carries it through an edit for a print
+/// setup first made for it, is the same sheet as one saved without it, and is
+/// written without it.
+#[test]
+fn a_sheet_saved_with_an_export_bleed_loads_without_one() {
+    let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
+    assert!(saved.get("bleed_um").is_none());
+    saved["bleed_um"] = serde_json::json!(3_175);
+    let restored: SchematicSheetFormat = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(restored.retired_export_bleed.micrometres(), Some(3_175));
+    assert_eq!(restored, SchematicSheetFormat::default());
+    let edited = restored
+        .try_update(|draft| draft.orientation = SchematicPageOrientation::Portrait)
+        .unwrap();
+    assert_eq!(edited.retired_export_bleed.micrometres(), Some(3_175));
+    assert!(
+        serde_json::to_value(&edited)
+            .unwrap()
+            .get("bleed_um")
+            .is_none()
+    );
+
+    // Every sheet once wrote a bleed of nothing, which carries none.
+    saved["bleed_um"] = serde_json::json!(0);
+    let unbled: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
+    assert_eq!(unbled.retired_export_bleed.micrometres(), None);
 }
 
 #[test]

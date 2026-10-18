@@ -908,7 +908,7 @@ mod tests {
     #[test]
     fn a_ron_session_saved_with_retired_drawing_sheet_frames_restores() {
         let format = ron::to_string(&crate::state::SchematicSheetFormat::default()).unwrap();
-        let start = format.find("bleed_um:").expect("a format writes its bleed");
+        let start = format.find("border:").expect("a format writes its border");
         let end = format
             .find(",title_block:")
             .expect("a format writes its title block");

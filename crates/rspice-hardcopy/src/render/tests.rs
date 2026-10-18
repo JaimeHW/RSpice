@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::sources::{
-    SemanticSchematic, drawing_sheet_artwork_bounds, drawing_sheet_title_values,
+    SemanticSchematic, authored_sheet_bounds, drawing_sheet_title_values,
     resolve_hardcopy_source_set_with, resolve_semantic_source, resolve_symbol_document,
 };
 use rspice_design_model::SchematicPageOrientation;
@@ -479,7 +479,7 @@ fn resolved_blank_schematic_with_identity(
         HardcopyDocumentKind::SchematicOrSymbol,
         HardcopyScope::CurrentSheet,
         HardcopySemanticDocument::Schematic(Box::new(semantic)),
-        drawing_sheet_artwork_bounds(format).unwrap(),
+        authored_sheet_bounds(format).unwrap(),
     )
     .unwrap()
 }
@@ -1176,20 +1176,22 @@ fn schematic_clipping_policy_compiles_an_authored_sheet() {
     assert_eq!(scene.extent, source.content_extent());
 }
 
+/// Bleed is the print setup's: a sheet saved with an export bleed of its own
+/// compiles on its paper alone, full or clipped.
 #[test]
-fn authored_sheet_bleed_compiles_for_full_and_clipped_output() {
-    let format = SchematicSheetFormat::default()
-        .try_update(|draft| draft.bleed_um = 5_000)
-        .unwrap();
+fn a_sheet_saved_with_a_bleed_compiles_on_its_paper_for_full_and_clipped_output() {
+    let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
+    saved["bleed_um"] = serde_json::json!(5_000);
+    let format: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
     let source = resolved_blank_schematic(&format);
     let (paper_width_um, paper_height_um) = format.oriented_dimensions_um();
     assert_eq!(
         source.content_extent().width().micrometres(),
-        paper_width_um + 10_000
+        paper_width_um
     );
     assert_eq!(
         source.content_extent().height().micrometres(),
-        paper_height_um + 10_000
+        paper_height_um
     );
 
     let full = SchematicHardcopySetup::new(

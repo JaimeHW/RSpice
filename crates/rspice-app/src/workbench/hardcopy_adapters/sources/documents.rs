@@ -75,7 +75,7 @@ pub(super) fn resolve_blank_schematic_sheet_with_format_and_project_values(
                 ),
             )
         },
-        drawing_sheet_artwork_bounds,
+        authored_sheet_bounds,
     )?;
     finish_resolved(
         identity,

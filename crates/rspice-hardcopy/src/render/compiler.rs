@@ -554,18 +554,6 @@ impl<'a> SemanticSceneCompiler<'a> {
             )?,
         );
 
-        if self.schematic_output.includes_paper() && geometry.bleed != geometry.paper {
-            self.primitives.push(ScenePrimitive::Rect {
-                rect: self.drawing_sheet_rect(geometry.bleed)?,
-                stroke: Some(StrokeStyle::try_new(
-                    SemanticColor::Secondary,
-                    Length::from_micrometres(100),
-                    StrokePattern::Dotted,
-                    None,
-                )?),
-                fill: None,
-            });
-        }
         if self.schematic_output.includes_paper() {
             self.primitives.push(ScenePrimitive::Rect {
                 rect: self.drawing_sheet_rect(geometry.paper)?,

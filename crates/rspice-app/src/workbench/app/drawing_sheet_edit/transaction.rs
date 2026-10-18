@@ -1616,7 +1616,7 @@ mod tests {
         let drc_version = app.state.dialogs.drc_checked_version;
         let retained_runs = app.state.simulation.retained.runs.len();
         open_drawing_sheet_setup(&mut app);
-        app.state.dialogs.drawing_sheet_setup.draft.bleed = "2".to_owned();
+        app.state.dialogs.drawing_sheet_setup.draft.zone_mode = ZoneModeChoice::None;
         let expected = app
             .state
             .dialogs
@@ -1747,7 +1747,7 @@ mod tests {
     fn an_inline_sheet_edit_waits_for_an_open_page_setup() {
         let (mut app, _, _) = governed_app_with_sheets(1);
         open_drawing_sheet_setup(&mut app);
-        app.state.dialogs.drawing_sheet_setup.draft.bleed = "2".to_owned();
+        app.state.dialogs.drawing_sheet_setup.draft.zone_mode = ZoneModeChoice::None;
         let draft = app.state.dialogs.drawing_sheet_setup.draft.clone();
 
         assert!(

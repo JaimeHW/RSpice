@@ -98,6 +98,34 @@ fn results_export_selects_the_active_project_document_pane_authority() {
     );
 }
 
+/// Bleed is the print setup's alone. A sheet saved with an export bleed of
+/// its own starts its first print setup with it where the page's margins
+/// hold it; otherwise, and for every other sheet, the default bleed stands.
+#[test]
+fn a_sheet_saved_with_a_bleed_seeds_its_first_print_setups_bleed() {
+    use crate::state::SchematicSheetFormat;
+    use rspice_hardcopy_contract::{Bleed, HardcopySetup, Length};
+
+    let saved_with = |bleed_um: u64| -> SchematicSheetFormat {
+        let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
+        saved["bleed_um"] = serde_json::json!(bleed_um);
+        serde_json::from_value(saved).unwrap()
+    };
+    let seeded_bleed = |format| {
+        setup_seeded_from_sheet_format(format)
+            .unwrap()
+            .physical_page()
+            .bleed()
+    };
+    let default_bleed = HardcopySetup::default().physical_page().bleed();
+    assert_eq!(
+        seeded_bleed(saved_with(3_175)),
+        Bleed::Uniform(Length::from_micrometres(3_175))
+    );
+    assert_eq!(seeded_bleed(SchematicSheetFormat::default()), default_bleed);
+    assert_eq!(seeded_bleed(saved_with(500_000)), default_bleed);
+}
+
 #[test]
 fn authored_sheet_formats_seed_output_media_without_reverse_coercion() {
     use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};

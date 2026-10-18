@@ -20,7 +20,10 @@ use super::*;
 
 use crate::product::ObjectRevision;
 use crate::state::SchematicSheetFormat;
-use crate::workbench::hardcopy_adapters::sources::resolve_blank_schematic_sheet_with_format;
+use crate::workbench::hardcopy_adapters::sources::{
+    HardcopySemanticDocument, SemanticSchematic, authored_sheet_bounds, drawing_sheet_title_values,
+    resolve_semantic_source, schematic_bounds, union_bounds,
+};
 use rspice_hardcopy::render::{
     HardcopyPublicationTimestamp, HardcopyRenderer, HardcopySceneMetadata,
 };
@@ -38,40 +41,88 @@ const PLAN_ID: u128 = 0x0048_4152_4443_4f50_595f_4834;
 /// stays cheap, high enough that a hairline still lands on a pixel.
 const INK_DPI: u16 = 72;
 
-/// An authored bleed puts the source extent outside the paper edge, which is
-/// what makes the clip policy and the output extent observable at all.
-fn sheet_format() -> SchematicSheetFormat {
-    SchematicSheetFormat::default()
-        .try_update(|draft| draft.bleed_um = 5_000)
-        .expect("authored bleed is a legal sheet format")
+/// A drawing sheet with a wire run past its paper's left edge, which puts
+/// the source extent outside the paper and is what makes the clip policy and
+/// the output extent observable at all: extending the output moves the whole
+/// sheet along the page.
+fn sheet(source_key: &str, document_id: u128, display_name: &str) -> ResolvedHardcopyDocument {
+    // The paper starts at the sheet origin, -140 units; a unit is 0.25 mm.
+    let past_the_edge = crate::state::Wire::segment(
+        1,
+        crate::state::Point::new(-180, 100),
+        crate::state::Point::new(-100, 100),
+    );
+    sheet_with(source_key, document_id, display_name, vec![past_the_edge])
 }
 
-fn sheet(source_key: &str, document_id: u128, display_name: &str) -> ResolvedHardcopyDocument {
-    resolve_blank_schematic_sheet_with_format(
-        HardcopySourceIdentity::try_new(
-            source_key,
-            HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(document_id)).unwrap(),
-            ObjectRevision::INITIAL,
-            display_name,
-        )
-        .unwrap(),
+/// A drawing sheet carrying `wires` and nothing else.
+fn sheet_with(
+    source_key: &str,
+    document_id: u128,
+    display_name: &str,
+    wires: Vec<crate::state::Wire>,
+) -> ResolvedHardcopyDocument {
+    let identity = HardcopySourceIdentity::try_new(
+        source_key,
+        HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(document_id)).unwrap(),
+        ObjectRevision::INITIAL,
+        display_name,
+    )
+    .unwrap();
+    let format = SchematicSheetFormat::default();
+    let semantic = SemanticSchematic {
+        view_path: identity.source_key.clone(),
+        drawing_sheet_title_values: drawing_sheet_title_values(&identity, &format, None, None),
+        drawing_sheet: Some(format.clone()),
+        drawing_sheet_page_numbering: None,
+        grid_pitch_units: 10,
+        components: Vec::new(),
+        wires,
+        buses: Vec::new(),
+        bus_taps: Vec::new(),
+        junctions: Vec::new(),
+        net_labels: Vec::new(),
+        design_notes: Vec::new(),
+        documentation_shapes: Vec::new(),
+    };
+    let paper = authored_sheet_bounds(&format).unwrap();
+    let bounds = schematic_bounds(&semantic).map_or(paper, |content| union_bounds(content, paper));
+    let digest = rspice_hardcopy_contract::sources::canonical_digest(
+        b"rspice-hardcopy-schematic-v1",
+        &semantic,
+    )
+    .unwrap();
+    resolve_semantic_source(
+        identity,
+        digest,
+        rspice_hardcopy_contract::HardcopyDocumentKind::SchematicOrSymbol,
         HardcopyScope::CurrentSheet,
-        Some(&sheet_format()),
+        HardcopySemanticDocument::Schematic(Box::new(semantic)),
+        bounds,
     )
     .unwrap()
 }
 
 /// The dialog as the Export workflow opens it on a resolved drawing sheet,
 /// then moved to a vector artifact so the rasteriser has text to lay out.
+/// The wire past the sheet's edge asks where the output stops; the base
+/// extends it, so clipping is an edit like any other.
 fn draft() -> HardcopyDialogState {
+    draft_on(sheet(
+        "hardcopy-setting-effects",
+        0x4834_0001,
+        "Setting effects",
+    ))
+}
+
+/// The dialog as the Export workflow opens it on `document`, the way
+/// [`draft`] opens it on its sheet.
+fn draft_on(document: ResolvedHardcopyDocument) -> HardcopyDialogState {
     let mut draft = HardcopyDialogState::default();
     draft
-        .open_resolved(
-            HardcopyWorkflow::Export,
-            sheet("hardcopy-setting-effects", 0x4834_0001, "Setting effects"),
-            None,
-        )
-        .expect("blank drawing sheet opens");
+        .open_resolved(HardcopyWorkflow::Export, document, None)
+        .expect("the drawing sheet opens");
+    draft.outside_sheet_content = OutsideSheetContentPolicy::ExtendOutput;
     draft.format = OutputFormat::SvgVector;
     draft.refresh_preview();
     draft
@@ -526,8 +577,16 @@ fn the_output_format_decides_the_artifact_it_writes() {
 #[test]
 fn embedding_fonts_puts_the_typeface_in_the_artifact() {
     // An SVG cannot outline text, so dropping the fonts is only legal once the
-    // page carries none: no sheet geometry, no legend, and no header or
-    // provenance line in the metadata.
+    // page carries none: no schematic content, no sheet geometry, no legend,
+    // and no header or provenance line in the metadata.
+    let draft = || {
+        draft_on(sheet_with(
+            "hardcopy-setting-effects",
+            0x4834_0001,
+            "Setting effects",
+            Vec::new(),
+        ))
+    };
     let lettering_free = |draft: &mut HardcopyDialogState| {
         draft.include_sheet_paper = false;
         draft.include_sheet_border = false;
@@ -784,6 +843,7 @@ fn the_selected_source_reaches_the_sealed_plan() {
             None,
         )
         .expect("second sheet opens");
+    other.outside_sheet_content = OutsideSheetContentPolicy::ExtendOutput;
     other.format = OutputFormat::SvgVector;
     other.refresh_preview();
 

@@ -52,7 +52,7 @@ fn blank_schematic_titled(
         HardcopyDocumentKind::SchematicOrSymbol,
         HardcopyScope::CurrentSheet,
         HardcopySemanticDocument::Schematic(Box::new(semantic)),
-        drawing_sheet_artwork_bounds(format).unwrap(),
+        authored_sheet_bounds(format).unwrap(),
     )
     .unwrap()
 }

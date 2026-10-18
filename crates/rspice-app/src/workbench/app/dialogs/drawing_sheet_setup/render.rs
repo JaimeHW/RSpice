@@ -564,7 +564,6 @@ fn paint_section_icon(ui: &mut Ui, section: DrawingSheetSection, selected: bool)
 fn field_section(field: &str) -> Option<DrawingSheetSection> {
     match field {
         "width" | "height" | "custom-name" => Some(DrawingSheetSection::Format),
-        "bleed" => Some(DrawingSheetSection::Margins),
         "title-fields" => Some(DrawingSheetSection::TitleBlock),
         _ => None,
     }
@@ -723,7 +722,7 @@ fn editor_column(
                             ))
                             .show(ui, |ui| match state.section {
                                 DrawingSheetSection::Format => format_panel(ui, state, problems),
-                                DrawingSheetSection::Margins => margins_panel(ui, state, problems),
+                                DrawingSheetSection::Margins => margins_panel(ui, state),
                                 DrawingSheetSection::Frame => frame_panel(ui, state),
                                 DrawingSheetSection::TitleBlock => title_panel(ui, state, problems),
                                 DrawingSheetSection::Scope => scope_panel(ui, state),
@@ -745,8 +744,8 @@ fn active_panel_header(ui: &mut Ui, section: DrawingSheetSection) {
         DrawingSheetSection::Margins => panel_header(
             ui,
             "PAPER INSETS",
-            "Margins and bleed",
-            "The sheet's standard sets its margins. Bleed belongs to export artwork and never enlarges the sheet.",
+            "Margins",
+            "The sheet's standard sets its margins. Bleed is the print setup's and never enlarges the sheet.",
         ),
         DrawingSheetSection::Frame => panel_header(
             ui,
@@ -1072,29 +1071,17 @@ fn display_units_field(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
     }
 }
 
-fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState, problems: &[FieldProblem]) {
+fn margins_panel(ui: &mut Ui, state: &mut DrawingSheetSetupState) {
     margin_map(ui, &state.draft);
     ui.add_space(15.0);
-    let unit = state.draft.display_unit.suffix();
     let bordered = state.draft.border != BorderTemplateChoice::None;
-    two_column(ui, |left, right| {
-        length_field(
-            left,
-            "Export bleed",
-            &mut state.draft.bleed,
-            "0",
-            field_error(problems, "bleed"),
-            unit,
+    // ASME Y14.1 4.1.3 lets a bound drawing widen its margins.
+    if bordered && state.draft.frame_convention() == DrawingSheetFrameConvention::AsmeY141 {
+        ui.checkbox(
+            &mut state.draft.binding_margin,
+            "Binding margin · 0.75 in left",
         );
-        right.add_space(19.0);
-        // ASME Y14.1 4.1.3 lets a bound drawing widen its margins.
-        if bordered && state.draft.frame_convention() == DrawingSheetFrameConvention::AsmeY141 {
-            right.checkbox(
-                &mut state.draft.binding_margin,
-                "Binding margin · 0.75 in left",
-            );
-        }
-    });
+    }
     ui.add_space(14.0);
     muted(
         ui,
@@ -2104,7 +2091,7 @@ mod blocked_sections {
             seen += 1;
         }
         assert!(
-            seen >= 5,
+            seen >= 4,
             "the guard found only {seen} reported fields, so it is scanning the wrong region"
         );
     }
