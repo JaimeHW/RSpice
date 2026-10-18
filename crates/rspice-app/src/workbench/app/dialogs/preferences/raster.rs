@@ -31,7 +31,7 @@ fn render_every_preferences_category_for_review() {
 
     // Dark is the default theme, and a dialog reviewed only there can be
     // unreadable in light without anyone seeing it: the two palettes are not
-    // inversions of each other. The densest page is rendered in both.
+    // inversions of each other. The two densest pages are rendered in both.
     let mut themes = vec![(crate::ui::Theme::default(), "")];
     themes.push((
         crate::ui::Theme {
@@ -43,7 +43,12 @@ fn render_every_preferences_category_for_review() {
 
     for category in PreferenceCategory::ALL {
         for (theme, suffix) in &themes {
-            if !suffix.is_empty() && category != PreferenceCategory::Schematic {
+            if !suffix.is_empty()
+                && !matches!(
+                    category,
+                    PreferenceCategory::Schematic | PreferenceCategory::Results
+                )
+            {
                 continue;
             }
             let mut app = RSpiceApp::test_instance();
