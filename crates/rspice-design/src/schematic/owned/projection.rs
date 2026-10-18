@@ -71,6 +71,9 @@ impl Schematic {
             for note in &mut projected.design_notes {
                 note.pos = translated_point(note.pos, offset_for(note.id))?;
             }
+            for probe in &mut projected.probes {
+                probe.position = translated_point(probe.position, offset_for(probe.id))?;
+            }
             for shape in &mut projected.documentation_shapes {
                 let delta = offset_for(shape.id);
                 let (minimum, maximum) = shape.bounds();
@@ -498,6 +501,56 @@ mod tests {
             ),
             "{error:?}"
         );
+    }
+
+    /// Both sheets draw a probe at (40, 60). The projection lays Output a
+    /// stride along, and its probe goes with it, as every other object of
+    /// the sheet does; a probe left where Output draws it read as standing
+    /// on Input.
+    #[test]
+    fn a_probe_is_projected_onto_its_own_sheet() {
+        use super::super::super::probe::SchematicProbe;
+        let at = Point::new(40, 60);
+        let probe = |id| SchematicProbe::new(id, at, format!("P{id}"), None).expect("a probe");
+        let schematic = Schematic::from_document(SchematicDocument {
+            probes: vec![probe(5), probe(6)],
+            ..SchematicDocument::default()
+        });
+        let mut catalog = DesignManagementCatalog::default();
+        let input = catalog
+            .bootstrap_for_cell_view(KEY, "Input", [5, 6])
+            .expect("first sheet");
+        let sheets = catalog.sheet_catalog_mut(KEY).expect("sheet catalog");
+        let output = sheets
+            .create_sheet(
+                SheetDefinition {
+                    name: "Output".to_owned(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(input),
+            )
+            .expect("second sheet");
+        sheets
+            .assign_objects(sheets.revision(), output, [6])
+            .expect("the probe joins Output");
+
+        let (projected, _) = schematic
+            .materialize_design_management_schematic(&catalog, KEY)
+            .expect("the design projects");
+
+        let sheets = catalog.sheet_catalog(KEY).expect("sheet catalog");
+        let read_back = |id| {
+            let probe = projected
+                .probes
+                .iter()
+                .find(|probe| probe.id == id)
+                .expect("the probe is projected");
+            projected_point_sheet(sheets, probe.position)
+        };
+        assert_eq!(read_back(5), Some((input, at)), "Input's probe");
+        assert_eq!(read_back(6), Some((output, at)), "Output's probe");
     }
 
     /// The same pin with a wire of its own on Output satisfies the contract.
