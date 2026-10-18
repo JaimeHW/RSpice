@@ -15,12 +15,12 @@ exit_criteria = "Remove this exception when gemm and pulp release on a maintaine
 
 [[exceptions]]
 id = "RUSTSEC-2026-0192"
-dependency = "winit -> sctk-adwaita -> ab_glyph -> ttf-parser"
+dependency = "ttf-parser 0.25.1: rspice-hardcopy (direct, so also rspice-worker); krilla 0.8.2 -> rustybuzz 0.20.1; winit 0.30.13 -> sctk-adwaita 0.10.1 -> ab_glyph 0.2.32 -> owned_ttf_parser 0.25.1 (Linux and BSD desktop only)"
 owner = "@JaimeHW"
-review_after = "2026-10-17"
-reason = "The current winit Wayland decoration stack has no compatible maintained replacement for this transitive parser."
-mitigations = "This path is confined to the desktop UI font stack; backend CLI and library deployments do not link it. Release builds remain checksum-locked and are exercised on Linux, macOS, and Windows."
-exit_criteria = "Upgrade the winit/sctk-adwaita font stack as soon as an upstream release removes the unmaintained ttf-parser version."
+review_after = "2027-01-17"
+reason = "ttf-parser is unmaintained and the advisory lists no patched release. Reviewed 2026-10-18: rustybuzz 0.20.1 and ab_glyph 0.2.32 are the newest releases and still require ttf-parser 0.25; krilla 0.8.2 is the newest and still shapes with rustybuzz; sctk-adwaita 0.12 still uses ab_glyph, and eframe 0.37 still requires winit 0.30. rspice-hardcopy's own glyph checks could move to skrifa, which krilla already brings in, but the other two paths would keep ttf-parser in the graph."
+mitigations = "Every font ttf-parser reads is local, trusted data. rspice-hardcopy's glyph-coverage and text-width checks and both krilla PDF exporters parse only the four IBM Plex files compiled in from assets/fonts with include_bytes!, and no RSpice path loads a user-supplied or downloaded font. On Linux and BSD desktops, sctk-adwaita draws Wayland title bars with the system titlebar font that gsettings and fc-match name, or its own embedded Cantarell; Windows and macOS builds do not compile that path. Project text is never parsed as font data."
+exit_criteria = "Remove this exception once rustybuzz (through a krilla release on harfrust) and ab_glyph (through sctk-adwaita and winit releases eframe accepts) no longer reach ttf-parser, and rspice-hardcopy's direct use has moved to skrifa."
 
 [[exceptions]]
 id = "RUSTSEC-2026-0206"
