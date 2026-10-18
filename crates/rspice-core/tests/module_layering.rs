@@ -378,6 +378,199 @@ fn count_occurrences(haystack: &str, needle: &str) -> usize {
     count
 }
 
+/// A name a `use` declaration brings into scope, and the path it stands for,
+/// segment by segment as written.
+type UseBinding = (String, Vec<String>);
+
+/// The names a file's own `use` declarations bind, comments already stripped.
+///
+/// Only a declaration that opens a line at column zero is read. Rustfmt puts
+/// every item of a file's own namespace there, so this takes the module's
+/// imports and re-exports and leaves out those scoped to a function body or
+/// an inline `mod`: `lib.rs`'s `pub mod error { pub use … }` binds
+/// `crate::error::CircuitError`, not `crate::CircuitError`. A glob binds no
+/// name this test can follow, and `as _` binds none at all.
+fn use_bindings(code: &str) -> Vec<UseBinding> {
+    let mut bindings = Vec::new();
+    let mut lines = code.lines();
+    while let Some(line) = lines.next() {
+        let Some(start) = use_tree_start(line) else {
+            continue;
+        };
+        let mut tree = start.to_owned();
+        while !tree.contains(';') {
+            let Some(next) = lines.next() else { break };
+            tree.push(' ');
+            tree.push_str(next);
+        }
+        let tree = tree.split(';').next().unwrap_or_default();
+        let tree = tree.split_whitespace().collect::<Vec<_>>().join(" ");
+        push_use_tree(&tree, &[], &mut bindings);
+    }
+    bindings
+}
+
+/// What follows `use` on a line that opens a `use` declaration at column
+/// zero, whatever its visibility.
+fn use_tree_start(line: &str) -> Option<&str> {
+    let declaration = match line.strip_prefix("pub") {
+        Some(visibility) => {
+            let visibility = match visibility.strip_prefix('(') {
+                Some(scope) => &scope[scope.find(')')? + 1..],
+                None => visibility,
+            };
+            visibility.strip_prefix(' ')?
+        }
+        None => line,
+    };
+    declaration.strip_prefix("use ")
+}
+
+/// Flatten one use tree, written under `prefix`, into the names it binds.
+fn push_use_tree(tree: &str, prefix: &[String], bindings: &mut Vec<UseBinding>) {
+    let tree = tree.trim();
+    // What follows a group's trailing comma.
+    if tree.is_empty() {
+        return;
+    }
+    if let Some(open) = tree.find('{') {
+        let path = [prefix, &path_segments(&tree[..open])].concat();
+        let group = &tree[open + 1..];
+        let group = group.strip_suffix('}').unwrap_or(group);
+        let mut depth = 0usize;
+        let mut start = 0;
+        for (index, ch) in group.char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => {
+                    push_use_tree(&group[start..index], &path, bindings);
+                    start = index + 1;
+                }
+                _ => {}
+            }
+        }
+        push_use_tree(&group[start..], &path, bindings);
+        return;
+    }
+    let (written, alias) = match tree.split_once(" as ") {
+        Some((written, alias)) => (written, Some(alias.trim())),
+        None => (tree, None),
+    };
+    let mut path = [prefix, &path_segments(written)].concat();
+    if path.last().is_some_and(|last| last == "self") {
+        path.pop();
+    }
+    let Some(last) = path.last() else { return };
+    let name = alias.unwrap_or(last);
+    if last == "*" || name == "_" {
+        return;
+    }
+    bindings.push((name.to_owned(), path));
+}
+
+fn path_segments(path: &str) -> Vec<String> {
+    path.split("::")
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The source of the module at `path` from the crate root, if it has a file
+/// of its own: `lib.rs` for the root itself, then `a/b.rs` or `a/b/mod.rs`.
+fn module_source(root: &Path, path: &[String]) -> Option<String> {
+    if path.is_empty() {
+        return fs::read_to_string(root.join("lib.rs")).ok();
+    }
+    let file: PathBuf = path.iter().collect();
+    fs::read_to_string(root.join(&file).with_extension("rs"))
+        .or_else(|_| fs::read_to_string(root.join(file).join("mod.rs")))
+        .ok()
+}
+
+/// Reads a module's source by its path from the crate root, so the resolver
+/// below can be pointed at a tree written inside a test.
+type ModuleSource<'a> = &'a dyn Fn(&[String]) -> Option<String>;
+
+/// `path`, as a `use` declaration in the module at `module` writes it, from
+/// the crate root; `None` when it leaves the crate.
+///
+/// A leading segment that is neither `crate`, `self` nor `super` is a
+/// submodule when the module has a file by that name, a name another of the
+/// file's declarations binds (`engine` binds `error` to
+/// `crate::analysis::error` and re-exports through it), or else another crate.
+fn absolute_path(
+    source: ModuleSource<'_>,
+    module: &[String],
+    bindings: &[UseBinding],
+    path: &[String],
+) -> Option<Vec<String>> {
+    let (first, rest) = path.split_first()?;
+    match first.as_str() {
+        "crate" => Some(rest.to_vec()),
+        "self" => Some([module, rest].concat()),
+        "super" => {
+            let parent = &module[..module.len().checked_sub(1)?];
+            if rest.first().is_some_and(|next| next == "super") {
+                absolute_path(source, parent, &[], rest)
+            } else {
+                Some([parent, rest].concat())
+            }
+        }
+        _ => {
+            let child = [module, std::slice::from_ref(first)].concat();
+            if source(&child).is_some() {
+                return Some([child.as_slice(), rest].concat());
+            }
+            let (_, aliased) = bindings
+                .iter()
+                .find(|(bound, aliased)| bound == first && aliased.as_slice() != path)?;
+            let aliased = absolute_path(source, module, bindings, aliased)?;
+            Some([aliased.as_slice(), rest].concat())
+        }
+    }
+}
+
+/// The top-level module that defines what `name` stands for in the module at
+/// `module`, following each `use` that passes it on, or `None` when that is
+/// nothing of this crate's: another crate's item, or one the root defines.
+fn defining_module(source: ModuleSource<'_>, module: &[String], name: &str) -> Option<String> {
+    let mut module = module.to_vec();
+    let mut name = name.to_owned();
+    // A re-export chain this long would be a cycle, which rustc refuses.
+    for _ in 0..16 {
+        let Some(code) = source(&module) else {
+            return module.first().cloned();
+        };
+        let bindings = use_bindings(&strip_line_comments(&code));
+        let Some((_, path)) = bindings.iter().find(|(bound, _)| *bound == name) else {
+            return module.first().cloned();
+        };
+        let mut target = absolute_path(source, &module, &bindings, path)?;
+        name = target.pop()?;
+        module = target;
+    }
+    panic!(
+        "`{name}` is re-exported in a cycle ending at `{}`",
+        module.join("::")
+    );
+}
+
+/// Every name the crate root's `use` declarations bring into scope, with the
+/// top-level module that defines it. Names the root defines or takes from
+/// another crate are left out: a path through them is no edge.
+fn crate_root_names(source: ModuleSource<'_>) -> BTreeMap<String, String> {
+    let lib = strip_line_comments(&source(&[]).expect("the crate root has a source"));
+    use_bindings(&lib)
+        .into_iter()
+        .filter_map(|(name, _)| {
+            let module = defining_module(source, &[], &name)?;
+            Some((name, module))
+        })
+        .collect()
+}
+
 /// Reference counts between top-level modules, keyed `(from, to)`.
 fn edge_counts() -> BTreeMap<(String, String), usize> {
     let root = src_dir();
@@ -416,6 +609,105 @@ fn layer_of(module: &str) -> u32 {
                  strictly above everything it may reference."
             )
         })
+}
+
+fn binding(name: &str, path: &str) -> UseBinding {
+    (name.to_owned(), path_segments(path))
+}
+
+#[test]
+fn a_use_declaration_binds_each_name_it_brings_into_the_file() {
+    let code = strip_line_comments(
+        "use std::sync::Arc;\n\
+         pub use engine::{\n    \
+             Engine as Facade, SimulationError,\n    \
+             sub::{self, Inner},\n\
+         };\n\
+         pub(crate) use log_scope::*;\n\
+         #[cfg(feature = \"simd\")]\n\
+         pub use simd::Lanes;\n\
+         use std::fmt::Write as _;\n\
+         // pub use commented::Out;\n\
+         pub mod error {\n    \
+             pub use crate::circuit::CircuitError;\n\
+         }\n\
+         fn body() {\n    \
+             use crate::device::Device;\n\
+         }\n",
+    );
+    assert_eq!(
+        use_bindings(&code),
+        [
+            binding("Arc", "std::sync::Arc"),
+            binding("Facade", "engine::Engine"),
+            binding("SimulationError", "engine::SimulationError"),
+            binding("sub", "engine::sub"),
+            binding("Inner", "engine::sub::Inner"),
+            binding("Lanes", "simd::Lanes"),
+        ]
+    );
+}
+
+/// A root that re-exports through a submodule, through a name another
+/// declaration binds, and through a second module's own re-export, beside a
+/// name it defines and one it takes from another crate.
+#[test]
+fn a_crate_root_name_counts_toward_the_module_that_defines_it() {
+    let tree = |path: &[String]| -> Option<String> {
+        let source = match path.join("/").as_str() {
+            "" => {
+                "pub mod analysis;\npub mod engine;\npub mod notice;\n\
+                 pub use engine::{ContinuationAid, Engine, SimulationError};\n\
+                 pub use notice::Scalar;\n\
+                 pub use num_complex::Complex64;\n\
+                 pub type Value = f64;\n"
+            }
+            "engine" => {
+                "mod core;\nuse crate::analysis::error;\n\
+                 pub use core::Engine;\n\
+                 pub use error::{ContinuationAid, SimulationError};\n"
+            }
+            "engine/core" => "pub struct Engine;\n",
+            "analysis" => "pub mod error;\n",
+            "analysis/error" => {
+                "pub use crate::notice::ContinuationAid;\npub enum SimulationError {}\n"
+            }
+            "notice" => "pub use super::Value as Scalar;\npub enum ContinuationAid {}\n",
+            _ => return None,
+        };
+        Some(source.to_owned())
+    };
+    let names = crate_root_names(&tree);
+    let names: Vec<(&str, &str)> = names
+        .iter()
+        .map(|(name, module)| (name.as_str(), module.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("ContinuationAid", "notice"),
+            ("Engine", "engine"),
+            ("SimulationError", "analysis"),
+        ]
+    );
+}
+
+/// The resolver reads the real root too: a reformatted `lib.rs` it can no
+/// longer parse would leave the ratchet blind again without failing it.
+#[test]
+fn the_crate_roots_own_names_are_read() {
+    let root = src_dir();
+    let names = crate_root_names(&|path| module_source(&root, path));
+    assert_eq!(names.get("Engine").map(String::as_str), Some("engine"));
+    assert_eq!(
+        names.get("CircuitData").map(String::as_str),
+        Some("circuit")
+    );
+    assert!(!names.contains_key("Value"), "the root defines `Value`");
+    assert!(
+        !names.contains_key("Complex64"),
+        "`Complex64` is another crate's"
+    );
 }
 
 #[test]
