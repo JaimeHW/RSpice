@@ -291,6 +291,77 @@ fn the_document_date_and_status_are_held_to_page_setups_rules() {
     );
 }
 
+/// On an ANSI sheet the block follows the size to ASME Y14.1's form, and the
+/// panel offers every value its approvals block letters: the engineer and
+/// each signature's date on the sheet, the CAGE code and contract number on
+/// the project. A signature date is held to the document date's form.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_asme_forms_approvals_are_typed_in_the_panel() {
+    let mut panel = SheetPanel::new();
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
+    )
+    .unwrap();
+    let format = resolve_active_drawing_sheet(&panel.app.state).format;
+    assert_eq!(
+        format.title_block.template,
+        DrawingSheetTitleBlockTemplate::AsmeY141
+    );
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    assert!(
+        painted.contains("Template\nASME Y14.1 · 6.25 × 2.00 in\n"),
+        "{painted}"
+    );
+    for label in [
+        "Created by",
+        "Created date",
+        "Checked by",
+        "Checked date",
+        "Engineer",
+        "Engineer date",
+        "Approved by",
+        "Approved date",
+        "Contract number",
+        "CAGE code",
+    ] {
+        assert!(
+            painted.contains(&format!("{label}\n")),
+            "{label}: {painted}"
+        );
+    }
+    // The ASME form has no document type.
+    assert!(!painted.contains("Document type"), "{painted}");
+
+    panel.enter("Engineer", "R. Okafor");
+    panel.enter("Engineer date", "2026-10-18");
+    panel.enter("Created date", "18/10/2026");
+    assert_eq!(
+        panel.app.state.prompt_text(),
+        Some("The date must be a calendar date written YYYY-MM-DD.")
+    );
+    panel.enter("CAGE code", "1ABC2");
+    panel.enter("Contract number", "N00024-26-C-0001");
+    assert_eq!(
+        panel.title_value(DrawingSheetTitleFieldId::Engineer),
+        "R. Okafor"
+    );
+    assert_eq!(
+        panel.title_value(DrawingSheetTitleFieldId::EngineerDate),
+        "2026-10-18"
+    );
+    assert_eq!(panel.title_value(DrawingSheetTitleFieldId::DrawnDate), "");
+    assert_eq!(
+        panel.document_value(DrawingSheetTitleFieldId::CageCode),
+        "1ABC2"
+    );
+    assert_eq!(
+        panel.document_value(DrawingSheetTitleFieldId::ContractNumber),
+        "N00024-26-C-0001"
+    );
+}
+
 /// Fields the sheet does not show offer nothing to type, and a block with no
 /// fields at all has no document section.
 #[cfg(not(target_arch = "wasm32"))]

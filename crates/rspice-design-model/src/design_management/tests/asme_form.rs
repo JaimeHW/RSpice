@@ -539,3 +539,143 @@ fn a_saved_ansi_sheet_keeps_the_block_it_was_saved_with() {
         asme
     );
 }
+
+#[test]
+fn block_e_is_a_name_and_date_grid_under_the_contract_number() {
+    for (standard, name_chars) in [
+        (DrawingSheetStandard::AnsiB, 8),
+        (DrawingSheetStandard::AnsiD, 13),
+    ] {
+        let layout = layout_of(&sheet(standard));
+        let block_e = layout
+            .rules
+            .iter()
+            .find(|rule| rule.width_um == 600 && rule.from_x_um == rule.to_x_um)
+            .unwrap()
+            .from_x_um;
+        // The contract number and the column headings stand as tall as
+        // block A beside them.
+        let contract = cell(&layout, "CONTRACT NO");
+        assert_eq!(bounds(contract), (0, 0, block_e, inch(37)));
+        assert_eq!(contract.field(), Some(Field::ContractNumber));
+        let (name, date) = (cell(&layout, "NAME"), cell(&layout, "DATE"));
+        assert_eq!(name.y_um + name.height_um, inch(62), "{standard:?}");
+        assert_eq!(date.x_um + date.width_um, block_e);
+        assert_eq!(date.width_um, inch(110));
+        let mut bottom = inch(62);
+        for (heading, person, signed) in [
+            ("DRAWN", Field::DrawnBy, Field::DrawnDate),
+            ("CHECKED", Field::CheckedBy, Field::CheckedDate),
+            ("ENGR", Field::Engineer, Field::EngineerDate),
+            ("APPROVED", Field::ApprovedBy, Field::ApprovedDate),
+        ] {
+            let row = cell(&layout, heading);
+            assert_eq!(row.y_um, bottom, "{standard:?} {heading}");
+            bottom = row.y_um + row.height_um;
+            assert_eq!(row.field(), Some(person));
+            let name_line = row.values[0];
+            assert_eq!(name_line.capacity(), name_chars, "{standard:?} {heading}");
+            let date_cell = layout.cell(signed).unwrap();
+            assert_eq!(date_cell.y_um, row.y_um);
+            assert_eq!(date_cell.x_um, name.x_um + name.width_um);
+            let date_line = date_cell.value(signed).unwrap();
+            // The date stands on the name's line and holds YYYY-MM-DD.
+            assert_eq!(date_line.seat_um, name_line.seat_um);
+            assert!(!date_line.elides("2026-10-18"));
+        }
+        assert_eq!(bottom, layout.height_um);
+    }
+}
+
+#[test]
+fn a_signature_date_is_a_calendar_date_like_the_document_date() {
+    let format = sheet(DrawingSheetStandard::AnsiB);
+    let dated = |field: DrawingSheetTitleFieldId, value: &str| {
+        format.try_update(|draft| {
+            draft.title_block.fields.get_mut(&field).unwrap().value = value.to_owned();
+        })
+    };
+    for field in [
+        Field::DrawnDate,
+        Field::CheckedDate,
+        Field::EngineerDate,
+        Field::ApprovedDate,
+    ] {
+        assert!(field.is_signature_date());
+        assert_eq!(field.entry_hint(), "YYYY-MM-DD");
+        assert!(dated(field, "2026-10-18").is_ok(), "{field:?}");
+        assert!(dated(field, "").is_ok(), "{field:?}");
+        for refused in ["18/10/2026", "2026-02-30", "2026-10-18T00:00"] {
+            assert!(
+                matches!(
+                    dated(field, refused),
+                    Err(DesignManagementError::DocumentControl(_))
+                ),
+                "{field:?} {refused}"
+            );
+        }
+    }
+    // The engineer's name is free text, as the other names are.
+    assert!(dated(Field::Engineer, "J. Whitfield").is_ok());
+}
+
+#[test]
+fn the_approval_date_reads_the_date_of_issue_until_the_sheet_gives_one() {
+    let format = sheet(DrawingSheetStandard::AnsiB);
+    let layout = layout_of(&format);
+    let issued = [(Field::ApprovedDate, "2026-10-01")];
+    let text = lettered(&layout, &resolved(&format, &issued));
+    assert!(text.iter().any(|line| line == "2026-10-01"), "{text:?}");
+    let signed = format
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&Field::ApprovedDate)
+                .unwrap()
+                .value = "2026-10-17".to_owned();
+        })
+        .unwrap();
+    let text = lettered(&layout, &resolved(&signed, &issued));
+    assert!(text.iter().any(|line| line == "2026-10-17"), "{text:?}");
+    assert!(!text.iter().any(|line| line == "2026-10-01"), "{text:?}");
+    // The other dates are the sheet's alone: an empty one is a box to fill.
+    let blank = lettered(&layout, &resolved(&format, &[]));
+    assert!(
+        !blank
+            .iter()
+            .any(|line| line.contains('-') && line.len() == 10)
+    );
+}
+
+#[test]
+fn a_project_saved_before_the_cage_code_and_contract_number_loads_without_them() {
+    let mut settings = serde_json::to_value(DrawingSheetProjectSettings::default()).unwrap();
+    let values = settings["title_block_field_values"]
+        .as_object_mut()
+        .unwrap();
+    values.remove("cage-code");
+    values.remove("contract-number");
+    let restored: DrawingSheetProjectSettings = serde_json::from_value(settings).unwrap();
+    for field in [Field::CageCode, Field::ContractNumber] {
+        assert!(field.is_project_owned());
+        assert_eq!(restored.title_block_field_values[&field], "");
+    }
+    // A sheet saved before them loads with them, unseen on every block but
+    // the ASME form.
+    let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
+    let fields = saved["title_block"]["fields"].as_object_mut().unwrap();
+    for name in [
+        "cage-code",
+        "engineer",
+        "drawn-date",
+        "checked-date",
+        "engineer-date",
+        "approved-date",
+        "contract-number",
+    ] {
+        assert!(fields.remove(name).is_some(), "{name}");
+    }
+    let loaded: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
+    assert_eq!(loaded, SchematicSheetFormat::default());
+}

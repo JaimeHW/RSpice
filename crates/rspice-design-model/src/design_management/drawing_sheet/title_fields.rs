@@ -51,6 +51,20 @@ pub enum DrawingSheetTitleFieldId {
     /// activity whose drawing number the sheet carries. Optional, kept by the
     /// project, and lettered only in the ASME form's DAI block.
     CageCode,
+    /// The engineer who signs ASME Y14.1's block E, beside the drafter, the
+    /// checker and the approver.
+    Engineer,
+    /// The dates block E's signatures were made on, each beside its name,
+    /// written `YYYY-MM-DD`. Kept with the names, by the sheet.
+    DrawnDate,
+    CheckedDate,
+    EngineerDate,
+    /// Lettered from the document's date of issue while the sheet gives it
+    /// none.
+    ApprovedDate,
+    /// The contract number ASME Y14.1 6.2 puts in block E when one applies.
+    /// Optional, and kept by the project.
+    ContractNumber,
 }
 
 /// What a schematic sheet is, in the name IEC 61082 gives it: the Document
@@ -61,7 +75,7 @@ impl DrawingSheetTitleFieldId {
     /// Every field a sheet carries. A field added since the first of these
     /// goes last, so a block that pours its fields in this order keeps the
     /// order a saved sheet was drawn with.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 23] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
@@ -79,6 +93,12 @@ impl DrawingSheetTitleFieldId {
         Self::Classification,
         Self::Language,
         Self::CageCode,
+        Self::Engineer,
+        Self::DrawnDate,
+        Self::CheckedDate,
+        Self::EngineerDate,
+        Self::ApprovedDate,
+        Self::ContractNumber,
     ];
 
     /// Fields withdrawn from the product that older sheets may still carry.
@@ -92,12 +112,13 @@ impl DrawingSheetTitleFieldId {
     /// one sheet. Visibility remains sheet-owned, but the value is resolved
     /// from [`DrawingSheetProjectSettings::title_block_field_values`] on every
     /// canvas and hardcopy page.
-    pub const PROJECT_OWNED: [Self; 5] = [
+    pub const PROJECT_OWNED: [Self; 6] = [
         Self::Organization,
         Self::DocumentId,
         Self::Classification,
         Self::Language,
         Self::CageCode,
+        Self::ContractNumber,
     ];
 
     #[must_use]
@@ -109,7 +130,30 @@ impl DrawingSheetTitleFieldId {
                 | Self::Classification
                 | Self::Language
                 | Self::CageCode
+                | Self::ContractNumber
         )
+    }
+
+    /// Whether the field is one of block E's signature dates, a calendar
+    /// date written `YYYY-MM-DD` and checked as the document's date is.
+    #[must_use]
+    pub const fn is_signature_date(self) -> bool {
+        matches!(
+            self,
+            Self::DrawnDate | Self::CheckedDate | Self::EngineerDate | Self::ApprovedDate
+        )
+    }
+
+    /// What an empty entry for the field shows as a hint where it is typed:
+    /// the form a date is written in, or the value the field reads until it
+    /// is given one.
+    #[must_use]
+    pub const fn entry_hint(self) -> &'static str {
+        if self.is_signature_date() {
+            "YYYY-MM-DD"
+        } else {
+            self.default_value()
+        }
     }
 
     /// The field's name wherever RSpice offers it for editing — the
@@ -138,6 +182,12 @@ impl DrawingSheetTitleFieldId {
             Self::DocumentStatus => "Document status",
             Self::Language => "Language",
             Self::CageCode => "CAGE code",
+            Self::Engineer => "Engineer",
+            Self::DrawnDate => "Created date",
+            Self::CheckedDate => "Checked date",
+            Self::EngineerDate => "Engineer date",
+            Self::ApprovedDate => "Approved date",
+            Self::ContractNumber => "Contract number",
         }
     }
 
@@ -219,7 +269,13 @@ impl DrawingSheetTitleFieldId {
             | Self::Classification
             | Self::DocumentType
             | Self::Language
-            | Self::CageCode => DrawingSheetTitleFieldPolicy {
+            | Self::CageCode
+            | Self::Engineer
+            | Self::DrawnDate
+            | Self::CheckedDate
+            | Self::EngineerDate
+            | Self::ApprovedDate
+            | Self::ContractNumber => DrawingSheetTitleFieldPolicy {
                 required_visible: false,
                 value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
             },
@@ -237,8 +293,9 @@ impl DrawingSheetTitleFieldId {
     /// segment of Cell / view, so a sheet showing Project as well letters
     /// that name twice. Those wait in Page Setup until a sheet asks for
     /// them: every cell a sheet does not spend is width the cells beside it
-    /// keep. The CAGE code belongs to the ASME form, which always carries its
-    /// cell, so no other block shows it unless a sheet asks.
+    /// keep. The CAGE code, the engineer, the signature dates and the
+    /// contract number belong to the ASME form, which always carries their
+    /// cells, so no other block shows them unless a sheet asks.
     #[must_use]
     pub const fn visible_by_default(self) -> bool {
         !matches!(
@@ -249,6 +306,12 @@ impl DrawingSheetTitleFieldId {
                 | Self::PaperSize
                 | Self::Language
                 | Self::CageCode
+                | Self::Engineer
+                | Self::DrawnDate
+                | Self::CheckedDate
+                | Self::EngineerDate
+                | Self::ApprovedDate
+                | Self::ContractNumber
         )
     }
 }

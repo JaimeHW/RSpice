@@ -267,7 +267,13 @@ pub const fn iso_7200_typical_chars(field: DrawingSheetTitleFieldId) -> Option<u
         | Field::Classification
         | Field::Project
         | Field::Scale
-        | Field::CageCode => None,
+        | Field::CageCode
+        | Field::Engineer
+        | Field::DrawnDate
+        | Field::CheckedDate
+        | Field::EngineerDate
+        | Field::ApprovedDate
+        | Field::ContractNumber => None,
     }
 }
 
@@ -282,6 +288,18 @@ impl DrawingSheetTitleBlockTemplate {
         field.policy().required_visible
             || (self == Self::Standard && ISO_7200_MANDATORY_FIELDS.contains(&field))
             || (self == Self::AsmeY141 && ASME_Y14_1_FORM_FIELDS.contains(&field))
+    }
+
+    /// Why Page Setup locks a field this template requires.
+    #[must_use]
+    pub const fn required_field_note(self) -> &'static str {
+        match self {
+            Self::Standard => "ISO 7200 makes this field mandatory on its form.",
+            Self::AsmeY141 => "ASME Y14.1's form always carries this field.",
+            Self::Compact | Self::OrganizationManaged | Self::None => {
+                "Every title block carries this field."
+            }
+        }
     }
 }
 

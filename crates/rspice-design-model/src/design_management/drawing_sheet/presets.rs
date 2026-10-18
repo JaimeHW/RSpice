@@ -750,7 +750,7 @@ fn validate_bounded_document_control_text(
     Ok(())
 }
 
-fn is_exact_iso_calendar_date(value: &str) -> bool {
+pub(super) fn is_exact_iso_calendar_date(value: &str) -> bool {
     let bytes = value.as_bytes();
     if !(bytes.len() == 10
         && bytes[4] == b'-'

@@ -660,16 +660,28 @@ fn the_compact_block_letters_its_fixed_form_values_whole() {
 
 /// A sheet that shows every field on the compact block — how sheets were
 /// saved before fields could be hidden, so every field but the language code
-/// and CAGE code they never had — has more to letter than the block holds.
-/// The free text gives way, then the document status; a page number,
-/// revision, paper size, date or classification is still lettered whole, and
-/// every caption is.
+/// and the ASME form's fields they never had — has more to letter than the
+/// block holds. The free text gives way, then the document status; a page
+/// number, revision, paper size, date or classification is still lettered
+/// whole, and every caption is.
 #[test]
 fn an_overfull_block_cuts_free_text_and_keeps_fixed_forms_whole() {
     let compact = on(DrawingSheetTitleBlockTemplate::Compact);
     let saved = DrawingSheetTitleFieldId::ALL
         .into_iter()
-        .filter(|field| !matches!(field, Field::Language | Field::CageCode))
+        .filter(|field| {
+            !matches!(
+                field,
+                Field::Language
+                    | Field::CageCode
+                    | Field::Engineer
+                    | Field::DrawnDate
+                    | Field::CheckedDate
+                    | Field::EngineerDate
+                    | Field::ApprovedDate
+                    | Field::ContractNumber
+            )
+        })
         .collect::<Vec<_>>();
     let every = showing(&compact, &saved);
     let layout = layout_of(&every);

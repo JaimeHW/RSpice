@@ -2687,6 +2687,12 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
         DrawingSheetTitleFieldId::DocumentStatus,
         DrawingSheetTitleFieldId::Language,
         DrawingSheetTitleFieldId::CageCode,
+        DrawingSheetTitleFieldId::Engineer,
+        DrawingSheetTitleFieldId::DrawnDate,
+        DrawingSheetTitleFieldId::CheckedDate,
+        DrawingSheetTitleFieldId::EngineerDate,
+        DrawingSheetTitleFieldId::ApprovedDate,
+        DrawingSheetTitleFieldId::ContractNumber,
     ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()
@@ -2761,7 +2767,8 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
     // Checked by is not one of the standard's fields, Classification is set
     // by a release policy, the language code is optional, Paper size
     // restates the sheet in hand, the project's name already leads Cell /
-    // view, and the CAGE code belongs to the ASME form.
+    // view, and the CAGE code, the engineer, the signature dates and the
+    // contract number belong to the ASME form.
     let hidden = [
         DrawingSheetTitleFieldId::Project,
         DrawingSheetTitleFieldId::CheckedBy,
@@ -2769,6 +2776,12 @@ fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
         DrawingSheetTitleFieldId::PaperSize,
         DrawingSheetTitleFieldId::Language,
         DrawingSheetTitleFieldId::CageCode,
+        DrawingSheetTitleFieldId::Engineer,
+        DrawingSheetTitleFieldId::DrawnDate,
+        DrawingSheetTitleFieldId::CheckedDate,
+        DrawingSheetTitleFieldId::EngineerDate,
+        DrawingSheetTitleFieldId::ApprovedDate,
+        DrawingSheetTitleFieldId::ContractNumber,
     ];
     for field in hidden {
         assert!(

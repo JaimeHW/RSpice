@@ -60,6 +60,8 @@ impl DrawingSheetTitleFieldId {
             Self::Language => 3,
             // A CAGE code is five characters.
             Self::CageCode => 5,
+            Self::DrawnDate | Self::CheckedDate | Self::EngineerDate | Self::ApprovedDate => 10,
+            Self::Engineer | Self::ContractNumber => 16,
             // Free text. A project name is a short identifier, and in a
             // single-library workspace it also leads `Cell / view`.
             Self::Project => 10,
@@ -86,6 +88,10 @@ impl DrawingSheetTitleFieldId {
                 | Self::Classification
                 | Self::Language
                 | Self::CageCode
+                | Self::DrawnDate
+                | Self::CheckedDate
+                | Self::EngineerDate
+                | Self::ApprovedDate
         )
     }
 

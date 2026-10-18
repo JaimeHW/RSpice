@@ -1058,9 +1058,10 @@ fn title_field_table(
                                             false,
                                             egui::Checkbox::without_text(&mut visible),
                                         )
-                                        .on_disabled_hover_text(
-                                            "ISO 7200 makes this field mandatory on its form.",
-                                        );
+                                        .on_disabled_hover_text(template.map_or(
+                                            "",
+                                            crate::state::DrawingSheetTitleBlockTemplate::required_field_note,
+                                        ));
                                     } else {
                                         ui.checkbox(&mut field.visible, "");
                                     }
@@ -1094,7 +1095,7 @@ fn title_field_table(
                                             TextEdit::singleline(
                                                 &mut state.draft.entry(id).or_default().value,
                                             )
-                                            .hint_text(id.default_value())
+                                            .hint_text(id.entry_hint())
                                             .char_limit(256),
                                         );
                                     }
@@ -1581,23 +1582,17 @@ fn title_field_label(id: DrawingSheetTitleFieldId) -> &'static str {
 
 fn title_field_owner(id: DrawingSheetTitleFieldId) -> &'static str {
     match id {
+        DrawingSheetTitleFieldId::Classification => "project policy",
         DrawingSheetTitleFieldId::Project => "project",
+        _ if id.is_project_owned() => "project",
         DrawingSheetTitleFieldId::CellView => "design identity",
-        DrawingSheetTitleFieldId::SheetTitle
-        | DrawingSheetTitleFieldId::DocumentType
-        | DrawingSheetTitleFieldId::DrawnBy
-        | DrawingSheetTitleFieldId::CheckedBy
-        | DrawingSheetTitleFieldId::ApprovedBy => "sheet",
         DrawingSheetTitleFieldId::PaperSize => "drawing sheet",
         DrawingSheetTitleFieldId::Page => "document order",
         DrawingSheetTitleFieldId::Revision => "working revision",
         DrawingSheetTitleFieldId::Scale => "retired",
         DrawingSheetTitleFieldId::Date | DrawingSheetTitleFieldId::DocumentStatus => "document",
-        DrawingSheetTitleFieldId::Organization
-        | DrawingSheetTitleFieldId::DocumentId
-        | DrawingSheetTitleFieldId::Language
-        | DrawingSheetTitleFieldId::CageCode => "project",
-        DrawingSheetTitleFieldId::Classification => "project policy",
+        // The title, document type and every signature and its date.
+        _ => "sheet",
     }
 }
 

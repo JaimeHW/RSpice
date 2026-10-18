@@ -327,7 +327,7 @@ fn canonical_entry(key: &str, visible: bool) -> String {
 }
 
 /// `canonical` as a build without the language code wrote it: it lacks the
-/// language code and the CAGE code the ASME form has added since, which are
+/// language code and every field the ASME form has added since, which are
 /// the fields written last, and each preset's frame, the ISO 5457 frame of
 /// a custom size, is written as every build before the standard frames
 /// wrote it.
@@ -340,7 +340,16 @@ fn without_language(canonical: &[u8]) -> String {
         r#""marks":{"registration":true,"folding":false}"#,
     );
     let mut today = String::from_utf8(canonical.to_vec()).unwrap();
-    for key in ["language", "cage-code"] {
+    for key in [
+        "language",
+        "cage-code",
+        "engineer",
+        "drawn-date",
+        "checked-date",
+        "engineer-date",
+        "approved-date",
+        "contract-number",
+    ] {
         let entry = canonical_entry(key, false);
         assert!(today.contains(&entry), "{key}: {today}");
         today = today.replacen(&entry, "", 1);

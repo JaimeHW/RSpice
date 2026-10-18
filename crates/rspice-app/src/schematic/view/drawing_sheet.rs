@@ -96,7 +96,9 @@ fn default_title_field_value(
         DrawingSheetTitleFieldId::PaperSize => sheet.format.authored_size.paper_size().to_owned(),
         // Retired: never present in a normalized field set, so never resolved.
         DrawingSheetTitleFieldId::Scale => String::new(),
-        DrawingSheetTitleFieldId::Date => state
+        // The approval date reads the document's date of issue while the
+        // sheet gives none of its own.
+        DrawingSheetTitleFieldId::Date | DrawingSheetTitleFieldId::ApprovedDate => state
             .workspace
             .content
             .design_management
@@ -117,7 +119,8 @@ fn default_title_field_value(
         | DrawingSheetTitleFieldId::DocumentId
         | DrawingSheetTitleFieldId::Classification
         | DrawingSheetTitleFieldId::Language
-        | DrawingSheetTitleFieldId::CageCode => state
+        | DrawingSheetTitleFieldId::CageCode
+        | DrawingSheetTitleFieldId::ContractNumber => state
             .workspace
             .content
             .design_management
@@ -129,6 +132,10 @@ fn default_title_field_value(
         DrawingSheetTitleFieldId::DrawnBy
         | DrawingSheetTitleFieldId::CheckedBy
         | DrawingSheetTitleFieldId::ApprovedBy
+        | DrawingSheetTitleFieldId::Engineer
+        | DrawingSheetTitleFieldId::DrawnDate
+        | DrawingSheetTitleFieldId::CheckedDate
+        | DrawingSheetTitleFieldId::EngineerDate
         | DrawingSheetTitleFieldId::DocumentType => String::new(),
     }
 }

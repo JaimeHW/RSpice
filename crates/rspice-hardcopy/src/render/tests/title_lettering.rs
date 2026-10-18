@@ -100,7 +100,13 @@ fn filled_in(format: &SchematicSheetFormat) -> SchematicSheetFormat {
                 if field.policy().value_authority == DrawingSheetTitleFieldValueAuthority::Authored
                     && state.value.is_empty()
                 {
-                    state.value = "Filled in".to_owned();
+                    // A signature date is filled in as the date it is.
+                    state.value = if field.is_signature_date() {
+                        "2026-10-18"
+                    } else {
+                        "Filled in"
+                    }
+                    .to_owned();
                 }
             }
         })

@@ -51,14 +51,18 @@ pub fn drawing_sheet_title_values(
         DrawingSheetTitleFieldId::PaperSize,
         format.authored_size.paper_size().to_owned(),
     );
+    let date_of_issue = identity
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.publication_date_utc.clone())
+        .unwrap_or_default();
+    // The approval date reads the date of issue while the sheet gives none
+    // of its own.
     values.insert(
-        DrawingSheetTitleFieldId::Date,
-        identity
-            .publication
-            .as_ref()
-            .and_then(|publication| publication.publication_date_utc.clone())
-            .unwrap_or_default(),
+        DrawingSheetTitleFieldId::ApprovedDate,
+        date_of_issue.clone(),
     );
+    values.insert(DrawingSheetTitleFieldId::Date, date_of_issue);
     values.insert(
         DrawingSheetTitleFieldId::DocumentStatus,
         identity

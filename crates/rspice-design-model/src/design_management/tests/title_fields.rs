@@ -670,6 +670,12 @@ fn an_organization_template_sealed_while_paper_size_was_withdrawn_still_loads() 
         DrawingSheetTitleFieldId::DocumentStatus,
         DrawingSheetTitleFieldId::Language,
         DrawingSheetTitleFieldId::CageCode,
+        DrawingSheetTitleFieldId::Engineer,
+        DrawingSheetTitleFieldId::DrawnDate,
+        DrawingSheetTitleFieldId::CheckedDate,
+        DrawingSheetTitleFieldId::EngineerDate,
+        DrawingSheetTitleFieldId::ApprovedDate,
+        DrawingSheetTitleFieldId::ContractNumber,
     ];
     let mut expected = DrawingSheetTitleFieldId::ALL
         .into_iter()

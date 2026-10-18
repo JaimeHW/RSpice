@@ -1243,6 +1243,14 @@ impl DrawingSheetTitleBlock {
         }
         for (field, state) in &self.fields {
             validate_value("drawing sheet title field", &state.value, true)?;
+            if field.is_signature_date()
+                && !state.value.is_empty()
+                && !is_exact_iso_calendar_date(&state.value)
+            {
+                return Err(DesignManagementError::DocumentControl(
+                    "The date must be a calendar date written YYYY-MM-DD.",
+                ));
+            }
             let policy = field.policy();
             if policy.required_visible && !state.visible {
                 return Err(DesignManagementError::NumericRange(

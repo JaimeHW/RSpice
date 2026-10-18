@@ -244,10 +244,16 @@ impl AsmeY141TitleBlockForm {
 
 /// The fields on the ASME form, in the order it is read: block E, then A,
 /// B, the drawing number's row and the bottom row.
-pub const ASME_Y14_1_FORM_FIELDS: [DrawingSheetTitleFieldId; 10] = [
+pub const ASME_Y14_1_FORM_FIELDS: [DrawingSheetTitleFieldId; 16] = [
+    Field::ContractNumber,
     Field::DrawnBy,
+    Field::DrawnDate,
     Field::CheckedBy,
+    Field::CheckedDate,
+    Field::Engineer,
+    Field::EngineerDate,
     Field::ApprovedBy,
+    Field::ApprovedDate,
     Field::Organization,
     Field::SheetTitle,
     Field::PaperSize,
@@ -573,11 +579,11 @@ impl Cell {
 }
 
 /// The people block E names, top to bottom, with each row's heading.
-const SIGNATURES: [(&str, Option<DrawingSheetTitleFieldId>); 4] = [
-    ("DRAWN", Some(Field::DrawnBy)),
-    ("CHECKED", Some(Field::CheckedBy)),
-    ("ENGR", None),
-    ("APPROVED", Some(Field::ApprovedBy)),
+const SIGNATURES: [(&str, DrawingSheetTitleFieldId, DrawingSheetTitleFieldId); 4] = [
+    ("DRAWN", Field::DrawnBy, Field::DrawnDate),
+    ("CHECKED", Field::CheckedBy, Field::CheckedDate),
+    ("ENGR", Field::Engineer, Field::EngineerDate),
+    ("APPROVED", Field::ApprovedBy, Field::ApprovedDate),
 ];
 
 /// Lay out the ASME form `form` for the sheet `format` authors.
@@ -695,7 +701,11 @@ fn approval_cells(form: AsmeY141TitleBlockForm) -> Vec<DrawingSheetTitleCell> {
         height_um: contract_um,
     };
     let caption = contract.heading_over("CONTRACT NO");
-    cells.push(contract.finish(Some(caption), Vec::new()));
+    let number = contract.value_under_heading(
+        DrawingSheetTitleText::Field(Field::ContractNumber),
+        ENTRY_UM,
+    );
+    cells.push(contract.finish(Some(caption), vec![number]));
     for (x_um, cell_um, heading) in [(0, name_um, "NAME"), (name_um, date_um, "DATE")] {
         let cell = Cell {
             x_um,
@@ -709,7 +719,7 @@ fn approval_cells(form: AsmeY141TitleBlockForm) -> Vec<DrawingSheetTitleCell> {
         };
         cells.push(cell.finish(Some(caption), Vec::new()));
     }
-    for (row, (heading, name)) in SIGNATURES.into_iter().enumerate() {
+    for (row, (heading, name, date)) in SIGNATURES.into_iter().enumerate() {
         let y_um = contract_um + headings_um + row_um * row as u64;
         let name_cell = Cell {
             x_um: 0,
@@ -718,20 +728,17 @@ fn approval_cells(form: AsmeY141TitleBlockForm) -> Vec<DrawingSheetTitleCell> {
             height_um: row_um,
         };
         let caption = name_cell.heading_over(heading);
-        let values = name
-            .map(|field| {
-                name_cell.value_under_heading(DrawingSheetTitleText::Field(field), ENTRY_UM)
-            })
-            .into_iter()
-            .collect();
-        cells.push(name_cell.finish(Some(caption), values));
+        let name = name_cell.value_under_heading(DrawingSheetTitleText::Field(name), ENTRY_UM);
+        cells.push(name_cell.finish(Some(caption), vec![name]));
+        // The date stands on the name's line, under the DATE heading.
         let date_cell = Cell {
             x_um: name_um,
             y_um,
             width_um: date_um,
             height_um: row_um,
         };
-        cells.push(date_cell.finish(None, Vec::new()));
+        let date = date_cell.value_under_heading(DrawingSheetTitleText::Field(date), ENTRY_UM);
+        cells.push(date_cell.finish(None, vec![date]));
     }
     cells
 }

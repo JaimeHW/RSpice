@@ -337,7 +337,13 @@ fn title_block_section(
             _ => field.default_value(),
         };
         if editable && !locked_by_organization(format, field) {
-            title_field_row(ui, identity, field, &authored.value, fallback, edit);
+            // An empty date shows the form it is written in.
+            let hint = if field.is_signature_date() {
+                field.entry_hint()
+            } else {
+                fallback
+            };
+            title_field_row(ui, identity, field, &authored.value, hint, edit);
         } else {
             let shown = [authored.value.trim(), fallback]
                 .into_iter()
