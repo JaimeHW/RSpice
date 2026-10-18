@@ -522,6 +522,18 @@ fn an_iso_frame_draws_centring_marks_instead_of_corner_crosses() {
             ((415 * MM, 148_500), (400 * MM, 148_500), 700),
         ]
     );
+    // On A4 portrait the title block spans the foot of the frame, and the
+    // bottom mark stops at the frame rather than rule through its cells.
+    let a4 = sheet(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Portrait,
+    );
+    let marks = lines(
+        &a4.frame_artwork(&a4.geometry().unwrap()),
+        DrawingSheetFrameLayer::CentringMarks,
+    );
+    assert_eq!(marks[1], ((105 * MM, 292 * MM), (105 * MM, 287 * MM), 700));
+    assert_eq!(marks[0], ((105 * MM, 5 * MM), (105 * MM, 20 * MM), 700));
 
     // An ASME format draws no corner crosses either; its microfilm arrows are
     // an option a new sheet leaves off.

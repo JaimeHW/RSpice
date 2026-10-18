@@ -70,7 +70,7 @@ fn drawing_sheet_layers_body(ui: &mut Ui, layers: &mut DrawingSheetLayerVisibili
             layer_row(
                 ui,
                 "Printable margin boundary",
-                "Dashed inset showing the authored printable area.",
+                "Dashed inset showing the authored printable area, where the frame does not already lie on it.",
                 &mut layers.margins,
             );
             layer_row(
@@ -87,8 +87,8 @@ fn drawing_sheet_layers_body(ui: &mut Ui, layers: &mut DrawingSheetLayerVisibili
             );
             layer_row(
                 ui,
-                "Registration and folding marks",
-                "Corner registration targets and format-defined fold marks.",
+                "Centring, registration and folding marks",
+                "ISO 5457 centring marks, ASME microfilm arrows, and an inset frame's corner targets and fold marks.",
                 &mut layers.registration_marks,
             );
             layer_row(

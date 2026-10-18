@@ -404,16 +404,37 @@ impl SchematicSheetFormat {
             match placement {
                 DrawingSheetFramePlacement::Iso5457 if self.marks.registration => {
                     let beyond = ISO_5457_CENTRING_BEYOND_FRAME_UM as i64;
-                    for (from, to) in [
-                        ((centre.0, band.y_um), (centre.0, area.y_um + beyond)),
-                        ((centre.0, band_bottom), (centre.0, area_bottom - beyond)),
-                        ((band.x_um, centre.1), (area.x_um + beyond, centre.1)),
-                        ((band_right, centre.1), (area_right - beyond, centre.1)),
+                    for (from, at_frame, to) in [
+                        (
+                            (centre.0, band.y_um),
+                            (centre.0, area.y_um),
+                            (centre.0, area.y_um + beyond),
+                        ),
+                        (
+                            (centre.0, band_bottom),
+                            (centre.0, area_bottom),
+                            (centre.0, area_bottom - beyond),
+                        ),
+                        (
+                            (band.x_um, centre.1),
+                            (area.x_um, centre.1),
+                            (area.x_um + beyond, centre.1),
+                        ),
+                        (
+                            (band_right, centre.1),
+                            (area_right, centre.1),
+                            (area_right - beyond, centre.1),
+                        ),
                     ] {
+                        // A mark that would run into the title block stops at
+                        // the frame rather than rule through its cells.
+                        let into_block = geometry
+                            .title_block
+                            .is_some_and(|block| segment_meets_rect(at_frame, to, block));
                         artwork.line(
                             DrawingSheetFrameLayer::CentringMarks,
                             from,
-                            to,
+                            if into_block { at_frame } else { to },
                             ISO_5457_CENTRING_LINE_UM,
                         );
                     }
@@ -663,9 +684,8 @@ impl SchematicSheetFormat {
             return;
         };
         let text = standard.paper_size();
-        let (_, paper_bottom) = far_corner(geometry.paper);
+        let (paper_right, paper_bottom) = far_corner(geometry.paper);
         let (_, band_bottom) = far_corner(geometry.zone_band);
-        let (area_right, _) = far_corner(geometry.drawing_area);
         let strip_um = paper_bottom - band_bottom;
         let lettering_um = ISO_5457_SIZE_DESIGNATION_UM;
         if strip_um < (lettering_um * 12 / 10) as i64 {
@@ -673,8 +693,8 @@ impl SchematicSheetFormat {
         }
         let width_um =
             (drawing_sheet_mono_advance_um(lettering_um) * text.chars().count() as u64) as i64;
-        // Clear of the trimming mark that occupies the corner.
-        let right = area_right - 1_000;
+        // Clear of the trimming mark that occupies the corner by 2 mm.
+        let right = paper_right - ISO_5457_TRIM_MARK_UM.0 as i64 - 2_000;
         artwork.push(
             DrawingSheetFrameLayer::SizeDesignation,
             DrawingSheetFrameMark::Text {
@@ -684,6 +704,16 @@ impl SchematicSheetFormat {
             },
         );
     }
+}
+
+/// Whether an axis-aligned segment reaches inside a rectangle, its edges
+/// included.
+fn segment_meets_rect(from: (i64, i64), to: (i64, i64), rect: DrawingSheetRect) -> bool {
+    let (right, bottom) = far_corner(rect);
+    from.0.min(to.0) <= right
+        && from.0.max(to.0) >= rect.x_um
+        && from.1.min(to.1) <= bottom
+        && from.1.max(to.1) >= rect.y_um
 }
 
 /// A rectangle's right and bottom edges.
