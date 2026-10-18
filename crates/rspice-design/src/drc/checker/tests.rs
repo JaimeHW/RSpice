@@ -1286,7 +1286,7 @@ fn a_lone_off_sheet_connector_is_advised_and_a_paired_one_is_not() {
     assert_eq!(findings[0].severity, DrcSeverity::Info);
     assert_eq!(
         findings[0].message,
-        "Off-sheet connector `BIAS` has no partner on another sheet."
+        "Off-sheet connector 'BIAS' has no partner on another sheet"
     );
     assert_eq!(
         findings[0].location,
@@ -1374,7 +1374,7 @@ fn case_colliding_net_names_are_a_drc_error() {
         assert_eq!(findings[0].severity, DrcSeverity::Error);
         assert_eq!(
             findings[0].message,
-            "Nets `Out` and `out` differ only by case; the netlist joins them into one node."
+            "Nets 'Out' and 'out' differ only by case; the netlist joins them into one node"
         );
         assert_eq!(
             findings[0].location,
@@ -1417,7 +1417,7 @@ fn case_colliding_net_names_are_a_drc_error() {
     assert_eq!(findings.len(), 1);
     assert_eq!(
         findings[0].message,
-        "Nets `Bias` and `BIAS` differ only by case; the netlist joins them into one node."
+        "Nets 'Bias' and 'BIAS' differ only by case; the netlist joins them into one node"
     );
     assert!(matches!(
         &findings[0].location,

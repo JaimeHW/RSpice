@@ -353,14 +353,14 @@ where
         }
         for label in &schematic.net_labels {
             if crossings.is_unmarked_crossing(label.pos) {
-                found.push((label.pos, format!("Net label \"{}\"", label.name.trim())));
+                found.push((label.pos, format!("Net label '{}'", label.name.trim())));
             }
         }
         for binding in &self.buses.scalar_taps {
             if crossings.is_unmarked_crossing(binding.point) {
                 found.push((
                     binding.point,
-                    format!("The bus tap for \"{}\"", binding.member_name),
+                    format!("The bus tap for '{}'", binding.member_name),
                 ));
             }
         }
@@ -829,7 +829,7 @@ where
             let deck_name = binding.deck_name.as_str();
             if let Err(error) = validate_net_name(name, policy) {
                 self.naming_error(
-                    format!("Invalid typed bus member \"{name}\": {error}"),
+                    format!("Invalid typed bus member '{name}': {error}"),
                     ConnectivityAnchor::Point(binding.point),
                 );
                 continue;
@@ -841,7 +841,7 @@ where
                 }
                 self.naming_error(
                     format!(
-                        "Typed bus member \"{name}\" at ({}, {}) is not on a scalar net",
+                        "Typed bus member '{name}' at ({}, {}) is not on a scalar net",
                         binding.point.x, binding.point.y
                     ),
                     ConnectivityAnchor::BusTap(binding.tap_id),
@@ -857,7 +857,7 @@ where
                 self.report(
                     ConnectivityDiagnosticKind::BusRangeConflict,
                     true,
-                    format!("Typed bus member \"{name}\" conflicts with net name \"{existing}\""),
+                    format!("Typed bus member '{name}' conflicts with net name '{existing}'"),
                     ConnectivityAnchor::Net(name.to_owned()),
                 );
                 continue;
@@ -895,7 +895,7 @@ where
             }
             if let Err(error) = validate_net_name(authored_name, policy) {
                 self.naming_error(
-                    format!("Invalid net label \"{authored_name}\": {error}"),
+                    format!("Invalid net label '{authored_name}': {error}"),
                     ConnectivityAnchor::NetLabel(label.name.clone()),
                 );
                 continue;
@@ -911,7 +911,7 @@ where
                     ConnectivityDiagnosticKind::OrphanNetLabel,
                     false,
                     format!(
-                        "Net label \"{authored_name}\" at ({}, {}) is not on a wire or terminal",
+                        "Net label '{authored_name}' at ({}, {}) is not on a wire or terminal",
                         label.pos.x, label.pos.y
                     ),
                     ConnectivityAnchor::NetLabel(label.name.clone()),
@@ -925,9 +925,8 @@ where
                 .then(|| binding.member_name.clone())
             });
             if let Some(typed_name) = typed_conflict {
-                let message = format!(
-                    "Net label \"{name}\" conflicts with typed bus member \"{typed_name}\""
-                );
+                let message =
+                    format!("Net label '{name}' conflicts with typed bus member '{typed_name}'");
                 self.report(
                     ConnectivityDiagnosticKind::BusRangeConflict,
                     true,
@@ -958,8 +957,8 @@ where
                         Some(existing) if !net_names_equal(&existing, name) => {
                             let existing = display_net_name(schematic, &existing);
                             let message = format!(
-                                "Net carries conflicting labels \"{existing}\" and \"{name}\"; \
-                                 keeping \"{existing}\""
+                                "Net carries conflicting labels '{existing}' and '{name}'; \
+                                 keeping '{existing}'"
                             );
                             self.report(
                                 ConnectivityDiagnosticKind::NetNaming,

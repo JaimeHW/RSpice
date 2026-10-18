@@ -1069,7 +1069,7 @@ pub(super) fn append_off_sheet_connector_violations(
             next_id,
             DrcViolationType::OffSheetConnectorWithoutPartner,
             format!(
-                "Off-sheet connector `{}` has no partner on another sheet.",
+                "Off-sheet connector '{}' has no partner on another sheet",
                 label.name
             ),
             DrcLocation::NetLabel {
@@ -1109,11 +1109,11 @@ pub(super) fn append_vector_width_violations(
             && mismatch.found_width >= mismatch.declared_width;
         let message = if sliceable {
             format!(
-                "{}; tap an explicit slice of the bus to connect it.",
+                "{}; tap an explicit slice of the bus to connect it",
                 mismatch.message()
             )
         } else {
-            format!("{}.", mismatch.message())
+            mismatch.message()
         };
         let mut violation = DrcViolation::new(
             next_id,
@@ -1187,8 +1187,8 @@ pub(super) fn append_case_collision_violations(
                     next_id,
                     DrcViolationType::CaseCollidingNetNames,
                     format!(
-                        "Nets `{first}` and `{name}` differ only by case; the netlist joins them \
-                         into one node."
+                        "Nets '{first}' and '{name}' differ only by case; the netlist joins them \
+                         into one node"
                     ),
                     location,
                 )
