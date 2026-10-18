@@ -909,7 +909,7 @@ fn flowed_fields_fill_the_rows_from_the_top_in_order() {
 fn a_value_longer_than_its_cell_is_cut_with_an_ellipsis() {
     let advance_um = drawing_sheet_mono_advance_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um);
     let value = |chars: u64| DrawingSheetTitleValue {
-        text: DrawingSheetTitleText::Field(Field::CellView),
+        text: DrawingSheetTitleText::Field(Field::SheetTitle),
         x_um: 0,
         seat_um: 0,
         width_um: advance_um * chars,
@@ -928,4 +928,53 @@ fn a_value_longer_than_its_cell_is_cut_with_an_ellipsis() {
     // Lettering never shrinks to fit: a cell too narrow for one character
     // still letters the ellipsis rather than smaller text.
     assert_eq!(value(0).letter("Anything"), ["…"]);
+}
+
+#[test]
+fn a_cell_view_path_is_cut_at_its_start_on_every_block() {
+    // The names of the cell and the view are at the end of the path.
+    let advance_um = drawing_sheet_mono_advance_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um);
+    let path = |chars: u64| DrawingSheetTitleValue {
+        text: DrawingSheetTitleText::Field(Field::CellView),
+        x_um: 0,
+        seat_um: 0,
+        width_um: advance_um * chars,
+        lettering_um: DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um,
+        emphasised: false,
+        max_lines: 1,
+        line_pitch_um: 0,
+        upper_case: false,
+    };
+    assert_eq!(
+        path(23).letter("mycircuit/top/schematic"),
+        ["mycircuit/top/schematic"]
+    );
+    assert!(!path(23).elides("mycircuit/top/schematic"));
+    // Part of the library's name is dropped up to its separator, so the
+    // cell and the view are kept whole.
+    assert_eq!(
+        path(16).letter("mycircuit/top/schematic"),
+        ["…/top/schematic"]
+    );
+    assert!(path(16).elides("mycircuit/top/schematic"));
+    // A cut that falls at a separator keeps the whole name after it.
+    assert_eq!(
+        path(14).letter("mycircuit/top/schematic"),
+        ["…top/schematic"]
+    );
+    // Too short for the cell's whole name, the path keeps what fits of it.
+    assert_eq!(path(12).letter("mycircuit/top/schematic"), ["…p/schematic"]);
+    assert_eq!(path(5).letter("no separators here"), ["…here"]);
+    assert_eq!(path(0).letter("lib/top/schematic"), ["…"]);
+    // The ISO 7200 form letters it cut the same way.
+    let iso = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA3,
+        SchematicPageOrientation::Landscape,
+    );
+    let layout = drawing_sheet_title_layout(&iso, &iso.geometry().unwrap()).unwrap();
+    let long = "analog_front_end_reference_library/bandgap/schematic";
+    let lettered = layout.value(Field::CellView).unwrap().letter(long);
+    assert_eq!(lettered.len(), 1);
+    assert!(lettered[0].starts_with("…/"), "{lettered:?}");
+    assert!(lettered[0].ends_with("/bandgap/schematic"), "{lettered:?}");
 }

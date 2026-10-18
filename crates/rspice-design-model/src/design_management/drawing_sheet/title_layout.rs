@@ -20,7 +20,8 @@
 //! hold, so a cell does not move while a value is typed into it, and a
 //! preview that has no values draws the same form the sheet does. Lettering
 //! never shrinks to fit: a value or caption longer than its cell holds is cut
-//! with an ellipsis.
+//! with an ellipsis, a cell / view path at its start, since the names of the
+//! cell and the view are at its end.
 
 use super::*;
 
@@ -125,7 +126,8 @@ impl DrawingSheetTitleValue {
 
     /// `value` as the cell letters it, line by line: whole when it fits, and
     /// otherwise wrapped at its spaces and cut with an ellipsis where the
-    /// last line runs out.
+    /// last line runs out. A cell / view path on one line is cut at its
+    /// start instead (see [`elide_title_path`]).
     #[must_use]
     pub fn letter(self, value: &str) -> Vec<String> {
         self.wrap(value).0
@@ -143,7 +145,12 @@ impl DrawingSheetTitleValue {
         } else {
             std::borrow::Cow::Borrowed(value)
         };
-        wrap_title_text(&value, self.capacity(), usize::from(self.max_lines.max(1)))
+        let capacity = self.capacity();
+        if self.field() == Some(DrawingSheetTitleFieldId::CellView) && self.max_lines <= 1 {
+            let cut = value.chars().count() > capacity;
+            return (vec![elide_title_path(&value, capacity)], cut);
+        }
+        wrap_title_text(&value, capacity, usize::from(self.max_lines.max(1)))
     }
 }
 
@@ -398,6 +405,27 @@ pub(super) fn elide_title_text(text: &str, max_chars: usize) -> String {
         .collect::<String>();
     kept.push('…');
     kept
+}
+
+/// `path`, a `/`-separated cell / view path such as `lib/cell/view`, cut to
+/// `max_chars` from its start: an ellipsis and as much of its end as fits,
+/// since that is where the cell and view are named. Where the first name
+/// kept would be only part of one and the end still holds two whole names,
+/// the cut moves to the separator after it, so `…/top/schematic` rather
+/// than `…t/top/schematic`.
+fn elide_title_path(path: &str, max_chars: usize) -> String {
+    let count = path.chars().count();
+    if count <= max_chars {
+        return path.to_owned();
+    }
+    let dropped = count - max_chars.saturating_sub(1);
+    let tail = path.chars().skip(dropped).collect::<String>();
+    let starts_whole = path.chars().nth(dropped - 1) == Some('/');
+    let kept = match tail.find('/') {
+        Some(at) if !starts_whole && tail[at + 1..].contains('/') => &tail[at..],
+        _ => tail.as_str(),
+    };
+    format!("…{kept}")
 }
 
 /// `text` broken at its spaces into at most `max_lines` lines of at most

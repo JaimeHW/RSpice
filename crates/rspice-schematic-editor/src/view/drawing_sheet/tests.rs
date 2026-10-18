@@ -757,10 +757,11 @@ fn the_canvas_letters_each_field_in_the_cell_the_sheet_lays_out() {
             "{whole} is cut: {text:?}"
         );
     }
+    // A cell / view path is cut at its start, where the ellipsis stands.
     assert!(
         text.iter()
-            .any(|line| line.ends_with('…') && long.starts_with(line.trim_end_matches('…'))),
-        "a value longer than its cell ends in an ellipsis: {text:?}"
+            .any(|line| line.starts_with('…') && long.ends_with(line.trim_start_matches('…'))),
+        "a value longer than its cell is cut with an ellipsis: {text:?}"
     );
 }
 
