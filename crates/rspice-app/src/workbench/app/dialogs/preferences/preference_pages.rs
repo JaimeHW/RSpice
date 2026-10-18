@@ -504,8 +504,11 @@ fn units(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::EngineeringSuffixes,
         "Engineering suffixes",
-        "Case-sensitive SPICE parsing with unambiguous meg and mil handling.",
-        &["Strict RSpice · 10Meg, 10m", "Classic SPICE compatibility"],
+        "How values typed into property and analysis fields are read. Netlists always follow SPICE.",
+        &[
+            "Strict · 10Meg, 10m; M only before a unit",
+            "SPICE · not case-sensitive, 10M = 10m",
+        ],
     );
     choice_row(
         ui,

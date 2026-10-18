@@ -68,12 +68,12 @@ pub fn parse_ui_quantity(
 
     let si = match kind {
         QuantityInputKind::EngineeringScalar => {
-            value * parse_prefix(suffix, policy.engineering_suffixes, false)?
+            value * parse_prefix(suffix, "", policy.engineering_suffixes)?
         }
         QuantityInputKind::Time => parse_time_or_frequency(value, suffix, "s", policy)?,
         QuantityInputKind::Frequency => {
-            if let Some(prefix) = suffix.strip_suffix("rad/s") {
-                value * parse_prefix(prefix, policy.engineering_suffixes, true)?
+            if let Some(prefix) = strip_unit(suffix, "rad/s", policy.engineering_suffixes) {
+                value * parse_prefix(prefix, "rad/s", policy.engineering_suffixes)?
                     / std::f64::consts::TAU
             } else {
                 parse_time_or_frequency(value, suffix, "Hz", policy)?
@@ -165,77 +165,155 @@ fn parse_time_or_frequency(
             Err(QuantityInputError::MissingUnit(unit))
         };
     }
-    let prefix = suffix
-        .strip_suffix(unit)
+    let prefix = strip_unit(suffix, unit, policy.engineering_suffixes)
         .ok_or_else(|| QuantityInputError::UnexpectedUnit(suffix.to_owned()))?;
-    Ok(value * parse_prefix(prefix, policy.engineering_suffixes, true)?)
+    Ok(value * parse_prefix(prefix, unit, policy.engineering_suffixes)?)
+}
+
+/// `suffix` without the field's `unit` at its end. SPICE spelling folds case,
+/// so `1MS` and `10KHZ` carry their units there as well.
+fn strip_unit<'a>(suffix: &'a str, unit: &str, policy: EngineeringSuffixPolicy) -> Option<&'a str> {
+    match policy {
+        EngineeringSuffixPolicy::StrictRspice => suffix.strip_suffix(unit),
+        EngineeringSuffixPolicy::ClassicSpiceCompatibility => {
+            let split = suffix.len().checked_sub(unit.len())?;
+            (suffix.is_char_boundary(split) && suffix[split..].eq_ignore_ascii_case(unit))
+                .then(|| &suffix[..split])
+        }
+    }
 }
 
 /// The decade a field's engineering prefix names, under the field's policy.
 ///
+/// `unit` is the unit typed after the prefix (empty for a field whose unit
+/// comes from its schema). It matters because SPICE reads the two together:
+/// `MHz` is megahertz but `Ms` is a millisecond.
+///
+/// SPICE spelling reads the prefix and unit exactly as the engine's deck
+/// lexer does, through [`spice_suffix_scale`]. Strict spelling keeps its own
+/// case-sensitive table, so that `M` and `m` can be told apart where a human
+/// is looking at the letter, and refuses the few spellings the engine would
+/// read as another value (`mHz`, `Ms`), so that a typed field never means
+/// one thing and runs another.
+///
 /// Neither policy has atto. `a` is a unit letter — the `A` of a one-ampere
 /// source — in every reader a typed value travels through, the engine's own
-/// deck lexer included, and a prefix table that still read it as 1e-18 would
-/// be the one place a value silently changed decade.
-///
-/// These tables stay separate from
-/// `rspice_core::netlist::lexer::spice_suffix_scale` on purpose, and are not
-/// routed through it: the strict policy is case-sensitive, so that `M` and `m`
-/// can be told apart in a field where a human is looking at the letter, while
-/// the engine's dialect folds case and reads both as milli. A field bound for
-/// a deck must use the engine's table instead — see
-/// the app-level deck parser.
+/// deck lexer included.
 fn parse_prefix(
     prefix: &str,
+    unit: &str,
     policy: EngineeringSuffixPolicy,
-    explicit_unit: bool,
 ) -> Result<f64, QuantityInputError> {
-    let multiplier = match policy {
-        EngineeringSuffixPolicy::StrictRspice => match prefix {
-            "" => 1.0,
-            "T" => 1e12,
-            "G" => 1e9,
-            // M is unambiguous when an explicit SI unit follows; a bare mega
-            // multiplier uses the documented `Meg` spelling.
-            "M" if explicit_unit => 1e6,
-            "Meg" => 1e6,
-            "k" => 1e3,
-            "m" => 1e-3,
-            "u" | "µ" => 1e-6,
-            "n" => 1e-9,
-            "p" => 1e-12,
-            "f" => 1e-15,
-            "mil" => 25.4e-6,
-            _ => {
-                return Err(QuantityInputError::UnknownEngineeringPrefix(
-                    prefix.to_owned(),
-                ));
-            }
-        },
-        EngineeringSuffixPolicy::ClassicSpiceCompatibility => {
-            let folded = prefix.to_ascii_lowercase();
-            match folded.as_str() {
+    let unknown = || QuantityInputError::UnknownEngineeringPrefix(prefix.to_owned());
+    let spelled = format!("{prefix}{unit}");
+    let (engine, consumed) = spice_suffix_scale(&spelled);
+    // Whether the engine reads the typed prefix as a scale factor, rather than
+    // stopping inside it or taking its letter for a unit (`A`, `V`, `S`).
+    let engine_reads_prefix =
+        prefix.is_empty() || (consumed >= prefix.chars().count() && engine != 1.0);
+    match policy {
+        EngineeringSuffixPolicy::StrictRspice => {
+            let multiplier = match prefix {
                 "" => 1.0,
-                "t" => 1e12,
-                "g" => 1e9,
-                "meg" => 1e6,
+                "T" => 1e12,
+                "G" => 1e9,
+                // M is unambiguous when an explicit SI unit follows; a bare
+                // mega multiplier uses the documented `Meg` spelling.
+                "M" if !unit.is_empty() => 1e6,
+                "Meg" => 1e6,
                 "k" => 1e3,
                 "m" => 1e-3,
-                "u" => 1e-6,
+                "u" | "µ" => 1e-6,
                 "n" => 1e-9,
                 "p" => 1e-12,
                 "f" => 1e-15,
                 "mil" => 25.4e-6,
-                _ if prefix == "µ" => 1e-6,
-                _ => {
-                    return Err(QuantityInputError::UnknownEngineeringPrefix(
-                        prefix.to_owned(),
-                    ));
-                }
+                _ => return Err(unknown()),
+            };
+            if engine_reads_prefix && engine != multiplier {
+                return Err(QuantityInputError::SpiceReadsDifferently(spelled));
             }
+            Ok(multiplier)
         }
+        // The micro sign is the one SI spelling the engine has no reading
+        // for at all, so it cannot be read two ways.
+        EngineeringSuffixPolicy::ClassicSpiceCompatibility if prefix == "µ" => Ok(1e-6),
+        EngineeringSuffixPolicy::ClassicSpiceCompatibility if engine_reads_prefix => Ok(engine),
+        EngineeringSuffixPolicy::ClassicSpiceCompatibility => Err(unknown()),
+    }
+}
+
+/// The scale the engine's deck lexer gives the suffix at the head of `text`,
+/// and how many characters of it that reading consumes.
+///
+/// A mirror of `rspice_core`'s `spice_suffix_scale`, which this crate cannot
+/// depend on. `rspice-design` types every prefix and unit spelling into a
+/// SPICE-spelling field and into the engine, and fails if they disagree.
+fn spice_suffix_scale(text: &str) -> (f64, usize) {
+    let chars = text.chars().collect::<Vec<_>>();
+    let Some(&first) = chars.first() else {
+        return (1.0, 0);
     };
-    Ok(multiplier)
+    if chars.len() >= 3 {
+        let three = chars[..3].iter().collect::<String>().to_ascii_uppercase();
+        let scale = match three.as_str() {
+            "MEG" | "MHZ" => Some(1e6),
+            "MIL" => Some(25.4e-6),
+            "GHZ" => Some(1e9),
+            "KHZ" => Some(1e3),
+            "UHZ" => Some(1e-6),
+            "NHZ" => Some(1e-9),
+            "PHZ" => Some(1e-12),
+            "FHZ" => Some(1e-15),
+            "THZ" => Some(1e12),
+            _ => None,
+        };
+        if let Some(scale) = scale {
+            return (scale, 3);
+        }
+    }
+    if chars.len() >= 2 {
+        let prefix = first.to_ascii_uppercase();
+        let unit = chars[1].to_ascii_uppercase();
+        let scale = match unit {
+            'S' | 'F' | 'H' => match prefix {
+                'N' => Some(1e-9),
+                'P' => Some(1e-12),
+                'U' => Some(1e-6),
+                'M' => Some(1e-3),
+                'F' if unit == 'S' => Some(1e-15),
+                _ => None,
+            },
+            'V' | 'A' | 'M' => match prefix {
+                'T' => Some(1e12),
+                'G' => Some(1e9),
+                'K' => Some(1e3),
+                'M' => Some(1e-3),
+                'U' => Some(1e-6),
+                'N' => Some(1e-9),
+                'P' => Some(1e-12),
+                'F' => Some(1e-15),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(scale) = scale {
+            return (scale, 2);
+        }
+    }
+    match first.to_ascii_uppercase() {
+        'T' => (1e12, 1),
+        'G' => (1e9, 1),
+        'K' => (1e3, 1),
+        'M' => (1e-3, 1),
+        'U' => (1e-6, 1),
+        'N' => (1e-9, 1),
+        'P' => (1e-12, 1),
+        'F' => (1e-15, 1),
+        'X' if chars.len() == 1 || !chars[1].is_ascii_alphabetic() => (1e6, 1),
+        'V' | 'A' | 'S' => (1.0, 1),
+        _ => (1.0, 0),
+    }
 }
 
 fn parse_temperature(value: f64, suffix: &str) -> Result<f64, QuantityInputError> {
@@ -279,6 +357,9 @@ pub enum QuantityInputError {
     MissingUnit(&'static str),
     UnexpectedUnit(String),
     UnknownEngineeringPrefix(String),
+    /// Strict spelling refuses a prefix and unit the engine reads as another
+    /// value (`mHz` is megahertz to SPICE).
+    SpiceReadsDifferently(String),
     AmbiguousDecimalSeparator,
     UnsupportedDecimalSeparator(char),
     BelowAbsoluteZero,
@@ -294,6 +375,12 @@ impl fmt::Display for QuantityInputError {
             Self::UnexpectedUnit(unit) => write!(f, "unexpected unit: {unit}"),
             Self::UnknownEngineeringPrefix(prefix) => {
                 write!(f, "unknown engineering prefix: {prefix}")
+            }
+            Self::SpiceReadsDifferently(spelling) => {
+                write!(
+                    f,
+                    "SPICE reads {spelling} as another value; use an exponent"
+                )
             }
             Self::AmbiguousDecimalSeparator => f.write_str("ambiguous decimal separator"),
             Self::UnsupportedDecimalSeparator(separator) => {
@@ -417,6 +504,50 @@ mod tests {
             .unwrap(),
             1e6
         );
+    }
+
+    /// SPICE spelling is the engine's: `MHz` is megahertz whatever its case,
+    /// and the field's unit may be typed in any case, as a deck would have it.
+    #[test]
+    fn spice_spelling_reads_prefix_and_unit_the_way_the_engine_does() {
+        let policy = QuantityPresentationPolicy {
+            engineering_suffixes: EngineeringSuffixPolicy::ClassicSpiceCompatibility,
+            ..QuantityPresentationPolicy::default()
+        };
+        let parse = |text, kind| parse_ui_quantity(text, kind, policy, UiNumberLocale::default());
+        assert_eq!(parse("10MHz", QuantityInputKind::Frequency), Ok(10e6));
+        assert_eq!(parse("10mhz", QuantityInputKind::Frequency), Ok(10e6));
+        assert_eq!(parse("10KHZ", QuantityInputKind::Frequency), Ok(10e3));
+        assert_eq!(parse("10MegHz", QuantityInputKind::Frequency), Ok(10e6));
+        assert_eq!(parse("1MS", QuantityInputKind::Time), Ok(1e-3));
+        assert_eq!(
+            parse("2pF", QuantityInputKind::EngineeringScalar),
+            Ok(2e-12)
+        );
+        assert_eq!(parse("1X", QuantityInputKind::EngineeringScalar), Ok(1e6));
+        assert!(parse("1kOhm", QuantityInputKind::EngineeringScalar).is_err());
+    }
+
+    /// Strict spelling is case-sensitive, and refuses the spellings the engine
+    /// would read as another value instead of reading them its own way.
+    #[test]
+    fn strict_spelling_refuses_what_the_engine_reads_as_another_value() {
+        let policy = QuantityPresentationPolicy::default();
+        let parse = |text, kind| parse_ui_quantity(text, kind, policy, UiNumberLocale::default());
+        assert_eq!(parse("10MHz", QuantityInputKind::Frequency), Ok(10e6));
+        for (text, kind, spelling) in [
+            ("1mHz", QuantityInputKind::Frequency, "mHz"),
+            ("1Ms", QuantityInputKind::Time, "Ms"),
+            ("1Mrad/s", QuantityInputKind::Frequency, "Mrad/s"),
+        ] {
+            assert_eq!(
+                parse(text, kind),
+                Err(QuantityInputError::SpiceReadsDifferently(
+                    spelling.to_owned()
+                )),
+                "{text}"
+            );
+        }
     }
 
     /// Atto left every reader in the toolchain, this one included. `a` is a

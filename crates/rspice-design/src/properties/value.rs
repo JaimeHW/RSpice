@@ -156,6 +156,89 @@ mod tests {
         );
     }
 
+    /// A typed field reads every prefix and unit spelling as the engine's
+    /// deck lexer does. The typed-field parser keeps its own copy of the
+    /// engine's suffix table, because its crate cannot depend on the engine;
+    /// this is what keeps that copy honest. Under SPICE spelling a field must
+    /// read every prefix the engine knows; under strict spelling it may refuse
+    /// a spelling, but never read one as another value.
+    #[test]
+    fn typed_fields_read_every_prefix_and_unit_the_way_the_engine_does() {
+        use rspice_app_types::quantity::EngineeringSuffixPolicy;
+        use rspice_core::netlist::lexer::spice_suffix_scale;
+
+        let locale = UiNumberLocale::default();
+        let prefixes = [
+            "", "T", "t", "G", "g", "Meg", "MEG", "meg", "M", "m", "k", "K", "u", "U", "n", "N",
+            "p", "P", "f", "F", "mil", "MIL", "X", "x", "a", "A", "µ",
+        ];
+        let units = ["", "Hz", "s", "V", "A", "F", "H", "Ohm"];
+        for suffixes in [
+            EngineeringSuffixPolicy::StrictRspice,
+            EngineeringSuffixPolicy::ClassicSpiceCompatibility,
+        ] {
+            let policy = QuantityPresentationPolicy {
+                engineering_suffixes: suffixes,
+                ..QuantityPresentationPolicy::default()
+            };
+            for prefix in prefixes {
+                for unit in units {
+                    let suffix = format!("{prefix}{unit}");
+                    let text = format!("2{suffix}");
+                    let kinds: &[QuantityInputKind] = match unit {
+                        "Hz" => &[
+                            QuantityInputKind::Frequency,
+                            QuantityInputKind::EngineeringScalar,
+                        ],
+                        "s" => &[
+                            QuantityInputKind::Time,
+                            QuantityInputKind::EngineeringScalar,
+                        ],
+                        _ => &[QuantityInputKind::EngineeringScalar],
+                    };
+                    for &kind in kinds {
+                        let Ok(read) = parse_ui_quantity(&text, kind, policy, locale) else {
+                            continue;
+                        };
+                        // The engine has no reading of the micro sign at all,
+                        // so there is nothing for the field to disagree with.
+                        let engine = if prefix == "µ" {
+                            2e-6
+                        } else {
+                            2.0 * spice_suffix_scale(&suffix).0
+                        };
+                        assert_eq!(read, engine, "{text} as {kind:?} under {suffixes:?}");
+                    }
+                }
+            }
+        }
+
+        let spice = QuantityPresentationPolicy {
+            engineering_suffixes: EngineeringSuffixPolicy::ClassicSpiceCompatibility,
+            ..QuantityPresentationPolicy::default()
+        };
+        for prefix in [
+            "T", "t", "G", "g", "Meg", "MEG", "meg", "M", "m", "k", "K", "u", "U", "n", "N", "p",
+            "P", "f", "F", "mil", "MIL",
+        ] {
+            for (unit, kind) in [
+                ("", QuantityInputKind::EngineeringScalar),
+                ("s", QuantityInputKind::Time),
+                ("Hz", QuantityInputKind::Frequency),
+            ] {
+                let text = format!("2{prefix}{unit}");
+                assert!(
+                    parse_ui_quantity(&text, kind, spice, locale).is_ok(),
+                    "SPICE spelling must read {text} as {kind:?}"
+                );
+            }
+        }
+        assert_eq!(
+            parse_ui_quantity("10MHz", QuantityInputKind::Frequency, spice, locale),
+            Ok(10e6)
+        );
+    }
+
     #[test]
     fn numeric_source_parser_distinguishes_quantities_expressions_and_incomplete_text() {
         let definition = PropertyDefinition::new("gain").with_type(PropertyType::Number);
