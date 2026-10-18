@@ -357,12 +357,32 @@ pub(crate) fn with_active_wire_topology<R>(
 /// this of every object in the document, on every frame of a drag, and
 /// spelling the cell view's key and looking its catalog up afresh for each
 /// of them cost 13 ms of every drag frame at production scale.
+///
+/// Every caller asks about each object of the document, so the objects
+/// assigned to another sheet are listed once, in id order, and each question
+/// is a search of that list rather than of the catalog's map: an object is
+/// off the active sheet exactly when the catalog assigns it to another one.
 pub(crate) fn off_active_sheet(
     workspace: &crate::state::ProjectWorkspace,
 ) -> impl Fn(u64) -> bool + '_ {
     let key = workspace.content.active_schematic_reference().key();
-    let catalog = workspace.content.design_management.sheet_catalog(&key);
-    move |id| !rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
+    let elsewhere = workspace
+        .content
+        .design_management
+        .sheet_catalog(&key)
+        .and_then(|catalog| {
+            let active = catalog.active_sheet_id()?;
+            Some(
+                catalog
+                    .object_assignments()
+                    .iter()
+                    .filter(|&(_, &sheet)| sheet != active)
+                    .map(|(&id, _)| id)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .unwrap_or_default();
+    move |id| elsewhere.binary_search(&id).is_ok()
 }
 
 /// The active sheet's own connectivity, where the canvas draws it: its parts,
