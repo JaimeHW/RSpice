@@ -17,6 +17,31 @@ const DESKTOP: (f32, f32) = (1280.0, 760.0);
 const TABLET: (f32, f32) = (820.0, 640.0);
 const PHONE: (f32, f32) = (390.0, 780.0);
 
+thread_local! {
+    /// The zone the panel reads wall times in under test; see
+    /// [`super::local_date_time`].
+    pub(super) static PINNED_ZONE: std::cell::Cell<Option<time::UtcOffset>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// The wall clock while a pass is drawn: 15:00:30 UTC on 18 October 2026.
+/// The half minute absorbs the fraction of a second egui's clock has run by
+/// the time a fixture's passes are drawn.
+const PINNED_WALL: std::time::Duration = std::time::Duration::from_secs(1_792_335_630);
+
+/// Run `pass` with the wall clock and its zone pinned, so the seeded notice
+/// raised two hours before egui's zero reads 13:00 on every machine.
+pub(super) fn with_pinned_clock<R>(pass: impl FnOnce() -> R) -> R {
+    struct Restore(Option<time::UtcOffset>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PINNED_ZONE.with(|zone| zone.set(self.0));
+        }
+    }
+    let _restore = Restore(PINNED_ZONE.with(|zone| zone.replace(Some(time::UtcOffset::UTC))));
+    crate::time_compat::with_unix_epoch(Ok(PINNED_WALL), pass)
+}
+
 /// A press and a release at one point, which is what egui reads as a click.
 fn click_events(at: Pos2) -> Vec<egui::Event> {
     vec![
@@ -165,17 +190,19 @@ impl Panel {
         }
 
         let app = &mut self.app;
-        let output = self.ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(
-                    Pos2::ZERO,
-                    vec2(self.size.0, self.size.1),
-                )),
-                events,
-                ..egui::RawInput::default()
-            },
-            |ui| show(ui.ctx(), app, TITLE_BAR),
-        );
+        let output = with_pinned_clock(|| {
+            self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        Pos2::ZERO,
+                        vec2(self.size.0, self.size.1),
+                    )),
+                    events,
+                    ..egui::RawInput::default()
+                },
+                |ui| show(ui.ctx(), app, TITLE_BAR),
+            )
+        });
         self.texts.clear();
         for clipped in &output.shapes {
             walk(&clipped.shape, clipped.clip_rect, &mut self.texts);
@@ -267,7 +294,7 @@ fn the_panel_states_the_session_in_one_grammar() {
         "Information",
         "Job \u{00b7} now",
         "Job \u{00b7} 30 min",
-        "System \u{00b7} 2 hr",
+        "System \u{00b7} 13:00",
         "Open in Results",
         "Show in Console",
         "This session \u{00b7} 4 of 50 kept",
@@ -626,12 +653,36 @@ fn filters_project_domains_without_mutating_activity() {
     ));
 }
 
+/// Under the hour an age is a count; from the hour it is the time on the
+/// reader's clock, with the date a hover away. Egui's 7,200 s here is the
+/// pinned wall's 15:00:30, so a notice from egui's zero was raised at 13:00:30.
 #[test]
-fn ages_are_session_relative_bounded_and_grouped_at_a_quarter_hour() {
-    assert_eq!(age_label(2.0, 4.0), "now");
-    assert_eq!(age_label(59.0, 0.0), "now");
-    assert_eq!(age_label(180.0, 0.0), "3 min");
-    assert_eq!(age_label(7_200.0, 0.0), "2 hr");
+fn ages_count_minutes_then_tell_the_time_and_group_at_a_quarter_hour() {
+    with_pinned_clock(|| {
+        let at = |now: f64| Clock {
+            now,
+            wall: PINNED_WALL,
+        };
+        assert_eq!(age_label(at(2.0), 4.0), "now");
+        assert_eq!(age_label(at(59.0), 0.0), "now");
+        assert_eq!(age_label(at(180.0), 0.0), "3 min");
+        assert_eq!(age_label(at(3_599.0), 0.0), "59 min");
+        assert_eq!(age_label(at(3_600.0), 0.0), "14:00");
+        assert_eq!(age_label(at(7_200.0), 0.0), "13:00");
+        assert_eq!(age_stamp(at(3_599.0), 0.0), None, "a count needs no date");
+        assert_eq!(
+            age_stamp(at(7_200.0), 0.0).as_deref(),
+            Some("2026-10-18 13:00:30")
+        );
+
+        // A wall clock that cannot be read still says how long ago.
+        let unread = Clock {
+            now: 7_200.0,
+            wall: std::time::Duration::ZERO,
+        };
+        assert_eq!(age_label(unread, 0.0), "2 hr");
+        assert_eq!(age_stamp(unread, 0.0), None);
+    });
 
     assert!(is_recent(899.0, 0.0));
     assert!(!is_recent(900.0, 0.0));
