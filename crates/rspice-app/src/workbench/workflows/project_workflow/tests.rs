@@ -1602,6 +1602,24 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
+    let mut state = AppState::default();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-open-missing-{}-{}.rspiceproj",
+        std::process::id(),
+        crate::time_compat::unix_epoch().as_nanos()
+    ));
+
+    assert!(!load_project_from_path(&mut state, &path));
+
+    let activity = state.ui.toasts.activity();
+    assert_eq!(activity.len(), 1, "an open that failed is said now");
+    assert_eq!(activity[0].title(), "Project open failed");
+    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+}
+
 #[test]
 fn a_named_new_project_seeds_every_owner_of_its_identity() {
     let mut state = AppState::default();

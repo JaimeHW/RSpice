@@ -217,11 +217,7 @@ pub(crate) fn action_export_result_selection_with_io(
         }
         Err(error) => {
             note_result_export_failure(state, format!("Result text export failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Result text export failed: {error}"),
-            );
+            state.report_failure("Result text export failed", error.to_string());
         }
     }
 }
@@ -245,10 +241,9 @@ pub(crate) fn action_export_csv_with_io(
             .iter()
             .find_map(|analysis| analysis.validate_retained_evidence().err())
     }) {
-        state.record(
-            LogSeverity::Error,
-            LogSource::Studio,
-            format!("Result export failed: the stored result did not verify: {error}"),
+        state.report_failure(
+            "Result export failed",
+            format!("the stored result did not verify: {error}"),
         );
         return;
     }
@@ -722,11 +717,7 @@ fn export_typed_result_tsv(
     let contents = match csv_to_tsv(&prepared.contents) {
         Ok(contents) => contents,
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("TSV export failed: {error}"),
-            );
+            state.report_failure("TSV export failed", error.to_string());
             return;
         }
     };
@@ -799,11 +790,7 @@ fn publish_result_text(
         }
         Err((note, error)) => {
             note_result_export_failure(state, note);
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{label} export failed: {error}"),
-            );
+            state.report_failure(format!("{label} export failed"), error.to_string());
         }
     }
 }
@@ -854,10 +841,9 @@ fn export_native_result_bundle(
             return;
         }
         Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.display_name()),
+            state.report_failure(
+                format!("{} export failed", kind.display_name()),
+                error.to_string(),
             );
             return;
         }
@@ -873,10 +859,9 @@ fn export_native_result_bundle(
                 state,
                 format!("{} encoding failed: {error}", kind.display_name()),
             );
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.display_name()),
+            state.report_failure(
+                format!("{} export failed", kind.display_name()),
+                error.to_string(),
             );
             return;
         }
@@ -931,10 +916,9 @@ fn export_native_result_bundle(
                 state,
                 format!("{} export failed: {error}", kind.display_name()),
             );
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.display_name()),
+            state.report_failure(
+                format!("{} export failed", kind.display_name()),
+                error.to_string(),
             );
         }
     }
@@ -978,11 +962,7 @@ fn export_csv(
                 }
                 Err(e) => {
                     note_result_export_failure(state, format!("CSV export failed: {e}"));
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("CSV export failed: {e}"),
-                    );
+                    state.report_failure("CSV export failed", e.to_string());
                 }
             }
         }
@@ -991,11 +971,7 @@ fn export_csv(
         }
         Err(e) => {
             note_result_export_failure(state, format!("CSV destination failed: {e}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("CSV export failed: {e}"),
-            );
+            state.report_failure("CSV export failed", e.to_string());
         }
     }
 }
@@ -1009,11 +985,7 @@ fn export_tsv(
         match crate::io::WaveformWriter::new(crate::io::WaveformFormat::Tsv).write_text(dataset) {
             Ok(contents) => contents,
             Err(error) => {
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("TSV export failed: {error}"),
-                );
+                state.report_failure("TSV export failed", error.to_string());
                 return;
             }
         };
@@ -1049,22 +1021,14 @@ fn export_tsv(
                 }
                 Err(error) => {
                     note_result_export_failure(state, format!("TSV export failed: {error}"));
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("TSV export failed: {error}"),
-                    );
+                    state.report_failure("TSV export failed", error.to_string());
                 }
             }
         }
         Ok(None) => {}
         Err(error) => {
             note_result_export_failure(state, format!("TSV destination failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("TSV export failed: {error}"),
-            );
+            state.report_failure("TSV export failed", error.to_string());
         }
     }
 }
@@ -1128,22 +1092,14 @@ fn export_touchstone(
                 }
                 Err(error) => {
                     note_result_export_failure(state, format!("Touchstone export failed: {error}"));
-                    state.record(
-                        LogSeverity::Error,
-                        LogSource::Studio,
-                        format!("Touchstone export failed: {error}"),
-                    );
+                    state.report_failure("Touchstone export failed", error.to_string());
                 }
             }
         }
         Ok(None) => {}
         Err(error) => {
             note_result_export_failure(state, format!("Touchstone destination failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Touchstone export failed: {error}"),
-            );
+            state.report_failure("Touchstone export failed", error.to_string());
         }
     }
 }

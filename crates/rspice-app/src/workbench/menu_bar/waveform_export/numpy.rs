@@ -152,11 +152,7 @@ pub(super) fn export_numpy(
         Ok(bytes) => bytes,
         Err(error) => {
             note_result_export_failure(state, format!("{} encoding failed: {error}", kind.label()));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.label()),
-            );
+            state.report_failure(format!("{} export failed", kind.label()), error.to_string());
             return;
         }
     };
@@ -196,11 +192,7 @@ pub(super) fn export_numpy(
         }
         Err(error) => {
             note_result_export_failure(state, format!("{} export failed: {error}", kind.label()));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{} export failed: {error}", kind.label()),
-            );
+            state.report_failure(format!("{} export failed", kind.label()), error.to_string());
         }
     }
 }

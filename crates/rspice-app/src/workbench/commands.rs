@@ -72,8 +72,8 @@ fn model_library_rescan_diagnostic(app: &RSpiceApp) -> (String, bool) {
     let scan_errors = &app.state.pdk_config.scan_errors;
     let pack_definitions = app.state.model_library_manager.pack_definition_count();
     let mut summary = format!(
-        "Model library rescan found {discovered_files} configured model file(s) and \
-         {pack_definitions} shipped pack part(s)"
+        "Found {discovered_files} configured model file(s) and {pack_definitions} shipped pack \
+         part(s)"
     );
     let pack_error = app.state.model_library_manager.spice_pack_error();
     if let Some(error) = pack_error {
@@ -1136,26 +1136,6 @@ impl Command {
                 ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => false,
             },
             _ => true,
-        }
-    }
-
-    pub(crate) fn execute_with_feedback(self, app: &mut RSpiceApp, ctx: &egui::Context) {
-        let available = self.availability(app) == CommandAvailability::Available;
-        self.execute(app);
-        if available && self == Self::RescanModelLibraries {
-            let (message, has_errors) = model_library_rescan_diagnostic(app);
-            if has_errors {
-                app.state.ui.toasts.warn_with_title(
-                    ctx,
-                    "Model library rescan completed with warnings",
-                    message,
-                );
-            } else {
-                app.state
-                    .ui
-                    .toasts
-                    .success(ctx, "Model libraries rescanned", message);
-            }
         }
     }
 
@@ -2264,14 +2244,22 @@ impl Command {
             Self::RescanModelLibraries => {
                 crate::state::pdk_config::discover_model_files(&mut app.state.pdk_config);
                 app.state.model_library_manager.discover_spice_packs();
+                // Reported here, so the toolbar, the menu and the palette all
+                // say the same. A clean rescan answers the gesture; one that
+                // could not read a library is worth interrupting for.
                 let (message, has_errors) = model_library_rescan_diagnostic(app);
-                let severity = if has_errors {
-                    crate::diagnostics::LogSeverity::Warning
+                if has_errors {
+                    app.state
+                        .report_warning("Model library rescan completed with warnings", message);
                 } else {
-                    crate::diagnostics::LogSeverity::Info
-                };
-                app.state
-                    .record(severity, crate::diagnostics::LogSource::Studio, message);
+                    let message = format!("Model libraries rescanned: {message}");
+                    app.state.record(
+                        crate::diagnostics::LogSeverity::Info,
+                        crate::diagnostics::LogSource::Studio,
+                        message.clone(),
+                    );
+                    app.state.prompt(message);
+                }
             }
             Self::CompileVerilogA => {
                 // The command compiles the active Verilog-A cell view and

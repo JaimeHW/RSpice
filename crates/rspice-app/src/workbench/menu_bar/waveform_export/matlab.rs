@@ -115,11 +115,7 @@ pub(super) fn export_matlab(
         Ok(bytes) => bytes,
         Err(error) => {
             note_result_export_failure(state, format!("{LABEL} encoding failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{LABEL} export failed: {error}"),
-            );
+            state.report_failure(format!("{LABEL} export failed"), error.to_string());
             return;
         }
     };
@@ -157,11 +153,7 @@ pub(super) fn export_matlab(
         }
         Err(error) => {
             note_result_export_failure(state, format!("{LABEL} export failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("{LABEL} export failed: {error}"),
-            );
+            state.report_failure(format!("{LABEL} export failed"), error.to_string());
         }
     }
 }

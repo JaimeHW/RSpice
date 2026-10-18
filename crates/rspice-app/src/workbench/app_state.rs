@@ -1098,6 +1098,16 @@ impl AppState {
         );
     }
 
+    /// [`Self::report_failure`] for something that completed, but not the way
+    /// the user asked: saved as a download, not kept for the next session.
+    pub(crate) fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.report(
+            crate::ui::widgets::ToastKind::Warn,
+            title.into(),
+            detail.into(),
+        );
+    }
+
     fn report(&mut self, kind: crate::ui::widgets::ToastKind, title: String, detail: String) {
         use crate::diagnostics::{LogSeverity, LogSource};
         use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};

@@ -93,11 +93,7 @@ pub(super) fn export_vcd(
         }
         Err(error) => {
             note_result_export_failure(state, format!("VCD export failed: {error}"));
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("VCD export failed: {error}"),
-            );
+            state.report_failure("VCD export failed", error.to_string());
         }
     }
 }
