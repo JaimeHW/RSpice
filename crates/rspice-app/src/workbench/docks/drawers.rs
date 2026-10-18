@@ -24,6 +24,8 @@ const MOBILE_NAV_GROUP_HEIGHT: f32 = 23.0;
 /// One line of words beside a 24 px icon, with a comfortable touch target
 /// around them. The card carried a tagline under its label and was 72.
 const MOBILE_NAV_CARD_HEIGHT: f32 = 44.0;
+/// A card's trailing value, in the navigator's row-meta size.
+const MOBILE_NAV_META_SIZE: f32 = 10.0;
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let Some(drawer) = app.state.workbench.drawer else {
@@ -287,7 +289,11 @@ const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
 /// Everything that is not a workspace, under one head: three groups holding
 /// one, two and two entries were three rules and three captions over five
 /// rows.
-const TOOL_ACTIONS: [MobileNavigationAction; 5] = [
+///
+/// Notifications are here because a phone's title bar has no room for the
+/// bell: without this row the panel was reachable only from the palette, and
+/// the unread count from nowhere.
+const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
     MobileNavigationAction {
         command: Command::SpecialistToolBrowser,
         icon: WorkbenchIcon::More,
@@ -297,6 +303,11 @@ const TOOL_ACTIONS: [MobileNavigationAction; 5] = [
         command: Command::OpenConsole,
         icon: WorkbenchIcon::Console,
         label: "Console",
+    },
+    MobileNavigationAction {
+        command: Command::OpenNotifications,
+        icon: WorkbenchIcon::Bell,
+        label: "Notifications",
     },
     MobileNavigationAction {
         command: Command::ProjectLauncher,
@@ -510,9 +521,10 @@ fn mobile_navigation_group(
                 / columns as f32;
             for action in row {
                 let enabled = action.command.is_enabled(app);
+                let meta = card_meta(action.command, app);
                 let response = ui
                     .add_enabled_ui(enabled, |ui| {
-                        mobile_navigation_card(ui, *action, card_width)
+                        mobile_navigation_card(ui, *action, card_width, meta.as_deref())
                     })
                     .inner;
                 if enabled {
@@ -597,17 +609,34 @@ fn release_current_focus(ctx: &Context) {
     }
 }
 
+/// What a card states beside its name, the way a navigator row states its
+/// meta: the bell's unread count, for the shell whose title bar draws no bell.
+fn card_meta(command: Command, app: &RSpiceApp) -> Option<String> {
+    match command {
+        Command::OpenNotifications => {
+            let unread = app.state.ui.toasts.unread_count();
+            (unread > 0).then(|| format!("{unread} unread"))
+        }
+        _ => None,
+    }
+}
+
 fn mobile_navigation_card(
     ui: &mut egui::Ui,
     action: MobileNavigationAction,
     width: f32,
+    meta: Option<&str>,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let enabled = ui.is_enabled();
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(width, MOBILE_NAV_CARD_HEIGHT), Sense::click());
+    let announced = meta.map_or_else(
+        || action.label.to_owned(),
+        |meta| format!("{} \u{00b7} {meta}", action.label),
+    );
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), action.label)
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &announced)
     });
     ui.painter().rect(
         rect,
@@ -632,9 +661,20 @@ fn mobile_navigation_card(
             t.color.text_faint
         },
     );
+    let mut text_right = rect.right() - 10.0;
+    if let Some(meta) = meta {
+        let meta = ui.painter().text(
+            egui::pos2(text_right, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            meta,
+            theme::mono(MOBILE_NAV_META_SIZE, FontWeight::Regular),
+            t.color.text_faint,
+        );
+        text_right = meta.left() - 8.0;
+    }
     let text_clip = egui::Rect::from_min_max(
         egui::pos2(rect.left() + 53.0, rect.top() + 4.0),
-        egui::pos2(rect.right() - 10.0, rect.bottom() - 4.0),
+        egui::pos2(text_right, rect.bottom() - 4.0),
     );
     ui.painter().with_clip_rect(text_clip).text(
         egui::pos2(rect.left() + 53.0, rect.center().y),
@@ -849,12 +889,12 @@ mod tests {
         );
     }
 
-    /// Thirteen one-line rows under two heads, not thirteen taglined cards
-    /// under four: the one-column sheet was 1,237 px of scrolling.
+    /// Fourteen one-line rows under two heads, not taglined cards under four:
+    /// the one-column sheet was 1,237 px of scrolling.
     #[test]
     fn mobile_navigation_grid_height_tracks_its_real_rows() {
         assert_eq!(mobile_navigation_natural_height(2), 486.0);
-        assert_eq!(mobile_navigation_natural_height(1), 798.0);
+        assert_eq!(mobile_navigation_natural_height(1), 850.0);
         assert_eq!(MOBILE_NAV_MAX_WIDTH, 700.0);
         assert_eq!(MOBILE_NAV_GUTTER, 9.0);
         assert_eq!(MOBILE_NAV_CARD_HEIGHT, 44.0);
@@ -888,6 +928,32 @@ mod tests {
             .find(|action| action.label == "Organization & licensing")
             .expect("the account entry");
         assert_eq!(action.command, Command::AccountOrganization);
+    }
+
+    /// A phone's title bar draws no bell, so the sheet carries it: the panel
+    /// one tap away, and the unread count beside it in the row's meta.
+    #[test]
+    fn the_phone_sheet_reaches_notifications_and_counts_what_is_unread() {
+        let action = TOOL_ACTIONS
+            .iter()
+            .find(|action| action.command == Command::OpenNotifications)
+            .expect("the sheet offers the notification panel");
+        assert_eq!(action.label, "Notifications");
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        assert_eq!(
+            card_meta(Command::OpenNotifications, &app),
+            None,
+            "nothing unread says nothing"
+        );
+        app.state.ui.toasts.info(&ctx, "Recovery copy saved");
+        app.state.ui.toasts.info(&ctx, "Library reloaded");
+        assert_eq!(
+            card_meta(Command::OpenNotifications, &app).as_deref(),
+            Some("2 unread")
+        );
+        assert_eq!(card_meta(Command::OpenConsole, &app), None);
     }
 
     #[test]
