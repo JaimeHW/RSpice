@@ -1415,22 +1415,22 @@ mod tests {
         let campaign = crate::product::SimulationCampaignId::new();
         let bias = app.state.sim_setup.create_plan("Bias").expect("a plan");
         let sweep = app.state.sim_setup.create_plan("Sweep").expect("a plan");
-        let start_member =
-            |app: &mut RSpiceApp, plan: crate::product::SimulationPlanId, index: u32| -> u64 {
-                let run = app
-                    .state
-                    .simulation
-                    .start_prepared_run(plan_receipt(plan))
-                    .expect("a member run");
-                run.set_campaign_membership(
-                    SimulationCampaignMembership::new(campaign, "Nightly", index, 2)
-                        .expect("a membership"),
-                )
-                .expect("the run joins the campaign");
-                run.lifecycle = Lifecycle::Running;
-                run.id
-            };
-        let first = start_member(&mut app, bias, 1);
+        let start_member = |simulation: &mut crate::state::SimulationState,
+                            plan: crate::product::SimulationPlanId,
+                            index: u32|
+         -> u64 {
+            let run = simulation
+                .start_prepared_run(plan_receipt(plan))
+                .expect("a member run");
+            run.set_campaign_membership(
+                SimulationCampaignMembership::new(campaign, "Nightly", index, 2)
+                    .expect("a membership"),
+            )
+            .expect("the run joins the campaign");
+            run.lifecycle = Lifecycle::Running;
+            run.id
+        };
+        let first = start_member(&mut app.state.simulation, bias, 1);
         announce_run_completion(&ctx, &mut app);
 
         // One update: the first member fails and the second starts.
@@ -1453,7 +1453,7 @@ mod tests {
                 run_sequence: first,
             }),
         );
-        let second = start_member(&mut app, sweep, 2);
+        let second = start_member(&mut app.state.simulation, sweep, 2);
         announce_run_completion(&ctx, &mut app);
 
         let activity = app.state.ui.toasts.activity();
@@ -1628,7 +1628,7 @@ mod tests {
 
     /// Every accessibility label the toast stack draws this frame.
     #[cfg(not(target_arch = "wasm32"))]
-    fn toasts_on_screen(ctx: &Context, app: &mut RSpiceApp) -> Vec<String> {
+    fn toasts_on_screen(ctx: &Context, toasts: &mut crate::ui::widgets::Toasts) -> Vec<String> {
         let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1638,7 +1638,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                app.state.ui.toasts.show(ctx, 32.0, 40.0, false);
+                toasts.show(ctx, 32.0, 40.0, false);
             },
         );
         output
@@ -1715,7 +1715,7 @@ mod tests {
                 "{attention:?}: every outcome is kept in the bell"
             );
             assert_eq!(app.state.ui.toasts.unread_count(), 3, "{attention:?}");
-            let on_screen = toasts_on_screen(&ctx, &mut app);
+            let on_screen = toasts_on_screen(&ctx, &mut app.state.ui.toasts);
             let shows = |title: &str| on_screen.iter().any(|label| label.contains(title));
             assert_eq!(shows("Run 1 complete"), clean_toasts, "{attention:?}");
             assert_eq!(shows("Run 2 failed"), failure_toasts, "{attention:?}");
