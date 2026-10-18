@@ -122,6 +122,47 @@ mod tests {
         }
     }
 
+    /// The routing a new schematic starts with is the preference's, not the
+    /// session's last: an orthogonal preference does not inherit angled
+    /// routing from the session, and an any-angle one opens free routing on a
+    /// document that permits it.
+    #[test]
+    fn new_schematic_routing_comes_from_the_preference() {
+        use crate::state::WireJunctionPolicy;
+
+        let mut state = AppState::default();
+        state.ui.schematic_routing_mode = WireRoutingMode::Diagonal;
+        let created = state.new_schematic_document();
+        assert_eq!(
+            created.session.editor.wire_drawing.routing_mode,
+            WireRoutingMode::HorizontalFirst
+        );
+        assert_eq!(
+            created.document().document_policy.wire_junctions,
+            WireJunctionPolicy::OrthogonalAutomatic
+        );
+
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::WireJunctionBehavior, ANY_ANGLE_ROUTING)
+            .expect("a stored routing choice");
+        state.ui.schematic_routing_mode = WireRoutingMode::HorizontalFirst;
+        let created = state.new_schematic_document();
+        assert_eq!(
+            created.session.editor.wire_drawing.routing_mode,
+            WireRoutingMode::Diagonal
+        );
+        assert_eq!(
+            created.session.editor.bus_drawing.routing_mode,
+            WireRoutingMode::Diagonal
+        );
+        assert_eq!(
+            created.document().document_policy.wire_junctions,
+            WireJunctionPolicy::AnyAngle
+        );
+    }
+
     #[test]
     fn drag_selection_follows_the_preference_on_the_open_schematic() {
         let mut state = AppState::default();
