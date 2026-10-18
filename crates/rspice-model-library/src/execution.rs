@@ -711,9 +711,11 @@ mod tests {
     #[test]
     fn a_family_decision_settles_its_bins_and_the_card_of_its_name() {
         let record = decided("nch", "kit", KIT_BINS);
-        let (bindings, applied) =
-            resolve_materialized_definition_namespace(kit_and_vendor(), &[record.clone()])
-                .expect("the family decision settles the namespace");
+        let (bindings, applied) = resolve_materialized_definition_namespace(
+            kit_and_vendor(),
+            std::slice::from_ref(&record),
+        )
+        .expect("the family decision settles the namespace");
         assert_eq!(applied, [record]);
         let cards = bindings
             .iter()

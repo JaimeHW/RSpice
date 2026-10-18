@@ -14,6 +14,7 @@
 //! with it about which cards a family name reaches.
 
 use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use crate::{DeviceModel, ModelLibrary};
@@ -127,19 +128,35 @@ impl ModelLibrary {
     }
 
     /// Every family this library provides, by name.
+    ///
+    /// One pass over the cards rather than [`Self::bin_family`] per family: the
+    /// Properties picker asks this of every library on every frame, and a kit
+    /// holds thousands of cards in dozens of families.
     #[must_use]
     pub fn bin_families(&self) -> Vec<BinFamily<'_>> {
-        let mut names: Vec<String> = self
+        let names: HashSet<String> = self
             .models
             .values()
-            .filter_map(|model| model_bin_family(&model.name))
-            .map(str::to_ascii_lowercase)
+            .map(|model| model.name.to_ascii_lowercase())
             .collect();
-        names.sort();
-        names.dedup();
-        names
-            .iter()
-            .filter_map(|name| self.bin_family(name))
+        let mut families: BTreeMap<String, Vec<&DeviceModel>> = BTreeMap::new();
+        for model in self.models.values() {
+            let Some(family) = model_bin_family(&model.name).map(str::to_ascii_lowercase) else {
+                continue;
+            };
+            if !names.contains(&family) {
+                families.entry(family).or_default().push(model);
+            }
+        }
+        families
+            .into_values()
+            .map(|mut bins| {
+                bins.sort_by(|left, right| declaration_order(left, right));
+                BinFamily {
+                    name: model_bin_family(&bins[0].name).expect("a bin names its family"),
+                    bins,
+                }
+            })
             .collect()
     }
 
