@@ -6,9 +6,9 @@
 //! persisted, and deliberately reset (not copied) on clone — a clone
 //! rebuilds its own on first use.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use rspice_design::fast_hash::{FastMap, FastSet};
 use rspice_design::schematic::net_label::Junction;
 use rspice_design::schematic::wire::Wire;
 use rspice_design_model::Point;
@@ -35,7 +35,7 @@ pub struct CanvasCache {
 
     /// Spatial bins of wire-list indices used to avoid scanning an entire
     /// large design for viewport culling and point hit-testing.
-    wire_cells: HashMap<(i32, i32), Vec<usize>>,
+    wire_cells: FastMap<(i32, i32), Vec<usize>>,
 
     /// Very long conductors are cheaper to test directly than to replicate
     /// into an unbounded number of spatial bins.
@@ -43,10 +43,10 @@ pub struct CanvasCache {
 
     /// First (wire id, vertex index) at each grid point, in wire order —
     /// matching the linear-scan semantics of `wire_vertex_at`.
-    pub wire_vertices: HashMap<Point, (u64, usize)>,
+    pub wire_vertices: FastMap<Point, (u64, usize)>,
 
     /// Junction marker positions.
-    pub junctions: HashSet<Point>,
+    pub junctions: FastSet<Point>,
 
     /// Where the Junction tool may place a junction: crossings of the active
     /// sheet's conductors, found once per topology and sheet scope rather

@@ -1,25 +1,25 @@
-//! A fast hash for the private tables a pass over the drawing builds.
+//! A fast hash for the tables a pass over the drawing builds.
 //!
-//! The connectivity extraction and the junction rule key their tables by
-//! points, coordinates, ids and net numbers the drawing supplies, and each
-//! table lives for one pass. The standard hasher's defence against keys
-//! chosen to collide buys nothing there, and it costs several times this
-//! hash: a large sheet's pass hashes tens of thousands of keys, and every
-//! frame of a part drag runs one. This is the multiply-and-rotate hash rustc
-//! keeps its own tables with.
+//! The connectivity extraction, the junction rule and the canvas's geometry
+//! index key their tables by points, coordinates, ids and net numbers the
+//! drawing supplies, and each table lives until the drawing next changes.
+//! The standard hasher's defence against keys chosen to collide buys nothing
+//! there, and it costs several times this hash: a large sheet's pass hashes
+//! tens of thousands of keys, and every frame of a part drag runs one. This
+//! is the multiply-and-rotate hash rustc keeps its own tables with.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
 /// A map keyed by what the drawing supplies, hashed with [`FastHasher`].
-pub(crate) type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FastHasher>>;
+pub type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FastHasher>>;
 
 /// A set of what the drawing supplies, hashed with [`FastHasher`].
-pub(crate) type FastSet<T> = HashSet<T, BuildHasherDefault<FastHasher>>;
+pub type FastSet<T> = HashSet<T, BuildHasherDefault<FastHasher>>;
 
 /// The hash state: each word is added, then the sum multiplied.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct FastHasher {
+pub struct FastHasher {
     hash: u64,
 }
 
