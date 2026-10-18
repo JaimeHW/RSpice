@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::fast_hash::{FastMap, FastSet};
 use crate::hierarchy::HierarchySource;
 use crate::resolved_symbol::ResolvedCellSymbol;
 use crate::schematic::bus::{BusNotation, VectorConnectivity, vector_connectivity};
@@ -346,14 +347,17 @@ struct Pass<'a, S, G> {
     resolve_symbol: &'a S,
     promote_label: &'a G,
     buses: BusConnectivityAnalysis,
+    /// The nets, each with no points until [`Pass::finish`]: a net's points
+    /// are the points `point_to_net` maps to it, and only the finished
+    /// extraction is asked for them as a set.
     nets: Vec<Net>,
-    point_to_net: HashMap<Point, usize>,
+    point_to_net: FastMap<Point, usize>,
     ground_net: Option<usize>,
     vector_nets: VectorConnectivity,
     diagnostics: Vec<ConnectivityDiagnostic>,
     /// Labels, pins and tap ends on an unmarked crossing: they join neither
     /// wire, and one blocking finding already says so.
-    ambiguous_points: HashSet<Point>,
+    ambiguous_points: FastSet<Point>,
     /// Each component's terminals, by its index in the drawing, resolved once
     /// for every phase that reads them.
     terminals: Vec<Vec<(String, Point)>>,
@@ -378,11 +382,11 @@ where
             promote_label,
             buses,
             nets: Vec::new(),
-            point_to_net: HashMap::new(),
+            point_to_net: FastMap::default(),
             ground_net: None,
             vector_nets: VectorConnectivity::default(),
             diagnostics: Vec::new(),
-            ambiguous_points: HashSet::new(),
+            ambiguous_points: FastSet::default(),
             terminals,
         }
     }
@@ -615,8 +619,8 @@ where
         // by row and by column, each in order along its line because the
         // points are sorted by (x, y). An ambiguous point is not on any
         // segment's chain; a pin there keeps its own node.
-        let mut by_row: HashMap<i32, Vec<(i32, usize)>> = HashMap::new();
-        let mut by_col: HashMap<i32, Vec<(i32, usize)>> = HashMap::new();
+        let mut by_row: FastMap<i32, Vec<(i32, usize)>> = FastMap::default();
+        let mut by_col: FastMap<i32, Vec<(i32, usize)>> = FastMap::default();
         let mut candidates: Vec<usize> = Vec::new();
         for (index, point) in points.iter().enumerate() {
             if ambiguous.contains(point) {
@@ -717,7 +721,6 @@ where
                 nets.push(Net::new(nets.len() + 1));
                 nets.len() - 1
             });
-            nets[position].add_point(*point);
             self.point_to_net.insert(*point, nets[position].id);
         }
         self.nets.extend(nets);
@@ -1016,8 +1019,8 @@ where
         }
     }
 
-    /// Merge net `loser` into `winner`: fold its points, repoint the lookup,
-    /// and drop it from the net list.
+    /// Merge net `loser` into `winner`: repoint the lookup, which carries its
+    /// points over, fold in its label, and drop it from the net list.
     fn merge_nets(&mut self, winner: usize, loser: usize) {
         if winner == loser {
             return;
@@ -1084,7 +1087,7 @@ where
 
         // An annotation is a name written onto a point: it holds a terminal
         // that meets no conductor into the drawing rather than leaving it open.
-        let annotations: HashSet<Point> = schematic
+        let annotations: FastSet<Point> = schematic
             .net_labels
             .iter()
             .map(|label| label.pos)
@@ -1092,7 +1095,7 @@ where
             .collect();
 
         let mut bound: Vec<(u64, String, Point, usize)> = Vec::new();
-        let mut terminal_counts: HashMap<usize, usize> = HashMap::new();
+        let mut terminal_counts: FastMap<usize, usize> = FastMap::default();
         let terminals = std::mem::take(&mut self.terminals);
         for (component, terminals) in schematic.components.iter().zip(terminals) {
             for (pin, point) in terminals {
@@ -1104,11 +1107,13 @@ where
             }
         }
 
-        let spans: HashMap<usize, usize> = self
-            .nets
-            .iter()
-            .map(|net| (net.id, net.points.len()))
-            .collect();
+        // How many points each net spans: the points the lookup maps to it.
+        let mut spans: FastMap<usize, usize> = self.nets.iter().map(|net| (net.id, 0)).collect();
+        for net in self.point_to_net.values() {
+            if let Some(span) = spans.get_mut(net) {
+                *span += 1;
+            }
+        }
         bound
             .into_iter()
             .map(|(component_id, pin, point, net)| BoundTerminal {
@@ -1130,9 +1135,16 @@ where
         // conductor-level finding can name the drawn object. The net is found
         // by a map, the first net carrying the id as before, rather than by a
         // search of every net for every wire.
-        let mut net_positions: HashMap<usize, usize> = HashMap::with_capacity(self.nets.len());
+        let mut net_positions: FastMap<usize, usize> = FastMap::default();
+        net_positions.reserve(self.nets.len());
         for (position, net) in self.nets.iter().enumerate() {
             net_positions.entry(net.id).or_insert(position);
+        }
+        // A net's points are the points the lookup maps to it.
+        for (&point, net_id) in &self.point_to_net {
+            if let Some(&position) = net_positions.get(net_id) {
+                self.nets[position].add_point(point);
+            }
         }
         for wire in &schematic.wires {
             let Some(&net_id) = wire.points.first().and_then(|p| self.point_to_net.get(p)) else {
@@ -1151,7 +1163,7 @@ where
             .collect();
 
         let bound = self.bind_terminals();
-        let names: HashMap<usize, String> = self
+        let names: FastMap<usize, String> = self
             .nets
             .iter()
             .map(|net| (net.id, net.spice_name()))
@@ -1179,7 +1191,7 @@ where
 
         ExtractedConnectivity {
             nets: self.nets,
-            point_to_net: self.point_to_net,
+            point_to_net: self.point_to_net.into_iter().collect(),
             terminals,
             vector_nets: self.vector_nets,
             diagnostics: self.diagnostics,

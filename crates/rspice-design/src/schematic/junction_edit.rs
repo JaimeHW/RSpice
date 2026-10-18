@@ -6,8 +6,8 @@ use super::{
     net_label::{Junction, NetLabel},
     wire::{Wire, WireSegment},
 };
+use crate::fast_hash::{FastMap, FastSet};
 use rspice_design_model::Point;
-use std::collections::HashSet;
 
 /// Row/column interval index over wire segments. Built once per topology
 /// pass; point queries scan only the point's row and column buckets instead
@@ -20,24 +20,24 @@ use std::collections::HashSet;
 /// deletes the junction that joins them.
 struct SegmentIndex {
     /// Horizontal segments: y → (x0, x1, wire id) with x0 ≤ x1.
-    rows: std::collections::HashMap<i32, Vec<(i32, i32, u64)>>,
+    rows: FastMap<i32, Vec<(i32, i32, u64)>>,
     /// Vertical segments: x → (y0, y1, wire id) with y0 ≤ y1.
-    cols: std::collections::HashMap<i32, Vec<(i32, i32, u64)>>,
+    cols: FastMap<i32, Vec<(i32, i32, u64)>>,
     /// Segments that are neither horizontal nor vertical.
     diagonals: Vec<(WireSegment, u64)>,
     /// (wire id, vertex) pairs — distinguishes interiors from vertices. Left
     /// empty for an index that only asks where interiors cross.
-    vertices: HashSet<(u64, Point)>,
+    vertices: FastSet<(u64, Point)>,
 }
 
 impl SegmentIndex {
     /// The index over `wires`, with each wire's vertices when `vertices`.
     fn build(wires: &[Wire], vertices: bool) -> Self {
         let mut index = Self {
-            rows: std::collections::HashMap::new(),
-            cols: std::collections::HashMap::new(),
+            rows: FastMap::default(),
+            cols: FastMap::default(),
             diagonals: Vec::new(),
-            vertices: HashSet::new(),
+            vertices: FastSet::default(),
         };
         for wire in wires {
             if vertices {
@@ -146,8 +146,8 @@ fn line_direction(a: Point, b: Point) -> (i64, i64) {
 /// does not say which wire it means.
 pub struct CrossingIndex {
     index: SegmentIndex,
-    vertices: HashSet<Point>,
-    junctions: HashSet<Point>,
+    vertices: FastSet<Point>,
+    junctions: FastSet<Point>,
 }
 
 impl CrossingIndex {
@@ -188,15 +188,15 @@ impl CrossingIndex {
 pub struct JunctionRule {
     index: SegmentIndex,
     /// Wire ends at each vertex.
-    vertex_ends: std::collections::HashMap<Point, usize>,
+    vertex_ends: FastMap<Point, usize>,
     /// Component pins at each point.
-    pins: std::collections::HashMap<Point, usize>,
+    pins: FastMap<Point, usize>,
 }
 
 impl JunctionRule {
     /// The rule over `document`'s wires and the given pin positions.
     pub fn new(document: &SchematicDocument, pins: impl IntoIterator<Item = Point>) -> Self {
-        let mut vertex_ends = std::collections::HashMap::new();
+        let mut vertex_ends = FastMap::default();
         for wire in &document.wires {
             let last = wire.points.len().saturating_sub(1);
             for (index, point) in wire.points.iter().enumerate() {
@@ -204,7 +204,7 @@ impl JunctionRule {
                 *vertex_ends.entry(*point).or_insert(0) += ends;
             }
         }
-        let mut pin_counts = std::collections::HashMap::new();
+        let mut pin_counts = FastMap::default();
         for pin in pins {
             *pin_counts.entry(pin).or_insert(0) += 1;
         }
@@ -402,7 +402,7 @@ fn place_missing_junctions(
         .junctions
         .iter()
         .map(|junction| junction.pos)
-        .collect::<HashSet<_>>();
+        .collect::<FastSet<_>>();
     let mut changes = false;
     // Allocating an id searches the whole drawing for it. The ids in use are
     // gathered once instead, the first time a dot is added, and each new
@@ -436,7 +436,8 @@ pub fn remove_orphan_junctions(document: &mut SchematicDocument) -> usize {
 /// nothing the first does not; the first in drawing order stays.
 fn retain_meaningful_junctions(document: &mut SchematicDocument, rule: &JunctionRule) -> usize {
     let before = document.junctions.len();
-    let mut marked = HashSet::with_capacity(before);
+    let mut marked = FastSet::default();
+    marked.reserve(before);
     document
         .junctions
         .retain(|junction| marked.insert(junction.pos) && rule.dot_belongs(junction.pos, true));
@@ -483,6 +484,7 @@ pub fn add_net_label(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     /// Two wire ends meeting join each other with or without a dot, so a dot
     /// there marks nothing. It is exactly what deleting a T's stem leaves on
