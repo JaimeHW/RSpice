@@ -1505,7 +1505,7 @@ impl eframe::App for RSpiceApp {
             );
         }
         log::debug!("save: serialize app state");
-        eframe::set_value(storage, eframe::APP_KEY, &self.state);
+        self.state.store_session(storage);
         log::debug!("save: done");
     }
 

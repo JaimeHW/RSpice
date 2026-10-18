@@ -21,17 +21,7 @@ pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimu
     if state.retained.runs.is_empty() {
         // Clearing datasets preserves both their allocation history and
         // the project's retention decision across save and session restore.
-        return ProjectSimulationResultsData {
-            imported_transient_checkpoints: state.retained.imported_transient_checkpoints.clone(),
-            imported_monte_carlo_checkpoints: state
-                .retained
-                .imported_monte_carlo_checkpoints
-                .clone(),
-            next_run_id: state.retained.next_run_id,
-            retained_dataset_limit: state.retained.retained_dataset_limit,
-            ..ProjectSimulationResultsData::default()
-        }
-        .into();
+        return capture_simulation_results_without_runs(state);
     }
 
     let runs: Vec<_> = state
@@ -40,18 +30,11 @@ pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimu
         .iter()
         .map(ProjectSimulationRun::from)
         .collect();
-    let max_run_id = state
-        .retained
-        .runs
-        .iter()
-        .map(|run| run.id)
-        .max()
-        .unwrap_or(0);
     ProjectSimulationResultsData {
         runs,
         imported_monte_carlo_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
         imported_transient_checkpoints: state.retained.imported_transient_checkpoints.clone(),
-        next_run_id: state.retained.next_run_id.max(max_run_id),
+        next_run_id: next_run_id(state),
         retained_dataset_limit: state.retained.retained_dataset_limit,
         active_run_stable_id: state.active_run().map(|run| run.run_id),
         active_dataset_id: state.active_run().map(|run| run.dataset_id),
@@ -67,6 +50,33 @@ pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimu
         ..ProjectSimulationResultsData::default()
     }
     .into()
+}
+
+/// The results with every run left out: the imported resume inputs, the
+/// retention limit, and the run counter, so the next run is not numbered as
+/// one of the runs that were left out.
+pub(crate) fn capture_simulation_results_without_runs(
+    state: &SimulationState,
+) -> ProjectSimulationResults {
+    ProjectSimulationResultsData {
+        imported_transient_checkpoints: state.retained.imported_transient_checkpoints.clone(),
+        imported_monte_carlo_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
+        next_run_id: next_run_id(state),
+        retained_dataset_limit: state.retained.retained_dataset_limit,
+        ..ProjectSimulationResultsData::default()
+    }
+    .into()
+}
+
+fn next_run_id(state: &SimulationState) -> u64 {
+    let max_run_id = state
+        .retained
+        .runs
+        .iter()
+        .map(|run| run.id)
+        .max()
+        .unwrap_or(0);
+    state.retained.next_run_id.max(max_run_id)
 }
 #[cfg(test)]
 pub(crate) fn simulation_state_from_results(

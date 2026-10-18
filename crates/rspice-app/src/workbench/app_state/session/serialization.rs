@@ -81,6 +81,29 @@ impl serde::Serialize for AppState {
     where
         S: serde::Serializer,
     {
+        self.serialize_session(serializer, true)
+    }
+}
+
+/// The session with its runs left out, for a store that refused the whole
+/// session: a browser's storage holds a few megabytes, and one long run's
+/// waveforms are more than that.
+pub(super) struct WithoutRuns<'a>(pub(super) &'a AppState);
+
+impl serde::Serialize for WithoutRuns<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize_session(serializer, false)
+    }
+}
+
+impl AppState {
+    fn serialize_session<S>(&self, serializer: S, with_runs: bool) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
         // Safe mode may intentionally replace the visible project/session for
         // this process. Persist the exact pre-safe-mode payload so an
         // isolation launch can never erase document restoration state,
@@ -98,7 +121,11 @@ impl serde::Serialize for AppState {
         // flags stay out of the session; only user-visible result history is
         // persisted through the project-file DTO.
         use serde::ser::SerializeStruct;
-        let mut simulation_results = crate::io::capture_simulation_results(&self.simulation);
+        let mut simulation_results = if with_runs {
+            crate::io::capture_simulation_results(&self.simulation)
+        } else {
+            crate::io::capture_simulation_results_without_runs(&self.simulation)
+        };
         if simulation_results.validate().is_err() {
             simulation_results = ProjectSimulationResults::default();
         }

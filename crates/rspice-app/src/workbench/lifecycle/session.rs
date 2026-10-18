@@ -255,6 +255,20 @@ impl RunWatch {
     }
 }
 
+/// What the last save of the session kept for the next start. Transient.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum SessionKept {
+    /// All of it, or nothing has been saved yet.
+    #[default]
+    Whole,
+    /// All but the runs, which the store refused. Holds the run history they
+    /// were refused for, so later saves do not encode the same runs again
+    /// only to have them refused.
+    WithoutRuns(crate::state::RunHistoryRevision),
+    /// None of it: the store refused even the session without its runs.
+    Nothing,
+}
+
 /// Persistent and per-frame state shared by workbench document engines.
 #[derive(Debug, Clone, Default)]
 pub struct UiSessionState {
@@ -284,6 +298,9 @@ pub struct UiSessionState {
     /// The last autosave checkpoint could not be written. A failure is said
     /// when it starts, not again at every interval it persists. Transient.
     pub(crate) autosave_failing: bool,
+    /// What the last save of the session kept. Like `autosave_failing`, it
+    /// makes a refusal said when it starts, not at every save. Transient.
+    pub(crate) session_kept: SessionKept,
     /// A retained result document asked to be taken back to the plan that
     /// produced it.
     ///

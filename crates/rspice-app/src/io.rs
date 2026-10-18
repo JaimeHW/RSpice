@@ -30,7 +30,9 @@ pub(crate) use project_execution::{capture_execution_context, restore_execution_
 pub use project_io::{ProjectSimulationResults, ProjectSnapshot, load_project_file};
 #[cfg(test)]
 pub(crate) use project_results::simulation_state_from_results;
-pub(crate) use project_results::{capture_simulation_results, restore_simulation_results};
+pub(crate) use project_results::{
+    capture_simulation_results, capture_simulation_results_without_runs, restore_simulation_results,
+};
 pub use rspice_project::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext};
 // The run's own corner-expansion entry point, so the Corners page's tests can
 // assert that the page and the run reach the same verdict rather than that
