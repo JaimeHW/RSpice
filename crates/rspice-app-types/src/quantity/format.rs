@@ -127,7 +127,7 @@ impl QuantityPresentationPolicy {
     #[must_use]
     pub fn copy_scaled_unit_value(self, value: f64, unit: &str) -> String {
         match self.copied_value_format {
-            CopiedValueFormat::EngineeringNotationWithUnit => full_fixed_value(value, unit),
+            CopiedValueFormat::EngineeringNotationWithUnit => full_precision_value(value, unit),
             CopiedValueFormat::ScientificNotationWithSiUnit => scientific_value(value, unit),
         }
     }
@@ -154,10 +154,10 @@ impl QuantityPresentationPolicy {
         match self.copied_value_format {
             CopiedValueFormat::ScientificNotationWithSiUnit => scientific_value(kelvin, "K"),
             CopiedValueFormat::EngineeringNotationWithUnit => match self.temperature_display {
-                TemperatureDisplay::Celsius => full_fixed_value(kelvin - 273.15, "°C"),
-                TemperatureDisplay::Kelvin => full_fixed_value(kelvin, "K"),
+                TemperatureDisplay::Celsius => full_precision_value(kelvin - 273.15, "°C"),
+                TemperatureDisplay::Kelvin => full_precision_value(kelvin, "K"),
                 TemperatureDisplay::Fahrenheit => {
-                    full_fixed_value((kelvin - 273.15) * 1.8 + 32.0, "°F")
+                    full_precision_value((kelvin - 273.15) * 1.8 + 32.0, "°F")
                 }
             },
         }
@@ -169,8 +169,8 @@ impl QuantityPresentationPolicy {
         match self.copied_value_format {
             CopiedValueFormat::ScientificNotationWithSiUnit => scientific_value(radians, "rad"),
             CopiedValueFormat::EngineeringNotationWithUnit => match self.angle_display {
-                AngleDisplay::Degrees => full_fixed_value(radians.to_degrees(), "°"),
-                AngleDisplay::Radians => full_fixed_value(radians, "rad"),
+                AngleDisplay::Degrees => full_precision_value(radians.to_degrees(), "°"),
+                AngleDisplay::Radians => full_precision_value(radians, "rad"),
             },
         }
     }
@@ -180,8 +180,20 @@ fn fixed_value(value: f64, unit: &str, fractional_digits: usize) -> String {
     format!("{value:.fractional_digits$} {unit}")
 }
 
-fn full_fixed_value(value: f64, unit: &str) -> String {
-    format!("{value:.17} {unit}")
+/// Full-precision text for a value written against its unit as it stands.
+///
+/// Seventeen fixed decimals hold all seventeen significant digits a double
+/// needs from 0.1 up, so an ordinary value keeps that form. Under 0.1 they
+/// run out of digits, copying 1e-18 as zero; from 1e15 up the integer part
+/// alone carries the double's precision, so the decimals are padding and a
+/// reader counts digits to find the decade. Outside that span the shortest
+/// mantissa and exponent that read back as the same double say it outright.
+fn full_precision_value(value: f64, unit: &str) -> String {
+    if value == 0.0 || !value.is_finite() || (0.1..1e15).contains(&value.abs()) {
+        format!("{value:.17} {unit}")
+    } else {
+        format!("{value:e} {unit}")
+    }
 }
 
 fn scientific_value(value: f64, unit: &str) -> String {
@@ -196,7 +208,7 @@ fn engineering_value(
 ) -> String {
     if !value.is_finite() || value == 0.0 {
         return if full_precision {
-            full_fixed_value(value, unit)
+            full_precision_value(value, unit)
         } else {
             fixed_value(value, unit, fractional_digits)
         };
@@ -295,6 +307,103 @@ mod tests {
             policy.format_frequency(2e-15, 3),
             "2.000 fHz",
             "femto is still a prefix"
+        );
+    }
+
+    /// Copied values promise full precision, so an engineering copy written
+    /// without a prefix reads back as the very double it was made from.
+    /// Seventeen fixed decimals carry a double's seventeen significant digits
+    /// only from 0.1 up: under it they copied 1e-18 as zero and cut 3.2e-19
+    /// down to nothing.
+    #[test]
+    fn an_unprefixed_copy_reads_back_as_the_same_double() {
+        let engineering = QuantityPresentationPolicy {
+            copied_value_format: CopiedValueFormat::EngineeringNotationWithUnit,
+            ..QuantityPresentationPolicy::default()
+        };
+        let temperature = |temperature_display| QuantityPresentationPolicy {
+            temperature_display,
+            ..engineering
+        };
+        let angle = |angle_display| QuantityPresentationPolicy {
+            angle_display,
+            ..engineering
+        };
+        let mut values = vec![
+            0.0,
+            1.0 / 3.0,
+            0.1,
+            0.0625,
+            0.062_499_999_999_999_99,
+            273.15,
+            f64::EPSILON,
+            f64::MIN_POSITIVE,
+            f64::MIN_POSITIVE / 3.0,
+            5e-324,
+            f64::MAX,
+        ];
+        for exponent in -300..=300 {
+            for mantissa in [1.0, 1.234_567_890_123_456_7, 3.2, 9.999_999_999_999_998] {
+                values.push(mantissa * 10_f64.powi(exponent));
+            }
+        }
+        let read_back = |copied: &str| -> f64 {
+            let (number, _unit) = copied.split_once(' ').expect("a value and its unit");
+            number.parse().expect("the copy parses as a number")
+        };
+        for value in values.iter().flat_map(|value| [*value, -*value]) {
+            let copies = [
+                (engineering.copy_scaled_unit_value(value, "nV/√Hz"), value),
+                (
+                    temperature(TemperatureDisplay::Kelvin).copy_temperature(value),
+                    value,
+                ),
+                (
+                    temperature(TemperatureDisplay::Celsius).copy_temperature(value),
+                    value - 273.15,
+                ),
+                (
+                    temperature(TemperatureDisplay::Fahrenheit).copy_temperature(value),
+                    (value - 273.15) * 1.8 + 32.0,
+                ),
+                (angle(AngleDisplay::Radians).copy_angle(value), value),
+                (
+                    angle(AngleDisplay::Degrees).copy_angle(value),
+                    value.to_degrees(),
+                ),
+            ];
+            for (copied, shown) in copies {
+                if shown.is_finite() {
+                    assert_eq!(
+                        read_back(&copied).to_bits(),
+                        shown.to_bits(),
+                        "{shown:e} copied as {copied}"
+                    );
+                }
+            }
+        }
+
+        let noise = |value| engineering.copy_scaled_unit_value(value, "nV/√Hz");
+        assert_eq!(noise(1e-18), "1e-18 nV/√Hz");
+        assert_eq!(noise(-3.2e-19), "-3.2e-19 nV/√Hz");
+        assert_eq!(noise(1e300), "1e300 nV/√Hz");
+        assert_eq!(noise(0.05), "5e-2 nV/√Hz", "under 0.1 the decimals run out");
+        assert_eq!(noise(0.1), "0.10000000000000001 nV/√Hz");
+        assert_eq!(noise(1e15), "1e15 nV/√Hz");
+        assert_eq!(
+            noise(12.5),
+            "12.50000000000000000 nV/√Hz",
+            "an ordinary value keeps its fixed decimals"
+        );
+        assert_eq!(
+            noise(25_000.0),
+            "25000.00000000000000000 nV/√Hz",
+            "a unit that states its scale takes no prefix"
+        );
+        assert_eq!(noise(-0.0), "-0.00000000000000000 nV/√Hz");
+        assert_eq!(
+            temperature(TemperatureDisplay::Kelvin).copy_temperature(300.0),
+            "300.00000000000000000 K"
         );
     }
 
