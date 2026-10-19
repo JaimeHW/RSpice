@@ -382,7 +382,10 @@ fn document_section(
     let fields = format
         .title_block_field_order()
         .into_iter()
-        .filter(|field| is_document_field(*field) && format.title_field_shown(*field));
+        .filter(|field| {
+            is_document_field(*field)
+                && (is_release_record(*field) || format.title_field_shown(*field))
+        });
     for field in fields {
         let writable = editable && !locked_by_organization(format, field);
         if field == DrawingSheetTitleFieldId::DocumentStatus {
@@ -464,13 +467,19 @@ fn or_dash(value: &str) -> &str {
 /// Whether `field` holds a value of the whole document, kept by the project
 /// and lettered alike on every sheet, rather than one of this sheet's own.
 const fn is_document_field(field: DrawingSheetTitleFieldId) -> bool {
-    field.is_project_owned()
-        || matches!(
-            field,
-            DrawingSheetTitleFieldId::Revision
-                | DrawingSheetTitleFieldId::Date
-                | DrawingSheetTitleFieldId::DocumentStatus
-        )
+    field.is_project_owned() || is_release_record(field)
+}
+
+/// Whether `field` is part of the document's release record. A release is
+/// refused without its revision and date, so the panel offers all three even
+/// on a block that letters none of them, such as the ASME form's date.
+const fn is_release_record(field: DrawingSheetTitleFieldId) -> bool {
+    matches!(
+        field,
+        DrawingSheetTitleFieldId::Revision
+            | DrawingSheetTitleFieldId::Date
+            | DrawingSheetTitleFieldId::DocumentStatus
+    )
 }
 
 /// Whether the organization's block fixes `field`, so no sheet edits it.

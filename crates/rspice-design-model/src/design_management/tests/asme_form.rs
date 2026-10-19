@@ -156,49 +156,19 @@ fn the_block_takes_fig_5_1_on_a_to_c_and_fig_5_2_on_d_and_larger() {
 }
 
 #[test]
-fn the_template_is_named_with_the_size_of_the_block_the_sheet_carries() {
+fn the_template_is_named_for_the_standard_or_for_its_format() {
     let label = |standard| {
         let format = sheet(standard);
         format.title_block_template_label(format.title_block.template)
     };
-    assert_eq!(
-        label(DrawingSheetStandard::AnsiB),
-        "ASME Y14.1 · 7.50 × 2.00 in"
-    );
-    assert_eq!(
-        label(DrawingSheetStandard::AnsiD),
-        "ASME Y14.1 · 8.87 × 2.50 in"
-    );
+    // The name is the standard's alone: the block's size follows the sheet
+    // and is no choice of the user's, so a picker repeats none of it.
+    assert_eq!(label(DrawingSheetStandard::AnsiB), "ASME Y14.1");
+    assert_eq!(label(DrawingSheetStandard::AnsiD), "ASME Y14.1");
     // ASME Y14.1 does not define the ARCH series, so its block is named for
     // the format rather than claimed as the standard's.
-    assert_eq!(
-        label(DrawingSheetStandard::ArchB),
-        "ASME Y14.1 format · 7.82 × 2.00 in"
-    );
-    assert_eq!(
-        label(DrawingSheetStandard::ArchD),
-        "ASME Y14.1 format · 10.10 × 2.50 in"
-    );
-    // Every label names the block it reports.
-    for size in [AsmeY141TitleBlockSize::Small, AsmeY141TitleBlockSize::Large] {
-        for architectural in [false, true] {
-            for figure_minimum in [false, true] {
-                let form = AsmeY141TitleBlockForm {
-                    size,
-                    architectural,
-                    supplementary: false,
-                    figure_minimum,
-                };
-                let (width, height) = form.dimensions_um();
-                let named = format!(
-                    "{:.2} × {:.2} in",
-                    width as f64 / 25_400.0,
-                    height as f64 / 25_400.0
-                );
-                assert!(form.label().ends_with(&named), "{form:?} {named}");
-            }
-        }
-    }
+    assert_eq!(label(DrawingSheetStandard::ArchB), "ASME Y14.1 format");
+    assert_eq!(label(DrawingSheetStandard::ArchD), "ASME Y14.1 format");
 }
 
 #[test]
@@ -800,16 +770,8 @@ fn fig_5_1_fills_an_upright_ansi_a_drawing_area_and_a_bound_one_keeps_the_figure
     // figure's own block: still the standard's, as its sizes are minimums,
     // with the figure's eight-character names.
     for (standard, label, block) in [
-        (
-            DrawingSheetStandard::AnsiA,
-            "ASME Y14.1 · 6.25 × 2.00 in",
-            inch(625),
-        ),
-        (
-            DrawingSheetStandard::ArchA,
-            "ASME Y14.1 format · 6.57 × 2.00 in",
-            inch(657),
-        ),
+        (DrawingSheetStandard::AnsiA, "ASME Y14.1", inch(625)),
+        (DrawingSheetStandard::ArchA, "ASME Y14.1 format", inch(657)),
     ] {
         let format = upright(standard, true);
         assert!(!format.title_block_substituted(), "{standard:?}");

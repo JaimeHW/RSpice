@@ -142,7 +142,7 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
         "Sheet\nSize\nISO A4 · 297 × 210 mm\nOrientation\nLandscape\n\
          Format from\nProject default\nFrame\nISO 5457 frame\nZones\n6 × 4\n\
          Centring marks\nDrawn\nUnits\nMillimetres\n\
-         Title block\nTemplate\nISO 7200 · 180 × 45 mm\nOptional boxes\n3 of 6 shown\n\
+         Title block\nTemplate\nISO 7200\nOptional boxes\n3 of 6 shown\n\
          Created by\n\nApproved by\n\nDocument type\nCircuit diagram\n\nTitle\ntop\n\n\
          Document\nAll sheets\nLegal owner\n\nDocument status\nIn preparation\n\
          Identification number\n\nRevision\n\nDate of issue\nYYYY-MM-DD\n\n\
@@ -184,13 +184,14 @@ fn a_sheet_is_offered_its_standards_blocks_or_none() {
             [Template::Standard, Template::AsmeY141, Template::None]
         );
     }
-    // The ASME form is named with the size of the block the sheet carries.
+    // The ASME form is named for the standard, whatever size of block the
+    // sheet carries.
     assert_eq!(
         template_name(
             &on(DrawingSheetStandard::AnsiD, Template::AsmeY141),
             Template::AsmeY141
         ),
-        "ASME Y14.1 · 8.87 × 2.50 in"
+        "ASME Y14.1"
     );
 }
 
@@ -344,10 +345,7 @@ fn the_asme_forms_approvals_are_typed_in_the_panel() {
         DrawingSheetTitleBlockTemplate::AsmeY141
     );
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
-    assert!(
-        painted.contains("Template\nASME Y14.1 · 7.50 × 2.00 in\n"),
-        "{painted}"
-    );
+    assert!(painted.contains("Template\nASME Y14.1\n"), "{painted}");
     for label in [
         "Created by",
         "Created date",
@@ -393,6 +391,38 @@ fn the_asme_forms_approvals_are_typed_in_the_panel() {
     assert_eq!(
         panel.document_value(DrawingSheetTitleFieldId::ContractNumber),
         "N00024-26-C-0001"
+    );
+}
+
+/// The ASME form letters no date of issue, yet a release is refused without
+/// one, so the document's revision, date and status are offered on every
+/// block that has a document section and an ASME sheet can be released.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_asme_sheet_offers_the_release_record_its_block_does_not_letter() {
+    let mut panel = SheetPanel::new();
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
+    )
+    .unwrap();
+    let format = resolve_active_drawing_sheet(&panel.app.state).format;
+    assert!(!format.title_field_shown(DrawingSheetTitleFieldId::Date));
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
+    for label in ["Document status\n", "Revision\n", "Date of issue\n"] {
+        assert!(painted.contains(label), "{label}: {painted}");
+    }
+
+    panel.enter("Revision", "A");
+    panel.enter("Date of issue", "2026-10-18");
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::Status(DrawingSheetReleaseStatus::Released),
+    )
+    .unwrap();
+    assert_eq!(
+        panel.document_value(DrawingSheetTitleFieldId::Date),
+        "2026-10-18"
     );
 }
 

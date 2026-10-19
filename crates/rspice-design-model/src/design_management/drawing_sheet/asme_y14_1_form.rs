@@ -219,16 +219,10 @@ impl AsmeY141TitleBlockForm {
     /// named for the format rather than claimed as the standard's.
     #[must_use]
     pub const fn label(self) -> &'static str {
-        use AsmeY141TitleBlockSize::{Large, Small};
-        match (self.size, self.architectural, self.figure_minimum) {
-            (Small, false, false) => "ASME Y14.1 · 7.50 × 2.00 in",
-            (Large, false, false) => "ASME Y14.1 · 8.87 × 2.50 in",
-            (Small, true, false) => "ASME Y14.1 format · 7.82 × 2.00 in",
-            (Large, true, false) => "ASME Y14.1 format · 10.10 × 2.50 in",
-            (Small, false, true) => "ASME Y14.1 · 6.25 × 2.00 in",
-            (Large, false, true) => "ASME Y14.1 · 7.62 × 2.50 in",
-            (Small, true, true) => "ASME Y14.1 format · 6.57 × 2.00 in",
-            (Large, true, true) => "ASME Y14.1 format · 8.85 × 2.50 in",
+        if self.architectural {
+            "ASME Y14.1 format"
+        } else {
+            "ASME Y14.1"
         }
     }
 

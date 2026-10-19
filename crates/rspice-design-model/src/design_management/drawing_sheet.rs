@@ -588,12 +588,12 @@ pub enum DrawingSheetTitleBlockTemplate {
 
 impl DrawingSheetTitleBlockTemplate {
     /// The template's name wherever RSpice offers or reports it without a
-    /// sheet to size it by. The ASME form's name gives its size on a sheet
-    /// (see [`SchematicSheetFormat::title_block_template_label`]).
+    /// sheet to name it by. A sheet off the ASME sizes names the ASME form
+    /// for the format (see [`SchematicSheetFormat::title_block_template_label`]).
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Standard => "ISO 7200 · 180 × 45 mm",
+            Self::Standard => "ISO 7200",
             Self::OrganizationManaged => "Organization block",
             Self::None => "No title block",
             Self::AsmeY141 => "ASME Y14.1",

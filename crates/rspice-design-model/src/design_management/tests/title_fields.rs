@@ -299,13 +299,11 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
 
 #[test]
 fn each_title_block_template_goes_by_one_name() {
-    // Every picker, summary and warning names a template the same way, and
-    // a built-in block's name says what it is and how big.
+    // Every picker, summary and warning names a template the same way: by
+    // the standard it follows, as each sheet is offered only its own.
     for (template, name) in [
-        (
-            DrawingSheetTitleBlockTemplate::Standard,
-            "ISO 7200 · 180 × 45 mm",
-        ),
+        (DrawingSheetTitleBlockTemplate::Standard, "ISO 7200"),
+        (DrawingSheetTitleBlockTemplate::AsmeY141, "ASME Y14.1"),
         (DrawingSheetTitleBlockTemplate::None, "No title block"),
         (
             DrawingSheetTitleBlockTemplate::OrganizationManaged,
@@ -313,11 +311,6 @@ fn each_title_block_template_goes_by_one_name() {
         ),
     ] {
         assert_eq!(template.label(), name);
-        if let Some((width_um, height_um)) = template.dimensions_um()
-            && template != DrawingSheetTitleBlockTemplate::OrganizationManaged
-        {
-            assert!(name.ends_with(&format!("{} × {} mm", width_um / 1_000, height_um / 1_000)));
-        }
     }
 }
 
