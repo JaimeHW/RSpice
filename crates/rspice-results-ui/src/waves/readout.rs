@@ -599,21 +599,68 @@ pub fn append_copied_cursor(
         // line pasted a value off the far side of its turnaround while the
         // register on screen reported each branch.
         let value = sample_at_with_shape(&trace.x, &trace.y, &trace.shape, x, interpolation);
-        let copied = match trace.kind {
-            TraceKind::PhaseDeg => policy.copy_angle(value.to_radians()),
-            TraceKind::PhaseRad => policy.copy_angle(value),
-            TraceKind::MagnitudeDb => policy.copy_si_value(value, model.trace_unit(trace)),
-            TraceKind::NoiseDensity => policy.copy_scaled_unit_value(value, NOISE_DENSITY_UNIT),
-            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
-                // The trace's own unit, not the strip's: copying a supply
-                // current off a sheet it shares with node voltages must not
-                // paste milliamps as millivolts.
-                policy.copy_si_value(value, model.trace_unit(trace))
-            }
-        };
+        let copied = copied_trace_value(policy, trace.kind, value, model.trace_unit(trace));
         let _ = writeln!(target, "{} = {}", trace.name, copied.trim_end());
     }
     while target.ends_with('\n') {
         target.pop();
+    }
+}
+
+/// One trace's value as Copied values writes it. The unit is the trace's
+/// own, not the strip's: copying a supply current off a sheet it shares
+/// with node voltages must not paste milliamps as millivolts.
+fn copied_trace_value(
+    policy: QuantityPresentationPolicy,
+    kind: TraceKind,
+    value: f64,
+    unit: &str,
+) -> String {
+    match kind {
+        TraceKind::PhaseDeg => policy.copy_angle_degrees(value),
+        TraceKind::PhaseRad => policy.copy_angle(value),
+        TraceKind::NoiseDensity => policy.copy_scaled_unit_value(value, NOISE_DENSITY_UNIT),
+        TraceKind::MagnitudeDb | TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
+            policy.copy_si_value(value, unit)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_app_types::quantity::{AngleDisplay, CopiedValueFormat};
+
+    /// A phase trace holds degrees. Its copy went through radians and back,
+    /// which landed a unit in the last place off for about one degree value
+    /// in eight, so the pasted phase was not the one on the trace.
+    #[test]
+    fn a_copied_phase_reads_back_as_the_degrees_on_the_trace() {
+        let policy = QuantityPresentationPolicy {
+            copied_value_format: CopiedValueFormat::EngineeringNotationWithUnit,
+            angle_display: AngleDisplay::Degrees,
+            ..QuantityPresentationPolicy::default()
+        };
+        let mut degrees = (-72_000..=72_000)
+            .map(|step| f64::from(step) * 0.01)
+            .collect::<Vec<_>>();
+        degrees.extend([1.0 / 3.0, 0.1, 5e-324, f64::MIN_POSITIVE, 1e300]);
+        for exponent in -300..=300 {
+            for mantissa in [1.0, 1.234_567_890_123_456_7, 3.2, 9.999_999_999_999_998] {
+                let value = mantissa * 10_f64.powi(exponent);
+                degrees.extend([value, -value]);
+            }
+        }
+        for value in degrees {
+            let copied = copied_trace_value(policy, TraceKind::PhaseDeg, value, "°");
+            let (number, unit) = copied.split_once(' ').expect("a value and its unit");
+            assert_eq!(unit, "°");
+            let read_back: f64 = number.parse().expect("the copy parses as a number");
+            assert_eq!(
+                read_back.to_bits(),
+                value.to_bits(),
+                "{value:e} copied as {copied}"
+            );
+        }
     }
 }

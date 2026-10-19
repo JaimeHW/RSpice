@@ -426,7 +426,7 @@ fn copied_sample_value(
     match unit {
         "" => format!("{value:.17e}"),
         "Hz" => policy.copy_frequency(value),
-        "°" => policy.copy_angle(value.to_radians()),
+        "°" => policy.copy_angle_degrees(value),
         "rad" => policy.copy_angle(value),
         unit if rspice_results_ui::waves::unit_carries_its_decade(unit) => {
             policy.copy_scaled_unit_value(value, unit)
@@ -523,6 +523,9 @@ pub(crate) fn exact_result_browser_selection_bundle(
 
 #[cfg(test)]
 mod exact_evidence_quarantine_tests;
+
+#[cfg(test)]
+mod copied_value_tests;
 
 /// Lossless source-evidence projection for one typed Data Browser artifact.
 ///

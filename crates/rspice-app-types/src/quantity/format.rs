@@ -174,6 +174,21 @@ impl QuantityPresentationPolicy {
             },
         }
     }
+
+    /// Copy an angle stored in degrees, such as a phase sample.
+    ///
+    /// Degrees display writes the stored value as it stands. Going through
+    /// radians and back, as [`Self::copy_angle`] would, lands a unit in the
+    /// last place off for about one degree value in eight.
+    #[must_use]
+    pub fn copy_angle_degrees(self, degrees: f64) -> String {
+        match (self.copied_value_format, self.angle_display) {
+            (CopiedValueFormat::EngineeringNotationWithUnit, AngleDisplay::Degrees) => {
+                full_precision_value(degrees, "°")
+            }
+            _ => self.copy_angle(degrees.to_radians()),
+        }
+    }
 }
 
 fn fixed_value(value: f64, unit: &str, fractional_digits: usize) -> String {
