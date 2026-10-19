@@ -250,7 +250,8 @@ pub struct AppState {
     /// Flag to signal that application exit has been requested (after confirmation)
     pub(crate) exit_requested: bool,
     /// Recently opened/saved schematic and project files, most recent first
-    /// (persisted across sessions; drives File ▸ Open recent).
+    /// (persisted across sessions). The projects are the start page's recent
+    /// list; the schematics are what crash recovery scans.
     pub(crate) recent_files: Vec<RecentFile>,
     /// Browser-only suggested filename for the next schematic download.
     pub(crate) browser_schematic_save_name: Option<String>,
@@ -1229,7 +1230,7 @@ impl AppState {
     }
 
     /// Record a file in the recent-files list (most recent first, deduped,
-    /// capped at Projects and files ▸ Recent files listed).
+    /// capped at Projects and files ▸ Recent projects listed).
     pub(crate) fn remember_recent_file(&mut self, kind: RecentKind, path: &std::path::Path) {
         let previous = self
             .recent_files
@@ -1252,11 +1253,22 @@ impl AppState {
         self.trim_recent_files();
     }
 
-    /// Drop the oldest recent files beyond what Projects and files ▸ Recent
-    /// files listed keeps, so lowering it shortens the list at once.
+    /// Drop the oldest recent projects beyond what Projects and files ▸
+    /// Recent projects listed keeps, so lowering it shortens the start page's
+    /// list at once. The count is of projects, the only kind that list shows:
+    /// schematics are capped at the same count on their own, so opening them
+    /// never pushes a project off the page.
     pub(crate) fn trim_recent_files(&mut self) {
         let listed = self.ui.preferences.recent_files_listed();
-        self.recent_files.truncate(listed);
+        let (mut projects, mut schematics) = (0, 0);
+        self.recent_files.retain(|recent| {
+            let kept = match recent.kind {
+                RecentKind::Project => &mut projects,
+                RecentKind::Schematic => &mut schematics,
+            };
+            *kept += 1;
+            *kept <= listed
+        });
     }
 
     /// Change a project pin without changing its recency or file identity.
@@ -1369,14 +1381,15 @@ mod tests {
         assert!(state.recent_files[1].pinned);
     }
 
-    /// The list keeps as many files as Recent files listed asks, newest
-    /// first, and lowering the count shortens it at once.
+    /// The list keeps as many projects as Recent projects listed asks,
+    /// newest first, and lowering the count shortens it at once.
     #[test]
-    fn the_recent_list_keeps_as_many_files_as_preferences_ask() {
+    fn the_recent_list_keeps_as_many_projects_as_preferences_ask() {
         let mut state = AppState::default();
-        let path = |index: usize| std::path::PathBuf::from(format!("C:/Engineering/{index}.rsch"));
+        let path =
+            |index: usize| std::path::PathBuf::from(format!("C:/Engineering/{index}.rspiceproj"));
         for index in 0..10 {
-            state.remember_recent_file(RecentKind::Schematic, &path(index));
+            state.remember_recent_file(RecentKind::Project, &path(index));
         }
         assert_eq!(state.recent_files.len(), 8, "the shipped count is 8");
 
@@ -1386,7 +1399,7 @@ mod tests {
             .set_scalar(crate::workbench::ScalarPreference::RecentFilesListed, 12)
             .expect("12 is an offered count");
         for index in 10..20 {
-            state.remember_recent_file(RecentKind::Schematic, &path(index));
+            state.remember_recent_file(RecentKind::Project, &path(index));
         }
         assert_eq!(state.recent_files.len(), 12);
 

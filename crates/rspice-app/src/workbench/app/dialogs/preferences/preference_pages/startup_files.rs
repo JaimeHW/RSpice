@@ -45,22 +45,22 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-/// How many recently opened projects and schematics the recent list keeps.
+/// How many recent projects the start page lists.
 fn recent_files_row(ui: &mut Ui, state: &mut AppState) {
     let labels = RECENT_FILES_LISTED
-        .map(|count| format!("{count} files"))
+        .map(|count| format!("{count} projects"))
         .to_vec();
     searchable_row(
         ui,
-        "Recent files listed",
-        "How many recently opened projects and schematics RSpice remembers.",
+        "Recent projects listed",
+        "How many recently opened projects the start page lists.",
         &["recent", "history", "mru"],
         |ui| {
             value_column(ui, |ui| {
                 // Shown as the count it is, so a stored count between two
                 // of the offered ones is not misreported as its neighbour.
                 let current = format!(
-                    "{} files",
+                    "{} projects",
                     state
                         .ui
                         .preferences
@@ -69,7 +69,7 @@ fn recent_files_row(ui: &mut Ui, state: &mut AppState) {
                 if let Some(selected) = select(
                     ui,
                     "preferences.projects.recent-files-listed",
-                    "Recent files listed",
+                    "Recent projects listed",
                     &current,
                     &labels,
                     control_width(ui),

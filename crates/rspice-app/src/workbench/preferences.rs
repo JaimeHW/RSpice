@@ -1584,8 +1584,8 @@ impl UserPreferences {
         self.choice(ChoicePreference::StartupProject) == 0
     }
 
-    /// How many recently opened projects and schematics the recent list
-    /// keeps.
+    /// How many recently opened projects the start page lists. Recent
+    /// schematics, which it never shows, are capped at the same count apart.
     #[must_use]
     pub fn recent_files_listed(&self) -> usize {
         self.scalar(ScalarPreference::RecentFilesListed) as usize

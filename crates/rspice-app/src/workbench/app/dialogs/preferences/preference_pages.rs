@@ -1378,7 +1378,7 @@ mod tests {
             ("trackpad", "Mouse wheel"),
             ("retention", "Runs kept"),
             ("launch", "On startup"),
-            ("mru", "Recent files listed"),
+            ("mru", "Recent projects listed"),
             ("backup", "Keep a backup when saving"),
             ("include", "Library folders"),
             ("models", "Library folders"),

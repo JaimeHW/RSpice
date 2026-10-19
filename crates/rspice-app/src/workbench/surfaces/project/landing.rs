@@ -1020,6 +1020,44 @@ mod tests {
         assert!(rows[0].pinned);
     }
 
+    /// Recent projects listed counts what the start page shows. It used to
+    /// count schematics too, which the page never lists, so opening as many
+    /// schematics as the count pushed every project off it.
+    #[test]
+    fn opening_schematics_never_pushes_a_project_off_the_start_page() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.recent_files.clear();
+        let listed = app.state.ui.preferences.recent_files_listed();
+        let project =
+            |index: usize| std::path::PathBuf::from(format!("C:/Work/p{index}.rspiceproj"));
+        let schematic = |index: usize| std::path::PathBuf::from(format!("C:/Work/s{index}.rsch"));
+        for index in 0..=listed {
+            app.state
+                .remember_recent_file(RecentKind::Project, &project(index));
+        }
+        for index in 0..=listed {
+            app.state
+                .remember_recent_file(RecentKind::Schematic, &schematic(index));
+        }
+
+        let shown = recent_project_rows(&app)
+            .into_iter()
+            .map(|row| row.recent.path)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shown,
+            (1..=listed).rev().map(project).collect::<Vec<_>>(),
+            "the newest {listed} projects, newest first"
+        );
+        let schematics = app
+            .state
+            .recent_files
+            .iter()
+            .filter(|recent| recent.kind == RecentKind::Schematic)
+            .count();
+        assert_eq!(schematics, listed, "schematics stay bounded for recovery");
+    }
+
     #[test]
     fn landing_shared_filter_uses_portable_unc_identity() {
         let mut app = RSpiceApp::test_instance();
