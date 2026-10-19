@@ -276,15 +276,20 @@ impl JunctionRule {
         }
 
         // Each segment's strict interior, as (candidate, wire, direction).
-        // A column's candidates are a run of the (x, y) order; a row's, a
-        // run of a (y, x) order of their indices.
+        // A column's candidates are a run of the (x, y) order. A row's are
+        // dealt out of that order by y, so each row's list is in x order;
+        // only rows a segment runs along are dealt.
         let mut incidences: Vec<(usize, u64, (i64, i64))> = Vec::new();
-        let mut by_row = (0..candidates.len()).collect::<Vec<_>>();
-        by_row.sort_unstable_by_key(|&index| (candidates[index].0.y, candidates[index].0.x));
+        let mut by_row: FastMap<i32, Vec<usize>> = FastMap::default();
+        for (index, (point, ..)) in candidates.iter().enumerate() {
+            if self.index.rows.contains_key(&point.y) {
+                by_row.entry(point.y).or_default().push(index);
+            }
+        }
         for (&y, segments) in &self.index.rows {
-            let start = by_row.partition_point(|&index| candidates[index].0.y < y);
-            let end = by_row.partition_point(|&index| candidates[index].0.y <= y);
-            let row = &by_row[start..end];
+            let Some(row) = by_row.get(&y) else {
+                continue;
+            };
             for &(x0, x1, wire) in segments {
                 let low = row.partition_point(|&index| candidates[index].0.x <= x0);
                 let high = row
