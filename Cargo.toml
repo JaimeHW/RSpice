@@ -304,6 +304,23 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# A part drag in the schematic editor runs these crates' connectivity, wire
+# clean-up and sheet reconciliation on every frame, and its frames are held to
+# the budgets in `rspice-app`'s `schematic::view::frame_cost`: each move under
+# 8 ms, the drop within one 60 Hz frame. Built at "z", the shipping wasm missed
+# both under Node (slowest move 8.3-8.5 ms, drop 18.0-18.8 ms); at "s" it
+# meets them (7.6-7.7 ms, 15.0-15.6 ms). The production UI image grows 1.0 %
+# raw (110.37 to 111.44 MiB) and 1.5 % gzipped (29.90 to 30.34 MiB). Levels 2
+# and 3 were no faster and grew it 5.0 % and 5.5 % gzipped.
+[profile.web-release.package.rspice-design-model]
+opt-level = "s"
+
+[profile.web-release.package.rspice-design]
+opt-level = "s"
+
+[profile.web-release.package.rspice-project]
+opt-level = "s"
+
 # Faster test compilation
 [profile.test]
 incremental = true
