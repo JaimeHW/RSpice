@@ -82,3 +82,12 @@ impl Hasher for FastHasher {
         self.hash.rotate_left(26)
     }
 }
+
+/// A point's place in (x, y) order, as one integer: sorting by it sorts by x
+/// and then y, at one comparison where the pair takes two. Flipping each
+/// coordinate's sign bit orders the negative ones below the rest.
+#[inline]
+pub(crate) fn xy_order(point: rspice_design_model::Point) -> u64 {
+    let biased = |coordinate: i32| u64::from(coordinate.cast_unsigned() ^ 0x8000_0000);
+    (biased(point.x) << 32) | biased(point.y)
+}

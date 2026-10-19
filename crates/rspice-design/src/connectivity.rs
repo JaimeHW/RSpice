@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::fast_hash::{FastMap, FastSet};
+use crate::fast_hash::{FastMap, FastSet, xy_order};
 use crate::hierarchy::HierarchySource;
 use crate::resolved_symbol::ResolvedCellSymbol;
 use crate::schematic::bus::{BusNotation, VectorConnectivity, vector_connectivity};
@@ -617,12 +617,20 @@ where
             .chain(self.buses.scalar_taps.iter().map(|binding| binding.point))
             .map(|point| (point, false));
         let mut marked: Vec<(Point, bool)> = seeds.chain(others).collect();
-        // A seed sorts before a non-seed at the same point, so the one entry
-        // kept for the point says whether anything seeds it.
-        marked.sort_unstable_by_key(|&(point, seed)| (point.x, point.y, !seed));
-        marked.dedup_by_key(|&mut (point, _)| point);
-        let mut is_node: Vec<bool> = marked.iter().map(|&(_, seed)| seed).collect();
-        let points: Vec<Point> = marked.into_iter().map(|(point, _)| point).collect();
+        marked.sort_unstable_by_key(|&(point, _)| xy_order(point));
+        // One node per point, which anything there may seed.
+        let mut points: Vec<Point> = Vec::with_capacity(marked.len());
+        let mut is_node: Vec<bool> = Vec::with_capacity(marked.len());
+        for (point, seed) in marked {
+            if points.last() == Some(&point) {
+                if let Some(seeded) = is_node.last_mut() {
+                    *seeded |= seed;
+                }
+            } else {
+                points.push(point);
+                is_node.push(seed);
+            }
+        }
         let index_of = |point: Point| {
             points
                 .binary_search_by_key(&(point.x, point.y), |node| (node.x, node.y))
