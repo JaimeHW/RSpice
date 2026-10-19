@@ -181,6 +181,7 @@ fn canvas_frame(ctx: &egui::Context, state: &mut AppState, time: f64, events: Ve
                     zoom: 1.0,
                     bounds,
                 };
+                // accessibility-pointer-shim: test-only canvas event harness.
                 let response = ui.interact(
                     bounds,
                     egui::Id::new("test-schematic-canvas"),
