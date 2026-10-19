@@ -1272,6 +1272,33 @@ impl SheetCatalog {
         recorded: &BTreeMap<u64, SheetId>,
         default_sheet_id: Option<SheetId>,
     ) -> Result<SheetReconcileReceipt, DesignManagementError> {
+        let (receipt, reconciled) = self.reconcile_object_assignments_staged(
+            expected_catalog_revision,
+            live_object_ids,
+            recorded,
+            default_sheet_id,
+        )?;
+        if let Some(reconciled) = reconciled {
+            *self = reconciled;
+        }
+        Ok(receipt)
+    }
+
+    /// [`SheetCatalog::reconcile_object_assignments_with`] with nothing
+    /// changed: its receipt, refused for exactly what it refuses, and the
+    /// catalog it would leave when membership changes.
+    ///
+    /// Reconciliation runs on every synchronization and almost always finds
+    /// membership already in step, so a caller that would otherwise copy its
+    /// whole design authority to reconcile into asks this first, and copies
+    /// only to publish the catalog it is given.
+    pub fn reconcile_object_assignments_staged(
+        &self,
+        expected_catalog_revision: u64,
+        live_object_ids: impl IntoIterator<Item = u64>,
+        recorded: &BTreeMap<u64, SheetId>,
+        default_sheet_id: Option<SheetId>,
+    ) -> Result<(SheetReconcileReceipt, Option<Self>), DesignManagementError> {
         let plan =
             self.plan_reconciliation(expected_catalog_revision, live_object_ids, default_sheet_id)?;
         let receipt = plan.receipt;
@@ -1280,53 +1307,54 @@ impl SheetCatalog {
             + receipt.removed_cross_sheet_ports
             == 0
         {
-            return Ok(receipt);
+            return Ok((receipt, None));
         }
 
-        let live = |object_id: &u64| plan.live.binary_search(object_id).is_ok();
-        let mut candidate = self.clone();
-        candidate
-            .object_assignments
-            .retain(|object_id, _| live(object_id));
-        if let Some(destination) = plan.destination {
-            for object_id in &plan.live {
-                if candidate.object_assignments.contains_key(object_id) {
-                    continue;
-                }
+        // The live identities and the assignments are both sorted, so one
+        // walk beside each other keeps each live object's sheet and finds
+        // the objects that have none.
+        let mut assignments = Vec::with_capacity(plan.live.len());
+        let mut assigned = self.object_assignments.iter().peekable();
+        for &object_id in &plan.live {
+            while assigned.next_if(|&(&id, _)| id < object_id).is_some() {}
+            if let Some((_, &sheet_id)) = assigned.next_if(|&(&id, _)| id == object_id) {
+                assignments.push((object_id, sheet_id));
+            } else if let Some(destination) = plan.destination {
                 let sheet_id = recorded
-                    .get(object_id)
+                    .get(&object_id)
                     .copied()
                     .filter(|recorded| self.find(*recorded).is_some())
                     .unwrap_or(destination);
-                candidate.object_assignments.insert(*object_id, sheet_id);
+                assignments.push((object_id, sheet_id));
             }
         }
-        candidate.cross_sheet_ports.retain(|port| {
-            live(&port.definition.first.object_id()) && live(&port.definition.second.object_id())
-        });
+        let live = |object_id: u64| plan.live.binary_search(&object_id).is_ok();
+        let mut candidate = Self {
+            schema_version: self.schema_version,
+            revision: self.revision,
+            settings: self.settings.clone(),
+            sheets: self.sheets.clone(),
+            active_sheet_id: self.active_sheet_id,
+            object_assignments: assignments.into_iter().collect(),
+            cross_sheet_ports: self
+                .cross_sheet_ports
+                .iter()
+                .filter(|port| {
+                    live(port.definition.first.object_id())
+                        && live(port.definition.second.object_id())
+                })
+                .cloned()
+                .collect(),
+        };
         candidate.bump_revision("sheet catalog")?;
         candidate.validate()?;
-        *self = candidate;
-        Ok(SheetReconcileReceipt {
-            catalog_revision: self.revision,
-            ..receipt
-        })
-    }
-
-    /// What [`SheetCatalog::reconcile_object_assignments_with`] would change,
-    /// refused for exactly what it refuses, with nothing changed.
-    ///
-    /// Reconciliation runs on every synchronization and almost always finds
-    /// membership already in step, so a caller that would otherwise copy its
-    /// whole design authority to reconcile into asks this first.
-    pub fn reconcile_object_assignments_preview(
-        &self,
-        expected_catalog_revision: u64,
-        live_object_ids: impl IntoIterator<Item = u64>,
-        default_sheet_id: Option<SheetId>,
-    ) -> Result<SheetReconcileReceipt, DesignManagementError> {
-        self.plan_reconciliation(expected_catalog_revision, live_object_ids, default_sheet_id)
-            .map(|plan| plan.receipt)
+        Ok((
+            SheetReconcileReceipt {
+                catalog_revision: candidate.revision,
+                ..receipt
+            },
+            Some(candidate),
+        ))
     }
 
     /// Every check reconciliation makes, and what it would change: each

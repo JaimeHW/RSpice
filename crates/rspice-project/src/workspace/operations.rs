@@ -709,40 +709,25 @@ impl ProjectWorkspace {
             .chain(schematic.as_ref().probes.iter().map(|object| object.id))
             .collect::<Vec<_>>();
         // Every synchronization reconciles, and nearly every one finds
-        // membership in step. That is found on the catalog as it stands, by
-        // the same checks, before the design authority is copied to commit.
-        let preview = catalog
-            .reconcile_object_assignments_preview(
-                catalog.revision(),
-                live_object_ids.iter().copied(),
-                Some(active_sheet_id),
-            )
-            .map_err(invalid_design_management)?;
-        if preview.added_assignments == 0
-            && preview.removed_assignments == 0
-            && preview.removed_cross_sheet_ports == 0
-        {
-            return Ok(None);
-        }
-
-        let mut candidate = (*self.design_management).clone();
-        let catalog = candidate
-            .sheet_catalog_mut(&key)
-            .expect("the cloned catalog retains the validated cell/view key");
-        let receipt = catalog
-            .reconcile_object_assignments_with(
+        // membership in step. The catalog as it stands works out what the
+        // reconciliation leaves, by the same checks, and the design
+        // authority is copied only to publish a catalog that changed.
+        let (receipt, reconciled) = catalog
+            .reconcile_object_assignments_staged(
                 catalog.revision(),
                 live_object_ids,
                 recorded,
                 Some(active_sheet_id),
             )
             .map_err(invalid_design_management)?;
-        if receipt.added_assignments == 0
-            && receipt.removed_assignments == 0
-            && receipt.removed_cross_sheet_ports == 0
-        {
+        let Some(reconciled) = reconciled else {
             return Ok(None);
-        }
+        };
+
+        let mut candidate = (*self.design_management).clone();
+        *candidate
+            .sheet_catalog_mut(&key)
+            .expect("the cloned catalog retains the validated cell/view key") = reconciled;
         self.replace_design_management(candidate)?;
         Ok(Some(receipt))
     }
