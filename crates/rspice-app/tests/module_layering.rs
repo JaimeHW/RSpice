@@ -1779,8 +1779,8 @@ const PAINTED_UI_CRATES: &[&str] = &[
 /// commit as the fix — an entry whose site is clean fails this test, so the
 /// list cannot rot into a record of problems that no longer exist.
 ///
-/// It is 62 entries because the class is 62 sites wide and fixing them is a
-/// program rather than a change. It was measured, not estimated: the two
+/// It began at 62 entries because the class was 62 sites wide and fixing
+/// them is a program rather than a change. It was measured, not estimated: the two
 /// known-worst sites were repaired first — Check and save's rows, and
 /// `models/manager/paint.rs::property`, which painted all three columns of
 /// every property of every card in that workspace and published nothing at
