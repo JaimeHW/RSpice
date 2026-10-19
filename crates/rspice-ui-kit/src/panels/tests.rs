@@ -284,6 +284,49 @@ fn choice_and_typed_rows_start_their_values_on_one_edge() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+/// A choice longer than its field is cut to the field. Laid out whole, it
+/// widened its row, and every row after it ran past the panel's edge.
+#[test]
+fn a_choice_longer_than_its_field_is_cut_to_it() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let long = "Letters, digits and every punctuation mark the netlist keeps".to_owned();
+    let mut selected = "long".to_owned();
+    let options = vec![("long".to_owned(), long.clone())];
+    let mut typed = "R1".to_owned();
+    let mut rows = Rect::NOTHING;
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(240.0, 200.0))),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    property_row_combo(
+                        ui,
+                        "Net names",
+                        "cut-choice",
+                        &mut selected,
+                        &options,
+                        true,
+                    );
+                    property_row_input(ui, "Instance", &mut typed, false);
+                    rows = ui.min_rect();
+                });
+        },
+    );
+    assert!(rows.right() <= 240.0, "the rows ran to {}", rows.right());
+    let choice = output
+        .shapes
+        .iter()
+        .find_map(|clipped| painted_text_rect(&clipped.shape, &long))
+        .expect("the choice was painted");
+    assert!(choice.right() < rows.right(), "{choice:?} in {rows:?}");
+}
+
 #[test]
 fn property_controls_and_section_headers_expose_their_full_accessible_names() {
     let ctx = egui::Context::default();

@@ -1611,17 +1611,37 @@ fn property_row_combo_in(
             spacing.button_padding.x = f32::from(FIELD_TEXT_INSET);
             spacing.button_padding.y = ((value_rect.height() - text) * 0.5).max(0.0);
             spacing.interact_size.y = value_rect.height();
+            // A choice longer than its field is cut to the field and named
+            // whole on hover. Laid out at its own width, it widened the row,
+            // and every row after it ran past the panel's edge.
+            let room = value_rect.width()
+                - 2.0 * spacing.button_padding.x
+                - spacing.icon_spacing
+                - spacing.icon_width;
+            let font = egui::TextStyle::Button.resolve(ui.style());
+            let cut = ui
+                .painter()
+                .layout_no_wrap(selected_label.clone(), font, Color32::PLACEHOLDER)
+                .size()
+                .x
+                > room;
             ui.add_enabled_ui(enabled, |ui| {
                 let output = egui::ComboBox::from_id_salt(id_source)
                     .width(value_rect.width())
-                    .selected_text(selected_label)
+                    .truncate()
+                    .selected_text(selected_label.clone())
                     .show_ui(ui, |ui| {
                         for (value, display) in options {
                             ui.selectable_value(selected, value.clone(), display);
                         }
                     });
+                let response = if cut {
+                    output.response.on_hover_text(selected_label)
+                } else {
+                    output.response
+                };
                 ui.ctx()
-                    .accesskit_node_builder(output.response.id, |node| node.set_label(label));
+                    .accesskit_node_builder(response.id, |node| node.set_label(label));
             });
         },
     );
