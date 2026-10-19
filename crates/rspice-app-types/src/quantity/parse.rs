@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+use super::engineering::scaled_decimal;
 use super::{
     DecimalSeparatorInput, EngineeringSuffixPolicy, QuantityPresentationPolicy, TimeFrequencyInput,
 };
@@ -67,16 +68,18 @@ pub fn parse_ui_quantity(
     let suffix = suffix.trim();
 
     let si = match kind {
-        QuantityInputKind::EngineeringScalar => {
-            value * parse_prefix(suffix, "", policy.engineering_suffixes)?
-        }
-        QuantityInputKind::Time => parse_time_or_frequency(value, suffix, "s", policy)?,
+        QuantityInputKind::EngineeringScalar => scaled_decimal(
+            number,
+            value,
+            parse_prefix(suffix, "", policy.engineering_suffixes)?,
+        ),
+        QuantityInputKind::Time => parse_time_or_frequency(number, value, suffix, "s", policy)?,
         QuantityInputKind::Frequency => {
             if let Some(prefix) = strip_unit(suffix, "rad/s", policy.engineering_suffixes) {
                 value * parse_prefix(prefix, "rad/s", policy.engineering_suffixes)?
                     / std::f64::consts::TAU
             } else {
-                parse_time_or_frequency(value, suffix, "Hz", policy)?
+                parse_time_or_frequency(number, value, suffix, "Hz", policy)?
             }
         }
         QuantityInputKind::Temperature => parse_temperature(value, suffix)?,
@@ -153,6 +156,7 @@ fn numeric_prefix_len(source: &str) -> usize {
 }
 
 fn parse_time_or_frequency(
+    number: &str,
     value: f64,
     suffix: &str,
     unit: &'static str,
@@ -167,7 +171,11 @@ fn parse_time_or_frequency(
     }
     let prefix = strip_unit(suffix, unit, policy.engineering_suffixes)
         .ok_or_else(|| QuantityInputError::UnexpectedUnit(suffix.to_owned()))?;
-    Ok(value * parse_prefix(prefix, unit, policy.engineering_suffixes)?)
+    Ok(scaled_decimal(
+        number,
+        value,
+        parse_prefix(prefix, unit, policy.engineering_suffixes)?,
+    ))
 }
 
 /// `suffix` without the field's `unit` at its end. SPICE spelling folds case,
@@ -648,6 +656,48 @@ mod tests {
                 - std::f64::consts::PI)
                 .abs()
                 < 1e-12
+        );
+    }
+
+    /// A typed prefix moves the decimal exponent, so a field holds the double
+    /// nearest what was typed: multiplying the mantissa by the prefix rounds
+    /// twice, and a copied value pasted back was then not the one copied.
+    #[test]
+    fn a_prefixed_field_value_is_the_double_nearest_what_was_typed() {
+        let policy = QuantityPresentationPolicy::default();
+        let mut misses = Vec::new();
+        for exponent in -12..=12 {
+            for mantissa in [1.234_567_890_123_456_7, 3.2, 8.738_147_087_027_245] {
+                let value: f64 = mantissa * 10_f64.powi(exponent);
+                let written = format!("{value:e}");
+                let (digits, power) = written.split_once('e').expect("an exponent");
+                let power: i32 = power.parse().expect("an integer exponent");
+                for (prefix, decade) in [("n", -9), ("u", -6), ("m", -3), ("k", 3)] {
+                    let typed = format!("{digits}e{}{prefix}", power - decade);
+                    let mut fields = vec![
+                        (typed.clone(), QuantityInputKind::EngineeringScalar),
+                        (format!("{typed}s"), QuantityInputKind::Time),
+                    ];
+                    // `mHz` is refused: the engine reads it as megahertz.
+                    if prefix != "m" {
+                        fields.push((format!("{typed}Hz"), QuantityInputKind::Frequency));
+                    }
+                    for (text, kind) in fields {
+                        let parsed =
+                            parse_ui_quantity(&text, kind, policy, UiNumberLocale::default())
+                                .expect("a prefixed quantity");
+                        if parsed.to_bits() != value.to_bits() {
+                            misses.push(format!("{text} read as {parsed:e}, not {value:e}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            misses.is_empty(),
+            "{} misses, the first {:?}",
+            misses.len(),
+            misses.first()
         );
     }
 }
