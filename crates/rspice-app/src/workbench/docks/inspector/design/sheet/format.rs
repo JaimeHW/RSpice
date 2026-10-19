@@ -191,10 +191,11 @@ fn size_rows(
     }));
     choices.push((
         SizeChoice::OneOff,
-        if one_off {
-            current_size_choice_label(format)
-        } else {
-            "Custom size\u{2026}".to_owned()
+        match (one_off, editable) {
+            // Its edges and its name are the rows under it.
+            (true, true) => "Custom size".to_owned(),
+            (true, false) => current_size_choice_label(format),
+            (false, _) => "Custom size\u{2026}".to_owned(),
         },
     ));
     match choice_row(

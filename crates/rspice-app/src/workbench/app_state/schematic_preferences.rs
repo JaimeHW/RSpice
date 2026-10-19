@@ -29,15 +29,16 @@ pub(crate) const SELECTION_CROSSING: [SelectionCrossingPolicy; 3] = [
 ];
 
 /// The characters a net name may use, in stored index order, with the words
-/// Preferences and the sheet inspector name each set by.
+/// Preferences and the sheet inspector name each set by. Each fits the
+/// inspector's value column at its default width whole.
 pub(crate) const NET_NAME_CHARACTERS: [(NetNamingPolicy, &str); 2] = [
     (
         NetNamingPolicy::StrictCaseSensitive,
-        "ASCII letters, digits, _.$:/![]<>-",
+        "A\u{2013}Z a\u{2013}z 0\u{2013}9 _.$:/![]<>-",
     ),
     (
         NetNamingPolicy::SpiceCompatibleRelaxed,
-        "Any printable character but spaces",
+        "Any printable but spaces",
     ),
 ];
 

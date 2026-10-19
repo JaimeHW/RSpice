@@ -146,8 +146,8 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
          Created by\n\nApproved by\n\nDocument type\nCircuit diagram\n\nTitle\ntop\n\n\
          Document\nAll sheets\nLegal owner\n\nDocument status\nIn preparation\n\
          Identification number\n\nRevision\n\nDate of issue\nYYYY-MM-DD\n\n\
-         Change reference\nECO, ticket or release record\n\n\
-         Schematic\nGrid\n2.5 mm\nNet names\nASCII letters, digits, _.$:/![]<>-\n"
+         Change reference\nECO or ticket\n\n\
+         Schematic\nGrid\n2.5 mm\nNet names\nA\u{2013}Z a\u{2013}z 0\u{2013}9 _.$:/![]<>-\n"
     );
 }
 
@@ -446,7 +446,7 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
     assert_eq!(app.state.ui.schematic_snap.grid_size, 5);
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(
-        painted.ends_with("Grid\n1.25 mm\nNet names\nAny printable character but spaces\n"),
+        painted.ends_with("Grid\n1.25 mm\nNet names\nAny printable but spaces\n"),
         "{painted}"
     );
 
@@ -633,7 +633,7 @@ fn a_custom_size_is_typed_in_the_panel_and_saved_to_custom_sizes() {
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
     assert!(
         painted.contains(
-            "Size\nOne-off custom size · 297 × 210 mm\nWidth (mm)\n297\nHeight (mm)\n210\n\
+            "Size\nCustom size\nWidth (mm)\n297\nHeight (mm)\n210\n\
              Size name\nOne-off custom size\nSave as project size\nSave as personal size\n"
         ),
         "{painted}"
@@ -946,4 +946,66 @@ fn the_panel_brings_its_sheet_section_into_view_once_when_asked() {
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(painted.starts_with("Sheet\nSize\n"), "{painted}");
     assert!(!app.state.workbench.reveal_sheet_section);
+}
+
+/// At the inspector's default width the panel stays inside the inspector: a
+/// choice longer than its field is cut to the field rather than widening
+/// every row after it past the edge, and an ISO sheet's words and a custom
+/// size's fit whole.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_panel_fits_the_inspectors_default_width() {
+    fn walk(shape: &egui::epaint::Shape, cut: &mut Vec<String>) {
+        match shape {
+            egui::epaint::Shape::Text(text) if text.galley.elided => {
+                cut.push(text.galley.job.text.clone());
+            }
+            egui::epaint::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, cut)),
+            _ => {}
+        }
+    }
+    let iso_a3 = vec![DrawingSheetEdit::Size(DrawingSheetStandard::IsoA3)];
+    let ansi_d = vec![
+        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiD),
+        DrawingSheetEdit::Units(crate::state::DrawingSheetDisplayUnit::Inches),
+    ];
+    let custom = vec![
+        DrawingSheetEdit::CustomSize {
+            width_um: 500_000,
+            height_um: 350_000,
+        },
+        DrawingSheetEdit::CustomSizeName("Lab panel".to_owned()),
+    ];
+    for (edits, whole) in [(iso_a3, true), (ansi_d, false), (custom, true)] {
+        let mut app = RSpiceApp::test_instance();
+        for edit in edits {
+            apply_drawing_sheet_edit(&mut app.state, edit).unwrap();
+        }
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut rows = egui::Rect::NOTHING;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(312.0, 1_400.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        sheet_panel(ui, &mut app.state);
+                        rows = ui.min_rect();
+                    });
+            },
+        );
+        assert!(rows.right() <= 312.0, "the rows ran to {}", rows.right());
+        let mut cut = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut cut);
+        }
+        assert!(!whole || cut.is_empty(), "cut short: {cut:?}");
+    }
 }

@@ -439,7 +439,7 @@ fn document_section(
             SheetText::ChangeReference,
             SheetText::ChangeReference.label(),
             &control.change_reference,
-            "ECO, ticket or release record",
+            "ECO or ticket",
         ) {
             *edit = Some(Ok(DrawingSheetEdit::ChangeReference(typed)));
         }
