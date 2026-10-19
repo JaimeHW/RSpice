@@ -30,3 +30,30 @@ review_after = "2027-01-17"
 reason = "rustybuzz is unmaintained and the advisory lists no patched release. Reviewed 2026-10-18: krilla 0.8.2 is the newest release, its simple-text feature still shapes with rustybuzz 0.20.1, and no krilla release on harfrust exists. Both PDF exporters need simple-text to draw text."
 mitigations = "rustybuzz shapes only with the four IBM Plex files compiled in from assets/fonts with include_bytes!: rspice-hardcopy's PDF export and the app's keyboard-shortcut PDF build every krilla Font from those static bytes, and neither can load another font. Hardcopy text is capped at 64 KiB per string and 16 MiB per scene, control characters are refused, and every character must map to a glyph in the embedded font before it is shaped. Raster pixels and output bytes are bounded separately."
 exit_criteria = "Move to a krilla release backed by harfrust, or replace the simple-text path, as soon as a compatible maintained implementation is available."
+
+[[exceptions]]
+id = "RUSTSEC-2026-0370"
+dependency = "rspice-app (Linux and BSD desktop only) -> eframe 0.35.0 -> egui-winit 0.35.0 -> accesskit_winit 0.32.2 -> accesskit_unix 0.21.1 -> {accesskit_atspi_common 0.18.1, atspi 0.29.0, zbus 5.16.0} -> zvariant 5"
+owner = "@JaimeHW"
+review_after = "2027-01-17"
+reason = "zvariant is no longer maintained as a standalone crate: zbus 6.0.0 absorbed it as zbus::wire, and the advisory lists no patched release. Reviewed 2026-10-18: no accessibility crate is on zbus 6 yet. accesskit_unix 0.24.0, the newest, still requires zbus ^5.19 and atspi ^0.29; atspi 0.30.0 still requires zbus ^5.5; accesskit_atspi_common 0.21.0 still requires zvariant ^5.15. eframe 0.35 takes only accesskit_winit 0.32, and eframe 0.37's accesskit_winit 0.34 still reaches accesskit_unix 0.24, so no compatible graph drops it."
+mitigations = "Only rspice-app's native Linux and BSD build links zvariant, through eframe's accesskit feature; Windows, macOS and WebAssembly builds, and every other RSpice crate, do not. accesskit_unix uses it to encode and decode D-Bus messages on the user's own session bus and, only while a screen reader is enabled, on the AT-SPI accessibility bus. Both are local transports between the user's own processes; no netlist, project, result file or network input reaches it. The advisory reports no vulnerability, and the crate comes from the checksum-locked crates.io graph under cargo-deny's source policy."
+exit_criteria = "Remove this exception when an eframe release RSpice can adopt reaches an accesskit_unix and atspi on zbus 6, so zvariant leaves the graph."
+
+[[exceptions]]
+id = "RUSTSEC-2026-0371"
+dependency = "rspice-app (Linux and BSD desktop only) -> eframe 0.35.0 -> egui-winit 0.35.0 -> accesskit_winit 0.32.2 -> accesskit_unix 0.21.1 -> {atspi 0.29.0 -> atspi-common 0.13.0, zbus 5.16.0} -> zbus_names 4"
+owner = "@JaimeHW"
+review_after = "2027-01-17"
+reason = "zbus_names is no longer maintained as a standalone crate: zbus 6.0.0 absorbed it as zbus::names, and the advisory lists no patched release. Reviewed 2026-10-18: accesskit_unix 0.24.0 and atspi 0.30.0, the newest of each, still require zbus 5, which requires zbus_names 4, and eframe 0.35 takes only accesskit_winit 0.32, so no compatible graph drops it."
+mitigations = "Only rspice-app's native Linux and BSD build links zbus_names, through eframe's accesskit feature; Windows, macOS and WebAssembly builds, and every other RSpice crate, do not. It validates D-Bus bus, interface and member names for zbus and the AT-SPI crates on the user's own session bus and, only while a screen reader is enabled, on the AT-SPI accessibility bus. Both are local transports between the user's own processes; no netlist, project, result file or network input reaches it. The advisory reports no vulnerability, and the crate comes from the checksum-locked crates.io graph under cargo-deny's source policy."
+exit_criteria = "Remove this exception when an eframe release RSpice can adopt reaches an accesskit_unix and atspi on zbus 6, so zbus_names leaves the graph."
+
+[[exceptions]]
+id = "RUSTSEC-2026-0372"
+dependency = "rspice-app (Linux and BSD desktop only) -> eframe 0.35.0 -> egui-winit 0.35.0 -> accesskit_winit 0.32.2 -> accesskit_unix 0.21.1 -> zbus 5.16.0 -> zvariant 5 -> zvariant_derive 5"
+owner = "@JaimeHW"
+review_after = "2027-01-17"
+reason = "zvariant_derive is no longer maintained as a standalone crate: zbus 6.0.0 provides its derive macros, and the advisory lists no patched release. Reviewed 2026-10-18: it is reached only through zvariant, which stays in the graph until accesskit_unix and atspi move to zbus 6; their newest releases, 0.24.0 and 0.30.0, have not, and eframe 0.35 takes only accesskit_winit 0.32."
+mitigations = "zvariant_derive is a procedural macro: it runs only inside rustc while zvariant and the D-Bus crates above it compile for rspice-app's Linux and BSD build, and links no code of its own into any RSpice binary. It reads only those crates' source, never netlists, projects, result files or other runtime input. The advisory reports no vulnerability, and the crate comes from the checksum-locked crates.io graph under cargo-deny's source policy."
+exit_criteria = "Remove this exception together with RUSTSEC-2026-0370, when an eframe release RSpice can adopt reaches an accesskit_unix and atspi on zbus 6 and zvariant leaves the graph."

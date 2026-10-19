@@ -8,6 +8,9 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is a build-time proc-macro reached only through faer 0.24.4's gemm 0.19.0 and pulp 0.22.3, the newest releases of each, which all still require it; no runtime input reaches it." },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is used directly by rspice-hardcopy and reached through krilla's rustybuzz and winit's Wayland title bars; every font it reads is an embedded IBM Plex file or a local system font, and rustybuzz and ab_glyph have no release without it." },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through krilla 0.8.2 simple-text, still the newest krilla; RSpice's PDF exporters shape only the four embedded IBM Plex fonts, and no krilla release on harfrust exists yet." },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant moved into zbus 6, but accesskit_unix 0.24 and atspi 0.30, the newest, are still on zbus 5; it is linked only by rspice-app's Linux and BSD build, for D-Bus messages on the user's own session and AT-SPI buses." },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names moved into zbus 6, but accesskit_unix 0.24 and atspi 0.30, the newest, are still on zbus 5; it is linked only by rspice-app's Linux and BSD build, for D-Bus names on the user's own session and AT-SPI buses." },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive's macros moved into zbus 6, but it stays until zvariant leaves the accesskit_unix and atspi graph; it is a proc-macro run only while rspice-app's Linux and BSD build compiles." },
 ]
 
 [licenses]
