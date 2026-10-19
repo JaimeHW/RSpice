@@ -74,6 +74,7 @@ crates, and refuses egui, eframe, winit, wgpu and rfd in its closure.
 | `symbol-artwork` | Builds `symbol_artwork`: `build.rs` embeds every SVG in `assets/component_symbols/` and `usvg` parses them. Enabled by `rspice-app`, `rspice-hardcopy` and `rspice-schematic-editor` |
 | `generated-veriloga-catalog` | Enables `rspice-core/veriloga-builtins`, so the build-time generated Verilog-A models are in the device catalog and can be placed and bound; without it that catalog is empty |
 | `symbol-test-observation` | Counts symbol-view deserializations for cache regression tests. Enabled by `rspice-app`'s dev-dependency |
+| `work-observation` | Counts the work an edit does (document snapshots, connectivity passes and their steps, wire cleanups) in `rspice-design-model`'s `work_tally`, for tests that hold a gesture to its per-frame work. Enabled by `rspice-app`'s dev-dependency |
 | `schematic-test-fixtures` | Exposes test-only hooks (`Schematic::document_mut_for_test`, `set_identity_for_test`, materialization counters) to dependent tests that construct external or invalid edits. Enabled by the dev-dependencies of `rspice-app`, `rspice-schematic-editor` and `rspice-simulation` |
 
 ## Testing

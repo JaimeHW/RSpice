@@ -640,6 +640,8 @@ impl AppState {
     /// drawing holds it — so losing one is a project transaction of its own,
     /// which restores both the contract and the anchors it names.
     fn reconcile_active_sheet_membership(&mut self, active: &CellViewRef) {
+        #[cfg(test)]
+        rspice_design_model::work_tally::record(|work| work.sheet_reconciliations += 1);
         let recorded = self.schematic.take_restored_sheet_assignments();
         // Only a cell view that already holds contracts can lose one, and only
         // that case needs the retained before-state. Every other document

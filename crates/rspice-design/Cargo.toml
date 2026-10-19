@@ -18,6 +18,8 @@ generated-veriloga-catalog = ["rspice-core/veriloga-builtins"]
 symbol-test-observation = []
 # Enabled only by dependent integration tests that construct external/invalid edits.
 schematic-test-fixtures = []
+# Enabled by the app dev-dependency to count the work an edit does.
+work-observation = ["rspice-design-model/work-observation"]
 
 [dependencies]
 log.workspace = true

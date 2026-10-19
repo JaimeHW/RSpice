@@ -136,6 +136,8 @@ impl DesignManagementCatalog {
 
     #[must_use]
     pub fn sheet_catalog(&self, cell_view_key: &str) -> Option<&SheetCatalog> {
+        #[cfg(feature = "work-observation")]
+        crate::work_tally::record(|work| work.sheet_catalog_lookups += 1);
         canonical_cell_view_key(cell_view_key)
             .ok()
             .and_then(|key| self.sheet_catalogs.get(&key))

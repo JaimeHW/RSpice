@@ -9,6 +9,11 @@ publish.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+# Counts the work an edit does, for tests that hold a gesture to it.
+# Enabled by `rspice-app`'s dev-dependency; never in a shipping build.
+work-observation = []
+
 [dependencies]
 # The signed drawing-sheet package contract. Publishing and verification share
 # one implementation with the importer, so the offline publisher executable

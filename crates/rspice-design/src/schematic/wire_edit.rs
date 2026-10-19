@@ -582,6 +582,8 @@ pub fn merge_collinear_wires(
     seeds: Option<&HashSet<u64>>,
     join_end_to_end: bool,
 ) -> bool {
+    #[cfg(feature = "work-observation")]
+    rspice_design_model::work_tally::record(|work| work.collinear_merges += 1);
     let mut merge = CollinearMerge::new(document, seeds.cloned(), join_end_to_end);
     for line in 0..merge.lines.len() {
         while let Some((left, right)) = merge.next_pair(line) {
@@ -658,6 +660,10 @@ impl<'a> CollinearMerge<'a> {
         seeds: Option<HashSet<u64>>,
         join_end_to_end: bool,
     ) -> Self {
+        #[cfg(feature = "work-observation")]
+        rspice_design_model::work_tally::record(|work| {
+            work.collinear_wires_sorted += document.wires.len();
+        });
         let mut lines: HashMap<LineKey, Vec<LineWire>> = HashMap::new();
         let mut line_of = vec![None; document.wires.len()];
         for (position, wire) in document.wires.iter().enumerate() {

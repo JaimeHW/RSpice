@@ -99,6 +99,8 @@ pub struct SchematicSnapshot {
 impl SchematicSnapshot {
     /// Create a snapshot from the current schematic state
     pub fn capture(state: &super::document::SchematicDocument) -> Self {
+        #[cfg(feature = "work-observation")]
+        rspice_design_model::work_tally::record(|work| work.document_snapshots += 1);
         Self {
             document_policy: state.document_policy,
             grid_size: state.grid_size,

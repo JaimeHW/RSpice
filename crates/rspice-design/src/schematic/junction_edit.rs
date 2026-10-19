@@ -435,6 +435,8 @@ pub fn remove_orphan_junctions(document: &mut SchematicDocument) -> usize {
 /// carry a dot onto a point that already has one, and the second marks
 /// nothing the first does not; the first in drawing order stays.
 fn retain_meaningful_junctions(document: &mut SchematicDocument, rule: &JunctionRule) -> usize {
+    #[cfg(feature = "work-observation")]
+    rspice_design_model::work_tally::record(|work| work.junction_updates += 1);
     let before = document.junctions.len();
     let mut marked = FastSet::default();
     marked.reserve(before);

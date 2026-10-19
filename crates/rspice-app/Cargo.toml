@@ -106,7 +106,7 @@ rspice-simulation-contract = { workspace = true, features = ["derivation-test-ob
 csv.workspace = true
 rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
-rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures"] }
+rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation"] }
 zip.workspace = true
 rustyhdf5 = { version = "1.93", default-features = false }
 arrow-array = "60"

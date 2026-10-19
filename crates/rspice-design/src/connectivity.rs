@@ -369,6 +369,20 @@ where
     G: Fn(&str) -> Option<String>,
 {
     fn new(schematic: &'a SchematicDocument, resolve_symbol: &'a S, promote_label: &'a G) -> Self {
+        #[cfg(feature = "work-observation")]
+        rspice_design_model::work_tally::record(|work| {
+            work.connectivity_passes += 1;
+            work.connectivity_objects += [
+                schematic.components.len(),
+                schematic.wires.len(),
+                schematic.buses.len(),
+                schematic.bus_taps.len(),
+                schematic.junctions.len(),
+                schematic.net_labels.len(),
+            ]
+            .into_iter()
+            .sum::<usize>();
+        });
         let mut buses = analyze_bus_connectivity(schematic);
         buses.scalar_taps.sort_by_key(|binding| binding.tap_id);
         let terminals = schematic
@@ -636,12 +650,16 @@ where
         let mut parent: Vec<usize> = (0..points.len()).collect();
         fn root(parent: &mut [usize], mut node: usize) -> usize {
             while parent[node] != node {
+                #[cfg(feature = "work-observation")]
+                rspice_design_model::work_tally::record(|work| work.connectivity_steps += 1);
                 parent[node] = parent[parent[node]];
                 node = parent[node];
             }
             node
         }
         let mut link = |a: usize, b: usize| {
+            #[cfg(feature = "work-observation")]
+            rspice_design_model::work_tally::record(|work| work.connectivity_steps += 1);
             if a != b {
                 is_node[a] = true;
                 is_node[b] = true;
@@ -689,6 +707,10 @@ where
                     // chain. Interior/interior crossings stay disconnected
                     // unless an explicit junction is authored there.
                     let segment = WireSegment::new(a, b);
+                    #[cfg(feature = "work-observation")]
+                    rspice_design_model::work_tally::record(|work| {
+                        work.connectivity_steps += candidates.len();
+                    });
                     let mut on_segment = candidates
                         .iter()
                         .copied()
