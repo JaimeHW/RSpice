@@ -1,8 +1,8 @@
 //! Which wires pass through a point, without asking every wire.
 
-use std::collections::HashMap;
-
 use rspice_design_model::Point;
+
+use crate::fast_hash::FastMap;
 
 use super::Wire;
 
@@ -15,9 +15,9 @@ use super::Wire;
 pub(crate) struct WiresThrough<'a> {
     wires: &'a [Wire],
     /// Horizontal segments by row: the span they cover and their wire.
-    rows: HashMap<i32, Vec<(i32, i32, usize)>>,
+    rows: FastMap<i32, Vec<(i32, i32, usize)>>,
     /// Vertical segments by column, likewise.
-    columns: HashMap<i32, Vec<(i32, i32, usize)>>,
+    columns: FastMap<i32, Vec<(i32, i32, usize)>>,
     /// Wires the rows and columns cannot answer for.
     others: Vec<usize>,
 }
@@ -26,8 +26,8 @@ impl<'a> WiresThrough<'a> {
     pub(crate) fn new(wires: &'a [Wire]) -> Self {
         let mut index = Self {
             wires,
-            rows: HashMap::new(),
-            columns: HashMap::new(),
+            rows: FastMap::default(),
+            columns: FastMap::default(),
             others: Vec::new(),
         };
         for (position, wire) in wires.iter().enumerate() {
@@ -80,7 +80,7 @@ impl<'a> WiresThrough<'a> {
 
 /// Push the wire of every segment on `line` whose span covers `along`.
 fn spanning(
-    lines: &HashMap<i32, Vec<(i32, i32, usize)>>,
+    lines: &FastMap<i32, Vec<(i32, i32, usize)>>,
     line: i32,
     along: i32,
     found: &mut Vec<usize>,
