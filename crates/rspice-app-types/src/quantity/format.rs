@@ -241,12 +241,42 @@ fn engineering_value(
         .iter()
         .find_map(|(candidate, prefix)| (*candidate == exponent).then_some(*prefix))
         .unwrap_or("");
-    let scaled = value / 10_f64.powi(exponent);
     if full_precision {
-        format!("{scaled:.17} {prefix}{unit}")
-    } else {
-        format!("{scaled:.fractional_digits$} {prefix}{unit}")
+        return format!("{} {prefix}{unit}", mantissa_at_decade(value, exponent));
     }
+    let scaled = value / 10_f64.powi(exponent);
+    format!("{scaled:.fractional_digits$} {prefix}{unit}")
+}
+
+/// `value` written against `10^decade` with seventeen decimals, the digits
+/// taken from the value itself.
+///
+/// The value's own decimal expansion, correctly rounded, is written first and
+/// its point then moved as text, so mantissa × 10^decade reads back as the
+/// same double. Dividing by the power of ten first rounded once more, and
+/// about one value in six then read back a unit in the last place off.
+fn mantissa_at_decade(value: f64, decade: i32) -> String {
+    const DECIMALS: i32 = 17;
+    let places = usize::try_from(DECIMALS - decade).unwrap_or(0);
+    let text = format!("{:.places$}", value.abs());
+    let (whole, fraction) = text.split_once('.').unwrap_or((&text, ""));
+    let digits = format!("{whole}{fraction}");
+    // Where the point lands once the text is read at 10^decade; at or before
+    // the first digit when the value sits just under its decade.
+    let point = whole.len() as i64 - i64::from(decade);
+    let (whole, fraction) = match usize::try_from(point) {
+        Ok(point) if point > 0 => {
+            let (whole, fraction) = digits.split_at(point);
+            (whole.trim_start_matches('0'), fraction.to_owned())
+        }
+        _ => {
+            let zeros = "0".repeat(point.unsigned_abs() as usize);
+            ("", format!("{zeros}{digits}"))
+        }
+    };
+    let sign = if value.is_sign_negative() { "-" } else { "" };
+    let whole = if whole.is_empty() { "0" } else { whole };
+    format!("{sign}{whole}.{fraction}")
 }
 
 #[cfg(test)]
@@ -310,6 +340,30 @@ mod tests {
         );
     }
 
+    /// Both signs of every decade from 1e-300 to 1e300 at several
+    /// mantissas, with zero, subnormals and the extremes.
+    fn swept_values() -> Vec<f64> {
+        let mut values = vec![
+            0.0,
+            1.0 / 3.0,
+            0.1,
+            0.0625,
+            0.062_499_999_999_999_99,
+            273.15,
+            f64::EPSILON,
+            f64::MIN_POSITIVE,
+            f64::MIN_POSITIVE / 3.0,
+            5e-324,
+            f64::MAX,
+        ];
+        for exponent in -300..=300 {
+            for mantissa in [1.0, 1.234_567_890_123_456_7, 3.2, 9.999_999_999_999_998] {
+                values.push(mantissa * 10_f64.powi(exponent));
+            }
+        }
+        values.iter().flat_map(|value| [*value, -*value]).collect()
+    }
+
     /// Copied values promise full precision, so an engineering copy written
     /// without a prefix reads back as the very double it was made from.
     /// Seventeen fixed decimals carry a double's seventeen significant digits
@@ -329,29 +383,11 @@ mod tests {
             angle_display,
             ..engineering
         };
-        let mut values = vec![
-            0.0,
-            1.0 / 3.0,
-            0.1,
-            0.0625,
-            0.062_499_999_999_999_99,
-            273.15,
-            f64::EPSILON,
-            f64::MIN_POSITIVE,
-            f64::MIN_POSITIVE / 3.0,
-            5e-324,
-            f64::MAX,
-        ];
-        for exponent in -300..=300 {
-            for mantissa in [1.0, 1.234_567_890_123_456_7, 3.2, 9.999_999_999_999_998] {
-                values.push(mantissa * 10_f64.powi(exponent));
-            }
-        }
         let read_back = |copied: &str| -> f64 {
             let (number, _unit) = copied.split_once(' ').expect("a value and its unit");
             number.parse().expect("the copy parses as a number")
         };
-        for value in values.iter().flat_map(|value| [*value, -*value]) {
+        for value in swept_values() {
             let copies = [
                 (engineering.copy_scaled_unit_value(value, "nV/√Hz"), value),
                 (
@@ -404,6 +440,81 @@ mod tests {
         assert_eq!(
             temperature(TemperatureDisplay::Kelvin).copy_temperature(300.0),
             "300.00000000000000000 K"
+        );
+    }
+
+    /// A prefixed copy reads back as the same double when its mantissa is
+    /// taken at the prefix's decade, mantissa × 10^prefix. The mantissa was
+    /// the value divided by that power of ten, whose rounding put about one
+    /// value in six a unit in the last place off once read back.
+    #[test]
+    fn a_prefixed_copy_reads_back_as_the_same_double() {
+        let engineering = QuantityPresentationPolicy {
+            copied_value_format: CopiedValueFormat::EngineeringNotationWithUnit,
+            ..QuantityPresentationPolicy::default()
+        };
+        let radians_per_second = QuantityPresentationPolicy {
+            frequency_display: FrequencyDisplay::RadiansPerSecond,
+            ..engineering
+        };
+        let read_back = |copied: &str, unit: &str| -> f64 {
+            let (number, scaled_unit) = copied.split_once(' ').expect("a value and its unit");
+            let prefix = scaled_unit
+                .strip_suffix(unit)
+                .expect("the unit ends the copy");
+            let decade = match prefix {
+                "f" => -15,
+                "p" => -12,
+                "n" => -9,
+                "µ" => -6,
+                "m" => -3,
+                "" => 0,
+                "k" => 3,
+                "M" => 6,
+                "G" => 9,
+                "T" => 12,
+                other => panic!("{other:?} is not a prefix"),
+            };
+            let scaled = if decade == 0 {
+                number.to_owned()
+            } else {
+                format!("{number}e{decade}")
+            };
+            scaled.parse().expect("the copy parses as a number")
+        };
+        for value in swept_values() {
+            let copies = [
+                (engineering.copy_si_value(value, "V"), "V", value),
+                (engineering.copy_frequency(value), "Hz", value),
+                (
+                    radians_per_second.copy_frequency(value),
+                    "rad/s",
+                    value * TAU,
+                ),
+            ];
+            for (copied, unit, shown) in copies {
+                if shown.is_finite() {
+                    assert_eq!(
+                        read_back(&copied, unit).to_bits(),
+                        shown.to_bits(),
+                        "{shown:e} copied as {copied}"
+                    );
+                }
+            }
+        }
+
+        assert_eq!(
+            engineering.copy_si_value(0.008_738_147_087_027_245, "V"),
+            "8.73814708702724471 mV"
+        );
+        assert_eq!(
+            engineering.copy_si_value(1.0, "V"),
+            "1.00000000000000000 V",
+            "an exact value keeps its fixed decimals"
+        );
+        assert_eq!(
+            engineering.copy_si_value(-0.5, "V"),
+            "-500.00000000000000000 mV"
         );
     }
 
