@@ -401,6 +401,7 @@ mod tests {
                 ..Default::default()
             },
             |ui| {
+                // accessibility-pointer-shim: test-only canvas event harness.
                 let response = ui.interact(
                     egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 400.0)),
                     Id::new("canvas"),
