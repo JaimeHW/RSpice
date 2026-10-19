@@ -610,6 +610,13 @@ struct LineWire {
 }
 
 impl LineWire {
+    /// Where the wire starts and ends along its line: its ends in (x, y)
+    /// order, which is their order along any one line.
+    fn extent(&self) -> ((i32, i32), (i32, i32)) {
+        let [a, b] = self.ends.map(|end| (end.x, end.y));
+        if a <= b { (a, b) } else { (b, a) }
+    }
+
     /// [`Wire::contains_point`], for a wire of one segment.
     fn contains(&self, point: Point) -> bool {
         self.ends.contains(&point)
@@ -714,8 +721,15 @@ impl<'a> CollinearMerge<'a> {
     fn next_pair(&mut self, line: usize) -> Option<(usize, usize)> {
         let count = self.lines[line].1.len();
         for left in 0..count {
+            let (left_low, left_high) = self.lines[line].1[left].extent();
             for right in left + 1..count {
                 let wires = &self.lines[line].1;
+                // A pair merges only where the two share a point, so two
+                // wires whose extents along the line are apart never do.
+                let (right_low, right_high) = wires[right].extent();
+                if right_high < left_low || left_high < right_low {
+                    continue;
+                }
                 let (first, second) = (wires[left].id, wires[right].id);
                 if self
                     .seeds
