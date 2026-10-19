@@ -607,14 +607,22 @@ impl SheetCatalog {
             }
             _ => {}
         }
+        // A drawing's objects sit on a handful of sheets, in long runs of
+        // ids, so the sheet an assignment names is looked up only when it is
+        // not the one the assignment before it named.
+        let mut found = None;
         for (&object_id, sheet_id) in &self.object_assignments {
             require_object_id(object_id)?;
+            if found == Some(sheet_id) {
+                continue;
+            }
             if !sheet_ids.contains(sheet_id) {
                 return Err(DesignManagementError::MissingReference {
                     domain: "object sheet",
                     identity: sheet_id.to_string(),
                 });
             }
+            found = Some(sheet_id);
         }
         let mut port_ids = HashSet::with_capacity(self.cross_sheet_ports.len());
         let mut endpoint_pairs = HashSet::with_capacity(self.cross_sheet_ports.len());
