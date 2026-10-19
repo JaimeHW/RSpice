@@ -3,9 +3,10 @@
 //! (D1 section 9). Rows are in pick order, so the first row is what a plain
 //! click there takes.
 
+use egui::accesskit::Role;
 use egui::{
-    Align2, Context, Frame, Id, Key, LayerId, Margin, Modifiers, Order, PopupAnchor, Pos2, Rect,
-    RectAlign, Sense, Stroke, Vec2,
+    Align2, Context, EventFilter, Frame, Id, Key, LayerId, Margin, Modifiers, Order, PopupAnchor,
+    Pos2, Rect, RectAlign, Sense, Stroke, Vec2, WidgetInfo, WidgetType,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::Tokens;
@@ -24,6 +25,8 @@ const MAX_WIDTH: f32 = 280.0;
 const FONT_SIZE: f32 = 11.0;
 /// The chooser opens this far right of and below the click.
 const ANCHOR_OFFSET: Vec2 = Vec2::new(8.0, 8.0);
+/// What a screen reader calls the list.
+const LIST_LABEL: &str = "Objects at this point";
 
 /// One candidate: what kind of object it is and which one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,19 +205,37 @@ impl PickChooser {
         .frame(frame)
         .show(|ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
+            let mut list_rect = Rect::NOTHING;
+            let mut current = None;
             for (index, row) in self.rows[..choosable].iter().enumerate() {
-                let (rect, response) =
-                    ui.allocate_exact_size(Vec2::new(width, row_height), Sense::click());
+                let (_, rect) = ui.allocate_space(Vec2::new(width, row_height));
+                list_rect = list_rect.union(rect);
+                // A row senses the pointer and takes no focus: the list is
+                // the one keyboard stop, and the arrows move within it.
+                let response = ui.interact(rect, row_id(index), Sense::CLICK);
                 if response.hovered() {
                     focused = index;
                 }
+                let kind = kind_label(row.target);
+                response.widget_info(|| {
+                    WidgetInfo::labeled(
+                        WidgetType::SelectableLabel,
+                        true,
+                        format!("{kind} {}", row.identity),
+                    )
+                });
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    node.set_role(Role::ListBoxOption);
+                    node.set_selected(index == focused);
+                });
                 if index == focused {
+                    current = Some((response.id, rect));
                     ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
                 }
                 paint_row(
                     ui.painter(),
                     rect,
-                    kind_label(row.target),
+                    kind,
                     &row.identity,
                     (&kind_font, &identity_font),
                     (t.color.text_dim, t.color.text),
@@ -228,8 +249,9 @@ impl PickChooser {
                 }
             }
             if let Some(text) = &overflow {
-                let (rect, _) =
+                let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(width, row_height), Sense::hover());
+                response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, text));
                 paint_row(
                     ui.painter(),
                     rect,
@@ -239,9 +261,59 @@ impl PickChooser {
                     (t.color.text_faint, t.color.text_faint),
                 );
             }
+            list_stop(ui, list_rect, current);
         });
         self.focused = focused;
         outcome.or_else(|| (!open).then_some(ChooserOutcome::Dismiss))
+    }
+}
+
+/// The list over the rows, and its one keyboard stop.
+fn list_id() -> Id {
+    Id::new("rspice.schematic.pick_chooser.list")
+}
+
+fn row_id(index: usize) -> Id {
+    list_id().with(index)
+}
+
+/// The rows as one list a screen reader can reach: Tab gives it the
+/// keyboard, and it names the focused row, `current`, as its active option.
+///
+/// One stop rather than one per row, as the Problems table has: egui applies
+/// a focus lock filter only to a widget that held focus the frame before, so
+/// a filter set on each row as the arrows reached it would come a frame late
+/// and let a quick second arrow move egui's own focus past a row. Holding it
+/// here keeps the arrows and Esc the chooser's while the list has focus; Tab
+/// is left to egui, as the way out.
+fn list_stop(ui: &mut egui::Ui, rect: Rect, current: Option<(Id, Rect)>) {
+    let response = ui.interact(rect, list_id(), Sense::FOCUSABLE);
+    if response.has_focus() {
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                EventFilter {
+                    tab: false,
+                    horizontal_arrows: false,
+                    vertical_arrows: true,
+                    escape: true,
+                },
+            );
+        });
+    }
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, LIST_LABEL));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::ListBox);
+        if let Some((row, _)) = current {
+            node.set_active_descendant(row.accesskit_id());
+        }
+    });
+    // Focus the keyboard gave frames the focused row; focus a press gave
+    // frames nothing.
+    if theme::focus_is_visible(ui.ctx(), &response)
+        && let Some((_, row)) = current
+    {
+        theme::paint_focus_ring(ui, &response, row);
     }
 }
 
@@ -363,5 +435,197 @@ mod tests {
         );
         assert_eq!(kind_label(PointerTarget::NetLabel(1)), "Net label");
         assert_eq!(kind_label(PointerTarget::BusTap(1)), "Tap");
+    }
+
+    /// What one frame of the open chooser published and painted.
+    struct Seen {
+        /// Each option, top to bottom: its name, whether it is selected, and
+        /// where it is.
+        options: Vec<(String, bool, Rect)>,
+        /// Whether the list holds the keyboard.
+        list_focused: bool,
+        /// The name of the option the list gives as its active one.
+        active: Option<String>,
+        /// The design-system focus rings painted.
+        rings: Vec<Rect>,
+        outcome: Option<ChooserOutcome>,
+    }
+
+    impl Seen {
+        fn names(&self) -> Vec<&str> {
+            self.options
+                .iter()
+                .map(|(name, _, _)| name.as_str())
+                .collect()
+        }
+
+        fn selected(&self) -> Vec<bool> {
+            self.options
+                .iter()
+                .map(|(_, selected, _)| *selected)
+                .collect()
+        }
+
+        fn framed(&self, option: usize) -> bool {
+            let row = self.options[option].2.expand(0.5);
+            self.rings.len() == 1 && row.contains_rect(self.rings[0])
+        }
+    }
+
+    /// One frame of `chooser` with `events`, a tenth of a second after the
+    /// last (so the popup's fade-in is over a frame after it opens), read
+    /// back through the AccessKit tree and the painted shapes.
+    fn shown(ctx: &Context, chooser: &mut PickChooser, events: Vec<egui::Event>) -> Seen {
+        let mut outcome = None;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(600.0))),
+                time: Some(ctx.input(|input| input.time) + 0.1),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| outcome = chooser.show(ui.ctx()),
+        );
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("an AccessKit update");
+        let name_of = |id: egui::accesskit::NodeId| {
+            update
+                .nodes
+                .iter()
+                .find(|(node, _)| *node == id)
+                .and_then(|(_, node)| node.label())
+                .map(str::to_owned)
+        };
+        let mut options: Vec<(String, bool, Rect)> = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::ListBoxOption)
+            .map(|(_, node)| {
+                let bounds = node.bounds().expect("an option has bounds");
+                (
+                    node.label().unwrap_or_default().to_owned(),
+                    node.is_selected() == Some(true),
+                    Rect::from_min_max(
+                        Pos2::new(bounds.x0 as f32, bounds.y0 as f32),
+                        Pos2::new(bounds.x1 as f32, bounds.y1 as f32),
+                    ),
+                )
+            })
+            .collect();
+        options.sort_by(|a, b| a.2.top().total_cmp(&b.2.top()));
+        let list = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == Role::ListBox);
+        let ring = Stroke::new(2.0, Tokens::get(ctx).color.accent);
+        let mut rings = Vec::new();
+        let mut shapes: Vec<egui::Shape> = output
+            .shapes
+            .into_iter()
+            .map(|clipped| clipped.shape)
+            .collect();
+        while let Some(shape) = shapes.pop() {
+            match shape {
+                egui::Shape::Vec(inner) => shapes.extend(inner),
+                egui::Shape::Rect(rect) if rect.stroke == ring => rings.push(rect.rect),
+                _ => {}
+            }
+        }
+        Seen {
+            options,
+            list_focused: list.is_some_and(|(id, _)| *id == update.focus),
+            active: list
+                .and_then(|(_, node)| node.active_descendant())
+                .and_then(name_of),
+            rings,
+            outcome,
+        }
+    }
+
+    fn pointer(position: Pos2, pressed: bool) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            },
+        ]
+    }
+
+    /// The rows are the options of a list a screen reader reaches, each named
+    /// by its kind and identity, the focused one selected and the list's
+    /// active one. Tab gives the list the keyboard and frames the focused
+    /// row; the arrows move the frame with the focus. A pointer press frames
+    /// nothing, and a click still chooses.
+    #[test]
+    fn the_rows_are_a_list_the_keyboard_reaches_and_only_it_frames() {
+        let ctx = Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut chooser =
+            PickChooser::open(Pos2::new(100.0, 100.0), rows(3), false).expect("chooser");
+
+        let _ = shown(&ctx, &mut chooser, Vec::new());
+        let opened = shown(&ctx, &mut chooser, Vec::new());
+        assert_eq!(
+            opened.names(),
+            ["Instance R1", "Instance R2", "Instance R3"]
+        );
+        assert_eq!(opened.selected(), [true, false, false]);
+        assert_eq!(opened.active.as_deref(), Some("Instance R1"));
+        assert!(
+            !opened.list_focused,
+            "a long click opens it, not the keyboard"
+        );
+        assert!(opened.rings.is_empty(), "{:?}", opened.rings);
+
+        let press = opened.options[1].2.center();
+        let pressed = shown(&ctx, &mut chooser, pointer(press, true));
+        assert!(!pressed.list_focused, "a press gives the list no focus");
+        assert!(pressed.rings.is_empty(), "a press frames nothing");
+        let _ = shown(&ctx, &mut chooser, pointer(Pos2::new(500.0, 500.0), false));
+        let mut chooser =
+            PickChooser::open(Pos2::new(100.0, 100.0), rows(3), false).expect("chooser");
+        let _ = shown(&ctx, &mut chooser, Vec::new());
+
+        // egui gives the popup's own frame a stop of its own, so the walk is
+        // bounded rather than counted.
+        let mut tabbed = shown(&ctx, &mut chooser, press_events(Key::Tab));
+        for _ in 0..3 {
+            if tabbed.list_focused {
+                break;
+            }
+            tabbed = shown(&ctx, &mut chooser, press_events(Key::Tab));
+        }
+        assert!(tabbed.list_focused, "Tab reaches the list");
+        assert!(
+            tabbed.framed(0),
+            "Tab frames the focused row: {:?}",
+            tabbed.rings
+        );
+
+        let arrowed = shown(&ctx, &mut chooser, press_events(Key::ArrowDown));
+        assert!(arrowed.list_focused, "the list keeps the keyboard");
+        assert_eq!(arrowed.selected(), [false, true, false]);
+        assert_eq!(arrowed.active.as_deref(), Some("Instance R2"));
+        assert!(arrowed.framed(1), "the frame follows: {:?}", arrowed.rings);
+
+        let third = arrowed.options[2].2.center();
+        let pressed = shown(&ctx, &mut chooser, pointer(third, true));
+        assert!(pressed.rings.is_empty(), "a press takes the frame away");
+        let released = shown(&ctx, &mut chooser, pointer(third, false));
+        assert_eq!(
+            released.outcome,
+            Some(ChooserOutcome::Replace(PointerTarget::Component(3)))
+        );
+    }
+
+    fn press_events(key: Key) -> Vec<egui::Event> {
+        press(key, Modifiers::NONE).events
     }
 }
