@@ -220,6 +220,8 @@ mod tests {
                 if draw {
                     let rect =
                         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+                    // accessibility-pointer-shim: test-only stand-in for an
+                    // engineering canvas, which publishes its own semantics.
                     let response = ui.interact(rect, canvas, egui::Sense::click());
                     report_engineering_canvas_focus(&response, ViewType::Schematic);
                 }
