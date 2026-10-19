@@ -379,13 +379,21 @@ fn document_section(
         .design_management
         .drawing_sheet_settings()
         .document_control;
-    let fields = format
+    let mut fields: Vec<_> = format
         .title_block_field_order()
         .into_iter()
         .filter(|field| {
             is_document_field(*field)
                 && (is_release_record(*field) || format.title_field_shown(*field))
-        });
+        })
+        .collect();
+    // A block that letters none of a release-record field, such as the ASME
+    // form's date of issue, leaves it out of its order; it is still typed.
+    for field in RELEASE_RECORD {
+        if !fields.contains(&field) {
+            fields.push(field);
+        }
+    }
     for field in fields {
         let writable = editable && !locked_by_organization(format, field);
         if field == DrawingSheetTitleFieldId::DocumentStatus {
@@ -466,20 +474,22 @@ fn or_dash(value: &str) -> &str {
 
 /// Whether `field` holds a value of the whole document, kept by the project
 /// and lettered alike on every sheet, rather than one of this sheet's own.
-const fn is_document_field(field: DrawingSheetTitleFieldId) -> bool {
+fn is_document_field(field: DrawingSheetTitleFieldId) -> bool {
     field.is_project_owned() || is_release_record(field)
 }
 
-/// Whether `field` is part of the document's release record. A release is
-/// refused without its revision and date, so the panel offers all three even
-/// on a block that letters none of them, such as the ASME form's date.
-const fn is_release_record(field: DrawingSheetTitleFieldId) -> bool {
-    matches!(
-        field,
-        DrawingSheetTitleFieldId::Revision
-            | DrawingSheetTitleFieldId::Date
-            | DrawingSheetTitleFieldId::DocumentStatus
-    )
+/// The document's release record. A release is refused without its revision
+/// and date, so the panel offers all three even where the sheet's block
+/// letters none of them, such as the ASME form's date of issue or a revision
+/// box hidden from an ISO 7200 block.
+const RELEASE_RECORD: [DrawingSheetTitleFieldId; 3] = [
+    DrawingSheetTitleFieldId::DocumentStatus,
+    DrawingSheetTitleFieldId::Revision,
+    DrawingSheetTitleFieldId::Date,
+];
+
+fn is_release_record(field: DrawingSheetTitleFieldId) -> bool {
+    RELEASE_RECORD.contains(&field)
 }
 
 /// Whether the organization's block fixes `field`, so no sheet edits it.

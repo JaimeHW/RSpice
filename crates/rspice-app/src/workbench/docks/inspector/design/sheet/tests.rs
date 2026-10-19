@@ -865,7 +865,14 @@ fn the_optional_boxes_are_shown_and_hidden_in_the_panel() {
         painted.contains("Date of issue\nYYYY-MM-DD\n\nLanguage\n\n"),
         "{painted}"
     );
-    assert!(!painted.contains("Revision"), "{painted}");
+    // The revision leaves the block, not the document: a release still
+    // needs one, so it is still typed with the document's values.
+    assert!(painted.contains("Revision\n\nDate of issue\n"), "{painted}");
+    assert!(
+        !resolve_active_drawing_sheet(&panel.app.state)
+            .format
+            .title_field_shown(DrawingSheetTitleFieldId::Revision)
+    );
 
     panel.enter("Language", "en");
     assert_eq!(
