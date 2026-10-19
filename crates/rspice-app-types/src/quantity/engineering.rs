@@ -105,7 +105,45 @@ pub fn parse_engineering_value(input: &str) -> Result<f64, String> {
         )
     })?;
 
-    Ok(base_value * multiplier)
+    Ok(scaled_decimal(numeric_str, base_value, multiplier))
+}
+
+/// The decades a scale factor can name, each with the literal it is stored as.
+const DECADES: &[(f64, i32)] = &[
+    (1e-15, -15),
+    (1e-12, -12),
+    (1e-9, -9),
+    (1e-6, -6),
+    (1e-3, -3),
+    (1e3, 3),
+    (1e6, 6),
+    (1e9, 9),
+    (1e12, 12),
+];
+
+/// `number`, the decimal text `value` was parsed from, scaled by `multiplier`
+/// and rounded once.
+///
+/// `2.2u` written out is 2.2e-6. Multiplying the double nearest 2.2 by the
+/// double nearest 1e-6 rounds twice, and about one value in six then lands a
+/// unit in the last place away from the double nearest what was written. A
+/// power of ten moves the decimal exponent instead, so the written value is
+/// parsed once. Any other factor (`mil`) multiplies.
+pub(crate) fn scaled_decimal(number: &str, value: f64, multiplier: f64) -> f64 {
+    if multiplier == 1.0 {
+        return value;
+    }
+    let Some(&(_, decade)) = DECADES.iter().find(|(literal, _)| *literal == multiplier) else {
+        return value * multiplier;
+    };
+    let (mantissa, exponent) = match number.find(['e', 'E']) {
+        Some(at) => (&number[..at], number[at + 1..].parse::<i64>().ok()),
+        None => (number, Some(0)),
+    };
+    exponent
+        .and_then(|exponent| exponent.checked_add(i64::from(decade)))
+        .and_then(|exponent| format!("{mantissa}e{exponent}").parse().ok())
+        .unwrap_or(value * multiplier)
 }
 
 /// The decade a normalized suffix names, or `None` when the text is not a
@@ -494,5 +532,60 @@ mod tests {
                 "{value} formatted as {formatted}, which parsed back as {parsed}"
             );
         }
+    }
+
+    /// A prefixed value is the double nearest what was written. `2.2u`
+    /// written out is 2.2e-6, and multiplying the double nearest 2.2 by the
+    /// double nearest 1e-6 rounds twice: about one value in six then lands a
+    /// unit in the last place away from it, so a copied value pasted back
+    /// into a field was not the value that was copied.
+    #[test]
+    fn a_prefixed_value_reads_as_the_double_nearest_what_was_written() {
+        let prefixes = [
+            ("f", -15),
+            ("p", -12),
+            ("n", -9),
+            ("u", -6),
+            ("m", -3),
+            ("k", 3),
+            ("meg", 6),
+            ("g", 9),
+            ("t", 12),
+            ("nano", -9),
+        ];
+        let mut misses = Vec::new();
+        for exponent in -290..=290 {
+            for mantissa in [
+                1.0,
+                1.234_567_890_123_456_7,
+                3.2,
+                8.738_147_087_027_245,
+                9.999_999_999_999_998,
+            ] {
+                for sign in [1.0, -1.0] {
+                    let value: f64 = sign * mantissa * 10_f64.powi(exponent);
+                    let written = format!("{value:e}");
+                    let (digits, power) = written.split_once('e').expect("an exponent");
+                    let power: i32 = power.parse().expect("an integer exponent");
+                    for (token, decade) in prefixes {
+                        let text = format!("{digits}e{}{token}", power - decade);
+                        let parsed = parse_engineering_value(&text).expect("a prefixed value");
+                        if parsed.to_bits() != value.to_bits() {
+                            misses.push(format!("{text} read as {parsed:e}, not {value:e}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            misses.is_empty(),
+            "{} misses, the first {:?}",
+            misses.len(),
+            misses.first()
+        );
+        assert_eq!(
+            parse_engineering_value("8.73814708702724471m").map(f64::to_bits),
+            Ok(0.008_738_147_087_027_245_f64.to_bits())
+        );
     }
 }
