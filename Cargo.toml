@@ -60,7 +60,7 @@ repository = "https://github.com/JaimeHW/RSpice"
 rust-version = "1.94"
 
 [workspace.dependencies]
-zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Core dependencies - faer for high-performance sparse linear algebra
 faer = { version = "0.24", default-features = false, features = ["std"] }
 thiserror = "2.0"

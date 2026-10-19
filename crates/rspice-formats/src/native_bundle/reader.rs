@@ -109,7 +109,13 @@ pub fn decode_native_bundle(
                 "archive expands to {expanded} bytes; the limit is {max_expanded_bytes}"
             )));
         }
-        let name = file.name().to_owned();
+        let name = file
+            .name()
+            .map_err(|error| NativeBundleError::Zip {
+                context: format!("invalid member {index} name"),
+                source: error,
+            })?
+            .into_owned();
         if !names.insert(name.clone()) {
             return Err(NativeBundleError::InvalidData(format!(
                 "archive repeats member '{name}'"

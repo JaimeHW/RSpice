@@ -156,7 +156,18 @@ fn decode_npz_arrays(
         if member.is_dir() {
             continue;
         }
-        let member_name = member.name().to_owned();
+        let member_name = member
+            .name()
+            .map_err(|error| {
+                read_error(
+                    format,
+                    NumpyReadFailure::ArchiveMember {
+                        index,
+                        source: error,
+                    },
+                )
+            })?
+            .into_owned();
         if member_name.starts_with('/') || member_name.contains("..") || member_name.contains('\\')
         {
             return Err(read_error(

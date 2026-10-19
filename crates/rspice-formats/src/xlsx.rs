@@ -130,7 +130,10 @@ mod tests {
         )
         .expect("XLSX bytes");
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).expect("XLSX archive");
-        let names = archive.file_names().map(str::to_owned).collect::<Vec<_>>();
+        let names = archive
+            .file_names()
+            .map(|name| name.expect("XLSX part name").into_owned())
+            .collect::<Vec<_>>();
         assert!(names.iter().any(|name| name == "xl/worksheets/sheet1.xml"));
         assert!(names.iter().any(|name| name == "xl/worksheets/sheet2.xml"));
         let mut xml = String::new();
