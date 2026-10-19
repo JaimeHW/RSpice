@@ -131,7 +131,6 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
 /// as the form names it. An empty value shows what the block letters
 /// instead. The toolbar's Check cellview is not repeated as a button, and a
 /// check never run adds no section.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
     let mut app = RSpiceApp::test_instance();
@@ -197,7 +196,6 @@ fn a_sheet_is_offered_its_standards_blocks_or_none() {
 
 /// A revision index ISO 7200 advises against is flagged where it is typed,
 /// and kept.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_revision_index_with_an_o_is_flagged_and_kept() {
     let mut panel = SheetPanel::new();
@@ -218,7 +216,6 @@ fn a_revision_index_with_an_o_is_flagged_and_kept() {
 
 /// On the ASME form a revision is held to ASME Y14.35's sequence instead,
 /// and flagged, not refused, outside it.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_revision_outside_y14_35_is_flagged_and_kept_on_an_asme_sheet() {
     let mut panel = SheetPanel::new();
@@ -248,7 +245,6 @@ fn a_revision_outside_y14_35_is_flagged_and_kept_on_an_asme_sheet() {
 /// The document's values every sheet letters — owner, number, revision —
 /// are typed here too, and each lands on the project as its own undo step
 /// without disturbing the others.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn document_values_typed_in_the_panel_land_on_the_project() {
     let mut panel = SheetPanel::new();
@@ -289,7 +285,6 @@ fn document_values_typed_in_the_panel_land_on_the_project() {
 
 /// A date the document control cannot read is refused in its words and
 /// changes nothing; the release status is chosen from its list.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_document_date_and_status_are_held_to_the_document_controls_rules() {
     let mut panel = SheetPanel::new();
@@ -330,7 +325,6 @@ fn the_document_date_and_status_are_held_to_the_document_controls_rules() {
 /// panel offers every value its approvals block letters: the engineer and
 /// each signature's date on the sheet, the CAGE code and contract number on
 /// the project. A signature date is held to the document date's form.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_asme_forms_approvals_are_typed_in_the_panel() {
     let mut panel = SheetPanel::new();
@@ -397,7 +391,6 @@ fn the_asme_forms_approvals_are_typed_in_the_panel() {
 /// The ASME form letters no date of issue, yet a release is refused without
 /// one, so the document's revision, date and status are offered on every
 /// block that has a document section and an ASME sheet can be released.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn an_asme_sheet_offers_the_release_record_its_block_does_not_letter() {
     let mut panel = SheetPanel::new();
@@ -428,7 +421,6 @@ fn an_asme_sheet_offers_the_release_record_its_block_does_not_letter() {
 
 /// Fields the sheet does not show offer nothing to type, and a block with no
 /// fields at all has no document section.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn only_the_fields_this_block_shows_are_offered() {
     let mut app = RSpiceApp::test_instance();
@@ -453,7 +445,6 @@ fn only_the_fields_this_block_shows_are_offered() {
 /// The grid and net-name characters belong to the open schematic, not to
 /// Preferences: each change lands as one undo step, and a new grid moves the
 /// snap with it.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
     use crate::state::{NetNamingPolicy, SchematicGridPitch};
@@ -488,7 +479,6 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
 
 /// A typed title value lands when the field is left, as one undo step; the
 /// keystrokes before it are not transactions.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_title_value_typed_and_entered_lands_on_the_sheet_as_one_undo_step() {
     let mut panel = SheetPanel::new();
@@ -507,7 +497,6 @@ fn a_title_value_typed_and_entered_lands_on_the_sheet_as_one_undo_step() {
     assert!(!panel.app.state.can_undo_project_design());
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn escape_abandons_a_typed_title_value() {
     let mut panel = SheetPanel::new();
@@ -520,7 +509,6 @@ fn escape_abandons_a_typed_title_value() {
 
 /// Selecting something on the canvas mid-edit swaps the panel in the same
 /// frame; what was typed still lands on the sheet it was typed on.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_value_still_being_typed_lands_when_the_panel_moves_on() {
     let mut panel = SheetPanel::new();
@@ -534,7 +522,6 @@ fn a_value_still_being_typed_lands_when_the_panel_moves_on() {
 
 /// A value typed on one sheet is dropped, not written, once another sheet is
 /// active.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_value_typed_on_one_sheet_never_lands_on_another() {
     let mut panel = SheetPanel::new();
@@ -576,7 +563,6 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
 
 /// The size menu names each standard with its oriented size, and a choice
 /// lands on the sheet at once.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_size_chosen_in_the_panel_lands_on_the_sheet() {
     let mut app = RSpiceApp::test_instance();
@@ -593,7 +579,6 @@ fn a_size_chosen_in_the_panel_lands_on_the_sheet() {
 }
 
 /// A read-only sheet states the same properties, with nothing to operate.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_read_only_sheet_states_its_properties_without_controls() {
     let mut app = RSpiceApp::test_instance();
@@ -622,7 +607,6 @@ fn a_read_only_sheet_states_its_properties_without_controls() {
 
 /// Checks add a section only for this sheet's findings, and never the
 /// toolbar's Check cellview button.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn checks_appear_only_for_findings_on_this_sheet() {
     let mut app = RSpiceApp::test_instance();
@@ -647,7 +631,6 @@ fn sheet_format(state: &AppState) -> SchematicSheetFormat {
 /// sheet turns to a one-off size of its own edges, each edge lands as one
 /// undo step, the edges stand the sheet the way they are typed, and the size
 /// is named and saved to the project's custom sizes from the same rows.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_custom_size_is_typed_in_the_panel_and_saved_to_custom_sizes() {
     let mut panel = SheetPanel::new();
@@ -707,7 +690,6 @@ fn a_custom_size_is_typed_in_the_panel_and_saved_to_custom_sizes() {
 
 /// An edge the sheet cannot have is refused in the words that say why, and
 /// changes nothing.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn an_edge_the_sheet_cannot_have_is_refused_in_its_words() {
     let mut panel = SheetPanel::new();
@@ -736,7 +718,6 @@ fn an_edge_the_sheet_cannot_have_is_refused_in_its_words() {
 /// The frame of the sheet's standard, its zones, its marks and the unit its
 /// sizes are stated in are chosen in the panel, each as one undo step. A
 /// sheet without a frame offers neither zones nor marks.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_frame_its_zones_its_marks_and_the_units_are_chosen_in_the_panel() {
     let mut app = RSpiceApp::test_instance();
@@ -785,7 +766,6 @@ fn the_frame_its_zones_its_marks_and_the_units_are_chosen_in_the_panel() {
 
 /// An ANSI sheet takes ASME Y14.1's frame: its marks are microfilm arrows,
 /// and the binding margin its standard allows is chosen beside them.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn an_asme_sheet_offers_its_arrows_and_its_binding_margin() {
     let mut app = RSpiceApp::test_instance();
@@ -810,7 +790,6 @@ fn an_asme_sheet_offers_its_arrows_and_its_binding_margin() {
 
 /// A sheet follows the project default until it is given a format of its
 /// own, and can be put back on the default from the same row.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_sheet_follows_the_project_default_until_it_takes_its_own_format() {
     let mut app = RSpiceApp::test_instance();
@@ -845,7 +824,6 @@ fn a_sheet_follows_the_project_default_until_it_takes_its_own_format() {
 /// box shown offers its value where its kind of value is typed: Checked by
 /// on the sheet, the language on the document. A box the form requires
 /// stays.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_optional_boxes_are_shown_and_hidden_in_the_panel() {
     let mut panel = SheetPanel::new();
@@ -891,7 +869,6 @@ fn the_optional_boxes_are_shown_and_hidden_in_the_panel() {
 
 /// The change order a revision answers to is the document's, typed with the
 /// rest of its values.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_change_reference_is_typed_with_the_documents_values() {
     let mut panel = SheetPanel::new();
@@ -913,7 +890,6 @@ fn the_change_reference_is_typed_with_the_documents_values() {
 
 /// What a size leaves outside the drawing area is counted under the size,
 /// with the way to the first object and to the review of them all.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn content_outside_the_drawing_area_is_counted_under_the_size() {
     let mut app = RSpiceApp::test_instance();
@@ -945,7 +921,6 @@ fn content_outside_the_drawing_area_is_counted_under_the_size() {
 /// short, and its row says so. An ANSI A sheet bound with the binding margin
 /// steps down to the form's 6.25 in block, whose Created by cell holds a
 /// twelve-character name and not a twenty-five-character one.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_value_the_block_cuts_short_says_so_under_its_row() {
     use crate::state::DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY as CUT;
@@ -974,7 +949,6 @@ fn a_value_the_block_cuts_short_says_so_under_its_row() {
 
 /// Sheet properties ask the panel to bring its Sheet section into view, and
 /// the panel does so the next time it shows, once.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_panel_brings_its_sheet_section_into_view_once_when_asked() {
     let mut app = RSpiceApp::test_instance();
@@ -989,7 +963,6 @@ fn the_panel_brings_its_sheet_section_into_view_once_when_asked() {
 /// choice longer than its field is cut to the field rather than widening
 /// every row after it past the edge, and an ISO sheet's words and a custom
 /// size's fit whole.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_panel_fits_the_inspectors_default_width() {
     fn walk(shape: &egui::epaint::Shape, cut: &mut Vec<String>) {

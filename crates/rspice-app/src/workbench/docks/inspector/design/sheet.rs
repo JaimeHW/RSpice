@@ -744,5 +744,7 @@ fn template_name(
     format.title_block_template_label(template)
 }
 
-#[cfg(test)]
+// The panel's tests paint through the native-only inspector harness, and
+// the browser runner runs no plain test.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
