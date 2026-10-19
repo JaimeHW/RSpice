@@ -30,8 +30,8 @@ use crate::state::{
 use super::AppState;
 
 /// Components per sheet, laid out as a lattice of this many columns.
-const COLUMNS: usize = 40;
-const ROWS: usize = 25;
+pub(super) const COLUMNS: usize = 40;
+pub(super) const ROWS: usize = 25;
 /// Lattice pitch in world units.
 const PITCH: i32 = 200;
 const ORIGIN: i32 = 400;
@@ -47,6 +47,8 @@ pub(super) struct ScaleFixture {
     pub(super) components: [Vec<u64>; 2],
     /// Each sheet's routed (three- or four-point) wires.
     pub(super) routed_wires: [Vec<u64>; 2],
+    /// How many objects each sheet holds: components, wires and junctions.
+    pub(super) objects: [usize; 2],
 }
 
 /// Everything one sheet draws, before the sheet catalog assigns it.
@@ -133,9 +135,9 @@ pub(super) fn master_library() -> Library {
     library
 }
 
-/// One sheet's lattice: components, the conductors routed between them, and a
-/// junction wherever a stub tees into a rail.
-fn sheet_content(next_id: &mut u64, sheet: usize) -> SheetContent {
+/// One sheet's lattice of `columns` by `rows` components, the conductors
+/// routed between them, and a junction wherever a stub tees into a rail.
+fn sheet_content(next_id: &mut u64, sheet: usize, columns: usize, rows: usize) -> SheetContent {
     let mut allocate = || {
         let id = *next_id;
         *next_id += 1;
@@ -158,9 +160,9 @@ fn sheet_content(next_id: &mut u64, sheet: usize) -> SheetContent {
     // share coordinates, but loading a document folds junctions that share a
     // position, so a fixture that overlapped them exactly would lose half.
     let sheet_shift = Point::new(0, 70 * i32::try_from(sheet).expect("two sheets"));
-    for row in 0..ROWS {
-        for column in 0..COLUMNS {
-            let ordinal = row * COLUMNS + column;
+    for row in 0..rows {
+        for column in 0..columns {
+            let ordinal = row * columns + column;
             let id = allocate();
             let at = lattice(column, row);
             let position = Point::new(at.x + sheet_shift.x, at.y + sheet_shift.y);
@@ -193,15 +195,15 @@ fn sheet_content(next_id: &mut u64, sheet: usize) -> SheetContent {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    for row in 0..ROWS {
+    for row in 0..rows {
         let rail_y = lattice(0, row).y + sheet_shift.y + 100;
-        for column in 0..COLUMNS {
-            let ordinal = row * COLUMNS + column;
+        for column in 0..columns {
+            let ordinal = row * columns + column;
             let pins = &terminals[ordinal];
             let last = *pins.last().expect("every component has a terminal");
             let second = pins.get(1).copied().unwrap_or(last);
             // A routed conductor from this part to its right-hand neighbour.
-            if column + 1 < COLUMNS {
+            if column + 1 < columns {
                 let next = terminals[ordinal + 1][0];
                 let middle = (second.x + next.x) / 2 / 10 * 10;
                 let points = if second.y == next.y {
@@ -225,7 +227,7 @@ fn sheet_content(next_id: &mut u64, sheet: usize) -> SheetContent {
             content.junctions.push(Junction::new(allocate(), tee));
         }
         // Rails under each pair of columns, and one return rail per row.
-        for pair in 0..COLUMNS / 2 {
+        for pair in 0..columns / 2 {
             let left = lattice(pair * 2, row).x - 100;
             let right = lattice(pair * 2 + 1, row).x + 100;
             content.wires.push(Wire::new(
@@ -238,7 +240,7 @@ fn sheet_content(next_id: &mut u64, sheet: usize) -> SheetContent {
             allocate(),
             vec![
                 Point::new(lattice(0, row).x - 100, return_y),
-                Point::new(lattice(COLUMNS - 1, row).x + 100, return_y),
+                Point::new(lattice(columns - 1, row).x + 100, return_y),
             ],
         ));
     }
@@ -416,10 +418,16 @@ fn operating_point_run(instances: &[(String, &'static str)]) -> SimulationRun {
 /// operating point of 300 nodes. Sheet 1 is active. Deterministic: the same
 /// ids and coordinates every call.
 pub(super) fn scale_fixture() -> ScaleFixture {
+    scale_fixture_of(COLUMNS, ROWS)
+}
+
+/// [`scale_fixture`] with each sheet's lattice `columns` by `rows`
+/// components rather than 40 by 25.
+pub(super) fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
     let mut next_id = 1_u64;
     let sheets = [
-        sheet_content(&mut next_id, 0),
-        sheet_content(&mut next_id, 1),
+        sheet_content(&mut next_id, 0, columns, rows),
+        sheet_content(&mut next_id, 1, columns, rows),
     ];
     let first = sheets[0].ids().collect::<Vec<_>>();
     let second = sheets[1].ids().collect::<Vec<_>>();
@@ -471,6 +479,7 @@ pub(super) fn scale_fixture() -> ScaleFixture {
         state,
         components,
         routed_wires,
+        objects: [first.len(), second.len()],
     }
 }
 

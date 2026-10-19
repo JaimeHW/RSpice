@@ -17,6 +17,8 @@ use super::symbols::SymbolLibrary;
 mod array_interaction;
 mod bus_interaction;
 mod context_menu;
+#[cfg(test)]
+mod drag_work;
 pub(crate) mod drawing_sheet;
 mod edge_pan;
 mod floating_paste;
