@@ -393,6 +393,10 @@ pub struct Diode {
     /// Linear temperature coefficient for the reverse breakdown voltage
     /// (Xyce TBV1, in 1/C).
     pub tbv1: Value,
+    /// Whether TBV1 was authored. Outside the Xyce dialect an authored TBV1
+    /// is ngspice's spelling of TCV (`dio.c:121`), so the law it selects
+    /// depends on the dialect chosen after the card is parsed.
+    tbv1_given: bool,
     /// Quadratic temperature coefficient for the reverse breakdown voltage
     /// (Xyce TBV2, in 1/C^2).
     pub tbv2: Value,
@@ -445,10 +449,11 @@ pub struct Diode {
     last_stamp_gd: std::cell::Cell<Value>,
     /// Folded AREA * M multiplier applied to the bottom junction.
     junction_scale: Value,
-    /// Temperature-shifted authored BV before IBV/NBV matching.
-    /// Retained so a later public dialect switch can rematch the knee with the
-    /// dialect's omitted-NBV default without discarding the temperature law.
-    temperature_shifted_breakdown_voltage: Option<Value>,
+    /// `T − TNOM` of the last temperature update, retained so a later public
+    /// dialect switch can reshift BV (TBV1's law is dialect-specific) and
+    /// rematch the knee with the dialect's omitted-NBV default without
+    /// discarding the temperature law.
+    breakdown_temperature_delta: Option<Value>,
     /// Temperature-adjusted matched breakdown voltage (Xyce/ngspice tBrkdwnV).
     temperature_breakdown_voltage: Option<Value>,
     /// Pre-computed matrix indices for O(1) stamping
@@ -656,6 +661,7 @@ impl Diode {
             ngspice_dialect: false,
             native_xyce_transient_convergence: false,
             tbv1: 0.0,
+            tbv1_given: false,
             tbv2: 0.0,
 
             // Flicker noise off by default (diosetup.c: fNcoef 0, fNexp 1).
@@ -678,7 +684,7 @@ impl Diode {
             last_stamp_id: std::cell::Cell::new(0.0),
             last_stamp_gd: std::cell::Cell::new(0.0),
             junction_scale: 1.0,
-            temperature_shifted_breakdown_voltage: None,
+            breakdown_temperature_delta: None,
             temperature_breakdown_voltage: None,
             indices: DiodeIndices::default(),
         }
@@ -1105,11 +1111,11 @@ impl Diode {
         {
             self.temperature_model.gap2 = v;
         }
-        // TCV selects ngspice's breakdown law; TBV1/TBV2 below select Xyce's.
-        // They are deliberately separate rather than aliased: ngspice's `tbv1`
-        // is a synonym for TCV and enters as `BV·(1 − TCV·dt)`, while Xyce's
-        // TBV1 enters as `BV·(1 + TBV1·dt)`. Folding them together would flip
-        // the sign of every card that names the other dialect's parameter.
+        // TCV selects ngspice's breakdown law; TBV1/TBV2 below select Xyce's
+        // under the Xyce dialect. They are kept apart rather than aliased at
+        // parse time: ngspice's `tbv1` is a synonym for TCV and enters as
+        // `BV − TCV·dt`, while Xyce's TBV1 enters as `BV·(1 + TBV1·dt)`, and
+        // the dialect that decides between them is selected after parsing.
         if let Some(&v) = params.get("TCV")
             && v.is_finite()
         {
@@ -1171,6 +1177,7 @@ impl Diode {
             && v.is_finite()
         {
             self.tbv1 = v;
+            self.tbv1_given = true;
         }
         if let Some(&v) = params.get("TBV2")
             && v.is_finite()
@@ -1557,14 +1564,15 @@ impl Diode {
     }
 
     fn update_temperature_breakdown_voltage(&mut self, delta_t: Value) {
-        self.temperature_shifted_breakdown_voltage = self.shifted_breakdown_voltage(delta_t);
+        self.breakdown_temperature_delta = Some(delta_t);
         self.rematch_temperature_breakdown_voltage();
     }
 
     fn rematch_temperature_breakdown_voltage(&mut self) {
         self.candidate_eval_valid = false;
         self.temperature_breakdown_voltage = self
-            .temperature_shifted_breakdown_voltage
+            .breakdown_temperature_delta
+            .and_then(|delta_t| self.shifted_breakdown_voltage(delta_t))
             .and_then(|value| self.xbv_matched_breakdown_voltage(value));
     }
 
@@ -1575,15 +1583,24 @@ impl Diode {
     /// differently. ngspice's TCV subtracts (`BV − TCV·dt`) at TLEV=0 and
     /// scales (`BV·(1 − TCV·dt)`) otherwise; Xyce's TBV1/TBV2 scale with the
     /// opposite sign (`BV·(1 + TBV1·dt + TBV2·dt²)`). A card that names TCV
-    /// gets ngspice's; anything else gets Xyce's, which degenerates to no
-    /// shift when TBV1 and TBV2 are absent.
+    /// gets ngspice's, and so does TBV1 outside the Xyce dialect, where it is
+    /// ngspice's alias of TCV (`dio.c:121`, law `diotemp.c:211-214`).
+    /// Anything else gets Xyce's, which degenerates to no shift when TBV1
+    /// and TBV2 are absent.
     fn shifted_breakdown_voltage(&self, delta_t: Value) -> Option<Value> {
         let bv = self.bv?;
-        let shifted = if self.temperature_model.tcv_given {
+        let tcv = if self.temperature_model.tcv_given {
+            Some(self.temperature_model.tcv)
+        } else if self.tbv1_given && !self.xyce_dialect {
+            Some(self.tbv1)
+        } else {
+            None
+        };
+        let shifted = if let Some(tcv) = tcv {
             if self.temperature_model.tlev == 0 {
-                bv - self.temperature_model.tcv * delta_t
+                bv - tcv * delta_t
             } else {
-                bv * (1.0 - self.temperature_model.tcv * delta_t)
+                bv * (1.0 - tcv * delta_t)
             }
         } else {
             bv * (1.0 + delta_t * (self.tbv1 + self.tbv2 * delta_t))
@@ -3106,20 +3123,23 @@ mod tests {
         let temp = REFTEMP + 10.0;
         diode.set_temperature_xyce_7(temp, REFTEMP);
 
-        let shifted_bv = 5.0 * (1.0 + 1.0e-3 * 10.0);
+        // Outside the Xyce dialect TBV1 is ngspice's TCV: `BV − TCV·dt`.
+        let ngspice_shifted_bv = 5.0 - 1.0e-3 * 10.0;
         let ngspice_default = matched_breakdown_oracle(
-            shifted_bv,
+            ngspice_shifted_bv,
             diode.ibv,
             diode.total_saturation_current(),
             1.48,
             diode.vt,
         );
         let before = diode.active_breakdown_voltage().unwrap();
-        assert!((before - ngspice_default).abs() <= 16.0 * Value::EPSILON * shifted_bv);
+        assert!((before - ngspice_default).abs() <= 16.0 * Value::EPSILON * ngspice_shifted_bv);
 
         diode.update(&[-5.1]);
         let cached = diode.candidate_current_and_conductance(-5.1);
         diode.set_xyce_compatibility(true);
+        // Under Xyce the same TBV1 scales: `BV·(1 + TBV1·dt)`.
+        let shifted_bv = 5.0 * (1.0 + 1.0e-3 * 10.0);
         let xyce_default =
             matched_breakdown_oracle(shifted_bv, diode.ibv, diode.is, 1.48, diode.vt);
         let after = diode.active_breakdown_voltage().unwrap();
@@ -3659,6 +3679,7 @@ mod tests {
         params.insert("TBV2".to_string(), -5.0e-8);
 
         let mut diode = Diode::spice_defaults("d1".to_string(), 1, 2).with_model_params(&params);
+        diode.set_xyce_compatibility(true);
         let tnom = REFTEMP;
         let temp = 273.15 - 55.0;
         diode.set_temperature_xyce_7(temp, tnom);

@@ -175,6 +175,44 @@ fn diode_ikr_limits_reverse_high_injection_current_like_ngspice46() {
     );
 }
 
+#[test]
+fn diode_tbv1_is_ngspices_tcv_outside_the_xyce_dialect() {
+    // ngspice-46 (`dio.c:121` aliases tbv1 to TCV; `diotemp.c:212` shifts
+    // BV - TCV*dT at TLEV=0), same deck with `set numdgt=12`:
+    // i(v1) = -1.29022027334e-05, i(v2) = -1.81695935822e-02.
+    // Xyce's law BV*(1 + TBV1*dT) leaves both points out of breakdown
+    // (about -1.087e-09 A).
+    let deck = "diode tbv1 breakdown temperature\n\
+                .temp 127\n\
+                v1 0 a dc 9.75\n\
+                v2 0 b dc 10\n\
+                d1 a 0 dz\n\
+                d2 b 0 dz\n\
+                .model dz d(is=1e-14 bv=10 ibv=1m tbv1=1e-3)\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("TBV1 deck parses");
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_dc_op(&netlist)
+            .expect("TBV1 deck converges");
+        assert_close(
+            &format!("{dialect:?} i(v1)"),
+            branch_current(&result, "v1"),
+            -1.290_220_273_34e-5,
+            1.0e-6,
+            0.0,
+        );
+        assert_close(
+            &format!("{dialect:?} i(v2)"),
+            branch_current(&result, "v2"),
+            -1.816_959_358_22e-2,
+            1.0e-6,
+            0.0,
+        );
+    }
+}
+
 fn isr_reverse_branch_current(dialect: SpiceDialect, voltage: f64) -> f64 {
     let deck = format!(
         "* diode ISR/NR dialect oracle\n\
