@@ -1363,6 +1363,7 @@ impl<'a> Flattener<'a> {
             .any(|(name, _)| name.eq_ignore_ascii_case("M"));
         let xyce_implicit_multiplier = caller_scope.expression_dialect() == ExpressionDialect::Xyce;
         let applies_as_physical_multiplier = xyce_implicit_multiplier || !formal_declares_m;
+        refuse_undeclared_subcircuit_instance_params(subckt, &instance.name, instance_params)?;
         let mut multiplicity = 1.0;
         if applies_as_physical_multiplier {
             for (param_index, (name, value)) in instance_params.iter().enumerate() {
@@ -4545,6 +4546,66 @@ fn resolve_string_parametric_value(
     }
 }
 
+/// Refuse an X-line parameter that names nothing the subcircuit declares.
+///
+/// `X1 a b rr r=5` on a `.subckt rr a b` with no parameters, or `q=5` on one
+/// that declares only `r`, used to bind a value no card reads and run as if
+/// it had not been written. ngspice refuses the first ("Mismatch: 0 formal
+/// but 1 actual params") and silently drops the second; Spectre refuses any
+/// instance parameter its subcircuit does not declare. A declared name is a
+/// formal on the `.subckt` line or a `.param` in its body; `M` is always the
+/// instance's parallel multiplier.
+fn refuse_undeclared_subcircuit_instance_params(
+    subckt: &SubcircuitDef,
+    instance_name: &str,
+    instance_params: &[(String, ParametricValue)],
+) -> Result<(), ParseError> {
+    let declares = |name: &str| {
+        subckt
+            .params
+            .iter()
+            .map(|(formal, _)| formal)
+            .chain(subckt.expr_params.iter().map(|(formal, _)| formal))
+            .chain(subckt.string_params.iter().map(|(formal, _)| formal))
+            .chain(subckt.body_params.iter().map(|(local, _)| local))
+            .chain(subckt.body_expr_params.iter().map(|(local, _)| local))
+            .chain(subckt.body_string_params.iter().map(|(local, _)| local))
+            .any(|declared| declared.eq_ignore_ascii_case(name))
+    };
+    let Some((name, _)) = instance_params
+        .iter()
+        .find(|(name, _)| !name.eq_ignore_ascii_case("M") && !declares(name))
+    else {
+        return Ok(());
+    };
+    let mut formals = subckt
+        .params
+        .iter()
+        .map(|(formal, _)| formal.as_str())
+        .chain(subckt.expr_params.iter().map(|(formal, _)| formal.as_str()))
+        .chain(
+            subckt
+                .string_params
+                .iter()
+                .map(|(formal, _)| formal.as_str()),
+        )
+        .collect::<Vec<_>>();
+    formals.sort_unstable_by_key(|formal| formal.to_ascii_uppercase());
+    formals.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    let declared = if formals.is_empty() {
+        "declares no parameters".to_string()
+    } else {
+        format!("declares {}", formals.join(", "))
+    };
+    Err(ParseError::Syntax {
+        line: 0,
+        message: format!(
+            "Subcircuit instance '{instance_name}' sets parameter '{name}', which subcircuit '{}' does not declare (it {declared})",
+            subckt.name
+        ),
+    })
+}
+
 fn build_subcircuit_param_scope(
     subckt: &SubcircuitDef,
     instance_name: &str,
@@ -5633,6 +5694,62 @@ mod tests {
                 message.starts_with(&format!("line {line}: ")) && message.contains(detail),
                 "{message}"
             );
+        }
+    }
+
+    /// An X-line parameter that names nothing the subcircuit declares is
+    /// refused at the X card in every dialect. ngspice 46 refuses
+    /// `X1 1 0 rr r=5` on a parameterless `rr` ("Mismatch: 0 formal but 1
+    /// actual params") and silently drops `q=5` on an `rr` that declares
+    /// only `r`; both used to run here as if the value had not been written.
+    #[test]
+    fn instance_parameters_must_name_a_declared_subcircuit_parameter() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let parse = |deck: &str| {
+                Netlist::parse_with_options(
+                    deck,
+                    super::super::parser::NetlistParseOptions {
+                        expression_dialect: dialect,
+                        ..Default::default()
+                    },
+                )
+                .expect("deck parses")
+            };
+            for (deck, detail) in [
+                (
+                    "no params\n.subckt rr a b\nR1 a b 1k\n.ends\nV1 1 0 1\nX1 1 0 rr r=5\n.op\n.end\n",
+                    "sets parameter 'r', which subcircuit 'rr' does not declare (it declares no parameters)",
+                ),
+                (
+                    "unknown param\n.subckt rr a b r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr q=5\n.op\n.end\n",
+                    "sets parameter 'q', which subcircuit 'rr' does not declare (it declares r)",
+                ),
+                (
+                    "params keyword\n.subckt rr a b params: r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr params: r=2k q=5\n.op\n.end\n",
+                    "sets parameter 'q'",
+                ),
+            ] {
+                let error = flatten_netlist(&parse(deck)).expect_err("undeclared parameter");
+                let ParseError::Syntax { line, message } = &error else {
+                    panic!("{dialect:?}: {error:?}");
+                };
+                assert_eq!(*line, 6, "{dialect:?}: {message}");
+                assert!(
+                    message
+                        .to_ascii_lowercase()
+                        .contains(&detail.to_ascii_lowercase()),
+                    "{dialect:?}: {message}"
+                );
+            }
+            // M is the multiplier, and a body .param is a declared name.
+            for deck in [
+                "m\n.subckt rr a b\nR1 a b 1k\n.ends\nV1 1 0 1\nX1 1 0 rr m=2\n.op\n.end\n",
+                "body\n.subckt rr a b\n.param r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr r=2k\n.op\n.end\n",
+                "declared\n.subckt rr a b r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr R=2k M=2\n.op\n.end\n",
+            ] {
+                flatten_netlist(&parse(deck))
+                    .unwrap_or_else(|error| panic!("{dialect:?} {deck}: {error}"));
+            }
         }
     }
 
