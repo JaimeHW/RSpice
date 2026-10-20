@@ -14,7 +14,7 @@
 //!   `[ghost] [secondary] [primary]`, or `[secondary] … [ghost] [primary]`
 //!   when the secondary is set apart, with the primary always rightmost,
 //!   always exactly one, accent-filled (or `err` when destructive), plus an
-//!   optional mono hint on the left.
+//!   optional hint on the left: a sentence of at most two lines.
 //! - **Body** — the scrolling middle region, laid out inside a stable
 //!   scrollbar gutter: the bar's track is withheld from the body whether or
 //!   not a bar is showing, so the body's width answers to the surface's width
@@ -800,14 +800,7 @@ impl DialogHintTone {
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = HINT_MARK_GAP;
             self.mark(ui);
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(hint)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(color),
-                )
-                .truncate(),
-            );
+            hint_sentence(ui, hint, color, HINT_MAX_ROWS);
         });
     }
 }
@@ -815,6 +808,43 @@ impl DialogHintTone {
 /// Air between a footer hint's mark and its sentence: the problem line's, so
 /// a marked hint and a marked row read as the same mark.
 const HINT_MARK_GAP: f32 = PROBLEM_MARK_ADVANCE - PROBLEM_MARK_SIDE;
+/// Lines a footer hint may take beside the actions. Two lines of
+/// [`HINT_LINE_H`] stand inside a 29-point action's height, so a refusal is
+/// stated whole without the footer growing as it appears.
+const HINT_MAX_ROWS: usize = 2;
+/// One line of a footer hint.
+const HINT_LINE_H: f32 = 14.0;
+/// The most a hint asks of the footer's width before the footer stacks.
+const HINT_TRACK_CAP: f32 = 200.0;
+
+/// A footer hint's sentence: prose in the sans face, wrapped to `max_rows`
+/// lines in the track it is given, and elided past them with the whole
+/// sentence on hover.
+fn hint_sentence(ui: &mut Ui, hint: &str, color: Color32, max_rows: usize) {
+    let mut job = egui::text::LayoutJob::single_section(
+        hint.to_owned(),
+        egui::TextFormat {
+            font_id: theme::sans(tokens::FS_0, FontWeight::Regular),
+            color,
+            line_height: Some(HINT_LINE_H),
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: ui.available_width().max(1.0),
+        max_rows,
+        overflow_character: Some('\u{2026}'),
+        ..Default::default()
+    };
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let elided = galley.elided;
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter().galley(rect.min, galley, color);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, hint));
+    if elided {
+        response.on_hover_text(hint);
+    }
+}
 
 /// Mockup transaction strip rendered between a workflow body and its footer.
 ///
@@ -1011,7 +1041,8 @@ impl<'a> Dialog<'a> {
         self
     }
 
-    /// Mono footer hint (validation count, shortcut reminder).
+    /// Footer hint (a count, a reminder, why the primary is refused), left
+    /// of the actions in at most two lines of prose.
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self
@@ -1679,11 +1710,30 @@ impl<'a> Dialog<'a> {
         let action_count =
             1 + usize::from(self.secondary.is_some()) + usize::from(self.ghost.is_some());
         let action_height = large_targets.unwrap_or(29.0);
-        let hint_height = if self.hint.is_some() { 19.0 } else { 0.0 };
+        let hint_height = self.stacked_hint_rows(surface_width) as f32 * HINT_LINE_H;
         let row_count = action_count + usize::from(self.hint.is_some());
         20.0 + action_count as f32 * action_height
             + hint_height
             + row_count.saturating_sub(1) as f32 * 6.0
+    }
+
+    /// The lines a stacked footer gives its hint: as many as the sentence
+    /// takes across the footer at a generous estimate of its width, up to
+    /// [`HINT_MAX_ROWS`]. The footer is sized before anything is laid out, so
+    /// the hint is wrapped to exactly this many lines and never runs past it.
+    fn stacked_hint_rows(&self, surface_width: f32) -> usize {
+        let Some(hint) = self.hint.as_deref() else {
+            return 0;
+        };
+        let mark = if self.hint_tone.problem().is_some() {
+            PROBLEM_MARK_ADVANCE
+        } else {
+            0.0
+        };
+        let track =
+            (surface_width - 2.0 * f32::from(WORKFLOW_FOOTER_HORIZONTAL_MARGIN) - mark).max(1.0);
+        let lines = (hint.chars().count() as f32 * 6.4 / track).ceil() as usize;
+        lines.clamp(1, HINT_MAX_ROWS)
     }
 
     fn footer_stacks(&self, surface_width: f32) -> bool {
@@ -1705,8 +1755,13 @@ impl<'a> Dialog<'a> {
             required += button_width(label);
             items += 1;
         }
+        // A hint wraps beside the actions, so it needs the track its longest
+        // line takes, not its whole sentence's length, and never more than a
+        // fixed track: a long refusal elides there rather than stacking the
+        // footer, which would move the actions as the refusal appears.
         if let Some(hint) = self.hint.as_deref() {
-            required += hint.chars().count() as f32 * 6.4;
+            required +=
+                (hint.chars().count() as f32 * 6.4 / HINT_MAX_ROWS as f32).min(HINT_TRACK_CAP);
             items += 1;
         }
         required += items.saturating_sub(1) as f32 * 6.0;
@@ -1885,17 +1940,11 @@ impl<'a> Dialog<'a> {
                     if let Some(hint) = self.hint.as_deref() {
                         let tone = self.hint_tone;
                         let color = tone.text_color(&c);
+                        let rows = self.stacked_hint_rows(surface_width);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = HINT_MARK_GAP;
                             tone.mark(ui);
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(hint)
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                        .color(color),
-                                )
-                                .wrap(),
-                            );
+                            hint_sentence(ui, hint, color, rows);
                         });
                     }
                     let action_width = ui.available_width();
@@ -1968,15 +2017,7 @@ impl<'a> Dialog<'a> {
                                 ui.set_min_width(track);
                                 ui.spacing_mut().item_spacing.x = HINT_MARK_GAP;
                                 self.hint_tone.mark(ui);
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(hint)
-                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                            .color(c.text_dim),
-                                    )
-                                    .truncate(),
-                                )
-                                .on_hover_text(hint);
+                                hint_sentence(ui, hint, c.text_dim, 1);
                             },
                         );
                     }

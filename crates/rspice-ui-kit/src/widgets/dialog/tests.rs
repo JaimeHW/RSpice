@@ -1024,6 +1024,54 @@ fn a_marked_hint_reads_in_dim_text_behind_its_coloured_mark() {
     }
 }
 
+/// A footer hint is prose: the sans face, never the mono one kept for values.
+/// A refusal too long for one line beside the actions takes a second line
+/// instead of eliding or stacking the footer, and stays inside the footer.
+#[test]
+fn a_long_footer_hint_wraps_to_two_sans_lines_beside_the_actions() {
+    let hint = "A pin named IN already exists on this symbol; choose another name.";
+    let dialog = || {
+        Dialog::new(TEST_TITLE, "Place")
+            .description(TEST_DESCRIPTION)
+            .size(DialogSize::CommandForm)
+            .ghost("Cancel")
+            .hint(hint)
+            .hint_tone(DialogHintTone::Error)
+    };
+    assert!(
+        !dialog().footer_stacks(420.0),
+        "the hint stacked the footer"
+    );
+    let output = settled_pass(|ctx| {
+        let _ = dialog().show(ctx, |ui| {
+            ui.label("Dialog body");
+        });
+    });
+    let text = painted_texts(&output.shapes)
+        .into_iter()
+        .find(|text| text.galley.job.text == hint)
+        .expect("the hint is painted");
+    assert!(!text.galley.elided, "the hint was elided");
+    assert_eq!(text.galley.rows.len(), 2, "the hint takes two lines");
+    let family = &text.galley.job.sections[0].format.font_id.family;
+    assert_eq!(
+        *family,
+        crate::theme::sans(crate::tokens::FS_0, crate::theme::FontWeight::Regular).family,
+        "the hint is set in the sans face"
+    );
+    let primary = painted_texts(&output.shapes)
+        .into_iter()
+        .find(|text| text.galley.job.text == "Place")
+        .expect("the primary is painted");
+    let hint_rect = text.galley.rect.translate(text.pos.to_vec2());
+    let primary_rect = primary.galley.rect.translate(primary.pos.to_vec2());
+    assert!(
+        hint_rect.top() >= primary_rect.center().y - 15.0
+            && hint_rect.bottom() <= primary_rect.center().y + 15.0,
+        "the hint {hint_rect:?} stands beside the actions {primary_rect:?}"
+    );
+}
+
 #[test]
 fn dialog_publishes_modal_accessibility_semantics() {
     let ctx = Context::default();
