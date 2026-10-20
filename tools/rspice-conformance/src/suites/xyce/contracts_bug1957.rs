@@ -578,6 +578,7 @@ impl XyceTestRunner {
                 inductors,
                 coefficient,
                 model,
+                ..
             } = &element.kind
             else {
                 continue;

@@ -3699,6 +3699,7 @@ impl XyceTestRunner {
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
+                    coefficient_expr: None,
                     model,
                 } => {
                     Self::validate_static_step_coupling_contract(
@@ -3957,6 +3958,7 @@ impl XyceTestRunner {
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
+                    coefficient_expr: None,
                     model,
                 } => {
                     Self::validate_static_step_coupling_contract(
@@ -3973,6 +3975,7 @@ impl XyceTestRunner {
                     freq,
                     nl,
                     model,
+                    ..
                 } => Self::validate_lossless_transmission_line_contract(
                     netlist,
                     &element.name,
@@ -4286,6 +4289,7 @@ impl XyceTestRunner {
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
+                    coefficient_expr: None,
                     model,
                 } => {
                     Self::validate_static_step_coupling_contract(
@@ -4302,7 +4306,8 @@ impl XyceTestRunner {
                     freq,
                     nl,
                     model,
-                } => Self::validate_lossless_transmission_line_contract(netlist, &element.name, element.nodes.len(), &LosslessLineSpec { z0: *z0, td: *td, freq: *freq, nl: *nl, model: model.as_deref() })?,
+                    ..
+                } =>Self::validate_lossless_transmission_line_contract(netlist, &element.name, element.nodes.len(), &LosslessLineSpec { z0: *z0, td: *td, freq: *freq, nl: *nl, model: model.as_deref() })?,
                 ElementKind::VSwitch { .. } => {}
                 ElementKind::ISwitch {
                     control_element, ..

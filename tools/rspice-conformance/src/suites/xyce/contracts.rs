@@ -6692,6 +6692,7 @@ impl XyceTestRunner {
                     freq: None,
                     nl: None,
                     model: None,
+                    ..
                 } if z0.to_bits() == 50.0f64.to_bits()
                     && td.to_bits() == 10e-9f64.to_bits()
             )

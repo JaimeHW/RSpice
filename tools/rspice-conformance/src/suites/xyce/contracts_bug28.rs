@@ -584,7 +584,7 @@ impl XyceTestRunner {
             ["NODE2", "NODE5"],
             4.65e-6,
             expected_l2_expression,
-        ) || !matches!(&subckt.elements[9].kind, ElementKind::Coupling { inductors, coefficient, model: None }
+        ) || !matches!(&subckt.elements[9].kind, ElementKind::Coupling { inductors, coefficient, coefficient_expr: None, model: None }
                 if subckt.elements[9].name.eq_ignore_ascii_case("KTRANS")
                     && inductors.len() == 2
                     && inductors.iter().zip(["L1", "L2"]).all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
@@ -642,7 +642,7 @@ impl XyceTestRunner {
             || !flattened_l("XTEST.L2", ["XTEST.NODE2", "XTEST.NODE5"], 4.65e-6)
             || !flattened.elements.iter().any(|element|
                 element.name.eq_ignore_ascii_case("XTEST.KTRANS")
-                    && matches!(&element.kind, ElementKind::Coupling { inductors, coefficient, model: None }
+                    && matches!(&element.kind, ElementKind::Coupling { inductors, coefficient, coefficient_expr: None, model: None }
                         if inductors.len() == 2
                             && inductors.iter().zip(["XTEST.L1", "XTEST.L2"]).all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
                             && coefficient.to_bits() == 1.0f64.to_bits()))

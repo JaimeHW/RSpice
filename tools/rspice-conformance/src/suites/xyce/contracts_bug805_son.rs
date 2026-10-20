@@ -405,7 +405,7 @@ impl XyceTestRunner {
         if !element.name.eq_ignore_ascii_case(name)
             || element.provenance != ElementProvenance::Authored
             || !element.nodes.is_empty()
-            || !matches!(&element.kind, ElementKind::Coupling { inductors, coefficient: actual, model: None }
+            || !matches!(&element.kind, ElementKind::Coupling { inductors, coefficient: actual, coefficient_expr: None, model: None }
                 if actual.to_bits() == coefficient.to_bits()
                     && inductors.len() == 2
                     && inductors[0].eq_ignore_ascii_case("L1")

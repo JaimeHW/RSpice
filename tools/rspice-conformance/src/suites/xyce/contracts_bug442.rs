@@ -767,6 +767,7 @@ impl XyceTestRunner {
                     freq: None,
                     nl: None,
                     model: None,
+                    ..
                 } if z0.to_bits() == 50.0f64.to_bits()
                     && td.to_bits() == (10.0 * NANOSECOND).to_bits()
             );

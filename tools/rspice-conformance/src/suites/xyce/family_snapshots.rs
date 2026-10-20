@@ -3937,6 +3937,7 @@ impl XyceTestRunner {
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
+                    coefficient_expr: None,
                     model,
                 } if nodes.is_empty()
                     && inductors.len() >= 2
@@ -4268,6 +4269,7 @@ impl XyceTestRunner {
                 ElementKind::Coupling {
                     inductors: winding_names,
                     coefficient,
+                    coefficient_expr: None,
                     model: Some(core_model),
                 } if nodes.is_empty()
                     && winding_names.len() == 2
