@@ -1723,35 +1723,12 @@ impl MeasureEngine {
         if lower > upper {
             return MeasureResult::failed(name, "Empty range");
         }
-        let mut integral = 0.0;
-        let mut width = 0.0;
-        let mut previous = None;
-        for (&axis, &value) in time.iter().zip(signal) {
-            let lower_tolerance = if lower.is_finite() {
-                lower.abs() * 1.0e-12
-            } else {
-                0.0
-            };
-            let upper_tolerance = if upper.is_finite() {
-                upper.abs() * 1.0e-12
-            } else {
-                0.0
-            };
-            if axis >= lower - lower_tolerance && axis <= upper + upper_tolerance {
-                if let Some((previous_axis, previous_value)) = previous {
-                    let dx = Value::abs(axis - previous_axis);
-                    integral += 0.5 * (value + previous_value) * dx;
-                    width += dx;
-                }
-                previous = Some((axis, value));
-            } else {
-                previous = None;
+        let window = windowed_trapezoid(time, signal, lower, upper, data.segment_starts, |v| v);
+        match window {
+            Some(WindowedIntegral { integral, width }) if width > 0.0 => {
+                MeasureResult::success(name, integral / width)
             }
-        }
-        if width == 0.0 {
-            MeasureResult::failed(name, "Empty range")
-        } else {
-            MeasureResult::success(name, integral / width)
+            _ => MeasureResult::failed(name, "Empty range"),
         }
     }
 
@@ -1790,35 +1767,12 @@ impl MeasureEngine {
         if lower > upper {
             return MeasureResult::failed(name, "Empty range");
         }
-        let mut integral = 0.0;
-        let mut width = 0.0;
-        let mut previous = None;
-        for (&axis, &value) in time.iter().zip(signal) {
-            let lower_tolerance = if lower.is_finite() {
-                lower.abs() * 1.0e-12
-            } else {
-                0.0
-            };
-            let upper_tolerance = if upper.is_finite() {
-                upper.abs() * 1.0e-12
-            } else {
-                0.0
-            };
-            if axis >= lower - lower_tolerance && axis <= upper + upper_tolerance {
-                if let Some((previous_axis, previous_value)) = previous {
-                    let dx = Value::abs(axis - previous_axis);
-                    integral += 0.5 * (value * value + previous_value * previous_value) * dx;
-                    width += dx;
-                }
-                previous = Some((axis, value));
-            } else {
-                previous = None;
+        let window = windowed_trapezoid(time, signal, lower, upper, data.segment_starts, |v| v * v);
+        match window {
+            Some(WindowedIntegral { integral, width }) if width > 0.0 => {
+                MeasureResult::success(name, (integral / width).sqrt())
             }
-        }
-        if width == 0.0 {
-            MeasureResult::failed(name, "Empty range")
-        } else {
-            MeasureResult::success(name, (integral / width).sqrt())
+            _ => MeasureResult::failed(name, "Empty range"),
         }
     }
 
@@ -2166,37 +2120,76 @@ impl MeasureEngine {
             (None, Some(to)) => (to, Value::INFINITY, sweep_direction),
             (None, None) => (Value::NEG_INFINITY, Value::INFINITY, sweep_direction),
         };
-        let mut selected_points = 0usize;
-        let mut integral = 0.0;
-        let mut previous = None;
-        for (&axis, &value) in time.iter().zip(signal) {
-            let lower_tolerance = if lower.is_finite() {
-                lower.abs() * 1.0e-12
-            } else {
-                0.0
-            };
-            let upper_tolerance = if upper.is_finite() {
-                upper.abs() * 1.0e-12
-            } else {
-                0.0
-            };
-            if axis >= lower - lower_tolerance && axis <= upper + upper_tolerance {
-                selected_points += 1;
-                if let Some((previous_axis, previous_value)) = previous {
-                    let dx = Value::abs(axis - previous_axis);
-                    integral += 0.5 * (value + previous_value) * dx;
-                }
-                previous = Some((axis, value));
-            } else {
-                previous = None;
+        match windowed_trapezoid(time, signal, lower, upper, data.segment_starts, |v| v) {
+            Some(WindowedIntegral { integral, .. }) => {
+                MeasureResult::success(name, integral * direction)
             }
-        }
-        if selected_points == 0 {
-            MeasureResult::failed(name, "Empty range")
-        } else {
-            MeasureResult::success(name, integral * direction)
+            None => MeasureResult::failed(name, "Empty range"),
         }
     }
+}
+
+struct WindowedIntegral {
+    integral: Value,
+    width: Value,
+}
+
+/// Trapezoid integral of `integrand(signal)` over the axis window
+/// `[lower, upper]`, with the piecewise-linear signal interpolated where the
+/// window edges cut an interval, so a window need not land on samples.
+/// Pairs that straddle a sweep-segment start are skipped: the jump back to
+/// the start of the next inner DC pass is not part of the waveform. `None`
+/// means the window reaches neither a sample nor an interval.
+fn windowed_trapezoid(
+    axis: &[Value],
+    signal: &[Value],
+    lower: Value,
+    upper: Value,
+    segment_starts: &[usize],
+    integrand: impl Fn(Value) -> Value,
+) -> Option<WindowedIntegral> {
+    let lower_tolerance = if lower.is_finite() {
+        lower.abs() * 1.0e-12
+    } else {
+        0.0
+    };
+    let upper_tolerance = if upper.is_finite() {
+        upper.abs() * 1.0e-12
+    } else {
+        0.0
+    };
+    let mut reached = axis
+        .iter()
+        .any(|&x| x >= lower - lower_tolerance && x <= upper + upper_tolerance);
+    let mut integral = 0.0;
+    let mut width = 0.0;
+    let count = axis.len().min(signal.len());
+    for index in 1..count {
+        if segment_starts.binary_search(&index).is_ok() {
+            continue;
+        }
+        let (x0, x1) = (axis[index - 1], axis[index]);
+        let (y0, y1) = (signal[index - 1], signal[index]);
+        let start = x0.min(x1).max(lower);
+        let end = x0.max(x1).min(upper);
+        let span = end - start;
+        if span.is_nan() || span <= 0.0 {
+            continue;
+        }
+        let at = |x: Value| {
+            if x == x0 {
+                y0
+            } else if x == x1 {
+                y1
+            } else {
+                y0 + (y1 - y0) * ((x - x0) / (x1 - x0))
+            }
+        };
+        integral += 0.5 * (integrand(at(start)) + integrand(at(end))) * span;
+        width += span;
+        reached = true;
+    }
+    reached.then_some(WindowedIntegral { integral, width })
 }
 
 #[derive(Clone, Copy)]
@@ -3954,6 +3947,93 @@ mod tests {
 
         assert_eq!(results[0].value, Some(0.0));
         assert!(results[0].passed);
+    }
+
+    fn window_statement(
+        name: &str,
+        analysis: &str,
+        kind: &str,
+        from: Option<Value>,
+        to: Option<Value>,
+    ) -> MeasureStatement {
+        let signal = "V(X)".to_string();
+        MeasureStatement {
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            fail_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type: match kind {
+                "INTEG" => MeasureType::Integ { signal, from, to },
+                "RMS" => MeasureType::Rms { signal, from, to },
+                _ => MeasureType::Avg { signal, from, to },
+            },
+            analysis: analysis.to_string(),
+        }
+    }
+
+    #[test]
+    fn integrals_interpolate_a_window_that_falls_between_samples() {
+        // `.dc V1 0 1 0.3` of v(x)=x, window 0.1..0.8. ngspice 46 also reads
+        // INTEG 0.315; RSpice used to drop the slices outside the first and
+        // last in-window samples and read 0.135. RMS is the trapezoid of the
+        // squares over 0.1, 0.3, 0.6, 0.8.
+        let axis = [0.0, 0.3, 0.6, 0.9];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(X)".to_string(), &axis);
+        let mut engine = MeasureEngine::new();
+        for (name, kind) in [("integ", "INTEG"), ("rms", "RMS"), ("avg", "AVG")] {
+            engine.add(window_statement(name, "DC", kind, Some(0.1), Some(0.8)));
+        }
+        let results = engine.evaluate(&axis, &signals);
+
+        let rms: Value =
+            ((0.01 + 0.09) / 2.0 * 0.2 + (0.09 + 0.36) / 2.0 * 0.3 + (0.36 + 0.64) / 2.0 * 0.2)
+                / 0.7;
+        for (result, expected) in results.iter().zip([0.315, rms.sqrt(), 0.45]) {
+            let value = result.value.expect("window measures pass");
+            assert!(
+                (value - expected).abs() < 1e-12,
+                "{}: {value} != {expected}",
+                result.name
+            );
+        }
+
+        // A window strictly between two samples still has a defined area.
+        let mut inner = MeasureEngine::new();
+        inner.add(window_statement(
+            "inner",
+            "TRAN",
+            "INTEG",
+            Some(0.4),
+            Some(0.5),
+        ));
+        let value = inner.evaluate(&axis, &signals)[0]
+            .value
+            .expect("inner window");
+        assert!((value - 0.045).abs() < 1e-12, "{value}");
+    }
+
+    #[test]
+    fn integrals_do_not_bridge_the_jump_between_nested_dc_passes() {
+        // `.dc V1 1 0 -0.5 V2 0 1 1` of v(x)*(1+v(y)): two descending passes.
+        let axis = [1.0, 0.5, 0.0, 1.0, 0.5, 0.0];
+        let values = [1.0, 0.5, 0.0, 2.0, 1.0, 0.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(X)".to_string(), &values);
+        let mut engine = MeasureEngine::new();
+        engine.add(window_statement("integ", "DC", "INTEG", None, None));
+        engine.add(window_statement("avg", "DC", "AVG", None, None));
+        let results = engine.evaluate_with_segment_starts(MeasureData {
+            axis: &axis,
+            signals: &signals,
+            segment_starts: &[3],
+        });
+        // Passes integrate to 0.5 and 1.0 over unit width each; the sweep
+        // descends, so the integral is negative.
+        assert_eq!(results[0].value, Some(-1.5));
+        assert_eq!(results[1].value, Some(0.75));
     }
 
     #[test]
