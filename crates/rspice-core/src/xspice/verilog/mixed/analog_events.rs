@@ -65,24 +65,28 @@ impl MixedSignalHost {
             else {
                 unreachable!("validated event probe")
             };
-            let analog_origin = if self.state.started {
-                self.analog_event_counter(name)?
-            } else {
-                0
-            };
+            // Both origins are the accepted counts this trial starts from. Before
+            // the first accepted timepoint that is zero for a module that has
+            // just initialized, but a DC sweep point that continues from the
+            // previous point's held equilibrium starts with that point's counts:
+            // the analog half's restored counter and the discrete half's adopted
+            // signal. Counting from zero there would read the carried
+            // occurrences as new ones the analog half never recorded.
+            let analog_origin = self.analog_event_counter(name)?;
+            let digital = self
+                .state
+                .digital
+                .read(signal)
+                .and_then(FourStateValue::to_u64)
+                .filter(|value| *value <= u64::from(COUNTER_MASK));
             // Shared views acquire their initialized counter values when the
             // coordinator starts the first trial. Their logical origin is zero.
             let digital_origin = if self.state.started {
-                self.state
-                    .digital
-                    .read(signal)
-                    .and_then(FourStateValue::to_u64)
-                    .filter(|value| *value <= u64::from(COUNTER_MASK))
-                    .ok_or_else(|| MixedSignalError::InvalidBridge {
-                        detail: "analog event counter lost its initialized signal".into(),
-                    })? as u32
+                digital.ok_or_else(|| MixedSignalError::InvalidBridge {
+                    detail: "analog event counter lost its initialized signal".into(),
+                })? as u32
             } else {
-                0
+                digital.unwrap_or(0) as u32
             };
             self.scratch.trial.analog_events.push(AnalogEventTrial {
                 analog_origin,

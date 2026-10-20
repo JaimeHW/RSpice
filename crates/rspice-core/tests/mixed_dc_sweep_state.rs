@@ -105,6 +105,11 @@ fn xspice_latch_deck(card: &str) -> Netlist {
 
 /// `(vin, v(q))` at every point of the deck's own `.dc` card.
 fn sweep(netlist: &Netlist) -> Vec<(f64, f64)> {
+    sweep_of(netlist, "q")
+}
+
+/// `(swept value, v(node))` at every point of the deck's own `.dc` card.
+fn sweep_of(netlist: &Netlist, node: &str) -> Vec<(f64, f64)> {
     let Some(AnalysisCommand::Dc {
         source,
         start,
@@ -137,7 +142,10 @@ fn sweep(netlist: &Netlist) -> Vec<(f64, f64)> {
         .map(|point| {
             (
                 point.sweep_value,
-                point.result.try_voltage_named("q").expect("q is published"),
+                point
+                    .result
+                    .try_voltage_named(node)
+                    .unwrap_or_else(|| panic!("{node} is published")),
             )
         })
         .collect()
@@ -323,4 +331,88 @@ fn a_parameter_that_changes_the_digital_structure_reinitializes_the_point() {
     let changed = sweep(&deck(".dc r 4000 10000 6000 w list 2 4"));
     let levels = changed.iter().map(|&(_, q)| is_high(q)).collect::<Vec<_>>();
     assert_eq!(levels, [false, true, false, true], "{changed:?}");
+}
+
+/// A discrete process waiting on an analog `above` event: `q` latches high
+/// the first time `V(in)` is above 0.5 V and drives `a` to 2.0 V (0.5 V
+/// before). `above` fires during DC initialization when its expression is
+/// already positive (Verilog-AMS LRM 2.4 section 5.10.3).
+const ABOVE_LATCH: &str = "`include \"disciplines.vams\"\n\
+`timescale 1ns/1ps\n\
+module ab(in, a);\n\
+  input in; electrical in; output a; electrical a;\n\
+  reg q; initial q = 0;\n\
+  always @(EVENT(V(in) - 0.5)) q = 1;\n\
+  analog V(a) <+ (q ? 2.0 : 0.5);\n\
+endmodule\n";
+
+fn event_latch_deck(source: &SourceFile, card: &str) -> Netlist {
+    parse(&format!(
+        "* analog event in a discrete process\n\
+         v1 in 0 0.8\n\
+         x1 in a ab\n\
+         r1 a 0 1k\n\
+         .hdl \"{}\"\n\
+         {card}\n\
+         .end\n",
+        source.path()
+    ))
+}
+
+/// The levels `a` reads at each point of a sweep, in sweep order.
+fn levels(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    points
+        .iter()
+        .map(|&(vin, a)| ((vin * 10.0).round() / 10.0, a))
+        .collect()
+}
+
+/// An `above` event fires at every DC point where it holds, as it does at a
+/// standalone `.op`, including at a point that continues from one where it
+/// already fired: that point starts from the counts the previous point
+/// carried, not from zero.
+#[test]
+fn an_above_event_fires_at_every_dc_point_where_it_holds() {
+    let source = SourceFile::new("vams", &ABOVE_LATCH.replace("EVENT", "above"));
+    let op = Engine::default()
+        .run_dc_op(&event_latch_deck(&source, ""))
+        .expect("the operating point solves")
+        .try_voltage_named("a")
+        .expect("a is published");
+    assert!((op - 2.0).abs() < 1e-9, "the .op reads {op}");
+    for (card, expected) in [
+        (".dc v1 0.6 1 0.2", vec![(0.6, 2.0), (0.8, 2.0), (1.0, 2.0)]),
+        (
+            ".dc v1 0.2 1 0.2",
+            vec![(0.2, 0.5), (0.4, 0.5), (0.6, 2.0), (0.8, 2.0), (1.0, 2.0)],
+        ),
+        // Carried in sweep order, `q` stays latched below the threshold.
+        (
+            ".dc v1 1 0.2 -0.2",
+            vec![(1.0, 2.0), (0.8, 2.0), (0.6, 2.0), (0.4, 2.0), (0.2, 2.0)],
+        ),
+        (
+            ".dc v1 1 0.2 -0.2 restart=yes",
+            vec![(1.0, 2.0), (0.8, 2.0), (0.6, 2.0), (0.4, 0.5), (0.2, 0.5)],
+        ),
+    ] {
+        let points = levels(&sweep_of(&event_latch_deck(&source, card), "a"));
+        assert_eq!(points.len(), expected.len(), "{card}: {points:?}");
+        for (&(vin, a), &(want_vin, want_a)) in points.iter().zip(&expected) {
+            assert!(
+                (vin - want_vin).abs() < 1e-9 && (a - want_a).abs() < 1e-9,
+                "{card}: {points:?}"
+            );
+        }
+    }
+}
+
+/// `cross` shares `above`'s event counter bridge; a sweep over it runs too.
+#[test]
+fn a_cross_event_in_a_dc_sweep_runs_every_point() {
+    let source = SourceFile::new("vams", &ABOVE_LATCH.replace("EVENT", "cross"));
+    for card in [".dc v1 0.2 1 0.2", ".dc v1 1 0.2 -0.2"] {
+        let points = sweep_of(&event_latch_deck(&source, card), "a");
+        assert_eq!(points.len(), 5, "{card}: {points:?}");
+    }
 }
