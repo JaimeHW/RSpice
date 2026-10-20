@@ -3184,51 +3184,62 @@ rload out 0 1meg
 fn oneshot_edges_land_on_the_trigger_crossing_at_every_transient_step() {
     // v(clk) ramps 0 -> 1 V across [0.9 ms, 1 ms], crossing clk_trig = 0.5 at
     // exactly 950 us. cntl_in is null, so the pulse width is a flat 100 us.
-    let deck = "\
-* XSPICE oneshot trigger crossing
-vclk clk 0 pwl(0 0 0.9m 0 1m 1 2m 1)
-aone clk null null out os
-.model os oneshot (cntl_array=[0 1] pw_array=[100u 100u] clk_trig=0.5 out_low=0 out_high=1 rise_delay=0 rise_time=1u fall_delay=0 fall_time=1u retrig=false)
-rload out 0 1meg
-.end
-";
-    let netlist = Netlist::parse(deck).expect("deck parses");
+    // `0.9m` and `1m` are the doubles nearest their decimals, so on the 950 us
+    // timepoint the one-shot predicts the clock is exactly 0.5 V: the firing
+    // belongs to that point, not to the step after it. The falling clock
+    // checks the same landing for a negative-edge trigger.
     const CROSSING: f64 = 950.0e-6;
     const EDGE_TIME: f64 = 1.0e-6;
     const PULSE_WIDTH: f64 = 100.0e-6;
     let fall_start = CROSSING + EDGE_TIME + PULSE_WIDTH;
 
-    for tstep in [20.0e-6, 10.0e-6, 5.0e-6, 2.0e-6, 1.0e-6] {
-        let result = Engine::default()
-            .run_tran(&netlist, 2.0e-3, tstep)
-            .expect("transient solves");
-        let out = transient_node_series(&result, "out");
+    for (clock, pos_edge_trig) in [
+        ("pwl(0 0 0.9m 0 1m 1 2m 1)", true),
+        ("pwl(0 1 0.9m 1 1m 0 2m 0)", false),
+    ] {
+        let deck = format!("\
+* XSPICE oneshot trigger crossing
+vclk clk 0 {clock}
+aone clk null null out os
+.model os oneshot (cntl_array=[0 1] pw_array=[100u 100u] clk_trig=0.5 pos_edge_trig={pos_edge_trig} out_low=0 out_high=1 rise_delay=0 rise_time=1u fall_delay=0 fall_time=1u retrig=false)
+rload out 0 1meg
+.end
+");
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        for tstep in [20.0e-6, 10.0e-6, 5.0e-6, 2.0e-6, 1.0e-6] {
+            let result = Engine::default()
+                .run_tran(&netlist, 2.0e-3, tstep)
+                .expect("transient solves");
+            let out = transient_node_series(&result, "out");
 
-        // A ramp sample pins the edge it belongs to: the value alone says how
-        // far into a linear edge of known duration the sample sits.
-        for (label, edge_start, recover) in [
-            ("rise", CROSSING, (|value: f64| value) as fn(f64) -> f64),
-            ("fall", fall_start, |value: f64| 1.0 - value),
-        ] {
-            let samples = result
-                .time
-                .iter()
-                .zip(out)
-                .filter(|(time, _)| (edge_start..=edge_start + 2.0 * EDGE_TIME).contains(*time))
-                .filter(|(_, value)| **value > 1.0e-9 && **value < 1.0 - 1.0e-9)
-                .map(|(time, value)| (*time, *value))
-                .collect::<Vec<_>>();
-            assert!(
-                !samples.is_empty(),
-                "tstep={tstep:e}: no accepted timepoint lands inside the {EDGE_TIME:e} s {label}"
-            );
-            for (time, value) in samples {
-                let start = time - recover(value) * EDGE_TIME;
+            // A ramp sample pins the edge it belongs to: the value alone says how
+            // far into a linear edge of known duration the sample sits.
+            for (label, edge_start, recover) in [
+                ("rise", CROSSING, (|value: f64| value) as fn(f64) -> f64),
+                ("fall", fall_start, |value: f64| 1.0 - value),
+            ] {
+                let samples = result
+                    .time
+                    .iter()
+                    .zip(out)
+                    .filter(|(time, _)| (edge_start..=edge_start + 2.0 * EDGE_TIME).contains(*time))
+                    .filter(|(_, value)| **value > 1.0e-9 && **value < 1.0 - 1.0e-9)
+                    .map(|(time, value)| (*time, *value))
+                    .collect::<Vec<_>>();
                 assert!(
-                    (start - edge_start).abs() < 1.0e-9,
-                    "tstep={tstep:e}: {label} sample ({time:e}, {value}) puts the edge at \
-                     {start:e}, not the {edge_start:e} the {CROSSING:e} crossing requires"
+                    !samples.is_empty(),
+                    "pos_edge_trig={pos_edge_trig}, tstep={tstep:e}: no accepted timepoint lands \
+                 inside the {EDGE_TIME:e} s {label}"
                 );
+                for (time, value) in samples {
+                    let start = time - recover(value) * EDGE_TIME;
+                    assert!(
+                        (start - edge_start).abs() < 1.0e-9,
+                        "pos_edge_trig={pos_edge_trig}, tstep={tstep:e}: {label} sample ({time:e}, \
+                     {value}) puts the edge at {start:e}, not the {edge_start:e} the \
+                     {CROSSING:e} crossing requires"
+                    );
+                }
             }
         }
     }

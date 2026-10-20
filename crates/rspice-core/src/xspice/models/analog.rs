@@ -2881,9 +2881,14 @@ impl CodeModel for AnalogOneShot {
             let positive_edge = analog_boolean_param(ctx, "oneshot", "pos_edge_trig")?;
             let retrigger = analog_boolean_param(ctx, "oneshot", "retrig")?;
 
+            // A clock that reaches `clk_trig` fires on that point. The
+            // predicted crossing is offered as a timepoint, so the stepper
+            // can land with the clock exactly on the trigger; waiting for it
+            // to pass dated the firing back onto that point from the next
+            // step, with the whole rise window already behind the solver.
             if positive_edge {
                 if !set {
-                    if clock > old_clock && clock > trigger {
+                    if clock > old_clock && clock >= trigger {
                         state = true;
                         set = true;
                         trigger_time = Some(oneshot_trigger_crossing_time(
@@ -2894,7 +2899,7 @@ impl CodeModel for AnalogOneShot {
                     set = false;
                 }
             } else if !set {
-                if clock < old_clock && clock < trigger {
+                if clock < old_clock && clock <= trigger {
                     state = true;
                     set = true;
                     trigger_time = Some(oneshot_trigger_crossing_time(
