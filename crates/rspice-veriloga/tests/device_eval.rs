@@ -3411,6 +3411,92 @@ endmodule
     }
 }
 
+/// The optional operands of LRM 2.4 sections 4.5.2, 4.5.4 and 4.5.5: a
+/// tolerance or nature on `ddt`, `idt` and `idtmod`, and an `idt` assert fixed
+/// for the instance. Each call computes exactly what its plain form computes,
+/// and a nonzero assert holds the integral at its initial condition. Every
+/// one of these forms was refused ("Function 'ddt' expects 1 argument(s),
+/// got 2", "expects 1..2" for `idt`, "expects 1..4" for `idtmod`).
+#[test]
+fn integral_operators_accept_tolerance_nature_and_fixed_assert_operands() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module optional_operands(p1, p2, p3, p4, p5, p6, p7, p8, p9, n);
+    inout p1, p2, p3, p4, p5, p6, p7, p8, p9, n;
+    electrical p1, p2, p3, p4, p5, p6, p7, p8, p9, n;
+    parameter real rate = 1.0e6;
+    parameter integer hold = 1;
+    analog begin
+        I(p1, n) <+ ddt(V(p1, n), 1.0e-9);
+        I(p2, n) <+ ddt(V(p1, n), Voltage);
+        I(p3, n) <+ ddt(V(p1, n), V);
+        I(p4, n) <+ ddt(V(p1, n));
+        I(p5, n) <+ idt(rate, 0.25, 0, 1.0e-9);
+        I(p6, n) <+ idt(rate, 0.25);
+        I(p7, n) <+ idt(rate, 0.25, hold) + idt(rate, 0.0, 1, Current);
+        I(p8, n) <+ idtmod(rate, 0.0, 1.0, 0.0, 1.0e-9);
+        I(p9, n) <+ idtmod(rate, 0.0, 1.0, 0.0);
+    end
+endmodule
+"#,
+    );
+    let mut device = model.device("OPT1", &[1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+    let check = |currents: &[f64], label: &str| {
+        for (with, plain) in [(0, 3), (1, 3), (2, 3), (4, 5), (7, 8)] {
+            assert_eq!(
+                currents[with].to_bits(),
+                currents[plain].to_bits(),
+                "{label}: contribution {with} differs from its plain form {plain}: {currents:?}"
+            );
+        }
+        assert_eq!(currents[6], 0.25, "{label}: a held idt reads its IC");
+    };
+    device.update_voltages(&[0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    check(&device.evaluate(), "dc");
+    device.advance_state();
+    device.set_analysis_type(2);
+    device.set_timestep(0.25e-6);
+    for (step, volts) in [0.75, 1.5, 1.0].into_iter().enumerate() {
+        device.update_voltages(&[volts, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let currents = device.evaluate();
+        check(&currents, &format!("step {step}"));
+        assert!(currents[3] != 0.0, "step {step}: ddt sees the change");
+        device.advance_state();
+    }
+}
+
+/// What the optional operands may not be: an assert that changes during the
+/// simulation (the reset is not implemented, and dropping it would integrate
+/// straight through), a tolerance read from a probe, or a tolerance that is
+/// not positive.
+#[test]
+fn integral_operator_options_refuse_what_they_cannot_honour() {
+    for (call, expected) in [
+        (
+            "idt(V(p, n), 0.0, V(p, n) > 0.5)",
+            "idt with an assert that can change during the simulation is not supported",
+        ),
+        (
+            "ddt(V(p, n), V(p, n))",
+            "ddt tolerance must be a constant expression or a nature",
+        ),
+        (
+            "idt(V(p, n), 0.0, 0, -1.0)",
+            "idt tolerance must be positive",
+        ),
+    ] {
+        let source = format!(
+            "`include \"disciplines.vams\"\nmodule refused(p, n); inout p, n; electrical p, n;\nanalog I(p, n) <+ {call};\nendmodule\n"
+        );
+        let error = match rspice_veriloga::VerilogACompiler::default().compile(&source) {
+            Ok(_) => panic!("{call} must be refused"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains(expected), "{call}: {error}");
+    }
+}
+
 #[test]
 fn jacobian_matches_finite_difference_for_diode() {
     let model = compile(

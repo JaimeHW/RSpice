@@ -5329,6 +5329,17 @@ impl SemanticAnalyzer {
             && matches!(call.name.as_str(), "ddt" | "idt" | "idtmod")
         {
             self.validate_builtin_call_arity(call)?;
+            if call.name == "idt"
+                && let Some(assert) = call.args.get(2)
+            {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidContribution(
+                        "an idt with an assert operand cannot be the left side of an indirect equation"
+                            .into(),
+                    ),
+                    assert.span(),
+                )));
+            }
             Expression::Call(CallExpr {
                 resolved_builtin: call.resolved_builtin,
                 name: call.name.clone(),
@@ -7526,6 +7537,9 @@ impl SemanticAnalyzer {
             Expression::Call(call) => {
                 self.validate_builtin_call_arity(call)?;
                 self.validate_null_arguments(call)?;
+                if let Some(stripped) = self.strip_integral_operator_options(call)? {
+                    return self.lower_expression(&stripped);
+                }
                 self.validate_filter_vector_operands(call)?;
                 if call.name.eq_ignore_ascii_case("absdelay")
                     && let Some(max_delay) = call.args.get(2)
@@ -8279,6 +8293,104 @@ impl SemanticAnalyzer {
             selector,
             span: function.span,
         })))
+    }
+
+    /// `ddt`, `idt` or `idtmod` without the optional operands this simulator
+    /// accepts but does not use (LRM 2.4 sections 4.5.2, 4.5.4 and 4.5.5), or
+    /// `None` when the call has none.
+    ///
+    /// The trailing absolute tolerance, or the nature whose `abstol` it
+    /// names, is advisory: these operators are companion evaluations with no
+    /// state unknown of their own for a tolerance to converge, so it is
+    /// checked (a positive constant, or a nature or its access function) and
+    /// dropped. An `idt` assert that is a constant zero never resets, so the
+    /// call is the two-argument form; a constant nonzero assert holds the
+    /// output at its initial condition for the whole simulation, so the call
+    /// is that initial condition; one that parameters fix for the instance
+    /// chooses between the two. An assert that can change during the
+    /// simulation is refused by name: restarting the integral from its
+    /// initial condition is not implemented.
+    fn strip_integral_operator_options(
+        &self,
+        call: &CallExpr,
+    ) -> CompileResult<Option<Expression>> {
+        let name = call.name.to_ascii_lowercase();
+        let tolerance = match name.as_str() {
+            "ddt" => 1,
+            "idt" => 3,
+            "idtmod" => 4,
+            _ => return Ok(None),
+        };
+        let invalid = |message: String, span: Span| {
+            Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(message),
+                span,
+            )))
+        };
+        let mut args = call.args.clone();
+        let mut changed = false;
+        if let Some(operand) = args.get(tolerance) {
+            let nature = matches!(operand, Expression::Identifier(identifier)
+                if self.symbols.lookup(&identifier.name).is_none()
+                    && (self.disciplines.get_nature(&identifier.name).is_some()
+                        || self.disciplines.resolve_access(&identifier.name).is_some()));
+            if !nature {
+                if !self.expression_is_simulation_invariant(operand) {
+                    return invalid(
+                        format!(
+                            "{name} tolerance must be a constant expression or a nature, not a value that changes during the simulation"
+                        ),
+                        operand.span(),
+                    );
+                }
+                if let Some(value) = self.eval_const_invariant(operand)
+                    && !(value.is_finite() && value > 0.0)
+                {
+                    return invalid(
+                        format!("{name} tolerance must be positive, not {value}"),
+                        operand.span(),
+                    );
+                }
+            }
+            args.truncate(tolerance);
+            changed = true;
+        }
+        if name == "idt" && args.len() == 3 {
+            let assert = args.pop().expect("three operands");
+            let held = args[1].clone();
+            let integral = Expression::Call(CallExpr {
+                resolved_builtin: call.resolved_builtin,
+                name: call.name.clone(),
+                args,
+                span: call.span,
+            });
+            return match self.eval_const_invariant(&assert) {
+                Some(value) if value != 0.0 => Ok(Some(held)),
+                Some(_) => Ok(Some(integral)),
+                // Fixed for the instance: one of the two forms for its whole
+                // life, chosen by a condition that cannot change while it runs.
+                None if self.expression_is_simulation_invariant(&assert) => {
+                    Ok(Some(Expression::Conditional(ConditionalExpr {
+                        condition: Box::new(assert),
+                        then_expr: Box::new(held),
+                        else_expr: Box::new(integral),
+                        span: call.span,
+                    })))
+                }
+                None => invalid(
+                    "idt with an assert that can change during the simulation is not supported: restarting the integral from its initial condition is not implemented, so only an assert that is fixed for the instance (a constant or parameters) is accepted".into(),
+                    assert.span(),
+                ),
+            };
+        }
+        Ok(changed.then(|| {
+            Expression::Call(CallExpr {
+                resolved_builtin: call.resolved_builtin,
+                name: call.name.clone(),
+                args,
+                span: call.span,
+            })
+        }))
     }
 
     fn validate_builtin_call_arity(&self, call: &CallExpr) -> CompileResult<()> {

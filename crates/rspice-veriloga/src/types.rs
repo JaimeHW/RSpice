@@ -477,11 +477,13 @@ impl FunctionRegistry {
         }
 
         // Analog operators
-        functions.insert("ddt".into(), FunctionSignature::analog_operator("ddt", 1));
-        functions.insert("idt".into(), FunctionSignature::analog_operator("idt", 2));
+        // LRM 2.4 sections 4.5.2, 4.5.4 and 4.5.5: each takes a trailing
+        // absolute tolerance or nature, and `idt` an assert before it.
+        functions.insert("ddt".into(), FunctionSignature::analog_operator("ddt", 2));
+        functions.insert("idt".into(), FunctionSignature::analog_operator("idt", 4));
         functions.insert(
             "idtmod".into(),
-            FunctionSignature::analog_operator("idtmod", 4),
+            FunctionSignature::analog_operator("idtmod", 5),
         );
         functions.insert("ddx".into(), FunctionSignature::analog_operator("ddx", 2));
         functions.insert(

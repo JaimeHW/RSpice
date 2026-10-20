@@ -120,8 +120,15 @@ which a compile runs on a thread of its own sized for those bounds.
   literals, parameters, localparams or a parameter array: each instance gets
   the filter its own parameter values describe (an instance that changes one
   compiles its own specialization); a coefficient that reads a variable or a
-  probe is refused by name. The integration rule for `ddt`/`idt` is not a
-  compile-time choice: the engine supplies companion coefficients per
+  probe is refused by name. `ddt`, `idt` and `idtmod` take their optional
+  absolute tolerance or nature operand (a positive constant, or a nature or
+  its access function); it is advisory, since these operators are companion
+  evaluations with no state unknown of their own for it to converge. The
+  `idt` assert must be fixed for the instance (a constant or parameters): a
+  nonzero assert holds the output at the initial condition. An assert that
+  can change during the simulation is refused by name, because restarting the
+  integral from its initial condition is not implemented. The integration
+  rule for `ddt`/`idt` is not a compile-time choice: the engine supplies companion coefficients per
   timestep, so one compiled model runs under backward Euler or
   Gear-2/trapezoidal.
 - **`limexp`** is `exp(x)` up to `x = 80` and the tangent line
