@@ -562,3 +562,62 @@ fn sources_at_the_nesting_bounds_compile_from_a_small_stack() {
         .join()
         .unwrap();
 }
+
+/// A misspelled directive stops the compile where it is written, and the IEEE
+/// 1364 directives with no analog effect compile with a warning at each one.
+///
+/// Before, `` `inculde "opts.vams" `` compiled clean: the preprocessor left the
+/// unknown name in the text and the parser dropped it with its line, so the
+/// model silently lost whatever the include defined.
+#[test]
+fn directive_typos_are_refused_and_ignorable_directives_warn() {
+    let typo = "`inculde \"opts.vams\"\nmodule t(p, n); inout p, n; electrical p, n;\n\
+                analog I(p, n) <+ V(p, n);\nendmodule\n";
+    let error = VerilogACompiler::default()
+        .compile(typo)
+        .map(|_| ())
+        .expect_err("a misspelled `include must not compile");
+    assert!(
+        error
+            .to_string()
+            .contains("1:1: unknown compiler directive `inculde (did you mean `include?)"),
+        "{error}"
+    );
+
+    let ignorable = "`celldefine\nmodule c(p, n); inout p, n; electrical p, n;\n\
+                     `pragma vendor setting\nanalog begin\n`line 1 \"c.v\" 0\n\
+                     I(p, n) <+ V(p, n);\nend\nendmodule\n`endcelldefine\n";
+    let report = VerilogACompiler::default()
+        .compile_runtime(ignorable, None)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let warned: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "VA-PARSE-IGNORED-DIRECTIVE")
+        .map(|diagnostic| {
+            let start = diagnostic.span.as_ref().and_then(|span| span.start);
+            (start.map(|start| start.line), diagnostic.message.as_str())
+        })
+        .collect();
+    assert_eq!(
+        warned,
+        [
+            (
+                Some(1),
+                "compiler directive `celldefine has no effect in this compiler and is ignored"
+            ),
+            (
+                Some(3),
+                "compiler directive `pragma has no effect in this compiler and is ignored"
+            ),
+            (
+                Some(5),
+                "compiler directive `line has no effect in this compiler and is ignored"
+            ),
+            (
+                Some(9),
+                "compiler directive `endcelldefine has no effect in this compiler and is ignored"
+            ),
+        ]
+    );
+}

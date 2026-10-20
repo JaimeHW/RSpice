@@ -104,6 +104,8 @@ pub struct Parser<'a> {
     library_order: Option<Vec<SmolStr>>,
     /// Open statement and expression levels, indexed by [`Nesting`].
     nesting: [usize; 2],
+    /// See [`SourceFile::ignored_directives`].
+    ignored_directives: Vec<(SmolStr, Span)>,
 }
 
 impl<'a> Parser<'a> {
@@ -137,6 +139,7 @@ impl<'a> Parser<'a> {
             library: None,
             library_order: None,
             nesting: [0; 2],
+            ignored_directives: Vec::new(),
         }
     }
 
@@ -269,6 +272,7 @@ impl<'a> Parser<'a> {
             items,
             configs,
             library_order: self.library_order.take(),
+            ignored_directives: std::mem::take(&mut self.ignored_directives),
             span: start_span.extend(end_span),
         })
     }
@@ -795,7 +799,8 @@ impl<'a> Parser<'a> {
             if matches!(
                 self.current().text.as_deref(),
                 Some("`default_nettype" | "`resetall")
-            ) {
+            ) || self.at_ignored_directive()
+            {
                 return self.skip_directive();
             }
             return Err(self.unsupported_current("module item"));
@@ -2263,6 +2268,10 @@ impl<'a> Parser<'a> {
         let mut statements = Vec::new();
         let mut variables = Vec::new();
         while !self.check(TokenKind::End) && !self.at_end() {
+            if self.at_ignored_directive() {
+                self.skip_directive()?;
+                continue;
+            }
             // Attributes may decorate block-local declarations (for example
             // operating-point metadata emitted by CMC model macros). They do
             // not change local-variable semantics, but must be consumed before
@@ -4061,6 +4070,8 @@ impl<'a> Parser<'a> {
             self.net_defaults.push((directive.start, enabled));
         } else if name.as_deref() == Some("`resetall") {
             self.net_defaults.push((directive.start, true));
+        } else if let Some(ignored) = name.as_deref().and_then(ignored_directive) {
+            self.ignored_directives.push((ignored.into(), directive));
         }
         while !self.at_end() && self.current_span().start < directive.end {
             self.advance();
@@ -4068,9 +4079,28 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    /// Whether the current token is a directive read past without effect.
+    fn at_ignored_directive(&self) -> bool {
+        self.check(TokenKind::Directive)
+            && self
+                .current()
+                .text
+                .as_deref()
+                .and_then(ignored_directive)
+                .is_some()
+    }
+
     fn error(&self, kind: ParseErrorKind) -> ParseError {
         ParseError::new(kind, self.current_span())
     }
+}
+
+/// `directive` without its backtick, when it is one of
+/// [`crate::preprocessor::IGNORED_DIRECTIVES`].
+fn ignored_directive(directive: &str) -> Option<&str> {
+    directive
+        .strip_prefix('`')
+        .filter(|name| crate::preprocessor::IGNORED_DIRECTIVES.contains(name))
 }
 
 /// Parse a number literal with scale factors

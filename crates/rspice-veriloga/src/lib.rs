@@ -1277,10 +1277,22 @@ impl VerilogACompiler {
         // Library maps and configurations (IEEE 1364-2005 clause 13) leave an
         // ordinary module set, which a configuration's name selects from.
         semantic::library_binding::bind(&mut source_file)?;
+        // Directives the parser read past without effect are reported where
+        // they stand, ahead of defparam's and the analyzer's findings.
+        let mut front_end_warnings: Vec<_> = source_file
+            .ignored_directives
+            .iter()
+            .map(|(name, span)| semantic::SemanticWarning {
+                code: "VA-PARSE-IGNORED-DIRECTIVE",
+                message: format!(
+                    "compiler directive `{name} has no effect in this compiler and is ignored"
+                ),
+                span: *span,
+            })
+            .collect();
         // `defparam` (section 12.2.1) over the whole unit, before a root's
         // specialization reads its instances.
-        let mut defparam_warnings = Vec::new();
-        let root_defparams = semantic::defparam::apply(&mut source_file, &mut defparam_warnings)?;
+        let root_defparams = semantic::defparam::apply(&mut source_file, &mut front_end_warnings)?;
         let mut source_specialization = Vec::new();
         if !parameters.is_empty() {
             let selected = source_file
@@ -1325,7 +1337,7 @@ impl VerilogACompiler {
                 if let Some(defparam) = root_defparams.iter().find(|defparam| {
                     defparam.module == selected.name && defparam.parameter == parameter.name
                 }) {
-                    defparam_warnings
+                    front_end_warnings
                         .push(semantic::defparam::instance_value_replaced(defparam, name));
                     continue;
                 }
@@ -1359,9 +1371,9 @@ impl VerilogACompiler {
             SemanticAnalyzer::new().prepare_source(&source_file)?
         };
         analyzed.source_specialization = source_specialization;
-        if !defparam_warnings.is_empty() {
-            defparam_warnings.append(&mut analyzed.warnings);
-            analyzed.warnings = defparam_warnings;
+        if !front_end_warnings.is_empty() {
+            front_end_warnings.append(&mut analyzed.warnings);
+            analyzed.warnings = front_end_warnings;
         }
         measurements.record(PipelinePhase::Semantic, phase_started.elapsed())?;
         measurements.metrics_mut().module_count = metrics::usize_to_u64(analyzed.modules.len());

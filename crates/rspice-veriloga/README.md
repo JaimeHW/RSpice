@@ -174,6 +174,14 @@ transitive function calls and branches removed by constant folding.
 analog `$error` are accepted and discarded with a warning: they produce no
 runtime output.
 
+The preprocessor refuses an undefined macro or an unknown compiler directive
+where it is written, in any position, and names the directive or macro it most
+likely misspells; a directive written after other text on its line is refused
+too. `` `celldefine ``, `` `endcelldefine ``, `` `pragma ``, `` `line ``,
+`` `begin_keywords ``, `` `end_keywords `` and `` `nounconnected_drive `` change
+nothing an analog model computes and are read past with a warning
+(`VA-PARSE-IGNORED-DIRECTIVE`); `` `unconnected_drive `` is refused by name.
+
 Real `%` is a remainder, differentiated as `da - trunc(a/b)*db` away from its
 discontinuities. Analog real-to-integer assignment rounds to nearest, half away
 from zero; that conversion and the integer bitwise and shift rules live in

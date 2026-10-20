@@ -25,6 +25,9 @@ pub struct SourceFile {
     /// The libraries a library map declares, in declaration order, when the
     /// sources were read under one (IEEE 1364-2005 section 13.2).
     pub library_order: Option<Vec<SmolStr>>,
+    /// The directives read past without effect (named without their
+    /// backtick), each with its span, for the compiler to warn about.
+    pub ignored_directives: Vec<(SmolStr, Span)>,
     /// Span of the entire file
     pub span: Span,
 }

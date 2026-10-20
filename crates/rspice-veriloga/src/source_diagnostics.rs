@@ -92,7 +92,7 @@ impl From<&crate::PreprocessorError> for SourceCompileDiagnostic {
             byte_start: None,
             byte_end: None,
             line: (error.line > 0).then_some(error.line),
-            column: None,
+            column: error.column.filter(|_| error.line > 0),
         }
     }
 }

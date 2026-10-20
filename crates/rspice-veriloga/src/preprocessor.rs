@@ -279,6 +279,8 @@ pub struct PreprocessorError {
     pub message: String,
     pub file: Option<PathBuf>,
     pub line: usize,
+    /// One-based column on `line`, when the error is about one construct on it.
+    pub column: Option<usize>,
     /// Structured admission failure, independent of human diagnostic text.
     pub resource_limit: Option<SourceResourceLimit>,
     pub cancelled: bool,
@@ -289,9 +291,17 @@ pub struct PreprocessorError {
 
 impl std::fmt::Display for PreprocessorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.file {
-            Some(path) => write!(f, "{}:{}: {}", path.display(), self.line, self.message),
-            None => write!(f, "line {}: {}", self.line, self.message),
+        match (&self.file, self.column) {
+            (Some(path), Some(column)) => write!(
+                f,
+                "{}:{}:{column}: {}",
+                path.display(),
+                self.line,
+                self.message
+            ),
+            (Some(path), None) => write!(f, "{}:{}: {}", path.display(), self.line, self.message),
+            (None, Some(column)) => write!(f, "line {}:{column}: {}", self.line, self.message),
+            (None, None) => write!(f, "line {}: {}", self.line, self.message),
         }
     }
 }
@@ -310,6 +320,7 @@ impl PreprocessorError {
             message: message.into(),
             file,
             line,
+            column: None,
             resource_limit: None,
             cancelled: false,
             io_error: None,
@@ -1252,6 +1263,11 @@ impl Preprocessor {
                     }
                     _ => unreachable!("is_known_directive() filtered the directive set"),
                 }
+            } else if include_line && self.leaves_line_to_parser(trimmed) {
+                // A directive the parser reads past or refuses by name; its
+                // operand is not code, so nothing on the line is expanded.
+                output.push_source(line, &current_path, line_num + 1);
+                output.push_source("\n", &current_path, line_num + 1);
             } else if include_line {
                 // Regular line (possibly starting with a macro invocation).
                 // Expand macros inline so that `define/`undef ordering is
@@ -1266,6 +1282,13 @@ impl Preprocessor {
                         }
                         None => break,
                     }
+                }
+
+                // Every backtick name left on the line must be a macro: an
+                // undefined one used to stay in the text, where the parser
+                // dropped it at file scope and misreported it elsewhere.
+                if let Some((offset, name)) = self.first_undefined_macro(&logical) {
+                    return Err(self.undefined_macro_error(&logical, offset, name, line_num + 1));
                 }
 
                 let expanded = self.expand_macros_at(
@@ -1324,25 +1347,95 @@ impl Preprocessor {
     }
 
     /// Directive names processed by the preprocessor itself. Anything else
-    /// starting with a backtick is a macro invocation (or an unknown
-    /// directive left for downstream stages).
+    /// starting with a backtick is a macro invocation, one of the directives
+    /// the parser reads ([`IGNORED_DIRECTIVES`] and `` `unconnected_drive ``),
+    /// or an error.
     fn is_known_directive(name: &str) -> bool {
-        matches!(
+        KNOWN_DIRECTIVES.contains(&name)
+    }
+
+    /// Whether `name` is a directive the preprocessor leaves in the text for
+    /// the parser: one it ignores with a warning, or `` `unconnected_drive ``,
+    /// which it refuses by name.
+    fn is_parser_directive(name: &str) -> bool {
+        IGNORED_DIRECTIVES.contains(&name) || name == "unconnected_drive"
+    }
+
+    /// Whether `trimmed` opens with a parser directive that no macro shadows.
+    fn leaves_line_to_parser(&self, trimmed: &str) -> bool {
+        trimmed.strip_prefix('`').is_some_and(|rest| {
+            let name = macro_name(rest);
+            Self::is_parser_directive(name) && !self.macros.contains_key(name)
+        })
+    }
+
+    /// The first `` `name `` in `text`, outside string literals, that is not a
+    /// defined macro, with the byte offset of its backtick.
+    fn first_undefined_macro<'t>(&self, text: &'t str) -> Option<(usize, &'t str)> {
+        let mut in_string = false;
+        let mut chars = text.char_indices();
+        while let Some((offset, ch)) = chars.next() {
+            match ch {
+                '"' => in_string = !in_string,
+                '\\' if in_string => {
+                    chars.next();
+                }
+                '`' if !in_string => {
+                    let name = macro_name(&text[offset + 1..]);
+                    if !name.is_empty() && !self.macros.contains_key(name) {
+                        return Some((offset, name));
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The refusal of the undefined `` `name `` at byte `offset` of `text`,
+    /// whose first line is source line `first_line`.
+    fn undefined_macro_error(
+        &self,
+        text: &str,
+        offset: usize,
+        name: &str,
+        first_line: usize,
+    ) -> PreprocessorError {
+        let line_start = text[..offset].rfind('\n').map_or(0, |newline| newline + 1);
+        let opens_line = text[..offset].trim().is_empty();
+        let invoked = text[offset + 1 + name.len()..].starts_with('(');
+        // Text that opens its line and takes no arguments may be a directive.
+        let directive_position = opens_line && !invoked;
+        let directive = closest_name(
             name,
-            "include"
-                | "define"
-                | "undef"
-                | "ifdef"
-                | "ifndef"
-                | "else"
-                | "elsif"
-                | "endif"
-                | "timescale"
-                | "resetall"
-                | "default_nettype"
-                | "default_transition"
-                | "default_discipline"
+            KNOWN_DIRECTIVES.iter().chain(&IGNORED_DIRECTIVES).copied(),
         )
+        .filter(|_| directive_position);
+        let message = if Self::is_known_directive(name) || Self::is_parser_directive(name) {
+            format!(
+                "compiler directive `{name} must begin its line; this compiler reads \
+                 directives only at the start of a line"
+            )
+        } else if let Some(directive) = directive {
+            format!("unknown compiler directive `{name} (did you mean `{directive}?)")
+        } else {
+            let what = if directive_position {
+                "unknown compiler directive or undefined macro"
+            } else {
+                "undefined macro"
+            };
+            match closest_name(name, self.macros.keys().map(String::as_str)) {
+                Some(defined) => format!("{what} `{name} (did you mean `{defined}?)"),
+                None => format!("{what} `{name}"),
+            }
+        };
+        let mut error = PreprocessorError::new(
+            message,
+            self.current_file.clone(),
+            first_line + text[..offset].matches('\n').count(),
+        );
+        error.column = Some(text[line_start..offset].chars().count() + 1);
+        error
     }
 
     /// Remove comments while preserving line structure and string literals.
@@ -1782,10 +1875,19 @@ impl Preprocessor {
                         })?;
                         append_text(&mut result, &expanded)?;
                     }
-                } else {
-                    // Not a defined macro, keep as-is (might be a directive)
+                } else if name.is_empty() {
+                    // A backtick that names nothing, such as one left by a
+                    // stringification operator, is not an invocation.
                     append_char(&mut result, '`')?;
-                    append_text(&mut result, &name)?;
+                } else {
+                    // A name on the line itself is refused at its column
+                    // before expansion; this one came out of a macro body or
+                    // a directive's operand.
+                    return Err(PreprocessorError::new(
+                        format!("undefined macro `{name}"),
+                        self.current_file.clone(),
+                        line_num,
+                    ));
                 }
             } else {
                 append_char(&mut result, ch)?;
@@ -1888,6 +1990,91 @@ impl Preprocessor {
 
 fn strip_utf8_bom(source: &str) -> &str {
     source.strip_prefix('\u{feff}').unwrap_or(source)
+}
+
+/// The directives the preprocessor processes itself.
+const KNOWN_DIRECTIVES: [&str; 13] = [
+    "include",
+    "define",
+    "undef",
+    "ifdef",
+    "ifndef",
+    "else",
+    "elsif",
+    "endif",
+    "timescale",
+    "resetall",
+    "default_nettype",
+    "default_transition",
+    "default_discipline",
+];
+
+/// IEEE 1364-2005 clause 19 directives that change nothing an analog model
+/// computes: cell marking, keyword-set selection, the line-number remapping of
+/// `` `line `` (which only moves where diagnostics point), the implementation
+/// pragmas section 19.10 says an unrecognized tool shall ignore, and
+/// `` `nounconnected_drive ``, which restores the floating default this
+/// compiler never leaves. The preprocessor leaves each in the text and the
+/// parser reads past it with a warning.
+pub(crate) const IGNORED_DIRECTIVES: [&str; 7] = [
+    "begin_keywords",
+    "celldefine",
+    "end_keywords",
+    "endcelldefine",
+    "line",
+    "nounconnected_drive",
+    "pragma",
+];
+
+/// The macro or directive name at the start of `text`, which follows its
+/// backtick; empty when no name does.
+fn macro_name(text: &str) -> &str {
+    let end = text
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(text.len());
+    &text[..end]
+}
+
+/// The candidate closest to `name` in edit distance (a transposition counts as
+/// one edit), if it is close enough to be a likely misspelling.
+pub(crate) fn closest_name<'a>(
+    name: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    let allowed = if name.chars().count() <= 3 { 1 } else { 2 };
+    candidates
+        .into_iter()
+        .filter(|candidate| *candidate != name)
+        .map(|candidate| (edit_distance(name, candidate), candidate))
+        .filter(|(distance, _)| *distance <= allowed)
+        .min()
+        .map(|(_, candidate)| candidate)
+}
+
+/// Optimal-string-alignment distance between `a` and `b`.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut rows = vec![vec![0_usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in rows.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for (j, cell) in rows[0].iter_mut().enumerate() {
+        *cell = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let substitution = usize::from(a[i - 1] != b[j - 1]);
+            let mut best = (rows[i - 1][j] + 1)
+                .min(rows[i][j - 1] + 1)
+                .min(rows[i - 1][j - 1] + substitution);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                best = best.min(rows[i - 2][j - 2] + 1);
+            }
+            rows[i][j] = best;
+        }
+    }
+    rows[a.len()][b.len()]
 }
 
 //=============================================================================
@@ -2045,6 +2232,98 @@ value = `KEEP("a, \"quoted\", {braces}, [brackets], (parentheses)");
             .expect_err("wrong argument count must fail");
         assert_eq!(wrong.line, 2);
         assert!(wrong.message.contains("expects 2 argument(s), got 1"));
+    }
+
+    /// An undefined macro or an unknown directive is refused where it is
+    /// written, in every position.
+    ///
+    /// Before, the name stayed in the text: at file scope the parser dropped
+    /// it with the rest of its line, so `` `inculde `` and `` `defnie `` compiled
+    /// clean into a different model, and elsewhere it surfaced as "Invalid
+    /// expression" or "Unsupported module item".
+    #[test]
+    fn undefined_macros_and_unknown_directives_are_refused_at_their_column() {
+        for (source, line, column, message) in [
+            (
+                "`inculde \"opts.vams\"\n",
+                1,
+                1,
+                "unknown compiler directive `inculde (did you mean `include?)",
+            ),
+            (
+                "`define R 1\n`defnie R_SCALE 2\n",
+                2,
+                1,
+                "unknown compiler directive `defnie (did you mean `define?)",
+            ),
+            (
+                "`MAKE_MODULE(foo)\nmodule m; endmodule\n",
+                1,
+                1,
+                "undefined macro `MAKE_MODULE",
+            ),
+            (
+                "module m;\n  `MPRoz(R, 1k)\nendmodule\n",
+                2,
+                3,
+                "undefined macro `MPRoz",
+            ),
+            (
+                "analog begin\n    `INIT_STUFF\nend\n",
+                2,
+                5,
+                "unknown compiler directive or undefined macro `INIT_STUFF",
+            ),
+            (
+                "`define SCALE 2\nx = V(p) * `SCAEL;\n",
+                2,
+                12,
+                "undefined macro `SCAEL (did you mean `SCALE?)",
+            ),
+            (
+                "`define F(a) (a)\nx = `F(\n  `G);\n",
+                3,
+                3,
+                "undefined macro `G",
+            ),
+            (
+                "x = `ifdef A 1 `else 2 `endif;\n",
+                1,
+                5,
+                "compiler directive `ifdef must begin its line",
+            ),
+        ] {
+            let error = Preprocessor::new()
+                .preprocess_source(source)
+                .expect_err(source);
+            assert_eq!(
+                (error.line, error.column),
+                (line, Some(column)),
+                "{source:?}: {error}"
+            );
+            assert!(error.message.starts_with(message), "{source:?}: {error}");
+        }
+
+        // A name a macro body brings in is refused on the invoking line.
+        let error = Preprocessor::new()
+            .preprocess_source("`define A `B\nx = `A;\n")
+            .expect_err("`B is undefined");
+        assert_eq!((error.line, error.column), (2, None));
+        assert_eq!(error.message, "undefined macro `B");
+
+        // Text in a branch that is not taken is not examined.
+        pp("`ifdef NOPE\n`inculde \"x\"\nx = `UNDEFINED;\n`endif\n");
+    }
+
+    /// The IEEE 1364 directives that change nothing an analog model computes
+    /// reach the parser as written, operand and all, for it to read past with
+    /// a warning; `` `unconnected_drive `` reaches it to be refused by name.
+    #[test]
+    fn ignorable_directives_pass_to_the_parser_unexpanded() {
+        let source = "`celldefine\n`pragma tool option `UNDEFINED\n`line 3 \"a.v\" 0\n\
+                      `begin_keywords \"1364-2005\"\n`end_keywords\n`nounconnected_drive\n\
+                      `unconnected_drive pull1\n`endcelldefine\n";
+        assert_eq!(pp(source), source);
     }
 
     #[test]
