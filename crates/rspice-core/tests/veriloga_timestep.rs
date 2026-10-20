@@ -598,3 +598,61 @@ fn a_cross_step_costs_no_newton_failure_whatever_its_size() {
         "{iterations} Newton iterations for {points} points"
     );
 }
+
+/// B-4, the power-electronics case: a clocked PWM (timer sets the gate, the
+/// ramp crossing the control resets it) driving 20 or 24 V failed with
+/// "Convergence failed after 118 iterations" while 12 V passed. The ramp
+/// rises 0 to 1 V over 9.9 us of each 10 us period, so the 0.43 V control is
+/// crossed at 4.257 us into every cycle: the gate is vdrv on [k*10u, k*10u +
+/// 4.257u) and 0 V for the rest of the cycle.
+#[test]
+fn a_clocked_pwm_drives_twenty_four_volts_every_cycle() {
+    let model = write_model(
+        &format!("pwm_{}.va", std::process::id()),
+        "`include \"disciplines.vams\"\n\
+         module pwm(ctl, ramp, g); input ctl, ramp; output g; electrical ctl, ramp, g;\n\
+         parameter real vdrv = 20; parameter real period = 10u;\n\
+         integer q;\n\
+         analog begin\n\
+         @(initial_step) q = 0;\n\
+         @(timer(0, period)) q = 1;\n\
+         @(cross(V(ramp) - V(ctl), +1)) q = 0;\n\
+         V(g) <+ vdrv * q;\n\
+         end\n\
+         endmodule\n",
+    );
+    for vdrv in [12.0, 20.0, 24.0] {
+        let deck = Netlist::parse(&format!(
+            "pwm\nvr ramp 0 pulse(0 1 0 9.9u 0.1u 0 10u)\nvc ctl 0 0.43\n\
+             X1 ctl ramp g pwm vdrv={vdrv}\nrl g 0 1k\n.va \"{model}\" pwm\n.end\n"
+        ))
+        .expect("the deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_tran(&deck, 100e-6, 0.1e-6)
+            .unwrap_or_else(|error| panic!("vdrv={vdrv}: the run must complete: {error}"));
+        let g = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("g"))
+            .expect("node g");
+        assert_eq!(result.time.last(), Some(&100e-6), "vdrv={vdrv}");
+        let mut high = 0;
+        for (time, level) in result.time.iter().zip(&result.voltages[g]) {
+            let phase = time - (time / 10e-6).floor() * 10e-6;
+            let expected = if phase > 1e-12 && phase < 4.257e-6 - 1e-12 {
+                high += 1;
+                vdrv
+            } else if phase > 4.257e-6 + 1e-12 && phase < 10e-6 - 1e-12 {
+                0.0
+            } else {
+                continue;
+            };
+            assert!(
+                (level - expected).abs() < 1e-9,
+                "vdrv={vdrv}: V(g) at t={time:e} is {level}, expected {expected}"
+            );
+        }
+        assert!(high >= 10, "vdrv={vdrv}: the gate is high in every cycle");
+    }
+    let _ = std::fs::remove_file(model);
+}
