@@ -2425,10 +2425,12 @@ fn a_version_one_document_that_declares_a_bus_is_refused() {
         DigitalEventTrace {
             node_name: "d1".to_owned(),
             points: Vec::new(),
+            hdl_time_precision: None,
         },
         DigitalEventTrace {
             node_name: "d0".to_owned(),
             points: Vec::new(),
+            hdl_time_precision: None,
         },
     ];
     payload.digital_buses = vec![DigitalEventBus {
@@ -2485,6 +2487,7 @@ fn a_bus_is_judged_against_the_traces_it_declares_over() {
     let trace = |name: &str| DigitalEventTrace {
         node_name: name.to_owned(),
         points: Vec::new(),
+        hdl_time_precision: None,
     };
 
     assert_eq!(

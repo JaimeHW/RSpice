@@ -499,6 +499,15 @@ impl TransientPayload {
             for point in &trace.points {
                 finite("digital event time", point.time)?;
             }
+            if let Some(precision) = trace.hdl_time_precision {
+                finite("digital trace HDL time precision", precision)?;
+                if precision <= 0.0 {
+                    return Err(ResultDocumentError::Malformed {
+                        location: "digital trace HDL time precision",
+                        detail: format!("{precision} s is not a positive time"),
+                    });
+                }
+            }
         }
         for trace in &self.real_traces {
             super::require_name("real event trace node", &trace.node_name)?;
@@ -628,6 +637,12 @@ pub struct DigitalEventTrace {
     pub node_name: String,
     /// Committed values in recording order, one per change.
     pub points: Vec<DigitalEventPoint>,
+    /// The design time precision, in seconds, of the HDL that reads or drives
+    /// this net ([`crate::engine::DigitalTrace::hdl_time_precision`]), which
+    /// a dump of the net is written at. Absent when no HDL observes the net,
+    /// so the document of a run with no HDL is spelled as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hdl_time_precision: Option<f64>,
 }
 
 /// One committed digital value and the accepted time it was first observed at.

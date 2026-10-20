@@ -606,8 +606,7 @@ fn typed_transient_traces(
                     ),
                 })
                 .collect(),
-            // A result document has no place for the HDL's precision yet.
-            hdl_time_precision: None,
+            hdl_time_precision: trace.hdl_time_precision,
         })
         .collect();
     let real_traces = payload

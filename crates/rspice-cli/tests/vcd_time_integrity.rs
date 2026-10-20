@@ -310,6 +310,14 @@ fn an_hdl_input_dumps_at_the_tick_the_hdl_saw_it_at() {
     assert!(converted.status.success(), "{converted:?}");
     assert_eq!(std::fs::read_to_string(dir.join("raw.vcd")).unwrap(), run);
 
+    // The typed result document carries the precision too: its dump was
+    // written at 1 fs with the edge at #188571429 before it did.
+    let json = rspice_in(&dir, &["run", "m10.cir", "-f", "json", "-o", "run.json"]);
+    assert!(json.status.success(), "{json:?}");
+    let converted = convert(&dir.join("run.json"), &dir.join("json.vcd"), "vcd", &[]);
+    assert!(converted.status.success(), "{converted:?}");
+    assert_eq!(std::fs::read_to_string(dir.join("json.vcd")).unwrap(), run);
+
     // `d2a_s` uses `transition`, which the JIT's CFG route does not lower, so
     // it compiles on the postfix plan. That is a route choice with the same
     // results, and it printed `WARN [JIT] Model 'd2a_s' takes the postfix

@@ -966,6 +966,7 @@ impl AnalysisResultDocument {
             digital_traces.push(DigitalEventTrace {
                 node_name: trace.node_name.clone(),
                 points,
+                hdl_time_precision: trace.hdl_time_precision,
             });
         }
 
@@ -1170,6 +1171,7 @@ impl AnalysisResultDocument {
             digital_traces.push(DigitalEventTrace {
                 node_name: trace.node_name.clone(),
                 points,
+                hdl_time_precision: trace.hdl_time_precision,
             });
         }
         let mut real_traces = Vec::with_capacity(compressed.real_traces.len());
