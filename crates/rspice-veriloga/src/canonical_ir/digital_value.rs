@@ -894,12 +894,16 @@ pub fn one_bit(bit: FourStateBit) -> FourStateValue {
     value
 }
 
-/// Logical equality (`==`) and inequality (`!=`), IEEE 1364-2005 section 5.1.7.
+/// Logical equality (`==`) and inequality (`!=`), IEEE 1364-2005 section 5.1.8.
 ///
-/// The result is `x` if either operand has any `x` or `z` bit. This is the
-/// rule that makes `==` unusable for testing whether a signal is unknown, and
-/// the reason the standard also defines `===` — which is [`case_match`] with
-/// [`DigitalCaseMatch::Exact`], not a variant of this function.
+/// The result is `x` only when `x` or `z` bits make the relation ambiguous.
+/// A position where both operands hold known, differing bits decides it:
+/// `4'b10x1 == 4'b0011` is `0` and `!=` is `1`, whatever the unknown bit
+/// would have been. Otherwise any `x` or `z` bit makes the answer `x`. That
+/// is the rule that makes `==` unusable for testing whether a signal is
+/// unknown, and the reason the standard also defines `===`, which is
+/// [`case_match`] with [`DigitalCaseMatch::Exact`], not a variant of this
+/// function.
 /// `signed` is the sign of the comparison's own context, IEEE 1364-2005
 /// section 5.4.2: both operands are signed, or the comparison is unsigned. It
 /// decides only how the narrower operand reaches the wider one — the *result*
@@ -910,17 +914,31 @@ pub fn equality(
     negate: bool,
     signed: bool,
 ) -> FourStateValue {
-    if left.has_unknown() || right.has_unknown() {
-        return one_bit(FourStateBit::Unknown);
-    }
     let width = left.width().max(right.width());
     let left = left.extended(width, signed);
     let right = right.extended(width, signed);
-    let equal = (0..width).all(|index| left.bit(index) == right.bit(index));
-    one_bit(if equal != negate {
-        FourStateBit::One
-    } else {
+    let known = |bit: FourStateBit| matches!(bit, FourStateBit::Zero | FourStateBit::One);
+    let mut ambiguous = false;
+    for index in 0..width {
+        let (left, right) = (left.bit(index), right.bit(index));
+        if known(left) && known(right) {
+            if left != right {
+                return one_bit(if negate {
+                    FourStateBit::One
+                } else {
+                    FourStateBit::Zero
+                });
+            }
+        } else {
+            ambiguous = true;
+        }
+    }
+    one_bit(if ambiguous {
+        FourStateBit::Unknown
+    } else if negate {
         FourStateBit::Zero
+    } else {
+        FourStateBit::One
     })
 }
 
@@ -1404,7 +1422,7 @@ pub fn real_arithmetic(op: RealArithmeticOp, left: f64, right: f64) -> f64 {
 /// A comparison between two real values.
 ///
 /// Equality is here rather than beside [`equality`] because the four-state one
-/// is a different operator: section 5.1.7's `==` can answer `x`, and this one
+/// is a different operator: section 5.1.8's `==` can answer `x`, and this one
 /// cannot — two reals are equal or they are not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RealCompareOp {
@@ -1816,35 +1834,79 @@ mod tests {
         );
     }
 
-    /// IEEE 1364-2005 section 5.1.7: `==` is unknown if either side has an
-    /// unknown bit, even when the two-state bits already disagree.
+    /// IEEE 1364-2005 section 5.1.8: `==` is unknown only when unknown bits
+    /// make the relation ambiguous. A known bit that already differs decides
+    /// it, wherever the unknown bits sit. Expected values are Icarus Verilog
+    /// 13's (`iverilog -g2005`) for the same operands.
     #[test]
-    fn equality_is_poisoned_by_unknown_bits() {
-        assert_eq!(
-            equality(&parse("1010"), &parse("1010"), false, false).spelling(),
-            "1"
-        );
-        assert_eq!(
-            equality(&parse("1010"), &parse("1011"), false, false).spelling(),
-            "0"
-        );
-        assert_eq!(
-            equality(&parse("1010"), &parse("101x"), false, false).spelling(),
-            "x"
-        );
-        assert_eq!(
-            equality(&parse("101z"), &parse("1010"), false, false).spelling(),
-            "x"
-        );
-        // Inequality is poisoned identically, not the complement of `x`.
-        assert_eq!(
-            equality(&parse("1010"), &parse("1011"), true, false).spelling(),
-            "1"
-        );
-        assert_eq!(
-            equality(&parse("1010"), &parse("101x"), true, false).spelling(),
-            "x"
-        );
+    fn equality_is_unknown_only_when_the_known_bits_agree() {
+        let cases: &[(&str, &str, &str, &str)] = &[
+            // (left, right, ==, !=)
+            ("1010", "1010", "1", "0"),
+            ("1010", "1011", "0", "1"),
+            // Every known position agrees: the unknown bit is the whole answer.
+            ("1010", "101x", "x", "x"),
+            ("101z", "1010", "x", "x"),
+            ("x010", "1010", "x", "x"),
+            ("xxxx", "xxxx", "x", "x"),
+            ("zzzz", "zzzz", "x", "x"),
+            // A known differing bit decides, below, above, or beside the unknown one.
+            ("10x1", "0011", "0", "1"),
+            ("1x", "0z", "0", "1"),
+            ("x0", "z1", "0", "1"),
+            ("1xz0", "0xz0", "0", "1"),
+            ("x1x1", "x0x1", "0", "1"),
+            ("zzz1", "xxx0", "0", "1"),
+            // Unknown on both sides of one position is still ambiguous.
+            ("1x01", "1z01", "x", "x"),
+        ];
+        for (left, right, equal, unequal) in cases {
+            let (left_value, right_value) = (parse(left), parse(right));
+            assert_eq!(
+                equality(&left_value, &right_value, false, false).spelling(),
+                *equal,
+                "{left} == {right}"
+            );
+            assert_eq!(
+                equality(&left_value, &right_value, true, false).spelling(),
+                *unequal,
+                "{left} != {right}"
+            );
+            // Symmetric in its operands.
+            assert_eq!(
+                equality(&right_value, &left_value, false, false).spelling(),
+                *equal,
+                "{right} == {left}"
+            );
+        }
+    }
+
+    /// Mixed widths compare after the narrower operand is extended, so the
+    /// extension's own bits can decide. Unsigned, it zero-extends; signed, an
+    /// unknown sign bit extends as unknown and decides nothing. Icarus 13.
+    #[test]
+    fn equality_of_mixed_widths_compares_the_extended_bits() {
+        let cases: &[(&str, &str, bool, &str)] = &[
+            // (narrow, wide, signed, ==)
+            ("x1", "0001", false, "x"),
+            ("x1", "1001", false, "0"),
+            ("x1", "0011", false, "x"),
+            ("x0", "0001", false, "0"),
+            ("1x", "1110", true, "x"),
+            ("1x", "0110", true, "0"),
+            ("x1", "1111", true, "x"),
+            ("x1", "0111", true, "x"),
+            ("x1", "0110", true, "0"),
+            ("01", "x001", false, "x"),
+            ("01", "x011", false, "0"),
+        ];
+        for (narrow, wide, signed, equal) in cases {
+            assert_eq!(
+                equality(&parse(narrow), &parse(wide), false, *signed).spelling(),
+                *equal,
+                "{narrow} == {wide} signed={signed}"
+            );
+        }
     }
 
     #[test]

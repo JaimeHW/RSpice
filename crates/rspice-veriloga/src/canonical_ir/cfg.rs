@@ -1082,7 +1082,8 @@ pub enum CfgValueKind {
         input: ValueId,
     },
     /// Logical equality (`==`) or inequality (`!=`), yielding one bit, unknown
-    /// if either operand has an `x`/`z` bit.
+    /// only when `x`/`z` bits leave it ambiguous: a known differing bit
+    /// decides it.
     DigitalEquality {
         left: ValueId,
         right: ValueId,

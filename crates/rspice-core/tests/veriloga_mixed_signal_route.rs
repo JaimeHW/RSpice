@@ -5439,6 +5439,73 @@ fn a_zero_node_x_card_instantiates_a_portless_testbench_named_by_its_spice_path(
     }
 }
 
+/// IEEE 1364-2005 section 5.1.8: `==` and `!=` answer `x` only when unknown
+/// bits make the relation ambiguous. A known differing bit decides them, so
+/// it decides the `if`, `else if` and `while` conditions built on them. The
+/// expected lines are Icarus Verilog 13's (`iverilog -g2005`) for this module.
+#[test]
+fn a_known_differing_bit_decides_equality_beside_unknown_bits() {
+    use rspice_core::config::{HdlOutputCollector, HdlStream};
+    let model = ModelFile::new(
+        "equality_bench",
+        "`timescale 1ns/1ns\n\
+         module tb(o);\n\
+         output o; reg o; reg x; reg [3:0] got, exp, v; integer i;\n\
+         initial begin\n\
+         o = 0; got = 4'b10x1; exp = 4'b0011;\n\
+         $display(\"eq=%b ne=%b\", got == exp, got != exp);\n\
+         if (got != exp) $display(\"MISMATCH detected\"); else $display(\"no mismatch reported\");\n\
+         if (got == exp) $display(\"equal\"); else $display(\"not equal branch\");\n\
+         $display(\"eq2=%b\", 2'b1x == 2'b0z);\n\
+         $display(\"ceq=%b cne=%b\", got === exp, got !== exp);\n\
+         x = 1'bx; v = 4'b1x00;\n\
+         $display(\"%b %b %b\", (x == 1'b0) || 1'b1, v == 4'b0x00, v != 4'b0x00);\n\
+         i = 0; while (v != 4'b0000 && i < 3) begin i = i + 1; v = 4'b0000; end\n\
+         $display(\"i=%0d\", i);\n\
+         v = 4'b1x00; i = 0;\n\
+         if (v == 4'b0100) i = 1; else if (v != 4'b0100) i = 2; else i = 3;\n\
+         $display(\"branch=%0d\", i);\n\
+         $display(\"amb=%b %b\", v == 4'b1000, v != 4'b1100);\n\
+         $finish;\n\
+         end\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* equality with a known differing bit\nx1 o tb\nr1 o 0 1k\n\
+         .hdl \"{}\" module=tb\n.end\n",
+        model.deck_path()
+    ))
+    .expect("the deck parses");
+    let collector = std::sync::Arc::new(HdlOutputCollector::new());
+    let mut config = SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    Engine::new(config)
+        .run_with_outcome(&rspice_core::NoAbort, |engine, signal| {
+            engine.run_tran_with_abort(&netlist, 10e-9, 1e-9, signal)
+        })
+        .expect("the run completes");
+    let printed: Vec<String> = collector
+        .take()
+        .into_iter()
+        .filter(|record| record.stream == HdlStream::Stdout)
+        .map(|record| record.text.trim_end().to_owned())
+        .collect();
+    assert_eq!(
+        printed,
+        [
+            "eq=0 ne=1",
+            "MISMATCH detected",
+            "not equal branch",
+            "eq2=0",
+            "ceq=0 cne=1",
+            "1 0 1",
+            "i=1",
+            "branch=2",
+            "amb=x x",
+        ]
+    );
+}
+
 /// Design P2 section 4.3: an operating point prints the time-zero output once,
 /// at its committed equilibrium, stamped as the operating point.
 #[test]
