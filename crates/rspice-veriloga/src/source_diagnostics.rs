@@ -11,8 +11,9 @@ use std::path::Path;
 ///
 /// Byte ranges are half-open UTF-8 ranges in `path`, not in expanded compiler
 /// input. Lines and Unicode scalar columns are one-based. When preprocessing
-/// changed a line (for example, a macro invocation), its entire original line
-/// is selected instead of presenting an expanded token as an authored range.
+/// changed a line (for example, a macro invocation), text it left alone keeps
+/// its exact position and a location inside the expansion selects the
+/// original invocation, never an expanded token as an authored range.
 /// Diagnostics without a source span retain `None` locations.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourceCompileDiagnostic {
@@ -194,8 +195,18 @@ impl PreprocessedSource {
                     end,
                     source[line_range.start..start].chars().count() + 1,
                 )
-            } else {
+            } else if exact_line {
                 (line_range.start, line_range.end, 1)
+            } else {
+                let content = expanded_line.trim_end_matches(['\r', '\n']);
+                let alignment =
+                    LineAlignment::new(content, original_line.trim_end_matches(['\r', '\n']));
+                let (range, column) = alignment.map(content, local_start, local_end);
+                (
+                    (line_range.start + range.start).min(line_range.end),
+                    (line_range.start + range.end).min(line_range.end),
+                    column,
+                )
             };
         Some(MappedSourceSpan {
             path: &segment.logical_path,
@@ -215,6 +226,101 @@ impl crate::runtime_report::SiteLines for PreprocessedSource {
         }
         let segment = self.segment_at(usize::try_from(span.start).ok()?)?;
         Some((Some(segment.logical_path.as_path()), segment.source_line))
+    }
+}
+
+/// How a line the preprocessor changed lines up with its original.
+///
+/// Expansion rewrites the middle of a line: the content before the first
+/// invocation and after the last one is unchanged. A location in either
+/// shared run maps to its exact original column; a location inside the
+/// rewritten middle maps to the original invocation (or invocations).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LineAlignment {
+    /// Leading content bytes both lines share.
+    prefix: usize,
+    /// Trailing content bytes both lines share, disjoint from `prefix`.
+    suffix: usize,
+    original_len: usize,
+    expanded_len: usize,
+    /// Unicode scalars of the original between `prefix` and `suffix`.
+    changed_chars: usize,
+}
+
+impl LineAlignment {
+    /// Both arguments are line content without the line terminator.
+    pub(crate) fn new(expanded: &str, original: &str) -> Self {
+        let prefix: usize = expanded
+            .chars()
+            .zip(original.chars())
+            .take_while(|(a, b)| a == b)
+            .map(|(a, _)| a.len_utf8())
+            .sum();
+        let room = expanded.len().min(original.len()) - prefix;
+        let mut suffix = 0;
+        for (a, b) in expanded.chars().rev().zip(original.chars().rev()) {
+            if a != b || suffix + a.len_utf8() > room {
+                break;
+            }
+            suffix += a.len_utf8();
+        }
+        Self {
+            prefix,
+            suffix,
+            original_len: original.len(),
+            expanded_len: expanded.len(),
+            changed_chars: original[prefix..original.len() - suffix].chars().count(),
+        }
+    }
+
+    /// The original byte range (relative to the line start) and one-based
+    /// column of the expanded-line range `start..end`; `expanded` is the
+    /// expanded line content the alignment was built from.
+    pub(crate) fn map(
+        &self,
+        expanded: &str,
+        start: usize,
+        end: usize,
+    ) -> (std::ops::Range<usize>, usize) {
+        let floor = |mut offset: usize| {
+            offset = offset.min(expanded.len());
+            while !expanded.is_char_boundary(offset) {
+                offset -= 1;
+            }
+            offset
+        };
+        let changed_end = self.original_len - self.suffix;
+        let suffix_start = self.expanded_len - self.suffix;
+        let prefix_chars = expanded[..self.prefix].chars().count();
+        // (original offset, column) of one expanded offset, and whether it
+        // fell inside the rewritten middle.
+        let locate = |offset: usize| {
+            if offset < self.prefix {
+                let offset = floor(offset);
+                (offset, expanded[..offset].chars().count() + 1, false)
+            } else if offset >= suffix_start {
+                let beyond = offset.saturating_sub(self.expanded_len);
+                let within = floor(offset) - suffix_start;
+                let column = prefix_chars
+                    + self.changed_chars
+                    + expanded[suffix_start..suffix_start + within]
+                        .chars()
+                        .count()
+                    + beyond
+                    + 1;
+                (changed_end + within + beyond, column, false)
+            } else {
+                (self.prefix, prefix_chars + 1, true)
+            }
+        };
+        let (original_start, column, inside) = locate(start);
+        let (original_end, _, end_inside) = locate(end.max(start));
+        let original_end = if inside || end_inside {
+            original_end.max(changed_end)
+        } else {
+            original_end
+        };
+        (original_start..original_end.max(original_start), column)
     }
 }
 
@@ -333,7 +439,7 @@ mod tests {
         assert_eq!(expanded.column, Some(1));
         assert_eq!(
             &second[expanded.byte_start.unwrap()..expanded.byte_end.unwrap()],
-            "`BAD\n"
+            "`BAD"
         );
         assert_eq!(
             diagnostics[2].phase,
@@ -342,5 +448,69 @@ mod tests {
         assert!(diagnostics[2].path.is_none());
         assert!(diagnostics[2].line.is_none());
         assert!(diagnostics[2].byte_start.is_none());
+    }
+
+    /// On a line a macro invocation changed, text before and after the
+    /// invocation keeps its own column and a location inside the expansion
+    /// selects the invocation. Both mappers agree at every offset. It used to
+    /// select the whole line at column 1.
+    #[test]
+    fn a_macro_expanded_line_keeps_unchanged_columns_and_selects_the_invocation() {
+        let root = "`define BAD (1 +)\n\u{3b1} = `BAD * \u{3b2} @;\n";
+        let bundle = VirtualSourceBundle::from_sources("root.va", [("root.va", root)]).unwrap();
+        let provider = VirtualBundleProvider::new(&bundle, VirtualCompileLimits::default());
+        let mut pp = Preprocessor::new();
+        let preprocessed = pp
+            .preprocess_provider_root_mapped(&provider, Path::new("root.va"))
+            .unwrap();
+        let prepared = crate::prepared_diagnostics::PreparedSourceMap::new(&preprocessed, |path| {
+            pp.dependency_documents()
+                .iter()
+                .find(|document| document.logical_path == path)
+                .map(|document| document.source.as_str())
+        });
+        let line_start = preprocessed.source.find('\u{3b1}').unwrap();
+        let locate = |needle: &str| {
+            let offset =
+                (line_start + preprocessed.source[line_start..].find(needle).unwrap()) as u32;
+            let error = CompileError::Parser(ParseError::new(
+                ParseErrorKind::InvalidExpression,
+                Span::new(SourceId::new(0), offset, offset + needle.len() as u32),
+            ));
+            let live = provider_diagnostics(&error, &preprocessed, pp.dependency_documents());
+            assert_eq!(prepared.diagnostics(&preprocessed.source, &error), live);
+            let diagnostic = live.into_iter().next().unwrap();
+            (
+                diagnostic.column.unwrap(),
+                root[diagnostic.byte_start.unwrap()..diagnostic.byte_end.unwrap()].to_string(),
+            )
+        };
+        // `α = ` is shared, so `=` keeps column 3.
+        assert_eq!(locate("="), (3, "=".into()));
+        // Inside the expansion: the invocation, at its backtick.
+        assert_eq!(locate("+"), (5, "`BAD".into()));
+        assert_eq!(locate("(1 +)"), (5, "`BAD".into()));
+        // After it: `β` and `@` keep their authored columns.
+        assert_eq!(locate("\u{3b2}"), (12, "\u{3b2}".into()));
+        assert_eq!(locate("@"), (14, "@".into()));
+        // Spans from every offset of the line to the end of input agree too.
+        for start in line_start..preprocessed.source.len() {
+            if !preprocessed.source.is_char_boundary(start) {
+                continue;
+            }
+            let error = CompileError::Parser(ParseError::new(
+                ParseErrorKind::InvalidExpression,
+                Span::new(
+                    SourceId::new(0),
+                    start as u32,
+                    preprocessed.source.len() as u32,
+                ),
+            ));
+            assert_eq!(
+                prepared.diagnostics(&preprocessed.source, &error),
+                provider_diagnostics(&error, &preprocessed, pp.dependency_documents()),
+                "offset {start}"
+            );
+        }
     }
 }

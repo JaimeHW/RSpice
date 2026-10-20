@@ -2,9 +2,11 @@
 //!
 //! Original documents can be released once their line ranges and expansion
 //! status are indexed. Exact lines use the retained expanded input to count
-//! Unicode columns; changed lines select the original macro invocation.
+//! Unicode columns; changed lines keep the columns of their unchanged text
+//! and select the original macro invocation for the rest.
 
 use crate::preprocessor::PreprocessedSource;
+use crate::source_diagnostics::LineAlignment;
 use crate::{CompileDiagnosticSpan, CompileError, SourceCompileDiagnostic};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -24,6 +26,8 @@ struct SourceSegment {
     line: usize,
     content_bytes: usize,
     exact: bool,
+    /// How a changed line lines up with its original; `None` when exact.
+    alignment: Option<LineAlignment>,
 }
 
 impl crate::runtime_report::SiteLines for PreparedSourceMap {
@@ -53,6 +57,7 @@ impl PreparedSourceMap {
                     line: line + 1,
                     content_bytes: text.trim_end_matches(['\r', '\n']).len(),
                     exact: true,
+                    alignment: None,
                 }
             })
             .collect();
@@ -123,8 +128,9 @@ impl PreparedSourceMap {
             };
             let expanded = segment.expanded_start..segment.expanded_end;
             let original_content = source[original.clone()].trim_end_matches(['\r', '\n']);
-            let exact = preprocessed.source[expanded.clone()].trim_end_matches(['\r', '\n'])
-                == original_content;
+            let expanded_content =
+                preprocessed.source[expanded.clone()].trim_end_matches(['\r', '\n']);
+            let exact = expanded_content == original_content;
             result.segments.push(SourceSegment {
                 expanded,
                 original: original.clone(),
@@ -132,6 +138,7 @@ impl PreparedSourceMap {
                 line: segment.source_line,
                 content_bytes: original_content.len(),
                 exact,
+                alignment: (!exact).then(|| LineAlignment::new(expanded_content, original_content)),
             });
         }
         result
@@ -193,14 +200,12 @@ impl PreparedSourceMap {
                     offset == source.len() && segment.expanded.end == source.len()
                 })
             })?;
-        let start = offset
-            .saturating_sub(segment.expanded.start)
-            .min(segment.original.len());
-        let end = usize::try_from(span.byte_end)
+        let local_start = offset.saturating_sub(segment.expanded.start);
+        let local_end = usize::try_from(span.byte_end)
             .ok()?
-            .saturating_sub(segment.expanded.start)
-            .min(segment.original.len())
-            .max(start);
+            .saturating_sub(segment.expanded.start);
+        let start = local_start.min(segment.original.len());
+        let end = local_end.min(segment.original.len()).max(start);
         let expanded_line = &source[segment.expanded.clone()];
         // Original and expanded line endings may differ. Beyond their shared
         // content, every original byte is an ASCII CR or LF boundary.
@@ -215,6 +220,11 @@ impl PreparedSourceMap {
                     + start.saturating_sub(segment.content_bytes)
                     + 1,
             )
+        } else if let Some(alignment) = &segment.alignment {
+            let content = expanded_line.trim_end_matches(['\r', '\n']);
+            let (range, column) = alignment.map(content, local_start, local_end);
+            let clamp = |offset: usize| segment.original.start + offset.min(segment.original.len());
+            (clamp(range.start)..clamp(range.end), column)
         } else {
             (segment.original.clone(), 1)
         };
