@@ -5260,7 +5260,7 @@ impl SemanticAnalyzer {
         if !valid_lhs {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidContribution(
-                    "the left side of an indirect equation must be an access function, or ddt, idt, or idtmod applied to an access function".into(),
+                    "an indirect equation whose left side is not an access function, or ddt, idt or idtmod applied to one".into(),
                 ),
                 stmt.lhs.span(),
             )));
