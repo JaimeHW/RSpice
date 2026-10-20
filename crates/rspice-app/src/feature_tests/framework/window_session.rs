@@ -45,6 +45,44 @@ fn the_windows_page_carries_no_constant_paragraphs() {
     assert!(!says("Restored geometry is clamped"));
 }
 
+/// The window the manager is open in already has the focus, so its row
+/// offers no Focus; with no other window there is no Action column.
+#[test]
+fn the_active_window_offers_no_focus() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .workbench
+        .window_session_dialog
+        .open(WindowSessionPage::Windows);
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| render_window_session_dialog(&mut app, ctx),
+        );
+        if let Some(update) = output.platform_output.accesskit_update {
+            nodes.extend(update.nodes);
+        }
+    }
+    let says = |text: &str| {
+        nodes
+            .values()
+            .any(|node| node.label() == Some(text) || node.value() == Some(text))
+    };
+    assert!(says("active"), "the main window's row is missing");
+    assert!(!says("Focus"), "the active window offers Focus");
+    assert!(!says("Action"), "an Action column with no actions");
+}
+
 /// Detach and New window are command forms: each fact and choice on the
 /// label grid, the choices kit selects, Cancel and Esc close. They had a
 /// Monitor dropdown whose one entry did nothing, labels to the right of

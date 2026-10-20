@@ -534,8 +534,12 @@ fn render_windows_page(
         });
     });
     ui.add_space(8.0);
+    let current = app.workbench().window_session.current();
+    // Focus and Close act on a window other than this one; with no other
+    // window open, no row has an action and the column goes.
+    let actions = app.workbench().window_session.windows().count() > 1;
     Grid::new("window-session.windows")
-        .num_columns(5)
+        .num_columns(if actions { 5 } else { 4 })
         .striped(true)
         .spacing([18.0, 7.0])
         .show(ui, |ui| {
@@ -543,7 +547,9 @@ fn render_windows_page(
             ui.strong("Monitor");
             ui.strong("Documents");
             ui.strong("State");
-            ui.strong("Action");
+            if actions {
+                ui.strong("Action");
+            }
             ui.end_row();
             for (id, window) in app.workbench().window_session.windows() {
                 ui.label(&window.title);
@@ -563,19 +569,22 @@ fn render_windows_page(
                 );
                 ui.label(if window.bounds.recovery_pending {
                     "recovery pending"
-                } else if id == app.workbench().window_session.current() {
+                } else if id == current {
                     "active"
                 } else {
                     "open"
                 });
-                ui.horizontal(|ui| {
-                    if ui.button("Focus").clicked() {
-                        *action = Some(WindowSessionAction::Focus(id));
-                    }
-                    if !id.is_primary() && ui.button("Close").clicked() {
-                        *action = Some(WindowSessionAction::CloseWindow(id));
-                    }
-                });
+                if actions {
+                    ui.horizontal(|ui| {
+                        // The window this dialog is in already has the focus.
+                        if id != current && ui.button("Focus").clicked() {
+                            *action = Some(WindowSessionAction::Focus(id));
+                        }
+                        if !id.is_primary() && ui.button("Close").clicked() {
+                            *action = Some(WindowSessionAction::CloseWindow(id));
+                        }
+                    });
+                }
                 ui.end_row();
             }
         });
