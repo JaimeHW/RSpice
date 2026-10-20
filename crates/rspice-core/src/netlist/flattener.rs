@@ -5779,6 +5779,35 @@ mod tests {
         }
     }
 
+    /// `params:amp=1` with no space after the colon declares `amp` on the
+    /// `.SUBCKT` line and sets it on an X line. ngspice 46 runs this deck at
+    /// 1/3 A for the override and 1 A for the default; the glued field used
+    /// to read as a formal named `params:amp`, so the override was refused.
+    #[test]
+    fn a_params_keyword_glued_to_its_first_assignment_declares_that_parameter() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let netlist = Netlist::parse_with_options(
+                "glued params keyword\n.subckt pair a params:amp=1\nR1 a 0 {amp}\n.ends pair\nX1 n pair amp=3\nX2 m pair\nX3 k pair PARAMS:amp=5\nV1 n 0 1\nV2 m 0 1\nV3 k 0 1\n.op\n.end\n",
+                super::super::parser::NetlistParseOptions {
+                    expression_dialect: dialect,
+                    ..Default::default()
+                },
+            )
+            .expect("deck parses");
+            let flattened =
+                flatten_netlist(&netlist).unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+            let mut resistances = flattened
+                .iter()
+                .filter_map(|element| match element.kind {
+                    ElementKind::Resistor { value, .. } => Some(value),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            resistances.sort_by(f64::total_cmp);
+            assert_eq!(resistances, vec![1.0, 3.0, 5.0], "{dialect:?}");
+        }
+    }
+
     /// ngspice 46 runs `X1 1 0 rr q=5` on a `.subckt rr a b r=1k` (or on one
     /// whose only declaration is a body `.param`) with V1 at -1 mA, the
     /// value dropped unread, and stops on a subcircuit with no declarations

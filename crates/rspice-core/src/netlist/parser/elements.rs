@@ -6525,6 +6525,11 @@ pub(super) fn parse_subcircuit_instance(
         if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
             continue;
         }
+        // `params:amp=3` sets `amp`, as it does on the `.SUBCKT` line.
+        let field = match field.get(.."PARAMS:".len()) {
+            Some(marker) if marker.eq_ignore_ascii_case("PARAMS:") => &field[marker.len()..],
+            _ => field.as_str(),
+        };
         if let Some((param_name, raw_value)) = field.split_once('=') {
             params.push((
                 param_name.to_string(),
@@ -8861,6 +8866,7 @@ pub(super) fn parse_subckt_def(
         line_num,
         expression_dialect == ExpressionDialect::Xyce,
     )?;
+    let fields = split_glued_subckt_params_marker(fields, expression_dialect);
     if fields.len() < 2 {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -9165,6 +9171,30 @@ fn is_subckt_params_marker(field: &str, expression_dialect: ExpressionDialect) -
         field.to_ascii_uppercase().as_str(),
         "PARAM" | "PARAM:" | "PARAMS" | "PARAMS:" | "PARAMETERS" | "PARAMETERS:"
     )
+}
+
+/// `params:amp=1`, with no space after the colon, declares `amp`: ngspice and
+/// Xyce both split the keyword off at the colon. Kept whole, the field read
+/// as a formal named `params:amp` that no card can reference.
+fn split_glued_subckt_params_marker(
+    fields: Vec<String>,
+    expression_dialect: ExpressionDialect,
+) -> Vec<String> {
+    let mut split = Vec::with_capacity(fields.len() + 1);
+    for (index, field) in fields.into_iter().enumerate() {
+        match field.find(':') {
+            Some(colon)
+                if index >= 2
+                    && colon + 1 < field.len()
+                    && is_subckt_params_marker(&field[..=colon], expression_dialect) =>
+            {
+                split.push(field[..=colon].to_string());
+                split.push(field[colon + 1..].to_string());
+            }
+            _ => split.push(field),
+        }
+    }
+    split
 }
 
 fn is_subckt_optional_marker(field: &str, expression_dialect: ExpressionDialect) -> bool {
