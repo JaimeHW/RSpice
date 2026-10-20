@@ -5247,7 +5247,7 @@ pub(super) fn parse_lossless_tline(
     let port2_pos = expect_node(stream, line_num)?;
     let port2_neg = expect_node(stream, line_num)?;
 
-    let parsed = parse_tline_params(stream, line_num, params, true)?;
+    let parsed = parse_tline_params(stream, line_num, params, true, false)?;
     if parsed.model.is_none() && parsed.z0.is_none() {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -5263,6 +5263,7 @@ pub(super) fn parse_lossless_tline(
             freq: parsed.freq,
             nl: parsed.nl,
             model: parsed.model,
+            deferred_params: parsed.deferred,
         },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
         provenance: crate::netlist::ElementProvenance::Authored,
@@ -5318,7 +5319,7 @@ fn parse_yline_transmission_line(
         let port2_pos = expect_node(stream, line_num)?;
         let port2_neg = expect_node(stream, line_num)?;
 
-        let parsed = parse_tline_params(stream, line_num, params, true)?;
+        let parsed = parse_tline_params(stream, line_num, params, true, false)?;
         if parsed.model.is_none() && parsed.z0.is_none() {
             return Err(ParseError::Syntax {
                 line: line_num,
@@ -5334,6 +5335,7 @@ fn parse_yline_transmission_line(
                 freq: parsed.freq,
                 nl: parsed.nl,
                 model: parsed.model,
+                deferred_params: parsed.deferred,
             },
             nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
             provenance: crate::netlist::ElementProvenance::Authored,
@@ -6193,6 +6195,7 @@ pub(super) fn parse_coupled_tlines(
             freq: None,
             nl: None,
             model,
+            deferred_params: Vec::new(),
         },
         nodes,
         provenance: crate::netlist::ElementProvenance::Authored,

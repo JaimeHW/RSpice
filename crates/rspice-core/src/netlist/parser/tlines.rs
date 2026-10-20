@@ -335,6 +335,7 @@ pub(super) fn parse_transmission_line(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let port1_pos = expect_node(stream, line_num)?;
@@ -342,7 +343,7 @@ pub(super) fn parse_transmission_line(
     let port2_pos = expect_node(stream, line_num)?;
     let port2_neg = expect_node(stream, line_num)?;
 
-    let parsed = parse_tline_params(stream, line_num, params, false)?;
+    let parsed = parse_tline_params(stream, line_num, params, false, defer_simple_param_refs)?;
     let z0 = parsed.z0.ok_or_else(|| ParseError::Syntax {
         line: line_num,
         message: "Transmission line requires Z0".to_string(),
@@ -356,6 +357,7 @@ pub(super) fn parse_transmission_line(
             freq: parsed.freq,
             nl: parsed.nl,
             model: parsed.model,
+            deferred_params: parsed.deferred,
         },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
         provenance: crate::netlist::ElementProvenance::Authored,
@@ -371,6 +373,8 @@ pub(super) struct ParsedTlineParams {
     pub(super) freq: Option<Value>,
     pub(super) nl: Option<Value>,
     pub(super) model: Option<String>,
+    /// Named fields whose expressions resolve once their scope is known.
+    pub(super) deferred: Vec<(String, String)>,
 }
 
 pub(super) fn parse_tline_params(
@@ -378,8 +382,25 @@ pub(super) fn parse_tline_params(
     line_num: usize,
     params: &ParamContext,
     allow_bare_model: bool,
+    defer_simple_param_refs: bool,
 ) -> Result<ParsedTlineParams, ParseError> {
     let mut parsed = ParsedTlineParams::default();
+    let named_value = |stream: &mut TokenStream,
+                       field: &str,
+                       deferred: &mut Vec<(String, String)>|
+     -> Result<Option<Value>, ParseError> {
+        let (value, expression) = expect_deferrable_scalar(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            &format!("Transmission-line {field}"),
+        )?;
+        if let Some(expression) = expression {
+            deferred.push((field.to_string(), expression));
+        }
+        Ok(Some(value))
+    };
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -438,16 +459,16 @@ pub(super) fn parse_tline_params(
 
         match token_upper.as_str() {
             "Z0" | "ZO" => {
-                parsed.z0 = Some(expect_value(stream, line_num, params)?);
+                parsed.z0 = named_value(stream, "Z0", &mut parsed.deferred)?;
             }
             "TD" => {
-                parsed.td = Some(expect_value(stream, line_num, params)?);
+                parsed.td = named_value(stream, "TD", &mut parsed.deferred)?;
             }
             "F" | "FREQ" => {
-                parsed.freq = Some(expect_value(stream, line_num, params)?);
+                parsed.freq = named_value(stream, "F", &mut parsed.deferred)?;
             }
             "NL" => {
-                parsed.nl = Some(expect_value(stream, line_num, params)?);
+                parsed.nl = named_value(stream, "NL", &mut parsed.deferred)?;
             }
             "MODEL" => {
                 parsed.model = Some(expect_ident(stream, line_num)?);

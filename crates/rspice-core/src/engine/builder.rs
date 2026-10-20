@@ -9314,6 +9314,7 @@ impl Engine {
                     freq,
                     nl,
                     model,
+                    ..
                 } => {
                     if element.nodes.len() < 4 {
                         return Err(SimulationError::Circuit(format!(

@@ -576,6 +576,9 @@ pub(super) fn process_line_with_abort(
                     coefficient_expr: Some(_),
                     ..
                 }
+        ) || matches!(
+            &element.kind,
+            ElementKind::TransmissionLine { deferred_params, .. } if !deferred_params.is_empty()
         ) {
             state
                 .deferred_source_origins
@@ -842,7 +845,13 @@ pub(super) fn parse_line(
         'S' => parse_vswitch(&mut stream, line_num, elements),
         'W' => parse_iswitch(&mut stream, line_num, elements),
         // Transmission lines
-        'T' => parse_transmission_line(&mut stream, line_num, elements, params),
+        'T' => parse_transmission_line(
+            &mut stream,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
+        ),
         'O' => parse_lossless_tline(&mut stream, line_num, elements, params),
         'Y' => parse_lossy_tline(
             &mut stream,

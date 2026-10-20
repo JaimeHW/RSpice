@@ -252,6 +252,32 @@ fn coupling_coefficient_override_reaches_the_mutual_inductance() {
     );
 }
 
+/// A T line's Z0 and TD are evaluated in the instance's scope. ngspice 46
+/// with the override z=100 d=2n: |V(b)| = 0.9524316, 1.090099 and 1.523388
+/// at 1, 50.5 and 100 MHz. With the defaults (a matched 50 ohm line, which
+/// is what RSpice used) the magnitude is a flat 0.952381.
+#[test]
+fn transmission_line_override_reaches_the_line() {
+    let deck = "tline params in subckt\n\
+         .subckt line a b params: z=50 d=1n\n\
+         T1 a 0 b 0 Z0={z} TD={d}\n\
+         .ends\n\
+         V1 in 0 AC 1\n\
+         R1 in a 50\n\
+         X1 a b line z=100 d=2n\n\
+         R2 b 0 1k\n\
+         .ac lin 3 1meg 100meg\n\
+         .end\n";
+    for (frequency, expected) in [(1.0e6, 0.9524316), (50.5e6, 1.090099), (100.0e6, 1.523388)] {
+        let magnitude = ac_magnitude(deck, "b", frequency);
+        // ngspice prints seven significant digits.
+        assert!(
+            (magnitude - expected).abs() < 2.0e-6,
+            "|V(b)| at {frequency:e} Hz = {magnitude}, ngspice {expected}"
+        );
+    }
+}
+
 /// POLY coefficients and TABLE entries of E/G/F/H sources are evaluated in
 /// the instance's scope. ngspice 46 on this deck: every output is 2 V except
 /// the TABLE's 1.5 V. With the subcircuit defaults (g=1, vmax=1), which is

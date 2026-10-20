@@ -3340,21 +3340,44 @@ fn resolve_top_level_deferred_values_with_abort(
             crate::netlist::expr::eval_expression(expression, params)
                 .map_err(|error| failure(format!("{error}")))
         };
-        if let ElementKind::Coupling {
-            coefficient,
-            coefficient_expr,
-            model,
-            ..
-        } = &mut element.kind
-            && let Some(expression) = coefficient_expr.take()
-        {
-            *coefficient = resolve(&expression)?;
-            if let Some(message) = crate::netlist::mutual_inductor::coupling_coefficient_error(
-                *coefficient,
-                model.is_some(),
-            ) {
-                return Err(failure(message));
+        match &mut element.kind {
+            ElementKind::Coupling {
+                coefficient,
+                coefficient_expr,
+                model,
+                ..
+            } => {
+                if let Some(expression) = coefficient_expr.take() {
+                    *coefficient = resolve(&expression)?;
+                    if let Some(message) =
+                        crate::netlist::mutual_inductor::coupling_coefficient_error(
+                            *coefficient,
+                            model.is_some(),
+                        )
+                    {
+                        return Err(failure(message));
+                    }
+                }
             }
+            ElementKind::TransmissionLine {
+                z0,
+                td,
+                freq,
+                nl,
+                deferred_params,
+                ..
+            } => {
+                for (field, expression) in std::mem::take(deferred_params) {
+                    let value = Some(resolve(&expression)?);
+                    match field.as_str() {
+                        "Z0" => *z0 = value,
+                        "TD" => *td = value,
+                        "F" => *freq = value,
+                        _ => *nl = value,
+                    }
+                }
+            }
+            _ => {}
         }
     }
     ensure_parse_not_aborted(abort)

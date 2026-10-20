@@ -582,6 +582,10 @@ pub enum ElementKind {
         nl: Option<Value>,
         /// Optional model name for O/Y/P-style transmission lines
         model: Option<String>,
+        /// `Z0`/`TD`/`F`/`NL` expressions captured inside subcircuits, or
+        /// citing a root `.PARAM` declared later, and resolved over the
+        /// matching field when the parameter scope is known.
+        deferred_params: Vec<(String, String)>,
     },
 
     //-------------------------------------------------------------------------

@@ -309,6 +309,7 @@ impl<'a> ElementDetails<'a> {
                 freq,
                 nl,
                 model,
+                ..
             } => record!("transmission_line", z0, td, freq, nl, model),
             Coupling {
                 inductors,

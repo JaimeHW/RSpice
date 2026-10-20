@@ -2703,19 +2703,39 @@ impl<'a> Flattener<'a> {
                 freq,
                 nl,
                 model,
-            } => ElementKind::TransmissionLine {
-                z0: *z0,
-                td: *td,
-                freq: *freq,
-                nl: *nl,
-                model: self.resolve_optional_scoped_model(
-                    model,
-                    scope,
-                    element_path,
-                    model_scope_path,
-                    abort,
-                )?,
-            },
+                deferred_params,
+            } => {
+                let (mut z0, mut td, mut freq, mut nl) = (*z0, *td, *freq, *nl);
+                for (field, expression) in deferred_params {
+                    let value = self.resolve_optional_value_expr(
+                        Value::NAN,
+                        &Some(expression.clone()),
+                        scope,
+                        None,
+                        abort,
+                    )?;
+                    match field.as_str() {
+                        "Z0" => z0 = Some(value),
+                        "TD" => td = Some(value),
+                        "F" => freq = Some(value),
+                        _ => nl = Some(value),
+                    }
+                }
+                ElementKind::TransmissionLine {
+                    z0,
+                    td,
+                    freq,
+                    nl,
+                    model: self.resolve_optional_scoped_model(
+                        model,
+                        scope,
+                        element_path,
+                        model_scope_path,
+                        abort,
+                    )?,
+                    deferred_params: Vec::new(),
+                }
+            }
 
             // All other element types - clone as-is
             other => other.clone(),
@@ -5528,6 +5548,47 @@ mod tests {
                 .to_string()
                 .contains("Invalid coupling coefficient 1.5"),
             "{error}"
+        );
+    }
+
+    fn transmission_line_fields(netlist: &Netlist) -> Vec<(String, Option<Value>, Option<Value>)> {
+        let flattened = flatten_netlist_with_models(netlist).expect("netlist flattens");
+        flattened
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::TransmissionLine { z0, td, .. } => {
+                    Some((element.name.clone(), *z0, *td))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// ngspice evaluates a T line's Z0 and TD in each instance's scope; both
+    /// used to be read once with the subcircuit defaults. A root T line may
+    /// also cite a `.param` declared later.
+    #[test]
+    fn transmission_line_fields_resolve_in_their_scope() {
+        let netlist = Netlist::parse(
+            "tline scope\n\
+             .subckt line a b params: z=50 d=1n\n\
+             T1 a 0 b 0 Z0={z} TD={d}\n\
+             .ends\n\
+             X1 a b line z=100 d=2n\n\
+             X2 c e line\n\
+             T2 f 0 g 0 Z0={zr} TD=1n\n\
+             .param zr=75\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        assert_eq!(
+            transmission_line_fields(&netlist),
+            [
+                ("X1.T1".to_string(), Some(100.0), Some(2.0e-9)),
+                ("X2.T1".to_string(), Some(50.0), Some(1.0e-9)),
+                ("T2".to_string(), Some(75.0), Some(1.0e-9)),
+            ]
         );
     }
 
