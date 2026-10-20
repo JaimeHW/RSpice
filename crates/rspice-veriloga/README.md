@@ -107,7 +107,10 @@ let device = VerilogADevice::try_new("R1", report.model, &[1, 0])?;
 
 Unsupported input is always a `CompileError` naming the construct and its span.
 The compiler does not silently drop what it cannot lower, and `semantic`
-carries tests pinning that.
+carries tests pinning that. Statements and expressions nest at most 256 levels
+and an operator tree reaches at most 1024 levels; deeper source is refused
+(`VA-PARSE-NESTING-LIMIT`) rather than left to exhaust the compiler's stack,
+which a compile runs on a thread of its own sized for those bounds.
 
 - **Analog operators**: `ddt`, `idt`, `idtmod`, `ddx`, `limexp`, `absdelay`,
   `transition`, `slew`, `laplace_zp/zd/np/nd`, `zi_nd/zp/zd/np`,
