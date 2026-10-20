@@ -189,6 +189,7 @@ impl CodeGenerator {
             laplace_filters: std::cell::RefCell::new(Vec::new()),
             laplace_sites: std::cell::RefCell::new(HashMap::new()),
             lookup_tables: std::cell::RefCell::new(Vec::new()),
+            lookup_table_sites: std::cell::RefCell::new(Vec::new()),
             limit_state_count: std::cell::Cell::new(0),
             named_limiter_slots: std::cell::RefCell::new(Vec::new()),
             delay_buffer_count: std::cell::Cell::new(0),
@@ -406,6 +407,7 @@ impl CodeGenerator {
         let emit_ctx = EmitContext::from_ir(ir);
         let num_terminals = ir.terminals.len();
         self.lookup_tables.borrow_mut().clear();
+        self.lookup_table_sites.borrow_mut().clear();
         self.laplace_filters.borrow_mut().clear();
         self.laplace_sites.borrow_mut().clear();
         self.zi_filters.borrow_mut().clear();
@@ -703,6 +705,7 @@ impl CodeGenerator {
 
         model.laplace_filters = self.laplace_filters.take();
         model.lookup_tables = self.lookup_tables.take();
+        self.lookup_table_sites.borrow_mut().clear();
         model.zi_filters = self.zi_filters.take();
         model.zi_filter_definitions = self.zi_filter_definitions.take();
         model.requires_nodeset_phase = self.requires_nodeset_phase.get();
@@ -2226,9 +2229,17 @@ impl CodeGenerator {
             .into());
         }
 
+        // One compiled table per call site: the conversions of one call (its
+        // value and every derivative action) share it, and two calls with the
+        // same data do not, because the canonical layout numbers each call as
+        // its own `$table_model` site.
+        let mut sites = self.lookup_table_sites.borrow_mut();
         let mut tables = self.lookup_tables.borrow_mut();
-        if let Some(existing_idx) = tables.iter().position(|table| {
-            table.x_data == *x_data && table.y_data == *y_data && table.control == data.control
+        if let Some(existing_idx) = tables.iter().zip(sites.iter()).position(|(table, site)| {
+            *site == data.site
+                && table.x_data == *x_data
+                && table.y_data == *y_data
+                && table.control == data.control
         }) {
             return Ok(existing_idx);
         }
@@ -2236,6 +2247,7 @@ impl CodeGenerator {
         let table =
             LookupTable::from_data(x_data.to_vec(), y_data.to_vec()).with_control(data.control);
         tables.push(table);
+        sites.push(data.site);
         Ok(tables.len() - 1)
     }
 }

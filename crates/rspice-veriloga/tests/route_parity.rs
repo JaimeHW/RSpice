@@ -1084,6 +1084,42 @@ endmodule
     );
 }
 
+/// Two calls with identical data are two `$table_model` sites. Sharing one
+/// compiled table between them left the canonical renumbering with one
+/// emitted slot claimed by two sites, a run-time refusal of a module that
+/// compiled.
+#[test]
+fn table_model_identical_calls_are_two_sites() {
+    let trace = compare_routes_traced(
+        r#"
+`include "disciplines.vams"
+module route_table_twice(p, n);
+    inout p, n;
+    electrical p, n;
+    real first, second;
+    analog begin
+        first = $table_model(V(p, n), "0 0; 1 1; 2 4");
+        second = $table_model(V(p, n), "0 0; 1 1; 2 4");
+        I(p, n) <+ (first + 2.0 * second) * 1.0e-3;
+    end
+endmodule
+"#,
+        &[1, 0],
+        0,
+        |probe: &mut Probe| {
+            probe.dc("dc", &[3.0]);
+            probe.observe("dc", &["first", "second"]);
+        },
+    );
+    for (key, expected) in [("dc.var.first", 7.0), ("dc.var.second", 7.0)] {
+        let entry = trace
+            .iter()
+            .find(|entry| entry.key == key)
+            .unwrap_or_else(|| panic!("{key} missing"));
+        assert_eq!((entry.value, &entry.text), (expected, &None), "{key}");
+    }
+}
+
 /// `E` refuses an input beyond the data at run time, naming it, on every
 /// route.
 #[test]

@@ -21,6 +21,8 @@ pub struct CodeGenerator {
         std::cell::RefCell<std::collections::HashMap<crate::ir::LaplaceSiteId, usize>>,
     /// Collected lookup tables used by $table_model expressions.
     pub(super) lookup_tables: std::cell::RefCell<Vec<LookupTable>>,
+    /// Source site of each entry of `lookup_tables`.
+    pub(super) lookup_table_sites: std::cell::RefCell<Vec<(u32, u32, u32)>>,
     /// Stateful slot allocator for `$limit`.
     pub(super) limit_state_count: std::cell::Cell<usize>,
     /// State slots of the named limiters whose bodies are being emitted,

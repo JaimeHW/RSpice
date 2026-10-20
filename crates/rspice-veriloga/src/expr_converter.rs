@@ -1002,8 +1002,9 @@ impl<'a> ExprConverter<'a> {
                 // 2) Inline string table: $table_model(x, "0 0; 1 2; 2 4")
                 // 3) Table file path:    $table_model(x, "table.dat")
                 // each optionally followed by the LRM control string ("3L").
-                let data = self.parse_table_model_data(func)?;
+                let mut data = self.parse_table_model_data(func)?;
                 let input = self.convert(arena, &func.args[0])?;
+                data.site = (func.span.source.raw(), func.span.start, func.span.end);
                 let table = arena.push_table(data);
                 Ok(arena.push(Node::TableLookup { input, table }))
             }
@@ -2589,7 +2590,7 @@ impl<'a> ExprConverter<'a> {
                 y_data.push(y.value);
             }
             let (x, y) = Self::validate_and_sort_table_data(x_data, y_data)?;
-            return Ok(TableData { x, y, control });
+            return Ok(TableData::new(x, y, control));
         }
 
         // An array data source (one sample array per input plus the output
@@ -2643,7 +2644,7 @@ impl<'a> ExprConverter<'a> {
         if let Ok(rows) = Self::parse_inline_table_spec(raw, columns) {
             let (x, y) = select(rows);
             let (x, y) = Self::validate_and_sort_table_data(x, y)?;
-            return Ok(TableData { x, y, control });
+            return Ok(TableData::new(x, y, control));
         }
 
         let path = Path::new(raw);
@@ -2661,7 +2662,7 @@ impl<'a> ExprConverter<'a> {
         })?;
         let (x, y) = select(rows);
         let (x, y) = Self::validate_and_sort_table_data(x, y)?;
-        Ok(TableData { x, y, control })
+        Ok(TableData::new(x, y, control))
     }
 
     /// Rows of `columns` numbers each. Rows are lines or `;`-separated

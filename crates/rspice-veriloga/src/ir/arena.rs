@@ -139,21 +139,31 @@ impl TableId {
     }
 }
 
-/// One `$table_model` call's data and control string.
+/// One `$table_model` call's data, control string and source site.
 #[derive(Clone, PartialEq, Debug)]
 pub struct TableData {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
     pub control: crate::codegen::TableControl,
+    /// The call's source span `(source, start, end)`. Every conversion of one
+    /// call shares one compiled table; two calls never do, because the
+    /// canonical layout numbers each call as its own site.
+    pub site: (u32, u32, u32),
 }
 
 impl TableData {
-    /// Linear data with no control string.
+    /// Linear data with no control string and no source site.
     pub fn linear(x: Vec<f64>, y: Vec<f64>) -> Self {
+        Self::new(x, y, crate::codegen::TableControl::default())
+    }
+
+    /// Data and control with no source site yet.
+    pub fn new(x: Vec<f64>, y: Vec<f64>, control: crate::codegen::TableControl) -> Self {
         Self {
             x,
             y,
-            control: crate::codegen::TableControl::default(),
+            control,
+            site: (0, 0, 0),
         }
     }
 }
