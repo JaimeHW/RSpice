@@ -134,6 +134,7 @@ fn parse_source_spec_impl(
     let mut rf_port = SourceRfPortBuilder::default();
     let mut distortion_f1: Option<SourceDistortionTone> = None;
     let mut distortion_f2: Option<SourceDistortionTone> = None;
+    let mut multiplier: Option<Value> = None;
 
     loop {
         skip_commas(stream);
@@ -281,21 +282,31 @@ fn parse_source_spec_impl(
             _ if is_source_port_annotation_keyword(&keyword) => {
                 consume_source_port_annotation(stream, line_num, params, &mut rf_port)?;
             }
-            _ if is_xyce_ignored_source_instance_parameter(&keyword)
+            _ if is_source_multiplier_parameter(&keyword)
                 && matches!(stream.peek_n(1).kind, TokenKind::Equals) =>
             {
-                // Xyce's independent-source reader accepts instance-style
-                // assignments after the source waveform and leaves them to
-                // the source device.  The built-in V/ISRC devices do not
-                // define these parameters, so they have no effect on the
-                // source value.  Consume the assignment here to preserve
-                // that compatibility without inventing ngspice's distinct
-                // current-source multiplier semantics.
                 stream.advance();
                 stream.advance();
                 skip_commas(stream);
-                if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-                    stream.advance();
+                if params.expression_dialect() == crate::config::ExpressionDialect::Xyce {
+                    // Xyce's independent-source reader accepts instance-style
+                    // assignments after the source waveform and leaves them
+                    // to the source device.  The built-in V/ISRC devices do
+                    // not define these parameters, so they have no effect on
+                    // the source value.  Consume the assignment here to
+                    // preserve that compatibility.
+                    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                        stream.advance();
+                    }
+                } else {
+                    // ngspice's current source takes `m` as a parallel
+                    // multiplier on its whole output: DC, AC and transient
+                    // (isrc.c, isrcload.c, isrcacld.c). Its voltage source
+                    // has no `m`, and the V card refuses one before its
+                    // specification is read.
+                    multiplier = Some(expect_finite_source_value(
+                        stream, line_num, params, "M", "value",
+                    )?);
                 }
             }
             _ if transient.is_none() => {
@@ -321,7 +332,10 @@ fn parse_source_spec_impl(
 
     let source = match (dc_value, ac_terms, transient) {
         (None, None, None)
-            if distortion_f1.is_some() || distortion_f2.is_some() || rf_port.portnum.is_some() =>
+            if distortion_f1.is_some()
+                || distortion_f2.is_some()
+                || rf_port.portnum.is_some()
+                || multiplier.is_some() =>
         {
             // Annotation-only independent sources retain SPICE's default
             // zero DC value. DISTOF1/DISTOF2 and RF-port metadata are
@@ -371,14 +385,43 @@ fn parse_source_spec_impl(
         source
     };
 
-    Ok(if let Some(port) = rf_port.into_port() {
+    let mut source = if let Some(port) = rf_port.into_port() {
         SourceSpec::RfPort {
             inner: Box::new(source),
             port,
         }
     } else {
         source
-    })
+    };
+    if let Some(multiplier) = multiplier {
+        crate::netlist::flattener::scale_source_amplitudes(&mut source, multiplier);
+    }
+    Ok(source)
+}
+
+/// Whether a V card's tail assigns `M=` outside every waveform's
+/// parentheses. ngspice's voltage source has no `m` parameter and refuses
+/// the card; Xyce's reader accepts and ignores it.
+pub(super) fn voltage_source_assigns_multiplier(stream: &TokenStream) -> bool {
+    let mut depth = 0usize;
+    let tokens = stream.remaining_line_tokens();
+    for (index, token) in tokens.iter().enumerate() {
+        match &token.kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => depth = depth.saturating_sub(1),
+            TokenKind::Ident(name)
+                if depth == 0
+                    && is_source_multiplier_parameter(name)
+                    && tokens
+                        .get(index + 1)
+                        .is_some_and(|next| matches!(next.kind, TokenKind::Equals)) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Read a `V`/`I` card's waveform specification into a [`SourceSpec`].
@@ -594,7 +637,7 @@ fn deferred_source_file_dependency(raw: &str) -> Result<Option<SourceFileDepende
                 skip_source_value_syntax(&mut stream)?;
             }
             Some(name)
-                if is_xyce_ignored_source_instance_parameter(name)
+                if is_source_multiplier_parameter(name)
                     && matches!(stream.peek_n(1).kind, TokenKind::Equals) =>
             {
                 stream.advance();
@@ -815,15 +858,26 @@ fn optional_ac_value_or_default(
 fn ac_term_is_omitted(stream: &TokenStream) -> bool {
     match &stream.peek().kind {
         TokenKind::Newline | TokenKind::Eof => true,
-        TokenKind::Ident(keyword) => is_source_level_keyword(keyword),
+        TokenKind::Ident(keyword) => {
+            is_source_level_keyword(keyword) || source_multiplier_assignment(stream)
+        }
         _ => false,
     }
+}
+
+/// Whether the stream is at an `M=` assignment, which ends any optional
+/// value before it (`AC 1 m=2` has no phase).
+fn source_multiplier_assignment(stream: &TokenStream) -> bool {
+    matches!(&stream.peek().kind, TokenKind::Ident(keyword) if is_source_multiplier_parameter(keyword))
+        && matches!(stream.peek_n(1).kind, TokenKind::Equals)
 }
 
 fn dc_term_is_omitted(stream: &TokenStream) -> bool {
     match &stream.peek().kind {
         TokenKind::Newline | TokenKind::Eof => true,
-        TokenKind::Ident(keyword) => is_source_level_keyword(keyword),
+        TokenKind::Ident(keyword) => {
+            is_source_level_keyword(keyword) || source_multiplier_assignment(stream)
+        }
         _ => false,
     }
 }
@@ -1867,7 +1921,8 @@ fn source_args_end(stream: &TokenStream, has_paren: bool) -> bool {
                 && (keyword.eq_ignore_ascii_case("AC")
                     || keyword.eq_ignore_ascii_case("DISTOF1")
                     || keyword.eq_ignore_ascii_case("DISTOF2")
-                    || is_source_port_annotation_keyword(keyword)) =>
+                    || is_source_port_annotation_keyword(keyword)
+                    || source_multiplier_assignment(stream)) =>
         {
             true
         }
@@ -1887,7 +1942,8 @@ fn source_numeric_args_end(stream: &TokenStream, has_paren: bool) -> bool {
                     || keyword.eq_ignore_ascii_case("DC")
                     || keyword.eq_ignore_ascii_case("DISTOF1")
                     || keyword.eq_ignore_ascii_case("DISTOF2")
-                    || is_source_port_annotation_keyword(keyword)) =>
+                    || is_source_port_annotation_keyword(keyword)
+                    || source_multiplier_assignment(stream)) =>
         {
             true
         }
@@ -1928,7 +1984,9 @@ fn parse_exp_spec(
     })
 }
 
-fn is_xyce_ignored_source_instance_parameter(keyword: &str) -> bool {
+/// The independent-source instance parameter `M`: ngspice's current-source
+/// parallel multiplier, accepted and ignored by Xyce's source reader.
+fn is_source_multiplier_parameter(keyword: &str) -> bool {
     keyword.eq_ignore_ascii_case("M")
 }
 
@@ -2254,9 +2312,18 @@ mod tests {
 
     #[test]
     fn xyce_ignored_source_instance_assignment_is_accepted() {
-        let source = parse_source_spec_text("DC 3.361e-02A M=4.190e-07", 1, &ParamContext::new())
+        let mut xyce = ParamContext::new();
+        xyce.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
+        let source = parse_source_spec_text("DC 3.361e-02A M=4.190e-07", 1, &xyce)
             .expect("Xyce source instance assignment parses");
 
         assert!(matches!(source, SourceSpec::Dc(value) if (value - 3.361e-2).abs() < 1e-15));
+
+        // ngspice's current source multiplies its output by `m` (isrcload.c).
+        let source = parse_source_spec_text("DC 3.361e-02A M=4.190e-07", 1, &ParamContext::new())
+            .expect("ngspice source multiplier parses");
+        assert!(
+            matches!(source, SourceSpec::Dc(value) if (value - 3.361e-2 * 4.190e-7).abs() < 1e-22)
+        );
     }
 }

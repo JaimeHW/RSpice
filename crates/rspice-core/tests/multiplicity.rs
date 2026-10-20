@@ -517,6 +517,84 @@ r1 out 0 1k
     }
 }
 
+/// ngspice's current source takes `m` as a parallel multiplier on its DC,
+/// AC and transient output (isrcload.c, isrcacld.c), and its CCCS folds `m`
+/// into the gain. ngspice 46 on this deck: V(7) = 2 V, V(6) = 8 V,
+/// V(9) = 2 V, |V(9)| = 2000 V at 1 kHz for AC 1, and V(10) = 2 V at 1 us.
+/// RSpice dropped the current source's `m` (V(7) = 1 V) and refused it on F.
+#[test]
+fn ngspice_current_source_and_cccs_m_scale_every_output() {
+    let deck = "\
+* ngspice source multipliers
+I1 0 7 dc 1m m=2
+R7 7 0 1k
+V4 4 0 1
+VS 4 5 0
+R5 5 0 1k
+F1 0 6 VS 4 m=2
+R6 6 0 1k
+I2 0 9 dc 1m ac 1 m=2
+R9 9 0 1k
+I3 0 10 PWL(0 0 1u 1m) m=2
+R10 10 0 1k
+.end
+";
+    for (node, expected) in [("7", 2.0), ("6", 8.0), ("9", 2.0)] {
+        let v = op_voltage(deck, node);
+        assert!(
+            (v - expected).abs() < 1e-9,
+            "V({node}) = {v}, ngspice {expected}"
+        );
+    }
+
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let ac = Engine::default()
+        .run_ac(&netlist, &[1.0e3])
+        .expect("AC solves")
+        .remove(0);
+    let idx = ac
+        .node_names
+        .iter()
+        .position(|name| name == "9")
+        .expect("node 9 exists");
+    let magnitude = ac.voltages[idx].norm();
+    assert!(
+        (magnitude - 2000.0).abs() < 1e-6,
+        "|V(9)| = {magnitude}, ngspice 2000"
+    );
+
+    let tran = Engine::default()
+        .run_tran(&netlist, 1.0e-6, 1.0e-8)
+        .expect("transient solves");
+    let idx = tran
+        .node_names
+        .iter()
+        .position(|name| name == "10")
+        .expect("node 10 exists");
+    let final_voltage = *tran.voltages[idx]
+        .last()
+        .expect("transient emitted samples");
+    assert!(
+        (final_voltage - 2.0).abs() < 1e-6,
+        "V(10) at 1 us = {final_voltage}, ngspice 2"
+    );
+}
+
+/// ngspice's voltage source has no `m` and refuses the card; Xyce's source
+/// reader accepts and ignores it, so the Xyce dialect keeps doing that.
+#[test]
+fn voltage_source_m_follows_the_selected_dialect() {
+    let deck = "\
+* voltage source M
+V1 1 0 1 m=2
+R1 1 0 1k
+.end
+";
+    let error = Netlist::parse(deck).expect_err("ngspice refuses a voltage source M");
+    assert!(error.to_string().contains("no M parameter"), "{error}");
+    assert!((xyce_op_voltage(deck, "1") - 1.0).abs() < 1e-12);
+}
+
 #[test]
 fn xyce_vccs_multiplicity_scales_transient_current() {
     let deck = "\

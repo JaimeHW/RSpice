@@ -5169,6 +5169,16 @@ fn apply_element_multiplicity(element: &mut Element, m: Value) {
             }
         }
         ElementKind::CurrentSource(spec) => scale_source_amplitudes(spec, m),
+        // ngspice folds a CCCS's `m` into its gain (cccspar.c).
+        ElementKind::Cccs {
+            gain, gain_expr, ..
+        } => {
+            if let Some(expression) = gain_expr {
+                *expression = format!("({expression})*({m})");
+            } else {
+                *gain *= m;
+            }
+        }
         ElementKind::Vccs { multiplicity, .. }
         | ElementKind::BehavioralCurrent { multiplicity, .. } => {
             multiplicity.value *= m;
@@ -5203,8 +5213,9 @@ fn scale_multiplicity_param(instance_params: &mut Vec<(String, Value)>, m: Value
 
 /// Scale every amplitude-like quantity of a source specification by `m`,
 /// recursing through combined DC/AC/transient forms. Time-like quantities
-/// (delays, frequencies, time constants) are never touched.
-fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
+/// (delays, frequencies, time constants) are never touched. The parser
+/// applies it for a current source's own `m=`.
+pub(super) fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
     match spec {
         SourceSpec::Distortion { inner, f1, f2 } => {
             if let Some(tone) = f1 {

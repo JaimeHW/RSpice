@@ -1231,6 +1231,17 @@ pub(super) fn parse_voltage_source(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
+    if params.expression_dialect() != crate::config::ExpressionDialect::Xyce
+        && source_specs::voltage_source_assigns_multiplier(stream)
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Voltage source '{name}' has no M parameter; only current sources take a parallel multiplier"
+            ),
+        });
+    }
+
     if defer_source_spec {
         let raw_spec = collect_deferred_source_spec(stream);
         elements.push(Element {
@@ -8392,7 +8403,7 @@ fn parse_current_controlled_source(
         None => {
             let control_element = expect_ident(stream, line_num)?;
             let mut gain_direction = 0.0.into();
-            let (gain, gain_expr) = expect_deferrable_controlled_source_value(
+            let (mut gain, mut gain_expr) = expect_deferrable_controlled_source_value(
                 stream,
                 line_num,
                 params,
@@ -8400,7 +8411,36 @@ fn parse_current_controlled_source(
                 element_label,
                 parameter_direction.as_ref().map(|_| &mut gain_direction),
             )?;
-            if !defer_simple_param_refs && let Some(capture) = parameter_direction {
+            // ngspice's CCCS takes `m` as a parallel multiplier folded into
+            // its gain (cccs.c, cccspar.c); its CCVS has none, and an `M=`
+            // there is refused like any other unknown parameter.
+            if !is_voltage_output {
+                let multiplicity = parse_source_multiplicity_tail(
+                    stream,
+                    line_num,
+                    params,
+                    defer_simple_param_refs,
+                    element_label,
+                    true,
+                )?;
+                match (&gain_expr, &multiplicity.value_expr) {
+                    (None, None) => {
+                        gain *= multiplicity.value;
+                        gain_direction = gain_direction * multiplicity.value;
+                    }
+                    (gain_text, multiplicity_text) => {
+                        let gain_text = gain_text.clone().unwrap_or_else(|| gain.to_string());
+                        let multiplicity_text = multiplicity_text
+                            .clone()
+                            .unwrap_or_else(|| multiplicity.value.to_string());
+                        gain_expr = Some(format!("({gain_text})*({multiplicity_text})"));
+                    }
+                }
+            }
+            if !defer_simple_param_refs
+                && gain_expr.is_none()
+                && let Some(capture) = parameter_direction
+            {
                 capture.elements.insert(
                     name.clone(),
                     ElementParameterDirection::Gain(gain_direction),
