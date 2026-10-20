@@ -230,6 +230,12 @@ use rspice_core::analysis::harmonic_balance::{
 // select for the Properties model picker by the containment test circuit
 // construction applies, rather than by a copy of its tolerance. The census is
 // 5,735, with no slack.
+// `HarmonicComponent::sine_referenced_phase` adds one: the CLI `.four` table
+// (`rspice-cli` fourier_document.rs) reports SPICE's sine-referenced phase
+// from the same conversion the result document applies. Deleting
+// `FourierAnalysis::analyze_current_with_abort`, which nothing called (current
+// traces go through `analyze_impulses_with_abort`), takes one away. The census
+// stays 5,735, with no slack.
 const MAX_PUBLIC_ITEMS: usize = 5735;
 
 /// How far under the ceiling the count may sit before the ceiling is

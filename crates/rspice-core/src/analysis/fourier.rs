@@ -340,24 +340,6 @@ impl FourierAnalysis {
         self.analyze_observation(&result.time, values, &impulses, abort)
     }
 
-    /// Analyze sampled current together with its complete signed charge history.
-    /// The caller identifies the trace; impulses are integrated on `(start, stop]`
-    /// by the same physical transform used for authored `.FOUR` cards.
-    pub fn analyze_current_with_abort(
-        &self,
-        time: &[Value],
-        values: &[Value],
-        trace: &crate::CurrentImpulseTrace,
-        abort: &dyn AbortSignal,
-    ) -> Result<FourierResult, FourierError> {
-        self.analyze_impulse_trace(
-            time,
-            values,
-            crate::transient_observation::ImpulseTraceRef::Current(trace),
-            abort,
-        )
-    }
-
     /// Analyze sampled node voltage together with its complete singular history.
     /// Voltage actions retain volt-seconds and higher derivative coefficients;
     /// they are never converted into current charge or sampled voltage spikes.
