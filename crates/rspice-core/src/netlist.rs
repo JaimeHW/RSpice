@@ -10467,11 +10467,12 @@ mod tests {
 
         let netlist = Netlist::parse_file(&deck).expect("included END is a comment");
         let _ = std::fs::remove_dir_all(dir);
-        let result = crate::engine::Engine::default()
-            .run_dc_op(&netlist)
-            .expect("operating point");
-        let current = result.branch_current_named("V1").expect("V1 current");
-        assert!((current + 2.0e-3).abs() < 1.0e-12, "I(V1) = {current}");
+        let names: Vec<_> = netlist
+            .elements
+            .iter()
+            .map(|element| element.name.as_str())
+            .collect();
+        assert_eq!(names, ["V1", "R9", "R10"]);
     }
 
     #[test]

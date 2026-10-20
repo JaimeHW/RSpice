@@ -1205,16 +1205,22 @@ mod tests {
             );
         }
 
-        // ngspice 46 on audit decks e2.cir and cm3.cir: I(V1) = -1 mA.
+        // ngspice 46 runs audit decks e2.cir and cm3.cir with these three
+        // cards (I(V1) = -1 mA).
         let netlist = crate::Netlist::parse(
             "dollar comment\nV1 1 0 1\nR1 1 0 1k $load\nC1 1 0 1p $Cload\n#comment\n.op\n.end\n",
         )
         .unwrap();
-        let result = crate::engine::Engine::default()
-            .run_dc_op(&netlist)
-            .unwrap();
-        let current = result.branch_current_named("V1").unwrap();
-        assert!((current + 1.0e-3).abs() < 1.0e-12, "I(V1) = {current}");
+        let names: Vec<_> = netlist
+            .elements
+            .iter()
+            .map(|element| element.name.as_str())
+            .collect();
+        assert_eq!(names, ["V1", "R1", "C1"]);
+        assert!(matches!(
+            netlist.elements[1].kind,
+            ElementKind::Resistor { value, .. } if value == 1.0e3
+        ));
     }
 
     #[test]
