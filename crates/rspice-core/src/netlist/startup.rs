@@ -94,7 +94,8 @@ fn validate_candidate(
                 &flattened.elements,
                 abort,
             )?;
-            filter_unknown_entries(netlist, &namespace, abort)?;
+            let module_instances = compiled_module_instances(&flattened.elements);
+            filter_unknown_entries(netlist, &namespace, &module_instances, abort)?;
             supersede_redefined_targets(netlist, &mut flattened.scoped_startup_directives, abort)?;
             validate_constraint_consistency(
                 netlist,
@@ -415,9 +416,37 @@ fn merge_qualified_expansions(
     Ok(())
 }
 
+/// Instances hierarchy expansion leaves for the builder: an X card whose
+/// master is a compiled (Verilog-A) module rather than a deck subcircuit.
+fn compiled_module_instances(elements: &[super::Element]) -> HashSet<String> {
+    elements
+        .iter()
+        .filter(|element| matches!(element.kind, super::ElementKind::Subcircuit { .. }))
+        .map(|element| canonical_symbol(&element.name))
+        .collect()
+}
+
+/// Whether `node` is in the parsed namespace, or may be an internal node of a
+/// compiled module instance. A Verilog-A module's internal nodes exist only
+/// once it is compiled, and the output publishes them as `x1.x` (and accepts
+/// `x1:x`), so a startup card naming one is resolved by the builder rather
+/// than dropped here as undefined.
+fn startup_node_may_exist(
+    node: &str,
+    namespace: &HashSet<String>,
+    module_instances: &HashSet<String>,
+) -> bool {
+    let canonical = canonical_symbol(node);
+    namespace.contains(&canonical)
+        || canonical
+            .rsplit_once('.')
+            .is_some_and(|(instance, _)| module_instances.contains(instance))
+}
+
 fn filter_unknown_entries(
     netlist: &mut Netlist,
     namespace: &HashSet<String>,
+    module_instances: &HashSet<String>,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     for (record_index, record) in netlist.startup_directives.iter_mut().enumerate() {
@@ -434,10 +463,14 @@ fn filter_unknown_entries(
                     .iter()
                     .zip(entry.qualified_references.iter())
                     .any(|(node, reference)| {
-                        namespace.contains(&canonical_symbol(node))
+                        startup_node_may_exist(node, namespace, module_instances)
                             && reference.as_ref().is_none_or(|reference| {
                                 canonical_symbol(reference) == "0"
-                                    || namespace.contains(&canonical_symbol(reference))
+                                    || startup_node_may_exist(
+                                        reference,
+                                        namespace,
+                                        module_instances,
+                                    )
                             })
                     });
             if exists

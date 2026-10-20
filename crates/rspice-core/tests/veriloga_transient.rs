@@ -2376,3 +2376,60 @@ endmodule
 
     let _ = std::fs::remove_file(model);
 }
+
+/// `.ic` and `.nodeset` reach a Verilog-A module's internal node under either
+/// spelling the output publishes it by.
+///
+/// The module's internal node `x` is a 1 kOhm, 1 nF RC to ground, published as
+/// `v(x1.x)`. `.ic v(x1.x)=0.5` was dropped at parse time ("ignored undefined
+/// node(s): X1.X"), because the node exists only once the module is compiled,
+/// and the run started from 0 V. It now starts at 0.5 V and decays as
+/// `0.5 e^(-t / 1 us)`, as the same RC in a deck subcircuit does.
+#[test]
+fn startup_cards_reach_a_verilog_a_internal_node_under_both_spellings() {
+    let model = write_model(
+        "internal_ic",
+        "`include \"disciplines.vams\"\n\
+         module icm(p, o); inout p; output o; electrical p, o, x;\n\
+         analog begin\n\
+         \x20 I(x) <+ V(x) / 1k + ddt(1n * V(x));\n\
+         \x20 I(p) <+ V(p) / 1k;\n\
+         \x20 V(o) <+ V(x);\n\
+         end\n\
+         endmodule\n",
+    );
+    for spelling in ["x1.x", "x1:x"] {
+        let netlist = Netlist::parse(&format!(
+            "* internal-node startup cards\n\
+             x1 p o icm\n\
+             .va \"{}\" icm\n\
+             .ic v({spelling})=0.5\n\
+             .nodeset v({spelling})=0.5\n\
+             .end\n",
+            deck_path(&model)
+        ))
+        .expect("parse");
+        assert!(
+            !netlist
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("undefined node")),
+            "{spelling}: the internal node is not undefined: {:?}",
+            netlist.diagnostics
+        );
+        let result = Engine::default()
+            .run_tran(&netlist, 5e-6, 10e-9)
+            .unwrap_or_else(|error| panic!("{spelling}: {error}"));
+        let x = result
+            .try_voltage_waveform_named("x1.x")
+            .unwrap_or_else(|| panic!("{spelling}: v(x1.x) is published"));
+        for (time, voltage) in result.time.iter().zip(x) {
+            let expected = 0.5 * (-time / 1e-6).exp();
+            assert!(
+                (voltage - expected).abs() <= 2e-3,
+                "{spelling}: v(x1.x) at {time:e} is {voltage}, expected {expected}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
