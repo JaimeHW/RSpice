@@ -35,6 +35,8 @@ use crate::workbench::app_state::AppState;
 const TITLE: &str = "Connectivity, buses and global nets";
 const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, global aliases, and reviewed corrective actions without changing electrical intent implicitly.";
 const PRIMARY: &str = "Apply reviewed connectivity repairs";
+/// Why "Begin bus placement" is disabled while the declaration is empty.
+const BUS_DECLARATION_MISSING: &str = "Enter a bus declaration to begin placement";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ConnectivityManagerTab {
@@ -98,7 +100,9 @@ impl Default for ConnectivityManagerDialogState {
             selected_repairs: BTreeSet::new(),
             contract_at_open: ConnectivityContract::default(),
             policy: ConnectivityPolicy::default(),
-            bus_declaration: "DATA[7:0]".to_owned(),
+            // A declaration is authored, never proposed: the field opens
+            // empty and the placeholder shows the syntax.
+            bus_declaration: String::new(),
             endpoint_choices: HashMap::new(),
             error: None,
             receipt: None,
@@ -1053,7 +1057,16 @@ impl RSpiceApp {
                 "Validate one durable indexed declaration, then place its vector geometry with the schematic bus router.",
             ),
         };
-        let bus_error = (page == ConnectivityManagerPage::CreateBus)
+        // An empty field is not a failed declaration: it is one not yet
+        // written, so the footer says what is missing instead of an error.
+        let bus_draft_empty = self
+            .state
+            .dialogs
+            .connectivity_manager
+            .bus_declaration
+            .trim()
+            .is_empty();
+        let bus_error = (page == ConnectivityManagerPage::CreateBus && !bus_draft_empty)
             .then(|| bus_validation.as_ref().err().cloned())
             .flatten();
         let error = self
@@ -1081,6 +1094,9 @@ impl RSpiceApp {
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl)
             .body_scroll_offset(&mut body_scroll_offset);
+        if page == ConnectivityManagerPage::CreateBus && bus_draft_empty {
+            dialog = dialog.hint(BUS_DECLARATION_MISSING);
+        }
         if !write_allowed {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
@@ -2153,6 +2169,9 @@ fn create_bus_body(
             );
             ui.end_row();
         });
+    if dialog.bus_declaration.trim().is_empty() {
+        return ConnectivityBodyAction::None;
+    }
     ui.add_space(10.0);
     match BusDeclaration::parse(dialog.bus_declaration.trim()) {
         Ok(declaration) => status_label(

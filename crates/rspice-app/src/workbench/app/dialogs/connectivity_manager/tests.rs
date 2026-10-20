@@ -122,6 +122,18 @@ fn typed_bus_validation_preserves_declared_direction() {
     assert_eq!(ascending.width(), 8);
 }
 
+/// Nothing is proposed: the manager opens with no declaration, so placement
+/// cannot begin on a vector the user never wrote.
+#[test]
+fn the_bus_declaration_opens_empty_and_placement_waits_for_one() {
+    let dialog = ConnectivityManagerDialogState::default();
+    assert_eq!(dialog.bus_declaration, "");
+    assert!(
+        validate_bus_draft(&dialog).is_err(),
+        "an empty declaration does not arm bus placement"
+    );
+}
+
 #[test]
 fn bus_draft_accepts_the_authored_declaration_and_rejects_a_malformed_one() {
     let mut dialog = ConnectivityManagerDialogState::default();
