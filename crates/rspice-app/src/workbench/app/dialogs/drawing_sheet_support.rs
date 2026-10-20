@@ -72,6 +72,21 @@ impl DrawingSheetSupportState {
 }
 
 pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), String> {
+    crate::workbench::app::SchematicEditAuthority::capture(state)
+        .validate(state, "Sheet Format Manager")?;
+    // A drawing that never used a sheet workflow has no catalog; nothing
+    // creates one on load. Managing its format is the first use, so it
+    // creates the catalog here, as one undoable step, with everything drawn
+    // as Sheet 1.
+    if state
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog(&state.workspace.content.active_key())
+        .is_none()
+    {
+        crate::workbench::app::sheets::ensure_sheet_catalog(state)?;
+    }
     let designs = &state.workspace.content.design_management;
     let edit = crate::workbench::app::SchematicEditAuthority::capture(state);
     edit.validate(state, "Sheet Format Manager")?;
@@ -993,6 +1008,36 @@ mod tests {
                 .edit
                 .is_none()
         );
+    }
+
+    /// A new schematic has no sheet catalog until a sheet workflow is first
+    /// used. Opening Sheet formats… is that use: it creates the catalog with
+    /// the drawing as Sheet 1 and opens on it, where it used to refuse.
+    #[test]
+    fn opening_the_manager_on_a_drawing_without_a_catalog_creates_it() {
+        let mut app = RSpiceApp::test_instance();
+        let key = app.state.workspace.content.active_key();
+        assert!(
+            app.state
+                .workspace
+                .content
+                .design_management
+                .sheet_catalog(&key)
+                .is_none()
+        );
+
+        open_sheet_format_manager(&mut app.state).expect("the first use creates the catalog");
+
+        let catalog = app
+            .state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&key)
+            .expect("a catalog");
+        assert_eq!(catalog.sheets().len(), 1);
+        assert_eq!(catalog.sheets()[0].name(), "Sheet 1");
+        assert!(app.state.dialogs.drawing_sheet_support.manager.open);
     }
 
     #[test]

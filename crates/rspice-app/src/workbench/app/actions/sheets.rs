@@ -452,6 +452,26 @@ fn enter_active_sheet(state: &mut AppState) {
     state.schematic.session.editor.needs_fit = false;
 }
 
+/// Give a drawing with no sheet catalog its catalog: everything already
+/// drawn becomes Sheet 1, as one undoable transaction. For a sheet workflow
+/// used for the first time (Sheet formats…); a catalog is never created on
+/// load. Does nothing where the catalog exists.
+pub(in crate::workbench) fn ensure_sheet_catalog(state: &mut AppState) -> Result<(), String> {
+    if active_sheet_catalog(state).is_some() {
+        return Ok(());
+    }
+    state.cancel_schematic_drag();
+    state.sync_active_schematic_to_workspace();
+    let key = state.workspace.content.active_schematic_reference().key();
+    let objects = live_object_ids(state);
+    let before = (*state.workspace.content.design_management).clone();
+    let mut candidate = before.clone();
+    candidate
+        .bootstrap_for_cell_view(&key, "Sheet 1", objects)
+        .map_err(|error| error.to_string())?;
+    commit(state, "create sheet catalog", before, candidate)
+}
+
 /// A drawing with no sheet catalog is one sheet. Its first new sheet creates
 /// the catalog with everything already drawn as Sheet 1, adds Sheet 2 after
 /// it and enters it, as one transaction, so one undo gives back the single
