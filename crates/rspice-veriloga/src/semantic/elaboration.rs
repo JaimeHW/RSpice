@@ -1687,7 +1687,12 @@ fn resolve_connection(
     if parent_scope.discrete_nets.contains(source_name) {
         return Err(semantic_error(
             SemanticErrorKind::UnsupportedFeature(format!(
-                "analog port '{}' of instance '{path}' connects discrete net '{source_name}' without a connect module",
+                "analog port '{}' of instance '{path}' connects discrete net '{source_name}' without a \
+                 connect module; this compiler inserts connect modules only where a deck node joins \
+                 discrete and analog ports, not inside a design (LRM 2.4 clause 7). Bring \
+                 '{source_name}' out through a port of the top module to a deck node, or join the \
+                 two sides through an instance of a converter module with one discrete and one \
+                 electrical port",
                 child_port.name
             )),
             expression.span(),

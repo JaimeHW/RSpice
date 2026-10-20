@@ -32,7 +32,7 @@ elements, native BSIM3, BSIM4, BSIM-SOI, VBIC and EKV compact models, and 43
 compact models generated from their Verilog-A sources. Mixed-signal decks are
 first-class: RSpice has both halves of Verilog-AMS, so digital and real-number
 modules simulate alongside the analog solve, with connect modules inserted
-automatically at discipline boundaries.
+automatically where a deck node joins analog and discrete ports.
 
 RSpice has one engine behind every interface. The command line, the desktop
 and browser application, the Python bindings and the WebAssembly build all run
@@ -368,10 +368,15 @@ The discrete half is the IEEE 1364-2005 digital subset: four-state (`0 1 x z`)
 logic, gate primitives, blocking and non-blocking assignment, vectors, module
 hierarchy, and clause 13 library maps and configurations, driven by an event
 wheel alongside the analog solve. Real-number modeling has `wreal` nets and the
-four resolved forms. Mixed-discipline boundaries follow LRM 2.4 clause 7
-(discipline resolution, `connect_mode` auto-insertion, `resolveto` with
-`exclude`, and `merged`/`split` segmentation), with the detail resolution mode
-of Annex F.2.2 refused by name rather than approximated.
+four resolved forms. Mixed-discipline boundaries at deck nodes follow LRM 2.4
+clause 7 (discipline resolution, `connect_mode` auto-insertion, `resolveto`
+with `exclude`, and `merged`/`split` segmentation), with the detail resolution
+mode of Annex F.2.2 refused by name rather than approximated. A boundary
+inside one HDL design, a net joining a discrete port and an analog port of
+two instances in the hierarchy, gets no automatic connect module: it is
+refused by name, and works once the net is brought out to a deck node or an
+instance of an ordinary converter module (one discrete and one electrical
+port) joins the two.
 
 Digital and mixed runs export to VCD with `rspice run --format vcd`, one wire
 per digital node and one N-bit vector per declared bus (`--expand-buses` writes

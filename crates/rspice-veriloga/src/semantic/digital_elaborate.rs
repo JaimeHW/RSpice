@@ -627,8 +627,12 @@ impl DigitalElaborator<'_> {
             path,
         )?;
         let borrowed: Vec<_> = connections.iter().map(Option::as_ref).collect();
+        let parent_source = ancestors
+            .last()
+            .and_then(|parent| self.source_modules.get(&parent.key.module))
+            .copied();
         let (signals, mut scope, port_drivers, bit_aliases) =
-            self.bind_ports(child, parent_scope, path, &borrowed)?;
+            self.bind_ports(child, parent_scope, parent_source, path, &borrowed)?;
         scope.connections = super::node_vectors::ConnectionScope::new(child_source, child);
         scope.constants = super::DigitalConstants::from_module(child_source);
         scope.time_scale = child_source.time_scale;
@@ -717,6 +721,7 @@ impl DigitalElaborator<'_> {
         &self,
         child: &AnalyzedModule,
         parent_scope: &Scope,
+        parent_source: Option<&Module>,
         path: &str,
         connections: &[Option<&Expression>],
     ) -> CompileResult<(
@@ -763,7 +768,14 @@ impl DigitalElaborator<'_> {
                 // Input/output selections keep their assignment semantics;
                 // an inout selection joins normalized wire bits directly.
                 Some(ConnectionForm::Select { name, select, span }) => {
-                    let outer = lookup_connection(name, parent_scope, path, &port.name, span)?;
+                    let outer = self.lookup_connection(
+                        name,
+                        parent_scope,
+                        parent_source,
+                        path,
+                        &port.name,
+                        span,
+                    )?;
                     let width = select.width(span)?;
                     if width != declared.width && !resizes_variable {
                         return Err(semantic_error(
@@ -859,8 +871,14 @@ impl DigitalElaborator<'_> {
                 }
                 Some(ConnectionForm::Net(identifier)) => {
                     let span = identifier.span;
-                    let outer =
-                        lookup_connection(&identifier.name, parent_scope, path, &port.name, span)?;
+                    let outer = self.lookup_connection(
+                        &identifier.name,
+                        parent_scope,
+                        parent_source,
+                        path,
+                        &port.name,
+                        span,
+                    )?;
                     if outer.width != declared.width && !(resizes_variable && outer.width != 0) {
                         return Err(semantic_error(
                             SemanticErrorKind::UnsupportedFeature(format!(
@@ -1230,25 +1248,113 @@ fn connection_form<'a>(
     }
 }
 
-/// The connecting scope's binding for a name a connection reads.
-fn lookup_connection(
-    name: &SmolStr,
-    scope: &Scope,
-    path: &str,
-    port: &str,
-    span: Span,
-) -> CompileResult<Binding> {
-    scope.signals.get(name).cloned().ok_or_else(|| {
-        semantic_error(
-            SemanticErrorKind::UnsupportedFeature(format!(
+impl DigitalElaborator<'_> {
+    /// The connecting scope's binding for a name a discrete port's connection
+    /// reads.
+    ///
+    /// A name the scope has no discrete signal for is either undeclared, or a
+    /// continuous net: one an analog port of another instance in the same
+    /// module made electrical. The second is a discipline boundary inside the
+    /// HDL design, where LRM 2.4 clause 7 would insert a connect module; this
+    /// compiler inserts them only where a deck node joins the two sides, so it
+    /// says that, naming the net and both instances, rather than asking for a
+    /// `wire` declaration the source already has.
+    fn lookup_connection(
+        &self,
+        name: &SmolStr,
+        scope: &Scope,
+        parent_source: Option<&Module>,
+        path: &str,
+        port: &str,
+        span: Span,
+    ) -> CompileResult<Binding> {
+        if let Some(binding) = scope.signals.get(name) {
+            return Ok(binding.clone());
+        }
+        let message = if scope.connections.is_physical(name) {
+            let analog = self
+                .analog_port_on(name, scope, parent_source, path)
+                .map(|(instance, analog_port)| {
+                    format!("analog port `{analog_port}` of instance `{instance}`")
+                })
+                .unwrap_or_else(|| "an analog port".to_string());
+            format!(
+                "net `{name}` joins discrete port `{port}` of instance `{path}` and {analog}, a \
+                 discipline boundary inside the HDL design; this compiler inserts connect \
+                 modules only where a deck node joins discrete and analog ports, not inside a \
+                 design (LRM 2.4 clause 7). Bring `{name}` out through a port of the top \
+                 module to a deck node, or join the two instances through an instance of a \
+                 converter module with one discrete and one electrical port"
+            )
+        } else {
+            format!(
                 "port `{port}` of instance `{path}` is connected to `{name}`, which is not a \
                  declared discrete-domain signal; this compiler does not create the implicit \
                  net of IEEE 1364-2005 section 4.5, so declare `{name}` with a `wire` \
                  declaration"
-            )),
+            )
+        };
+        Err(semantic_error(
+            SemanticErrorKind::UnsupportedFeature(message),
             span,
-        )
-    })
+        ))
+    }
+
+    /// The other instance, and its port, that connects a continuous `net` of
+    /// the module enclosing `path` to an analog port.
+    fn analog_port_on(
+        &self,
+        net: &str,
+        scope: &Scope,
+        parent_source: Option<&Module>,
+        path: &str,
+    ) -> Option<(String, SmolStr)> {
+        let (parent_path, own) = path.rsplit_once('.').unwrap_or(("", path));
+        parent_source?
+            .instances
+            .iter()
+            .filter(|sibling| sibling.name != own)
+            .find_map(|sibling| {
+                let module = self
+                    .connections
+                    .modules
+                    .get(&sibling.module)
+                    .map(|module| &module.analyzed)
+                    .or_else(|| self.analyzed.modules.get(&sibling.module))?;
+                let sibling_path = qualify(parent_path, &sibling.name);
+                let bound = super::node_vectors::bind_connections(
+                    sibling,
+                    module,
+                    &scope.connections,
+                    &sibling_path,
+                )
+                .ok()?;
+                module
+                    .ports
+                    .iter()
+                    .zip(bound)
+                    .find(|(port, actual)| {
+                        !module
+                            .digital
+                            .signals
+                            .iter()
+                            .any(|signal| signal.name == port.name)
+                            && actual.as_ref().is_some_and(|actual| names_net(actual, net))
+                    })
+                    .map(|(port, _)| (sibling_path.to_string(), port.name.clone()))
+            })
+    }
+}
+
+/// Whether a port actual is `net` or a select of it.
+fn names_net(actual: &Expression, net: &str) -> bool {
+    match actual {
+        Expression::Identifier(identifier) => identifier.name == net,
+        Expression::ArrayAccess(access) => access.array == net,
+        Expression::Digital(DigitalExpr::PartSelect(select)) => select.name == net,
+        Expression::Digital(DigitalExpr::ArraySelect(select)) => select.name == net,
+        _ => false,
+    }
 }
 
 /// Coordinates already closed in their parent's typed constant scope.

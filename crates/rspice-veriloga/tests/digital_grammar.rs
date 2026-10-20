@@ -2455,7 +2455,12 @@ fn unelaborated_instance_constructs_refuse_by_name() {
                  endmodule\n",
                 "    wire x, z;\n     gate g1(z, x);",
             ),
-            vec!["discrete net", "without a connect module"],
+            vec![
+                "discrete net",
+                "without a connect module",
+                "deck node",
+                "converter module",
+            ],
         ),
     ];
 
@@ -2467,6 +2472,41 @@ fn unelaborated_instance_constructs_refuse_by_name() {
                 "refusing {label} must mention {fragment:?}, got {message:?}"
             );
         }
+    }
+}
+
+/// A declared net that joins a discrete child output and an analog child port
+/// is a discipline boundary inside the design. It used to be refused as if it
+/// were undeclared ("declare `n` with a `wire` declaration", though it is
+/// one). The refusal names what is missing, connect-module insertion inside
+/// a design, with the net, both instances and the two ways that work.
+#[test]
+fn a_discipline_boundary_inside_the_design_is_refused_as_one() {
+    const CHILDREN: &str = "module dig(q);\n\
+                            \x20   output q; reg q;\n\
+                            \x20   initial q = 0;\n\
+                            endmodule\n\
+                            module res(a, b);\n\
+                            \x20   inout a, b; electrical a, b;\n\
+                            \x20   analog I(a, b) <+ V(a, b);\n\
+                            endmodule\n";
+    for declaration in ["wire m;", "electrical m;"] {
+        let message = hierarchy_error(&hierarchy(
+            CHILDREN,
+            &format!("    {declaration}\n     dig u1(m);\n     res u2(m, p);"),
+        ));
+        for fragment in [
+            "net `m` joins discrete port `q` of instance `u1`",
+            "analog port `a` of instance `u2`",
+            "inserts connect modules only where a deck node joins",
+            "converter module",
+        ] {
+            assert!(
+                message.contains(fragment),
+                "`{declaration}` must mention {fragment:?}, got {message:?}"
+            );
+        }
+        assert!(!message.contains("implicit net"), "{message}");
     }
 }
 

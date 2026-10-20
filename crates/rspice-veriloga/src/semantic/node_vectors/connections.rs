@@ -61,6 +61,13 @@ impl ConnectionScope {
         }
     }
 
+    /// Whether `name` is a continuous node, node vector or node array here.
+    pub fn is_physical(&self, name: &str) -> bool {
+        self.nodes.contains_key(name)
+            || self.arrays.contains_key(name)
+            || self.physical.contains(name)
+    }
+
     pub fn contains_physical(&self, actual: &Expression) -> bool {
         fn elements(scope: &ConnectionScope, values: &[ArrayLiteralElement], depth: usize) -> bool {
             if depth > MAX_REPLICATION_NESTING {
