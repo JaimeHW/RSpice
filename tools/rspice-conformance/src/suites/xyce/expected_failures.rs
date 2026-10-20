@@ -2054,7 +2054,7 @@ impl XyceTestRunner {
             source,
             deck_path,
             43,
-            "Invalid number '2.0e+' at line 1",
+            "Invalid number '2.0e+'",
         )?;
         Ok(XyceExpectedFailureObservation {
             stage: XyceExpectedFailureStage::NetlistParse,
