@@ -1064,11 +1064,25 @@ pub struct HarmonicComponent {
     pub frequency: Value,
     /// Magnitude
     pub magnitude: Value,
-    /// Phase (degrees)
+    /// Phase (degrees) of the cosine-referenced phasor; see
+    /// [`HarmonicComponent::sine_referenced_phase`] for the `.FOUR` table's.
     pub phase: Value,
 }
 
 impl HarmonicComponent {
+    /// Phase (degrees) against a sine, the way a SPICE `.FOUR` table reports
+    /// it (SPICE2; ngspice `frontend/fourier.c`, `atan2(cos_sum, sin_sum)`),
+    /// so a `SIN` source at zero phase reads 0°. A cosine leads the sine of
+    /// the same phase by a quarter turn; the DC term keeps its zero phase.
+    #[must_use]
+    pub fn sine_referenced_phase(&self) -> Value {
+        if self.harmonic_number == 0 {
+            return self.phase;
+        }
+        let phase = self.phase + 90.0;
+        if phase > 180.0 { phase - 360.0 } else { phase }
+    }
+
     /// Get normalized magnitude (percent of the fundamental).
     ///
     /// `Ok(None)` means the reference magnitude is exactly zero. Invalid

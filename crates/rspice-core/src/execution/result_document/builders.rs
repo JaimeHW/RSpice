@@ -46,7 +46,7 @@ use crate::Value;
 use crate::analysis::ac::AcResult;
 use crate::analysis::dcmatch::DcMatchResult;
 use crate::analysis::distortion::{DistortionAnalysisResult, DistortionPointResult};
-use crate::analysis::fourier::FourierResult;
+use crate::analysis::fourier::{FourierResult, HarmonicComponent};
 use crate::analysis::harmonic_balance::HbResult;
 use crate::analysis::measure_signals::impulse_observation::current_parameter;
 use crate::analysis::monte_carlo::{
@@ -2260,7 +2260,7 @@ impl AnalysisResultDocument {
         let phases = result
             .harmonics
             .iter()
-            .map(|harmonic| harmonic.phase)
+            .map(HarmonicComponent::sine_referenced_phase)
             .collect::<Vec<_>>();
         let signals = vec![
             ResultSignal::new(

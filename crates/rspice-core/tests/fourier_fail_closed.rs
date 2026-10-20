@@ -344,6 +344,42 @@ fn thd_remains_scale_invariant_below_the_old_absolute_cutoff() {
 }
 
 #[test]
+fn four_table_phase_is_sine_referenced_like_spice() {
+    // ngspice 46 `.four 1k` of SIN(0.5 1 1k), SIN(0 1 1k 0 0 90) and
+    // (0.5 + sin)^2: fundamental phases 0 and 90 degrees, second harmonic of
+    // the square -90 degrees (its -cos(2wt)/2 term).
+    const FUNDAMENTAL: f64 = 1_000.0;
+    let time = (0..=2_000)
+        .map(|index| index as f64 / 2_000.0 / FUNDAMENTAL)
+        .collect::<Vec<_>>();
+    let phase_of = |values: Vec<f64>, harmonic: usize| {
+        let result = analyzer(FUNDAMENTAL, 2).analyze(&time, &values).unwrap();
+        result.harmonic(harmonic).unwrap().sine_referenced_phase()
+    };
+    let wave = |t: f64, degrees: f64| (2.0 * PI * FUNDAMENTAL * t + degrees.to_radians()).sin();
+
+    let sine = phase_of(time.iter().map(|&t| 0.5 + wave(t, 0.0)).collect(), 1);
+    assert!(sine.abs() < 1e-9, "SIN fundamental reads {sine}");
+    let shifted = phase_of(time.iter().map(|&t| wave(t, 90.0)).collect(), 1);
+    assert!(
+        (shifted - 90.0).abs() < 1e-9,
+        "90-degree SIN reads {shifted}"
+    );
+    let square = phase_of(
+        time.iter().map(|&t| (0.5 + wave(t, 0.0)).powi(2)).collect(),
+        2,
+    );
+    assert!(
+        (square + 90.0).abs() < 1e-9,
+        "second harmonic reads {square}"
+    );
+    let dc = analyzer(FUNDAMENTAL, 1)
+        .analyze(&time, &vec![1.0; time.len()])
+        .unwrap();
+    assert_eq!(dc.harmonic(0).unwrap().sine_referenced_phase(), 0.0);
+}
+
+#[test]
 fn known_dc_fundamental_and_second_harmonic_oracle_remains_accurate() {
     const FUNDAMENTAL: f64 = 1_000.0;
     const SAMPLES_PER_PERIOD: usize = 1_000;

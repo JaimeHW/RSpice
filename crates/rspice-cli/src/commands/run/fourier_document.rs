@@ -342,7 +342,10 @@ fn fourier_harmonic_header_row(harmonic_width: usize) -> String {
 fn fourier_harmonic_row(harmonic: &HarmonicComponent, harmonic_width: usize) -> String {
     format!(
         "│  {:harmonic_width$}        {:12.4e}      {:10.6}   {:10.2}          │",
-        harmonic.harmonic_number, harmonic.frequency, harmonic.magnitude, harmonic.phase
+        harmonic.harmonic_number,
+        harmonic.frequency,
+        harmonic.magnitude,
+        harmonic.sine_referenced_phase()
     )
 }
 
@@ -414,7 +417,7 @@ fn write_fourier_output(
                         harmonic.harmonic_number,
                         harmonic.frequency,
                         harmonic.magnitude,
-                        harmonic.phase,
+                        harmonic.sine_referenced_phase(),
                         result.dc_component,
                         thd_percent
                     )
@@ -444,7 +447,7 @@ fn write_fourier_output(
                                         "n": harmonic.harmonic_number,
                                         "frequency_hz": harmonic.frequency,
                                         "magnitude": harmonic.magnitude,
-                                        "phase_deg": harmonic.phase,
+                                        "phase_deg": harmonic.sine_referenced_phase(),
                                     })
                                 })
                                 .collect::<Vec<_>>(),
@@ -587,7 +590,7 @@ mod tests {
                     harmonic.harmonic_number,
                     harmonic.frequency,
                     harmonic.magnitude,
-                    harmonic.phase
+                    harmonic.sine_referenced_phase()
                 ));
             }
             expected.push(format!("├{}┤", "─".repeat(interior)));
