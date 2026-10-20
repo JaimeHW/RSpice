@@ -164,10 +164,6 @@ fn every_exposed_action_has_a_real_executor() {
         assert!(license_app.state.cloud.license_dialog.open);
     }
 
-    let mut help_app = RSpiceApp::test_instance();
-    execute_action(&mut help_app, AccountAction::SupportBundle);
-    assert!(help_app.state.shell.help_center.open);
-
     // Cloud session actions delegate to the account service; on an
     // unconfigured test instance they must be accepted no-ops.
     let mut cloud_app = RSpiceApp::test_instance();
@@ -265,11 +261,7 @@ fn signed_in_app_with(snapshot: CloudSessionSnapshot) -> RSpiceApp {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn every_section_of_a_signed_in_console_is_painted() {
-    const BELOW_THE_DESKTOP_FOLD: [&str; 3] = [
-        "Revoke",
-        "Help center\u{2026}",
-        "Create support bundle\u{2026}",
-    ];
+    const BELOW_THE_DESKTOP_FOLD: [&str; 1] = ["Revoke"];
     for size in [egui::vec2(1_440.0, 1_400.0), egui::vec2(390.0, 2_400.0)] {
         let mut app = signed_in_app();
         let text = painted_console(&mut app, size);
@@ -293,9 +285,6 @@ fn every_section_of_a_signed_in_console_is_painted() {
             "Revoke",
             "Privacy",
             "Legal and privacy\u{2026}",
-            "About",
-            "Help center\u{2026}",
-            "Create support bundle\u{2026}",
             "Preferences\u{2026}",
             "Close",
         ]
@@ -447,5 +436,72 @@ fn typed_command_and_rendered_surface_disclose_the_same_offline_boundary() {
             !labels.iter().any(|label| label.contains(fixture)),
             "fixture leaked into account UI"
         );
+    }
+}
+
+/// At 1440x900 the console is whole: its last row stands above the footer,
+/// so nothing is scrolled out of view. It used to end on an About section
+/// (version, platform, Help center, support bundle) that Help > About
+/// already states, which ran under the fold into an inner scroll, and em
+/// dashes stood in for words ("None, nothing is sent" with a dash).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_console_fits_a_desktop_frame_without_about_or_dashes() {
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .workbench
+        .navigate(account_route(), RouteTransitionSource::User)
+        .expect("account manager route is executable");
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..4 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| show(ctx, &mut app),
+        );
+        if let Some(update) = output.platform_output.accesskit_update {
+            nodes.extend(update.nodes);
+        }
+    }
+    let last_row = nodes
+        .values()
+        .find_map(|node| {
+            [node.label(), node.value()]
+                .into_iter()
+                .flatten()
+                .any(|name| name.starts_with("Project files"))
+                .then(|| node.bounds())
+                .flatten()
+        })
+        .expect("the privacy rows");
+    // The header's close button is also named Close; the footer's is the
+    // lowest.
+    let close = nodes
+        .values()
+        .filter(|node| node.label() == Some("Close"))
+        .filter_map(|node| node.bounds())
+        .max_by(|a, b| a.y0.total_cmp(&b.y0))
+        .expect("the footer's Close");
+    assert!(
+        last_row.y1 <= close.y0,
+        "the last row ends at {} under the footer at {}",
+        last_row.y1,
+        close.y0
+    );
+    for text in nodes
+        .values()
+        .flat_map(|node| [node.label(), node.value()])
+        .flatten()
+    {
+        assert!(!text.starts_with("About"), "an About section: {text}");
+        assert!(!text.contains('\u{2014}'), "an em dash: {text}");
     }
 }

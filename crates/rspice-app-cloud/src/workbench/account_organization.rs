@@ -32,9 +32,10 @@ use super::design_system::elide_text;
 use super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const ACCOUNT_TITLE: &str = "Account and administration";
-const ACCOUNT_DESCRIPTION: &str = "The account this installation is signed in with, the license it runs under, what leaves this machine, and the build it runs.";
-/// Side inset of every section.
-const SECTION_INSET: f32 = 20.0;
+const ACCOUNT_DESCRIPTION: &str = "The account this installation is signed in with, the license it runs under, and what leaves this machine.";
+/// Side inset of every section: the title's and the footer's, so the dialog
+/// has one left edge.
+const SECTION_INSET: f32 = 12.0;
 const SECTION_TOP: f32 = 16.0;
 const SECTION_BOTTOM: f32 = 16.0;
 const AVATAR_SIZE: f32 = 40.0;
@@ -86,7 +87,6 @@ struct AccountConsoleModel {
     features: Vec<FeatureRow>,
     devices: Vec<DeviceRow>,
     privacy_rows: Vec<(String, String)>,
-    about_rows: Vec<(String, String)>,
     boundary: String,
 }
 
@@ -108,13 +108,6 @@ impl AccountConsoleModel {
             features: feature_rows(license, cloud),
             devices: device_rows(cloud),
             privacy_rows: privacy_rows(availability),
-            about_rows: vec![
-                (
-                    "Version".to_owned(),
-                    concat!("RSpice ", env!("CARGO_PKG_VERSION")).to_owned(),
-                ),
-                ("Platform".to_owned(), current_platform_label().to_owned()),
-            ],
             boundary: boundary_statement(license, cloud),
         }
     }
@@ -172,7 +165,7 @@ fn identity_model(
                 CloudSessionPhase::Active => {
                     let (title, detail) = identity_lines(cloud);
                     IdentityModel {
-                        initials: Some(initials(&title)),
+                        initials: initials(&title),
                         note: cloud
                             .verified_at
                             .as_deref()
@@ -192,13 +185,13 @@ fn identity_model(
                         .as_ref()
                         .map(|license| {
                             format!(
-                                "Offline \u{2014} this device stays licensed through {}",
+                                "Offline. This device stays licensed through {}.",
                                 unix_date(license.expires_at_unix_seconds)
                             )
                         })
                         .unwrap_or_default();
                     IdentityModel {
-                        initials: Some(initials(&title)),
+                        initials: initials(&title),
                         title,
                         detail,
                         note,
@@ -310,9 +303,15 @@ fn feature_rows(license: Option<&LicenseInfo>, cloud: &CloudSessionSnapshot) -> 
         .map(|(_, label)| *label)
     {
         let granted = license.is_some_and(|info| info.features.iter().any(|f| f == label));
+        // A label is the grant's identity, so it is matched whole; shown, a
+        // dash-joined list of analyses is the name's detail line, the way
+        // the included capture row states its analyses.
+        let (name, detail) = label
+            .split_once(" \u{2014} ")
+            .map_or((label, ""), |(name, detail)| (name, detail));
         rows.push(FeatureRow {
-            name: label.to_owned(),
-            detail: String::new(),
+            name: name.to_owned(),
+            detail: detail.to_owned(),
             licensed: granted,
             term: if granted { "Perpetual" } else { "Not licensed" }.to_owned(),
         });
@@ -388,10 +387,7 @@ fn privacy_rows(availability: CloudAccountAvailability) -> Vec<(String, String)>
         CloudAccountAvailability::UnconfiguredBuild => "None",
     };
     vec![
-        (
-            "Usage data".to_owned(),
-            "None \u{2014} nothing is sent".to_owned(),
-        ),
+        ("Usage data".to_owned(), "Nothing is sent".to_owned()),
         ("Network access".to_owned(), network.to_owned()),
         ("Project files".to_owned(), "Stay on this device".to_owned()),
     ]
@@ -458,8 +454,6 @@ pub enum AccountAction {
     RefreshSession,
     RevokeLease(String),
     LegalPrivacy,
-    SupportBundle,
-    HelpCenter,
 }
 
 impl AccountAction {
@@ -475,8 +469,6 @@ impl AccountAction {
             Self::RefreshSession => "Refresh",
             Self::RevokeLease(_) => "Revoke",
             Self::LegalPrivacy => "Legal and privacy\u{2026}",
-            Self::SupportBundle => "Create support bundle\u{2026}",
-            Self::HelpCenter => "Help center\u{2026}",
         }
     }
 
@@ -531,8 +523,6 @@ pub fn execute_action(
         AccountAction::RefreshSession => parts.account.refresh(),
         AccountAction::RevokeLease(lease_id) => parts.account.revoke_lease(lease_id),
         AccountAction::LegalPrivacy => return Some(ids::LEGAL_PRIVACY),
-        AccountAction::SupportBundle => return Some(ids::SUPPORT_BUNDLE),
-        AccountAction::HelpCenter => return Some(ids::HELP_CENTER),
     }
     None
 }
@@ -576,8 +566,6 @@ pub fn show(ctx: &egui::Context, parts: &mut AccountConsoleParts<'_>) -> Option<
             }
             section_rule(ui);
             privacy_section(ui, &model.privacy_rows, &mut requested_action);
-            section_rule(ui);
-            about_section(ui, &model.about_rows, &mut requested_action);
         });
 
     match choice {
@@ -1013,25 +1001,6 @@ fn privacy_section(ui: &mut Ui, rows: &[(String, String)], requested: &mut Optio
     });
 }
 
-fn about_section(ui: &mut Ui, rows: &[(String, String)], requested: &mut Option<AccountAction>) {
-    section(ui, |ui, _| {
-        section_heading(ui, "About", None, None, &mut None);
-        ui.add_space(6.0);
-        for (label, value) in rows {
-            fact_row(ui, label, value);
-        }
-        ui.add_space(12.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            for action in [AccountAction::HelpCenter, AccountAction::SupportBundle] {
-                if Button::new(action.label()).show(ui).clicked() {
-                    *requested = Some(action);
-                }
-            }
-        });
-    });
-}
-
 /// A label and its value on one line, in the section's own two columns.
 fn fact_row(ui: &mut Ui, label: &str, value: &str) {
     let tokens = Tokens::get(ui.ctx());
@@ -1238,17 +1207,16 @@ fn avatar(ui: &Ui, rect: Rect, initials: Option<&str>) {
     }
 }
 
-fn initials(value: &str) -> String {
-    let mut letters = value
+/// Up to two initials; `None` for a name with no letter or digit in it, which
+/// the avatar draws as the generic head rather than a dash.
+fn initials(value: &str) -> Option<String> {
+    let letters = value
         .split_whitespace()
         .filter_map(|part| part.chars().find(char::is_ascii_alphanumeric))
         .take(2)
         .collect::<String>()
         .to_uppercase();
-    if letters.is_empty() {
-        letters.push('\u{2014}');
-    }
-    letters
+    (!letters.is_empty()).then_some(letters)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1262,34 +1230,6 @@ fn license_storage_description() -> String {
         || "Configuration folder unavailable".to_owned(),
         |path| path.display().to_string(),
     )
-}
-
-#[cfg(target_arch = "wasm32")]
-const fn current_platform_label() -> &'static str {
-    "Web browser"
-}
-
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
-const fn current_platform_label() -> &'static str {
-    "Windows desktop"
-}
-
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-const fn current_platform_label() -> &'static str {
-    "macOS desktop"
-}
-
-#[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
-const fn current_platform_label() -> &'static str {
-    "Linux desktop"
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(any(target_os = "windows", target_os = "macos", target_os = "linux"))
-))]
-const fn current_platform_label() -> &'static str {
-    "Native application"
 }
 
 #[cfg(test)]
@@ -1455,7 +1395,12 @@ mod tests {
                 model
                     .features
                     .iter()
-                    .any(|row| &row.name == feature && row.licensed),
+                    // A row is named for the label up to its dash; the
+                    // analyses after it are the row's detail line.
+                    .any(
+                        |row| feature.split(" \u{2014} ").next() == Some(row.name.as_str())
+                            && row.licensed
+                    ),
                 "granted local feature must appear licensed: {feature}"
             );
         }
@@ -1469,8 +1414,9 @@ mod tests {
 
     #[test]
     fn initials_are_derived_without_fixture_fallbacks() {
-        assert_eq!(initials("Ada Lovelace"), "AL");
-        assert_eq!(initials("RSpice Labs LLC"), "RL");
-        assert_eq!(initials("\u{2014}"), "\u{2014}");
+        assert_eq!(initials("Ada Lovelace").as_deref(), Some("AL"));
+        assert_eq!(initials("RSpice Labs LLC").as_deref(), Some("RL"));
+        // No letters: the avatar draws its head, not a dash.
+        assert_eq!(initials("\u{2014}"), None);
     }
 }
