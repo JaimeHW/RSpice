@@ -352,16 +352,17 @@ fn console_empty_hints_match_mockup_spacing_and_type_scale() {
 
 /// A page with nothing to list is inset by the body padding and nothing
 /// else: its line stands at the panel's own left edge, on the row the first
-/// row would have taken. The hint used to carry a 12 × 20 inset of its own,
+/// row would have taken — under the tab strip, or under the page's toolbar
+/// band where it has one. The hint used to carry a 12 × 20 inset of its own,
 /// which floated it inside a panel every other page kept tight.
 #[test]
 fn an_empty_page_starts_where_its_first_row_would() {
-    fn scan(shape: &egui::epaint::Shape, found: &mut Option<egui::Pos2>) {
+    fn scan(shape: &egui::epaint::Shape, below: f32, found: &mut Option<egui::Pos2>) {
         match shape {
             // An empty field's galley has no extent, so the band filter below
             // cannot place it; it is placed by where it is drawn instead.
             egui::epaint::Shape::Text(text)
-                if text.galley.job.text.is_empty() || text.pos.y < CONSOLE_HEADER_HEIGHT => {}
+                if text.galley.job.text.is_empty() || text.pos.y < below => {}
             egui::epaint::Shape::Text(text) => {
                 if found.is_none_or(|best: egui::Pos2| text.pos.y < best.y) {
                     *found = Some(text.pos);
@@ -369,10 +370,25 @@ fn an_empty_page_starts_where_its_first_row_would() {
             }
             egui::epaint::Shape::Vec(shapes) => {
                 for shape in shapes {
-                    scan(shape, found);
+                    scan(shape, below, found);
                 }
             }
             _ => {}
+        }
+    }
+    /// The foot of the page's toolbar band: the panel-filled rect that starts
+    /// at the tab strip's foot.
+    fn toolbar_foot(shape: &egui::epaint::Shape, panel: egui::Color32) -> Option<f32> {
+        match shape {
+            egui::epaint::Shape::Rect(rect)
+                if rect.fill == panel && (rect.rect.top() - CONSOLE_HEADER_HEIGHT).abs() < 0.5 =>
+            {
+                Some(rect.rect.bottom())
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                shapes.iter().find_map(|shape| toolbar_foot(shape, panel))
+            }
+            _ => None,
         }
     }
 
@@ -403,20 +419,28 @@ fn an_empty_page_starts_where_its_first_row_would() {
         let _ = run();
         let _ = run();
         let output = run();
+        let panel = Tokens::get(&ctx).color.bg_panel;
+        // The first row stands as far under the toolbar band as a page with
+        // no toolbar stands under the tab strip.
+        let body_top = output
+            .shapes
+            .iter()
+            .find_map(|clipped| toolbar_foot(&clipped.shape, panel))
+            .unwrap_or(CONSOLE_HEADER_HEIGHT)
+            + CONSOLE_BODY_PADDING_TOP;
         let mut found = None;
         for clipped in &output.shapes {
             // The tab strip paints above the body; only body ink is in scope.
             if clipped.shape.visual_bounding_rect().top() < CONSOLE_HEADER_HEIGHT {
                 continue;
             }
-            scan(&clipped.shape, &mut found);
+            scan(&clipped.shape, body_top - 0.5, &mut found);
         }
         let hint = found.unwrap_or_else(|| panic!("{page:?} painted no empty line"));
         assert_eq!(
             hint.x, CONSOLE_BODY_PADDING_X,
             "{page:?} insets its empty line past the body padding"
         );
-        let body_top = CONSOLE_HEADER_HEIGHT + CONSOLE_BODY_PADDING_TOP;
         assert!(
             (body_top..body_top + CONSOLE_ROW_MIN_HEIGHT).contains(&hint.y),
             "{page:?} drops its empty line to {} instead of the first row at {body_top}",
@@ -544,20 +568,42 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
 }
 
 #[test]
-fn clear_affordance_is_truthful_for_every_console_page() {
-    let console = console_clear_action(ConsolePage::Console, true);
-    assert!(console.enabled);
-    assert_eq!(console.label, "Clear the session log");
-    assert!(!console_clear_action(ConsolePage::Console, false).enabled);
+fn clear_affordance_is_truthful() {
+    let clear = console_clear_action(true);
+    assert!(clear.enabled);
+    assert_eq!(clear.label, "Clear the session log");
+    let empty = console_clear_action(false);
+    assert!(!empty.enabled);
+    assert_eq!(empty.label, "The session log is already empty");
+}
 
-    for page in [
-        ConsolePage::Problems,
-        ConsolePage::Measurements,
-        ConsolePage::TaskLog,
-    ] {
-        let action = console_clear_action(page, true);
-        assert!(!action.enabled);
-        assert_ne!(action.label, "Clear the session log");
+/// The tab strip holds the pages and what acts on the dock itself, the same
+/// on every page. Clear is the Console page's own control, on its toolbar: it
+/// used to sit in the strip on every page, disabled on the three that have
+/// nothing a reader may clear.
+#[test]
+fn the_strip_holds_only_the_docks_own_actions_and_clear_is_the_consoles() {
+    for page in ConsolePage::ALL {
+        let mut app = busy_console();
+        app.state.workbench.console_page = page;
+        let nodes = labelled_bounds(&console_dock_output(&mut app, 900.0));
+        let mut strip: Vec<&str> = nodes
+            .iter()
+            .filter(|(role, _, bounds)| {
+                *role == egui::accesskit::Role::Button && bounds.bottom() <= CONSOLE_HEADER_HEIGHT
+            })
+            .map(|(_, label, _)| label.as_str())
+            .collect();
+        strip.sort_unstable();
+        assert_eq!(
+            strip,
+            ["Collapse console", "Maximize console"],
+            "{page:?}'s strip"
+        );
+        let clear = nodes
+            .iter()
+            .any(|(_, label, _)| label == "Clear the session log");
+        assert_eq!(clear, page == ConsolePage::Console, "{page:?} offers Clear");
     }
 }
 
@@ -602,7 +648,6 @@ fn a_run_channel_has_no_clear_and_the_command_leaves_the_session_alone() {
     let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
     assert!(!clear_is_offered(
         desktop,
-        ConsolePage::Console,
         app.state.workbench.console_view.channel
     ));
     assert!(!Command::ClearConsole.is_enabled(&app));
@@ -816,7 +861,6 @@ fn fractional_engine_progress_is_rendered_as_a_percentage() {
 #[test]
 fn console_chrome_and_grid_geometry_match_the_mockup() {
     assert_eq!(CONSOLE_HEADER_HEIGHT, 31.0);
-    assert_eq!(CONSOLE_TAB_HEIGHT, 26.0);
     assert_eq!(CONSOLE_TOUCH_HEADER_HEIGHT, 44.0);
     assert_eq!(CONSOLE_ACTION_SIZE, 27.0);
     assert_eq!(CONSOLE_ACTION_MARGIN_RIGHT, 3.0);
@@ -897,7 +941,7 @@ fn a_pressed_console_tab_opens_its_page_without_taking_keyboard_focus() {
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let problems = active_problem_count(&app.state, ui.ctx().cumulative_pass_nr());
-                    console_tabs(ui, &mut app, problems, CONSOLE_TAB_HEIGHT);
+                    console_tabs(ui, &mut app, problems, CONSOLE_HEADER_HEIGHT, true);
                 });
             },
         );
@@ -925,28 +969,158 @@ fn a_pressed_console_tab_opens_its_page_without_taking_keyboard_focus() {
 
 #[test]
 fn console_tab_lane_reserves_every_visible_trailing_action() {
-    use crate::workbench::state::ConsoleChannel;
-
-    let session = ConsoleChannel::Session;
+    // Maximize and collapse.
     let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
-    for page in ConsolePage::ALL {
-        let clear = clear_is_offered(desktop, page, session);
-        assert_eq!(console_trailing_actions_width(desktop, clear, false), 90.0);
-    }
-    // A run's log has no Clear, and the lane gives its width back to the tabs.
-    let run = clear_is_offered(desktop, ConsolePage::Console, ConsoleChannel::Run(1));
-    assert_eq!(console_trailing_actions_width(desktop, run, false), 60.0);
-
+    assert_eq!(console_trailing_actions_width(desktop, false), 60.0);
+    // Collapse alone, at the touch target.
     let phone = LayoutSpec::resolve_with_pointer(390.0, 844.0, true, &WorkbenchState::default());
-    for page in ConsolePage::ALL {
-        let clear = clear_is_offered(phone, page, session);
-        assert_eq!(console_trailing_actions_width(phone, clear, true), 47.0);
-    }
-
+    assert_eq!(console_trailing_actions_width(phone, true), 47.0);
     let tablet = LayoutSpec::resolve_with_pointer(1_024.0, 768.0, true, &WorkbenchState::default());
-    for page in ConsolePage::ALL {
-        let clear = clear_is_offered(tablet, page, session);
-        assert_eq!(console_trailing_actions_width(tablet, clear, true), 94.0);
+    assert_eq!(console_trailing_actions_width(tablet, true), 47.0);
+}
+
+/// A collapsed dock shows its tabs and no page, so no tab is marked as the
+/// open one, and a press on any tab opens the dock on that page. A press used
+/// to change the page the strip marked and leave the dock shut.
+#[test]
+fn a_press_on_a_collapsed_docks_tab_opens_it_on_that_page() {
+    let mut app = busy_console();
+    app.state.workbench.console_visible = false;
+    app.state.workbench.console_page = ConsolePage::Console;
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    // Each frame answers with what it drew, the page the dock is on and
+    // whether it shows that page.
+    let mut frame = |events: Vec<egui::Event>| {
+        let layout = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900.0, CONSOLE_HEADER_HEIGHT),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| super::show(ui, &mut app, layout),
+        );
+        let open = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench).show_console_body;
+        (output, app.state.workbench.console_page, open)
+    };
+    // Sizing settles on the second pass.
+    let _ = frame(Vec::new());
+    let (output, _, _) = frame(Vec::new());
+    let update = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("accesskit is on");
+    assert!(
+        update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Tab)
+            .all(|(_, node)| !node.is_selected().unwrap_or(false)),
+        "a collapsed dock marks a tab as open"
+    );
+    let problems = labelled_bounds(&output)
+        .into_iter()
+        .find(|(role, label, _)| {
+            *role == egui::accesskit::Role::Tab && label.starts_with("Problems")
+        })
+        .map(|(_, _, bounds)| bounds.center())
+        .expect("the Problems tab");
+    let button = |pressed| egui::Event::PointerButton {
+        pos: problems,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(vec![egui::Event::PointerMoved(problems), button(true)]);
+    let (_, page, open) = frame(vec![button(false)]);
+    assert_eq!(page, ConsolePage::Problems);
+    assert!(open, "the press left the dock collapsed");
+}
+
+/// The open page's underline runs the whole width of its tab, as the tab's
+/// hover fill does, and lies on the strip's foot, over its rule. It used to
+/// stop 8 px short of either edge and float above the rule.
+#[test]
+fn the_open_tabs_underline_spans_its_tab_on_the_strips_foot() {
+    let mut app = busy_console();
+    app.state.workbench.console_page = ConsolePage::Problems;
+    let output = console_dock_output(&mut app, 900.0);
+    let tab = labelled_bounds(&output)
+        .into_iter()
+        .find(|(role, label, _)| {
+            *role == egui::accesskit::Role::Tab && label.starts_with("Problems")
+        })
+        .map(|(_, _, bounds)| bounds)
+        .expect("the Problems tab");
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let accent = Tokens::get(&ctx).color.accent;
+    let underline = output
+        .shapes
+        .iter()
+        .find_map(|clipped| match &clipped.shape {
+            egui::epaint::Shape::Rect(rect)
+                if rect.fill == accent && rect.rect.bottom() <= CONSOLE_HEADER_HEIGHT + 0.5 =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        })
+        .expect("the open tab's underline");
+    assert_eq!(
+        underline.x_range(),
+        tab.x_range(),
+        "{underline:?} under {tab:?}"
+    );
+    assert_eq!(underline.bottom(), CONSOLE_HEADER_HEIGHT);
+}
+
+/// Every page's toolbar stands on a band of the panel's fill, ruled off from
+/// the page's well under it. The Problems page's controls used to stand on
+/// the well itself, the colour of the rows they filter.
+#[test]
+fn a_pages_toolbar_stands_on_the_panel_fill_above_the_well() {
+    let mut app = busy_console();
+    app.state.project_lifecycle.authority.open_session();
+    app.state.ui.netlist.diagnostics = std::sync::Arc::new(
+        crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
+            vec![
+                crate::workbench::documents::netlist_document::Diagnostic::error(
+                    "bad netlist card",
+                ),
+            ],
+            "",
+        )
+        .unwrap(),
+    );
+    let size = Vec2::new(900.0, 240.0);
+    for page in [
+        ConsolePage::Console,
+        ConsolePage::Problems,
+        ConsolePage::Measurements,
+    ] {
+        app.state.workbench.console_page = page;
+        let layout = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
+        let mut palette = None;
+        let canvas = crate::ui::raster::render(size, |ui, _| {
+            palette = Some(Tokens::get(ui.ctx()).color);
+            super::show(ui, &mut app, layout);
+        });
+        let palette = palette.expect("a pass ran");
+        // Beside the controls, past the last of them; then well under them.
+        let x = 600;
+        let band = canvas
+            .pixel(x, CONSOLE_HEADER_HEIGHT as usize + 3)
+            .expect("on the canvas");
+        let well = canvas.pixel(x, 200).expect("on the canvas");
+        assert_eq!(band, palette.bg_panel, "{page:?}'s toolbar band");
+        assert_eq!(well, palette.bg_inset, "{page:?}'s well");
     }
 }
 
@@ -1099,11 +1273,12 @@ fn busy_console() -> RSpiceApp {
     app
 }
 
-/// The page's controls share the header band with the tabs and the dock's
-/// actions: one row, beside the tabs and short of the actions, at a 900 px
-/// dock.
+/// The page's controls stand on its toolbar band under the tabs, as the
+/// Problems page's do: one row, centred on one line, short of Clear at the
+/// far end, at a 900 px dock. They used to share the tab strip, squeezed
+/// between the tabs and the dock's actions.
 #[test]
-fn the_console_toolbar_fits_one_row_of_a_900_px_dock() {
+fn the_console_toolbar_fits_one_row_under_the_tabs_of_a_900_px_dock() {
     let mut app = busy_console();
     let nodes = labelled_bounds(&console_dock_output(&mut app, 900.0));
     let find = |label: &str| {
@@ -1113,28 +1288,27 @@ fn the_console_toolbar_fits_one_row_of_a_900_px_dock() {
             .map(|(_, _, bounds)| *bounds)
             .unwrap_or_else(|| panic!("no {label:?} control: {nodes:?}"))
     };
-    let tabs_end = nodes
-        .iter()
-        .filter(|(role, ..)| *role == egui::accesskit::Role::Tab)
-        .map(|(_, _, bounds)| bounds.right())
-        .fold(0.0, f32::max);
-    assert!(tabs_end > 0.0, "no tab was published: {nodes:?}");
     let clear = find("Clear the session log");
+    let field = find("Find in the log");
     let controls = [
+        find("Errors 3"),
+        find("Warnings 12"),
+        find("Info 240"),
         find("Console channel"),
-        find("Errors, 3"),
-        find("Warnings, 12"),
-        find("Info, 240"),
-        find("Find in the log"),
+        field,
+        clear,
     ];
+    let line = clear.center().y;
     for control in controls {
         assert!(
-            control.top() >= 0.0 && control.bottom() <= CONSOLE_HEADER_HEIGHT,
-            "{control:?} leaves the {CONSOLE_HEADER_HEIGHT} px band"
+            control.top() >= CONSOLE_HEADER_HEIGHT,
+            "{control:?} rises into the {CONSOLE_HEADER_HEIGHT} px tab strip"
         );
-        assert!(control.left() >= tabs_end, "{control:?} overlaps the tabs");
+        assert!(
+            (control.center().y - line).abs() <= 0.5,
+            "{control:?} is off the toolbar's line at {line}"
+        );
     }
-    let field = find("Find in the log");
     assert!(
         field.right() <= clear.left(),
         "the find field {field:?} runs under Clear {clear:?}"

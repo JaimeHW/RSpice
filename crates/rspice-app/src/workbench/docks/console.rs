@@ -24,8 +24,9 @@ use super::super::state::{ConsoleChannel, ConsolePage};
 use crate::workbench::commands::vocabulary::Command;
 
 const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
-const CONSOLE_TAB_HEIGHT: f32 = 26.0;
 const CONSOLE_TOUCH_HEADER_HEIGHT: f32 = 44.0;
+/// The open page's mark along the foot of its tab, over the strip's rule.
+const CONSOLE_TAB_UNDERLINE: f32 = 2.0;
 const CONSOLE_ACTION_SIZE: f32 = 27.0;
 const CONSOLE_ACTION_MARGIN_RIGHT: f32 = 3.0;
 const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
@@ -42,8 +43,6 @@ const CONSOLE_COLUMN_GAP: f32 = 9.0;
 /// runs past its widest text. Two of them are the gutter between one
 /// column's widest text and the next column's, the same between every pair.
 const CONSOLE_CELL_INSET: f32 = 6.0;
-/// Space between the tabs and the Console page's controls beside them.
-const CONSOLE_TOOLBAR_GAP: f32 = 12.0;
 /// A select's frame around its text: the inset before it and the chevron's
 /// well after it. A select is sized to its longest choice plus this.
 const CONSOLE_SELECT_CHROME: f32 = 32.0;
@@ -82,8 +81,20 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             .max_rect(content_rect)
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
-            // The transcript is prose, and keeps the inset on every side.
-            ConsolePage::Console => padded(ui, |ui| transcript::console(ui, &mut app.state)),
+            ConsolePage::Console => {
+                // The command decides what Clear may clear and does the
+                // clearing; the toolbar only offers it.
+                let clear = clear_is_offered(layout, app.state.workbench.console_view.channel)
+                    .then(|| console_clear_action(Command::ClearConsole.is_enabled(app)));
+                if toolbar(ui, |ui| console_toolbar(ui, &mut app.state, layout, clear)) {
+                    Command::ClearConsole.execute(app);
+                }
+                // The transcript is prose, and keeps the inset on every side.
+                ui.add_space(CONSOLE_BODY_PADDING_TOP);
+                if prose_fits(ui) {
+                    padded(ui, |ui| transcript::console(ui, &mut app.state));
+                }
+            }
             ConsolePage::Problems => {
                 // A waiver changes what refuses a run, as the rule deck does,
                 // so a run prepared or checked before it is not authorized
@@ -111,41 +122,37 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     } else {
         CONSOLE_HEADER_HEIGHT
     };
-    let console_page = app.state.workbench.console_page == ConsolePage::Console;
-    let clear_shown = clear_is_offered(
-        layout,
-        app.state.workbench.console_page,
-        app.state.workbench.console_view.channel,
-    );
-    let header = ui.allocate_ui_with_layout(
+    let open = layout.show_console_body;
+    // The strip's last row of pixels, inside the strip: centred on its
+    // bottom edge, half the line fell on the body, whose fill then painted
+    // over it, and the strip had no visible rule at all. Painted before the
+    // tabs, so the open page's underline lies over it rather than under it.
+    if open {
+        let strip = egui::Rect::from_min_size(
+            ui.cursor().min,
+            Vec2::new(ui.available_width(), header_height),
+        );
+        ui.painter().hline(
+            strip.x_range(),
+            strip.bottom() - 0.5,
+            egui::Stroke::new(1.0, t.color.border),
+        );
+    }
+    // The strip holds the pages and what acts on the dock itself. A page's
+    // own controls are on the band under it, so moving between the pages
+    // never moves the tabs.
+    ui.allocate_ui_with_layout(
         Vec2::new(ui.available_width(), header_height),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let action_width = console_trailing_actions_width(layout, clear_shown, touch_targets);
+            let action_width = console_trailing_actions_width(layout, touch_targets);
             egui::ScrollArea::horizontal()
                 .id_salt("workbench.console.tabs.scroll")
                 .max_width((ui.available_width() - action_width).max(header_height))
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        console_tabs(
-                            ui,
-                            app,
-                            problems,
-                            if touch_targets {
-                                header_height
-                            } else {
-                                CONSOLE_TAB_HEIGHT
-                            },
-                        );
-                        // A compact header has no band beside the tabs, so the
-                        // page's controls scroll with them.
-                        if layout.compact_shell && console_page {
-                            ui.add_space(CONSOLE_TOOLBAR_GAP);
-                            transcript::toolbar(ui, &mut app.state);
-                        }
-                    });
+                    console_tabs(ui, app, problems, header_height, open);
                 });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let control_size = if touch_targets {
@@ -154,123 +161,109 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     CONSOLE_ACTION_SIZE
                 };
                 ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
-                if console_action(
-                    ui,
-                    ConsoleActionIcon::Workbench(WorkbenchIcon::ChevronDown),
-                    if layout.show_console_body {
-                        "Collapse console"
-                    } else {
-                        "Expand console"
-                    },
-                    false,
-                    control_size,
-                )
-                .clicked()
-                {
-                    if layout.show_console_body {
+                // The chevron points the way the dock will go.
+                let (icon, label) = if open {
+                    (WorkbenchIcon::ChevronDown, "Collapse console")
+                } else {
+                    (WorkbenchIcon::ChevronUp, "Expand console")
+                };
+                if console_action(ui, icon, label, false, control_size).clicked() {
+                    if open {
                         app.state.workbench.console_maximized = false;
                     }
                     Command::ToggleConsole.execute(app);
                 }
-                if !layout.compact_shell {
-                    if !touch_targets {
-                        ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
-                        if console_action(
-                            ui,
-                            ConsoleActionIcon::Workbench(WorkbenchIcon::Focus),
-                            if app.state.workbench.console_maximized {
-                                "Restore console"
-                            } else {
-                                "Maximize console"
-                            },
-                            app.state.workbench.console_maximized,
-                            control_size,
-                        )
-                        .clicked()
-                        {
-                            Command::ToggleConsoleMaximized.execute(app);
-                        }
-                    }
-                    // The command decides what the visible page has to clear
-                    // and does the clearing; this control contributes only the
-                    // wording for the page in front of the user.
-                    if clear_shown {
-                        let clear = console_clear_action(
-                            app.state.workbench.console_page,
-                            Command::ClearConsole.is_enabled(app),
-                        );
-                        ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
-                        let response = ui
-                            .add_enabled_ui(clear.enabled, |ui| {
-                                console_action(
-                                    ui,
-                                    ConsoleActionIcon::Clear,
-                                    clear.label,
-                                    false,
-                                    control_size,
-                                )
-                            })
-                            .inner;
-                        if response.clicked() {
-                            Command::ClearConsole.execute(app);
-                        }
-                    }
-                    if console_page {
-                        // The rest of the band, left to right after the tabs.
-                        // Clipped to it, so a narrow dock cuts the find field
-                        // short rather than painting it under the actions.
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
-                            ui.add_space(CONSOLE_TOOLBAR_GAP);
-                            transcript::toolbar(ui, &mut app.state);
-                        });
+                if !layout.compact_shell && !touch_targets {
+                    ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
+                    if console_action(
+                        ui,
+                        WorkbenchIcon::Focus,
+                        if app.state.workbench.console_maximized {
+                            "Restore console"
+                        } else {
+                            "Maximize console"
+                        },
+                        app.state.workbench.console_maximized,
+                        control_size,
+                    )
+                    .clicked()
+                    {
+                        Command::ToggleConsoleMaximized.execute(app);
                     }
                 }
             });
         },
     );
-    // The strip's last row of pixels, inside the strip: centred on its
-    // bottom edge, half the line fell on the body, whose fill then painted
-    // over it, and the strip had no visible rule at all.
-    if layout.show_console_body {
-        ui.painter().hline(
-            header.response.rect.x_range(),
-            header.response.rect.bottom() - 0.5,
-            egui::Stroke::new(1.0, t.color.border),
-        );
-    }
 }
 
-/// Whether the header offers Clear. Every page but a run's log shows it, the
-/// pages with nothing to clear disabled with the reason; a run's log is a
-/// record, so it has no Clear at all.
-fn clear_is_offered(layout: LayoutSpec, page: ConsolePage, channel: ConsoleChannel) -> bool {
-    let run_log = page == ConsolePage::Console && matches!(channel, ConsoleChannel::Run(_));
-    !(layout.compact_shell || run_log)
-}
-
-fn console_trailing_actions_width(
+/// The Console page's toolbar: the log's filters, and `clear` at the far end
+/// where the page offers it. Returns whether Clear was pressed.
+///
+/// The controls wrap on a compact shell, which has no room for them on one
+/// line and offers no Clear.
+fn console_toolbar(
+    ui: &mut Ui,
+    state: &mut AppState,
     layout: LayoutSpec,
-    clear_shown: bool,
-    touch_targets: bool,
-) -> f32 {
+    clear: Option<ConsoleClearAction>,
+) -> bool {
+    if layout.compact_shell {
+        ui.horizontal_wrapped(|ui| transcript::toolbar(ui, state));
+        return false;
+    }
+    ui.horizontal(|ui| {
+        // Clear is set first, from the right, so the find field knows the
+        // room it leaves. The filters are clipped to that room, so a narrow
+        // dock cuts the find field short rather than painting it under Clear.
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let cleared = clear.is_some_and(|clear| {
+                crate::ui::widgets::Button::new("Clear")
+                    .enabled(clear.enabled)
+                    .accessible_label(clear.label)
+                    .show(ui)
+                    .on_hover_text(clear.label)
+                    .on_disabled_hover_text(clear.label)
+                    .clicked()
+            });
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
+                transcript::toolbar(ui, state);
+            });
+            cleared
+        })
+        .inner
+    })
+    .inner
+}
+
+/// Whether the Console page offers Clear. A run's log is a record, so it has
+/// no Clear at all, and a compact shell has no room for it.
+fn clear_is_offered(layout: LayoutSpec, channel: ConsoleChannel) -> bool {
+    !(layout.compact_shell || matches!(channel, ConsoleChannel::Run(_)))
+}
+
+fn console_trailing_actions_width(layout: LayoutSpec, touch_targets: bool) -> f32 {
     let control_size = if touch_targets {
         CONSOLE_TOUCH_HEADER_HEIGHT
     } else {
         CONSOLE_ACTION_SIZE
     };
-    let mut actions = 1_usize;
-    if !layout.compact_shell {
-        actions += usize::from(!touch_targets);
-    }
-    actions += usize::from(clear_shown);
+    let actions = 1 + usize::from(!layout.compact_shell && !touch_targets);
     actions as f32 * (control_size + CONSOLE_ACTION_MARGIN_RIGHT)
 }
 
-fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height: f32) {
+/// The page tabs. `open` says whether the dock shows a page under them: a
+/// collapsed dock marks no tab as the one open, and a press on any tab opens
+/// the dock on that page.
+fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height: f32, open: bool) {
     let mut requested = None;
+    let mut expand = false;
     let mut focus = None;
     let mut ids = Vec::with_capacity(ConsolePage::ALL.len());
+    // A row of the tabs' own height. `horizontal` starts a row at the control
+    // height and centres in that, which set a tab taller than a control below
+    // the strip's foot, over the page under it.
+    ui.spacing_mut().interact_size.y = height;
     let tabs = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         for (index, page) in ConsolePage::ALL.into_iter().enumerate() {
@@ -286,11 +279,15 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
             // errors.
             let breakdown =
                 (page == ConsolePage::Problems && count > 0).then(|| problems.announcement());
+            let current = app.state.workbench.console_page == page;
             let response = console_tab(
                 ui,
                 page,
-                app.state.workbench.console_page == page,
-                count,
+                TabState {
+                    current,
+                    open,
+                    count,
+                },
                 breakdown,
                 height,
             );
@@ -299,6 +296,7 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
             // the focus ring appears only for a reader who is using the keys.
             if response.clicked() {
                 requested = Some(page);
+                expand = !open;
             }
             if response.has_focus() {
                 let key = ui.input_mut(|input| {
@@ -338,16 +336,37 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
     if let Some(page) = requested {
         app.state.workbench.console_page = page;
     }
+    if expand {
+        app.state.workbench.open_console();
+    }
+}
+
+/// What a tab shows of the page it names.
+#[derive(Debug, Clone, Copy)]
+struct TabState {
+    /// The dock's current page: the one it shows, or will show when opened.
+    current: bool,
+    /// Whether the dock shows a page at all.
+    open: bool,
+    /// The page's badge; zero shows none.
+    count: usize,
 }
 
 fn console_tab(
     ui: &mut Ui,
     page: ConsolePage,
-    selected: bool,
-    count: usize,
+    state: TabState,
     breakdown: Option<String>,
     height: f32,
 ) -> egui::Response {
+    let TabState {
+        current,
+        open,
+        count,
+    } = state;
+    // Only a page the dock is showing is marked as the open one. The current
+    // page's tab stays the strip's keyboard stop while the dock is collapsed.
+    let selected = current && open;
     let t = Tokens::get(ui.ctx());
     let font = theme::sans(CONSOLE_FONT_SIZE, FontWeight::Regular);
     let galley = ui
@@ -361,7 +380,7 @@ fn console_tab(
     };
     let width = 20.0 + galley.size().x + count_width;
     let mut sense = Sense::click();
-    if !selected {
+    if !current {
         sense = sense.difference(Sense::focusable_noninteractive());
     }
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), sense);
@@ -383,7 +402,14 @@ fn console_tab(
         }
     });
     if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        // The tab runs the strip's full height; its fill stops short of the
+        // strip's rule.
+        let fill = if open {
+            rect.with_max_y(rect.bottom() - 1.0)
+        } else {
+            rect
+        };
+        ui.painter().rect_filled(fill, 0.0, t.color.bg_hover);
     }
     let text_color = if selected {
         t.color.text
@@ -413,11 +439,10 @@ fn console_tab(
         );
     }
     if selected {
+        // Edge to edge of the tab, as its hover fill is, and down on the
+        // strip's rule, joining the tab to the page under it.
         ui.painter().rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(rect.left() + 8.0, rect.bottom() - 2.0),
-                egui::pos2(rect.right() - 8.0, rect.bottom()),
-            ),
+            rect.with_min_y(rect.bottom() - CONSOLE_TAB_UNDERLINE),
             0.0,
             t.color.accent,
         );
@@ -429,14 +454,9 @@ fn console_tab(
     }
 }
 
-enum ConsoleActionIcon {
-    Clear,
-    Workbench(WorkbenchIcon),
-}
-
 fn console_action(
     ui: &mut Ui,
-    icon: ConsoleActionIcon,
+    icon: WorkbenchIcon,
     label: &str,
     selected: bool,
     size: f32,
@@ -457,33 +477,9 @@ fn console_action(
     } else {
         t.color.text_faint
     };
-    match icon {
-        ConsoleActionIcon::Workbench(icon) => {
-            icon.paint(ui.painter(), icon_rect, icon_color);
-        }
-        ConsoleActionIcon::Clear => paint_trash(ui.painter(), icon_rect, icon_color),
-    }
+    icon.paint(ui.painter(), icon_rect, icon_color);
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(label)
-}
-
-fn paint_trash(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.2, color);
-    let body = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 4.0, rect.top() + 5.0),
-        egui::pos2(rect.right() - 4.0, rect.bottom() - 2.0),
-    );
-    painter.rect_stroke(body, 1.0, stroke, egui::StrokeKind::Inside);
-    painter.hline(
-        egui::Rangef::new(rect.left() + 2.0, rect.right() - 2.0),
-        rect.top() + 4.0,
-        stroke,
-    );
-    painter.hline(
-        egui::Rangef::new(rect.left() + 6.0, rect.right() - 6.0),
-        rect.top() + 2.0,
-        stroke,
-    );
 }
 
 fn active_measurement_count(simulation: &SimulationState) -> usize {
@@ -571,16 +567,19 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
         .inner
     });
     if rows.is_empty() {
-        padded(ui, |ui| {
-            if app.state.simulation.active_run().is_some() {
-                muted(ui, "This dataset has no computed measurements.");
-            } else {
-                muted(
-                    ui,
-                    "Select a retained result dataset to inspect measurements.",
-                );
-            }
-        });
+        ui.add_space(CONSOLE_BODY_PADDING_TOP);
+        if prose_fits(ui) {
+            padded(ui, |ui| {
+                if app.state.simulation.active_run().is_some() {
+                    muted(ui, "This dataset has no computed measurements.");
+                } else {
+                    muted(
+                        ui,
+                        "Select a retained result dataset to inspect measurements.",
+                    );
+                }
+            });
+        }
     } else {
         measurement_table(ui, &rows);
     }
@@ -1360,31 +1359,17 @@ struct ConsoleClearAction {
     label: &'static str,
 }
 
-/// The Clear control's state on `page`. On the Console page it is the
-/// session's log it clears; a run's log offers no Clear at all.
-fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleClearAction {
-    match page {
-        ConsolePage::Console => ConsoleClearAction {
-            enabled: console_has_output,
-            label: if console_has_output {
-                "Clear the session log"
-            } else {
-                "The session log is already empty"
-            },
-        },
-        ConsolePage::Problems => ConsoleClearAction {
-            enabled: false,
-            // A finding leaves the list when the check that made it no longer
-            // does, not when a control hides it.
-            label: "Problems lists current findings and is not cleared from here",
-        },
-        ConsolePage::Measurements => ConsoleClearAction {
-            enabled: false,
-            label: "Measurements belong to the selected run's results",
-        },
-        ConsolePage::TaskLog => ConsoleClearAction {
-            enabled: false,
-            label: "Task history is retained and cannot be cleared here",
+/// The Console page's Clear, which clears the session's log. Only that page
+/// offers it: a finding leaves Problems when the check that made it no longer
+/// does, measurements belong to a run's results, and the task history and a
+/// run's log are records.
+fn console_clear_action(session_has_output: bool) -> ConsoleClearAction {
+    ConsoleClearAction {
+        enabled: session_has_output,
+        label: if session_has_output {
+            "Clear the session log"
+        } else {
+            "The session log is already empty"
         },
     }
 }
@@ -1505,15 +1490,39 @@ fn padded<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
-/// A page's toolbar: its controls in the text column, with as much space
-/// under them as the body leaves over them, so the controls sit evenly
-/// between the tab strip and the table's header band. Every page with a
+/// A page's toolbar: its controls in the text column, on a band of the
+/// panel's own fill ruled off from the page under it, as the tab strip is.
+/// The page's well starts under the rule; the controls used to stand on the
+/// well itself, where their own input wells vanished into it and nothing
+/// separated them from the rows they filter.
+///
+/// The band starts at the tab strip's rule, over the body's top inset, and
+/// leaves as much space under the controls as over them. Every page with a
 /// toolbar draws it here, at the same height, so moving between them does
-/// not move it.
+/// not move it. A table's header band meets the rule; a page that writes
+/// prose under it insets that by the body's top padding.
 fn toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let band = ui.painter().add(egui::Shape::Noop);
+    let top = ui.cursor().top() - CONSOLE_BODY_PADDING_TOP;
     let inner = padded(ui, add);
     ui.add_space(CONSOLE_BODY_PADDING_TOP);
+    let t = Tokens::get(ui.ctx());
+    let rect = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
+    ui.painter()
+        .set(band, egui::Shape::rect_filled(rect, 0.0, t.color.bg_panel));
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
     inner
+}
+
+/// Whether one whole row fits in what is left of the page. A dock dragged
+/// shorter than a page's toolbar and one row shows the toolbar alone, rather
+/// than a line cut by its bottom edge.
+fn prose_fits(ui: &Ui) -> bool {
+    ui.available_height() + 0.5 >= CONSOLE_ROW_MIN_HEIGHT
 }
 
 /// The line a page paints instead of rows.

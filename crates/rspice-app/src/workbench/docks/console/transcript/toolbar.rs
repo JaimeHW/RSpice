@@ -1,7 +1,8 @@
-//! The Console page's controls, set in the dock's header band: the channel,
-//! the three severity toggles and the find field.
+//! The Console page's controls, on the page's toolbar band: the three
+//! severity toggles, the channel and the find field — the controls the
+//! Problems page sets for its own list, in the same order and the same kit.
 
-use egui::{Key, Modifiers, Rect, Sense, Ui, Vec2, pos2};
+use egui::{Key, Modifiers, Ui};
 
 use super::super::CONSOLE_SELECT_CHROME;
 use super::lines::Rows;
@@ -9,10 +10,7 @@ use super::{body_id, find_id, source};
 use crate::state::SimulationRun;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    PROBLEM_MARK_SIDE, Problem, StatusMark, paint_problem_mark, paint_status_mark,
-    select_mono_with_response,
-};
+use crate::ui::widgets::{chip, select_mono_with_response};
 use crate::workbench::AppState;
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
 use crate::workbench::state::{ConsoleChannel, ConsoleSeverity, ConsoleView};
@@ -25,12 +23,11 @@ const SESSION: &str = "Session";
 const FIND_CHARACTERS: f32 = 24.0;
 const FIND_MIN_CHARACTERS: f32 = 10.0;
 
-/// A severity toggle's padding either side, and the gap between its mark and
-/// its count.
-const TOGGLE_PAD: f32 = 6.0;
-const TOGGLE_GAP: f32 = 4.0;
-
 /// Draw the controls, editing the reading position they are drawn from.
+///
+/// Every severity keeps its toggle whatever its count: a log grows while it
+/// is read, and a toggle that came and went with its first line would move
+/// the controls beside it under the pointer.
 pub(in crate::workbench::docks) fn toolbar(ui: &mut Ui, state: &mut AppState) {
     let mut view = std::mem::take(&mut state.workbench.console_view);
     let counts = {
@@ -43,12 +40,13 @@ pub(in crate::workbench::docks) fn toolbar(ui: &mut Ui, state: &mut AppState) {
     };
     let advance = character_width(ui);
     ui.spacing_mut().item_spacing.x = 6.0;
-    channel(ui, &state.simulation.retained.runs, &mut view, advance);
     for severity in ConsoleSeverity::ALL {
-        if severity_toggle(ui, severity, counts[severity.index()], view.shows(severity)).clicked() {
+        let label = format!("{} {}", severity.label(), counts[severity.index()]);
+        if chip(ui, &label, view.shows(severity)).clicked() {
             view.toggle(severity);
         }
     }
+    channel(ui, &state.simulation.retained.runs, &mut view, advance);
     find(ui, &mut view, advance);
     state.workbench.console_view = view;
 }
@@ -91,85 +89,6 @@ fn channel(ui: &mut Ui, runs: &[SimulationRun], view: &mut ConsoleView, advance:
             view.open(channel);
         }
     }
-}
-
-/// One severity toggle: the severity's mark and the channel's count of it.
-/// Pressed while the severity is shown, as a toolbar toggle is.
-fn severity_toggle(
-    ui: &mut Ui,
-    severity: ConsoleSeverity,
-    count: usize,
-    shown: bool,
-) -> egui::Response {
-    let tokens = Tokens::get(ui.ctx());
-    let ink = if shown {
-        tokens.color.text_dim
-    } else {
-        tokens.color.text_faint
-    };
-    let digits = ui.painter().layout_no_wrap(
-        count.to_string(),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        ink,
-    );
-    let size = Vec2::new(
-        TOGGLE_PAD + PROBLEM_MARK_SIDE + TOGGLE_GAP + digits.size().x + TOGGLE_PAD,
-        tokens.metrics.ctl_h,
-    );
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let label = format!("{}, {count}", severity.label());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            ui.is_enabled(),
-            shown,
-            label.clone(),
-        )
-    });
-    if shown {
-        ui.painter()
-            .rect_filled(rect, tokens.radius, tokens.color.bg_active);
-    } else if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, tokens.radius, tokens.color.bg_hover);
-    }
-    let mark = Rect::from_center_size(
-        pos2(
-            rect.left() + TOGGLE_PAD + PROBLEM_MARK_SIDE * 0.5,
-            rect.center().y,
-        ),
-        Vec2::splat(PROBLEM_MARK_SIDE),
-    );
-    // A hidden severity's mark loses its colour with its rows.
-    match (severity, shown) {
-        (ConsoleSeverity::Errors, true) => paint_problem_mark(ui.painter(), mark, Problem::Failure),
-        (ConsoleSeverity::Warnings, true) => {
-            paint_problem_mark(ui.painter(), mark, Problem::Warning);
-        }
-        (ConsoleSeverity::Errors, false) => {
-            paint_status_mark(ui.painter(), mark, Problem::Failure.mark(), ink);
-        }
-        (ConsoleSeverity::Warnings, false) => {
-            paint_status_mark(ui.painter(), mark, Problem::Warning.mark(), ink);
-        }
-        // A note's mark carries no colour, because a note is not a problem.
-        (ConsoleSeverity::Info, _) => {
-            paint_status_mark(ui.painter(), mark, StatusMark::Info, ink);
-        }
-    }
-    ui.painter().galley(
-        pos2(
-            mark.right() + TOGGLE_GAP,
-            rect.center().y - digits.size().y * 0.5,
-        ),
-        digits,
-        ink,
-    );
-    // Asked every frame, so a press takes away a ring Tab gave.
-    if theme::focus_is_visible(ui.ctx(), &response) {
-        theme::paint_focus_ring(ui, &response, rect);
-    }
-    response.on_hover_text(format!("{}: {count}", severity.label()))
 }
 
 /// The find field. Escape clears it and gives the keyboard back to the log.
