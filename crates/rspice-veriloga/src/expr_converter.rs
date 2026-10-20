@@ -369,6 +369,99 @@ fn optional_string_arg(
 /// against terminal 0.
 pub const GROUND_NODE: usize = usize::MAX;
 
+/// The bare identifiers [`ExprConverter`] reads as built-in constants.
+///
+/// Semantic analysis reports any other identifier that names no declaration,
+/// so this list and `convert_identifier` change together (pinned by
+/// `every_builtin_constant_name_converts`).
+pub(crate) const BUILTIN_CONSTANT_NAMES: &[&str] = &[
+    "M_PI", "P_PI", "M_E", "P_E", "M_LN2", "M_LN10", "M_LOG2E", "M_LOG10E", "M_SQRT2", "inf",
+];
+
+/// Every function name [`ExprConverter`] lowers from a plain call.
+///
+/// Semantic analysis reports any other call that is neither an analog
+/// function nor an access function as an unknown function, so this list and
+/// `convert_call`/`convert_analog_call` change together (pinned by
+/// `every_lowered_call_name_reaches_its_lowering`).
+pub(crate) const LOWERED_CALL_NAMES: &[&str] = &[
+    "abs",
+    "sqrt",
+    "exp",
+    "__rspice_limited_exp",
+    "ln",
+    "log",
+    "log10",
+    "sin",
+    "cos",
+    "tan",
+    "sinh",
+    "cosh",
+    "tanh",
+    "asin",
+    "acos",
+    "atan",
+    "asinh",
+    "acosh",
+    "atanh",
+    "atan2",
+    "hypot",
+    "floor",
+    "ceil",
+    "min",
+    "max",
+    "pow",
+    "limexp",
+    "ddt",
+    "idt",
+    "idtmod",
+    "ddx",
+    "absdelay",
+    "transition",
+    "slew",
+    "cross",
+    "above",
+    "timer",
+    "last_crossing",
+    "analysis",
+    "white_noise",
+    "flicker_noise",
+    "noise_table",
+    "noise_table_log",
+    "laplace_nd",
+    "laplace_zp",
+    "laplace_zd",
+    "laplace_np",
+    "zi_nd",
+    "zi_zp",
+    "zi_zd",
+    "zi_np",
+];
+
+/// Every `$` system function [`ExprConverter`] lowers. Semantic analysis
+/// refuses any other one it lowers, by name (pinned by
+/// `every_lowered_call_name_reaches_its_lowering`).
+pub(crate) const LOWERED_SYSTEM_FUNCTION_NAMES: &[&str] = &[
+    "$vt",
+    "$thermal_vt",
+    "$temperature",
+    "$abstime",
+    "$mfactor",
+    "$simparam",
+    "$param_given",
+    "$port_connected",
+    "$limit",
+    "$table_model",
+    "$white_noise",
+    "$flicker_noise",
+    "$noise_table",
+    "$noise_table_log",
+];
+
+/// The refusal for a call [`ExprConverter`] has no lowering for. Semantic
+/// analysis reports unknown functions first, so reaching it is a bug.
+const UNLOWERED_CALL: &str = "no lowering for function";
+
 /// Context for expression conversion
 ///
 /// Maintains mappings from names to indices for efficient IR generation.
@@ -844,7 +937,7 @@ impl<'a> ExprConverter<'a> {
             return Ok(arena.push(Node::Var(name)));
         }
 
-        // Check for built-in constants
+        // Check for built-in constants (keep `BUILTIN_CONSTANT_NAMES` in step)
         match name.as_str() {
             "M_PI" | "P_PI" => Ok(arena.push(Node::Const(std::f64::consts::PI))),
             "M_E" | "P_E" => Ok(arena.push(Node::Const(std::f64::consts::E))),
@@ -1181,9 +1274,15 @@ impl<'a> ExprConverter<'a> {
                 )),
             )
             .into()),
+            _ if func.name.starts_with('$') => {
+                Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                    crate::analog_tasks::system_name_refusal(&func.name, "function"),
+                ))
+                .into())
+            }
             _ => Err(
-                CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
-                    "System function: {}",
+                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                    "{UNLOWERED_CALL} '{}'",
                     func.name
                 )))
                 .into(),
@@ -1724,8 +1823,8 @@ impl<'a> ExprConverter<'a> {
                 }))
             }
             _ => Err(
-                CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
-                    "Function: {}",
+                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                    "{UNLOWERED_CALL} '{}'",
                     call.name
                 )))
                 .into(),
@@ -2842,6 +2941,69 @@ mod tests {
             raw: value.to_string().into(),
             span: Span::dummy(),
         })
+    }
+
+    /// Semantic analysis refuses a call whose name is not in
+    /// `LOWERED_CALL_NAMES` / `LOWERED_SYSTEM_FUNCTION_NAMES`, so every listed
+    /// name must reach a lowering of its own, whatever its arity, and a name
+    /// outside the lists must not.
+    #[test]
+    fn every_lowered_call_name_reaches_its_lowering() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let fell_through = |expression: &Expression| {
+            let arena = &mut ExprArena::new();
+            converter
+                .convert(arena, expression)
+                .err()
+                .map(|error| error.to_string())
+                .is_some_and(|message| {
+                    message.contains(UNLOWERED_CALL)
+                        || message.contains("unknown system function")
+                        || message.contains("is not supported in analog code")
+                })
+        };
+        let call = |name: &str, arity: usize| {
+            Expression::Call(CallExpr {
+                resolved_builtin: false,
+                name: name.into(),
+                args: (0..arity).map(|index| number(index as f64 + 1.0)).collect(),
+                span: Span::dummy(),
+            })
+        };
+        let system = |name: &str, arity: usize| {
+            Expression::SystemFunction(SystemFunction {
+                name: name.into(),
+                args: (0..arity).map(|index| number(index as f64 + 1.0)).collect(),
+                span: Span::dummy(),
+            })
+        };
+        for arity in 0..=6 {
+            for name in LOWERED_CALL_NAMES {
+                assert!(!fell_through(&call(name, arity)), "{name}/{arity}");
+            }
+            for name in LOWERED_SYSTEM_FUNCTION_NAMES {
+                assert!(!fell_through(&system(name, arity)), "{name}/{arity}");
+            }
+        }
+        assert!(fell_through(&call("myfunc", 1)));
+        assert!(fell_through(&system("$foobar", 1)));
+    }
+
+    #[test]
+    fn every_builtin_constant_name_converts() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        for name in BUILTIN_CONSTANT_NAMES {
+            let arena = &mut ExprArena::new();
+            let identifier = Expression::Identifier(crate::ast::Identifier {
+                name: (*name).into(),
+                span: Span::dummy(),
+            });
+            converter
+                .convert(arena, &identifier)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+        }
     }
 
     fn empty_context() -> ConversionContext {

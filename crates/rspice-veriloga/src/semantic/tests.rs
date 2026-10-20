@@ -3313,3 +3313,103 @@ fn a_discrete_construct_in_the_analog_domain_takes_its_article() {
     );
     assert!(!diagnostic.contains("a arithmetic"), "{diagnostic}");
 }
+
+/// The semantic errors of an analysis, in recorded order.
+fn semantic_errors(error: CompileError) -> Vec<SemanticError> {
+    match error {
+        CompileError::Semantic(error) => vec![error],
+        CompileError::Multiple(errors) => errors.into_iter().flat_map(semantic_errors).collect(),
+        other => panic!("expected semantic errors, got {other}"),
+    }
+}
+
+fn spanned(source: &str, span: Span) -> &str {
+    &source[span.start as usize..span.end as usize]
+}
+
+/// An undeclared identifier is a semantic error at the identifier, not a
+/// code generation failure ("Cannot compile expression: Unknown identifier").
+#[test]
+fn an_undeclared_identifier_is_reported_by_semantic_analysis_at_its_span() {
+    let source = module_src("analog I(p, n) <+ V(p, n) / rr;");
+    let errors = semantic_errors(analyze(&source).expect_err("rr is undeclared"));
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        matches!(&errors[0].kind, SemanticErrorKind::UndeclaredSymbol { name } if name == "rr"),
+        "{errors:?}"
+    );
+    assert_eq!(spanned(&source, errors[0].span), "rr");
+}
+
+/// Every undeclared name in a module is reported by one compile, in source
+/// order (the audit's d21 used to report only `undefined_a`).
+#[test]
+fn every_undeclared_identifier_in_a_module_is_reported_at_once() {
+    let errors = semantic_errors(
+        analyze(&module_src(
+            "real x, y;\nanalog begin\n  x = undefined_a;\n  y = undefined_b;\n  \
+             I(p, n) <+ V(p, n) * x * y * undefined_c;\nend",
+        ))
+        .expect_err("three names are undeclared"),
+    );
+    let names: Vec<_> = errors
+        .iter()
+        .map(|error| match &error.kind {
+            SemanticErrorKind::UndeclaredSymbol { name } => name.to_string(),
+            other => panic!("unexpected {other}"),
+        })
+        .collect();
+    assert_eq!(names, ["undefined_a", "undefined_b", "undefined_c"]);
+}
+
+/// Built-in constants and block-local variables are declarations.
+#[test]
+fn builtin_constants_and_block_locals_resolve() {
+    analyze(&module_src(
+        "analog begin : blk\n  real k;\n  k = M_PI + P_E + M_SQRT2;\n  \
+         I(p, n) <+ V(p, n) * k / inf;\nend",
+    ))
+    .expect("built-in constants and block locals are declared names");
+}
+
+/// A call to no analog function and no built-in names the function.
+#[test]
+fn a_call_to_an_undeclared_function_is_an_unknown_function() {
+    let source = module_src("analog I(p, n) <+ myfunc(V(p, n));");
+    let errors = semantic_errors(analyze(&source).expect_err("myfunc is undeclared"));
+    assert!(
+        matches!(&errors[..], [error] if matches!(&error.kind,
+            SemanticErrorKind::UnknownFunction(name) if name == "myfunc")),
+        "{errors:?}"
+    );
+    assert_eq!(spanned(&source, errors[0].span), "myfunc(V(p, n))");
+}
+
+/// A standard system task or function the analog code cannot run is
+/// unsupported; a name no standard defines is unknown. Both used to be the
+/// other way round ("Unknown function: '$debug'", "Unsupported feature:
+/// System function: $foobar").
+#[test]
+fn system_names_are_unsupported_when_standard_and_unknown_otherwise() {
+    for (body, expected) in [
+        (
+            "analog begin $debug(\"x\"); I(p, n) <+ V(p, n); end",
+            "Unsupported feature: system task '$debug' is not supported in analog code",
+        ),
+        (
+            "analog begin $foobar(1); I(p, n) <+ V(p, n); end",
+            "Unknown system task: '$foobar'",
+        ),
+        (
+            "analog I(p, n) <+ V(p, n) * $foobar(1);",
+            "Unknown system function: '$foobar'",
+        ),
+        (
+            "integer fd;\nanalog begin fd = $fopen(\"log.txt\"); I(p, n) <+ V(p, n); end",
+            "Unsupported feature: system function '$fopen' is not supported in analog code",
+        ),
+    ] {
+        let diagnostic = analyze(&module_src(body)).expect_err(body).to_string();
+        assert!(diagnostic.contains(expected), "{body}: {diagnostic}");
+    }
+}

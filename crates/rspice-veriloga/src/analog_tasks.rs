@@ -16,6 +16,148 @@ pub struct AnalogTaskOrigin {
     pub line: u32,
 }
 
+/// System tasks and functions the standards define: Verilog-AMS (LRM 2.4 and
+/// 2023, chapter 9) and the IEEE 1364-2005 ones Verilog-AMS inherits.
+///
+/// An analog position that does not accept one of these refuses it as
+/// unsupported; any other `$name` is reported as unknown, which is what a
+/// misspelling looks like.
+const STANDARD_SYSTEM_NAMES: &[&str] = &[
+    // Display and file I/O
+    "$display",
+    "$strobe",
+    "$write",
+    "$monitor",
+    "$monitoron",
+    "$monitoroff",
+    "$debug",
+    "$fdisplay",
+    "$fstrobe",
+    "$fwrite",
+    "$fmonitor",
+    "$fdebug",
+    "$fopen",
+    "$fclose",
+    "$fflush",
+    "$fgetc",
+    "$fgets",
+    "$fscanf",
+    "$sscanf",
+    "$swrite",
+    "$sformat",
+    "$feof",
+    "$ferror",
+    "$fread",
+    "$fseek",
+    "$ftell",
+    "$rewind",
+    "$ungetc",
+    "$readmemb",
+    "$readmemh",
+    // Simulation control and announcements
+    "$finish",
+    "$stop",
+    "$fatal",
+    "$error",
+    "$warning",
+    "$info",
+    // Time
+    "$abstime",
+    "$realtime",
+    "$time",
+    "$stime",
+    "$printtimescale",
+    "$timeformat",
+    // Random numbers and distributions
+    "$random",
+    "$arandom",
+    "$urandom",
+    "$urandom_range",
+    "$rdist_uniform",
+    "$rdist_normal",
+    "$rdist_exponential",
+    "$rdist_poisson",
+    "$rdist_chi_square",
+    "$rdist_t",
+    "$rdist_erlang",
+    "$dist_uniform",
+    "$dist_normal",
+    "$dist_exponential",
+    "$dist_poisson",
+    "$dist_chi_square",
+    "$dist_t",
+    "$dist_erlang",
+    // Simulator environment and hierarchy queries
+    "$temperature",
+    "$vt",
+    "$simparam",
+    "$simparam$str",
+    "$simprobe",
+    "$mfactor",
+    "$xposition",
+    "$yposition",
+    "$angle",
+    "$hflip",
+    "$vflip",
+    "$param_given",
+    "$port_connected",
+    "$analog_node_alias",
+    "$analog_port_alias",
+    "$test$plusargs",
+    "$value$plusargs",
+    // Analog kernel control and models
+    "$limit",
+    "$discontinuity",
+    "$bound_step",
+    "$table_model",
+    // Conversions
+    "$bitstoreal",
+    "$realtobits",
+    "$itor",
+    "$rtoi",
+    "$signed",
+    "$unsigned",
+    "$clog2",
+    // IEEE 1364-2005 section 17.11 math functions
+    "$ln",
+    "$log10",
+    "$exp",
+    "$sqrt",
+    "$pow",
+    "$floor",
+    "$ceil",
+    "$sin",
+    "$cos",
+    "$tan",
+    "$asin",
+    "$acos",
+    "$atan",
+    "$atan2",
+    "$hypot",
+    "$sinh",
+    "$cosh",
+    "$tanh",
+    "$asinh",
+    "$acosh",
+    "$atanh",
+];
+
+/// Why an analog position refuses the system task or function `name`
+/// (`role` is "task" or "function"): a standard one is unsupported here, any
+/// other is unknown.
+pub(crate) fn system_name_refusal(name: &str, role: &str) -> String {
+    if STANDARD_SYSTEM_NAMES.contains(&name) {
+        format!("system {role} '{name}' is not supported in analog code")
+    } else {
+        format!("unknown system {role} '{name}'")
+    }
+}
+
+/// Whether `name` is a system task or function the standards define.
+pub(crate) fn is_standard_system_name(name: &str) -> bool {
+    STANDARD_SYSTEM_NAMES.contains(&name)
+}
+
 /// An argument's language type must survive numerical backend lowering.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnalogTaskOperand<E> {

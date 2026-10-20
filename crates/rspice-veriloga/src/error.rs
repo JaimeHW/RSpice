@@ -437,6 +437,10 @@ pub enum SemanticErrorKind {
     #[error("Unknown function: '{0}'")]
     UnknownFunction(String),
 
+    /// A `$name` that no standard defines; `role` is "task" or "function".
+    #[error("Unknown system {role}: '{name}'")]
+    UnknownSystemName { role: &'static str, name: String },
+
     #[error("Unsupported feature: {0}")]
     UnsupportedFeature(String),
 
@@ -480,6 +484,7 @@ impl SemanticErrorKind {
             Self::MissingAttribute(_) => "VA-SEM-MISSING-ATTRIBUTE",
             Self::ArgumentCountMismatch { .. } => "VA-SEM-ARGUMENT-COUNT",
             Self::UnknownFunction(_) => "VA-SEM-UNKNOWN-FUNCTION",
+            Self::UnknownSystemName { .. } => "VA-SEM-UNKNOWN-SYSTEM-NAME",
             Self::UnsupportedFeature(_) => "VA-SEM-UNSUPPORTED-FEATURE",
             Self::IndexOutOfBounds(_) => "VA-SEM-INDEX-OUT-OF-BOUNDS",
             Self::ConnectRules(_) => "VA-SEM-CONNECT-RULES",

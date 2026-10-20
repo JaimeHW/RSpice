@@ -781,7 +781,18 @@ impl SemanticAnalyzer {
                         analyzed.default_discipline = default_discipline.clone();
                         modules.insert(module.name.clone(), analyzed);
                     }
-                    Err(e) => return Err(e),
+                    // Diagnostics recorded before the error that stopped the
+                    // module (an undeclared name, say) come first: the stop
+                    // may be their consequence.
+                    Err(e) if self.errors.is_empty() => return Err(e),
+                    Err(e) => {
+                        let mut errors: Vec<CompileError> = std::mem::take(&mut self.errors)
+                            .into_iter()
+                            .map(CompileError::Semantic)
+                            .collect();
+                        errors.push(e);
+                        return Err(CompileError::multiple(errors));
+                    }
                 }
             }
         }
@@ -7491,6 +7502,16 @@ impl SemanticAnalyzer {
                         id.span,
                     )));
                 }
+                if !self.identifier_resolves(&id.name) {
+                    // Recorded rather than returned: analysis continues, so
+                    // every undeclared name in the module is reported at once.
+                    self.record_unresolved_name(
+                        SemanticErrorKind::UndeclaredSymbol {
+                            name: id.name.clone(),
+                        },
+                        id.span,
+                    );
+                }
                 let resolved = match self.lookup_substitution(&id.name) {
                     Some(subst) => subst,
                     None => expr.clone(),
@@ -7542,6 +7563,15 @@ impl SemanticAnalyzer {
                 if let Some(noise) = self.lower_noise_process_call(&f.name, &args, f.span)? {
                     Expression::NoiseSource(noise)
                 } else {
+                    if f.name.starts_with('$')
+                        && !crate::expr_converter::LOWERED_SYSTEM_FUNCTION_NAMES
+                            .contains(&f.name.as_str())
+                    {
+                        self.record_unresolved_name(
+                            Self::system_name_error_kind(&f.name, "function"),
+                            f.span,
+                        );
+                    }
                     Expression::SystemFunction(SystemFunction {
                         name: f.name.clone(),
                         args,
@@ -7620,6 +7650,18 @@ impl SemanticAnalyzer {
                     }
                     self.inline_function(&call.name, &call.args, call.span)?
                 } else {
+                    if !crate::expr_converter::LOWERED_CALL_NAMES.contains(&call.name.as_str()) {
+                        let kind = if call.name == "ac_stim" {
+                            SemanticErrorKind::UnsupportedFeature(
+                                "the analog operator 'ac_stim' is not implemented; describe \
+                                 the AC stimulus with an AC source in the netlist"
+                                    .into(),
+                            )
+                        } else {
+                            SemanticErrorKind::UnknownFunction(call.name.to_string())
+                        };
+                        self.record_unresolved_name(kind, call.span);
+                    }
                     let mut args = call
                         .args
                         .iter()
@@ -9164,9 +9206,55 @@ impl SemanticAnalyzer {
 
     fn unknown_system_task_error(call: &CallStmt) -> CompileError {
         CompileError::Semantic(SemanticError::new(
-            SemanticErrorKind::UnknownFunction(call.name.to_string()),
+            Self::system_name_error_kind(&call.name, "task"),
             call.span,
         ))
+    }
+
+    /// A standard system task or function this position does not accept is
+    /// unsupported; any other `$name` is unknown.
+    fn system_name_error_kind(name: &str, role: &'static str) -> SemanticErrorKind {
+        if crate::analog_tasks::is_standard_system_name(name) {
+            SemanticErrorKind::UnsupportedFeature(crate::analog_tasks::system_name_refusal(
+                name, role,
+            ))
+        } else {
+            SemanticErrorKind::UnknownSystemName {
+                role,
+                name: name.to_string(),
+            }
+        }
+    }
+
+    /// Record an unresolved name once per site; lowering may visit a site
+    /// more than once.
+    fn record_unresolved_name(&mut self, kind: SemanticErrorKind, span: Span) {
+        let code = kind.code();
+        if !self
+            .errors
+            .iter()
+            .any(|error| error.span == span && error.kind.code() == code)
+        {
+            self.record_error_at(kind, span);
+        }
+    }
+
+    /// Whether a bare identifier in an analog expression names something:
+    /// a declaration in scope, a substitution, an array, a built-in
+    /// constant, or a hierarchical reference (resolved during elaboration).
+    fn identifier_resolves(&self, name: &SmolStr) -> bool {
+        self.symbols.lookup(name).is_some()
+            || self
+                .subst_stack
+                .iter()
+                .any(|frame| frame.contains_key(name))
+            || crate::expr_converter::BUILTIN_CONSTANT_NAMES.contains(&name.as_str())
+            || self.arrays.contains_key(name)
+            || self.parameter_arrays.contains(name)
+            || name.contains('.')
+            || name
+                .split_once('[')
+                .is_some_and(|(base, _)| self.arrays.contains_key(base))
     }
 
     fn validate_node(&self, name: &str, span: Span) -> CompileResult<()> {
