@@ -2456,6 +2456,33 @@ fn a_version_one_document_that_declares_a_bus_is_refused() {
 }
 
 #[test]
+fn a_version_eighteen_document_that_carries_an_hdl_precision_is_refused() {
+    let mut document = document_for(AnalysisResultKind::Transient);
+    let ResultPayload::Tran(payload) = &mut document.payload else {
+        panic!("the transient fixture carries a transient payload");
+    };
+    payload.digital_traces = vec![DigitalEventTrace {
+        node_name: "d".to_owned(),
+        points: Vec::new(),
+        hdl_time_precision: Some(1e-12),
+    }];
+    let json = document.to_json().expect("encode");
+    assert!(json.contains("\"hdlTimePrecision\""));
+    AnalysisResultDocument::from_json(&json).expect("the current version carries it");
+    let version_eighteen = json.replace(
+        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
+        "\"schemaVersion\":18",
+    );
+    let error = AnalysisResultDocument::from_json(&version_eighteen)
+        .expect_err("version 18 predates the HDL precision");
+    let ResultDocumentError::Malformed { location, detail } = error else {
+        panic!("a version-18 document carrying the field is malformed, not unversioned");
+    };
+    assert_eq!(location, "digital trace HDL time precision");
+    assert!(detail.contains("version 19"), "{detail}");
+}
+
+#[test]
 fn an_empty_bus_table_leaves_no_trace_in_the_encoding() {
     // The field is skipped when empty, which is what lets a version-2 document
     // that declares no bus stay byte-comparable with the version-1 document it

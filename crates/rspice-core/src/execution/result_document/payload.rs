@@ -623,13 +623,11 @@ pub struct FftChildReference {
 /// a version, and [`crate::execution::ANALYSIS_RESULT_DOCUMENT_VERSION`] is
 /// what a reader gates on.
 ///
-/// This build writes version 2 and decodes 1 and 2. The two differ in one
-/// place: version 2's transient payload may carry
-/// [`DigitalEventBus`] declarations, and a version-1 document declares none.
-/// Nothing else moved, and a version-1 document is read as a version-2
-/// document with no bus — a version-1 document that carries one is refused
-/// rather than read, because it was written by something that had already
-/// stopped meaning version 1.
+/// Version 2's transient payload added [`DigitalEventBus`] declarations, and
+/// version 19 added `hdlTimePrecision` here. An older document is read with
+/// neither; one whose version predates the field it carries is refused rather
+/// than read, because it was written by something that had already stopped
+/// meaning that version.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DigitalEventTrace {

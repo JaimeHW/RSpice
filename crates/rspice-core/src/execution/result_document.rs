@@ -237,7 +237,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 18;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 19;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -296,14 +296,18 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 18;
 /// Version 18 adds explicit per-variable Monte Carlo output units. Earlier
 /// populations retain unstated units; a probe name never establishes a unit.
 ///
+/// Version 19 adds a digital trace's `hdlTimePrecision`, the design time
+/// precision of the HDL that reads or drives the net. Earlier documents carry
+/// none, and a dump of their nets falls back to the femtosecond rule.
+///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
 /// new family to misread: it refuses the unknown `resultKind` tag outright.
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 18] = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 19] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
 ];
 
 /// First version whose transient payload may declare a digital bus.
@@ -750,6 +754,18 @@ impl AnalysisResultDocument {
             return Err(ResultDocumentError::Malformed {
                 location: "Monte Carlo units",
                 detail: "Monte Carlo output units require document version 18".into(),
+            });
+        }
+        if self.schema_version < 19
+            && let ResultPayload::Tran(payload) = &self.payload
+            && payload
+                .digital_traces
+                .iter()
+                .any(|trace| trace.hdl_time_precision.is_some())
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "digital trace HDL time precision",
+                detail: "an HDL time precision requires document version 19".into(),
             });
         }
         if self.payload.result_kind() != self.result_kind {
