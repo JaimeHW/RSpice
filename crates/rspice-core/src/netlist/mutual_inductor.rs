@@ -8,6 +8,21 @@ use super::{
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
 
+/// Why a coupling coefficient is out of its domain, if it is. Linear K cards
+/// keep signed winding polarity, -1 <= k <= 1; a nonlinear CORE card keeps
+/// its nonnegative model domain, 0 <= k <= 1.
+pub(crate) fn coupling_coefficient_error(
+    coefficient: crate::Value,
+    nonlinear_core: bool,
+) -> Option<String> {
+    let minimum = if nonlinear_core { 0.0 } else { -1.0 };
+    (!coefficient.is_finite() || !(minimum..=1.0).contains(&coefficient)).then(|| {
+        format!(
+            "Invalid coupling coefficient {coefficient}: expected a finite value in [{minimum}, 1]"
+        )
+    })
+}
+
 /// One source-ordered semantic record used by the parser's post-parse
 /// validation pass.
 #[derive(Debug, Clone)]
@@ -573,6 +588,7 @@ mod tests {
                 kind: ElementKind::Coupling {
                     inductors: vec!["L1".into(), missing.into()],
                     coefficient: 0.5,
+                    coefficient_expr: None,
                     model: None,
                 },
                 nodes: Vec::new(),

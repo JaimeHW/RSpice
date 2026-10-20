@@ -570,7 +570,12 @@ pub(super) fn process_line_with_abort(
     for element in &state.elements[first_new_element..] {
         if matches!(
             element.kind,
-            ElementKind::VoltageSourceDeferred(_) | ElementKind::CurrentSourceDeferred(_)
+            ElementKind::VoltageSourceDeferred(_)
+                | ElementKind::CurrentSourceDeferred(_)
+                | ElementKind::Coupling {
+                    coefficient_expr: Some(_),
+                    ..
+                }
         ) {
             state
                 .deferred_source_origins
@@ -827,7 +832,13 @@ pub(super) fn parse_line(
             defer_simple_param_refs,
         ),
         // Coupling and switches
-        'K' => parse_coupling(&mut stream, line_num, elements, params),
+        'K' => parse_coupling(
+            &mut stream,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
+        ),
         'S' => parse_vswitch(&mut stream, line_num, elements),
         'W' => parse_iswitch(&mut stream, line_num, elements),
         // Transmission lines

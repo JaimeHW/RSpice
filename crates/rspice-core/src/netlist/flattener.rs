@@ -1774,6 +1774,7 @@ impl<'a> Flattener<'a> {
             ElementKind::Coupling {
                 inductors,
                 coefficient,
+                coefficient_expr,
                 model,
             } => ElementKind::Coupling {
                 inductors: inductors
@@ -1781,6 +1782,7 @@ impl<'a> Flattener<'a> {
                     .map(|name| self.remap_local_element_reference(name, prefix))
                     .collect(),
                 coefficient: *coefficient,
+                coefficient_expr: coefficient_expr.clone(),
                 model: model.clone(),
             },
             ElementKind::Xspice {
@@ -2663,10 +2665,30 @@ impl<'a> Flattener<'a> {
             ElementKind::Coupling {
                 inductors,
                 coefficient,
+                coefficient_expr,
                 model,
             } => ElementKind::Coupling {
                 inductors: inductors.clone(),
-                coefficient: *coefficient,
+                coefficient: {
+                    let coefficient = self.resolve_optional_value_expr(
+                        *coefficient,
+                        coefficient_expr,
+                        scope,
+                        None,
+                        abort,
+                    )?;
+                    if let Some(message) = super::mutual_inductor::coupling_coefficient_error(
+                        coefficient,
+                        model.is_some(),
+                    ) {
+                        return Err(ParseError::InvalidValue(format!(
+                            "element '{element_path}': {message}"
+                        ))
+                        .into());
+                    }
+                    coefficient
+                },
+                coefficient_expr: None,
                 model: self.resolve_optional_scoped_model(
                     model,
                     scope,
@@ -5456,6 +5478,74 @@ fn is_simple_probe_name(s: &str) -> bool {
 mod tests {
     use super::*;
     use crate::abort_signal::CountingAbort;
+
+    fn coupling_coefficients(netlist: &Netlist) -> Vec<(String, Value)> {
+        let flattened = flatten_netlist_with_models(netlist).expect("netlist flattens");
+        flattened
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Coupling { coefficient, .. } => {
+                    Some((element.name.clone(), *coefficient))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// ngspice evaluates a K card's coefficient in each instance's parameter
+    /// scope. The coefficient used to be read once, with the subcircuit
+    /// defaults, so `kc=0.5` on the instance was silently ignored.
+    #[test]
+    fn coupling_coefficients_resolve_in_each_instance_scope() {
+        let netlist = Netlist::parse(
+            "coupling scope\n\
+             .subckt xfmr p s params: kc=0.9\n\
+             L1 p 0 1m\n\
+             L2 s 0 4m\n\
+             K1 L1 L2 {kc}\n\
+             .ends\n\
+             X1 a b xfmr kc=0.5\n\
+             X2 c d xfmr\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        assert_eq!(
+            coupling_coefficients(&netlist),
+            [("X1.K1".to_string(), 0.5), ("X2.K1".to_string(), 0.9)]
+        );
+
+        let error = flatten_netlist_with_models(
+            &Netlist::parse(
+                "coupling domain\n.subckt xfmr p s params: kc=0.9\nL1 p 0 1m\nL2 s 0 4m\n\
+                 K1 L1 L2 {kc}\n.ends\nX1 a b xfmr kc=1.5\n.end\n",
+            )
+            .expect("deck parses"),
+        )
+        .expect_err("an instance coefficient outside [-1, 1] is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid coupling coefficient 1.5"),
+            "{error}"
+        );
+    }
+
+    /// A root K card may cite a `.param` declared later in the file, as in
+    /// ngspice; it used to fail as an undefined parameter.
+    #[test]
+    fn root_coupling_coefficients_read_later_parameters() {
+        let netlist = Netlist::parse(
+            "forward coupling\nL1 a 0 1m\nL2 b 0 1m\nK1 L1 L2 {kc}\n.param kc=0.25\n.end\n",
+        )
+        .expect("a later .param resolves the coefficient");
+        assert_eq!(coupling_coefficients(&netlist), [("K1".to_string(), 0.25)]);
+        assert!(
+            Netlist::parse("undefined coupling\nL1 a 0 1m\nL2 b 0 1m\nK1 L1 L2 {kx}\n.end\n")
+                .is_err(),
+            "a parameter nothing defines is still an error"
+        );
+    }
 
     #[test]
     fn statistical_parameter_expansion_preserves_arithmetic_and_branches() {

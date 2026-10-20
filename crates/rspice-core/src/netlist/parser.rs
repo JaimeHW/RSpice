@@ -937,6 +937,12 @@ fn parse_netlist_impl(
             &state.deferred_source_origins,
             abort,
         )?;
+        resolve_top_level_deferred_values_with_abort(
+            &mut state.elements,
+            &state.params,
+            &state.deferred_source_origins,
+            abort,
+        )?;
         resolve_top_level_deferred_chebyshev_with_abort(
             &mut state.elements,
             &state.params,
@@ -3301,6 +3307,56 @@ fn resolve_top_level_deferred_source_specs_with_abort(
         }
     }
 
+    ensure_parse_not_aborted(abort)
+}
+
+/// Resolve root-card fields that cite a `.PARAM` declared later in the file.
+///
+/// A subcircuit body keeps such expressions for each instance's scope; a root
+/// card has only the root scope, and it is complete once the whole deck has
+/// been read. ngspice reads the same forward references (numparam evaluates
+/// after collecting every `.param`).
+fn resolve_top_level_deferred_values_with_abort(
+    elements: &mut [Element],
+    params: &ParamContext,
+    origins: &HashMap<String, NetlistSourceLocation>,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    for (index, element) in elements.iter_mut().enumerate() {
+        poll_parse_abort(abort, index)?;
+        let origin = origins.get(&element.name);
+        let name = element.name.as_str();
+        let failure = |message: String| -> ParseWithAbortError {
+            match origin {
+                Some(origin) => ParseError::Syntax {
+                    line: origin.line,
+                    message: format!("{origin}: element '{name}': {message}"),
+                }
+                .into(),
+                None => ParseError::InvalidValue(format!("element '{name}': {message}")).into(),
+            }
+        };
+        let resolve = |expression: &str| -> Result<Value, ParseWithAbortError> {
+            crate::netlist::expr::eval_expression(expression, params)
+                .map_err(|error| failure(format!("{error}")))
+        };
+        if let ElementKind::Coupling {
+            coefficient,
+            coefficient_expr,
+            model,
+            ..
+        } = &mut element.kind
+            && let Some(expression) = coefficient_expr.take()
+        {
+            *coefficient = resolve(&expression)?;
+            if let Some(message) = crate::netlist::mutual_inductor::coupling_coefficient_error(
+                *coefficient,
+                model.is_some(),
+            ) {
+                return Err(failure(message));
+            }
+        }
+    }
     ensure_parse_not_aborted(abort)
 }
 

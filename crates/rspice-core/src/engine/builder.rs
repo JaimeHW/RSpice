@@ -5875,6 +5875,7 @@ impl Engine {
                 inductors,
                 coefficient,
                 model,
+                ..
             } = &element.kind
             else {
                 continue;
@@ -9666,6 +9667,7 @@ impl Engine {
                     inductors,
                     coefficient,
                     model,
+                    ..
                 } => {
                     if let Some(model) = model {
                         // Nonlinear CORE cards (single or multi-winding) are

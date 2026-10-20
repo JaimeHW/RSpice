@@ -21,12 +21,41 @@ fn reject_unexpected_tail(
     })
 }
 
+/// Read a scalar card field that may name parameters this pass cannot
+/// resolve yet: a subcircuit's instance parameters, or a root `.PARAM`
+/// declared later in the file. A plain number resolves now. An expression is
+/// kept with its value in the current scope and resolved again once its
+/// scope is known, the way a controlled source keeps its gain expression.
+fn expect_deferrable_scalar(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer: bool,
+    field: &str,
+) -> Result<(Value, Option<String>), ParseError> {
+    match take_deferrable_value(stream, params, true) {
+        Some(DeferrableValue::Resolved(value)) => Ok((value, None)),
+        Some(DeferrableValue::Deferred(expression)) => {
+            match stream.evaluate_expression(&expression, params) {
+                Ok(value) if !defer => Ok((value, None)),
+                Ok(value) => Ok((value, Some(expression))),
+                Err(_) => Ok((Value::NAN, Some(expression))),
+            }
+        }
+        None => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{field} requires a numeric value or parameter expression"),
+        }),
+    }
+}
+
 /// Parse coupling coefficient: K1 L1 L2 [L3...] coefficient [model]
 pub(super) fn parse_coupling(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
 
@@ -60,7 +89,17 @@ pub(super) fn parse_coupling(
         }
     }
 
-    let coefficient = expect_value(stream, line_num, params)?;
+    let (coefficient, coefficient_expr) = if matches!(stream.peek().kind, TokenKind::Number(_)) {
+        (expect_value(stream, line_num, params)?, None)
+    } else {
+        expect_deferrable_scalar(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            "Coupling coefficient",
+        )?
+    };
     // Xyce's nonlinear magnetic-core form appends a model name after the
     // coupling value (for example `K1 Lp1 1 CORE_MODEL`).  A single-winding
     // card without that model is not a valid mutual-inductor declaration;
@@ -96,15 +135,16 @@ pub(super) fn parse_coupling(
         None
     };
 
-    // Linear K cards retain signed winding polarity. Nonlinear CORE cards
-    // retain their existing nonnegative model-domain validation.
-    let minimum = if model.is_some() { 0.0 } else { -1.0 };
-    if !coefficient.is_finite() || !(minimum..=1.0).contains(&coefficient) {
+    // A deferred coefficient is validated once its scope resolves it.
+    if coefficient_expr.is_none()
+        && let Some(message) = crate::netlist::mutual_inductor::coupling_coefficient_error(
+            coefficient,
+            model.is_some(),
+        )
+    {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: format!(
-                "Invalid coupling coefficient {coefficient}: expected a finite value in [{minimum}, 1]"
-            ),
+            message,
         });
     }
 
@@ -122,6 +162,7 @@ pub(super) fn parse_coupling(
         kind: ElementKind::Coupling {
             inductors,
             coefficient,
+            coefficient_expr,
             model,
         },
         nodes: vec![], // Coupling doesn't have direct node connections

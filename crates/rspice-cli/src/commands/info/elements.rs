@@ -314,6 +314,7 @@ impl<'a> ElementDetails<'a> {
                 inductors,
                 coefficient,
                 model,
+                ..
             } => record!("coupling", inductors, coefficient, model),
             Subcircuit {
                 subckt_name,

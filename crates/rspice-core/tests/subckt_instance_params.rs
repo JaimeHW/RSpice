@@ -213,3 +213,41 @@ fn unresolvable_deferred_parameter_is_a_hard_error() {
         "error should identify the unresolved reference: {message}"
     );
 }
+
+fn ac_magnitude(deck: &str, node: &str, frequency: f64) -> f64 {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let point = Engine::default()
+        .run_ac(&netlist, &[frequency])
+        .expect("AC solves")
+        .remove(0);
+    let idx = point
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} missing from AC result"));
+    point.voltages[idx].norm()
+}
+
+/// ngspice 46 on audit deck k3.cir gives |V(s)| = 0.5303726 at 1 kHz with
+/// the instance's kc=0.5. The subcircuit default kc=0.9 gives 0.9487555,
+/// which is what RSpice reported while K read only the default.
+#[test]
+fn coupling_coefficient_override_reaches_the_mutual_inductance() {
+    let deck = "mutual inductor in subckt, param kc\n\
+         .subckt xfmr p s params: kc=0.9 lv=1m\n\
+         L1 p 0 {lv}\n\
+         L2 s 0 4m\n\
+         K1 L1 L2 {kc}\n\
+         .ends\n\
+         V1 in 0 AC 1\n\
+         R1 in p 10\n\
+         X1 p s xfmr kc=0.5\n\
+         R2 s 0 1k\n\
+         .ac lin 3 1k 100k\n\
+         .end\n";
+    let magnitude = ac_magnitude(deck, "s", 1.0e3);
+    assert!(
+        (magnitude - 0.5303726).abs() < 1.0e-6,
+        "|V(s)| = {magnitude}, ngspice 0.5303726"
+    );
+}
