@@ -5977,7 +5977,6 @@ mod tests {
         );
     }
 
-
     /// A root K card may cite a `.param` declared later in the file, as in
     /// ngspice; it used to fail as an undefined parameter.
     #[test]
