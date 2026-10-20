@@ -1,12 +1,10 @@
-//! New View — small modal on the dialog primitive: the target
-//! library/cell context, a view name, and the view type as chips.
+//! New View: a command form stating the target library and cell, asking for
+//! a view name and the view type.
 
 use super::shared::{DialogActionOutcome, LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, chip, input_row, kv_row};
+use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::AppState;
 use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, store_generated_symbol};
 
@@ -109,6 +107,25 @@ impl AppState {
     }
 }
 
+/// Why Create is waiting while the view has no name.
+const NEW_VIEW_NAME_MISSING: &str = "Enter a name for the view";
+
+/// What the line under the view name says when Create cannot run on it.
+enum NameLine {
+    /// Nothing typed yet: what Create waits for, not a refusal.
+    Missing,
+    /// A name the library would refuse, and why.
+    Refused(String),
+}
+
+fn new_view_name_line(name: &str) -> Option<NameLine> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Some(NameLine::Missing);
+    }
+    validate_lcv_name(name, "View name").map(NameLine::Refused)
+}
+
 impl RSpiceApp {
     pub(in crate::workbench) fn process_new_view_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.new_view_dialog {
@@ -125,66 +142,43 @@ impl RSpiceApp {
             self.state.dialogs.new_view_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
         let dialogs = &mut self.state.dialogs;
-        let can_create = !dialogs.new_view_name.trim().is_empty()
+        let name_refusal = new_view_name_line(&dialogs.new_view_name);
+        let can_create = name_refusal.is_none()
             && !dialogs.new_view_library.is_empty()
             && !dialogs.new_view_cell.is_empty()
             && is_creatable_view_type(dialogs.new_view_type)
             && catalog_current;
+        let error = dialogs.new_view_error.clone();
+        let name_id = egui::Id::new("library.new-view.name");
+        let type_names = CREATABLE_VIEW_TYPES.map(|view_type| view_type.display_name());
+        let mut type_index = CREATABLE_VIEW_TYPES
+            .iter()
+            .position(|view_type| *view_type == dialogs.new_view_type)
+            .unwrap_or_default();
 
-        let choice = Dialog::new("New view", "Create")
-            .description("Create a named view of the selected type in this library cell.")
-            .size(DialogSize::Transaction)
-            .ghost("Cancel")
+        let choice = CommandForm::new("New view", "Create")
+            .describe("Create a named view of the selected type in this library cell.")
             .primary_enabled(can_create)
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                let t = Tokens::get(ui.ctx());
-                let c = t.color;
-
-                kv_row(ui, "Library", &dialogs.new_view_library);
-                kv_row(ui, "Cell", &dialogs.new_view_cell);
-                ui.add_space(4.0);
-
-                input_row(ui, "View name", &mut dialogs.new_view_name);
-
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), t.metrics.row_h),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        let (label_rect, _) = ui.allocate_exact_size(
-                            egui::vec2(96.0, t.metrics.row_h),
-                            egui::Sense::hover(),
-                        );
-                        ui.painter().text(
-                            egui::pos2(label_rect.left(), label_rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            "Type",
-                            theme::sans(tokens::FS_1, FontWeight::Regular),
-                            c.text_dim,
-                        );
-                        for view_type in CREATABLE_VIEW_TYPES {
-                            if chip(
-                                ui,
-                                view_type.display_name(),
-                                dialogs.new_view_type == view_type,
-                            )
-                            .clicked()
-                            {
-                                dialogs.new_view_type = view_type;
-                            }
-                        }
+            // A refusal of the name stands under it; the slot holds only what
+            // belongs to no field, so it reserves nothing while empty.
+            .status(error.as_deref().map_or(Ok(None), Err))
+            .status_fixed_at_open()
+            .show(ctx, |rows| {
+                rows.value_mono("Library", &dialogs.new_view_library);
+                rows.value_mono("Cell", &dialogs.new_view_cell);
+                rows.text("View name", name_id, &mut dialogs.new_view_name, "");
+                rows.field_line(
+                    Some(name_id),
+                    match &name_refusal {
+                        None => FieldLine::Blank,
+                        Some(NameLine::Missing) => FieldLine::Derived(NEW_VIEW_NAME_MISSING),
+                        Some(NameLine::Refused(refusal)) => FieldLine::Error(refusal),
                     },
                 );
-
-                if let Some(error) = dialogs.new_view_error.clone() {
-                    ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new(error)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.err),
-                    );
+                if rows.choice("Type", &type_names, &mut type_index) {
+                    dialogs.new_view_type = CREATABLE_VIEW_TYPES[type_index];
                 }
+                Some(name_id)
             });
 
         match choice {
@@ -969,6 +963,69 @@ mod tests {
         assert!(state.dialogs.new_view_dialog);
         assert_eq!(state.dialogs.new_view_type, ViewType::Symbol);
         assert_eq!(state.dialogs.new_view_name, "symbol");
+    }
+
+    /// New view is a command form: a 420 pt card with Library and Cell on
+    /// its label/value grid, not a 760 pt transaction with its two facts
+    /// pushed to the far edge; and an empty name says what Create waits for.
+    #[test]
+    fn new_view_is_a_command_form_that_says_what_create_waits_for() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("form_test");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+        app.state
+            .open_new_view_dialog("form_test", "amp")
+            .expect("writable target");
+        app.state.dialogs.new_view_name.clear();
+
+        // Access updates are incremental: keep the latest of every node.
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..4 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| app.process_new_view_dialog(ctx),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        // The modal's own node is the whole screen. The surface is centred
+        // on it, and Create ends 12 pt in from the surface's right edge.
+        let create = nodes
+            .values()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Create")
+            })
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("Create has bounds");
+        let width = 2.0 * (create.x1 + 12.0) - 1440.0;
+        assert!(width <= 424.0, "New view is {width} pt wide");
+        assert!(nodes.values().any(|node| {
+            node.role() == egui::accesskit::Role::TextInput && node.label() == Some("View name")
+        }));
+        assert!(
+            nodes
+                .values()
+                .any(|node| node.value() == Some(NEW_VIEW_NAME_MISSING)),
+            "Create does not say what it waits for"
+        );
+        assert!(matches!(
+            new_view_name_line("bad name"),
+            Some(NameLine::Refused(_))
+        ));
+        assert!(new_view_name_line("symbol").is_none());
     }
 
     #[test]
