@@ -14,7 +14,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-use egui::{Context, Grid, RichText, ScrollArea, Ui};
+use egui::{Context, Grid, RichText, Ui};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ProjectSourceBundle, ProjectSourceLanguage};
@@ -49,6 +49,9 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
         if !state.platform.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
         }
+        if let Some(refusal) = generated_deck_refusal(state) {
+            return Err(refusal.to_owned());
+        }
         state.code.code_workspace.source_document_dialog = true;
         return Ok(());
     };
@@ -70,13 +73,26 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 /// Whether the lifecycle dialog can be opened for the visible page.
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
     match visible_language(state) {
-        None => state.platform.project_lifecycle.is_open(),
+        None => {
+            state.platform.project_lifecycle.is_open() && generated_deck_refusal(state).is_none()
+        }
         Some(language) => state
             .model
             .workspace
             .active_source_bundle(language)
             .is_some(),
     }
+}
+
+/// Why the netlist page has no source document to manage: the deck on it is
+/// generated from the schematic and read-only, and the project owns no deck
+/// or include of its own. The page's Create source makes one.
+pub(crate) fn generated_deck_refusal(state: &AppState) -> Option<&'static str> {
+    let content = &state.model.workspace.content;
+    let owned = content.netlist_descriptor.is_some()
+        || !content.retained_netlist_decks.is_empty()
+        || crate::workbench::documents::netlist_document::active_dependency(state).is_some();
+    (!owned).then_some("The generated netlist is read-only. Create a source deck to manage one.")
 }
 
 /// The source language of the document the dialog manages: a Verilog-A cell
@@ -99,15 +115,12 @@ struct DocumentFacts {
     language: ProjectSourceLanguage,
     logical_path: String,
     leaf: String,
-    identity: String,
     role: String,
     is_entry: bool,
     is_environment_lock: bool,
     editable: bool,
     is_root: bool,
-    shape: String,
     line_endings: MessageId,
-    bundle: String,
     validation_current: bool,
     imports: Vec<String>,
     imported_by: Vec<String>,
@@ -125,10 +138,10 @@ struct RevisionRow {
 struct NetlistLifecycleFacts {
     deck_id: Option<uuid::Uuid>,
     logical_path: String,
-    identity: String,
-    shape: String,
     line_endings: MessageId,
-    published_origin: String,
+    /// The file on disk the deck or include was saved to or opened from;
+    /// `None` for one that lives only inside the project.
+    native_path: Option<String>,
     history_count: usize,
     decks: Vec<(uuid::Uuid, String)>,
     operations_blocked: Option<String>,
@@ -136,10 +149,7 @@ struct NetlistLifecycleFacts {
     include_owned: bool,
 }
 
-fn netlist_lifecycle_facts(
-    app: &RSpiceApp,
-    messages: MessageCatalog,
-) -> Option<NetlistLifecycleFacts> {
+fn netlist_lifecycle_facts(app: &RSpiceApp) -> Option<NetlistLifecycleFacts> {
     let descriptor = app
         .state
         .model
@@ -182,32 +192,9 @@ fn netlist_lifecycle_facts(
             .to_ascii_lowercase()
             .cmp(&right.1.to_ascii_lowercase())
     });
-    let identity = match (descriptor, document) {
-        (Some(descriptor), Some(document)) => format!(
-            "{} · doc {} · rev {}",
-            descriptor
-                .deck_id
-                .simple()
-                .to_string()
-                .chars()
-                .take(12)
-                .collect::<String>(),
-            document
-                .id()
-                .as_uuid()
-                .simple()
-                .to_string()
-                .chars()
-                .take(12)
-                .collect::<String>(),
-            document.revision().get(),
-        ),
-        (None, None) => "No project-owned top deck has been created.".to_owned(),
-        _ => return None,
-    };
     let active_dependency =
         crate::workbench::documents::netlist_document::active_dependency(&app.state);
-    let published_origin = active_dependency.map_or_else(
+    let native_path = active_dependency.map_or_else(
         || {
             app.state
                 .model
@@ -215,17 +202,9 @@ fn netlist_lifecycle_facts(
                 .content
                 .netlist_source_path
                 .as_ref()
-                .map_or_else(
-                    || messages.text(MessageId::NetlistNotPublished),
-                    |path| path.display().to_string(),
-                )
+                .map(|path| path.display().to_string())
         },
-        |dependency| {
-            dependency
-                .locator()
-                .native_origin()
-                .map_or_else(|| "Retained inside the project".to_owned(), str::to_owned)
-        },
+        |dependency| dependency.locator().native_origin().map(str::to_owned),
     );
     let include_owned = active_dependency.is_some()
         && crate::workbench::documents::netlist_document::active_dependency_is_owned(&app.state);
@@ -239,42 +218,6 @@ fn netlist_lifecycle_facts(
             || root_path.clone(),
             |dependency| dependency.locator().display_name().to_owned(),
         ),
-        identity: active_dependency.map_or(identity, |dependency| {
-            format!(
-                "{} · included by {root_path}",
-                dependency.locator().logical_identity()
-            )
-        }),
-        shape: active_dependency.map_or_else(
-            || {
-                document.map_or_else(
-                    || "No authored source".to_owned(),
-                    |document| {
-                        messages.format(
-                            MessageId::CodeSourceContentShape,
-                            &[
-                                ("lines", &document.source().lines().count().to_string()),
-                                ("bytes", &document.source().len().to_string()),
-                            ],
-                        )
-                    },
-                )
-            },
-            |dependency| {
-                dependency.source().map_or_else(
-                    || "Unresolved include".to_owned(),
-                    |source| {
-                        messages.format(
-                            MessageId::CodeSourceContentShape,
-                            &[
-                                ("lines", &source.lines().count().to_string()),
-                                ("bytes", &source.len().to_string()),
-                            ],
-                        )
-                    },
-                )
-            },
-        ),
         line_endings: active_dependency
             .and_then(crate::state::DependencyMetadata::source)
             .map_or_else(
@@ -285,7 +228,7 @@ fn netlist_lifecycle_facts(
                 },
                 line_ending_summary,
             ),
-        published_origin,
+        native_path,
         history_count: descriptor.map_or(0, |descriptor| descriptor.revision_history.len()),
         decks,
         operations_blocked: active_dependency.and_then(|_| {
@@ -336,23 +279,6 @@ fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentF
     )?;
     let bundle = app.state.model.workspace.active_source_bundle(language)?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
-    let identity = bundle.document_id(&logical_path).map_or_else(
-        || messages.text(MessageId::CodeSourceIdentityNotRetained),
-        |id| {
-            let revision = bundle
-                .document_revision(&logical_path)
-                .map_or_else(|| "-".to_owned(), |revision| revision.get().to_string());
-            format!(
-                "{} \u{00b7} rev {revision}",
-                id.as_uuid()
-                    .simple()
-                    .to_string()
-                    .chars()
-                    .take(12)
-                    .collect::<String>()
-            )
-        },
-    );
     let history = bundle
         .revision_history()
         .iter()
@@ -368,7 +294,6 @@ fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentF
     Some(DocumentFacts {
         language,
         leaf: leaf_name(&logical_path),
-        identity,
         role: role_label(messages, bundle.role_for_path(&logical_path)),
         is_entry: bundle.role_for_path(&logical_path)
             == Some(crate::state::ProjectSourceRole::AutomationEntry),
@@ -384,21 +309,7 @@ fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentF
             &logical_path,
             bundle.root().logical_path(),
         ),
-        shape: messages.format(
-            MessageId::CodeSourceContentShape,
-            &[
-                ("lines", &content.lines().count().to_string()),
-                ("bytes", &content.len().to_string()),
-            ],
-        ),
         line_endings: line_ending_summary(content),
-        bundle: messages.format(
-            MessageId::CodeSourceAgainstRevision,
-            &[
-                ("revision", &bundle.revision().get().to_string()),
-                ("digest", &short_digest(bundle.closure_digest())),
-            ],
-        ),
         validation_current: bundle.validation_is_current(),
         imports: dependency_paths(bundle, &logical_path, true),
         imported_by: dependency_paths(bundle, &logical_path, false),
@@ -548,7 +459,7 @@ impl RSpiceApp {
             &[("document", &facts.leaf)],
         ))
         .size(DialogSize::SimulationWorkflow)
-        .initial_height(600.0)
+        .overlay_scrollbar()
         .primary_on_enter(false)
         .initial_focus(DialogInitialFocus::BodyControl);
         if let Some(reason) = facts.block_reason {
@@ -675,7 +586,7 @@ impl RSpiceApp {
 
     fn render_netlist_source_document_dialog(&mut self, ctx: &Context) {
         let messages = self.state.workbench.messages();
-        let Some(facts) = netlist_lifecycle_facts(self, messages) else {
+        let Some(facts) = netlist_lifecycle_facts(self) else {
             self.state.code.code_workspace.source_document_dialog = false;
             self.state.code.netlist.lifecycle_dialog.transaction = None;
             self.state.code.netlist.lifecycle_dialog.include_transaction = None;
@@ -690,7 +601,9 @@ impl RSpiceApp {
             &[("document", &facts.logical_path)],
         ))
         .size(DialogSize::SimulationWorkflow)
-        .initial_height(600.0)
+        // The rows fit at every desktop size; a bar would only reserve a
+        // gutter that left the right edge wider than the left.
+        .overlay_scrollbar()
         .primary_on_enter(false)
         .initial_focus(DialogInitialFocus::BodyControl);
         if let Some(reason) = facts.operations_blocked.as_deref() {
@@ -837,7 +750,8 @@ impl RSpiceApp {
             NetlistLifecycleAction::SetIncludeSearchPaths(paths) => {
                 if let Err(error) = self
                     .state
-                    .model.workspace
+                    .model
+                    .workspace
                     .content.project
                     .set_include_search_paths(paths)
                     .map_err(|error| error.to_string())
@@ -981,26 +895,22 @@ fn lifecycle_body(
     messages: MessageCatalog,
 ) -> LifecycleAction {
     let mut action = LifecycleAction::None;
-    // One body around every section, so they stack on the section gap rather
-    // than on the scroll area's item spacing.
-    ScrollArea::vertical()
-        .id_salt("source-document-lifecycle")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            panel_body(ui, |ui| {
-                if let Some(chosen) = current_document(ui, facts, messages) {
-                    action = chosen;
-                }
-                operations(ui, facts, &mut action, messages);
-                if let Some(chosen) = operation_review(ui, state, messages) {
-                    action = chosen;
-                }
-                includes(ui, facts, messages);
-                if let Some(chosen) = revision_history(ui, state, facts, messages) {
-                    action = chosen;
-                }
-            });
-        });
+    // One body around every section, so they stack on the section gap. The
+    // dialog's body scrolls when the sections outgrow it; a scroll area of
+    // its own here held the dialog at full height and withheld a gutter.
+    panel_body(ui, |ui| {
+        if let Some(chosen) = current_document(ui, facts, messages) {
+            action = chosen;
+        }
+        operations(ui, facts, &mut action, messages);
+        if let Some(chosen) = operation_review(ui, state, messages) {
+            action = chosen;
+        }
+        includes(ui, facts, messages);
+        if let Some(chosen) = revision_history(ui, state, facts, messages) {
+            action = chosen;
+        }
+    });
     action
 }
 
@@ -1011,201 +921,171 @@ fn netlist_lifecycle_body(
     messages: MessageCatalog,
 ) -> NetlistLifecycleAction {
     let mut action = NetlistLifecycleAction::None;
-    ScrollArea::vertical()
-        .id_salt("netlist-document-lifecycle")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            panel_body(ui, |ui| {
-                code_inspector_section(
+    // The dialog's body scrolls when a review opened below the rows outgrows
+    // it; a scroll area of its own here only withheld a gutter on the right.
+    panel_body(ui, |ui| {
+        code_inspector_section(
+            ui,
+            &messages.text(MessageId::CodeSourceCurrentDocument),
+            None,
+            None,
+            |ui| {
+                if facts.include_identity.is_some() {
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::NetlistLogicalIdentity),
+                        facts.include_identity.as_deref().unwrap_or_default(),
+                    );
+                } else if facts.decks.len() <= 1 {
+                    // One deck is nothing to choose between.
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::NetlistTopDeck),
+                        &facts.logical_path,
+                    );
+                } else {
+                    let choices = facts
+                        .decks
+                        .iter()
+                        .map(|(_, path)| (path.clone(), path.clone()))
+                        .collect::<Vec<_>>();
+                    let mut selected = facts.logical_path.clone();
+                    if crate::workbench::design_system::property_row_combo(
+                        ui,
+                        &messages.text(MessageId::NetlistTopDeck),
+                        "netlist-top-deck-selector",
+                        &mut selected,
+                        &choices,
+                        facts.operations_blocked.is_none()
+                            && state.code.netlist.lifecycle_dialog.transaction.is_none(),
+                    ) && let Some((deck_id, _)) =
+                        facts.decks.iter().find(|(_, path)| *path == selected)
+                        && Some(*deck_id) != facts.deck_id
+                    {
+                        action = NetlistLifecycleAction::SelectDeck(*deck_id);
+                    }
+                }
+                // The deck's name inside the project is the row above;
+                // a path is stated only where it says something new,
+                // the file on disk it was saved to or opened from.
+                if facts.include_identity.is_some() {
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSourcePath),
+                        facts.native_path.as_deref().unwrap_or(&facts.logical_path),
+                    );
+                } else if let Some(path) = facts.native_path.as_deref() {
+                    property_row(ui, &messages.text(MessageId::CodeSourcePath), path);
+                }
+                property_row(
                     ui,
-                    &messages.text(MessageId::CodeSourceCurrentDocument),
-                    None,
-                    None,
-                    |ui| {
-                        if facts.include_identity.is_some() {
-                            property_row(
-                                ui,
-                                &messages.text(MessageId::NetlistLogicalIdentity),
-                                facts.include_identity.as_deref().unwrap_or_default(),
-                            );
-                        } else if facts.decks.is_empty() {
-                            property_row(
-                                ui,
-                                &messages.text(MessageId::NetlistTopDeck),
-                                &facts.logical_path,
-                            );
-                        } else {
-                            let choices = facts
-                                .decks
-                                .iter()
-                                .map(|(_, path)| (path.clone(), path.clone()))
-                                .collect::<Vec<_>>();
-                            let mut selected = facts.logical_path.clone();
-                            if crate::workbench::design_system::property_row_combo(
-                                ui,
-                                &messages.text(MessageId::NetlistTopDeck),
-                                "netlist-top-deck-selector",
-                                &mut selected,
-                                &choices,
-                                facts.operations_blocked.is_none()
-                                    && state.code.netlist.lifecycle_dialog.transaction.is_none(),
-                            ) && let Some((deck_id, _)) =
-                                facts.decks.iter().find(|(_, path)| *path == selected)
-                                && Some(*deck_id) != facts.deck_id
-                            {
-                                action = NetlistLifecycleAction::SelectDeck(*deck_id);
-                            }
-                        }
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeSourcePath),
-                            &facts.logical_path,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeSourceIdentity),
-                            &facts.identity,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeSourceContent),
-                            &facts.shape,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeSourceLineEndings),
-                            &messages.text(facts.line_endings),
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::NetlistPublishedOrigin),
-                            &facts.published_origin,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::NetlistTopDeckCatalog),
-                            &messages.format(
-                                if facts.decks.len() == 1 {
-                                    MessageId::CodeSourceDocumentSingular
-                                } else {
-                                    MessageId::CodeSourceDocuments
-                                },
-                                &[("count", &facts.decks.len().to_string())],
-                            ),
-                        );
-                    },
+                    &messages.text(MessageId::CodeSourceLineEndings),
+                    &messages.text(facts.line_endings),
                 );
-                code_inspector_section(
-                    ui,
-                    &messages.text(MessageId::CodeSourceFileOperations),
-                    None,
-                    None,
-                    |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                            let transaction_open =
-                                state.code.netlist.lifecycle_dialog.transaction.is_some()
-                                    || state
-                                        .code
-                                        .netlist
-                                        .lifecycle_dialog
-                                        .include_transaction
-                                        .is_some();
-                            if facts.include_identity.is_some() {
-                                if Button::new(&messages.text(MessageId::NetlistCopyProject))
-                                    .enabled(!facts.include_owned && !transaction_open)
-                                    .show(ui)
-                                    .clicked()
-                                {
-                                    action = NetlistLifecycleAction::CopyIncludeOwnership;
-                                }
-                                for (label, candidate) in [
-                                    (MessageId::CodeSourceRename, CodeSourceFileAction::Rename),
-                                    (MessageId::CodeSourceMove, CodeSourceFileAction::Move),
-                                ] {
-                                    let response = Button::new(&messages.text(label))
-                                        .enabled(facts.include_owned && !transaction_open)
-                                        .show(ui);
-                                    if response.clicked() {
-                                        action = NetlistLifecycleAction::BeginInclude(candidate);
-                                    }
-                                }
-                                let response = Button::new(
-                                    &messages.text(MessageId::NetlistReleaseProjectOwnership),
-                                )
+            },
+        );
+        code_inspector_section(
+            ui,
+            &messages.text(MessageId::CodeSourceFileOperations),
+            None,
+            None,
+            |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                    let transaction_open =
+                        state.code.netlist.lifecycle_dialog.transaction.is_some()
+                            || state
+                                .code
+                                .netlist
+                                .lifecycle_dialog
+                                .include_transaction
+                                .is_some();
+                    if facts.include_identity.is_some() {
+                        if Button::new(&messages.text(MessageId::NetlistCopyProject))
+                            .enabled(!facts.include_owned && !transaction_open)
+                            .show(ui)
+                            .clicked()
+                        {
+                            action = NetlistLifecycleAction::CopyIncludeOwnership;
+                        }
+                        for (label, candidate) in [
+                            (MessageId::CodeSourceRename, CodeSourceFileAction::Rename),
+                            (MessageId::CodeSourceMove, CodeSourceFileAction::Move),
+                        ] {
+                            let response = Button::new(&messages.text(label))
                                 .enabled(facts.include_owned && !transaction_open)
                                 .show(ui);
-                                if response.clicked() {
-                                    action = NetlistLifecycleAction::ReleaseIncludeOwnership;
-                                }
-                                if !facts.include_owned {
-                                    response.on_disabled_hover_text(
-                                    facts.operations_blocked.as_deref().unwrap_or(
-                                        "This include is already a read-only referenced source.",
-                                    ),
-                                );
-                                }
-                                ui.label(
-                                    messages.text(MessageId::NetlistReleaseOwnershipDescription),
-                                );
-                            } else {
-                                if Button::new(&messages.text(if cfg!(target_arch = "wasm32") {
-                                    MessageId::NetlistDownloadSourceCopy
-                                } else {
-                                    MessageId::NetlistSaveSourceAs
-                                }))
-                                .enabled(facts.deck_id.is_some() && !transaction_open)
-                                .show(ui)
-                                .clicked()
-                                {
-                                    action = NetlistLifecycleAction::SaveSourceAs;
-                                }
-                                for (label, candidate) in FILE_OPERATIONS {
-                                    let enabled = facts.operations_blocked.is_none()
-                                        && !transaction_open
-                                        && (facts.deck_id.is_some()
-                                            || candidate == CodeSourceFileAction::New);
-                                    let response = Button::new(&messages.text(label))
-                                        .enabled(enabled)
-                                        .destructive(candidate == CodeSourceFileAction::Delete)
-                                        .show(ui);
-                                    if response.clicked() {
-                                        action = NetlistLifecycleAction::Begin(candidate);
-                                    }
-                                    if let Some(reason) = facts.operations_blocked.as_deref() {
-                                        response.on_disabled_hover_text(reason);
-                                    }
-                                }
-                                if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
-                                    .enabled(
-                                        facts.history_count > 0
-                                            && state
-                                                .code
-                                                .netlist
-                                                .lifecycle_dialog
-                                                .transaction
-                                                .is_none(),
-                                    )
-                                    .show(ui)
-                                    .clicked()
-                                {
-                                    action = NetlistLifecycleAction::OpenHistory;
-                                }
+                            if response.clicked() {
+                                action = NetlistLifecycleAction::BeginInclude(candidate);
                             }
-                        });
-                    },
-                );
-                if let Some(chosen) = include_search_paths(ui, state, messages) {
-                    action = chosen;
-                }
-                if let Some(chosen) = netlist_operation_review(ui, state, messages) {
-                    action = chosen;
-                }
-                if let Some(chosen) = netlist_include_operation_review(ui, state, messages) {
-                    action = chosen;
-                }
-            })
-        });
+                        }
+                        let response =
+                            Button::new(&messages.text(MessageId::NetlistReleaseProjectOwnership))
+                                .enabled(facts.include_owned && !transaction_open)
+                                .show(ui);
+                        if response.clicked() {
+                            action = NetlistLifecycleAction::ReleaseIncludeOwnership;
+                        }
+                        if !facts.include_owned {
+                            response.on_disabled_hover_text(
+                                facts.operations_blocked.as_deref().unwrap_or(
+                                    "This include is already a read-only referenced source.",
+                                ),
+                            );
+                        }
+                        ui.label(messages.text(MessageId::NetlistReleaseOwnershipDescription));
+                    } else {
+                        if Button::new(&messages.text(if cfg!(target_arch = "wasm32") {
+                            MessageId::NetlistDownloadSourceCopy
+                        } else {
+                            MessageId::NetlistSaveSourceAs
+                        }))
+                        .enabled(facts.deck_id.is_some() && !transaction_open)
+                        .show(ui)
+                        .clicked()
+                        {
+                            action = NetlistLifecycleAction::SaveSourceAs;
+                        }
+                        for (label, candidate) in FILE_OPERATIONS {
+                            let enabled = facts.operations_blocked.is_none()
+                                && !transaction_open
+                                && (facts.deck_id.is_some()
+                                    || candidate == CodeSourceFileAction::New);
+                            let response = Button::new(&messages.text(label))
+                                .enabled(enabled)
+                                .destructive(candidate == CodeSourceFileAction::Delete)
+                                .show(ui);
+                            if response.clicked() {
+                                action = NetlistLifecycleAction::Begin(candidate);
+                            }
+                            if let Some(reason) = facts.operations_blocked.as_deref() {
+                                response.on_disabled_hover_text(reason);
+                            }
+                        }
+                        if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
+                            .enabled(
+                                facts.history_count > 0
+                                    && state.code.netlist.lifecycle_dialog.transaction.is_none(),
+                            )
+                            .show(ui)
+                            .clicked()
+                        {
+                            action = NetlistLifecycleAction::OpenHistory;
+                        }
+                    }
+                });
+            },
+        );
+        if let Some(chosen) = include_search_paths(ui, state, messages) {
+            action = chosen;
+        }
+        if let Some(chosen) = netlist_operation_review(ui, state, messages) {
+            action = chosen;
+        }
+        if let Some(chosen) = netlist_include_operation_review(ui, state, messages) {
+            action = chosen;
+        }
+    });
     action
 }
 
@@ -1605,28 +1485,13 @@ fn current_document(
                 &messages.text(MessageId::CodeSourcePath),
                 &facts.logical_path,
             );
-            property_row(
-                ui,
-                &messages.text(MessageId::CodeSourceIdentity),
-                &facts.identity,
-            );
             if let Some(chosen) = role_control(ui, facts, messages) {
                 action = Some(chosen);
             }
             property_row(
                 ui,
-                &messages.text(MessageId::CodeSourceContent),
-                &facts.shape,
-            );
-            property_row(
-                ui,
                 &messages.text(MessageId::CodeSourceLineEndings),
                 &messages.text(facts.line_endings),
-            );
-            property_row(
-                ui,
-                &messages.text(MessageId::CodeSourceBundle),
-                &facts.bundle,
             );
             // A current validation is the state this row is in nearly always,
             // and saying so is the absence of a problem.
@@ -2289,15 +2154,137 @@ mod tests {
     /// An empty project exposes the lifecycle manager so the first top deck
     /// can be created without a generated or imported predecessor.
     #[test]
-    fn an_unowned_netlist_page_can_open_the_top_deck_lifecycle() {
+    fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
         let mut app = RSpiceApp::test_instance();
         app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
+        // The generated deck is read-only and the project owns no other:
+        // there is nothing to manage, and the refusal says so.
+        assert!(!source_document_dialog_is_available(&app.state));
+        let refusal = open_source_document_dialog(&mut app.state).unwrap_err();
+        assert!(refusal.contains("read-only"), "{refusal}");
+        assert!(!app.state.code.code_workspace.source_document_dialog);
+
+        crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
+            &mut app.state,
+            CodeSourceFileAction::New,
+        )
+        .unwrap();
+        crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+            &mut app.state,
+        )
+        .unwrap();
         assert!(source_document_dialog_is_available(&app.state));
         open_source_document_dialog(&mut app.state).unwrap();
         assert!(app.state.code.code_workspace.source_document_dialog);
-        let facts = netlist_lifecycle_facts(&app, english()).unwrap();
-        assert!(facts.deck_id.is_none());
-        assert!(facts.decks.is_empty());
+        let facts = netlist_lifecycle_facts(&app).unwrap();
+        assert!(facts.deck_id.is_some());
+        assert_eq!(facts.decks.len(), 1);
+    }
+
+    /// The deck's properties are its name, where it is on disk and its line
+    /// endings. The dialog used to add a twelve-digit deck and document
+    /// identity, a line and byte count, "Not published to a reopenable
+    /// native path" and a count of the project's decks.
+    #[test]
+    fn an_owned_deck_states_its_properties_without_identity_jargon() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = owned_deck_app();
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| app.render_source_document_dialog(ui.ctx()),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        let says = |text: &str| {
+            nodes.values().any(|node| {
+                node.label().is_some_and(|label| label.contains(text))
+                    || node.value().is_some_and(|value| value.contains(text))
+            })
+        };
+        assert!(says("Top deck"), "the deck row is missing");
+        assert!(says("Line endings"), "the line endings row is missing");
+        for jargon in [
+            "Identity",
+            "Published origin",
+            "reopenable",
+            "Project top decks",
+            " bytes",
+        ] {
+            assert!(!says(jargon), "the dialog states {jargon:?}");
+        }
+    }
+
+    /// An Automation or Verilog-A document states its path, role, line
+    /// endings and, when stale, its validation. Its twelve-digit identity,
+    /// line and byte count and bundle digest are gone.
+    #[test]
+    fn a_source_document_states_its_properties_without_identity_jargon() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
+        open_source_document_dialog(&mut app.state).unwrap();
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| app.render_source_document_dialog(ui.ctx()),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        let says = |text: &str| {
+            nodes.values().any(|node| {
+                node.label().is_some_and(|label| label.contains(text))
+                    || node.value().is_some_and(|value| value.contains(text))
+            })
+        };
+        assert!(says("Path"), "the path row is missing");
+        assert!(says("Line endings"), "the line endings row is missing");
+        for jargon in ["Identity", " bytes", "Bundle"] {
+            assert!(!says(jargon), "the dialog states {jargon:?}");
+        }
+    }
+
+    /// A project that owns one authored top deck, on the netlist page.
+    fn owned_deck_app() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        app.state.model.preferences.set_toggle(
+            crate::workbench::preferences::TogglePreference::ReducedMotion,
+            true,
+        );
+        app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
+        crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
+            &mut app.state,
+            CodeSourceFileAction::New,
+        )
+        .unwrap();
+        crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+            &mut app.state,
+        )
+        .unwrap();
+        open_source_document_dialog(&mut app.state).unwrap();
+        app
     }
 }
 
