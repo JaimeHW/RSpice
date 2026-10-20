@@ -1883,17 +1883,23 @@ impl SemanticAnalyzer {
         if dimensions.is_empty() {
             return (None, Vec::new());
         }
+        // A use of a refused array is not a second error: without this, every
+        // read of `m` added "Undeclared symbol: 'm'" after the refusal.
+        let refused = |analyzer: &mut Self| -> (Option<VectorBounds>, Vec<VectorBounds>) {
+            analyzer.refused_declarations.insert(name.into());
+            (None, Vec::new())
+        };
         let mut axes = Vec::with_capacity(dimensions.len());
         for dimension in dimensions {
-            let Some(axis) = self.resolve_vector_range(
-                Some(&VectorRange {
+            let Some(axis) = self.resolve_constant_range(
+                &VectorRange {
                     msb: dimension.start.clone(),
                     lsb: dimension.end.clone(),
                     span: dimension.span,
-                }),
+                },
                 &format!("unpacked array {name}"),
             ) else {
-                return (None, Vec::new());
+                return refused(self);
             };
             axes.push(axis);
         }
@@ -1901,14 +1907,20 @@ impl SemanticAnalyzer {
         let Ok(layout) =
             crate::array_index::UnpackedArrayLayout::new(&bounds, Self::MAX_ARRAY_ELEMENTS)
         else {
+            // The limit is on entries, whatever each entry's width.
+            let entries = axes.iter().fold(1_u128, |entries, axis| {
+                entries.saturating_mul(u128::from(axis.msb.abs_diff(axis.lsb)) + 1)
+            });
+            let ranges: String = axes.iter().map(|axis| axis.spelling()).collect();
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "unpacked array `{name}` exceeds the supported {} elements",
+                    "unpacked array `{name}` {ranges} has {entries} entries; this compiler \
+                     supports at most {} entries per array",
                     Self::MAX_ARRAY_ELEMENTS
                 )),
                 dimensions[0].span,
             );
-            return (None, Vec::new());
+            return refused(self);
         };
         let flat = if axes.len() == 1 {
             axes[0]
@@ -1950,6 +1962,31 @@ impl SemanticAnalyzer {
         keyword: &str,
     ) -> Option<VectorBounds> {
         let range = range?;
+        let bounds = self.resolve_constant_range(range, keyword)?;
+        if bounds.width() > MAX_DIGITAL_VECTOR_WIDTH {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "`{keyword}` vector {} is {} bits; this compiler supports at most {} \
+                     bits per signal",
+                    bounds.spelling(),
+                    u128::from(bounds.msb.abs_diff(bounds.lsb)) + 1,
+                    MAX_DIGITAL_VECTOR_WIDTH
+                )),
+                range.span,
+            );
+            return None;
+        }
+        Some(bounds)
+    }
+
+    /// The constant bounds of a range, in either direction, with no limit on
+    /// how many positions they span: a packed range's limit is bits, an
+    /// unpacked dimension's is entries, and each caller states its own.
+    fn resolve_constant_range(
+        &mut self,
+        range: &VectorRange,
+        keyword: &str,
+    ) -> Option<VectorBounds> {
         let bound = |expression| {
             crate::canonical_ir::digital_lower::selector_constant(
                 expression,
@@ -1997,21 +2034,7 @@ impl SemanticAnalyzer {
             );
             return None;
         };
-        let bounds = VectorBounds { msb, lsb };
-        if bounds.width() > MAX_DIGITAL_VECTOR_WIDTH {
-            self.record_error_at(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "`{keyword}` vector {} is {} bits; this compiler supports at most {} \
-                     bits per signal",
-                    bounds.spelling(),
-                    u128::from(bounds.msb.abs_diff(bounds.lsb)) + 1,
-                    MAX_DIGITAL_VECTOR_WIDTH
-                )),
-                range.span,
-            );
-            return None;
-        }
-        Some(bounds)
+        Some(VectorBounds { msb, lsb })
     }
 
     // ------------------------------------------------------------------

@@ -373,6 +373,24 @@ fn vector_bounds_must_be_constant_and_bounded() {
     }
 }
 
+/// An unpacked array's limit is on entries, whatever each entry's width; it
+/// was refused as a "vector" of "65537 bits", and every later use of the
+/// array added "Undeclared symbol: 'm'".
+#[test]
+fn an_unpacked_array_past_the_entry_limit_is_refused_once_in_entries() {
+    let message = analyze_error(&digital_module(
+        "    reg [7:0] m [0:65536];\n\
+         \x20   initial begin m[0] = 8'h5a; m[1] = m[0]; end",
+    ));
+    assert!(
+        message.contains("unpacked array `m` [0:65536] has 65537 entries")
+            && message.contains("at most 65536 entries per array")
+            && !message.contains("bits")
+            && !message.contains("Undeclared"),
+        "{message}"
+    );
+}
+
 #[test]
 fn digital_bounds_outside_the_index_range_are_refused_before_conversion() {
     for range in [

@@ -446,6 +446,9 @@ pub struct SemanticAnalyzer {
     /// Compile output tasks as warned no-ops
     /// ([`crate::CompilerOptions::discard_output_tasks`]).
     discard_output_tasks: bool,
+    /// Names whose declaration was refused: a use of one is not reported
+    /// again as an undeclared symbol.
+    refused_declarations: HashSet<SmolStr>,
     /// User-defined analog functions of the module under analysis
     user_functions: HashMap<SmolStr, FunctionDef>,
     effectful_functions: HashSet<SmolStr>,
@@ -580,6 +583,7 @@ impl SemanticAnalyzer {
             functions: FunctionRegistry::new(),
             symbols: SymbolTable::new(),
             errors: Vec::new(),
+            refused_declarations: HashSet::new(),
             user_functions: HashMap::new(),
             effectful_functions: HashSet::new(),
             guard_stack: Vec::new(),
@@ -761,6 +765,7 @@ impl SemanticAnalyzer {
                 }
                 self.symbols = SymbolTable::new();
                 self.errors.clear();
+                self.refused_declarations.clear();
                 self.user_functions.clear();
                 self.guard_stack.clear();
                 self.region_stack.clear();
@@ -2460,8 +2465,15 @@ impl SemanticAnalyzer {
 
         // Surface every recorded diagnostic instead of silently succeeding
         if !self.errors.is_empty() {
+            let refused = std::mem::take(&mut self.refused_declarations);
             let errors = std::mem::take(&mut self.errors)
                 .into_iter()
+                .filter(|error| {
+                    !matches!(
+                        &error.kind,
+                        SemanticErrorKind::UndeclaredSymbol { name } if refused.contains(name)
+                    )
+                })
                 .map(CompileError::Semantic)
                 .collect();
             return Err(CompileError::multiple(errors));
