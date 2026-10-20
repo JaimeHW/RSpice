@@ -1321,16 +1321,24 @@ mod tests {
     }
 
     #[test]
-    fn an_event_time_no_timescale_carries_names_the_file_and_the_node() {
+    fn an_event_time_no_tick_carries_names_the_file_and_the_node() {
+        // A quarter femtosecond rounds onto tick zero, which already holds a
+        // different value.
         let trace = DigitalTrace {
             node_name: "clk".to_string(),
-            points: vec![DigitalTracePoint {
-                time: 1.5e-15,
-                value: DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
-            }],
+            points: vec![
+                DigitalTracePoint {
+                    time: 0.0,
+                    value: DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
+                },
+                DigitalTracePoint {
+                    time: 0.25e-15,
+                    value: DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
+                },
+            ],
         };
         let error = event_document(Path::new("run.vcd"), &[trace], &[], &[])
-            .expect_err("half a femtosecond has no exact tick at any timescale");
+            .expect_err("two values of one signal cannot share a femtosecond tick");
         let message = error.to_string();
         assert!(
             message.contains("run.vcd") && message.contains("clk"),
