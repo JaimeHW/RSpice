@@ -108,6 +108,23 @@ pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandCon
     Some(context)
 }
 
+/// Why [`resolve_veriloga_compile`] finds nothing to compile, checked in its
+/// own order, so a grey Compile row names the reason the compile would have
+/// been refused.
+pub(crate) fn veriloga_compile_refusal(app: &RSpiceApp) -> &'static str {
+    if app.state.workbench.safe_mode.project_read_only() {
+        "the project is open read-only"
+    } else if !app.state.project_lifecycle.is_open() {
+        "no project is open"
+    } else if app.state.workspace.content.active_view_type() != crate::state::ViewType::VerilogA {
+        "open a Verilog-A cell view in Design"
+    } else if app.state.ui.code_workspace.veriloga.pending.is_some() {
+        "a Verilog-A compile is already running"
+    } else {
+        "the Verilog-A cell view has no source to compile"
+    }
+}
+
 fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
     use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, active_dependency, active_dependency_is_owned,

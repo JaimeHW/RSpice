@@ -1334,7 +1334,16 @@ impl Command {
             Self::CheckAndSave if app.state.schematic_edit_read_only() => {
                 "the active schematic is read-only"
             }
-            Self::RunSimulation => "active plan is not runnable",
+            // An unrunnable plan stays enabled on purpose, so the run says
+            // why it cannot start; this row is grey only while one runs, or,
+            // on the netlist page, while the deck there cannot run.
+            Self::RunSimulation
+                if app.state.simulation.execution.has_active_execution()
+                    || app.state.simulation.execution.trigger_simulation =>
+            {
+                "a run is already in progress"
+            }
+            Self::RunSimulation => "the netlist on this page cannot run yet",
             Self::ManageSimulationPlans => {
                 "the active simulation plan has no stable analysis identity to manage"
             }
@@ -1430,9 +1439,19 @@ impl Command {
             Self::ModelCreateProjectCopy => super::selected_model_for_project_copy(app)
                 .err()
                 .unwrap_or("the selected model cannot be copied into the project"),
-            Self::ModelEditor => super::selected_project_model_for_editor(app)
-                .err()
-                .unwrap_or("the selected model cannot be opened for inspection"),
+            // Correlation opens on the same selected model the editor does.
+            Self::ModelEditor | Self::ModelCorrelation => {
+                super::selected_project_model_for_editor(app)
+                    .err()
+                    .unwrap_or("the selected model cannot be opened for inspection")
+            }
+            Self::ToggleLinkedCursors if app.state.workbench.workspace != Workspace::Results => {
+                "open a result in Results"
+            }
+            Self::ToggleLinkedCursors | Self::ExpressionDiagnostics => {
+                "no result dataset is available"
+            }
+            Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),
             Self::ModelSaveRevision if app.state.workbench.safe_mode.project_read_only() => {
                 "the project is open read-only"
             }

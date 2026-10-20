@@ -1183,6 +1183,27 @@ fn every_menu_shows_exactly_its_pinned_rows() {
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n\n"));
 }
 
+/// Run is grey only while a run is in progress: an unrunnable plan stays
+/// enabled on purpose, so the run itself can say why it cannot start. The
+/// grey row said the plan was not runnable, which was never the reason.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_grey_run_row_says_a_run_is_already_in_progress() {
+    let mut app = title_test_app();
+    app.state.simulation.execution.trigger_simulation = true;
+    assert_eq!(
+        Command::RunSimulation.availability(&app),
+        CommandAvailability::Disabled("a run is already in progress")
+    );
+    let rows = menu_pin(ApplicationMenu::Simulate.entries(), &app);
+    assert!(
+        rows.iter().any(
+            |row| row == "Run active plan | start-run | F5 | off: a run is already in progress"
+        ),
+        "{rows:?}"
+    );
+}
+
 /// A build with no cloud endpoints can never host a live session or publish,
 /// so the File menu leaves both rows out instead of showing them grey for
 /// good, and the rule that framed them goes with them.
@@ -1418,9 +1439,9 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Add result comparison… | compare-datasets |  | off: open an active result document",
             "Report page and datasheet editor… | report-page-editor |  | on",
             "---",
-            "Linked A/B cursors | toggle-linked-cursors | Shift+C | off: command is unavailable in this context",
+            "Linked A/B cursors | toggle-linked-cursors | Shift+C | off: open a result in Results",
             "Calculator… | calculator |  | on",
-            "Expression and unit diagnostics… | expression-diagnostics |  | off: command is unavailable in this context",
+            "Expression and unit diagnostics… | expression-diagnostics |  | off: no result dataset is available",
             "Measurement library… | measurement-library |  | off: open a result in Results",
             "Family slicing and pivot… | family-slicing |  | off: open a result in Results",
             "Plot document properties… | plot-properties |  | off: open a result in Results",
@@ -1444,9 +1465,9 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
         &[
             "Model & library catalog | models-catalog |  | on",
             "Device model and parameter editor… | model-editor |  | off: select one model in Model & library catalog",
-            "Measurement correlation… | model-correlation |  | off: command is unavailable in this context",
+            "Measurement correlation… | model-correlation |  | off: select one model in Model & library catalog",
             "---",
-            "Verilog-A/AMS compiler | veriloga |  | off: command is unavailable in this context",
+            "Verilog-A/AMS compiler | veriloga |  | off: open a Verilog-A cell view in Design",
         ],
     ),
     (
