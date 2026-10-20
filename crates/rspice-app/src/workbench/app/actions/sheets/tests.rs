@@ -258,7 +258,11 @@ fn a_moving_delete_policy_relocates_the_objects_and_undo_restores_them() {
     );
     // The menu's delete moves nothing until the move is confirmed.
     delete_sheet(&mut state, second).expect("the delete waits for confirmation");
-    assert_eq!(sheet_count(&state), 2, "nothing moved before the confirmation");
+    assert_eq!(
+        sheet_count(&state),
+        2,
+        "nothing moved before the confirmation"
+    );
     let pending = state
         .dialogs
         .delete_sheet

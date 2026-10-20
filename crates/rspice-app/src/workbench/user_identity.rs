@@ -34,12 +34,14 @@ pub(crate) fn user_display_name(
 }
 
 fn operating_system_user() -> Option<String> {
-    ["USERNAME", "USER", "LOGNAME"].into_iter().find_map(|name| {
-        std::env::var(name)
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-    })
+    ["USERNAME", "USER", "LOGNAME"]
+        .into_iter()
+        .find_map(|name| {
+            std::env::var(name)
+                .ok()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+        })
 }
 
 #[cfg(test)]

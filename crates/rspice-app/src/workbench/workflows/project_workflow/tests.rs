@@ -1983,8 +1983,7 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
         fn flush(&mut self) {}
     }
 
-    let directory =
-        std::env::temp_dir().join(format!("rspice-save-as-{}", uuid::Uuid::new_v4()));
+    let directory = std::env::temp_dir().join(format!("rspice-save-as-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&directory).expect("fixture directory");
     let original = directory.join("original.rspiceproj");
     let renamed = directory.join("renamed.rspiceproj");
@@ -2000,18 +1999,31 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
     assert!(names_renamed(
         crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&state).as_deref()
     ));
-    assert!(names_renamed(state.workspace.content.project.path.as_deref()));
     assert!(names_renamed(
-        state.recent_files.first().map(|recent| recent.path.as_path())
+        state.workspace.content.project.path.as_deref()
+    ));
+    assert!(names_renamed(
+        state
+            .recent_files
+            .first()
+            .map(|recent| recent.path.as_path())
     ));
 
     let mut storage = MemoryStorage::default();
     eframe::set_value(&mut storage, eframe::APP_KEY, &state);
     let restored = AppState::restore_eframe_session(&storage).expect("the session restores");
-    assert!(names_renamed(restored.workspace.content.project.path.as_deref()));
     assert!(names_renamed(
-        restored.recent_files.first().map(|recent| recent.path.as_path())
+        restored.workspace.content.project.path.as_deref()
     ));
-    assert!(original.exists(), "the file it came from is left as last saved");
+    assert!(names_renamed(
+        restored
+            .recent_files
+            .first()
+            .map(|recent| recent.path.as_path())
+    ));
+    assert!(
+        original.exists(),
+        "the file it came from is left as last saved"
+    );
     std::fs::remove_dir_all(directory).ok();
 }

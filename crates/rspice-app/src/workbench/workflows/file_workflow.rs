@@ -938,7 +938,11 @@ mod tests {
             .workspace
             .clone_schematic_editor(&active.key())
             .expect("the open cell view keeps its buffer");
-        assert_eq!(original.document().components.len(), 1, "nothing was replaced");
+        assert_eq!(
+            original.document().components.len(),
+            1,
+            "nothing was replaced"
+        );
 
         assert!(apply_loaded_schematic(
             &mut state,

@@ -144,7 +144,10 @@ fn connectivity_only_variant_comparison_detects_dnp_topology_change() {
 /// A menu row for Variants or Annotation lands on that tab, not on Sheets.
 #[test]
 fn design_management_opens_on_the_tab_a_row_asks_for() {
-    for tab in [DesignManagementTab::Variants, DesignManagementTab::Annotation] {
+    for tab in [
+        DesignManagementTab::Variants,
+        DesignManagementTab::Annotation,
+    ] {
         let mut app = RSpiceApp::test_instance();
         open_design_management_on(&mut app.state, tab);
         assert!(app.state.dialogs.design_management.open);

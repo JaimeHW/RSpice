@@ -74,7 +74,10 @@ pub(in crate::workbench) fn render_delete_sheet_confirmation(ctx: &Context, stat
 /// Anything that changes the sheet's objects or its neighbour while the
 /// confirmation is open changes the outcome, and a delete is not run on an
 /// outcome nobody saw.
-pub(in crate::workbench) fn confirm_sheet_delete(state: &mut AppState, pending: &PendingSheetDelete) {
+pub(in crate::workbench) fn confirm_sheet_delete(
+    state: &mut AppState,
+    pending: &PendingSheetDelete,
+) {
     let plan = sheet_actions::plan_delete(state, pending.sheet);
     if pending.still_planned(&plan) {
         let _ = sheet_actions::commit_delete_sheet(state, pending.sheet);

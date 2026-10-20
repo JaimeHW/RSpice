@@ -202,7 +202,12 @@ fn display_options_rows(
     draft: &mut SchematicVisibilityPolicy,
     layers: &mut crate::state::DrawingSheetLayerVisibility,
 ) -> Id {
-    let options = |labels: &[&str]| labels.iter().map(|label| (*label).to_owned()).collect::<Vec<_>>();
+    let options = |labels: &[&str]| {
+        labels
+            .iter()
+            .map(|label| (*label).to_owned())
+            .collect::<Vec<_>>()
+    };
 
     let annotation = rows.select_with_response(
         "Annotations",
@@ -295,7 +300,10 @@ fn display_options_rows(
             ("Zone references", &mut layers.zones),
             ("Title block", &mut layers.title_block),
             ("Centring marks", &mut layers.centring_marks),
-            ("Dimensions at detail zoom", &mut layers.dimensions_at_detail_zoom),
+            (
+                "Dimensions at detail zoom",
+                &mut layers.dimensions_at_detail_zoom,
+            ),
         ],
     );
 
@@ -383,7 +391,12 @@ mod tests {
                 }
             }
         }
-        for row in ["Annotations", "Net highlighting", "Zone references", "Title block"] {
+        for row in [
+            "Annotations",
+            "Net highlighting",
+            "Zone references",
+            "Title block",
+        ] {
             assert!(labels.contains(row), "{row} is missing:\n{labels}");
         }
         assert!(
@@ -392,8 +405,11 @@ mod tests {
         );
 
         app.state.dialogs.schematic_visibility.layers_draft.zones = false;
-        app.state.dialogs.schematic_visibility.draft.parameter_labels =
-            SchematicParameterLabelVisibility::Hidden;
+        app.state
+            .dialogs
+            .schematic_visibility
+            .draft
+            .parameter_labels = SchematicParameterLabelVisibility::Hidden;
         apply_display_options(&mut app.state);
         assert!(!app.state.ui.drawing_sheet_layers.zones);
         assert_eq!(
