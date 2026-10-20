@@ -2080,6 +2080,12 @@ impl MixedSignalHost {
         &self.instance
     }
 
+    /// The tick this instance's HDL runs on: its design's finest `timescale`
+    /// precision, or the linked design's when the deck links instances.
+    pub(crate) fn time_resolution(&self) -> TimeResolution {
+        self.resolution
+    }
+
     pub(crate) fn set_simulation_parameters(
         &mut self,
         parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,

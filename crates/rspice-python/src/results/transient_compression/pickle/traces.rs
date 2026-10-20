@@ -66,6 +66,7 @@ pub(crate) fn rebuild_digital_trace(
     Ok(rspice_core::engine::DigitalTrace {
         node_name,
         points: rebuilt,
+        hdl_time_precision: None,
     })
 }
 

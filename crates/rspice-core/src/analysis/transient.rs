@@ -498,6 +498,16 @@ pub struct DigitalTrace {
     pub node_name: String,
     /// Committed event samples for this node.
     pub points: Vec<DigitalTracePoint>,
+    /// The design time precision, in seconds, of the HDL that reads or drives
+    /// this net, or `None` when no HDL process observes it.
+    ///
+    /// The points stay at the physical instants the run accepted them at: an
+    /// A/D crossing is dated where the analog solution crossed, between two
+    /// HDL ticks. The HDL itself saw that change at its nearest tick, after
+    /// any delta cycles there, and an event dump is a record of what the HDL
+    /// saw, so the VCD projection rounds this net's changes to this precision
+    /// and keeps the last value of each tick.
+    pub hdl_time_precision: Option<Value>,
 }
 
 /// One accepted real-valued event sample for a named XSPICE real node.
@@ -1357,6 +1367,7 @@ impl TransientResult {
                     self.digital_traces.push(DigitalTrace {
                         node_name: node_name.clone(),
                         points: Vec::new(),
+                        hdl_time_precision: None,
                     });
                     trace_indices.insert(node_id, index);
                     index

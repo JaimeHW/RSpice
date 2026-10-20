@@ -12684,6 +12684,8 @@ impl Engine {
         } else {
             None
         };
+        #[cfg(feature = "veriloga")]
+        circuit.mark_hdl_observed_traces(&mut result.digital_traces, &result.node_names);
         result.fft_results = fft::evaluate(self, netlist, &result, requested_stop, abort)?;
         retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_result_values(

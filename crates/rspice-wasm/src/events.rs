@@ -501,6 +501,7 @@ fn core_digital_traces(traces: &[DigitalEventTrace]) -> DetailedWasmResult<Vec<D
         built.push(DigitalTrace {
             node_name: trace.node_name.clone(),
             points,
+            hdl_time_precision: None,
         });
     }
     Ok(built)
@@ -719,6 +720,7 @@ C1 out 0 1p
                     value: DigitalValue::new(*state, *strength),
                 })
                 .collect(),
+            hdl_time_precision: None,
         }
     }
 

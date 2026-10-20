@@ -184,7 +184,23 @@ pub struct RawEventTimeline {
     /// Value at each event time: an event code for
     /// [`RawEventKind::Digital`], the value itself for [`RawEventKind::Real`].
     pub values: Vec<Value>,
+    /// The time precision, in seconds, of the HDL that reads or drives this
+    /// node, if one does. Written as an inert `Option:` metadata line in the
+    /// plot's header, so the times stay what the run recorded and a reader
+    /// that does not know the key reads the plot exactly as before.
+    pub hdl_time_precision: Option<Value>,
 }
+
+/// The `Option:` metadata an event plot of an HDL-observed node carries: the
+/// JSON object `{"hdl_time_precision": <seconds>}`.
+pub(crate) fn hdl_time_precision_metadata(precision: Value) -> String {
+    let mut object = serde_json::Map::new();
+    object.insert(HDL_TIME_PRECISION_KEY.to_string(), precision.into());
+    serde_json::Value::Object(object).to_string()
+}
+
+/// The key [`hdl_time_precision_metadata`] writes the precision under.
+pub(crate) const HDL_TIME_PRECISION_KEY: &str = "hdl_time_precision";
 
 /// One declared bus's event plot: the declaration in its title, one column per
 /// member.
@@ -284,6 +300,8 @@ pub struct RawExporter {
     variables: Vec<RawVariable>,
     /// Data points (time/freq values in column 0, then signals)
     data: Vec<Vec<Value>>,
+    /// Inert RSpice metadata written as `Option:` chunks after `Plotname:`.
+    metadata: Option<String>,
 }
 
 impl RawExporter {
@@ -294,6 +312,7 @@ impl RawExporter {
             plot_name: "Transient Analysis".to_string(),
             variables: vec![RawVariable::time()],
             data: Vec::new(),
+            metadata: None,
         }
     }
 
@@ -308,6 +327,7 @@ impl RawExporter {
             plot_name: kind.plot_name().to_string(),
             variables: vec![RawVariable::time(), RawVariable::event(kind, node_name)],
             data: Vec::new(),
+            metadata: None,
         }
     }
 
@@ -329,6 +349,7 @@ impl RawExporter {
             plot_name: RawEventKind::Bus.plot_name().to_string(),
             variables,
             data: Vec::new(),
+            metadata: None,
         }
     }
 
@@ -441,6 +462,9 @@ impl RawExporter {
         writeln!(writer, "Title: {}", self.title)?;
         writeln!(writer, "Date: {}", chrono_date())?;
         writeln!(writer, "Plotname: {}", self.plot_name)?;
+        if let Some(metadata) = &self.metadata {
+            crate::io::ltspice_raw::write_raw_metadata_options(writer, metadata)?;
+        }
         writeln!(writer, "Flags: real")?;
         writeln!(writer, "No. Variables: {}", self.variables.len())?;
         writeln!(writer, "No. Points: {}", self.data.len())?;
@@ -625,6 +649,7 @@ pub fn write_event_plots<W: Write + ?Sized>(
             )));
         }
         let mut exporter = RawExporter::new_event_plot(timeline.kind, &timeline.node_name);
+        exporter.metadata = timeline.hdl_time_precision.map(hdl_time_precision_metadata);
         exporter.add_transient_data(&timeline.times, std::slice::from_ref(&timeline.values))?;
         exporter.write(writer, format)?;
     }
@@ -708,6 +733,7 @@ pub fn write_dc_sweep<W: Write + ?Sized>(
             var_type: VariableType::Voltage,
         }],
         data: Vec::new(),
+        metadata: None,
     };
 
     for name in node_names {
@@ -841,12 +867,14 @@ mod export_tests {
                 node_name: "clk".to_string(),
                 times: vec![0.0, 2.5e-10, 7.0e-10],
                 values: vec![9.0, 1.0, 12.0],
+                hdl_time_precision: None,
             },
             RawEventTimeline {
                 kind: RawEventKind::Real,
                 node_name: "vctrl".to_string(),
                 times: vec![0.0, 5.0e-10],
                 values: vec![-1.234_567_890_123_456_7e-3, 9.876_543_210_987_654e6],
+                hdl_time_precision: None,
             },
         ]
     }
@@ -966,18 +994,21 @@ mod export_tests {
                 node_name: "quiet".to_string(),
                 times: Vec::new(),
                 values: Vec::new(),
+                hdl_time_precision: None,
             },
             RawEventTimeline {
                 kind: RawEventKind::Digital,
                 node_name: "two words".to_string(),
                 times: vec![0.0],
                 values: vec![1.0],
+                hdl_time_precision: None,
             },
             RawEventTimeline {
                 kind: RawEventKind::Real,
                 node_name: "vctrl".to_string(),
                 times: vec![0.0, 1.0e-9],
                 values: vec![1.0],
+                hdl_time_precision: None,
             },
         ];
 
@@ -1076,6 +1107,7 @@ mod export_tests {
             plot_name: "Transient Analysis".to_string(),
             variables: vec![RawVariable::time(), RawVariable::voltage("out")],
             data: vec![vec![0.0]],
+            metadata: None,
         };
         let error = malformed_exporter
             .write_to_file(&destination, RawFormat::Ascii)

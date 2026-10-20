@@ -84,6 +84,19 @@ pub enum EventProjectionError {
         tick: u128,
     },
 
+    /// A net is marked as observed by an HDL whose time precision is not a
+    /// tick period a VCD `$timescale` can name.
+    #[error(
+        "node '{node}' is observed by an HDL with a time precision of {precision} s, which no VCD \
+         timescale names"
+    )]
+    HdlPrecision {
+        /// The node whose precision was rejected.
+        node: String,
+        /// The rejected precision, in seconds.
+        precision: Value,
+    },
+
     /// No one VCD timescale can retain both the event spacing and full duration.
     #[error("no VCD timescale can retain every event time within its 64-bit tick range")]
     TimescaleRange,
@@ -289,13 +302,22 @@ pub fn digital_value_from_vcd_bit(bit: VcdBit) -> DigitalValue {
 /// all land on nanoseconds is written `1 ns` with small tick numbers rather
 /// than `1 fs` with large ones. An event an analog solution dated between two
 /// femtoseconds (an A/D threshold crossing, nearly always) moves by less than
-/// half of one. An HDL net's trace is already on the design's own tick, the
-/// instant the HDL saw each change at. What rounding must not do is merge two
-/// different values one signal held at different recorded times onto one tick,
-/// where the dump could not say which came first: that is refused as
+/// half of one. What rounding must not do is merge two different values one
+/// signal held at different recorded times onto one tick, where the dump could
+/// not say which came first: that is refused as
 /// [`EventProjectionError::TimeCollision`]. Values recorded at one identical
 /// time are delta changes and are kept in order, and different signals may
 /// share a tick.
+///
+/// A net an HDL reads or drives ([`DigitalTrace::hdl_time_precision`]) is
+/// dumped as that HDL saw it instead. Its trace keeps the physical instants
+/// (an A/D output changes where the analog solution crossed the threshold),
+/// but the HDL dated each change at its nearest tick, so each change rounds to
+/// the nearest multiple of the design precision, and several changes on one
+/// tick, the HDL's delta cycles, collapse to the last: the value the HDL
+/// observed once they settled. Such a dump's `$timescale` is the design
+/// precision (finer only if a net no HDL observes needs it), which is the tick
+/// the HDL's own `$dumpvars` writes, so the two dumps line up.
 /// The chosen period must also keep every tick within `u64`; otherwise the
 /// combination of duration and event spacing is refused as
 /// [`EventProjectionError::TimescaleRange`]. Intermediate femtoseconds use
@@ -335,15 +357,12 @@ pub fn event_vcd_document(
         if claimed.contains(&canonical_event_name(&trace.node_name)) {
             continue;
         }
-        let mut points = Vec::new();
-        let mut times = SignalTimes::default();
+        let grid = TimeGrid::of(&trace.node_name, trace.hdl_time_precision)?;
+        let mut changes = GridChanges::new(grid);
         for point in &trace.points {
-            let placed = times.place(&trace.node_name, point.time)?;
-            push_change(
-                &mut points,
+            changes.push(
                 &trace.node_name,
                 point.time,
-                placed,
                 VcdValue::Logic(vec![digital_value_to_vcd_bit(point.value)]),
             )?;
         }
@@ -351,7 +370,8 @@ pub fn event_vcd_document(
             name: checked_node_name(&trace.node_name)?,
             kind: VcdSignalKind::Logic,
             width: 1,
-            points,
+            points: changes.points,
+            hdl_period: grid.hdl_period(),
         });
     }
     for trace in real_traces {
@@ -378,10 +398,14 @@ pub fn event_vcd_document(
             kind: VcdSignalKind::Real,
             width: REAL_VARIABLE_WIDTH,
             points,
+            hdl_period: None,
         });
     }
 
-    let timescale = choose_timescale(pending.iter().flat_map(|signal| &signal.points))?;
+    let timescale = choose_timescale(
+        pending.iter().flat_map(|signal| &signal.points),
+        pending.iter().filter_map(|signal| signal.hdl_period).min(),
+    )?;
     let period = u128::from(timescale.femtoseconds());
     let mut document = VcdDocument::new(timescale);
     document.version = VCD_WRITER_VERSION.to_string();
@@ -416,6 +440,9 @@ struct PendingSignal {
     kind: VcdSignalKind,
     width: u32,
     points: Vec<(u128, VcdValue)>,
+    /// The HDL tick, in femtoseconds, the points were rounded to, if an HDL
+    /// observes the signal.
+    hdl_period: Option<u128>,
 }
 
 /// The `$var` reference a bus is declared under: `name [msb:lsb]`.
@@ -440,6 +467,9 @@ fn bus_signal(
     // time out of order or out of range is reported against the node that
     // recorded it rather than against the bus it was folded into.
     let mut histories: Vec<Vec<(Value, u8)>> = Vec::with_capacity(bus.members.len());
+    // A word is on its HDL's tick only when an HDL observes every bit of it;
+    // one vector variable cannot carry two grids.
+    let mut hdl_precision = Some(Value::INFINITY);
     for member in &bus.members {
         let key = canonical_event_name(member);
         let trace = digital_traces
@@ -453,6 +483,9 @@ fn bus_signal(
         for point in &trace.points {
             times.place(&trace.node_name, point.time)?;
         }
+        hdl_precision = hdl_precision
+            .zip(trace.hdl_time_precision)
+            .map(|(finest, precision)| finest.min(precision));
         histories.push(
             trace
                 .points
@@ -466,14 +499,16 @@ fn bus_signal(
         .iter()
         .map(|points| BusMemberHistory { points })
         .collect();
-    let mut points = Vec::new();
-    let mut times = SignalTimes::default();
+    let grid = TimeGrid::of(
+        &reference,
+        hdl_precision.filter(|precision| precision.is_finite()),
+    )?;
+    let mut changes = GridChanges::new(grid);
     let events = bus_events(&members).map_err(|source| EventProjectionError::BusTooLarge {
         bus: bus.name.clone(),
         source,
     })?;
     for (time, codes) in events {
-        let placed = times.place(&reference, time)?;
         let bits = codes
             .into_iter()
             // Every code here is `event_code` of a value read two statements
@@ -482,14 +517,15 @@ fn bus_signal(
             // run has said about it.
             .map(|code| event_code_to_vcd_bit(code).unwrap_or(VcdBit::Unknown))
             .collect();
-        push_change(&mut points, &reference, time, placed, VcdValue::Logic(bits))?;
+        changes.push(&reference, time, VcdValue::Logic(bits))?;
     }
 
     Ok(PendingSignal {
         name,
         kind: VcdSignalKind::Logic,
         width: bus.width() as u32,
-        points,
+        points: changes.points,
+        hdl_period: grid.hdl_period(),
     })
 }
 
@@ -602,6 +638,7 @@ pub fn vcd_event_histories(
                 histories.digital_traces.push(DigitalTrace {
                     node_name: reference,
                     points,
+                    hdl_time_precision: None,
                 });
             }
             VcdSignalKind::Logic => {
@@ -640,6 +677,7 @@ pub fn vcd_event_histories(
                     .map(|index| DigitalTrace {
                         node_name: vcd_member_name(base, *index),
                         points: Vec::new(),
+                        hdl_time_precision: None,
                     })
                     .collect();
                 for change in &signal.changes {
@@ -821,6 +859,107 @@ fn push_change(
     Ok(())
 }
 
+/// The tick grid one signal's changes are placed on.
+#[derive(Debug, Clone, Copy)]
+enum TimeGrid {
+    /// No HDL observes the signal: each time rounds to the nearest
+    /// femtosecond, and two values merged onto one tick are refused.
+    Femtosecond,
+    /// An HDL observes the signal: each time rounds to the HDL's nearest tick,
+    /// as the HDL dated the change, and the last value of a tick stands.
+    Hdl {
+        /// The HDL's time precision, in seconds.
+        precision: Value,
+        /// The same precision in whole femtoseconds.
+        period: u128,
+    },
+}
+
+impl TimeGrid {
+    /// The grid a signal observed by an HDL of `precision` seconds is on.
+    fn of(node: &str, precision: Option<Value>) -> Result<Self, EventProjectionError> {
+        let Some(precision) = precision else {
+            return Ok(Self::Femtosecond);
+        };
+        VcdTimescale::ALL
+            .into_iter()
+            .map(|timescale| u128::from(timescale.femtoseconds()))
+            .find(|&period| {
+                let seconds = period as f64 / FEMTOSECONDS_PER_SECOND;
+                (seconds - precision).abs() <= seconds * 1e-9
+            })
+            .map(|period| Self::Hdl { precision, period })
+            .ok_or_else(|| EventProjectionError::HdlPrecision {
+                node: node.to_string(),
+                precision,
+            })
+    }
+
+    /// The HDL tick in femtoseconds, if this is an HDL's grid.
+    fn hdl_period(self) -> Option<u128> {
+        match self {
+            Self::Femtosecond => None,
+            Self::Hdl { period, .. } => Some(period),
+        }
+    }
+}
+
+/// One signal's changes, placed on its grid in order.
+struct GridChanges {
+    grid: TimeGrid,
+    times: SignalTimes,
+    points: Vec<(u128, VcdValue)>,
+}
+
+impl GridChanges {
+    fn new(grid: TimeGrid) -> Self {
+        Self {
+            grid,
+            times: SignalTimes::default(),
+            points: Vec::new(),
+        }
+    }
+
+    /// Place one change recorded at `time`.
+    ///
+    /// On an HDL's grid the time rounds to the HDL's nearest tick, which is
+    /// the rule the HDL dated an analog crossing by. Several changes on one
+    /// tick are the HDL's delta cycles there: the last one is what the HDL
+    /// observed once they settled, so it replaces the others, and a tick that
+    /// settles back where the previous tick left the signal carries no change.
+    fn push(
+        &mut self,
+        node: &str,
+        time: Value,
+        value: VcdValue,
+    ) -> Result<(), EventProjectionError> {
+        let placed = self.times.place(node, time)?;
+        let TimeGrid::Hdl { precision, period } = self.grid else {
+            return push_change(&mut self.points, node, time, placed, value);
+        };
+        let unrepresentable = || EventProjectionError::UnrepresentableTime {
+            node: node.to_string(),
+            time,
+        };
+        let ticks = (time / precision).round();
+        if !ticks.is_finite() || ticks < 0.0 || ticks > MAX_EVENT_FEMTOSECONDS as f64 {
+            return Err(unrepresentable());
+        }
+        let tick = (ticks as u128)
+            .checked_mul(period)
+            .filter(|&tick| tick <= MAX_EVENT_FEMTOSECONDS)
+            .ok_or_else(unrepresentable)?;
+        if self.points.last().is_some_and(|(last, _)| *last == tick) {
+            self.points.pop();
+        }
+        if self.points.last().is_some_and(|(_, held)| *held == value) {
+            return Ok(());
+        }
+        self.points.push((tick, value));
+        Ok(())
+    }
+}
+
 /// Round one event time to the nearest whole femtosecond.
 ///
 /// Retain the low integer bits when scaling: above 2^53 femtoseconds the
@@ -861,18 +1000,30 @@ fn event_femtoseconds(node: &str, time: Value) -> Result<u128, EventProjectionEr
     Ok(tick)
 }
 
+/// The coarsest timescale that divides every tick, and no coarser than
+/// `hdl_period` when an HDL observes a signal: such a dump is written at the
+/// design's own precision, the tick its `$dumpvars` would use.
 fn choose_timescale<'a>(
     points: impl Iterator<Item = &'a (u128, VcdValue)> + Clone,
+    hdl_period: Option<u128>,
 ) -> Result<VcdTimescale, EventProjectionError> {
     let finest = VcdTimescale {
         magnitude: VcdMagnitude::One,
         unit: VcdTimeUnit::Femtoseconds,
     };
+    let hdl_timescale = hdl_period.and_then(|period| {
+        VcdTimescale::ALL
+            .into_iter()
+            .find(|candidate| u128::from(candidate.femtoseconds()) == period)
+    });
     if points.clone().all(|(femtoseconds, _)| *femtoseconds == 0) {
-        return Ok(finest);
+        return Ok(hdl_timescale.unwrap_or(finest));
     }
     VcdTimescale::ALL
         .into_iter()
+        .filter(|candidate| {
+            hdl_period.is_none_or(|cap| u128::from(candidate.femtoseconds()) <= cap)
+        })
         .find(|candidate| {
             let period = u128::from(candidate.femtoseconds());
             points.clone().all(|(femtoseconds, _)| {
@@ -897,6 +1048,7 @@ mod tests {
                     value: *value,
                 })
                 .collect(),
+            hdl_time_precision: None,
         }
     }
 
@@ -1201,6 +1353,125 @@ mod tests {
             .collect()
     }
 
+    fn document_bits(document: &VcdDocument, signal: usize) -> Vec<String> {
+        document.signals[signal]
+            .changes
+            .iter()
+            .map(|change| match &change.value {
+                VcdValue::Logic(bits) => bits.iter().map(|bit| bit.to_string()).collect(),
+                VcdValue::Real(value) => value.to_string(),
+            })
+            .collect()
+    }
+
+    fn hdl_trace(precision: Value, points: &[(Value, DigitalValue)]) -> DigitalTrace {
+        DigitalTrace {
+            hdl_time_precision: Some(precision),
+            ..digital_trace("in", points)
+        }
+    }
+
+    /// An A/D crossing feeding an HDL is recorded where the analog solution
+    /// crossed, 188.5714286 ns; the HDL (`timescale 1ns/1ps`) saw it at its
+    /// nearest tick, 188571 ps, and the dump says what the HDL saw, at the
+    /// design precision.
+    #[test]
+    fn a_net_an_hdl_observes_changes_at_the_hdl_tick() {
+        let document = event_vcd_document(
+            "tran",
+            &[hdl_trace(
+                1e-12,
+                &[
+                    (0.0, DigitalValue::zero()),
+                    (7e-8, DigitalValue::one()),
+                    (1.885_714_285_714_285_7e-7, DigitalValue::zero()),
+                ],
+            )],
+            &[],
+            &[],
+        )
+        .expect("an HDL net dumps at the HDL tick");
+        assert_eq!(document.timescale.to_string(), "1 ps");
+        assert_eq!(document_ticks(&document, 0), [0, 70_000, 188_571]);
+    }
+
+    /// Several changes of an HDL net on one tick are its delta cycles: the
+    /// last value stands, and a tick that settles back where it started is no
+    /// change at all. A sine starting on the A/D threshold records the input
+    /// rising 1e-20 s after time zero; the HDL saw `in=1` at tick 0.
+    #[test]
+    fn changes_of_an_hdl_net_on_one_tick_keep_the_last_value() {
+        let document = event_vcd_document(
+            "tran",
+            &[hdl_trace(
+                1e-12,
+                &[
+                    (0.0, DigitalValue::zero()),
+                    (1e-20, DigitalValue::one()),
+                    (5.0001e-9, DigitalValue::zero()),
+                    (5.0003e-9, DigitalValue::one()),
+                    (9.0e-9, DigitalValue::zero()),
+                    (9.0002e-9, DigitalValue::one()),
+                    (9.0004e-9, DigitalValue::zero()),
+                ],
+            )],
+            &[],
+            &[],
+        )
+        .expect("delta cycles collapse to the last value");
+        assert_eq!(document_ticks(&document, 0), [0, 9_000]);
+        assert_eq!(document_bits(&document, 0), ["1", "0"]);
+        // The same history on no HDL's grid is still refused.
+        let unobserved = event_vcd_document(
+            "tran",
+            &[digital_trace(
+                "in",
+                &[(0.0, DigitalValue::zero()), (1e-20, DigitalValue::one())],
+            )],
+            &[],
+            &[],
+        );
+        assert!(matches!(
+            unobserved,
+            Err(EventProjectionError::TimeCollision { .. })
+        ));
+    }
+
+    /// The dump is written at the design precision even when every change
+    /// lands on a coarser tick, and finer only for a net no HDL observes.
+    #[test]
+    fn an_hdl_dump_is_written_at_the_design_precision() {
+        let hdl = hdl_trace(
+            1e-12,
+            &[(0.0, DigitalValue::zero()), (1e-6, DigitalValue::one())],
+        );
+        let document =
+            event_vcd_document("tran", std::slice::from_ref(&hdl), &[], &[]).expect("dumps");
+        assert_eq!(document.timescale.to_string(), "1 ps");
+        assert_eq!(document_ticks(&document, 0), [0, 1_000_000]);
+
+        let analog = digital_trace(
+            "cmp",
+            &[(0.0, DigitalValue::zero()), (1.6e-15, DigitalValue::one())],
+        );
+        let document = event_vcd_document("tran", &[hdl, analog], &[], &[]).expect("dumps");
+        assert_eq!(document.timescale.to_string(), "1 fs");
+        assert_eq!(document_ticks(&document, 0), [0, 1_000_000_000]);
+        assert_eq!(document_ticks(&document, 1), [0, 2]);
+
+        let error = event_vcd_document(
+            "tran",
+            &[hdl_trace(3e-12, &[(0.0, DigitalValue::zero())])],
+            &[],
+            &[],
+        )
+        .expect_err("3 ps is no VCD tick");
+        assert!(
+            matches!(error, EventProjectionError::HdlPrecision { .. }),
+            "{error}"
+        );
+    }
+
     #[test]
     fn nanosecond_times_are_not_mistaken_for_inexact_ones() {
         // `1e-9 * 1e15` is not exactly 1_000_000 in binary64. A residual test
@@ -1329,6 +1600,7 @@ mod bus_tests {
                     value: *value,
                 })
                 .collect(),
+            hdl_time_precision: None,
         }
     }
 

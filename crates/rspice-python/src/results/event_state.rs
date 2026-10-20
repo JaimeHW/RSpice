@@ -309,6 +309,7 @@ pub(super) fn rebuild_transient_event_traces(
                         })
                     })
                     .collect::<Result<Vec<_>, String>>()?,
+                hdl_time_precision: None,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -429,6 +430,7 @@ mod event_pickle_tests {
                     },
                 },
             ],
+            hdl_time_precision: None,
         }];
         let real = vec![RealTrace {
             node_name: "ctrl".to_string(),
@@ -458,6 +460,7 @@ mod event_pickle_tests {
                     strength: DigitalStrength::Strong,
                 },
             }],
+            hdl_time_precision: None,
         });
 
         let state = transient_event_persistence_state(&digital, &real, &buses);

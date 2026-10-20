@@ -214,6 +214,103 @@ fn incompatible_timeline_range_and_resolution_preserve_the_destination() {
 /// Two values one signal held at different times that round onto one tick
 /// have no order in a dump and are refused; two signals changing at those
 /// times are simultaneous on that tick.
+fn rspice_in(dir: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("--quiet")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("RSPICE_OUTPUT_FORMAT")
+        .output()
+        .unwrap()
+}
+
+/// The tick of every change one dump writes for the variable named `name`.
+fn change_ticks(dump: &str, name: &str) -> Vec<String> {
+    let code = dump
+        .lines()
+        .find_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            (fields.first() == Some(&"$var") && fields.get(4) == Some(&name))
+                .then(|| fields[3].to_string())
+        })
+        .unwrap_or_else(|| panic!("no variable {name}:\n{dump}"));
+    let mut tick = String::new();
+    let mut ticks = Vec::new();
+    for line in dump.lines().map(str::trim) {
+        if let Some(at) = line.strip_prefix('#') {
+            tick = at.to_string();
+        } else if line.len() > 1 && line[1..] == code && !line.starts_with('$') {
+            ticks.push(tick.clone());
+        }
+    }
+    ticks
+}
+
+/// An A/D connect module with hysteresis feeds an HDL input (`timescale
+/// 1ns/1ps`). The analog solution dates the falling crossing at 188.5714286
+/// ns, between two femtoseconds and between two of the HDL's ticks; the HDL
+/// saw it at tick 188571 ps (`$realtime` prints 188.5710) and its own
+/// `$dumpvars` writes it there. The run's dump and the dump converted from
+/// its rawfile say the same: `$timescale 1 ps`, the edge at #188571.
+#[test]
+fn an_hdl_input_dumps_at_the_tick_the_hdl_saw_it_at() {
+    let dir = test_dir("vcd_hdl_tick");
+    std::fs::write(
+        dir.join("rx.vams"),
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module rx(in, o);\n\
+         \x20 input in; output o; reg o;\n\
+         \x20 initial begin $dumpfile(\"hdl.vcd\"); $dumpvars(0, rx); o = 0; end\n\
+         \x20 always @(in) o = in;\n\
+         endmodule\n\
+         connectmodule a2d_h(a, d);\n\
+         \x20 input a; output d; electrical a; logic d; reg d;\n\
+         \x20 parameter real vhi = 0.6, vlo = 0.4;\n\
+         \x20 initial d = 0;\n\
+         \x20 always @(cross(V(a) - vhi, +1)) d = 1;\n\
+         \x20 always @(cross(V(a) - vlo, -1)) d = 0;\n\
+         endmodule\n\
+         connectmodule d2a_s(d, a);\n\
+         \x20 input d; output a; logic d; electrical a;\n\
+         \x20 analog V(a) <+ transition(d ? 2.0 : 0.0, 0, 3n);\n\
+         endmodule\n\
+         connectrules hyst;\n\
+         \x20 connect a2d_h #(.vhi(0.7));\n\
+         \x20 connect d2a_s;\n\
+         endconnectrules\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("m10.cir"),
+        "* authored connect modules with hysteresis\n\
+         .hdl \"rx.vams\" module=rx\n\
+         .options connectrules=hyst\n\
+         v1 in 0 pwl(0 0 100n 1 150n 0.5 160n 0.65 200n 0.3 210n 0.65)\n\
+         x1 in o rx\n\
+         r1 o 0 1k\n\
+         .tran 1n 250n\n\
+         .end\n",
+    )
+    .unwrap();
+
+    let run = rspice_in(&dir, &["run", "m10.cir", "-f", "vcd", "-o", "run.vcd"]);
+    assert!(run.status.success(), "{run:?}");
+    let hdl = std::fs::read_to_string(dir.join("hdl.vcd")).unwrap();
+    let run = std::fs::read_to_string(dir.join("run.vcd")).unwrap();
+    assert!(run.contains("$timescale\n\t1 ps\n$end"), "{run}");
+    assert_eq!(change_ticks(&run, "IN"), ["0", "70000", "188571"], "{run}");
+    // `o = in` runs on the tick the HDL saw `in` change at.
+    assert_eq!(change_ticks(&run, "IN"), change_ticks(&hdl, "o"), "{hdl}");
+    assert_eq!(change_ticks(&run, "O"), change_ticks(&hdl, "o"), "{hdl}");
+
+    let raw = rspice_in(&dir, &["run", "m10.cir", "-f", "raw", "-o", "run.raw"]);
+    assert!(raw.status.success(), "{raw:?}");
+    let converted = convert(&dir.join("run.raw"), &dir.join("raw.vcd"), "vcd", &[]);
+    assert!(converted.status.success(), "{converted:?}");
+    assert_eq!(std::fs::read_to_string(dir.join("raw.vcd")).unwrap(), run);
+}
+
 #[test]
 fn one_signal_cannot_hold_two_values_on_one_tick() {
     let dir = test_dir("vcd_distinct_time_collision");

@@ -6898,7 +6898,10 @@ fn a_mixed_checkpoint_round_trips_an_assign_fed_by_an_a_d_input() {
 /// The analog solution dates an A/D crossing between two femtoseconds nearly
 /// always, and the input net's trace keeps that instant. The VCD export
 /// refused the whole run over it, after simulating, because no timescale
-/// held the instant exactly; it writes each edge at the nearest femtosecond.
+/// held the instant exactly. The HDL saw each edge at its nearest tick of the
+/// design precision (`timescale 1ns/1ps`), so the dump writes it there, at
+/// `1 ps`, the tick the HDL's own `$dumpvars` uses; the trace keeps the
+/// physical instant.
 #[test]
 fn a_mixed_run_dumps_crossings_dated_between_two_femtoseconds() {
     let model = ModelFile::new(
@@ -6942,7 +6945,16 @@ fn a_mixed_run_dumps_crossings_dated_between_two_femtoseconds() {
         &result.digital_buses,
     )
     .expect("the run dumps");
-    assert_eq!(document.timescale.to_string(), "1 fs");
+    assert_eq!(
+        result
+            .digital_traces
+            .iter()
+            .find(|trace| trace.node_name.eq_ignore_ascii_case("in"))
+            .and_then(|trace| trace.hdl_time_precision),
+        Some(1e-12),
+        "the HDL reads the input net"
+    );
+    assert_eq!(document.timescale.to_string(), "1 ps");
     let input = document
         .signals
         .iter()
@@ -6963,7 +6975,7 @@ fn a_mixed_run_dumps_crossings_dated_between_two_femtoseconds() {
         ticks,
         changes
             .iter()
-            .map(|time| (time * 1e15).round() as u64)
+            .map(|time| (time / 1e-12).round() as u64)
             .collect::<Vec<_>>()
     );
 }

@@ -519,6 +519,7 @@ mod structural_tests {
                     strength: DigitalStrength::Strong,
                 },
             }],
+            hdl_time_precision: None,
         }];
         let message = validate_transient_state(&result)
             .expect_err("an event after the last accepted sample is not in this result");

@@ -606,6 +606,8 @@ fn typed_transient_traces(
                     ),
                 })
                 .collect(),
+            // A result document has no place for the HDL's precision yet.
+            hdl_time_precision: None,
         })
         .collect();
     let real_traces = payload
@@ -695,6 +697,7 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
             digital_traces.push(DigitalTrace {
                 node_name: node.to_string(),
                 points,
+                hdl_time_precision: None,
             });
         } else {
             let points = match &column.data {
@@ -1336,6 +1339,7 @@ mod tests {
                     value: DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
                 },
             ],
+            hdl_time_precision: None,
         };
         let error = event_document(Path::new("run.vcd"), &[trace], &[], &[])
             .expect_err("two values of one signal cannot share a femtosecond tick");

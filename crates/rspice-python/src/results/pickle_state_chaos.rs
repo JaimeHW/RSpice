@@ -148,6 +148,7 @@ fn valid_event_state() -> TransientEventPersistenceState {
                     },
                 },
             ],
+            hdl_time_precision: None,
         },
         DigitalTrace {
             node_name: "count#1".to_string(),
@@ -158,6 +159,7 @@ fn valid_event_state() -> TransientEventPersistenceState {
                     strength: DigitalStrength::Strong,
                 },
             }],
+            hdl_time_precision: None,
         },
         DigitalTrace {
             node_name: "count#0".to_string(),
@@ -168,6 +170,7 @@ fn valid_event_state() -> TransientEventPersistenceState {
                     strength: DigitalStrength::Strong,
                 },
             }],
+            hdl_time_precision: None,
         },
     ];
     let real = vec![RealTrace {
@@ -445,6 +448,7 @@ fn valid_transient_result() -> TransientResult {
                     strength: DigitalStrength::Strong,
                 },
             }],
+            hdl_time_precision: None,
         }],
         digital_buses: Vec::new(),
         real_traces: vec![RealTrace {

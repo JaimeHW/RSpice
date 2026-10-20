@@ -306,6 +306,7 @@ mod tests {
                     value: DigitalValue::new(*state, *strength),
                 })
                 .collect(),
+            hdl_time_precision: None,
         }
     }
 

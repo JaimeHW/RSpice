@@ -54,7 +54,9 @@ use crate::engine::{
 use crate::execution::event_bus::{
     BusMemberHistory, BusReassemblyTooLarge, bus_events, split_bus_notation,
 };
-use crate::io::raw_export::{RawBusTimeline, RawEventKind, RawEventTimeline};
+use crate::io::raw_export::{
+    HDL_TIME_PRECISION_KEY, RawBusTimeline, RawEventKind, RawEventTimeline,
+};
 use crate::io::{RawFile, RawWaveformData};
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 
@@ -194,12 +196,14 @@ pub fn transient_event_plots(
             .iter()
             .map(|point| Value::from(point.value.event_code()))
             .collect(),
+        hdl_time_precision: trace.hdl_time_precision,
     });
     let real = real_traces.iter().map(|trace| RawEventTimeline {
         kind: RawEventKind::Real,
         node_name: trace.node_name.clone(),
         times: trace.points.iter().map(|point| point.time).collect(),
         values: trace.points.iter().map(|point| point.value).collect(),
+        hdl_time_precision: None,
     });
     digital
         .chain(real)
@@ -459,6 +463,9 @@ fn decode_bus_column(
     Ok(DigitalTrace {
         node_name: member.to_owned(),
         points,
+        // The member plots carry the HDL's precision; a column standing in
+        // for a missing one has nothing to say about it.
+        hdl_time_precision: None,
     })
 }
 
@@ -511,7 +518,46 @@ fn decode_digital_plot(plot: &RawWaveformData) -> Result<DigitalTrace, EventPlot
         })?;
         points.push(DigitalTracePoint { time, value: code });
     }
-    Ok(DigitalTrace { node_name, points })
+    let hdl_time_precision = hdl_time_precision(plot, &node_name)?;
+    Ok(DigitalTrace {
+        node_name,
+        points,
+        hdl_time_precision,
+    })
+}
+
+/// The HDL time precision a digital event plot's metadata declares, if any.
+///
+/// The writer puts it in an inert `Option:` metadata line, which the reader
+/// restores as the plot's command text. A plot without one, which is every
+/// plot a build before this one wrote, carries `None`, and table provenance
+/// is [`validation`]'s to judge; a JSON object that is not this one, or a
+/// precision that is not a positive finite number of seconds, is a corrupt
+/// artifact and is refused.
+fn hdl_time_precision(
+    plot: &RawWaveformData,
+    node_name: &str,
+) -> Result<Option<Value>, EventPlotError> {
+    let metadata = plot.header.command.trim();
+    if !metadata.starts_with('{') {
+        return Ok(None);
+    }
+    let invalid = || EventPlotError::InvalidData {
+        plot: plot.header.plotname.clone(),
+        message: format!(
+            "the metadata of node '{node_name}' is not an HDL time precision: {metadata}"
+        ),
+    };
+    let object: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(metadata).map_err(|_| invalid())?;
+    let precision = match (object.len(), object.get(HDL_TIME_PRECISION_KEY)) {
+        (1, Some(value)) => value.as_f64(),
+        _ => None,
+    };
+    precision
+        .filter(|precision| precision.is_finite() && *precision > 0.0)
+        .map(Some)
+        .ok_or_else(invalid)
 }
 
 fn decode_real_plot(plot: &RawWaveformData) -> Result<RealTrace, EventPlotError> {
@@ -564,6 +610,7 @@ mod tests {
                     value: DigitalValue::high_z(),
                 },
             ],
+            hdl_time_precision: None,
         }
     }
 
@@ -602,12 +649,57 @@ mod tests {
         }
     }
 
+    /// The precision of the HDL observing a net rides in its plot's header as
+    /// inert metadata, so `convert --to vcd` of a rawfile dumps that net at the
+    /// HDL's tick as the run's own dump does. A net no HDL observes carries
+    /// none, and its plot is the one a build before the key wrote.
+    #[test]
+    fn an_hdl_time_precision_round_trips_in_both_encodings() {
+        let observed = DigitalTrace {
+            node_name: "in".to_string(),
+            hdl_time_precision: Some(1e-12),
+            ..digital_trace()
+        };
+        for format in [RawFormat::Binary, RawFormat::Ascii] {
+            let mut bytes = Vec::new();
+            write_event_plots(
+                &mut bytes,
+                &transient_event_plots(&[observed.clone(), digital_trace()], &[]),
+                &[],
+                format,
+            )
+            .expect("write event plots");
+            let header = String::from_utf8_lossy(&bytes);
+            assert_eq!(
+                header.matches("Option: rspice_metadata_v1_0_1 = x").count(),
+                1,
+                "{format:?}"
+            );
+            let mut file = parse_raw_plots_reader_with_limits(
+                &mut Cursor::new(bytes),
+                ResourceLimits::default(),
+            )
+            .expect("parse event plots");
+            assert_eq!(
+                decode_event_plots(&file)
+                    .expect("decode event plots")
+                    .digital_traces,
+                vec![observed.clone(), digital_trace()],
+                "{format:?}"
+            );
+
+            file.plots[0].header.command = r#"{"hdl_time_precision":-1}"#.to_string();
+            assert!(decode_event_plots(&file).is_err(), "{format:?}");
+        }
+    }
+
     #[test]
     fn empty_traces_are_dropped_rather_than_written_as_boundaryless_plots() {
         let timelines = transient_event_plots(
             &[DigitalTrace {
                 node_name: "unused".to_string(),
                 points: Vec::new(),
+                hdl_time_precision: None,
             }],
             &[RealTrace {
                 node_name: "quiet".to_string(),
@@ -730,6 +822,7 @@ mod bus_tests {
                     value: *value,
                 })
                 .collect(),
+            hdl_time_precision: None,
         }
     }
 
@@ -952,6 +1045,7 @@ mod bus_tests {
                 node_name: "d".to_string(),
                 times: vec![0.0],
                 values: vec![0.0],
+                hdl_time_precision: None,
             }],
             &[],
             RawFormat::Ascii,

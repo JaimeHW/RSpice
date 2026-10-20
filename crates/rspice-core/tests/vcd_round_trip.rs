@@ -200,6 +200,7 @@ fn digital_trace(node: &str, times: &[f64]) -> DigitalTrace {
                 },
             })
             .collect(),
+        hdl_time_precision: None,
     }
 }
 

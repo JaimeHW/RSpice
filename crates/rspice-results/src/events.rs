@@ -155,6 +155,7 @@ pub fn core_event_traces(
         digital.push(DigitalTrace {
             node_name: trace.node_name.clone(),
             points,
+            hdl_time_precision: None,
         });
     }
     let real = real_traces

@@ -1587,6 +1587,7 @@ mod tests {
                         strength: DigitalStrength::Strong,
                     },
                 }],
+                hdl_time_precision: None,
             }],
             digital_buses: Vec::new(),
             real_traces: Vec::new(),

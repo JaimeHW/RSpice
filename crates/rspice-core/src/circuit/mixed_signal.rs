@@ -1253,4 +1253,49 @@ impl CircuitData {
         claims.dedup_by_key(|&mut (node, ..)| node);
         snapshot.extend(claims.into_iter().map(|(node, _, value)| (node, value)));
     }
+
+    /// Mark every digital trace an HDL process reads or drives with the
+    /// design's time precision.
+    ///
+    /// The nets are the ones [`Self::append_mixed_digital_snapshot`] publishes:
+    /// the linked design's event nets and every instance's boundary nets, which
+    /// are the A/D outputs feeding an HDL input and the HDL outputs feeding a
+    /// D/A. The precision is the finest any instance runs at; a linked design
+    /// already runs every instance at its own finest. A trace no HDL observes
+    /// is left unmarked.
+    pub(crate) fn mark_hdl_observed_traces(
+        &self,
+        traces: &mut [crate::analysis::transient::DigitalTrace],
+        node_names: &[String],
+    ) {
+        let Some(resolution) = self
+            .mixed_signal_hosts
+            .iter()
+            .map(|host| host.time_resolution())
+            .reduce(|finest, other| finest.finest(other))
+        else {
+            return;
+        };
+        let mut nodes = std::collections::BTreeSet::new();
+        if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
+            nodes.extend(digital.event_values().map(|(node, _)| node));
+        }
+        for host in &self.mixed_signal_hosts {
+            host.boundary_trace_bindings(|node, _, _, _| {
+                nodes.insert(node);
+            });
+        }
+        let observed: std::collections::BTreeSet<&str> = nodes
+            .into_iter()
+            .filter_map(|node| node.checked_sub(1))
+            .filter_map(|index| node_names.get(index).map(String::as_str))
+            .collect();
+        // A kernel refined below a femtosecond still dumps at VCD's finest tick.
+        let precision = resolution.seconds_per_tick().max(1e-15);
+        for trace in traces {
+            if observed.contains(trace.node_name.as_str()) {
+                trace.hdl_time_precision = Some(precision);
+            }
+        }
+    }
 }
