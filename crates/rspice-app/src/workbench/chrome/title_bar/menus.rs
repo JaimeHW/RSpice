@@ -1,76 +1,13 @@
-//! What each application menu holds, and the rows and rules it is drawn
-//! with. The source editor's right-click menu shares the rows.
+//! What each application menu holds, written down as entries the menu
+//! renderer draws and a test can read. The source editor's right-click menu
+//! is written the same way.
 
 use super::*;
-
-/// The View menu's viewport group, in the order it is drawn.
-///
-/// Named rather than written inline so the menu's rows are a value a test can
-/// look at: `VisibilityOptions` was drawn once inside the loop and once again
-/// straight after it, which no reader of a `for` body would see.
-pub(super) const VIEW_VIEWPORT_COMMANDS: [Command; 11] = [
-    Command::ZoomIn,
-    Command::ZoomOut,
-    Command::ZoomFit,
-    Command::FitSchematicContent,
-    Command::ZoomOneToOne,
-    Command::ZoomToSelection,
-    Command::ZoomBox,
-    Command::CycleGrid,
-    Command::GridSnapRouting,
-    Command::DrawingSheetLayers,
-    Command::VisibilityOptions,
-];
-pub(super) const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
-    Command::PlaceInstance,
-    Command::PlaceWire,
-    Command::PlaceBus,
-    Command::PlaceBusTap,
-    Command::PlaceJunction,
-    Command::PlaceLabel,
-    Command::PlaceProbe,
-    Command::PlacePin,
-    Command::PlaceText,
-    Command::PlaceShape,
-];
-pub(super) const DESIGN_EDIT_COMMANDS: [Command; 4] = [
-    Command::MoveSelection,
-    Command::StretchSelection,
-    Command::ArraySelection,
-    Command::ReplaceInstance,
-];
-/// The sheets of the active drawing, in the order the strip shows them:
-/// navigate first, then author.
-pub(super) const DESIGN_SHEET_COMMANDS: [Command; 4] = [
-    Command::PreviousSheet,
-    Command::NextSheet,
-    Command::NewSheet,
-    Command::DeleteSheet,
-];
-pub(super) const DESIGN_MANAGEMENT_COMMANDS: [Command; 8] = [
-    Command::CreateHierarchy,
-    Command::DesignManagement,
-    Command::SelectionBulkEdit,
-    Command::ConnectivityManager,
-    Command::ConfigurationSets,
-    Command::RuleSetup,
-    Command::ReviewComments,
-    Command::RevisionHistory,
-];
-/// The design checks, narrowest first: the cellview in front of the reader,
-/// the whole design, and the check that gates a save.
-const DESIGN_CHECK_COMMANDS: [Command; 3] = [
-    Command::CheckCellview,
-    Command::CheckDesign,
-    Command::CheckAndSave,
-];
-pub(super) const WINDOW_LAYOUT_COMMANDS: [Command; 5] = [
-    Command::ToggleNavigator,
-    Command::ToggleInspector,
-    Command::ToggleConsole,
-    Command::ToggleResultsSplit,
-    Command::ToggleFocusMode,
-];
+use menu_entries::MenuEntry::Separator;
+use menu_entries::{
+    MenuContext, MenuEntry, command, command_as, command_by_state, command_without_key,
+    palette_scope,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum ApplicationMenu {
@@ -104,19 +41,19 @@ impl ApplicationMenu {
         }
     }
 
-    pub(super) fn show(self, ui: &mut Ui, app: &mut RSpiceApp) {
+    pub(super) const fn entries(self) -> &'static [MenuEntry] {
         match self {
-            Self::File => file_menu(ui, app),
-            Self::Edit => edit_menu(ui, app),
-            Self::View => view_menu(ui, app),
-            Self::Design => design_menu(ui, app),
-            Self::Simulate => simulate_menu(ui, app),
-            Self::Results => results_menu(ui, app),
-            Self::Verify => verify_menu(ui, app),
-            Self::Models => models_menu(ui, app),
-            Self::Automation => automation_menu(ui, app),
-            Self::Window => window_menu(ui, app),
-            Self::Help => help_menu(ui, app),
+            Self::File => FILE_MENU,
+            Self::Edit => EDIT_MENU,
+            Self::View => VIEW_MENU,
+            Self::Design => DESIGN_MENU,
+            Self::Simulate => SIMULATE_MENU,
+            Self::Results => RESULTS_MENU,
+            Self::Verify => VERIFY_MENU,
+            Self::Models => MODELS_MENU,
+            Self::Automation => AUTOMATION_MENU,
+            Self::Window => WINDOW_MENU,
+            Self::Help => HELP_MENU,
         }
     }
 }
@@ -135,48 +72,408 @@ pub(super) const ALL_MENUS: [ApplicationMenu; 11] = [
     ApplicationMenu::Help,
 ];
 
-/// What the menus drew, row by row, while a test was listening: the record a
-/// test pins a menu's exact rows against.
-#[cfg(test)]
-pub(super) mod row_log {
-    use super::{Command, CommandAvailability};
-    use std::cell::RefCell;
+const FILE_MENU: &[MenuEntry] = &[
+    command(Command::ProjectLauncher),
+    Separator,
+    command(Command::OpenProject),
+    command(Command::OpenNetlist),
+    command(Command::NewProject),
+    command(Command::RecentProjects),
+    Separator,
+    command(Command::NewCell),
+    command(Command::OpenDocument),
+    Separator,
+    command(Command::Save),
+    command(Command::SaveAs),
+    command(Command::SaveAll),
+    command(Command::RevertActiveDocument),
+    Separator,
+    command(Command::ImportNetlist),
+    command(Command::ImportVerilogA),
+    Separator,
+    command(Command::ExportSchematicSvg),
+    command(Command::ExportWaveformsCsv),
+    command(Command::ExportPublicationSnapshot),
+    command(Command::ExportNetlist(crate::io::NetlistFormat::Spice)),
+    Separator,
+    command(Command::LiveSession),
+    command(Command::PublishToWeb),
+    Separator,
+    command(Command::CloseActiveDocument),
+    command(Command::CloseProject),
+    Separator,
+    // The drawing sheet's workflows, in the order the sheet is set up.
+    command(Command::SheetProperties),
+    command(Command::SheetFormatManager),
+    command(Command::CustomSheetSizes),
+    command(Command::SheetDefaults),
+    command(Command::PrintHardcopy),
+    command(Command::ExportActiveView),
+    MenuEntry::Only(
+        MenuContext::DesktopApplication,
+        &[Separator, command(Command::Exit)],
+    ),
+];
 
-    thread_local! {
-        static ROWS: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
-    }
+/// Edit acts on what the page shows: with a source editor as the document,
+/// on its text; otherwise on the drawing's selection.
+const EDIT_MENU: &[MenuEntry] = &[
+    command(Command::Undo),
+    command(Command::Redo),
+    Separator,
+    command(Command::Cut),
+    command(Command::Copy),
+    command(Command::Paste),
+    MenuEntry::Only(
+        MenuContext::SourceEditor,
+        &[command(Command::DuplicateLine)],
+    ),
+    MenuEntry::Only(MenuContext::Drawing, &[command(Command::Duplicate)]),
+    command(Command::Delete),
+    command(Command::SelectAll),
+    Separator,
+    MenuEntry::Only(
+        MenuContext::SourceEditor,
+        &[
+            command(Command::ToggleLineComment),
+            command(Command::FormatDocument),
+            command(Command::GoToLine),
+            command(Command::FindCodeDocument),
+        ],
+    ),
+    MenuEntry::Only(
+        MenuContext::Drawing,
+        &[
+            command(Command::RenameSelection),
+            command(Command::ObjectProperties),
+            command(Command::FindInDesign),
+            command(Command::FindReplace),
+        ],
+    ),
+    Separator,
+    command(Command::Preferences),
+];
 
-    /// Run `draw` and return the line of every row it drew, hidden ones too.
-    pub(in super::super) fn record(draw: impl FnOnce()) -> Vec<String> {
-        ROWS.with(|rows| *rows.borrow_mut() = Some(Vec::new()));
-        draw();
-        ROWS.with(|rows| rows.borrow_mut().take().unwrap_or_default())
-    }
+const VIEW_MENU: &[MenuEntry] = &[
+    command(Command::ZoomIn),
+    command(Command::ZoomOut),
+    command(Command::ZoomFit),
+    command(Command::FitSchematicContent),
+    command(Command::ZoomOneToOne),
+    command(Command::ZoomToSelection),
+    command(Command::ZoomBox),
+    command(Command::CycleGrid),
+    command(Command::GridSnapRouting),
+    command(Command::DrawingSheetLayers),
+    command(Command::VisibilityOptions),
+    // Folding, offered while a source editor is the document on screen.
+    MenuEntry::Only(
+        MenuContext::SourceEditor,
+        &[
+            Separator,
+            command(Command::FoldSelection),
+            command(Command::UnfoldAtCaret),
+            command(Command::FoldAll),
+            command(Command::UnfoldAll),
+        ],
+    ),
+    Separator,
+    command_by_state(
+        Command::ToggleFullScreen,
+        "Exit full screen",
+        "Enter full screen",
+        full_screen_shown,
+    ),
+    command(Command::ResetActiveView),
+    Separator,
+    command(Command::EngineeringTableView),
+];
 
-    pub(in super::super) fn push(line: impl FnOnce() -> String) {
-        ROWS.with(|rows| {
-            if let Some(rows) = rows.borrow_mut().as_mut() {
-                rows.push(line());
-            }
-        });
-    }
+fn full_screen_shown(app: &RSpiceApp) -> bool {
+    app.state.workbench.full_screen_presentation
+}
 
-    /// `label | command id | key | state`, the state being `on`, `off: why`
-    /// or `hidden`.
-    pub(in super::super) fn command_line(
-        label: &str,
-        command: Command,
-        shortcut: &str,
-        availability: CommandAvailability,
-    ) -> String {
-        let state = match availability {
-            CommandAvailability::Available => "on".to_owned(),
-            CommandAvailability::Disabled(reason) => format!("off: {reason}"),
-            CommandAvailability::Hidden => "hidden".to_owned(),
-        };
-        format!("{label} | {} | {shortcut} | {state}", command.stable_id())
+const DESIGN_MENU: &[MenuEntry] = &[
+    command_as(
+        Command::OpenWorkspace(Workspace::Design),
+        "Open active schematic",
+    ),
+    command(Command::AscendHierarchy),
+    command(Command::DescendHierarchy),
+    Separator,
+    command(Command::PlaceInstance),
+    command(Command::PlaceWire),
+    command(Command::PlaceBus),
+    command(Command::PlaceBusTap),
+    command(Command::PlaceJunction),
+    command(Command::PlaceLabel),
+    command(Command::PlaceProbe),
+    command(Command::PlacePin),
+    command(Command::PlaceText),
+    command(Command::PlaceShape),
+    Separator,
+    command(Command::MoveSelection),
+    command(Command::StretchSelection),
+    command(Command::ArraySelection),
+    command(Command::ReplaceInstance),
+    MenuEntry::Submenu {
+        label: "Arrange",
+        icon: WorkbenchIcon::Grid,
+        entries: ARRANGE_MENU,
+    },
+    command(Command::JoinCollinearWires),
+    Separator,
+    // The sheets of the active drawing, in the order the strip shows them:
+    // navigate first, then author.
+    command(Command::PreviousSheet),
+    command(Command::NextSheet),
+    command(Command::NewSheet),
+    command(Command::DeleteSheet),
+    Separator,
+    command(Command::CreateHierarchy),
+    command(Command::DesignManagement),
+    command(Command::SelectionBulkEdit),
+    command(Command::ConnectivityManager),
+    command(Command::ConfigurationSets),
+    command(Command::RuleSetup),
+    command(Command::ReviewComments),
+    command(Command::RevisionHistory),
+    Separator,
+    command_as(
+        Command::DesignSpecialistWorkspaces,
+        "Specialist workspaces\u{2026}",
+    ),
+    Separator,
+    // The design checks, narrowest first: the cellview in front of the
+    // reader, the whole design, and the check that gates a save.
+    command(Command::CheckCellview),
+    command(Command::CheckDesign),
+    command(Command::CheckAndSave),
+    Separator,
+    palette_scope("Browse all design commands\u{2026}", "Design"),
+];
+
+/// The Design menu's Arrange submenu, group by group: turn and flip, line
+/// up, space out, put back on the grid.
+const ARRANGE_MENU: &[MenuEntry] = &[
+    command(Command::RotateSelection),
+    command(Command::RotateSelectionCounterClockwise),
+    command(Command::MirrorSelectionHorizontal),
+    command(Command::MirrorSelectionVertical),
+    Separator,
+    command(Command::AlignSelectionLeft),
+    command(Command::AlignSelectionCenter),
+    command(Command::AlignSelectionRight),
+    command(Command::AlignSelectionTop),
+    command(Command::AlignSelectionMiddle),
+    command(Command::AlignSelectionBottom),
+    Separator,
+    command(Command::DistributeSelectionHorizontal),
+    command(Command::DistributeSelectionVertical),
+    Separator,
+    command(Command::SnapSelectionToGrid),
+];
+
+const SIMULATE_MENU: &[MenuEntry] = &[
+    // The manager owns which plan is active, and every row below it acts on
+    // that plan - "Run active plan", "Stop active run", its job history, its
+    // preflight checks. Choosing the plan therefore reads above the actions
+    // taken on it, in the same group they belong to.
+    command(Command::ManageSimulationPlans),
+    // Filling the chosen plan reads directly under choosing it, and above the
+    // actions that dispatch what it holds. It is here because the navigator is
+    // the only other route to the catalogue, and the navigator is a panel a
+    // reader can collapse.
+    command(Command::AddAnalysis),
+    command(Command::RunSimulation),
+    command(Command::StopSimulation),
+    command(Command::JobsManager),
+    command(Command::PreflightChecks),
+    Separator,
+    command_as(
+        Command::OpenWorkspace(Workspace::Simulate),
+        "Simulation Studio",
+    ),
+    // Beside the studio, because a definition is what the studio's
+    // excitations read: the mockup's Simulate menu lists the two together.
+    command_as(
+        Command::OpenWorkspace(Workspace::Stimulus),
+        "Stimulus Library",
+    ),
+    command(Command::SimulationOptions),
+    command(Command::GenerateNetlist),
+    command(Command::EditSpecifications),
+];
+
+const RESULTS_MENU: &[MenuEntry] = &[
+    command(Command::ResultViewer(crate::workbench::ResultViewer::Waves)),
+    command(Command::DatasetManifestBrowser),
+    command(Command::CreateResultDocument),
+    command(Command::CompareResultDatasets),
+    command(Command::ReportAuthoring),
+    Separator,
+    command(Command::ToggleLinkedCursors),
+    command(Command::WaveformCalculator),
+    command(Command::ExpressionDiagnostics),
+    command(Command::MeasurementLibrary),
+    command(Command::FamilySlicing),
+    command(Command::VisualizationDocumentProperties),
+    Separator,
+    command(Command::ImportResultDataset),
+    command(Command::ExportWaveformsCsv),
+];
+
+const VERIFY_MENU: &[MenuEntry] = &[
+    command_as(
+        Command::VerificationPage(VerificationPage::Yield),
+        "Verification cockpit",
+    ),
+    command_as(
+        Command::VerificationPage(VerificationPage::Corners),
+        "Corner matrix",
+    ),
+    command_as(
+        Command::VerificationPage(VerificationPage::Optimization),
+        "Optimization",
+    ),
+    command_as(
+        Command::VerificationPage(VerificationPage::DeviceSafety),
+        "Safe operating area",
+    ),
+    command_as(
+        Command::VerificationPage(VerificationPage::Regression),
+        "Regression plan",
+    ),
+];
+
+const MODELS_MENU: &[MenuEntry] = &[
+    command_as(
+        Command::ModelsPage(ModelsPage::Models),
+        "Model & library catalog",
+    ),
+    command(Command::ModelEditor),
+    command(Command::ModelCorrelation),
+    Separator,
+    command_as(Command::CompileVerilogA, "Verilog-A/AMS compiler"),
+];
+
+const AUTOMATION_MENU: &[MenuEntry] = &[command_as(
+    Command::AutomationConsole,
+    "Automation workspace",
+)];
+
+const WINDOW_MENU: &[MenuEntry] = &[
+    command(Command::ToggleNavigator),
+    command(Command::ToggleInspector),
+    command(Command::ToggleConsole),
+    command(Command::ToggleResultsSplit),
+    command(Command::ToggleFocusMode),
+    Separator,
+    command(Command::NewApplicationWindow),
+    command(Command::DetachDocument),
+    command(Command::MoveDocumentToWindow),
+    command(Command::ReattachDocument),
+    command(Command::ConsolidateWindows),
+    command(Command::MonitorRecovery),
+    Separator,
+    command(Command::PreviousDocument),
+    command(Command::NextDocument),
+    command(Command::CloseOtherDocuments),
+    command(Command::CloseAllDocuments),
+    Separator,
+    command(Command::WorkspaceLayouts),
+    command(Command::WindowManager),
+    command(Command::ResetLayout),
+    Separator,
+    command(Command::PreviousWorkspace),
+    command(Command::NextWorkspace),
+];
+
+const HELP_MENU: &[MenuEntry] = &[
+    command(Command::HelpCenter),
+    command(Command::KeyboardShortcuts),
+    command(Command::ReleaseNotes),
+    command(Command::MigrationGuide),
+    command(Command::SystemDiagnostics),
+    command(Command::SupportBundle),
+    command(Command::LegalPrivacy),
+    Separator,
+    command(Command::About),
+];
+
+/// What the bar's overflow menu holds where it hides menus: the three
+/// workspaces of the hidden menus while only File through Simulate show,
+/// then the rows every overflow keeps.
+pub(super) const fn overflow_entries(projection: MenuProjection) -> &'static [MenuEntry] {
+    if matches!(projection, MenuProjection::ThroughSimulate) {
+        OVERFLOW_THROUGH_SIMULATE_MENU
+    } else {
+        OVERFLOW_MENU
     }
 }
+
+const OVERFLOW_THROUGH_SIMULATE_MENU: &[MenuEntry] = &[
+    command_without_key(
+        Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+        "Results workspace",
+    ),
+    command_without_key(
+        Command::VerificationPage(VerificationPage::Yield),
+        "Verification workspace",
+    ),
+    command_without_key(Command::ModelsPage(ModelsPage::Models), "Models workspace"),
+    command_without_key(Command::AutomationConsole, "Automation workspace"),
+    command_without_key(
+        Command::SpecialistToolBrowser,
+        "Specialist workspaces\u{2026}",
+    ),
+    Separator,
+    command(Command::WorkspaceLayouts),
+    command(Command::WindowManager),
+    command_without_key(Command::JobsManager, "Jobs & targets"),
+    command(Command::ToggleFocusMode),
+    command(Command::ToggleConsole),
+    Separator,
+    command(Command::HelpCenter),
+];
+
+const OVERFLOW_MENU: &[MenuEntry] = &[
+    command_without_key(Command::AutomationConsole, "Automation workspace"),
+    command_without_key(
+        Command::SpecialistToolBrowser,
+        "Specialist workspaces\u{2026}",
+    ),
+    Separator,
+    command(Command::WorkspaceLayouts),
+    command(Command::WindowManager),
+    command_without_key(Command::JobsManager, "Jobs & targets"),
+    command(Command::ToggleFocusMode),
+    command(Command::ToggleConsole),
+    Separator,
+    command(Command::HelpCenter),
+];
+
+/// The source editor's right-click menu: the language group, shown only
+/// where the document's language service can answer it, then the
+/// clipboard, then the line edits. Mutating rows are greyed on a read-only
+/// source.
+const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
+    MenuEntry::Only(
+        MenuContext::NavigableSourceEditor,
+        &[
+            command(Command::GoToDefinition),
+            command(Command::FindReferences),
+            command(Command::RenameSymbol),
+            Separator,
+        ],
+    ),
+    command(Command::Cut),
+    command(Command::Copy),
+    command(Command::Paste),
+    Separator,
+    command(Command::ToggleLineComment),
+    command(Command::FormatDocument),
+];
 
 pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool) {
     ui.set_min_width(MENU_CONTENT_WIDTH);
@@ -187,105 +484,6 @@ pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool) {
     } else {
         MENU_ROW_HEIGHT
     };
-}
-
-fn command_item(ui: &mut Ui, app: &mut RSpiceApp, command: Command) {
-    let spec = command.spec();
-    command_item_as(ui, app, command, spec.label, None);
-}
-
-fn command_item_as(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    command: Command,
-    label: &str,
-    shortcut_override: Option<&str>,
-) {
-    command_item_as_impl(ui, app, command, label, shortcut_override, None);
-}
-
-fn scoped_palette_item(ui: &mut Ui, app: &mut RSpiceApp, label: &str, scope: &'static str) {
-    command_item_as_impl(
-        ui,
-        app,
-        Command::CommandPalette,
-        label,
-        Some("Ctrl+K"),
-        Some(scope),
-    );
-}
-
-fn command_item_as_impl(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    command: Command,
-    label: &str,
-    shortcut_override: Option<&str>,
-    palette_scope: Option<&'static str>,
-) {
-    let availability = command.availability(app);
-    let shortcut = shortcut_for_occurrence(
-        app.state.ui.preferences.shortcuts(),
-        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
-        ui.ctx().os(),
-        command,
-        shortcut_override,
-    );
-    #[cfg(test)]
-    row_log::push(|| row_log::command_line(label, command, &shortcut, availability));
-    if availability == CommandAvailability::Hidden {
-        return;
-    }
-    let enabled = availability.is_available();
-    let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
-    let (rect, response) = ui
-        .add_enabled_ui(enabled, |ui| {
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click())
-        })
-        .inner;
-    let response = match availability {
-        CommandAvailability::Disabled(reason) => {
-            response.on_hover_text(format!("Unavailable: {reason}"))
-        }
-        CommandAvailability::Available | CommandAvailability::Hidden => response,
-    };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::MenuItem);
-        node.set_label(label);
-        if let CommandAvailability::Disabled(reason) = availability {
-            node.set_description(reason);
-        }
-        if enabled && !shortcut.is_empty() {
-            node.set_keyboard_shortcut(shortcut.as_str());
-        }
-    });
-    record_menu_row(ui.ctx(), &response, label, enabled);
-
-    let highlighted = enabled && (response.hovered() || response.has_focus());
-    paint_menu_row(
-        ui,
-        rect,
-        highlighted,
-        enabled,
-        command_icon(command),
-        label,
-        MenuRowTrailing::Shortcut(&shortcut),
-    );
-    theme::paint_focus_ring_outset(ui, &response, rect);
-
-    let response = match availability {
-        CommandAvailability::Disabled(reason) => response.on_disabled_hover_text(reason),
-        CommandAvailability::Available | CommandAvailability::Hidden => response,
-    };
-    if response.clicked() {
-        if let Some(scope) = palette_scope {
-            app.state.dialogs.command_palette.open_in_scope(scope);
-        } else {
-            command.execute(app);
-        }
-        ui.close();
-    }
 }
 
 pub(super) fn command_icon(command: Command) -> WorkbenchIcon {
@@ -461,60 +659,30 @@ pub(super) fn command_icon(command: Command) -> WorkbenchIcon {
     }
 }
 
-fn menu_separator(ui: &mut Ui) {
-    #[cfg(test)]
-    row_log::push(|| "---".to_owned());
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 9.0), Sense::hover());
-    ui.painter().hline(
-        (rect.left() + 5.0)..=(rect.right() - 5.0),
-        rect.top() + 4.5,
-        egui::Stroke::new(1.0, t.color.border),
-    );
-}
-
 /// The source editor's right-click menu, drawn with the menu bar's own rows
 /// and separators so its row height, text edge and rules match the menus
 /// above it. A long press opens it on touch.
-///
-/// The language group shows only where the document's language service can
-/// answer it; mutating rows are disabled on a read-only source.
 pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app: &mut RSpiceApp) {
     let ctx = response.ctx.clone();
     let large_targets = ctx.content_rect().width() <= 820.0
         || Tokens::get(&ctx).metrics.ctl_h >= MENU_TOUCH_ROW_HEIGHT;
     let popup_id = Popup::default_response_id(response);
-    Popup::context_menu(response).show(|ui| {
+    let shown = Popup::context_menu(response).show(|ui| {
         configure_menu_popup(ui, large_targets);
         ui.ctx().accesskit_node_builder(popup_id, |node| {
             node.set_role(egui::accesskit::Role::Menu);
             node.set_label("Source editor menu");
         });
         begin_menu_render(ui.ctx(), popup_id);
-        let navigation = [
-            Command::GoToDefinition,
-            Command::FindReferences,
-            Command::RenameSymbol,
-        ];
-        if navigation
-            .iter()
-            .any(|command| command.availability(app) != CommandAvailability::Hidden)
-        {
-            for command in navigation {
-                command_item(ui, app, command);
-            }
-            menu_separator(ui);
-        }
-        for command in [Command::Cut, Command::Copy, Command::Paste] {
-            command_item(ui, app, command);
-        }
-        menu_separator(ui);
-        for command in [Command::ToggleLineComment, Command::FormatDocument] {
-            command_item(ui, app, command);
-        }
+        let rows = menu_rows(SOURCE_EDITOR_MENU, app, ui.ctx());
+        let choice = show_menu_rows(ui, &rows);
         let render_state = finish_menu_render(ui.ctx());
         handle_popup_keyboard(ui.ctx(), popup_id, response, &render_state.rows);
+        choice
     });
+    if let Some(choice) = shown.and_then(|shown| shown.inner) {
+        choice.run(app);
+    }
 }
 
 pub(super) fn shortcut_for_occurrence(
@@ -529,59 +697,6 @@ pub(super) fn shortcut_for_occurrence(
         str::to_owned,
     )
 }
-
-fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::ProjectLauncher);
-    menu_separator(ui);
-    command_item(ui, app, Command::OpenProject);
-    command_item(ui, app, Command::OpenNetlist);
-    command_item(ui, app, Command::NewProject);
-    command_item(ui, app, Command::RecentProjects);
-    menu_separator(ui);
-    command_item(ui, app, Command::NewCell);
-    command_item(ui, app, Command::OpenDocument);
-    menu_separator(ui);
-    command_item(ui, app, Command::Save);
-    command_item(ui, app, Command::SaveAs);
-    command_item(ui, app, Command::SaveAll);
-    command_item(ui, app, Command::RevertActiveDocument);
-    menu_separator(ui);
-    command_item(ui, app, Command::ImportNetlist);
-    command_item(ui, app, Command::ImportVerilogA);
-    menu_separator(ui);
-    command_item(ui, app, Command::ExportSchematicSvg);
-    command_item(ui, app, Command::ExportWaveformsCsv);
-    command_item(ui, app, Command::ExportPublicationSnapshot);
-    command_item(
-        ui,
-        app,
-        Command::ExportNetlist(crate::io::NetlistFormat::Spice),
-    );
-    menu_separator(ui);
-    command_item(ui, app, Command::LiveSession);
-    command_item(ui, app, Command::PublishToWeb);
-    menu_separator(ui);
-    command_item(ui, app, Command::CloseActiveDocument);
-    command_item(ui, app, Command::CloseProject);
-    menu_separator(ui);
-    for command in DRAWING_SHEET_FILE_COMMANDS {
-        command_item(ui, app, command);
-    }
-    command_item(ui, app, Command::PrintHardcopy);
-    command_item(ui, app, Command::ExportActiveView);
-    let platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
-    if file_menu_shows_exit(platform) {
-        menu_separator(ui);
-        command_item(ui, app, Command::Exit);
-    }
-}
-
-pub(super) const DRAWING_SHEET_FILE_COMMANDS: [Command; 4] = [
-    Command::SheetProperties,
-    Command::SheetFormatManager,
-    Command::CustomSheetSizes,
-    Command::SheetDefaults,
-];
 
 pub(super) fn menu_popup_max_height(ui: &Ui) -> f32 {
     menu_popup_height_for_viewport(ui.ctx().content_rect().height())
@@ -600,358 +715,4 @@ pub(super) const fn file_menu_shows_exit(
         platform,
         crate::workbench::commands::vocabulary::CommandPlatform::Desktop
     )
-}
-
-/// Edit acts on what the page shows: with a source editor as the document,
-/// on its text; otherwise on the drawing's selection.
-fn edit_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    let source = app.state.ui.active_source_editor.is_some();
-    for command in [Command::Undo, Command::Redo] {
-        command_item(ui, app, command);
-    }
-    menu_separator(ui);
-    for command in [
-        Command::Cut,
-        Command::Copy,
-        Command::Paste,
-        if source {
-            Command::DuplicateLine
-        } else {
-            Command::Duplicate
-        },
-        Command::Delete,
-        Command::SelectAll,
-    ] {
-        command_item(ui, app, command);
-    }
-    menu_separator(ui);
-    if source {
-        for command in [
-            Command::ToggleLineComment,
-            Command::FormatDocument,
-            Command::GoToLine,
-        ] {
-            command_item(ui, app, command);
-        }
-    } else {
-        command_item(ui, app, Command::RenameSelection);
-        command_item(ui, app, Command::ObjectProperties);
-    }
-    command_item(
-        ui,
-        app,
-        if source {
-            Command::FindCodeDocument
-        } else {
-            Command::FindInDesign
-        },
-    );
-    if !source {
-        command_item(ui, app, Command::FindReplace);
-    }
-    menu_separator(ui);
-    command_item(ui, app, Command::Preferences);
-}
-
-/// Folding, offered while a source editor is the document on screen.
-const VIEW_SOURCE_FOLD_COMMANDS: [Command; 4] = [
-    Command::FoldSelection,
-    Command::UnfoldAtCaret,
-    Command::FoldAll,
-    Command::UnfoldAll,
-];
-
-fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    for command in VIEW_VIEWPORT_COMMANDS {
-        command_item(ui, app, command);
-    }
-    if app.state.ui.active_source_editor.is_some() {
-        menu_separator(ui);
-        for command in VIEW_SOURCE_FOLD_COMMANDS {
-            command_item(ui, app, command);
-        }
-    }
-    menu_separator(ui);
-    command_item_as(
-        ui,
-        app,
-        Command::ToggleFullScreen,
-        if app.state.workbench.full_screen_presentation {
-            "Exit full screen"
-        } else {
-            "Enter full screen"
-        },
-        None,
-    );
-    command_item(ui, app, Command::ResetActiveView);
-    menu_separator(ui);
-    command_item(ui, app, Command::EngineeringTableView);
-}
-
-fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item_as(
-        ui,
-        app,
-        Command::OpenWorkspace(Workspace::Design),
-        "Open active schematic",
-        None,
-    );
-    command_item(ui, app, Command::AscendHierarchy);
-    command_item(ui, app, Command::DescendHierarchy);
-    menu_separator(ui);
-    for command in DESIGN_PLACEMENT_COMMANDS {
-        command_item(ui, app, command);
-    }
-    menu_separator(ui);
-    for command in DESIGN_EDIT_COMMANDS {
-        command_item(ui, app, command);
-    }
-    arrange_submenu(ui, |ui| {
-        let width = arrange_submenu_width(ui, app);
-        ui.set_max_width(width);
-        ui.set_min_width(width);
-        for (index, group) in ARRANGE_GROUPS.iter().enumerate() {
-            if index > 0 {
-                menu_separator(ui);
-            }
-            for &command in *group {
-                command_item(ui, app, command);
-            }
-        }
-    });
-    command_item(ui, app, Command::JoinCollinearWires);
-    menu_separator(ui);
-    for command in DESIGN_SHEET_COMMANDS {
-        command_item(ui, app, command);
-    }
-    menu_separator(ui);
-    for command in DESIGN_MANAGEMENT_COMMANDS {
-        command_item(ui, app, command);
-    }
-    menu_separator(ui);
-    command_item_as(
-        ui,
-        app,
-        Command::DesignSpecialistWorkspaces,
-        "Specialist workspaces\u{2026}",
-        None,
-    );
-    menu_separator(ui);
-    for command in DESIGN_CHECK_COMMANDS {
-        command_item(ui, app, command);
-    }
-    menu_separator(ui);
-    scoped_palette_item(ui, app, "Browse all design commands\u{2026}", "Design");
-}
-
-pub(super) fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    // The manager owns which plan is active, and every row below it acts on
-    // that plan - "Run active plan", "Stop active run", its job history, its
-    // preflight checks. Choosing the plan therefore reads above the actions
-    // taken on it, in the same group they belong to.
-    command_item(ui, app, Command::ManageSimulationPlans);
-    // Filling the chosen plan reads directly under choosing it, and above the
-    // actions that dispatch what it holds. It is here because the navigator is
-    // the only other route to the catalogue, and the navigator is a panel a
-    // reader can collapse.
-    command_item(ui, app, Command::AddAnalysis);
-    command_item(ui, app, Command::RunSimulation);
-    command_item(ui, app, Command::StopSimulation);
-    command_item(ui, app, Command::JobsManager);
-    command_item(ui, app, Command::PreflightChecks);
-    menu_separator(ui);
-    command_item_as(
-        ui,
-        app,
-        Command::OpenWorkspace(Workspace::Simulate),
-        "Simulation Studio",
-        None,
-    );
-    // Beside the studio, because a definition is what the studio's
-    // excitations read: the mockup's Simulate menu lists the two together.
-    command_item_as(
-        ui,
-        app,
-        Command::OpenWorkspace(Workspace::Stimulus),
-        "Stimulus Library",
-        None,
-    );
-    command_item(ui, app, Command::SimulationOptions);
-    command_item(ui, app, Command::GenerateNetlist);
-    command_item(ui, app, Command::EditSpecifications);
-}
-
-pub(super) fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(
-        ui,
-        app,
-        Command::ResultViewer(crate::workbench::ResultViewer::Waves),
-    );
-    command_item(ui, app, Command::DatasetManifestBrowser);
-    command_item(ui, app, Command::CreateResultDocument);
-    command_item(ui, app, Command::CompareResultDatasets);
-    command_item(ui, app, Command::ReportAuthoring);
-    menu_separator(ui);
-    command_item(ui, app, Command::ToggleLinkedCursors);
-    command_item(ui, app, Command::WaveformCalculator);
-    command_item(ui, app, Command::ExpressionDiagnostics);
-    command_item(ui, app, Command::MeasurementLibrary);
-    command_item(ui, app, Command::FamilySlicing);
-    command_item(ui, app, Command::VisualizationDocumentProperties);
-    menu_separator(ui);
-    command_item(ui, app, Command::ImportResultDataset);
-    command_item(ui, app, Command::ExportWaveformsCsv);
-}
-
-fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item_as(
-        ui,
-        app,
-        Command::VerificationPage(VerificationPage::Yield),
-        "Verification cockpit",
-        None,
-    );
-    command_item_as(
-        ui,
-        app,
-        Command::VerificationPage(VerificationPage::Corners),
-        "Corner matrix",
-        None,
-    );
-    command_item_as(
-        ui,
-        app,
-        Command::VerificationPage(VerificationPage::Optimization),
-        "Optimization",
-        None,
-    );
-    command_item_as(
-        ui,
-        app,
-        Command::VerificationPage(VerificationPage::DeviceSafety),
-        "Safe operating area",
-        None,
-    );
-    command_item_as(
-        ui,
-        app,
-        Command::VerificationPage(VerificationPage::Regression),
-        "Regression plan",
-        None,
-    );
-}
-
-fn models_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item_as(
-        ui,
-        app,
-        Command::ModelsPage(ModelsPage::Models),
-        "Model & library catalog",
-        None,
-    );
-    command_item(ui, app, Command::ModelEditor);
-    command_item(ui, app, Command::ModelCorrelation);
-    menu_separator(ui);
-    command_item_as(
-        ui,
-        app,
-        Command::CompileVerilogA,
-        "Verilog-A/AMS compiler",
-        None,
-    );
-}
-
-fn automation_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item_as(
-        ui,
-        app,
-        Command::AutomationConsole,
-        "Automation workspace",
-        None,
-    );
-}
-
-pub(super) fn overflow_menu(ui: &mut Ui, app: &mut RSpiceApp, projection: MenuProjection) {
-    if projection == MenuProjection::ThroughSimulate {
-        command_item_as(
-            ui,
-            app,
-            Command::ResultViewer(crate::workbench::ResultViewer::Waves),
-            "Results workspace",
-            Some(""),
-        );
-        command_item_as(
-            ui,
-            app,
-            Command::VerificationPage(VerificationPage::Yield),
-            "Verification workspace",
-            Some(""),
-        );
-        command_item_as(
-            ui,
-            app,
-            Command::ModelsPage(ModelsPage::Models),
-            "Models workspace",
-            Some(""),
-        );
-    }
-    command_item_as(
-        ui,
-        app,
-        Command::AutomationConsole,
-        "Automation workspace",
-        Some(""),
-    );
-    command_item_as(
-        ui,
-        app,
-        Command::SpecialistToolBrowser,
-        "Specialist workspaces\u{2026}",
-        Some(""),
-    );
-    menu_separator(ui);
-    command_item(ui, app, Command::WorkspaceLayouts);
-    command_item(ui, app, Command::WindowManager);
-    command_item_as(ui, app, Command::JobsManager, "Jobs & targets", Some(""));
-    command_item(ui, app, Command::ToggleFocusMode);
-    command_item(ui, app, Command::ToggleConsole);
-    menu_separator(ui);
-    command_item(ui, app, Command::HelpCenter);
-}
-
-fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    for command in WINDOW_LAYOUT_COMMANDS {
-        command_item(ui, app, command);
-    }
-    menu_separator(ui);
-    command_item(ui, app, Command::NewApplicationWindow);
-    command_item(ui, app, Command::DetachDocument);
-    command_item(ui, app, Command::MoveDocumentToWindow);
-    command_item(ui, app, Command::ReattachDocument);
-    command_item(ui, app, Command::ConsolidateWindows);
-    command_item(ui, app, Command::MonitorRecovery);
-    menu_separator(ui);
-    command_item(ui, app, Command::PreviousDocument);
-    command_item(ui, app, Command::NextDocument);
-    command_item(ui, app, Command::CloseOtherDocuments);
-    command_item(ui, app, Command::CloseAllDocuments);
-    menu_separator(ui);
-    command_item(ui, app, Command::WorkspaceLayouts);
-    command_item(ui, app, Command::WindowManager);
-    command_item(ui, app, Command::ResetLayout);
-    menu_separator(ui);
-    command_item(ui, app, Command::PreviousWorkspace);
-    command_item(ui, app, Command::NextWorkspace);
-}
-
-fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    command_item(ui, app, Command::HelpCenter);
-    command_item(ui, app, Command::KeyboardShortcuts);
-    command_item(ui, app, Command::ReleaseNotes);
-    command_item(ui, app, Command::MigrationGuide);
-    command_item(ui, app, Command::SystemDiagnostics);
-    command_item(ui, app, Command::SupportBundle);
-    command_item(ui, app, Command::LegalPrivacy);
-    menu_separator(ui);
-    command_item(ui, app, Command::About);
 }

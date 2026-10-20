@@ -151,12 +151,45 @@ fn labels(projection: MenuProjection) -> Vec<&'static str> {
         .collect()
 }
 
+/// Draw `entries` the way an open menu draws them.
+#[cfg(not(target_arch = "wasm32"))]
+fn draw_menu_entries(ui: &mut Ui, app: &RSpiceApp, entries: &[MenuEntry]) {
+    let rows = menu_rows(entries, app, ui.ctx());
+    let _ = show_menu_rows(ui, &rows);
+}
+
+/// Every command `entries` list, in order, whatever context their blocks
+/// show in; a submenu's commands follow its row.
+fn listed_commands(entries: &[MenuEntry]) -> Vec<Command> {
+    let mut commands = Vec::new();
+    for entry in entries {
+        match *entry {
+            MenuEntry::Command(item) => commands.push(item.command),
+            MenuEntry::Submenu { entries, .. } | MenuEntry::Only(_, entries) => {
+                commands.extend(listed_commands(entries));
+            }
+            MenuEntry::Separator => {}
+        }
+    }
+    commands
+}
+
+/// `menu` lists `run` as consecutive rows.
+fn assert_menu_lists(menu: ApplicationMenu, run: &[Command]) {
+    let listed = listed_commands(menu.entries());
+    assert!(
+        listed.windows(run.len()).any(|window| window == run),
+        "{} does not list {run:?} in order: {listed:?}",
+        menu.label()
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn rendered_results_menu_labels() -> Vec<String> {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
-    let mut app = title_test_app();
+    let app = title_test_app();
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -168,7 +201,9 @@ fn rendered_results_menu_labels() -> Vec<String> {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
-                .show(ctx, |ui| results_menu(ui, &mut app));
+                .show(ctx, |ui| {
+                    draw_menu_entries(ui, &app, ApplicationMenu::Results.entries())
+                });
         },
     );
     let mut items = output
@@ -232,7 +267,9 @@ fn rendered_simulate_menu_rows(
         |ctx| {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
-                .show(ctx, |ui| simulate_menu(ui, &mut app));
+                .show(ctx, |ui| {
+                    draw_menu_entries(ui, &app, ApplicationMenu::Simulate.entries())
+                });
         },
     );
     let mut items = output
@@ -285,7 +322,7 @@ fn rendered_overflow_menu_labels() -> Vec<String> {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
-    let mut app = title_test_app();
+    let app = title_test_app();
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -298,7 +335,7 @@ fn rendered_overflow_menu_labels() -> Vec<String> {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ctx, |ui| {
-                    overflow_menu(ui, &mut app, MenuProjection::ThroughModels)
+                    draw_menu_entries(ui, &app, overflow_entries(MenuProjection::ThroughModels))
                 });
         },
     );
@@ -594,14 +631,14 @@ fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
 
 #[test]
 fn file_menu_exposes_the_canonical_drawing_sheet_workflows_in_order() {
-    assert_eq!(
-        DRAWING_SHEET_FILE_COMMANDS,
-        [
+    assert_menu_lists(
+        ApplicationMenu::File,
+        &[
             Command::SheetProperties,
             Command::SheetFormatManager,
             Command::CustomSheetSizes,
             Command::SheetDefaults,
-        ]
+        ],
     );
 }
 
@@ -673,46 +710,68 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
 #[test]
 fn the_view_menu_lists_each_viewport_row_exactly_once() {
     let mut seen = std::collections::BTreeSet::new();
-    for command in VIEW_VIEWPORT_COMMANDS {
+    let listed = listed_commands(ApplicationMenu::View.entries());
+    for command in &listed {
         assert!(
             seen.insert(command.spec().id),
-            "{command:?} appears twice in the View menu's viewport group"
+            "{command:?} appears twice in the View menu"
         );
     }
-    assert_eq!(seen.len(), VIEW_VIEWPORT_COMMANDS.len());
-    assert!(VIEW_VIEWPORT_COMMANDS.contains(&Command::VisibilityOptions));
+    assert_eq!(seen.len(), listed.len());
+    assert!(listed.contains(&Command::VisibilityOptions));
 }
+
+const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
+    Command::PlaceInstance,
+    Command::PlaceWire,
+    Command::PlaceBus,
+    Command::PlaceBusTap,
+    Command::PlaceJunction,
+    Command::PlaceLabel,
+    Command::PlaceProbe,
+    Command::PlacePin,
+    Command::PlaceText,
+    Command::PlaceShape,
+];
+const DESIGN_EDIT_COMMANDS: [Command; 4] = [
+    Command::MoveSelection,
+    Command::StretchSelection,
+    Command::ArraySelection,
+    Command::ReplaceInstance,
+];
+const DESIGN_MANAGEMENT_COMMANDS: [Command; 8] = [
+    Command::CreateHierarchy,
+    Command::DesignManagement,
+    Command::SelectionBulkEdit,
+    Command::ConnectivityManager,
+    Command::ConfigurationSets,
+    Command::RuleSetup,
+    Command::ReviewComments,
+    Command::RevisionHistory,
+];
+const DESIGN_SHEET_COMMANDS: [Command; 4] = [
+    Command::PreviousSheet,
+    Command::NextSheet,
+    Command::NewSheet,
+    Command::DeleteSheet,
+];
 
 #[test]
 fn design_placement_menu_matches_the_mockup_order() {
-    assert_eq!(
-        DESIGN_PLACEMENT_COMMANDS,
-        [
-            Command::PlaceInstance,
-            Command::PlaceWire,
-            Command::PlaceBus,
-            Command::PlaceBusTap,
-            Command::PlaceJunction,
-            Command::PlaceLabel,
-            Command::PlaceProbe,
-            Command::PlacePin,
-            Command::PlaceText,
-            Command::PlaceShape,
-        ]
-    );
+    assert_menu_lists(ApplicationMenu::Design, &DESIGN_PLACEMENT_COMMANDS);
 }
 
 #[test]
 fn window_layout_menu_places_split_with_results_before_focus_workspace() {
-    assert_eq!(
-        WINDOW_LAYOUT_COMMANDS,
-        [
+    assert_menu_lists(
+        ApplicationMenu::Window,
+        &[
             Command::ToggleNavigator,
             Command::ToggleInspector,
             Command::ToggleConsole,
             Command::ToggleResultsSplit,
             Command::ToggleFocusMode,
-        ]
+        ],
     );
 }
 
@@ -723,15 +782,7 @@ fn brand_lockup_does_not_reserve_space_after_the_wordmark() {
 
 #[test]
 fn design_edit_menu_matches_the_upgraded_authoring_group() {
-    assert_eq!(
-        DESIGN_EDIT_COMMANDS,
-        [
-            Command::MoveSelection,
-            Command::StretchSelection,
-            Command::ArraySelection,
-            Command::ReplaceInstance,
-        ]
-    );
+    assert_menu_lists(ApplicationMenu::Design, &DESIGN_EDIT_COMMANDS);
 }
 
 /// One frame of what `draw` paints, returning the labels of the menu items
@@ -798,15 +849,25 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
     let selection = &mut app.state.schematic.session.editor.selection;
     selection.select_component(1);
     selection.select_component(2);
-    let arrange = Id::new(ARRANGE_ROW_ID);
+    let arrange = menu_entries::submenu_row_id("Arrange");
     let design_menu = Id::new((
         "workbench.title_menu.trigger",
         MenuTriggerKey::Application(ApplicationMenu::Design),
     ))
     .with("popup");
-    let arrange_labels: Vec<&str> = ARRANGE_GROUPS
+    let arrange_labels: Vec<&str> = ApplicationMenu::Design
+        .entries()
         .iter()
-        .flat_map(|group| group.iter())
+        .find_map(|entry| match entry {
+            MenuEntry::Submenu {
+                label: "Arrange",
+                entries,
+                ..
+            } => Some(listed_commands(entries)),
+            _ => None,
+        })
+        .expect("the Design menu lists Arrange")
+        .iter()
         .map(|command| command.spec().label)
         .collect();
     assert_eq!(arrange_labels.len(), 13);
@@ -868,32 +929,12 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
 
 #[test]
 fn design_management_menu_matches_the_upgraded_governed_group() {
-    assert_eq!(
-        DESIGN_MANAGEMENT_COMMANDS,
-        [
-            Command::CreateHierarchy,
-            Command::DesignManagement,
-            Command::SelectionBulkEdit,
-            Command::ConnectivityManager,
-            Command::ConfigurationSets,
-            Command::RuleSetup,
-            Command::ReviewComments,
-            Command::RevisionHistory,
-        ]
-    );
+    assert_menu_lists(ApplicationMenu::Design, &DESIGN_MANAGEMENT_COMMANDS);
 }
 
 #[test]
 fn design_sheet_menu_reads_navigation_before_authoring() {
-    assert_eq!(
-        DESIGN_SHEET_COMMANDS,
-        [
-            Command::PreviousSheet,
-            Command::NextSheet,
-            Command::NewSheet,
-            Command::DeleteSheet,
-        ]
-    );
+    assert_menu_lists(ApplicationMenu::Design, &DESIGN_SHEET_COMMANDS);
 }
 
 #[test]
@@ -1054,30 +1095,36 @@ fn canonical_menu_icons_do_not_fall_back_to_generic_file_glyphs() {
     }
 }
 
-/// Every row `draw` puts in a menu, hidden ones included, as
+/// Every row `entries` show for `app`, hidden ones included, as
 /// `label | command id | key | state`; separators read `---` and a submenu
 /// row `label >`. Keys are the Windows desktop ones.
 #[cfg(not(target_arch = "wasm32"))]
-fn menu_pin(mut draw: impl FnMut(&mut Ui)) -> Vec<String> {
-    let ctx = Context::default();
-    ctx.set_os(egui::os::OperatingSystem::Windows);
-    crate::ui::Theme::default().apply(&ctx);
-    menus::row_log::record(|| {
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1_440.0, 900.0),
-                )),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default()
-                    .frame(Frame::NONE)
-                    .show(ctx, |ui| draw(ui));
-            },
-        );
+fn menu_pin(entries: &[MenuEntry], app: &RSpiceApp) -> Vec<String> {
+    menu_entries::resolve_menu_rows(
+        entries,
+        app,
+        crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+        egui::os::OperatingSystem::Windows,
+    )
+    .iter()
+    .map(|row| match row {
+        menu_entries::MenuRow::Command(row) => {
+            let state = match row.availability {
+                CommandAvailability::Available => "on".to_owned(),
+                CommandAvailability::Disabled(reason) => format!("off: {reason}"),
+                CommandAvailability::Hidden => "hidden".to_owned(),
+            };
+            format!(
+                "{} | {} | {} | {state}",
+                row.label,
+                row.command.stable_id(),
+                row.shortcut
+            )
+        }
+        menu_entries::MenuRow::Separator => "---".to_owned(),
+        menu_entries::MenuRow::Submenu { label, .. } => format!("{label} >"),
     })
+    .collect()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1113,26 +1160,23 @@ fn every_menu_shows_exactly_its_pinned_rows() {
         }
     };
     for (menu, expected) in PINNED_MENUS {
-        let mut app = title_test_app();
         check(
             menu.label(),
-            menu_pin(|ui| menu.show(ui, &mut app)),
+            menu_pin(menu.entries(), &title_test_app()),
             expected,
         );
     }
     for (menu, expected) in PINNED_SOURCE_EDITOR_MENUS {
-        let mut app = source_editor_app();
         check(
             &format!("{} with a source editor", menu.label()),
-            menu_pin(|ui| menu.show(ui, &mut app)),
+            menu_pin(menu.entries(), &source_editor_app()),
             expected,
         );
     }
     for (projection, expected) in PINNED_OVERFLOW_MENUS {
-        let mut app = title_test_app();
         check(
             &format!("{projection:?} overflow"),
-            menu_pin(|ui| overflow_menu(ui, &mut app, projection)),
+            menu_pin(overflow_entries(projection), &title_test_app()),
             expected,
         );
     }

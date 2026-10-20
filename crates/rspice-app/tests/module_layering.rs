@@ -263,7 +263,14 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// settings were left to the sheet panel. Its opener, its renderer, the
 /// title-block fields dialog only it reached, and its render tests' frame
 /// helpers took the application whole.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 789;
+///
+/// 789 -> 771 on 2026-10-20, when the application menus became data. The
+/// eleven menu functions, the overflow menu's, their dispatcher, the four
+/// row helpers and the two content callbacks the menu triggers threaded
+/// through each took the application whole to draw rows; the rows are now
+/// resolved from a shared borrow, and only the row a reader chose runs
+/// against the application.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 771;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

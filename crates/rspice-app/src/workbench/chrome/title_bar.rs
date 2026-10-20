@@ -14,30 +14,23 @@ use super::super::layout::LayoutSpec;
 use super::super::state::{ModelsPage, VerificationPage, WorkbenchState, Workspace};
 use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
-mod arrange;
 mod keyboard;
+mod menu_entries;
 mod menu_row;
 mod menus;
-#[cfg(test)]
-use arrange::ARRANGE_ROW_ID;
-use arrange::{ARRANGE_GROUPS, arrange_submenu, arrange_submenu_width};
 use keyboard::{
     InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, begin_menu_render,
     finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard, record_menu_row,
     step_menu_row_focus, typeahead_menu_row_focus,
 };
+use menu_entries::{MenuEntry, menu_rows, show_menu_rows};
 use menu_row::{MenuRowTrailing, paint_menu_row};
+#[cfg(test)]
+use menus::menu_popup_height_for_viewport;
 pub(in crate::workbench) use menus::source_editor_context_menu;
 use menus::{
-    ALL_MENUS, ApplicationMenu, configure_menu_popup, menu_popup_max_height, overflow_menu,
-    shortcut_for_occurrence,
-};
-#[cfg(test)]
-use menus::{
-    DESIGN_EDIT_COMMANDS, DESIGN_MANAGEMENT_COMMANDS, DESIGN_PLACEMENT_COMMANDS,
-    DESIGN_SHEET_COMMANDS, DRAWING_SHEET_FILE_COMMANDS, VIEW_VIEWPORT_COMMANDS,
-    WINDOW_LAYOUT_COMMANDS, command_icon, file_menu_shows_exit, menu_popup_height_for_viewport,
-    results_menu, simulate_menu,
+    ALL_MENUS, ApplicationMenu, command_icon, configure_menu_popup, file_menu_shows_exit,
+    menu_popup_max_height, overflow_entries, shortcut_for_occurrence,
 };
 
 #[cfg(test)]
@@ -349,14 +342,7 @@ fn menus(
             // matching the mockup's fixed-height `.menu-bar` flex track.
             ui.spacing_mut().item_spacing.x = 0.0;
             for &menu in projection.visible_menus() {
-                triggers.push(top_menu(
-                    ui,
-                    app,
-                    menu,
-                    large_targets,
-                    title_bar_height,
-                    |ui, app| menu.show(ui, app),
-                ));
+                triggers.push(top_menu(ui, app, menu, large_targets, title_bar_height));
             }
             if projection.has_overflow() {
                 triggers.push(overflow_menu_button(
@@ -433,7 +419,6 @@ fn top_menu(
     menu: ApplicationMenu,
     large_targets: bool,
     title_bar_height: f32,
-    contents: impl FnOnce(&mut Ui, &mut RSpiceApp),
 ) -> MenuTriggerResponse {
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let width = ui
@@ -451,7 +436,7 @@ fn top_menu(
             height: title_bar_height,
             large_targets,
         },
-        contents,
+        menu.entries(),
     )
 }
 
@@ -476,7 +461,7 @@ fn overflow_menu_button(
             height,
             large_targets,
         },
-        move |ui, app| overflow_menu(ui, app, projection),
+        overflow_entries(projection),
     )
 }
 
@@ -495,7 +480,7 @@ fn menu_trigger(
     app: &mut RSpiceApp,
     key: MenuTriggerKey,
     presentation: MenuTriggerPresentation,
-    contents: impl FnOnce(&mut Ui, &mut RSpiceApp),
+    entries: &[MenuEntry],
 ) -> MenuTriggerResponse {
     let MenuTriggerPresentation {
         width,
@@ -611,15 +596,22 @@ fn menu_trigger(
             node.set_label(format!("{} menu", key.label()));
         });
         begin_menu_render(ui.ctx(), popup_id);
-        egui::ScrollArea::vertical()
+        let rows = menu_rows(entries, app, ui.ctx());
+        let choice = egui::ScrollArea::vertical()
             .id_salt(("workbench.title_menu.scroll", key))
             .max_height(menu_popup_max_height(ui))
             .auto_shrink([false, true])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-            .show(ui, |ui| contents(ui, app));
+            .show(ui, |ui| show_menu_rows(ui, &rows))
+            .inner;
         let render_state = finish_menu_render(ui.ctx());
         handle_popup_keyboard(ui.ctx(), popup_id, &response, &render_state.rows);
+        choice
     });
+    let popup_shown = popup.is_some();
+    if let Some(choice) = popup.and_then(|shown| shown.inner) {
+        choice.run(app);
+    }
     if keyboard_focus.is_some() || (response.hovered() && another_application_menu_is_open) {
         // Opening after `Popup::show` keeps egui's toggle policy from closing a
         // custom keyboard/hover request during the same pass. Memory owns the
@@ -627,7 +619,7 @@ fn menu_trigger(
         // navigation handled after all triggers render.
         Popup::open_id(ui.ctx(), popup_id);
     }
-    let is_open = popup.is_some() || Popup::is_id_open(ui.ctx(), popup_id);
+    let is_open = popup_shown || Popup::is_id_open(ui.ctx(), popup_id);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::MenuItem);
         node.set_label(key.label());
