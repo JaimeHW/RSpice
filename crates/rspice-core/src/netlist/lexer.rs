@@ -458,8 +458,12 @@ impl<'a> Lexer<'a> {
 
         // Exponent part. ngspice's INPevaluate (inpeval.c) reads the Fortran
         // double-precision marker `D` exactly like `E`, so `1d3` is 1000. A
-        // marker with no digits after it is not an exponent: ngspice reads
-        // `1.5e` as 1.5, so the marker is left to the text after the number.
+        // `D` with no digits after it is no exponent, so it is left to the
+        // text after the number (`1d` is 1, as it always read). A digitless
+        // `E` is a malformed number everywhere but the ngspice dialect:
+        // ngspice reads `1.5e` as 1.5 and `2.0e+{p}` as garbage (3 ohm for
+        // p=3), Xyce refuses both by design (its BUG_587 certification
+        // deck), and so does Spectre.
         let mut fortran_exponent = false;
         if end < chars.len() && matches!(chars[end], 'e' | 'E' | 'd' | 'D') {
             let mut exp_end = end + 1;
@@ -473,6 +477,14 @@ impl<'a> Lexer<'a> {
             if exp_end > exp_start {
                 fortran_exponent = matches!(chars[end], 'd' | 'D');
                 end = exp_end;
+            } else if matches!(chars[end], 'e' | 'E')
+                && !crate::spice_number::reading_numbers_as_ngspice()
+            {
+                let malformed_bytes: usize = chars[..exp_end].iter().map(|c| c.len_utf8()).sum();
+                return Err(LexError::InvalidNumber(
+                    input[..malformed_bytes].to_string(),
+                    self.line,
+                ));
             }
         }
 
@@ -1165,9 +1177,9 @@ mod tests {
     }
 
     /// ngspice's INPevaluate reads `D` as an exponent marker exactly like `E`
-    /// (inpeval.c), so `1d3` is 1000, and an exponent marker with no digits
-    /// after it is no exponent at all: `1.5e` and `1d` keep their mantissa.
-    /// `1d3` used to resolve to 1 because the `D` was an unknown suffix.
+    /// (inpeval.c), so `1d3` is 1000, and a `D` with no digits after it is no
+    /// exponent at all: `1d` keeps its mantissa. `1d3` used to resolve to 1
+    /// because the `D` was an unknown suffix.
     #[test]
     fn fortran_d_exponents_read_like_e_exponents() {
         for (literal, expected) in [
@@ -1178,7 +1190,6 @@ mod tests {
             ("1d-6", 1.0e-6),
             ("1.5d0", 1.5),
             ("1.5d2k", 1.5e5),
-            ("1.5e", 1.5),
             ("1d", 1.0),
         ] {
             let parsed = parse_spice_value(literal)
@@ -1188,8 +1199,6 @@ mod tests {
                 "{literal} parsed as {parsed:e}, expected {expected:e}"
             );
         }
-        // A complete-token boundary still refuses the dangling marker.
-        assert!(parse_spice_value_complete("1.5e").is_err());
         assert_eq!(parse_spice_value_complete("1d3"), Ok(1.0e3));
 
         let tokens = tokenize("R1 1 0 1d-3\nV3 3 0 DC 2.5D+1\n").expect("tokenize");
@@ -1198,6 +1207,29 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Number(25.0)), "{kinds:?}");
         assert!(!kinds.contains(&TokenKind::Minus), "{kinds:?}");
         assert!(!kinds.contains(&TokenKind::Plus), "{kinds:?}");
+    }
+
+    /// An `E` with no exponent digits is a malformed number, as Xyce's BUG_587
+    /// certification deck requires of `R1 1 2 2.0e+{primary}` and as Spectre
+    /// reads it. Only the ngspice dialect follows INPevaluate, which reads
+    /// `1.5e` and `1.5e+` as 1.5.
+    #[test]
+    fn a_digitless_e_exponent_is_malformed_outside_the_ngspice_dialect() {
+        for literal in ["1.5e", "1.5E+", "2.0e-"] {
+            assert!(
+                matches!(parse_spice_value(literal), Err(LexError::InvalidNumber(..))),
+                "{literal}"
+            );
+        }
+        let error = tokenize("R1 1 2 2.0e+{primary}\n").expect_err("malformed exponent");
+        assert_eq!(error.to_string(), "Invalid number '2.0e+' at line 1");
+
+        let _ngspice = crate::spice_number::read_suffixes_as_ngspice(true);
+        for literal in ["1.5e", "1.5E+", "2.0e-"] {
+            let parsed = parse_spice_value(literal)
+                .unwrap_or_else(|error| panic!("{literal} must parse: {error}"));
+            assert!((parsed - literal[..3].parse::<Value>().unwrap()).abs() <= 1.0e-15);
+        }
     }
 
     /// A unit word after a decimal value's scale suffix is part of the value
@@ -1216,7 +1248,6 @@ mod tests {
             ("4.7uFarad", 4.7e-6),
             (".5nHenry", 0.5e-9),
             ("-2.5mA", -2.5e-3),
-            ("1.5e", 1.5),
         ] {
             let tokens = tokenize(&format!("{literal} next"))
                 .unwrap_or_else(|error| panic!("{literal} must tokenize: {error}"));

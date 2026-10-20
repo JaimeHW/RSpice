@@ -29,6 +29,12 @@ pub(crate) fn read_suffixes_as_ngspice(ngspice: bool) -> SuffixReading {
     SuffixReading(NGSPICE_SUFFIXES.with(|cell| cell.replace(ngspice)))
 }
 
+/// Whether numbers on this thread are read as ngspice reads them (see
+/// [`read_suffixes_as_ngspice`]).
+pub(crate) fn reading_numbers_as_ngspice() -> bool {
+    NGSPICE_SUFFIXES.with(std::cell::Cell::get)
+}
+
 /// Resolve the SPICE engineering suffix at the head of `text`.
 ///
 /// Returns the multiplier the suffix names together with how many characters
