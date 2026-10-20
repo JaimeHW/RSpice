@@ -713,43 +713,25 @@ fn mask_verilog_comments(source: &str) -> Result<String, String> {
         .map_err(|_| "Verilog-A source-search masking produced invalid UTF-8.".to_owned())
 }
 
+/// Blank every SPICE comment, keeping byte offsets, by the parser's own rule
+/// (a `*` card, and core's inline `;`, `$`, `#` and `//` comments outside
+/// quotes) so search never matches text the simulator does not read.
 fn mask_spice_comments(source: &str) -> Result<String, String> {
     let mut output = source.as_bytes().to_vec();
     let mut offset = 0_usize;
     for line in source.split_inclusive('\n') {
-        let bytes = line.as_bytes();
-        let first = bytes
-            .iter()
-            .position(|byte| !byte.is_ascii_whitespace())
-            .unwrap_or(bytes.len());
-        let mut in_string = false;
-        let mut escaped = false;
-        let mut comment_start = (first < bytes.len() && bytes[first] == b'*').then_some(first);
-        if comment_start.is_none() {
-            for index in first..bytes.len() {
-                let byte = bytes[index];
-                if byte == b'"' && !escaped {
-                    in_string = !in_string;
-                }
-                if !in_string
-                    && matches!(byte, b'$' | b';')
-                    && (index == first || bytes[index.saturating_sub(1)].is_ascii_whitespace())
-                {
-                    comment_start = Some(index);
-                    break;
-                }
-                escaped = !escaped && byte == b'\\';
-                if byte != b'\\' {
-                    escaped = false;
-                }
-            }
-        }
-        if let Some(start) = comment_start {
-            for index in start..bytes.len() {
-                if !matches!(bytes[index], b'\r' | b'\n') {
-                    output[offset + index] = b' ';
-                }
-            }
+        let body = line.trim_end_matches(['\r', '\n']);
+        let comment_start = if body.trim_start().starts_with('*') {
+            0
+        } else {
+            rspice_core::netlist::strip_spice_inline_comment(
+                body,
+                rspice_core::config::ExpressionDialect::Ngspice,
+            )
+            .len()
+        };
+        for byte in &mut output[offset + comment_start..offset + body.len()] {
+            *byte = b' ';
         }
         offset += line.len();
     }
@@ -865,6 +847,19 @@ mod tests {
         assert!(masked.contains("R1 a b 1k"));
         assert!(masked.contains("\"$gain\""));
         assert!(!masked.lines().next().unwrap().contains("gain"));
+
+        // The parser's rules, not a copy of them: `;` ends a card anywhere
+        // outside quotes, `#` opens a comment card, `$` after a comma opens
+        // one, and PSpice's `$G_` node names stay names.
+        let spice = "R3 a b 1k;gain\n  # gain\r\nR4 a b 1k,$gain\nR5 $G_DPWR b 'x;gain'\n";
+        let masked = mask_spice_comments(spice).expect("Netlist mask");
+        assert_eq!(masked.len(), spice.len());
+        let lines = masked.lines().collect::<Vec<_>>();
+        assert_eq!(lines[0].trim_end(), "R3 a b 1k");
+        assert_eq!(lines[1].trim(), "");
+        assert!(masked.contains("\r\n"));
+        assert_eq!(lines[2].trim_end(), "R4 a b 1k,");
+        assert_eq!(lines[3], "R5 $G_DPWR b 'x;gain'");
     }
 
     #[test]
