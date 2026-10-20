@@ -2384,6 +2384,85 @@ endmodule
         }
     }
 
+    /// The counter and sample-and-hold of the route parity row
+    /// `retained_counter_and_hold_agree_across_lowerings_and_rejected_trials`,
+    /// through emitted WebAssembly in both plans: every evaluation computes its
+    /// candidate from the last accepted values, so a rejected trial that
+    /// crossed the threshold leaves no trace in what is accepted next.
+    #[test]
+    fn wasm_retained_counter_and_hold_start_every_trial_from_accepted_values() {
+        let source = "module retained_counter(sense,out); inout sense,out; electrical sense,out;
+            real points,changes,was_above,above,held;
+            analog begin points=points+1; above=V(sense)>0.5;
+            if (above!=was_above) changes=changes+1; was_above=above;
+            if (above) held=V(sense);
+            I(out)<+points+10.0*changes+100.0*held+1.0e-3*V(out); end endmodule";
+        // Storage order: points, changes, was_above, above, held. `above` is
+        // assigned before every read, so it is not retained.
+        const RETAINED: [usize; 4] = [0, 1, 2, 4];
+        let evaluate = |[points, changes, was_above, held]: [f64; 4], sense: f64| {
+            let above = if sense > 0.5 { 1.0 } else { 0.0 };
+            [
+                points + 1.0,
+                changes + if above != was_above { 1.0 } else { 0.0 },
+                above,
+                if above != 0.0 { sense } else { held },
+            ]
+        };
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "retained_counter", postfix);
+            harness.reset();
+            let mut accepted = [0.0; 4];
+            for (sense, accept) in [
+                (0.0, true),
+                (0.8, false),
+                (0.3, true),
+                (0.9, true),
+                (0.2, false),
+                (0.7, true),
+                (0.1, true),
+                (0.95, false),
+                (0.05, true),
+            ] {
+                let expected = evaluate(accepted, sense);
+                for _ in 0..2 {
+                    let context = harness.store.data_mut().context_mut();
+                    context.begin_stateful_evaluation();
+                    let inputs = context.variables.clone();
+                    for (slot, input) in inputs.iter().copied().enumerate() {
+                        harness.write_f64(FusedKernelHarness::VARIABLES as usize + slot * 8, input);
+                    }
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, sense);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    let candidate = (0..inputs.len())
+                        .map(|slot| {
+                            harness.read_f64(FusedKernelHarness::VARIABLES as usize + slot * 8)
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        RETAINED.map(|slot| candidate[slot]),
+                        expected,
+                        "postfix={postfix}, sense={sense}: the candidate must start from {accepted:?}"
+                    );
+                    harness.store.data_mut().context_mut().variables = candidate;
+                }
+                if accept {
+                    harness
+                        .store
+                        .data_mut()
+                        .context_mut()
+                        .advance_state()
+                        .unwrap();
+                    accepted = expected;
+                }
+            }
+            assert_eq!(accepted, [6.0, 2.0, 0.0, 0.7], "postfix={postfix}");
+        }
+    }
+
     #[test]
     fn wasm_switch_branches_preserve_ordered_retention_and_jacobians() {
         use super::abi::{

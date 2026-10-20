@@ -1195,3 +1195,97 @@ endmodule
         }
     });
 }
+
+/// A counter and a sample-and-hold, each reading its own variables before
+/// assigning them, across accepted steps and rejected trials.
+///
+/// VAMS-2023 sections 4.5.10 and 5.10.2 make those variables static, and the
+/// engine commits them only when it accepts a point. So every evaluation
+/// starts from the last accepted values: a rejected trial that crossed the
+/// threshold, and the repeated Newton pass at each point, leave no trace. The
+/// row states that answer independently of either route, then requires the
+/// two routes to agree entry for entry.
+#[test]
+fn retained_counter_and_hold_agree_across_lowerings_and_rejected_trials() {
+    const SOURCE: &str = r#"
+`include "disciplines.vams"
+module route_retained_counter(sense, out);
+    inout sense, out;
+    electrical sense, out;
+    real points, changes, was_above, above, held;
+    analog begin
+        points = points + 1;
+        above = V(sense) > 0.5;
+        if (above != was_above)
+            changes = changes + 1;
+        was_above = above;
+        if (above)
+            held = V(sense);
+        I(out) <+ points + 10.0 * changes + 100.0 * held + 1.0e-3 * V(out);
+    end
+endmodule
+"#;
+    // (label, time, step, sense, accepted)
+    const STEPS: [(&str, f64, f64, f64, bool); 8] = [
+        ("t1", 1.0e-9, 1.0e-9, 0.8, false),
+        ("t1r", 0.5e-9, 0.5e-9, 0.3, true),
+        ("t2", 1.5e-9, 1.0e-9, 0.9, true),
+        ("t3", 2.5e-9, 1.0e-9, 0.2, false),
+        ("t3r", 2.0e-9, 0.5e-9, 0.7, true),
+        ("t4", 3.0e-9, 1.0e-9, 0.1, true),
+        ("t5", 4.0e-9, 1.0e-9, 0.95, false),
+        ("t5r", 3.5e-9, 0.5e-9, 0.05, true),
+    ];
+    const NAMES: [&str; 4] = ["points", "changes", "was_above", "held"];
+
+    let trace = compare_routes_traced(SOURCE, &[1, 2], 0, |probe| {
+        probe.dc("dc", &[0.0, 0.0]);
+        probe.observe("dc", &NAMES);
+        probe.accept("dc");
+        for (label, time, step, sense, accepted) in STEPS {
+            probe.tran(label, time, step, &[sense, 0.0]);
+            probe.tran(&format!("{label}n"), time, step, &[sense, 0.0]);
+            probe.observe(label, &NAMES);
+            if accepted {
+                probe.accept(label);
+            }
+        }
+    });
+
+    // The accepted state and the candidate each evaluation computes from it.
+    let evaluate = |[points, changes, was_above, held]: [f64; 4], sense: f64| {
+        let above = if sense > 0.5 { 1.0 } else { 0.0 };
+        [
+            points + 1.0,
+            changes + if above != was_above { 1.0 } else { 0.0 },
+            above,
+            if above != 0.0 { sense } else { held },
+        ]
+    };
+    let observed = |label: &str| {
+        NAMES.map(|name| {
+            let key = format!("{label}.var.{name}");
+            trace
+                .iter()
+                .find(|entry| entry.key == key)
+                .unwrap_or_else(|| panic!("{key} missing from the trace"))
+                .value
+        })
+    };
+    let mut accepted = evaluate([0.0; 4], 0.0);
+    assert_eq!(observed("dc"), accepted, "dc");
+    for (label, _, _, sense, is_accepted) in STEPS {
+        let candidate = evaluate(accepted, sense);
+        assert_eq!(
+            observed(label),
+            candidate,
+            "{label}: an evaluation must start from the last accepted values"
+        );
+        if is_accepted {
+            accepted = candidate;
+        }
+    }
+    // One up-crossing and one down-crossing were accepted. Each rejected trial
+    // crossed too, and none of them counted or overwrote the held sample.
+    assert_eq!(accepted, [6.0, 2.0, 0.0, 0.7]);
+}

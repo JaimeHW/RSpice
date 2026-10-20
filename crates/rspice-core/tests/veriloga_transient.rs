@@ -2109,3 +2109,270 @@ endmodule
 
     let _ = std::fs::remove_file(model);
 }
+
+/// A variable the analog block reads before it assigns it keeps its value
+/// from the last accepted time point (VAMS-2023 sections 4.5.10 and 5.10.2).
+/// `points` counts the evaluations that reach acceptance and `changes` counts
+/// the accepted points at which `sense` moves across `vth`. Both read
+/// themselves before writing, so a Newton iterate, a rejected step or an
+/// observation pass that leaked into accepted state would show up as a count
+/// the accepted waveform cannot explain.
+const RETAINED_COUNTER: &str = r#"
+`include "disciplines.vams"
+module va_retained_counter(sense, points_out, changes_out);
+    inout sense, points_out, changes_out;
+    electrical sense, points_out, changes_out;
+    parameter real vth = 0.5;
+    real points, changes, was_above, above;
+    analog begin
+        points = points + 1;
+        above = V(sense) > vth;
+        if (above != was_above)
+            changes = changes + 1;
+        was_above = above;
+        V(points_out) <+ points;
+        V(changes_out) <+ changes;
+    end
+endmodule
+"#;
+
+/// Check a counter run against the accepted waveform it produced.
+///
+/// A fresh run's first accepted point is the operating point, where
+/// `was_above` still holds its initial zero. A resumed run's first sample is
+/// the checkpoint's own point, which must carry the segment's last counts
+/// unchanged. Every later point adds exactly one to `points`, and adds one to
+/// `changes` exactly when the accepted `sense` crossed `vth` between the
+/// previous accepted point and this one.
+fn assert_counter_follows_accepted_points(
+    result: &rspice_core::engine::TransientResult,
+    vth: f64,
+    route: &str,
+    resumed_from: Option<&rspice_core::engine::TransientResult>,
+) -> f64 {
+    let sense = node_series(&result.node_names, &result.voltages, "sense");
+    let points = node_series(&result.node_names, &result.voltages, "points");
+    let changes = node_series(&result.node_names, &result.voltages, "changes");
+    let mut was_above = false;
+    let mut expected_points = 0.0;
+    let mut expected_changes = 0.0;
+    let mut first = 0;
+    if let Some(segment) = resumed_from {
+        let last = |node| {
+            node_series(&segment.node_names, &segment.voltages, node)
+                .last()
+                .copied()
+                .expect("segment endpoint")
+        };
+        expected_points = last("points");
+        expected_changes = last("changes");
+        was_above = last("sense") > vth;
+        assert_eq!(
+            [points[0], changes[0]],
+            [expected_points, expected_changes],
+            "{route}: the resumed run must start from the checkpoint's counts"
+        );
+        first = 1;
+    }
+    for (index, &time) in result.time.iter().enumerate().skip(first) {
+        let above = sense[index] > vth;
+        if above != was_above {
+            expected_changes += 1.0;
+        }
+        was_above = above;
+        expected_points += 1.0;
+        assert!(
+            (points[index] - expected_points).abs() < 1.0e-9,
+            "{route}: t={time:e}: accepted point {index} read points={} where only \
+             {expected_points} points were accepted",
+            points[index]
+        );
+        assert!(
+            (changes[index] - expected_changes).abs() < 1.0e-9,
+            "{route}: t={time:e}: changes={} but the accepted sense waveform crossed \
+             {expected_changes} times",
+            changes[index]
+        );
+    }
+    expected_changes
+}
+
+#[test]
+fn retained_variables_count_accepted_points_and_ignore_a_rejected_trial() {
+    let model = write_model("retained_counter_rejected", RETAINED_COUNTER);
+    let guard = write_model(
+        "retained_counter_guard",
+        r#"
+module retained_counter_guard(p, n);
+    inout p, n; electrical p, n;
+    analog I(p,n) <+ 1.0e-3*ln(V(p,n) + 0.1);
+endmodule
+"#,
+    );
+    // The guard is the fixture of
+    // `a_nonfinite_verilog_a_transient_trial_is_rejected_and_the_step_retried`:
+    // the first trial spans the whole 1 fs edge, its Newton iterate leaves the
+    // logarithm's domain, and the step is cut. At that rejected trial `sense`
+    // already sits at -5 V, below the threshold, so a candidate that leaked
+    // would count a crossing the accepted waveform does not have yet.
+    let deck = format!(
+        "* retained variables across a rejected trial\n\
+         V1 sense 0 PULSE(0 -5 0 1e-15 1e-15 1 2)\n\
+         R1 sense p 1k\n\
+         XG p 0 retained_counter_guard\n\
+         X1 sense points changes va_retained_counter vth=-2\n\
+         .va \"{}\" va_retained_counter\n\
+         .va \"{}\" retained_counter_guard\n\
+         .end\n",
+        deck_path(&model),
+        deck_path(&guard)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(1.0e-9),
+        ..Default::default()
+    })
+    .run_tran(&netlist, 3.0e-9, 1.0e-9)
+    .expect("a rejected trial must not fail the run");
+    assert!(
+        result.time.get(1).copied().unwrap_or(1.0) < 5.0e-16,
+        "the fixture must reject its first trial: {:?}",
+        &result.time[..result.time.len().min(4)]
+    );
+    let changes = assert_counter_follows_accepted_points(&result, -2.0, "rejected trial", None);
+    // Above the threshold at the operating point, below it after the edge.
+    assert_eq!(changes, 2.0);
+
+    let _ = std::fs::remove_file(model);
+    let _ = std::fs::remove_file(guard);
+}
+
+fn retained_counter_rc_deck(model: &std::path::Path) -> Netlist {
+    let deck = format!(
+        "* retained variables on an adaptive RC run\n\
+         V1 in 0 PULSE(0 1 2n 1n 1n 3n 10n)\n\
+         R1 in sense 1k\n\
+         C1 sense 0 1p\n\
+         X1 sense points changes va_retained_counter vth=0.5\n\
+         .va \"{}\" va_retained_counter\n\
+         .end\n",
+        deck_path(model)
+    );
+    Netlist::parse(&deck).expect("parse")
+}
+
+#[test]
+fn retained_variables_count_the_crossings_of_an_adaptive_run() {
+    let model = write_model("retained_counter_rc", RETAINED_COUNTER);
+    let netlist = retained_counter_rc_deck(&model);
+    let result = Engine::default()
+        .run_tran(&netlist, 40.0e-9, 0.5e-9)
+        .expect("adaptive counter run");
+    // Four pulses, each crossing the threshold once up and once down.
+    assert_eq!(
+        assert_counter_follows_accepted_points(&result, 0.5, "adaptive", None),
+        8.0
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
+/// A checkpoint carries retained values exactly. The resumed run starts from
+/// the segment's last counts, adds one point per accepted point from there,
+/// and sees the same crossings as an unsegmented run. A resume that lost the
+/// state would restart `points` at one, and would count a spurious change
+/// wherever `sense` sits above the threshold at the seam.
+#[test]
+fn retained_variables_resume_from_a_checkpoint_with_their_accepted_values() {
+    let model = write_model("retained_counter_checkpoint", RETAINED_COUNTER);
+    let netlist = retained_counter_rc_deck(&model);
+    let engine = Engine::default();
+    let continuous = engine
+        .run_tran(&netlist, 40.0e-9, 0.5e-9)
+        .expect("continuous counter run");
+    let crossings = assert_counter_follows_accepted_points(&continuous, 0.5, "continuous", None);
+    // The first seam sits on a pulse's high plateau, the second between pulses.
+    for checkpoint_time in [5.0e-9, 19.0e-9] {
+        let (segment, checkpoint) = engine
+            .run_tran_checkpointed(&netlist, checkpoint_time, 0.5e-9)
+            .expect("counter checkpoint segment");
+        assert_counter_follows_accepted_points(&segment, 0.5, "segment", None);
+        let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("retained Verilog-A state survives portable text");
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &serialized, 40.0e-9, 0.5e-9)
+            .expect("counter resumes");
+        assert_eq!(
+            assert_counter_follows_accepted_points(&resumed, 0.5, "resumed", Some(&segment)),
+            crossings,
+            "a resume at {checkpoint_time:e} must see the unsegmented run's crossings"
+        );
+    }
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn a_retained_sample_and_hold_keeps_its_sample_between_clock_pulses() {
+    let model = write_model(
+        "retained_hold",
+        r#"
+`include "disciplines.vams"
+module va_retained_hold(in_node, clk, out_node);
+    inout in_node, clk, out_node;
+    electrical in_node, clk, out_node;
+    real held;
+    analog begin
+        if (V(clk) > 0.5)
+            held = V(in_node);
+        V(out_node) <+ held;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* retained sample and hold\n\
+         V1 in 0 SIN(0 1 70meg)\n\
+         V2 clk 0 PULSE(0 1 1n 0.1n 0.1n 1n 5n)\n\
+         X1 in clk out va_retained_hold\n\
+         .va \"{}\" va_retained_hold\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 30.0e-9, 0.2e-9)
+        .expect("sample-and-hold run");
+    let input = node_series(&result.node_names, &result.voltages, "in");
+    let clock = node_series(&result.node_names, &result.voltages, "clk");
+    let output = node_series(&result.node_names, &result.voltages, "out");
+    let mut sampled = 0.0;
+    let mut held_points = 0;
+    for (index, &time) in result.time.iter().enumerate() {
+        if clock[index] > 0.5 {
+            sampled = input[index];
+        } else {
+            held_points += 1;
+        }
+        assert!(
+            (output[index] - sampled).abs() < 1.0e-9,
+            "t={time:e}: out={} but the last accepted sample was {sampled}",
+            output[index]
+        );
+    }
+    assert!(
+        held_points > 10,
+        "the clock must spend accepted points low: {held_points}"
+    );
+    let holds = output
+        .windows(2)
+        .zip(clock.windows(2))
+        .filter(|(out, clk)| clk[0] > 0.5 && clk[1] <= 0.5 && out[1].abs() > 1.0e-3)
+        .count();
+    assert!(
+        holds >= 4,
+        "the fixture must hold a nonzero sample after each pulse: {holds}"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
