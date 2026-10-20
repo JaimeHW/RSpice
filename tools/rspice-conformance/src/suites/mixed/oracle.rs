@@ -132,7 +132,9 @@ pub fn verify_binding(reference: &Path, deck: &Path) -> Result<(), String> {
     if text.lines().any(|line| line.trim() == expected) {
         Ok(())
     } else {
-        Err("reference is not bound to its oracle deck's current source; recapture".into())
+        Err(format!(
+            "reference is not bound to its oracle deck's current source (expected `{expected}`); recapture"
+        ))
     }
 }
 
