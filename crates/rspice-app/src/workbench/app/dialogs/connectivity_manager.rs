@@ -19,9 +19,10 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    Button, CommandForm, Dialog, DialogChoice, DialogInitialFocus, DialogSize,
+    DialogTransactionTone, FieldLine,
 };
-use crate::workbench::design_system::section_header;
+use crate::workbench::app::dialogs::review_primitives::{DIALOG_BODY_INSET, band_header};
 use rspice_design::connectivity::summary::{DesignNet, NetClass, projection_nets};
 use rspice_design::drc::{
     CheckReach, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
@@ -37,6 +38,10 @@ const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, gl
 const PRIMARY: &str = "Apply reviewed connectivity repairs";
 /// Why "Begin bus placement" is disabled while the declaration is empty.
 const BUS_DECLARATION_MISSING: &str = "Enter a bus declaration to begin placement";
+/// Why the manager's Apply is disabled while nothing is chosen to apply.
+const NOTHING_TO_APPLY: &str = "Select a repair or change a policy to apply";
+/// Why "Begin bus placement" is disabled on a read-only schematic.
+const READ_ONLY_STATUS: &str = "The active schematic or project is read-only.";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ConnectivityManagerTab {
@@ -1049,26 +1054,6 @@ impl RSpiceApp {
                     && bus_validation.is_ok()
             }
         };
-        let (title, primary, description) = match page {
-            ConnectivityManagerPage::Manager => (TITLE, PRIMARY, DESCRIPTION),
-            ConnectivityManagerPage::CreateBus => (
-                "Create indexed bus",
-                "Begin bus placement",
-                "Validate one durable indexed declaration, then place its vector geometry with the schematic bus router.",
-            ),
-        };
-        // An empty field is not a failed declaration: it is one not yet
-        // written, so the footer says what is missing instead of an error.
-        let bus_draft_empty = self
-            .state
-            .dialogs
-            .connectivity_manager
-            .bus_declaration
-            .trim()
-            .is_empty();
-        let bus_error = (page == ConnectivityManagerPage::CreateBus && !bus_draft_empty)
-            .then(|| bus_validation.as_ref().err().cloned())
-            .flatten();
         let error = self
             .state
             .dialogs
@@ -1077,26 +1062,49 @@ impl RSpiceApp {
             .as_deref()
             .or(stale.as_deref())
             .or(policy_authority_error.as_deref())
-            .or(bus_error.as_deref())
             .map(str::to_owned);
+        if page == ConnectivityManagerPage::CreateBus {
+            let status = if !write_allowed {
+                Ok(Some(READ_ONLY_STATUS))
+            } else {
+                error.as_deref().map_or(Ok(None), Err)
+            };
+            let choice = create_bus_form(
+                ctx,
+                &mut self.state.dialogs.connectivity_manager,
+                write_allowed,
+                primary_enabled,
+                status,
+            );
+            match choice {
+                DialogChoice::Primary => {
+                    if let Err(error) = self.commit_connectivity_bus() {
+                        self.state.dialogs.connectivity_manager.error = Some(error);
+                    }
+                }
+                DialogChoice::Ghost | DialogChoice::Cancelled => {
+                    self.state.dialogs.connectivity_manager.page = ConnectivityManagerPage::Manager;
+                    self.state.dialogs.connectivity_manager.error = None;
+                    self.state.dialogs.connectivity_manager.body_scroll_offset = 0.0;
+                }
+                DialogChoice::None | DialogChoice::Secondary => {}
+            }
+            return;
+        }
         let mut body_scroll_offset = self.state.dialogs.connectivity_manager.body_scroll_offset;
-        let mut dialog = Dialog::new(title, primary)
-            .description(description)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
+            .description(DESCRIPTION)
             .size(DialogSize::SimulationWorkflow)
             .initial_height(600.0)
             .flush_body()
-            .ghost(if page == ConnectivityManagerPage::Manager {
-                "Close"
-            } else {
-                "Cancel"
-            })
+            // The bands reach the frame's right edge; a withheld scroll
+            // gutter left bare surface beside them.
+            .overlay_scrollbar()
+            .ghost("Close")
             .primary_enabled(primary_enabled)
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl)
             .body_scroll_offset(&mut body_scroll_offset);
-        if page == ConnectivityManagerPage::CreateBus && bus_draft_empty {
-            dialog = dialog.hint(BUS_DECLARATION_MISSING);
-        }
         if !write_allowed {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
@@ -1109,50 +1117,31 @@ impl RSpiceApp {
                 "Connectivity transaction cannot continue",
                 error,
             );
+        } else if !primary_enabled {
+            dialog = dialog.hint(NOTHING_TO_APPLY);
         }
 
         let mut action = ConnectivityBodyAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = if page == ConnectivityManagerPage::Manager {
-                connectivity_manager_body(
-                    ui,
-                    &mut self.state.dialogs.connectivity_manager,
-                    write_allowed,
-                    stale.is_none(),
-                )
-            } else {
-                create_bus_body(
-                    ui,
-                    &mut self.state.dialogs.connectivity_manager,
-                    write_allowed,
-                )
-            };
+            action = connectivity_manager_body(
+                ui,
+                &mut self.state.dialogs.connectivity_manager,
+                write_allowed,
+                stale.is_none(),
+            );
             None
         });
         self.state.dialogs.connectivity_manager.body_scroll_offset = body_scroll_offset;
         self.handle_connectivity_body_action(ctx, action);
 
         match choice {
-            DialogChoice::Primary => match page {
-                ConnectivityManagerPage::Manager => {
-                    if let Err(error) = self.apply_selected_connectivity_repairs() {
-                        self.state.dialogs.connectivity_manager.error = Some(error);
-                    }
+            DialogChoice::Primary => {
+                if let Err(error) = self.apply_selected_connectivity_repairs() {
+                    self.state.dialogs.connectivity_manager.error = Some(error);
                 }
-                ConnectivityManagerPage::CreateBus => {
-                    if let Err(error) = self.commit_connectivity_bus() {
-                        self.state.dialogs.connectivity_manager.error = Some(error);
-                    }
-                }
-            },
+            }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                if page == ConnectivityManagerPage::Manager {
-                    self.state.dialogs.connectivity_manager.close();
-                } else {
-                    self.state.dialogs.connectivity_manager.page = ConnectivityManagerPage::Manager;
-                    self.state.dialogs.connectivity_manager.error = None;
-                    self.state.dialogs.connectivity_manager.body_scroll_offset = 0.0;
-                }
+                self.state.dialogs.connectivity_manager.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -1721,7 +1710,7 @@ fn connectivity_manager_body(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    connectivity_tabs(ui, &mut dialog.active_tab);
+    inset_block(ui, 0, |ui| connectivity_tabs(ui, &mut dialog.active_tab));
     let action = match dialog.active_tab {
         ConnectivityManagerTab::Connectivity => connectivity_tab(ui, &dialog.report),
         ConnectivityManagerTab::Buses => buses_tab(ui, dialog, write_allowed, current),
@@ -1731,34 +1720,42 @@ fn connectivity_manager_body(
         }
     };
     ui.separator();
-    let footer_action = ui
-        .horizontal(|ui| {
+    let footer_action = inset_block(ui, 8, |ui| {
+        let row = Vec2::new(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h);
+        let action = ui
+            .allocate_ui_with_layout(
+                row,
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} nets \u{00b7} {} buses \u{00b7} {} DRC findings",
+                            dialog.report.nets.len(),
+                            dialog.report.buses.len(),
+                            dialog.report.drc.violations().len()
+                        ))
+                        .color(Tokens::get(ui.ctx()).color.text_dim)
+                        .monospace(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if Button::new("Refresh report").show(ui).clicked() {
+                            return ConnectivityBodyAction::Refresh;
+                        }
+                        ConnectivityBodyAction::None
+                    })
+                    .inner
+                },
+            )
+            .inner;
+        if let Some(receipt) = dialog.receipt.as_deref() {
             ui.label(
-                RichText::new(format!(
-                    "{} nets \u{00b7} {} buses \u{00b7} {} DRC findings",
-                    dialog.report.nets.len(),
-                    dialog.report.buses.len(),
-                    dialog.report.drc.violations().len()
-                ))
-                .color(Tokens::get(ui.ctx()).color.text_dim)
-                .monospace(),
+                RichText::new(receipt)
+                    .color(Tokens::get(ui.ctx()).color.text_dim)
+                    .monospace(),
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if Button::new("Refresh report").show(ui).clicked() {
-                    return ConnectivityBodyAction::Refresh;
-                }
-                ConnectivityBodyAction::None
-            })
-            .inner
-        })
-        .inner;
-    if let Some(receipt) = dialog.receipt.as_deref() {
-        ui.label(
-            RichText::new(receipt)
-                .color(Tokens::get(ui.ctx()).color.text_dim)
-                .monospace(),
-        );
-    }
+        }
+        action
+    });
     if matches!(footer_action, ConnectivityBodyAction::Refresh) {
         footer_action
     } else {
@@ -1790,12 +1787,21 @@ fn connectivity_tabs(ui: &mut Ui, active: &mut ConnectivityManagerTab) {
     });
 }
 
+/// Content on the body's left edge and as far in from its right, `vertical`
+/// points clear of the bands above and below it.
+fn inset_block<R>(ui: &mut Ui, vertical: i8, add: impl FnOnce(&mut Ui) -> R) -> R {
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(DIALOG_BODY_INSET as i8, vertical))
+        .show(ui, add)
+        .inner
+}
+
 fn connectivity_tab(ui: &mut Ui, report: &ConnectivityReport) -> ConnectivityBodyAction {
-    section_header(
-        ui,
-        "Extracted connectivity",
-        Some("active view \u{00b7} hierarchy-resolved pins"),
-    );
+    band_header(ui, "Extracted connectivity", None);
+    inset_block(ui, 10, |ui| connectivity_table(ui, report))
+}
+
+fn connectivity_table(ui: &mut Ui, report: &ConnectivityReport) -> ConnectivityBodyAction {
     let mut action = ConnectivityBodyAction::None;
     ScrollArea::horizontal()
         .id_salt("connectivity-manager-nets")
@@ -1850,9 +1856,41 @@ fn buses_tab(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    section_header(ui, "Typed buses", Some("as declared"));
+    band_header(ui, "Typed buses", None);
     let old_policy = dialog.policy.clone();
     let mut action = ConnectivityBodyAction::None;
+    inset_block(ui, 10, |ui| {
+        bus_table(ui, dialog, &mut action);
+    });
+    band_header(ui, "Bus policy", None);
+    inset_block(ui, 10, |ui| {
+        policy_combo(
+            ui,
+            "Width mismatch",
+            &mut dialog.policy.width_mismatch,
+            &BundleWidthMismatchPolicy::ALL,
+            BundleWidthMismatchPolicy::label,
+        );
+        ui.add_space(8.0);
+        if Button::new("Create bus\u{2026}")
+            .enabled(write_allowed && current)
+            .show(ui)
+            .clicked()
+        {
+            action = ConnectivityBodyAction::CreateBus;
+        }
+    });
+    if old_policy != dialog.policy && matches!(action, ConnectivityBodyAction::None) {
+        action = ConnectivityBodyAction::Refresh;
+    }
+    action
+}
+
+fn bus_table(
+    ui: &mut Ui,
+    dialog: &ConnectivityManagerDialogState,
+    action: &mut ConnectivityBodyAction,
+) {
     ScrollArea::horizontal()
         .id_salt("connectivity-manager-buses")
         .show(ui, |ui| {
@@ -1888,35 +1926,12 @@ fn buses_tab(
                         ui.monospace(&bus.direction);
                         status_label(ui, &bus.status, bus.status == "valid");
                         if Button::new("Reveal").show(ui).clicked() {
-                            action = ConnectivityBodyAction::Reveal(bus.reveal.clone());
+                            *action = ConnectivityBodyAction::Reveal(bus.reveal.clone());
                         }
                         ui.end_row();
                     }
                 });
         });
-    ui.add_space(8.0);
-    section_header(ui, "Bus policy", None);
-    policy_combo(
-        ui,
-        "Width mismatch",
-        &mut dialog.policy.width_mismatch,
-        &BundleWidthMismatchPolicy::ALL,
-        BundleWidthMismatchPolicy::label,
-    );
-    property_line(ui, "Discipline conversion", "Declared connect rule only");
-    ui.horizontal(|ui| {
-        if Button::new("Create bus\u{2026}")
-            .enabled(write_allowed && current)
-            .show(ui)
-            .clicked()
-        {
-            action = ConnectivityBodyAction::CreateBus;
-        }
-    });
-    if old_policy != dialog.policy && matches!(action, ConnectivityBodyAction::None) {
-        action = ConnectivityBodyAction::Refresh;
-    }
-    action
 }
 
 fn globals_tab(
@@ -1925,8 +1940,55 @@ fn globals_tab(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    section_header(ui, "Explicit global nets", Some("project scope"));
+    band_header(ui, "Explicit global nets", None);
     let mut action = ConnectivityBodyAction::None;
+    inset_block(ui, 10, |ui| global_table(ui, dialog, &mut action));
+    band_header(ui, "Global-net policy", None);
+    let old_policy = dialog.policy.clone();
+    inset_block(ui, 10, |ui| {
+        policy_combo(
+            ui,
+            "Promotion",
+            &mut dialog.policy.global_promotion,
+            &GlobalNetPromotionPolicy::ALL,
+            GlobalNetPromotionPolicy::label,
+        );
+        policy_combo(
+            ui,
+            "Alias comparison",
+            &mut dialog.policy.alias_comparison,
+            &GlobalAliasComparisonPolicy::ALL,
+            GlobalAliasComparisonPolicy::label,
+        );
+        ui.add_space(8.0);
+        if Button::new("Review global aliases\u{2026}")
+            .enabled(
+                write_allowed
+                    && current
+                    && dialog.report.repairs.iter().any(|repair| {
+                        matches!(
+                            repair.action.as_ref(),
+                            Some(ConnectivityRepairAction::RenameLabels { .. })
+                        )
+                    }),
+            )
+            .show(ui)
+            .clicked()
+        {
+            action = ConnectivityBodyAction::ReviewAliases;
+        }
+    });
+    if old_policy != dialog.policy {
+        action = ConnectivityBodyAction::Refresh;
+    }
+    action
+}
+
+fn global_table(
+    ui: &mut Ui,
+    dialog: &ConnectivityManagerDialogState,
+    action: &mut ConnectivityBodyAction,
+) {
     ScrollArea::horizontal()
         .id_salt("connectivity-manager-globals")
         .show(ui, |ui| {
@@ -1959,7 +2021,7 @@ fn globals_tab(
                         if let Some(label) = global.declarations.first()
                             && Button::new("Reveal").show(ui).clicked()
                         {
-                            action = ConnectivityBodyAction::Reveal(RevealTarget::Label {
+                            *action = ConnectivityBodyAction::Reveal(RevealTarget::Label {
                                 view_key: label.view_key.clone(),
                                 id: label.id,
                             });
@@ -1968,45 +2030,6 @@ fn globals_tab(
                     }
                 });
         });
-    ui.add_space(8.0);
-    section_header(ui, "Global-net policy", None);
-    let old_policy = dialog.policy.clone();
-    policy_combo(
-        ui,
-        "Promotion",
-        &mut dialog.policy.global_promotion,
-        &GlobalNetPromotionPolicy::ALL,
-        GlobalNetPromotionPolicy::label,
-    );
-    policy_combo(
-        ui,
-        "Alias comparison",
-        &mut dialog.policy.alias_comparison,
-        &GlobalAliasComparisonPolicy::ALL,
-        GlobalAliasComparisonPolicy::label,
-    );
-    ui.horizontal(|ui| {
-        if Button::new("Review global aliases\u{2026}")
-            .enabled(
-                write_allowed
-                    && current
-                    && dialog.report.repairs.iter().any(|repair| {
-                        matches!(
-                            repair.action.as_ref(),
-                            Some(ConnectivityRepairAction::RenameLabels { .. })
-                        )
-                    }),
-            )
-            .show(ui)
-            .clicked()
-        {
-            action = ConnectivityBodyAction::ReviewAliases;
-        }
-        if old_policy != dialog.policy {
-            action = ConnectivityBodyAction::Refresh;
-        }
-    });
-    action
 }
 
 fn repair_preview_tab(
@@ -2015,180 +2038,184 @@ fn repair_preview_tab(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    section_header(
-        ui,
-        "Ordered corrective action",
-        Some("one undo transaction"),
-    );
-    ui.horizontal(|ui| {
-        for (step, text) in [
-            ("1", "Detect"),
-            ("2", "Review"),
-            ("3", "Apply"),
-            ("4", "Recheck"),
-        ] {
-            ui.label(
-                RichText::new(format!("{step} \u{00b7} {text}"))
-                    .monospace()
-                    .color(Tokens::get(ui.ctx()).color.text_dim),
-            );
-            if step != "4" {
-                ui.separator();
-            }
-        }
-    });
+    band_header(ui, "Ordered corrective action", None);
     let mut action = ConnectivityBodyAction::None;
-    ScrollArea::horizontal()
-        .id_salt("connectivity-manager-repairs")
-        .show(ui, |ui| {
-            Grid::new("connectivity-manager-repair-grid")
-                .num_columns(7)
-                .striped(true)
-                .min_col_width(92.0)
-                .show(ui, |ui| {
-                    table_header(
-                        ui,
-                        &[
-                            "Apply",
-                            "Object",
-                            "Before",
-                            "Proposed repair",
-                            "Identity effect",
-                            "Validation",
-                            "Action",
-                        ],
-                    );
-                    if dialog.report.repairs.is_empty() {
-                        ui.label("\u{2014}");
-                        ui.label("No connectivity repairs are currently required");
-                        for _ in 2..7 {
+    inset_block(ui, 10, |ui| {
+        ScrollArea::horizontal()
+            .id_salt("connectivity-manager-repairs")
+            .show(ui, |ui| {
+                Grid::new("connectivity-manager-repair-grid")
+                    .num_columns(7)
+                    .striped(true)
+                    .min_col_width(92.0)
+                    .show(ui, |ui| {
+                        table_header(
+                            ui,
+                            &[
+                                "Apply",
+                                "Object",
+                                "Before",
+                                "Proposed repair",
+                                "Identity effect",
+                                "Validation",
+                                "Action",
+                            ],
+                        );
+                        if dialog.report.repairs.is_empty() {
                             ui.label("\u{2014}");
-                        }
-                        ui.end_row();
-                    }
-                    for repair in &dialog.report.repairs {
-                        let actionable =
-                            repair.action.is_some() || !repair.endpoint_choices.is_empty();
-                        let mut selected = dialog.selected_repairs.contains(&repair.id);
-                        if ui
-                            .add_enabled(
-                                actionable && write_allowed && current,
-                                egui::Checkbox::without_text(&mut selected),
-                            )
-                            .changed()
-                        {
-                            if selected {
-                                dialog.selected_repairs.insert(repair.id.clone());
-                            } else {
-                                dialog.selected_repairs.remove(&repair.id);
+                            ui.label("No connectivity repairs are currently required");
+                            for _ in 2..7 {
+                                ui.label("\u{2014}");
                             }
+                            ui.end_row();
                         }
-                        ui.monospace(&repair.object);
-                        ui.label(&repair.before);
-                        ui.label(&repair.proposed);
-                        ui.label(&repair.identity_effect);
-                        status_label(ui, &repair.validation, actionable);
-                        ui.vertical(|ui| {
-                            if Button::new("Reveal").show(ui).clicked() {
-                                action = ConnectivityBodyAction::Reveal(repair.reveal.clone());
-                            }
-                            if !repair.endpoint_choices.is_empty() {
-                                let selected = dialog
-                                    .endpoint_choices
-                                    .entry(repair.id.clone())
-                                    .or_insert(0);
-                                *selected = (*selected)
-                                    .min(repair.endpoint_choices.len().saturating_sub(1));
-                                egui::ComboBox::from_id_salt(("repair-endpoint", &repair.id))
-                                    .selected_text(&repair.endpoint_choices[*selected].label)
-                                    .width(240.0)
-                                    .show_ui(ui, |ui| {
-                                        for (index, endpoint) in
-                                            repair.endpoint_choices.iter().enumerate()
-                                        {
-                                            ui.selectable_value(selected, index, &endpoint.label);
-                                        }
-                                    });
-                                if Button::new("Route to endpoint")
-                                    .enabled(write_allowed && current)
-                                    .show(ui)
-                                    .clicked()
-                                {
-                                    action = ConnectivityBodyAction::RouteRepair(repair.id.clone());
+                        for repair in &dialog.report.repairs {
+                            let actionable =
+                                repair.action.is_some() || !repair.endpoint_choices.is_empty();
+                            let mut selected = dialog.selected_repairs.contains(&repair.id);
+                            if ui
+                                .add_enabled(
+                                    actionable && write_allowed && current,
+                                    egui::Checkbox::without_text(&mut selected),
+                                )
+                                .changed()
+                            {
+                                if selected {
+                                    dialog.selected_repairs.insert(repair.id.clone());
+                                } else {
+                                    dialog.selected_repairs.remove(&repair.id);
                                 }
                             }
-                        });
-                        ui.end_row();
-                    }
-                });
+                            ui.monospace(&repair.object);
+                            ui.label(&repair.before);
+                            ui.label(&repair.proposed);
+                            ui.label(&repair.identity_effect);
+                            status_label(ui, &repair.validation, actionable);
+                            ui.vertical(|ui| {
+                                if Button::new("Reveal").show(ui).clicked() {
+                                    action = ConnectivityBodyAction::Reveal(repair.reveal.clone());
+                                }
+                                if !repair.endpoint_choices.is_empty() {
+                                    let selected = dialog
+                                        .endpoint_choices
+                                        .entry(repair.id.clone())
+                                        .or_insert(0);
+                                    *selected = (*selected)
+                                        .min(repair.endpoint_choices.len().saturating_sub(1));
+                                    egui::ComboBox::from_id_salt(("repair-endpoint", &repair.id))
+                                        .selected_text(&repair.endpoint_choices[*selected].label)
+                                        .width(240.0)
+                                        .show_ui(ui, |ui| {
+                                            for (index, endpoint) in
+                                                repair.endpoint_choices.iter().enumerate()
+                                            {
+                                                ui.selectable_value(
+                                                    selected,
+                                                    index,
+                                                    &endpoint.label,
+                                                );
+                                            }
+                                        });
+                                    if Button::new("Route to endpoint")
+                                        .enabled(write_allowed && current)
+                                        .show(ui)
+                                        .clicked()
+                                    {
+                                        action =
+                                            ConnectivityBodyAction::RouteRepair(repair.id.clone());
+                                    }
+                                }
+                            });
+                            ui.end_row();
+                        }
+                    });
+            });
+        ui.horizontal(|ui| {
+            if Button::new("Select validated repairs")
+                .enabled(write_allowed && current)
+                .show(ui)
+                .clicked()
+            {
+                dialog.selected_repairs.extend(
+                    dialog
+                        .report
+                        .repairs
+                        .iter()
+                        .filter(|repair| repair.action.is_some())
+                        .map(|repair| repair.id.clone()),
+                );
+            }
+            if Button::new("Open source map\u{2026}").show(ui).clicked() {
+                action = ConnectivityBodyAction::OpenSourceMap;
+            }
         });
-    ui.horizontal(|ui| {
-        if Button::new("Select validated repairs")
-            .enabled(write_allowed && current)
-            .show(ui)
-            .clicked()
-        {
-            dialog.selected_repairs.extend(
-                dialog
-                    .report
-                    .repairs
-                    .iter()
-                    .filter(|repair| repair.action.is_some())
-                    .map(|repair| repair.id.clone()),
-            );
-        }
-        if Button::new("Open source map\u{2026}").show(ui).clicked() {
-            action = ConnectivityBodyAction::OpenSourceMap;
-        }
     });
     action
 }
 
-fn create_bus_body(
-    ui: &mut Ui,
+/// The bus declaration, asked as a command form before the bus router arms:
+/// the width policy the bus will be checked against, the declaration, and
+/// under it what the declaration declares or why it is refused.
+fn create_bus_form(
+    ctx: &Context,
     dialog: &mut ConnectivityManagerDialogState,
     write_allowed: bool,
-) -> ConnectivityBodyAction {
-    section_header(ui, "Bus declaration", Some("typed design object"));
-    Grid::new("connectivity-create-bus")
-        .num_columns(2)
-        .spacing(Vec2::new(18.0, 10.0))
-        .show(ui, |ui| {
-            ui.label("Width policy");
-            ui.monospace(dialog.policy.width_mismatch.label());
-            ui.end_row();
-            ui.label("Discipline conversion");
-            ui.monospace("Declared connect rule only");
-            ui.end_row();
-            ui.label("Declaration");
-            ui.add_enabled(
-                write_allowed,
-                egui::TextEdit::singleline(&mut dialog.bus_declaration)
-                    .hint_text("DATA[7:0]")
-                    .desired_width(330.0),
+    primary_enabled: bool,
+    status: Result<Option<&str>, &str>,
+) -> DialogChoice {
+    let declaration_id = egui::Id::new("connectivity-create-bus-declaration");
+    CommandForm::new(CREATE_BUS_TITLE, CREATE_BUS_PRIMARY)
+        .describe(
+            "Validate one indexed bus declaration, then place its vector geometry with the schematic bus router.",
+        )
+        .primary_enabled(primary_enabled)
+        .fields_enabled(write_allowed)
+        // A refusal of the declaration stands under it; the slot holds only
+        // what belongs to no field, so it reserves nothing while empty.
+        .status(status)
+        .status_fixed_at_open()
+        .show(ctx, |rows| {
+            rows.value("Width policy", dialog.policy.width_mismatch.label());
+            rows.text(
+                "Declaration",
+                declaration_id,
+                &mut dialog.bus_declaration,
+                "NAME[msb:lsb]",
             );
-            ui.end_row();
-        });
-    if dialog.bus_declaration.trim().is_empty() {
-        return ConnectivityBodyAction::None;
+            let line = bus_declaration_line(&dialog.bus_declaration);
+            rows.field_line(
+                Some(declaration_id),
+                match &line {
+                    Ok(text) => FieldLine::Derived(text),
+                    Err(text) => FieldLine::Error(text),
+                },
+            );
+            Some(declaration_id)
+        })
+}
+
+const CREATE_BUS_TITLE: &str = "Create indexed bus";
+const CREATE_BUS_PRIMARY: &str = "Begin bus placement";
+
+/// The line under the declaration: what it declares, why it is refused, or,
+/// while it is empty, what placement waits for.
+fn bus_declaration_line(declaration: &str) -> Result<String, String> {
+    let declaration = declaration.trim();
+    if declaration.is_empty() {
+        return Ok(BUS_DECLARATION_MISSING.to_owned());
     }
-    ui.add_space(10.0);
-    match BusDeclaration::parse(dialog.bus_declaration.trim()) {
-        Ok(declaration) => status_label(
-            ui,
-            &format!(
-                "{} members \u{00b7} {} \u{00b7} placement creates one undoable typed bus",
+    BusDeclaration::parse(declaration)
+        .map(|declaration| {
+            format!(
+                "{} members, {}",
                 declaration.width(),
                 match declaration.direction() {
                     BusDirection::Ascending => "ascending",
                     BusDirection::Descending => "descending",
                 }
-            ),
-            true,
-        ),
-        Err(error) => status_label(ui, &error.to_string(), false),
-    }
-    ConnectivityBodyAction::None
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn table_header(ui: &mut Ui, labels: &[&str]) {
@@ -2214,17 +2241,6 @@ fn status_label(ui: &mut Ui, text: &str, good: bool) {
             })
             .monospace(),
     );
-}
-
-fn property_line(ui: &mut Ui, label: &str, value: &str) {
-    Grid::new(ui.id().with(label))
-        .num_columns(2)
-        .spacing(Vec2::new(20.0, 7.0))
-        .show(ui, |ui| {
-            ui.label(label);
-            ui.monospace(value);
-            ui.end_row();
-        });
 }
 
 fn policy_combo<T: Copy + PartialEq>(
