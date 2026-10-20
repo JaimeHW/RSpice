@@ -1107,7 +1107,7 @@ impl VerilogACompiler {
             if let Some(map) = source_map {
                 return map
                     .locate(offset)
-                    .map(|(path, line)| (path.display().to_string().into(), line as u32));
+                    .map(|(path, line)| (crate::source::display_path(path).into(), line as u32));
             }
             let prefix = source.get(..offset)?;
             Some((

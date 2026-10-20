@@ -196,8 +196,13 @@ impl PreparedSourceMap {
             start: None,
             end: None,
         };
-        self.map_span(source, &span)
-            .map(|found| (found.path.display().to_string(), found.line, found.column))
+        self.map_span(source, &span).map(|found| {
+            (
+                crate::source::display_path(found.path),
+                found.line,
+                found.column,
+            )
+        })
     }
 
     /// The original document, byte range, line and column of a span of the

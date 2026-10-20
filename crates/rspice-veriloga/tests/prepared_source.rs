@@ -1241,3 +1241,32 @@ fn prepared_virtual_source_shares_front_end_and_transports_standalone_connection
         rspice_veriloga::CompileError::Cancelled(_)
     ));
 }
+
+/// An analog task's origin and a located byte of the prepared text name
+/// their file as every diagnostic does: without the Windows verbatim prefix
+/// that reading through `canonicalize` adds (`\\?\C:\...`). An analog
+/// `$warning` printed "$warning at 0 s (\\?\C:\...\warn.va:5, x1)".
+#[test]
+fn analog_task_origins_and_located_bytes_drop_the_verbatim_prefix() {
+    let mut files = Sources::new();
+    files.0 = files.0.canonicalize().unwrap();
+    let root = files.write(
+        "tasks.va",
+        "`include \"disciplines.vams\"\nmodule tasks(p);\ninout p; electrical p;\nanalog begin\n \
+         @(initial_step) $warning(\"hi\");\n I(p) <+ V(p);\nend\nendmodule\n",
+    );
+    let prepared = prepare(&VerilogACompiler::new(CompilerOptions::default()), &root).unwrap();
+    let runtime = prepared.compile_runtime(None).unwrap();
+    let origin = runtime
+        .model
+        .analog_task_origins
+        .first()
+        .expect("the $warning is located");
+    assert_eq!(origin.line, 5);
+    assert!(!origin.file.starts_with(r"\\?\"), "{}", origin.file);
+    assert!(origin.file.ends_with("tasks.va"), "{}", origin.file);
+    let offset = prepared.preprocessed_source().find("I(p)").unwrap();
+    let (file, line, _) = prepared.source_location(offset).unwrap();
+    assert!(!file.starts_with(r"\\?\"), "{file}");
+    assert_eq!(line, 6);
+}
