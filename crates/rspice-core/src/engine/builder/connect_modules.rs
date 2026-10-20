@@ -66,6 +66,61 @@ fn connect_refusal(detail: impl Into<String>) -> ElaborationError {
     ElaborationError::new(ElaborationErrorKind::ConnectRule, detail)
 }
 
+/// The original coordinates of a connect source the design retains only as
+/// preprocessed text, prepared again from its file when a refusal needs to
+/// point into it. A file that no longer prepares to the same text is not
+/// mapped, so a location is never taken from a different snapshot.
+pub(super) fn original_coordinates<'a>(
+    path: &'a std::path::Path,
+    source: &str,
+) -> Option<OriginalCoordinates<'a>> {
+    let prepared = super::veriloga_cache::prepare_veriloga_source(
+        path,
+        crate::ResourceLimits::default(),
+        &crate::abort_signal::NoAbort,
+    )
+    .ok()?;
+    (prepared.preprocessed_source() == source).then_some(OriginalCoordinates { path, prepared })
+}
+
+/// A connect source's preprocessed text mapped back to the files it was
+/// written in. The deck's own file is named as the deck names it.
+pub(super) struct OriginalCoordinates<'a> {
+    path: &'a std::path::Path,
+    prepared: rspice_veriloga::PreparedRuntimeSource,
+}
+
+impl OriginalCoordinates<'_> {
+    fn shown(&self, file: &str) -> String {
+        let canonical = super::veriloga_cache::canonicalize_for_cache;
+        if canonical(std::path::Path::new(file)) == canonical(self.path) {
+            self.path.display().to_string()
+        } else {
+            file.to_owned()
+        }
+    }
+
+    /// The file, line and column one byte of the prepared text was written at.
+    pub(super) fn locate(&self, offset: usize) -> Option<(String, usize, usize)> {
+        let (file, line, column) = self.prepared.source_location(offset)?;
+        Some((self.shown(&file), line, column))
+    }
+
+    /// A compiler error on the prepared text, as findings in original files.
+    pub(super) fn diagnostics_for_error(
+        &self,
+        error: &rspice_veriloga::CompileError,
+    ) -> Vec<rspice_veriloga::SourceCompileDiagnostic> {
+        let mut diagnostics = self.prepared.diagnostics_for_error(error);
+        for diagnostic in &mut diagnostics {
+            if let Some(path) = &mut diagnostic.path {
+                *path = self.shown(path);
+            }
+        }
+        diagnostics
+    }
+}
+
 /// The continuous discipline a SPICE deck node has.
 const DECK_DISCIPLINE: &str = "electrical";
 /// The discrete discipline an XSPICE event net has.
@@ -410,7 +465,14 @@ pub(super) struct DesignConnectRules {
     requested: Option<String>,
     requested_source: Option<(String, std::path::PathBuf)>,
     registered_sources: std::collections::HashSet<String>,
-    available: Vec<(String, std::path::PathBuf, rspice_veriloga::source::Span)>,
+    /// Each configuration's name, file, and span in that file's prepared
+    /// source, which the last field retains for locating it.
+    available: Vec<(
+        String,
+        std::path::PathBuf,
+        rspice_veriloga::source::Span,
+        Option<std::sync::Arc<str>>,
+    )>,
     matches: usize,
     table: ConnectRuleTable,
     disciplines: DisciplineDb,
@@ -523,8 +585,12 @@ impl DesignConnectRules {
             return Ok(());
         }
         for block in specification.rules.blocks() {
-            self.available
-                .push((block.name.to_string(), path.to_path_buf(), block.span));
+            self.available.push((
+                block.name.to_string(),
+                path.to_path_buf(),
+                block.span,
+                specification.source.clone(),
+            ));
             if self
                 .requested
                 .as_deref()
@@ -585,13 +651,15 @@ impl DesignConnectRules {
         let available = self
             .available
             .iter()
-            .map(|(name, path, span)| {
-                format!(
-                    "'{name}' in '{}' (preprocessed bytes {}..{})",
-                    path.display(),
-                    span.start,
-                    span.end
-                )
+            .map(|(name, path, span, source)| {
+                match source
+                    .as_deref()
+                    .and_then(|source| original_coordinates(path, source))
+                    .and_then(|coordinates| coordinates.locate(span.start as usize))
+                {
+                    Some((file, line, column)) => format!("'{name}' at {file}:{line}:{column}"),
+                    None => format!("'{name}' in '{}'", path.display()),
+                }
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -721,6 +789,7 @@ impl DesignConnectRules {
                                 .into_owned(),
                             rule.continuous.name.to_string(),
                             rule.discrete.name.to_string(),
+                            rule.span,
                         ),
                     )
                 },

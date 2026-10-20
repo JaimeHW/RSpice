@@ -255,6 +255,13 @@ impl PreparedRuntimeSource {
         &self.source
     }
 
+    /// Where one byte of [`Self::preprocessed_source`] was written: the
+    /// original document, its one-based line and column. A byte a macro
+    /// expansion produced reports the invocation's line at column 1.
+    pub fn source_location(&self, offset: usize) -> Option<(String, usize, usize)> {
+        self.source_map.locate_byte(&self.source, offset)
+    }
+
     /// The files of a compilation unit of several files, in reading order,
     /// with the modules each declares. Empty when one file was prepared.
     pub fn unit_files(&self) -> &[UnitFile] {

@@ -1483,5 +1483,25 @@ pub enum ConnectError {
     CyclicSignal,
 }
 
+impl ConnectError {
+    /// The one construct this refusal blames, when it has one: the `connect`
+    /// statement, the `connectmodule`, or the later of two declarations.
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Self::DuplicateConnectDeclaration { second: span, .. }
+            | Self::UnknownConnectModule { span, .. }
+            | Self::ConnectModulePortCount { span, .. }
+            | Self::ConnectModulePortDiscipline { span, .. }
+            | Self::ConnectModuleDomains { span, .. }
+            | Self::ConnectModuleDirections { span, .. }
+            | Self::OverrideIncompatible { span, .. }
+            | Self::RuleDomains { span, .. }
+            | Self::PositionalConnectParameter { span, .. }
+            | Self::NonLiteralConnectParameter { span, .. } => Some(*span),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

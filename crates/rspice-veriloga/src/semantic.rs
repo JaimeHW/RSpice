@@ -809,7 +809,7 @@ impl SemanticAnalyzer {
         // statement's diagnostics are less useful than a broken module's.
         let connect_rules = crate::connect::build_connect_rule_table(source, &self.disciplines)
             .map_err(|error| {
-                let span = connect_rules_span(source);
+                let span = error.span().unwrap_or_else(|| connect_rules_span(source));
                 CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::ConnectRules(Box::new(error)),
                     span,
@@ -879,9 +879,10 @@ impl SemanticAnalyzer {
         self.register_physical_definitions(source)?;
         let rules = crate::connect::build_connect_rule_table(source, &self.disciplines).map_err(
             |error| {
+                let span = error.span().unwrap_or_else(|| connect_rules_span(source));
                 CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::ConnectRules(Box::new(error)),
-                    connect_rules_span(source),
+                    span,
                 ))
             },
         )?;
@@ -11510,9 +11511,9 @@ impl SemanticAnalyzer {
     }
 }
 
-/// Where to point a connect specification refusal.
+/// Where to point a connect specification refusal that blames no one construct.
 ///
-/// [`crate::connect::ConnectError`] carries a span on the variants that have
+/// [`crate::connect::ConnectError::span`] is used on the variants that have
 /// one construct to blame, but several — an ambiguous rule, an excluded pair —
 /// are about a *relation* between two. The first connect construct in the file
 /// is the honest fallback: it is the block the reader has to look at either

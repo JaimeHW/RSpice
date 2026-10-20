@@ -220,6 +220,113 @@ fn a_connect_library_needs_no_device_module() {
     assert!(!waveform.is_empty());
 }
 
+/// A design whose ports cross both ways, with its connect modules and rules
+/// in the same file behind an include, so the prepared text's byte offsets
+/// are nowhere near the file's own.
+const LOCATED_DESIGN: &str = "\
+`include \"disciplines.vams\"
+`timescale 1ns/1ps
+module rx(in, o);
+  input in; output o; reg o;
+  initial o = 0;
+  always @(in) o = in;
+endmodule
+connectmodule a2d_h(a, d);
+  input a; output d; electrical a; logic d; reg d;
+  parameter real vhi = 0.6, vlo = 0.4;
+  initial d = 0;
+  always @(cross(V(a) - vhi, +1)) d = 1;
+  always @(cross(V(a) - vlo, -1)) d = 0;
+endmodule
+connectmodule d2a_s(d, a);
+  input d; output a; logic d; electrical a;
+  parameter real vh = 2.0;
+  analog V(a) <+ transition(d ? vh : 0.0, 0, 3n);
+endmodule
+connectrules hyst;
+  connect a2d_h #(.vhi(0.7));
+  connect d2a_s;
+endconnectrules
+";
+
+/// The one-based line of the design that contains `text`.
+fn line_of(source: &str, text: &str) -> usize {
+    source
+        .lines()
+        .position(|line| line.contains(text))
+        .unwrap_or_else(|| panic!("the design has no line with {text:?}"))
+        + 1
+}
+
+/// Each connect refusal names the file and line its author wrote.
+///
+/// They used to say `file:0`, `preprocessed bytes 3240..3321`, `Semantic error
+/// at offset 3209`, or the line of the first `connectmodule` (8) for a
+/// `connect` statement on line 22: offsets into the text the preprocessor
+/// made, which no editor shows.
+#[test]
+fn connect_refusals_point_at_the_line_the_author_wrote() {
+    let directory = TempDirectory::new("located");
+    let refusal = |name: &str, source: &str, rules: &str| {
+        let path = directory.path().join(name);
+        std::fs::write(&path, source).expect("write the design");
+        let deck = format!(
+            "located connect refusal\n\
+             .hdl \"{}\" module=rx\n\
+             .options connectrules={rules}\n\
+             v1 in 0 pwl(0 0 100n 1)\n\
+             x1 in o rx\n\
+             r1 o 0 1k\n\
+             .tran 1n 100n\n\
+             .end\n",
+            path.display().to_string().replace('\\', "/")
+        );
+        let netlist = Netlist::parse(&deck).unwrap_or_else(|error| panic!("deck parses: {error}"));
+        Engine::default()
+            .run_tran(&netlist, 100.0e-9, 1.0e-9)
+            .expect_err("the deck is refused")
+            .to_string()
+    };
+
+    // A configuration the deck does not name: the ones there are, by line.
+    let text = refusal("unknown.vams", LOCATED_DESIGN, "nosuch");
+    let at = format!(
+        "unknown.vams:{}:1",
+        line_of(LOCATED_DESIGN, "connectrules hyst;")
+    );
+    assert!(
+        text.contains("'hyst' at ") && text.contains(&at) && !text.contains("preprocessed bytes"),
+        "{text}"
+    );
+
+    // A parameter the selected module does not declare: the statement.
+    let source = LOCATED_DESIGN.replace(".vhi(0.7)", ".vhi(0.7), .bogus(3)");
+    let text = refusal("bogus.vams", &source, "hyst");
+    let at = format!("bogus.vams:{}", line_of(&source, ".bogus(3)"));
+    assert!(
+        text.contains(&at) && text.contains("bogus") && !text.contains(".vams:0"),
+        "{text}"
+    );
+
+    // A statement naming no connectmodule: that statement, not line 8.
+    let source = LOCATED_DESIGN.replace("connect d2a_s;", "connect d2a_missing;");
+    let text = refusal("missing.vams", &source, "hyst");
+    let at = format!(
+        "missing.vams:{}:3",
+        line_of(&source, "connect d2a_missing;")
+    );
+    assert!(text.contains(&at) && text.contains("d2a_missing"), "{text}");
+
+    // A body the analog domain cannot compile: the operator in it.
+    let source = LOCATED_DESIGN.replace("transition(d ?", "transition((d === 1) ?");
+    let text = refusal("body.vams", &source, "hyst");
+    let at = format!("body.vams:{}:", line_of(&source, "==="));
+    assert!(
+        text.contains(&at) && !text.contains("offset") && !text.contains(".vams:0"),
+        "{text}"
+    );
+}
+
 /// An empty authored body leaves its output undriven, even with a built-in name.
 #[test]
 fn an_empty_authored_connect_body_is_not_replaced_by_a_builtin() {

@@ -181,6 +181,25 @@ impl PreparedSourceMap {
             .collect()
     }
 
+    /// The original document, line and column of one byte of the expanded
+    /// text, as a diagnostic starting at that byte would report them.
+    pub(crate) fn locate_byte(
+        &self,
+        source: &str,
+        offset: usize,
+    ) -> Option<(String, usize, usize)> {
+        let offset = u32::try_from(offset).ok()?;
+        let span = CompileDiagnosticSpan {
+            source_id: 0,
+            byte_start: offset,
+            byte_end: offset,
+            start: None,
+            end: None,
+        };
+        self.map_span(source, &span)
+            .map(|found| (found.path.display().to_string(), found.line, found.column))
+    }
+
     fn map_span(
         &self,
         source: &str,

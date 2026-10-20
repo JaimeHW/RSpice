@@ -29,6 +29,10 @@ pub(super) struct AuthoredConnectBody {
     source_package: String,
     continuous: String,
     discrete: String,
+    /// The `connect` statement that selected this body, in `source`: where a
+    /// refusal with no narrower span points, such as an unknown parameter
+    /// the statement overrides.
+    statement: rspice_veriloga::source::Span,
     compiled: OnceLock<CompiledConnectBody>,
 }
 
@@ -39,6 +43,7 @@ impl AuthoredConnectBody {
         source_package: String,
         continuous: String,
         discrete: String,
+        statement: rspice_veriloga::source::Span,
     ) -> Self {
         Self {
             configuration,
@@ -46,7 +51,42 @@ impl AuthoredConnectBody {
             source_package,
             continuous,
             discrete,
+            statement,
             compiled: OnceLock::new(),
+        }
+    }
+
+    /// A compile refusal located in the original source: the compiler's own
+    /// findings when they carry a span, else the selecting statement.
+    fn compile_refusal(&self, error: &rspice_veriloga::CompileError) -> ElaborationError {
+        let refusal = |detail: String| {
+            ElaborationError::new(ElaborationErrorKind::CompileRefusal, detail)
+                .in_source(std::path::Path::new(&self.source_package))
+        };
+        let Some(coordinates) = super::connect_modules::original_coordinates(
+            std::path::Path::new(&self.source_package),
+            &self.source,
+        ) else {
+            return refusal(format!(
+                "selected connect body could not be compiled: {error}"
+            ));
+        };
+        let diagnostics = coordinates.diagnostics_for_error(error);
+        if diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.path.is_some())
+        {
+            return refusal("selected connect body could not be compiled".into())
+                .with_compiler_diagnostics(diagnostics);
+        }
+        let refused = refusal(format!(
+            "selected connect body could not be compiled: {error}"
+        ));
+        match coordinates.locate(self.statement.start as usize) {
+            Some((file, line, _)) => {
+                refused.at(crate::netlist::NetlistSourceLocation::in_file(file, line))
+            }
+            None => refused,
         }
     }
 }
@@ -90,9 +130,11 @@ pub(super) fn materialize(
             if abort.is_aborted() {
                 SimulationError::Aborted
             } else {
-                refusal(format!(
-                    "selected connect body could not be compiled: {error}"
-                ))
+                SimulationError::from(
+                    body.compile_refusal(&error)
+                        .module(selected.name.as_str())
+                        .instance(selected.instance.as_str()),
+                )
             }
         })?;
         let _ = body.compiled.set(CompiledConnectBody {
