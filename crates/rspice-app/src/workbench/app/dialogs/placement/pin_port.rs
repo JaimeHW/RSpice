@@ -234,14 +234,9 @@ pub(in crate::workbench) fn render_pin_port_dialog(
     let usable = !matches!(current, Draft::Blocked(_));
     let ready = matches!(current, Draft::Ready(_));
     let refusal = current.refusal();
-    // The cell whose interface this batch will change. It is the one thing
-    // about the form that is not in the form, and the reason the
-    // document-changed refusal exists at all.
-    let view_path = model.workspace.content.active_view.display_path();
 
     let form = &mut *dialog;
     let choice = CommandForm::new(TITLE, PRIMARY)
-        .context(Some(view_path.as_str()))
         .describe(DESCRIPTION)
         .primary_enabled(usable && ready)
         .fields_enabled(usable)
@@ -249,7 +244,6 @@ pub(in crate::workbench) fn render_pin_port_dialog(
             Some(message) => Err(message),
             None => Ok(None),
         })
-        .status_lines(2)
         .show(ctx, |rows| {
             form.fields
                 .show(rows, declaration.as_deref(), bits.as_deref())

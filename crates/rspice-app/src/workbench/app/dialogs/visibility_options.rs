@@ -90,9 +90,7 @@ impl RSpiceApp {
         }
 
         let recovery_available = visibility_recovery_available(&self.state);
-        let mut form = CommandForm::new(TITLE, PRIMARY)
-            .describe(DESCRIPTION)
-            .status_fixed_at_open();
+        let mut form = CommandForm::new(TITLE, PRIMARY).describe(DESCRIPTION);
         if recovery_available {
             form = form.secondary("Undo last change");
         }

@@ -30,11 +30,11 @@ pub struct AddPaneChoices {
 pub fn show(ctx: &Context, draft: &mut AddPaneDraft, choices: &AddPaneChoices) -> DialogChoice {
     let refusal = choices.refusal.as_deref();
     CommandForm::new("Add pane", "Add")
-        .context(Some(choices.anchor.as_str()))
         .describe("Add a result pane to this document after the selected pane.")
         .primary_enabled(refusal.is_none())
         .status(refusal.map_or(Ok(None), Err))
         .show(ctx, |rows| {
+            rows.value("After", &choices.anchor);
             let (labels, current) = labels_and_selection(&choices.datasets, draft.dataset);
             if let Some(index) =
                 rows.select("Dataset", "rspice.add-pane.dataset", &current, &labels)

@@ -57,11 +57,8 @@ pub(in crate::workbench) fn render_design_note_dialog(
     } else {
         validation.as_ref().err().cloned()
     };
-    let view_path = model.workspace.content.active_view.display_path();
-
     let draft = &mut *dialog;
     let choice = CommandForm::new(TITLE, PRIMARY)
-        .context(Some(view_path.as_str()))
         .describe(DESCRIPTION)
         .primary_enabled(validation.is_ok())
         // Enter types a line of the note; the primary places it.
@@ -70,7 +67,6 @@ pub(in crate::workbench) fn render_design_note_dialog(
             Some(message) => Err(message),
             None => Ok(None),
         })
-        .status_lines(2)
         .show(ctx, |rows| {
             note_placement::show(rows, &mut draft.kind, &mut draft.text)
         });

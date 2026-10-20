@@ -177,10 +177,9 @@ impl ProjectFeature {
         let choice = CommandForm::new("New view", "Create")
             .describe("Create a named view of the selected type in this library cell.")
             .primary_enabled(can_create)
-            // A refusal of the name stands under it; the slot holds only what
-            // belongs to no field, so it reserves nothing while empty.
+            // A refusal of the name stands under it; the footer states only
+            // what belongs to no field.
             .status(error.as_deref().map_or(Ok(None), Err))
-            .status_fixed_at_open()
             .show(ctx, |rows| {
                 rows.value_mono("Library", &dialogs.new_view_library);
                 rows.value_mono("Cell", &dialogs.new_view_cell);

@@ -268,14 +268,11 @@ pub(in crate::workbench) fn render_find_replace_dialog(
         Ok(None) => Ok(None),
         Err(reason) => Err(reason.as_str()),
     };
-    let view_path = model.workspace.content.active_view.display_path();
     let form = &mut *dialog;
     let choice = CommandForm::new(TITLE, PRIMARY)
-        .context(Some(view_path.as_str()))
         .describe(DESCRIPTION)
         .primary_enabled(count > 0)
         .status(status)
-        .status_lines(2)
         .show(ctx, |rows| {
             let find = Id::new(FIND_FIELD);
             rows.text("Find", find, &mut form.find, "text or pattern");

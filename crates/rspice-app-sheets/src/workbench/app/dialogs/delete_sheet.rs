@@ -61,7 +61,6 @@ pub(in crate::workbench) fn render_delete_sheet_confirmation(
     );
     let choice = CommandForm::new(&title, PRIMARY)
         .describe(&description)
-        .status_fixed_at_open()
         .show(ctx, |rows| {
             rows.value("Objects on it", &objects);
             rows.value("Moved to", &pending.destination_name);

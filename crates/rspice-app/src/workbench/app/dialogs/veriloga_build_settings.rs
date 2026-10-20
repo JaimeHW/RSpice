@@ -501,8 +501,6 @@ impl RSpiceApp {
                 Some(message) => Err(message),
                 None => Ok(None),
             })
-            .status_lines(2)
-            .status_fixed_at_open()
             .show(ctx, |rows| {
                 edited = form_body(rows, &mut draft, &refusals, &messages);
                 None

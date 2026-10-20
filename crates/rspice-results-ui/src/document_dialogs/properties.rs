@@ -21,10 +21,9 @@ pub struct PropertiesDraft {
 /// quick view, whose digits are the user's own default.
 pub fn show(ctx: &Context, draft: &mut PropertiesDraft, scope: &str) -> DialogChoice {
     CommandForm::new("Plot properties", "Apply")
-        .context(Some(scope))
         .describe("Set the significant digits values are shown with and how phase is drawn.")
-        .status_fixed_at_open()
         .show(ctx, |rows| {
+            rows.value("Applies to", scope);
             let digits = (MIN_DIGITS..=MAX_DIGITS).collect::<Vec<_>>();
             let options = digits.iter().map(u8::to_string).collect::<Vec<_>>();
             if let Some(index) = rows.select(

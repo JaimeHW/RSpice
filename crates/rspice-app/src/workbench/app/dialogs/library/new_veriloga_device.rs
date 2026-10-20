@@ -273,8 +273,6 @@ impl RSpiceApp {
                 Some(message) => Err(message),
                 None => Ok(None),
             })
-            .status_lines(2)
-            .status_fixed_at_open()
             .show(ctx, |rows| {
                 picked = rows.select(
                     &library_label,

@@ -62,17 +62,11 @@ pub(in crate::workbench) fn render_bus_tap_dialog(
         Ok(_) => dialog.fields.validate(),
         Err(message) => DraftValidation::Invalid(message),
     };
-    // The sheet this tap goes on: the one thing about the form that is not
-    // in the form.
-    let view_path = model.workspace.content.active_view.display_path();
-
     let fields = &mut dialog.fields;
     let choice = CommandForm::new(TITLE, PRIMARY)
-        .context(Some(view_path.as_str()))
         .describe(DESCRIPTION)
         .primary_enabled(validation.can_commit())
         .status(validation.status())
-        .status_lines(2)
         .show(ctx, |rows| {
             bus_tap_placement::show(rows, &validation, fields)
         });

@@ -80,7 +80,6 @@ impl RSpiceApp {
                 Some(message) => Err(message),
                 None => Ok(None),
             })
-            .status_lines(2)
             .show(ctx, |rows| {
                 let (changed, focus) =
                     xspice_placement::show(rows, &draft.vector_ports, &mut draft.widths);

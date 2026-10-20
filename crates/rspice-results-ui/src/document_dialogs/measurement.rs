@@ -29,14 +29,13 @@ pub fn show(
     let field = Id::new("rspice.add-measurement.expression");
     let refusal = preview.refusal.as_deref();
     CommandForm::new("Add measurement", "Add")
-        .context(Some(preview.pane.as_str()))
         .describe(
             "Evaluate a scalar expression on the selected pane and keep its value in the document.",
         )
         .primary_enabled(refusal.is_none() && matches!(preview.value, Ok(Some(_))))
         .status(refusal.map_or(Ok(None), Err))
-        .status_fixed_at_open()
         .show(ctx, |rows| {
+            rows.value("Pane", &preview.pane);
             rows.text("Expression", field, &mut draft.expression, "rms(V(out))");
             rows.field_line(
                 Some(field),

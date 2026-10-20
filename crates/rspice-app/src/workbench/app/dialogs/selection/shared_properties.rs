@@ -263,7 +263,7 @@ pub(in crate::workbench) fn render_shared_properties_dialog(
         .into_iter()
         .map(|component| component.name.clone())
         .collect();
-    let context = format!("{} instances \u{b7} {}", names.len(), names.join(" "));
+    let instances = names.join(", ");
     let form = &mut *dialog;
     let any_edited = form.fields.iter().any(SharedField::edited);
     let status = match (&form.error, form.fields.is_empty()) {
@@ -272,12 +272,11 @@ pub(in crate::workbench) fn render_shared_properties_dialog(
         (None, false) => Ok(None),
     };
     let choice = CommandForm::new(TITLE, PRIMARY)
-        .context(Some(context.as_str()))
         .describe(DESCRIPTION)
         .primary_enabled(any_edited)
         .status(status)
-        .status_lines(2)
         .show(ctx, |rows| {
+            rows.value("Instances", &instances);
             let mut first = None;
             for field in &mut form.fields {
                 let id = Id::new(("shared-property", field.key.as_str()));

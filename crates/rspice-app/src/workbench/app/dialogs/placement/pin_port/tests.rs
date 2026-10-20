@@ -499,8 +499,8 @@ fn two_dozen_names() -> String {
         .join(" ")
 }
 
-/// The two tallest drafts: a valid batch, whose derived line wraps, and a
-/// refused one, whose message runs the full two lines the slot reserves.
+/// The two hardest drafts: a valid batch, whose derived line wraps, and a
+/// refused one, whose refusal is the longest the footer has to state.
 #[cfg(not(target_arch = "wasm32"))]
 type PinPortCase = (&'static str, fn(&mut AppState));
 

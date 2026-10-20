@@ -281,7 +281,6 @@ pub(in crate::workbench) fn render_array_selection_dialog(
             Some(message) => Err(message),
             None => Ok(None),
         })
-        .status_lines(2)
         .show(ctx, |rows| array_form(rows, &validation, &mut *dialog));
     match choice {
         DialogChoice::Primary => {

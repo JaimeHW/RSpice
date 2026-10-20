@@ -162,10 +162,8 @@ impl RSpiceApp {
         let mut spacing_id = None;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .describe(DESCRIPTION)
-            // A refusal is known only once Apply is pressed; while there is
-            // none, the form reserves no slot for it.
+            // A refusal is known only once Apply is pressed.
             .status(validation_error.as_deref().map_or(Ok(None), Err))
-            .status_fixed_at_open()
             .show(ctx, |rows| {
                 let (grid, spacing) =
                     grid_snap_routing_rows(rows, transaction, read_only, angled_routing);

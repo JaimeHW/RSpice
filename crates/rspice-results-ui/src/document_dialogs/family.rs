@@ -35,15 +35,14 @@ pub fn show(ctx: &Context, draft: &mut FamilyDraft, choices: &FamilyChoices) -> 
     let filter = Id::new("rspice.family.filter");
     let refusal = choices.refusal.as_deref();
     CommandForm::new("Family slicing and pivot", "Apply")
-        .context(Some(choices.scope.as_str()))
         .describe(
             "Choose the X axis and family dimension of a swept result, how members are \
              told apart, and which points are shown.",
         )
         .primary_enabled(refusal.is_none() && choices.points.is_ok())
         .status(refusal.map_or(Ok(None), Err))
-        .status_lines(2)
         .show(ctx, |rows| {
+            rows.value("Applies to", &choices.scope);
             dimension_row(
                 rows,
                 "X axis",

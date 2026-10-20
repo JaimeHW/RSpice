@@ -2203,10 +2203,9 @@ fn create_bus_form(
         )
         .primary_enabled(primary_enabled)
         .fields_enabled(write_allowed)
-        // A refusal of the declaration stands under it; the slot holds only
-        // what belongs to no field, so it reserves nothing while empty.
+        // A refusal of the declaration stands under it; the footer states
+        // only what belongs to no field.
         .status(status)
-        .status_fixed_at_open()
         .show(ctx, |rows| {
             rows.value("Width policy", dialog.policy.width_mismatch.label());
             rows.text(

@@ -142,8 +142,6 @@ impl RSpiceApp {
                 Some(message) => Err(message),
                 None => Ok(None),
             })
-            .status_lines(2)
-            .status_fixed_at_open()
             .show(ctx, |rows| {
                 rows.value_mono(&file_label, &form.file_name);
                 picked = rows.select(
@@ -212,8 +210,6 @@ impl RSpiceApp {
         let choice = CommandForm::new(&title, &primary)
             .describe(&description)
             .status(Ok(Some(note.as_str())))
-            .status_lines(2)
-            .status_fixed_at_open()
             .show(ctx, |rows| {
                 rows.value_mono(&view_label, &view);
                 rows.value_mono(&replaces, &review.target.logical_path);

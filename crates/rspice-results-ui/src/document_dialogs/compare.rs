@@ -132,14 +132,13 @@ pub fn show(ctx: &Context, draft: &mut CompareDraft, choices: &CompareChoices) -
     }
     let refusal = choices.refusal.as_deref();
     CommandForm::new("Compare datasets", "Compare")
-        .context(Some(choices.candidate.as_str()))
         .describe(
             "Compare the result with a baseline dataset, signal by signal, within a tolerance.",
         )
         .primary_enabled(refusal.is_none())
         .status(refusal.map_or(Ok(None), Err))
-        .status_lines(2)
         .show(ctx, |rows| {
+            rows.value("Result", &choices.candidate);
             let (labels, current) = labels_and_selection(&choices.baselines, draft.baseline);
             if let Some(index) =
                 rows.select("Baseline", "rspice.compare.baseline", &current, &labels)

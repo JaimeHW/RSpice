@@ -238,9 +238,9 @@ pub(in crate::workbench) fn render_rename_selection_dialog(
 
     let mut edited = false;
     let choice = CommandForm::new(TITLE, PRIMARY)
-        .context(Some(object.as_str()))
         .primary_enabled(validation.can_commit())
         .show(ctx, |rows| {
+            rows.value("Object", &object);
             let field = Id::new(FIELD_ID);
             let response = rows.text("New name", field, &mut dialog.draft, "A SPICE-safe name");
             // A prior publication error belongs to an older candidate;
@@ -306,23 +306,19 @@ pub(in crate::workbench) fn render_rename_selection_dialog(
     }
 }
 
-/// What the form is renaming, as its one context line: the name it has now
-/// and what kind of thing it is. No internal ID — the reader cannot act on
-/// one, and the object is the same object either way.
+/// What the form is renaming, as its Object row: what kind of thing it is
+/// and the name it has now. No internal ID — the reader cannot act on one,
+/// and the object is the same object either way.
 fn object_context(target: &RenameSelectionTarget) -> String {
     match target {
-        RenameSelectionTarget::Component(component) => format!(
-            "{} \u{00b7} {}",
-            component.name,
-            component.kind.display_name()
-        ),
-        RenameSelectionTarget::NetLabel(label) => format!("{} \u{00b7} net label", label.name),
-        RenameSelectionTarget::NamedNet(net) => format!("{} \u{00b7} net", net.name),
-        RenameSelectionTarget::Bus(bus) => format!(
-            "{} \u{00b7} bus",
-            bus.declaration
-                .as_ref()
-                .map_or_else(|| "undeclared".to_owned(), ToString::to_string)
+        RenameSelectionTarget::Component(component) => {
+            format!("{} {}", component.kind.display_name(), component.name)
+        }
+        RenameSelectionTarget::NetLabel(label) => format!("Net label {}", label.name),
+        RenameSelectionTarget::NamedNet(net) => format!("Net {}", net.name),
+        RenameSelectionTarget::Bus(bus) => bus.declaration.as_ref().map_or_else(
+            || "Undeclared bus".to_owned(),
+            |declaration| format!("Bus {declaration}"),
         ),
     }
 }
@@ -609,11 +605,11 @@ mod tests {
     /// The form names what it is renaming and how far the rename reaches,
     /// and states no internal ID for either.
     #[test]
-    fn the_context_line_names_the_object_without_its_internal_id() {
+    fn the_object_row_names_the_object_without_its_internal_id() {
         let (app, _) = component_app();
         let target = selected_rename_target(&app.state).expect("one renameable object");
         let context = object_context(&target);
-        assert_eq!(context, "R1 \u{00b7} Resistor");
+        assert_eq!(context, "Resistor R1");
         assert!(!context.contains("COMPONENT-"));
         assert_eq!(rename_scope(&app.state.model.schematic, &target), None);
     }

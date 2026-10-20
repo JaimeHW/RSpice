@@ -12,12 +12,11 @@
 //! Two invariants are worth stating, because both are things a reader only
 //! notices when they are missing:
 //!
-//! - The status slot is allocated whether or not it says anything, so the
-//!   footer does not move under the pointer as a draft becomes valid. A form
-//!   whose status is settled when it opens says so, and reserves only what
-//!   its status says. A form whose refusals are each about one field states
-//!   them in that field's line instead, which is always there, and so needs
-//!   no reserved status at all.
+//! - The status is stated in the footer, left of the actions, so nothing
+//!   moves under the pointer as a draft becomes valid, and the body ends at
+//!   its last row: the air under it is the air over the first. A form whose
+//!   refusals are each about one field states them in that field's line
+//!   instead, which is always there.
 //! - Every control is named to AccessKit by the label its row states. The
 //!   labels here are painted, not laid out as widgets, so nothing else would
 //!   name them.
@@ -28,11 +27,10 @@ use crate::panels::{WorkbenchIcon, icon_button};
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
-use super::dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use super::dialog::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
 use super::form;
 use super::segmented::{SegmentedWidth, segmented};
 use super::select::{SelectOutput, select, select_with_response};
-use super::status_mark::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark};
 
 /// Air between a row's label column and its control.
 const LABEL_GAP: f32 = 8.0;
@@ -42,10 +40,6 @@ const ROW_GAP: f32 = 8.0;
 const DERIVED_GAP: f32 = 4.0;
 /// One derived line, at `FS_0`.
 const DERIVED_LINE_H: f32 = 14.0;
-/// One status line, at `FS_0`.
-const STATUS_LINE_H: f32 = 15.0;
-/// Air between the context line and the first row.
-const CONTEXT_GAP: f32 = 10.0;
 /// Below this content width a label no longer fits beside its control, and the
 /// rows stack instead of shrinking the control into unusability.
 const STACKED_MAX_WIDTH: f32 = 300.0;
@@ -532,14 +526,15 @@ impl<'u> FormRows<'u> {
     /// is a grid rather than a ragged run. Returns `true` when any changed.
     pub fn checks(&mut self, label: &str, items: &mut [(&str, &mut bool)]) -> bool {
         let line_h = mark_line_height(self.ui);
+        let trim = mark_block_trim(self.ui, line_h);
         let id = self.ui.id().with(("command-form.checks", label));
-        self.block(label, line_h, |ui, width| {
+        self.block(label, line_h - 2.0 * trim, |ui, width| {
             let words = items.iter().map(|(words, _)| *words).collect::<Vec<_>>();
             let (columns, column_w) = mark_columns(ui, &words, width);
+            let lines = items.len().div_ceil(columns);
             let mut changed = false;
             for (line_index, line) in items.chunks_mut(columns).enumerate() {
-                let (line_rect, _) =
-                    ui.allocate_exact_size(vec2(width, line_h), egui::Sense::hover());
+                let line_rect = allocate_mark_line(ui, width, line_h, trim, line_index, lines);
                 for (column, (words, value)) in line.iter_mut().enumerate() {
                     let left = line_rect.left() + column as f32 * (column_w + MARK_COLUMN_GAP);
                     let item = id.with(line_index * columns + column);
@@ -560,13 +555,14 @@ impl<'u> FormRows<'u> {
     /// changed this frame.
     pub fn choice(&mut self, label: &str, options: &[&str], selected: &mut usize) -> bool {
         let line_h = mark_line_height(self.ui);
+        let trim = mark_block_trim(self.ui, line_h);
         let id = self.ui.id().with(("command-form.choice", label));
-        self.block(label, line_h, |ui, width| {
+        self.block(label, line_h - 2.0 * trim, |ui, width| {
             let (columns, column_w) = mark_columns(ui, options, width);
+            let lines = options.len().div_ceil(columns);
             let mut changed = false;
             for (line_index, line) in options.chunks(columns).enumerate() {
-                let (line_rect, _) =
-                    ui.allocate_exact_size(vec2(width, line_h), egui::Sense::hover());
+                let line_rect = allocate_mark_line(ui, width, line_h, trim, line_index, lines);
                 for (column, words) in line.iter().enumerate() {
                     let index = line_index * columns + column;
                     let left = line_rect.left() + column as f32 * (column_w + MARK_COLUMN_GAP);
@@ -705,6 +701,39 @@ fn mark_line_height(ui: &Ui) -> f32 {
     } else {
         MARK_LINE_H.min(t.metrics.ctl_h)
     }
+}
+
+/// The air a set of marks gives up at its outer edges. A mark line is taller
+/// than what it holds, so its words have room above and below; between two
+/// lines that room is the line spacing, but over the first line and under
+/// the last it would add to the gap every row keeps, and a set of checks
+/// that ends a form would leave more air under it than the form has over its
+/// first row. Under a finger the whole line is the target, and keeps it.
+fn mark_block_trim(ui: &Ui, line_h: f32) -> f32 {
+    if Tokens::get(ui.ctx()).metrics.is_touch() {
+        return 0.0;
+    }
+    let ink = mark_galley(ui, "Ag").size().y.max(MARK_SIDE);
+    ((line_h - ink) * 0.5).floor().max(0.0)
+}
+
+/// Lay out line `index` of a set of `lines` marks: `line_h` tall where it
+/// meets another line, less `trim` at the set's outer edges. Returns the
+/// whole line, centred where it would be untrimmed, for its mark and words
+/// to be placed in.
+fn allocate_mark_line(
+    ui: &mut Ui,
+    width: f32,
+    line_h: f32,
+    trim: f32,
+    index: usize,
+    lines: usize,
+) -> Rect {
+    let top = if index == 0 { trim } else { 0.0 };
+    let bottom = if index + 1 == lines { trim } else { 0.0 };
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(width, line_h - top - bottom), egui::Sense::hover());
+    Rect::from_min_size(pos2(rect.left(), rect.top() - top), vec2(width, line_h))
 }
 
 /// The words of one mark, as they are painted.
@@ -968,14 +997,11 @@ pub struct CommandForm<'a> {
     primary: &'a str,
     secondary: Option<&'a str>,
     secondary_enabled: bool,
-    context: Option<&'a str>,
     describe: Option<&'a str>,
     primary_enabled: bool,
     fields_enabled: bool,
     label_col: f32,
     status: Result<Option<&'a str>, &'a str>,
-    status_lines: usize,
-    status_reserved: bool,
     primary_on_enter: bool,
 }
 
@@ -986,14 +1012,11 @@ impl<'a> CommandForm<'a> {
             primary,
             secondary: None,
             secondary_enabled: true,
-            context: None,
             describe: None,
             primary_enabled: true,
             fields_enabled: true,
             label_col: form::LABEL_COL,
             status: Ok(None),
-            status_lines: 1,
-            status_reserved: true,
             primary_on_enter: true,
         }
     }
@@ -1025,16 +1048,6 @@ impl<'a> CommandForm<'a> {
         self
     }
 
-    /// One mono line under the header naming what the command will act on.
-    ///
-    /// It carries only what depends on the draft or the selection — a cell
-    /// path, a clicked object. A constant here would be a kicker with extra
-    /// steps, so `None` prints nothing at all rather than a placeholder.
-    pub fn context(mut self, context: Option<&'a str>) -> Self {
-        self.context = context;
-        self
-    }
-
     /// The sentence assistive technology reads for the whole surface.
     pub fn describe(mut self, description: &'a str) -> Self {
         self.describe = Some(description);
@@ -1053,29 +1066,13 @@ impl<'a> CommandForm<'a> {
         self
     }
 
-    /// The validation slot: `Ok(None)` says nothing, `Ok(Some(_))` states a
-    /// neutral fact, `Err(_)` states why the primary is refused, behind a
-    /// failure mark.
+    /// The form's status, stated in the footer left of the actions:
+    /// `Ok(None)` says nothing, `Ok(Some(_))` states a neutral fact, `Err(_)`
+    /// states why the primary is refused, behind a failure mark. The footer is
+    /// there whether or not it says anything, so nothing moves as a draft
+    /// becomes valid, and the body ends at its last row.
     pub fn status(mut self, status: Result<Option<&'a str>, &'a str>) -> Self {
         self.status = status;
-        self
-    }
-
-    /// How many lines the status slot reserves. The slot is that tall whether
-    /// or not it says anything, so the footer never moves as a draft changes.
-    pub fn status_lines(mut self, lines: usize) -> Self {
-        self.status_lines = lines.max(1);
-        self
-    }
-
-    /// For a form whose status is settled when it opens — a refusal known
-    /// from what it was opened on, a fact about it — rather than one a draft
-    /// can raise as it is edited. Nothing can appear mid-interaction, so
-    /// there is no footer to hold still: with nothing to say the form
-    /// reserves no slot, and with something the slot is as tall as what it
-    /// says, up to [`Self::status_lines`].
-    pub fn status_fixed_at_open(mut self) -> Self {
-        self.status_reserved = false;
         self
     }
 
@@ -1086,9 +1083,6 @@ impl<'a> CommandForm<'a> {
         body: impl FnOnce(&mut FormRows<'_>) -> Option<Id>,
     ) -> DialogChoice {
         let status = self.status;
-        let status_lines = self.status_lines;
-        let status_reserved = self.status_reserved;
-        let context = self.context;
         let fields_enabled = self.fields_enabled;
         let label_col = self.label_col;
         // Cancel is the only word any form in this family has for leaving.
@@ -1108,15 +1102,18 @@ impl<'a> CommandForm<'a> {
         if let Some(describe) = self.describe {
             dialog = dialog.description(describe);
         }
+        match status {
+            Ok(None) => {}
+            Ok(Some(fact)) => dialog = dialog.hint(fact),
+            Err(refusal) => {
+                dialog = dialog.hint(refusal).hint_tone(DialogHintTone::Error);
+            }
+        }
         let mut focused_field = None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             // Every gap in this body is stated, so nothing is the sum of an
             // explicit space and egui's own inter-widget one.
             ui.spacing_mut().item_spacing.y = 0.0;
-            if let Some(context) = context {
-                paint_context_line(ui, context);
-                ui.add_space(CONTEXT_GAP);
-            }
             let requested = {
                 if !fields_enabled {
                     ui.disable();
@@ -1124,7 +1121,6 @@ impl<'a> CommandForm<'a> {
                 let mut rows = FormRows::new(&mut *ui, label_col);
                 body(&mut rows)
             };
-            paint_status(ui, status, status_lines, status_reserved);
             focused_field = requested;
             requested
         });
@@ -1135,116 +1131,8 @@ impl<'a> CommandForm<'a> {
     }
 }
 
-/// The context line: one mono `FS_0` row that never wraps.
-fn paint_context_line(ui: &mut Ui, context: &str) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(width, DERIVED_LINE_H), egui::Sense::hover());
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let shown = middle_elided(ui, context, &font, t.color.text_dim, width);
-    ui.painter().text(
-        egui::pos2(rect.left(), rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        shown,
-        font,
-        t.color.text_dim,
-    );
-    let context = context.to_owned();
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Label);
-        node.set_value(context.clone());
-    });
-}
-
-/// The status slot: `lines` lines tall when `reserved`, whatever it says;
-/// otherwise only as tall as what it says, and absent when it says nothing.
-///
-/// A neutral fact is set in `text_dim`. A refusal belongs to no one field, so
-/// it carries a failure mark in front of primary text: the mark says it is a
-/// refusal, and the words stay as readable as the rows above them.
-fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>, lines: usize, reserved: bool) {
-    let t = Tokens::get(ui.ctx());
-    let message = match status {
-        Ok(None) => None,
-        Ok(Some(message)) => Some((message, t.color.text_dim, None)),
-        Err(message) => Some((message, t.color.text, Some(Problem::Failure))),
-    };
-    if !reserved && message.is_none() {
-        return;
-    }
-    ui.add_space(ROW_GAP);
-    let width = ui.available_width();
-    let Some((message, color, problem)) = message else {
-        ui.allocate_exact_size(
-            vec2(width, STATUS_LINE_H * lines as f32),
-            egui::Sense::hover(),
-        );
-        return;
-    };
-    let text_left = if problem.is_some() {
-        PROBLEM_MARK_ADVANCE
-    } else {
-        0.0
-    };
-    let mut job = egui::text::LayoutJob::single_section(
-        message.to_owned(),
-        egui::TextFormat {
-            font_id: theme::sans(tokens::FS_0, FontWeight::Regular),
-            color,
-            ..Default::default()
-        },
-    );
-    job.wrap = egui::text::TextWrapping {
-        max_width: (width - text_left).max(1.0),
-        max_rows: lines,
-        overflow_character: Some('\u{2026}'),
-        ..Default::default()
-    };
-    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-    let shown_lines = if reserved {
-        lines
-    } else {
-        galley.rows.len().clamp(1, lines)
-    };
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(width, STATUS_LINE_H * shown_lines as f32),
-        egui::Sense::hover(),
-    );
-    if let Some(problem) = problem {
-        let first_line = galley
-            .rows
-            .first()
-            .map_or(galley.size().y * 0.5, |row| row.rect().center().y);
-        paint_problem_mark(
-            ui.painter(),
-            egui::Rect::from_center_size(
-                egui::pos2(
-                    rect.left() + PROBLEM_MARK_SIDE * 0.5,
-                    rect.top() + first_line,
-                ),
-                egui::Vec2::splat(PROBLEM_MARK_SIDE),
-            ),
-            problem,
-        );
-    }
-    ui.painter().galley(
-        egui::pos2(rect.left() + text_left, rect.top()),
-        galley,
-        color,
-    );
-    let message = message.to_owned();
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Label);
-        node.set_value(message.clone());
-        if let Some(problem) = problem {
-            node.set_description(problem.announcement());
-        }
-    });
-}
-
 /// Mark the form's principal field invalid, and give it the refusal as its
-/// description, so the sentence in the status slot reaches a screen reader that
+/// description, so the sentence in the footer reaches a screen reader that
 /// never leaves the field.
 ///
 /// The principal field is the one the body nominates for initial focus, which
@@ -1273,10 +1161,8 @@ mod tests {
         let mut direction = 0usize;
         let mut signal = 0usize;
         CommandForm::new("Command form", "Place")
-            .context(Some("work/ota_5t/schematic"))
             .describe("A fixture of the command form's row vocabulary.")
             .status(status)
-            .status_lines(2)
             .show(ctx, |rows| {
                 let field = rows.text(
                     "Names",
@@ -1308,7 +1194,7 @@ mod tests {
     }
 
     /// Nothing the shell paints leaves the card, at any viewport it is offered
-    /// at, in either theme, with the status slot at its tallest.
+    /// at, in either theme, with the status at its longest.
     #[test]
     fn a_command_form_fits_every_viewport() {
         for screen in [
@@ -1344,11 +1230,11 @@ mod tests {
         }
     }
 
-    /// The slot is the same height whether or not it says anything, so a form
-    /// that becomes invalid does not move its own footer out from under the
-    /// pointer.
+    /// The status costs the card nothing whether or not it says anything, so
+    /// a form that becomes invalid does not move its own footer out from
+    /// under the pointer.
     #[test]
-    fn the_status_slot_holds_its_height_between_valid_and_invalid() {
+    fn the_footer_holds_still_between_valid_and_invalid() {
         let screen = egui::vec2(1024.0, 640.0);
         let valid = painted_runs(screen, Mode::Dark, 3, |ctx| {
             let _ = fixture(ctx, Ok(None));
@@ -1363,8 +1249,9 @@ mod tests {
         );
     }
 
-    /// A refusal that belongs to no field is a failure mark in front of
-    /// primary text, never red words; a neutral fact is dim and unmarked.
+    /// A refusal that belongs to no field is a failure mark in front of dim
+    /// text in the footer, never red words; a neutral fact is faint and
+    /// unmarked.
     #[test]
     fn a_form_level_refusal_is_a_failure_mark_before_neutral_text() {
         fn status_paint(
@@ -1426,7 +1313,7 @@ mod tests {
         let palette = Tokens::default().color;
         let refusal = "The module declares no ports";
         let (text, segments) = status_paint(Err(refusal), refusal);
-        assert_eq!(text.fallback_color, palette.text);
+        assert_eq!(text.fallback_color, palette.text_dim);
         let first_line = text.galley.rows[0].rect().translate(text.pos.to_vec2());
         let mark = segments
             .iter()
@@ -1439,65 +1326,142 @@ mod tests {
 
         let fact = "One module, two ports";
         let (text, segments) = status_paint(Ok(Some(fact)), fact);
-        assert_eq!(text.fallback_color, palette.text_dim);
+        assert_eq!(text.fallback_color, palette.text_faint);
         assert!(
             !segments.iter().any(|segment| segment.right() <= text.pos.x
-                && (segment.center().y - text.pos.y).abs() < STATUS_LINE_H),
+                && (segment.center().y - text.pos.y).abs() < DERIVED_LINE_H),
             "a neutral fact is unmarked: {segments:?}"
         );
     }
 
-    /// A form whose status is fixed at open has no dead band under its last
-    /// row: no slot when it says nothing, one line for a one-line fact.
-    #[test]
-    fn a_status_fixed_at_open_reserves_only_what_it_says() {
-        let screen = egui::vec2(1024.0, 640.0);
-        let height = |fixed: bool, status: Result<Option<&str>, &str>| {
-            painted_runs(screen, Mode::Dark, 3, |ctx| {
-                let mut form = CommandForm::new("Confirm", "Go")
-                    .status(status)
-                    .status_lines(2);
-                if fixed {
-                    form = form.status_fixed_at_open();
+    /// Where a form's body ink starts below the header's rule, and ends above
+    /// the footer's: the air a reader sees over the first row and under the
+    /// last.
+    fn body_air(pass: impl FnMut(&Context)) -> (f32, f32) {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(Rect, bool)>) {
+            match shape {
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, into);
+                    }
                 }
-                let _ = form.show(ctx, |rows| {
-                    rows.value_mono("File", "pair.va");
-                    None
-                });
-            })
-            .surface
-            .height()
+                egui::Shape::LineSegment { points, .. } => into.push((
+                    Rect::from_two_pos(points[0], points[1]),
+                    (points[0].y - points[1].y).abs() < 0.5,
+                )),
+                egui::Shape::Rect(rect) if rect.blur_width == 0.0 => {
+                    let inked =
+                        rect.fill.a() > 0 || (rect.stroke.width > 0.0 && rect.stroke.color.a() > 0);
+                    if inked {
+                        into.push((rect.rect, false));
+                    }
+                }
+                egui::Shape::Text(text) => {
+                    into.push((Rect::from_min_size(text.pos, text.galley.size()), false));
+                }
+                egui::Shape::Path(_) | egui::Shape::Circle(_) => {
+                    into.push((shape.visual_bounding_rect(), false));
+                }
+                _ => {}
+            }
+        }
+        let screen = egui::vec2(1024.0, 640.0);
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let input = || egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
+            ..Default::default()
         };
-        let reserved = height(false, Ok(None));
-        let close = |actual: f32, expected: f32| (actual - expected).abs() < 0.5;
-        assert!(close(height(false, Ok(Some("One line."))), reserved));
-        assert!(close(
-            height(true, Ok(None)),
-            reserved - (ROW_GAP + 2.0 * STATUS_LINE_H)
-        ));
-        assert!(close(
-            height(true, Ok(Some("One line."))),
-            reserved - STATUS_LINE_H
-        ));
+        let mut pass = pass;
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = ctx.run_ui(input(), |ctx| pass(ctx)).shapes;
+        }
+        let mut ink = Vec::new();
+        for clipped in &shapes {
+            walk(&clipped.shape, &mut ink);
+        }
+        // The card is the widest opaque rect short of the scrim; its rules
+        // are the horizontal lines that cross it.
+        let card = ink
+            .iter()
+            .filter(|(rect, rule)| !rule && rect.width() < screen.x - 1.0)
+            .map(|(rect, _)| *rect)
+            .fold(Rect::NOTHING, |widest, rect| {
+                if rect.width() > widest.width() {
+                    rect
+                } else {
+                    widest
+                }
+            });
+        let rules: Vec<f32> = ink
+            .iter()
+            .filter(|(rect, rule)| *rule && rect.width() >= card.width() - 2.0)
+            .map(|(rect, _)| rect.center().y)
+            .collect();
+        let header = rules.iter().copied().fold(f32::INFINITY, f32::min);
+        let footer = rules.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let (mut top, mut bottom) = (f32::INFINITY, f32::NEG_INFINITY);
+        for (rect, _) in &ink {
+            if rect.width() >= card.width() - 2.0
+                || rect.top() <= header + 0.5
+                || rect.bottom() >= footer - 0.5
+            {
+                continue;
+            }
+            top = top.min(rect.top());
+            bottom = bottom.max(rect.bottom());
+        }
+        (top - header, footer - bottom)
+    }
+
+    /// The body ends at its last row: the air under it is the air over the
+    /// first, whether the status says nothing or refuses, and whether the
+    /// last row is a control or a set of checks.
+    #[test]
+    fn the_air_under_the_last_row_matches_the_air_over_the_first() {
+        for status in [
+            Ok(None),
+            Err("EN: an interface port named 'EN' already exists"),
+        ] {
+            let (over, under) = body_air(|ctx| {
+                let _ = fixture(ctx, status);
+            });
+            assert!(
+                (over - under).abs() <= 1.0,
+                "{status:?}: {over} over the first row, {under} under the last"
+            );
+        }
+        let (over, under) = body_air(|ctx| {
+            let (mut grid, mut border) = (true, false);
+            let mut name = String::from("ota");
+            let _ = CommandForm::new("Display", "Apply").show(ctx, |rows| {
+                let field = rows.text("Name", Id::new("command-form.air.name"), &mut name, "");
+                rows.checks("Show", &mut [("Grid", &mut grid), ("Border", &mut border)]);
+                Some(field.id)
+            });
+        });
+        assert!(
+            (over - under).abs() <= 1.0,
+            "checks last: {over} over the first row, {under} under the last"
+        );
     }
 
     /// A field's line is one line whatever it says, so a field that becomes
-    /// invalid, or valid again, moves nothing below it; and a form whose
-    /// refusals stand under their fields reserves no status band.
+    /// invalid, or valid again, moves nothing below it.
     #[test]
     fn a_field_line_holds_its_height_whether_blank_derived_or_refused() {
         let screen = egui::vec2(1024.0, 640.0);
         let render = |line: FieldLine<'_>| {
             painted_runs(screen, Mode::Dark, 3, |ctx| {
                 let mut name = String::from("ota");
-                let _ = CommandForm::new("Field lines", "Create")
-                    .status_fixed_at_open()
-                    .show(ctx, |rows| {
-                        let id = Id::new("command-form.field-line.name");
-                        rows.text("Name", id, &mut name, "");
-                        rows.field_line(Some(id), line);
-                        Some(id)
-                    });
+                let _ = CommandForm::new("Field lines", "Create").show(ctx, |rows| {
+                    let id = Id::new("command-form.field-line.name");
+                    rows.text("Name", id, &mut name, "");
+                    rows.field_line(Some(id), line);
+                    Some(id)
+                });
             })
         };
         let blank = render(FieldLine::Blank);
@@ -1520,19 +1484,17 @@ mod tests {
         );
         let unreserved = painted_runs(screen, Mode::Dark, 3, |ctx| {
             let mut name = String::from("ota");
-            let _ = CommandForm::new("Field lines", "Create")
-                .status_fixed_at_open()
-                .show(ctx, |rows| {
-                    let id = Id::new("command-form.field-line.name");
-                    rows.text("Name", id, &mut name, "");
-                    Some(id)
-                });
+            let _ = CommandForm::new("Field lines", "Create").show(ctx, |rows| {
+                let id = Id::new("command-form.field-line.name");
+                rows.text("Name", id, &mut name, "");
+                Some(id)
+            });
         });
         assert!(
             (blank.surface.height() - unreserved.surface.height() - DERIVED_GAP - DERIVED_LINE_H)
                 .abs()
                 < 0.5,
-            "the slot costs one line and its gap, and no status band"
+            "the line costs one line and its gap"
         );
     }
 
@@ -1576,7 +1538,6 @@ mod tests {
         CommandForm::new("Build settings", "Save & compile")
             .secondary("Save")
             .label_column(112.0)
-            .status_fixed_at_open()
             .show(ctx, |rows| {
                 rows.checks(
                     "Targets",
@@ -1737,7 +1698,7 @@ mod tests {
 
     /// A long line is shortened from the middle, so both ends survive.
     #[test]
-    fn a_context_line_is_elided_in_the_middle() {
+    fn a_long_value_is_elided_in_the_middle() {
         let ctx = Context::default();
         crate::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(

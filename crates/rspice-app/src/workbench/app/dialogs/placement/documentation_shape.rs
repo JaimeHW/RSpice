@@ -60,8 +60,6 @@ pub(in crate::workbench) fn render_documentation_shape_dialog(
             Some(message) => Err(message),
             None => Ok(None),
         })
-        .status_fixed_at_open()
-        .status_lines(2)
         .show(ctx, |rows| shape_placement::show(rows, &mut draft.kind));
     match choice {
         DialogChoice::Primary => {

@@ -2155,8 +2155,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-ui-kit/src/widgets/canvas_entry.rs::derived",
     "rspice-ui-kit/src/widgets/canvas_entry.rs::paint_status",
     "rspice-ui-kit/src/widgets/command_form.rs::list_entry",
-    "rspice-ui-kit/src/widgets/command_form.rs::paint_context_line",
-    "rspice-ui-kit/src/widgets/command_form.rs::paint_status",
     "rspice-ui-kit/src/widgets/command_form.rs::value_row",
     "rspice-ui-kit/src/widgets/dialog.rs::mark",
     "rspice-ui-kit/src/widgets/form.rs::kv_row",

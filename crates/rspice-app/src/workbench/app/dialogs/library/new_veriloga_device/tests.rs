@@ -402,13 +402,14 @@ fn nothing_moves_while_the_draft_is_typed() {
         );
     }
 
-    // A failed create is the only thing that grows the form.
+    // A failed create is stated in the footer, so it moves nothing either.
     let failed = paint(
         "opamp",
         "inp:in out:out",
         Some("The project is open read-only."),
     );
-    assert!(failed.surface.height() > filled.surface.height());
+    assert_eq!(failed.surface, filled.surface);
+    assert_eq!(primary(&failed), primary(&filled));
     assert!(failed.rect_of("The project is open read-only.").is_some());
 }
 

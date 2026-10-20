@@ -357,7 +357,7 @@ pub(in crate::workbench) fn render_object_properties_dialog(
     );
     // A refusal that names a field is stated under that field. One that
     // names none — a stale document, a rejected commit — belongs to the
-    // form, so it goes in the status slot.
+    // form, so it goes in the footer.
     let refusal = dialog
         .validation_error
         .clone()
@@ -376,7 +376,6 @@ pub(in crate::workbench) fn render_object_properties_dialog(
             Some(message) => Err(message),
             None => Ok(None),
         })
-        .status_lines(2)
         .show(ctx, |rows| {
             let draft = dialog
                 .draft
