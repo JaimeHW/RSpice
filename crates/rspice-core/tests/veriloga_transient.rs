@@ -2528,3 +2528,55 @@ fn a_startup_card_on_a_missing_verilog_a_internal_node_warns() {
     );
     let _ = std::fs::remove_file(model);
 }
+
+/// A node a Verilog-A module drives is not reported as floating, and a
+/// topology warning prints once per run.
+///
+/// `V(o) <+ x` holds the module's output from ground, but the deck's DC
+/// topology walk cannot see inside the module, so with any grounded element
+/// in the deck it warned "Voltage Node (VO4OUT) does not have a DC path to
+/// ground". Every topology warning also printed twice, because the result's
+/// topology fingerprint rebuilds the circuit after the run. A floating
+/// capacitor midpoint is still reported, once.
+#[test]
+fn a_verilog_a_driven_node_is_not_reported_floating_and_warnings_print_once() {
+    let model = write_model(
+        "driven_output",
+        "`include \"disciplines.vams\"\n\
+         module vo4(in, o); input in; output o; electrical in, o;\n\
+         real x;\n\
+         analog begin @(cross(V(in) - 0.5, +1)) x = 1; V(o) <+ x; end\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* module output beside a floating capacitor midpoint\n\
+         .va \"{}\" vo4\n\
+         v1 in 0 sin(0 1 1k)\n\
+         xvo in vo4out vo4\n\
+         c1 in vo4mid 1n\n\
+         c2 vo4mid 0 1n\n\
+         .end\n",
+        deck_path(&model)
+    ))
+    .expect("parse");
+    let before = warnings_mentioning("VO4").len();
+    let engine = Engine::default();
+    let result = engine.run_tran(&netlist, 1e-3, 10e-6).expect("transient");
+    rspice_core::execution::topology_fingerprint(&engine, &netlist)
+        .expect("the result's topology fingerprint");
+    let warnings = warnings_mentioning("VO4")
+        .into_iter()
+        .skip(before)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        warnings,
+        ["Voltage Node (VO4MID) does not have a DC path to ground"],
+        "only the capacitor midpoint is reported, once"
+    );
+    let output = result
+        .try_voltage_waveform_named("vo4out")
+        .expect("v(vo4out) is published");
+    let last = output.last().copied().expect("samples");
+    assert!((last - 1.0).abs() <= 1e-9, "the crossing set x = 1: {last}");
+    let _ = std::fs::remove_file(model);
+}

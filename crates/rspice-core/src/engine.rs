@@ -50,6 +50,7 @@ pub use analysis_capability::{
     capability_matrix,
 };
 mod builder;
+pub(crate) use builder::without_repeated_topology_reports;
 pub use builder::{
     ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinCoverageGap,
     ModelBinInspection, ModelBinInstanceInspection, ModelBinSelectionKind,

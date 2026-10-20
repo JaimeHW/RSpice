@@ -44,8 +44,11 @@ pub fn topology_fingerprint_with_abort(
     let engine = engine.resolved_for_netlist(netlist);
 
     // The matrix is the authoritative elaborated sparsity, including
-    // generated/private unknowns selected by model options.
-    let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+    // generated/private unknowns selected by model options. The deck's own
+    // build has already reported its topology warnings.
+    let circuit = crate::engine::without_repeated_topology_reports(|| {
+        engine.build_circuit_with_abort(netlist, abort)
+    })?;
     let stamp_sparsity = if circuit.matrix_size() == 0 {
         Vec::new()
     } else {

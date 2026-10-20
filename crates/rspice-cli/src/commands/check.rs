@@ -640,7 +640,22 @@ fn check_connectivity(
         // node reported here is exactly one that would make an operating point
         // refuse to run.
         if let Ok(dc_paths) = rspice_core::netlist::analyze_dc_ground_paths(elements) {
-            for node in dc_paths.no_dc_path_nodes {
+            // A compiled module's equations decide the nodes on its terminals
+            // (`V(o) <+ x` drives `o` from ground), which this walk cannot
+            // see, so the engine does not warn about them and neither does
+            // this command.
+            let module_decided = dc_paths
+                .floating_components
+                .iter()
+                .zip(&dc_paths.floating_component_has_module_terminal)
+                .filter(|(_, has_module_terminal)| **has_module_terminal)
+                .flat_map(|(nodes, _)| nodes.iter().cloned())
+                .collect::<std::collections::HashSet<_>>();
+            for node in dc_paths
+                .no_dc_path_nodes
+                .into_iter()
+                .filter(|node| !module_decided.contains(node))
+            {
                 result.warnings.push(ValidationIssue {
                     compiler_diagnostic: None,
                     message: format!("Voltage Node ({node}) does not have a DC path to ground"),

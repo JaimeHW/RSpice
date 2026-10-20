@@ -349,6 +349,7 @@ fn bind_veriloga_model(
 
 mod model_policy;
 use model_policy::*;
+pub(crate) use model_policy::without_repeated_topology_reports;
 mod advanced_mos;
 mod version_metadata;
 use advanced_mos::{
@@ -10380,16 +10381,18 @@ impl Engine {
 
         // A startup card on a compiled module's internal node passed parse
         // time unchecked; the module's nodes exist now.
-        for warning in crate::netlist::unresolved_module_startup_warnings(
-            netlist,
-            &flat_elements,
-            |node| {
-                Self::node_lookup_candidates(netlist, node)
-                    .iter()
-                    .any(|candidate| circuit.get_node_by_name(candidate).is_some())
-            },
-        ) {
-            log::warn!("{warning}");
+        if !topology_already_reported() {
+            for warning in crate::netlist::unresolved_module_startup_warnings(
+                netlist,
+                &flat_elements,
+                |node| {
+                    Self::node_lookup_candidates(netlist, node)
+                        .iter()
+                        .any(|candidate| circuit.get_node_by_name(candidate).is_some())
+                },
+            ) {
+                log::warn!("{warning}");
+            }
         }
 
         check_build_abort(abort)?;

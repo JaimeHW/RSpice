@@ -211,6 +211,12 @@ pub struct DcGroundPathDiagnostics {
     /// components remain available for warnings but must not support fatal
     /// prechecks or nodal-only rank proofs.
     pub floating_component_is_certain: Vec<bool>,
+    /// Whether each [`Self::floating_components`] entry holds a terminal of a
+    /// compiled (Verilog-A) module instance. The module's own equations
+    /// decide such a node's DC voltage, `V(o) <+ x` from ground for one, and
+    /// a walk over deck elements cannot see them, so the component is not
+    /// reported as lacking a DC path; the post-solve audit still judges it.
+    pub floating_component_has_module_terminal: Vec<bool>,
 }
 
 /// Installed DC meaning of a capacitor's authored `IC=` value.
@@ -231,6 +237,23 @@ impl DcGroundPathDiagnostics {
             (diagnostic.severity == DcGroundPathSeverity::FatalCurrentDriven)
                 .then_some(diagnostic.node.as_str())
         })
+    }
+
+    /// The no-path nodes worth a warning, in deck order: every one except
+    /// those in a component a compiled module's terminal decides
+    /// ([`Self::floating_component_has_module_terminal`]).
+    pub(crate) fn reported_no_dc_path_nodes(&self) -> impl Iterator<Item = &str> {
+        let module_decided = self
+            .floating_components
+            .iter()
+            .zip(&self.floating_component_has_module_terminal)
+            .filter(|(_, has_module_terminal)| **has_module_terminal)
+            .flat_map(|(nodes, _)| nodes.iter().map(String::as_str))
+            .collect::<BTreeSet<_>>();
+        self.no_dc_path_nodes
+            .iter()
+            .map(String::as_str)
+            .filter(move |node| !module_decided.contains(node))
     }
 }
 
@@ -283,10 +306,15 @@ pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
     // answer, so the synthesizer's guarantee stands in for one.
     let mut authored_nodes: BTreeSet<String> = BTreeSet::new();
     let mut uncertain_node_keys: BTreeSet<String> = BTreeSet::new();
+    let mut module_terminal_keys: BTreeSet<String> = BTreeSet::new();
     let mut analysis_complete = true;
 
     for element in elements {
         union.collect_element_nodes(element);
+        if matches!(element.kind, ElementKind::Subcircuit { .. }) {
+            // An X card still standing after flattening is a compiled module.
+            module_terminal_keys.extend(element.nodes.iter().map(|node| node_key(node)));
+        }
         let synthesized = matches!(
             element.provenance,
             crate::netlist::ElementProvenance::GeneratedDynamicInternalNode { .. }
@@ -403,7 +431,13 @@ pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
 
     let mut component_index_by_root = BTreeMap::new();
     let mut floating_components: Vec<Vec<String>> = Vec::new();
+    let module_roots: BTreeSet<usize> = module_terminal_keys
+        .iter()
+        .filter_map(|key| union.index_by_key.get(key))
+        .map(|index| union.root_of(*index))
+        .collect();
     let mut floating_component_is_certain = Vec::new();
+    let mut floating_component_has_module_terminal = Vec::new();
     for node in &no_dc_path_nodes {
         let Some(root) = union
             .index_by_key
@@ -415,6 +449,7 @@ pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
         let component_index = *component_index_by_root.entry(root).or_insert_with(|| {
             floating_components.push(Vec::new());
             floating_component_is_certain.push(!uncertain_roots.contains(&root));
+            floating_component_has_module_terminal.push(module_roots.contains(&root));
             floating_components.len() - 1
         });
         floating_components[component_index].push(node.clone());
@@ -426,6 +461,7 @@ pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
         node_diagnostics,
         floating_components,
         floating_component_is_certain,
+        floating_component_has_module_terminal,
     })
 }
 
@@ -1438,6 +1474,47 @@ mod tests {
             .position(|nodes| *nodes == ["X"])
             .expect("XSPICE terminal remains visible for warnings");
         assert!(!diagnostics.floating_component_is_certain[xspice_component]);
+    }
+
+    /// A compiled module's terminal is decided by the module's equations, not
+    /// by anything this walk can see: `V(o) <+ x` in `x1 in o vo4` holds `o`
+    /// from ground. Any deck with a grounded element used to report `O` as
+    /// lacking a DC path (twice: the result fingerprint rebuilt the circuit).
+    /// The component stays in the data for the post-solve audit and is no
+    /// longer reported; a genuinely floating capacitor midpoint still is.
+    #[test]
+    fn a_compiled_module_terminal_is_not_reported_without_a_dc_path() {
+        let netlist = Netlist::parse(
+            "module output beside a floating capacitor midpoint\n\
+             v1 in 0 sin(0 1 1k)\n\
+             c1 in mid 1u\n\
+             c2 mid 0 1u\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let mut elements = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+        elements.push(Element {
+            name: "X1".to_string(),
+            kind: ElementKind::Subcircuit {
+                subckt_name: "vo4".to_string(),
+                params: Vec::new(),
+            },
+            nodes: vec!["IN".to_string(), "O".to_string()],
+            provenance: crate::netlist::ElementProvenance::Authored,
+        });
+
+        let diagnostics = analyze_dc_ground_paths(&elements).expect("partial analysis succeeds");
+        assert_eq!(diagnostics.no_dc_path_nodes, ["MID", "O"]);
+        assert_eq!(
+            diagnostics.floating_component_has_module_terminal,
+            [false, true]
+        );
+        assert_eq!(
+            diagnostics.reported_no_dc_path_nodes().collect::<Vec<_>>(),
+            ["MID"]
+        );
     }
 
     #[test]

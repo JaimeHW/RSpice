@@ -1903,7 +1903,8 @@ pub(super) fn collect_floating_nodes(
     capacitor_ic_mode: crate::netlist::CapacitorIcDcMode,
     inductor_ic_enforced: bool,
 ) -> crate::netlist::DcGroundPathDiagnostics {
-    if let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
+    let report = !topology_already_reported();
+    if report && let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
         for node in diagnostics.one_device_terminal_nodes {
             log::warn!("Voltage Node ({node}) connected to only 1 device Terminal");
         }
@@ -1928,10 +1929,40 @@ pub(super) fn collect_floating_nodes(
     ) else {
         return crate::netlist::DcGroundPathDiagnostics::default();
     };
-    for node in &diagnostics.no_dc_path_nodes {
-        log::warn!("Voltage Node ({node}) does not have a DC path to ground");
+    if report {
+        for node in diagnostics.reported_no_dc_path_nodes() {
+            log::warn!("Voltage Node ({node}) does not have a DC path to ground");
+        }
     }
     diagnostics
+}
+
+thread_local! {
+    /// Set while a circuit is rebuilt from a deck whose build has already
+    /// reported its topology, so the rebuild does not report it again.
+    static TOPOLOGY_ALREADY_REPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `build`, a second build of a deck whose first build has already
+/// reported its topology warnings, without reporting them again.
+///
+/// A run's result topology fingerprint rebuilds the circuit after the
+/// analysis, and every topology warning used to print twice.
+pub(crate) fn without_repeated_topology_reports<T>(build: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TOPOLOGY_ALREADY_REPORTED.set(self.0);
+        }
+    }
+    let _restore = Restore(TOPOLOGY_ALREADY_REPORTED.replace(true));
+    build()
+}
+
+/// Whether this build repeats one whose topology warnings (no DC path, a
+/// startup card's undefined node) were already reported.
+pub(super) fn topology_already_reported() -> bool {
+    TOPOLOGY_ALREADY_REPORTED.get()
 }
 
 /// Diagnostic descriptor for well-known MOS model levels.
