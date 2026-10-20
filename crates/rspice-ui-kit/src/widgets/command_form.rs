@@ -376,6 +376,12 @@ impl<'u> FormRows<'u> {
                 font,
                 t.color.text,
             );
+            // `widget_info` gives the node its bounds; a node built without
+            // them is dropped by every consumer of the tree, so the fact was
+            // painted and never read.
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label)
+            });
             let (label, value) = (label.to_owned(), value.to_owned());
             ui.ctx().accesskit_node_builder(response.id, |node| {
                 node.set_role(egui::accesskit::Role::Label);
@@ -2005,6 +2011,44 @@ mod tests {
                 assert!(rect.is_some(), "{cell} does not start under {header}");
             }
         }
+    }
+
+    /// A read-only fact reaches assistive technology as the pair it paints,
+    /// with the bounds it is painted in: a node without bounds is dropped by
+    /// every consumer of the tree.
+    #[test]
+    fn a_value_row_is_published_with_its_bounds() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let input = || egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 640.0),
+            )),
+            ..Default::default()
+        };
+        let mut nodes = Vec::new();
+        for _ in 0..2 {
+            let output = ctx.run_ui(input(), |ui| {
+                let _ = CommandForm::new("Rename", "Rename").show(ui, |rows| {
+                    rows.value("Object", "Resistor R1");
+                    None
+                });
+            });
+            nodes = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes;
+        }
+        let node = nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.label() == Some("Object") && node.value() == Some("Resistor R1"))
+            .expect("the fact is published as its label and value");
+        let bounds = node.bounds().expect("the fact is published with bounds");
+        assert!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0);
     }
 
     /// An empty field's hint is set in the faint tone, below the labels, so it
