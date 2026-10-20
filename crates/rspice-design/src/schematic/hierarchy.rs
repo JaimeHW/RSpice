@@ -1197,6 +1197,10 @@ fn inferred_discipline(
     )))
 }
 
+/// A boundary port is named after the net it carries when the author named
+/// that net. An unnamed net lends it the first selected pin instead: its
+/// automatic name ("net3") would collide with the child's own unnamed nets,
+/// which are numbered afresh inside the child.
 fn inferred_port_name(
     source_name: &str,
     components: &[&Component],
@@ -1213,11 +1217,31 @@ fn inferred_port_name(
         .iter()
         .find(|component| component.id == first.component_id)
         .map_or("PORT", |component| component.name.as_str());
-    let inferred = sanitize_identifier(&format!("{instance}_{}", first.terminal_name));
+    let terminal = terminal_word(&first.terminal_name);
+    let inferred = if terminal.is_empty() {
+        sanitize_identifier(instance)
+    } else {
+        sanitize_identifier(&format!("{instance}_{terminal}"))
+    };
     if inferred.is_empty() {
         format!("PORT{ordinal}")
     } else {
         inferred
+    }
+}
+
+/// A terminal as a port name can carry it. "+" and "-" are a two-terminal
+/// device's positive and negative ends, read as "p" and "n"; any other
+/// symbol is dropped. Sanitised to underscores instead, a resistor's "+"
+/// made the port "R1__".
+fn terminal_word(terminal: &str) -> String {
+    match terminal.trim() {
+        "+" => "p".to_owned(),
+        "-" => "n".to_owned(),
+        other => other
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || *character == '_')
+            .collect(),
     }
 }
 
@@ -1970,6 +1994,68 @@ fn segments_intersect(a: (Point, Point), b: (Point, Point)) -> bool {
 mod tests {
     use super::*;
     use crate::schematic::history::SchematicSnapshot;
+
+    /// A port on a net the author named takes the net's name; a port on an
+    /// unnamed net takes its first pin's instance and terminal, a resistor's
+    /// "+" and "-" read as "p" and "n". It was "R1__".
+    #[test]
+    fn boundary_ports_are_named_for_their_net_or_their_pin() {
+        let mut document = SchematicDocument::default();
+        for (id, name, x) in [(1, "R1", 0), (2, "R2", 200)] {
+            let mut component = Component::new(id, ComponentType::Resistor, Point::new(x, 0));
+            component.name = name.to_owned();
+            document.components.push(component);
+        }
+        let mut identity = SchematicIdentity::with_cursor(3);
+        identity.recalculate(&mut document);
+        let selected = HashSet::from([1]);
+        let source = HierarchySource {
+            document: &document,
+            identity: &identity,
+            topology_version: 7,
+            selected_components: &selected,
+            selected_count: 1,
+        };
+        let terminals = document
+            .components
+            .iter()
+            .flat_map(|component| {
+                component
+                    .terminal_positions()
+                    .into_iter()
+                    .map(|(name, point)| HierarchyExtractionTerminal {
+                        component_id: component.id,
+                        terminal_name: name.to_owned(),
+                        point,
+                        direction: None,
+                        discipline: PortDiscipline::Electrical,
+                    })
+            })
+            .collect::<Vec<_>>();
+        // R1's two pins each share a net with one of R2's: one unnamed, one
+        // named, so both cross the selection's boundary.
+        let nets = ["net4", "out"];
+        let connectivity = HierarchyNetConnectivity {
+            point_to_net: terminals
+                .iter()
+                .map(|terminal| {
+                    let pin = usize::from(terminal.terminal_name != "+");
+                    (terminal.point, nets[pin].to_owned())
+                })
+                .collect(),
+            net_segments: HashMap::new(),
+        };
+        let plan = source
+            .plan_hierarchy_extraction(&terminals, &connectivity, &HashMap::new())
+            .unwrap();
+        let mut names = plan
+            .ports
+            .iter()
+            .map(|port| port.name.as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        assert_eq!(names, ["R1_p", "out"]);
+    }
 
     #[test]
     fn hierarchy_candidates_are_headless_and_leave_source_and_allocator_unchanged() {
