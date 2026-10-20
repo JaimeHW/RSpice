@@ -716,7 +716,7 @@ impl XyceTestRunner {
                 model: None,
                 instance_params,
                 deferred_params,
-            } if value.to_bits() == 4.699_999_999_999_999_5e-7f64.to_bits()
+            } if value.to_bits() == 0.47e-6f64.to_bits()
                 && instance_params.is_empty()
                 && deferred_params.is_empty())
         {

@@ -686,13 +686,13 @@ impl XyceTestRunner {
             .map(|element| (element.name.to_ascii_lowercase(), element))
             .collect::<BTreeMap<_, _>>();
         for (name, nodes, value) in [
-            ("R6", ["0", "2"], 15.0 * 1.0e3),
-            ("R5", ["0", "3"], 15.0 * 1.0e3),
-            ("R4", ["0", "4"], 100.0 * 1.0e3),
+            ("R6", ["0", "2"], 15.0e3),
+            ("R5", ["0", "3"], 15.0e3),
+            ("R4", ["0", "4"], 100.0e3),
             ("R7", ["1", "5"], 0.37),
-            ("R16", ["0", "q2b"], 22.0 * 1.0e3),
-            ("R15", ["q2b", "q2c"], 47.0 * 1.0e3),
-            ("R17", ["q2e", "0"], 2.2 * 1.0e3),
+            ("R16", ["0", "q2b"], 22.0e3),
+            ("R15", ["q2b", "q2c"], 47.0e3),
+            ("R17", ["q2e", "0"], 2.2e3),
         ] {
             Self::validate_bug805_passive(
                 elements
@@ -705,16 +705,16 @@ impl XyceTestRunner {
             )?;
         }
         for (name, nodes, value) in [
-            ("C20", ["4", "0"], 30.0 * 1.0e-12),
-            ("C8", ["1", "4"], 82.0 * 1.0e-12),
-            ("C10", ["3", "0"], 270.0 * 1.0e-12),
-            ("C9", ["1", "3"], 10.0 * 1.0e-12),
-            ("C2", ["2", "0"], 47.0 * 1.0e-12),
-            ("C3", ["1", "2"], 10.0 * 1.0e-12),
-            ("C7", ["1", "0"], 82.0 * 1.0e-12),
-            ("C6", ["1", "q2b"], 3.3 * 1.0e-9),
-            ("C5", ["q2e", "0"], 2.7 * 1.0e-9),
-            ("C4", ["q2b", "q2e"], 2.7 * 1.0e-9),
+            ("C20", ["4", "0"], 30.0e-12),
+            ("C8", ["1", "4"], 82.0e-12),
+            ("C10", ["3", "0"], 270.0e-12),
+            ("C9", ["1", "3"], 10.0e-12),
+            ("C2", ["2", "0"], 47.0e-12),
+            ("C3", ["1", "2"], 10.0e-12),
+            ("C7", ["1", "0"], 82.0e-12),
+            ("C6", ["1", "q2b"], 3.3e-9),
+            ("C5", ["q2e", "0"], 2.7e-9),
+            ("C4", ["q2b", "q2e"], 2.7e-9),
         ] {
             Self::validate_bug805_passive(
                 elements
@@ -732,13 +732,13 @@ impl XyceTestRunner {
                 .ok_or_else(|| format!("{LABEL} lost L1"))?,
             "L1",
             ["5", "0"],
-            2.5 * 1.0e-6,
+            2.5e-6,
             'L',
         )?;
         let source = elements
             .get("v2")
             .ok_or_else(|| format!("{LABEL} lost V2"))?;
-        let expected_points: [(Value, Value); 2] = [(0.0, 0.0), (5.0 * 1.0e-9, 7.4)];
+        let expected_points: [(Value, Value); 2] = [(0.0, 0.0), (5.0e-9, 7.4)];
         if source.provenance != ElementProvenance::Authored
             || !Self::bug805_nodes_match(&source.nodes, &["q2c", "0"])
             || !matches!(&source.kind, ElementKind::VoltageSource(SourceSpec::Pwl {
@@ -767,7 +767,7 @@ impl XyceTestRunner {
         if !matches!(&netlist.analyses[0], AnalysisCommand::Tran {
             step, stop, start: None, max_step: None, uic: false,
         } if step.to_bits() == 0.0f64.to_bits()
-            && stop.to_bits() == (80.0f64 * 1.0e-6).to_bits())
+            && stop.to_bits() == 80.0e-6f64.to_bits())
         {
             return Err(format!("{LABEL} transient analysis changed"));
         }
@@ -823,7 +823,7 @@ impl XyceTestRunner {
             || !plan.steps.is_empty()
             || plan.wrapper_tolerance.is_some()
             || plan.tran.step.to_bits() != 0.0f64.to_bits()
-            || plan.tran.stop.to_bits() != (80.0f64 * 1.0e-6).to_bits()
+            || plan.tran.stop.to_bits() != 80.0e-6f64.to_bits()
             || plan.tran.start.is_some()
             || plan.tran.max_step.is_some()
             || plan.tran.uic

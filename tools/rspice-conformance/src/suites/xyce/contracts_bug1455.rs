@@ -340,7 +340,7 @@ impl XyceTestRunner {
             || !model.model_type.eq_ignore_ascii_case("PMOS")
             || !Self::exact_params(
                 &model.params,
-                &[("LEVEL", 1.0), ("KP", 25.0 * 1e-6), ("VTO", -0.8)],
+                &[("LEVEL", 1.0), ("KP", 25.0e-6), ("VTO", -0.8)],
             )
             || !model.expr_params.is_empty()
             || !model.string_params.is_empty()
@@ -389,7 +389,7 @@ impl XyceTestRunner {
         if mosfet.provenance != ElementProvenance::Authored
             || !Self::bug1455_nodes_match(&mosfet.nodes, &["3", "1", "2", "2"])
             || !model.eq_ignore_ascii_case("PFET")
-            || !Self::exact_params(instance_params, &[("L", 10.0 * 1e-6), ("W", 160.0 * 1e-6)])
+            || !Self::exact_params(instance_params, &[("L", 10.0e-6), ("W", 160.0e-6)])
             || !deferred_params.is_empty()
         {
             return Err(format!("{LABEL} M1 topology or geometry changed"));
@@ -434,7 +434,7 @@ impl XyceTestRunner {
     fn bug1455_analytic_row(vdd: Value) -> [Value; 5] {
         let vsg = vdd * 0.5;
         let overdrive = (vsg - 0.8).max(0.0);
-        let beta = (25.0 * 1e-6) * ((160.0 * 1e-6) / (10.0 * 1e-6));
+        let beta = 25.0e-6 * (160.0e-6 / 10.0e-6);
         let rd = 7.5e3;
         let (current, vsd) = if overdrive == 0.0 {
             (0.0, vdd)

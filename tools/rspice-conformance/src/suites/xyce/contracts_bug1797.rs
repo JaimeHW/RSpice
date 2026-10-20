@@ -389,9 +389,9 @@ impl XyceTestRunner {
             .collect::<Vec<_>>();
         if capacitors.len() != 2
             || !matches!(&capacitors[0].kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
-            if capacitors[0].name.eq_ignore_ascii_case("C4") && capacitors[0].nodes == ["4", "0"] && value.to_bits() == (30.0f64 * 1e-15).to_bits() && instance_params.is_empty() && deferred_params.is_empty())
+            if capacitors[0].name.eq_ignore_ascii_case("C4") && capacitors[0].nodes == ["4", "0"] && value.to_bits() == 30.0e-15f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
             || !matches!(&capacitors[1].kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
-            if capacitors[1].name.eq_ignore_ascii_case("CA") && capacitors[1].nodes.iter().zip(["A", "0"]).all(|(a,b)| a.eq_ignore_ascii_case(b)) && value.to_bits() == (30.0f64 * 1e-15).to_bits() && instance_params.is_empty() && deferred_params.is_empty())
+            if capacitors[1].name.eq_ignore_ascii_case("CA") && capacitors[1].nodes.iter().zip(["A", "0"]).all(|(a,b)| a.eq_ignore_ascii_case(b)) && value.to_bits() == 30.0e-15f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
         {
             return Err(format!("{LABEL} {} capacitors changed", role.file_name()));
         }
@@ -406,8 +406,8 @@ impl XyceTestRunner {
             || !matches!(&sources[1].kind, ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero })
                 if sources[1].name.eq_ignore_ascii_case("VIN") && sources[1].nodes.iter().zip(["IN", "0"]).all(|(a,b)| a.eq_ignore_ascii_case(b))
                     && v1.to_bits() == 0.0f64.to_bits() && v2.to_bits() == 5.0f64.to_bits()
-                    && delay.to_bits() == 1e-9f64.to_bits() && rise.to_bits() == (0.1f64 * 1e-9).to_bits()
-                    && fall.to_bits() == (0.1f64 * 1e-9).to_bits() && width.to_bits() == (0.8f64 * 1e-9).to_bits()
+                    && delay.to_bits() == 1e-9f64.to_bits() && rise.to_bits() == 0.1e-9f64.to_bits()
+                    && fall.to_bits() == 0.1e-9f64.to_bits() && width.to_bits() == 0.8e-9f64.to_bits()
                     && period.to_bits() == 5e-9f64.to_bits() && pulse_count.to_bits() == 0.0f64.to_bits() && !width_defaults_to_zero)
         {
             return Err(format!("{LABEL} {} sources changed", role.file_name()));

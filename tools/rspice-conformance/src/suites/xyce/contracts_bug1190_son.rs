@@ -574,14 +574,14 @@ impl XyceTestRunner {
                 StepTarget::Param,
                 "gpIS",
                 None,
-                (100.0 * 1.0e-15, 150.0 * 1.0e-15, 10.0 * 1.0e-15),
+                (100.0e-15, 150.0e-15, 10.0e-15),
             ),
             Bug1190SonRole::DiodeControl => Self::exact_bug1190_linear_step(
                 step,
                 StepTarget::Device,
                 "DMOD",
                 Some("IS"),
-                (100.0 * 1.0e-15, 150.0 * 1.0e-15, 10.0 * 1.0e-15),
+                (100.0e-15, 150.0e-15, 10.0e-15),
             ),
             _ => false,
         };

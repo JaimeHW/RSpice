@@ -735,9 +735,9 @@ impl XyceTestRunner {
 
     fn bug372_period(role: Bug372Role) -> Value {
         if matches!(role, Bug372Role::Level2) {
-            3.0 * 1.0e-6
+            3.0e-6
         } else {
-            3.01 * 1.0e-6
+            3.01e-6
         }
     }
 
@@ -1011,7 +1011,7 @@ impl XyceTestRunner {
                 if value.to_bits() == 10_000.0f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
             || !Self::bug372_nodes(&c2.nodes, &["VOUT", "0"])
             || !matches!(&c2.kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
-                if value.to_bits() == (0.1f64 * 1.0e-12).to_bits() && instance_params.is_empty() && deferred_params.is_empty())
+                if value.to_bits() == 0.1e-12f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
             || xinv.is_some_and(|xinv| {
                 !Self::bug372_nodes(&xinv.nodes, &["IN", "VOUT", "VDD", "0"])
                     || !matches!(&xinv.kind, ElementKind::Subcircuit { subckt_name, params }
@@ -1027,10 +1027,10 @@ impl XyceTestRunner {
         let expected_pulse = (
             supply,
             0.0,
-            1.5 * 1.0e-6,
-            5.0 * 1.0e-9,
-            5.0 * 1.0e-9,
-            1.5 * 1.0e-6,
+            1.5e-6,
+            5.0e-9,
+            5.0e-9,
+            1.5e-6,
             Self::bug372_period(role),
         );
         if pulse.map(|values| {
@@ -1095,8 +1095,8 @@ impl XyceTestRunner {
             || plan.wrapper_tolerance.is_some()
             || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
             || !plan.steps.is_empty()
-            || plan.tran.step.to_bits() != (20.0f64 * 1.0e-9).to_bits()
-            || plan.tran.stop.to_bits() != (30.0f64 * 1.0e-6).to_bits()
+            || plan.tran.step.to_bits() != 20.0e-9f64.to_bits()
+            || plan.tran.stop.to_bits() != 30.0e-6f64.to_bits()
             || plan.tran.start.is_some()
             || plan.tran.max_step.is_some()
             || plan.tran.uic
@@ -1339,10 +1339,10 @@ impl XyceTestRunner {
     fn bug372_pulse_value(role: Bug372Role, time: Value) -> Value {
         let v1 = Self::bug372_supply(role);
         let v2 = 0.0;
-        let delay = 1.5 * 1.0e-6;
-        let rise = 5.0 * 1.0e-9;
-        let fall = 5.0 * 1.0e-9;
-        let width = 1.5 * 1.0e-6;
+        let delay = 1.5e-6;
+        let rise = 5.0e-9;
+        let fall = 5.0e-9;
+        let width = 1.5e-6;
         let period = Self::bug372_period(role);
         if time <= delay {
             return v1;

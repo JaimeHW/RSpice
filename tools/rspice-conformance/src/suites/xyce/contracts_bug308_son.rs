@@ -492,14 +492,6 @@ impl XyceTestRunner {
         matches!(values.as_slice(), [_]).then_some(values[0])
     }
 
-    fn bug308_scaled(mantissa: Value, suffix_scale: Value) -> Value {
-        // The typed parser preserves SPICE suffix semantics by multiplying
-        // the authored mantissa by the suffix scale. Reproduce that exact
-        // IEEE operation instead of comparing with a separately rounded
-        // decimal literal.
-        mantissa * suffix_scale
-    }
-
     fn validate_bug308_topology(netlist: &Netlist) -> Result<(), String> {
         const MOS: [(&str, [&str; 4], &str, Value, Value); 17] = [
             ("M1", ["Anot", "A", "E1", "E1"], "PMOS", 3.6e-6, 1.2e-6),
@@ -562,10 +554,10 @@ impl XyceTestRunner {
         if capacitors.len() != 2
             || !matches!(&capacitors[0].kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
                 if capacitors[0].name.eq_ignore_ascii_case("CQ") && Self::bug308_nodes(&capacitors[0].nodes, &["Qnot", "0"])
-                    && value.to_bits() == Self::bug308_scaled(30.0, 1.0e-15).to_bits() && instance_params.is_empty() && deferred_params.is_empty())
+                    && value.to_bits() == 30.0e-15f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
             || !matches!(&capacitors[1].kind, ElementKind::Capacitor { value, value_expr: None, initial_voltage: None, model: None, instance_params, deferred_params }
                 if capacitors[1].name.eq_ignore_ascii_case("CL") && Self::bug308_nodes(&capacitors[1].nodes, &["Lnot", "0"])
-                    && value.to_bits() == Self::bug308_scaled(10.0, 1.0e-15).to_bits() && instance_params.is_empty() && deferred_params.is_empty())
+                    && value.to_bits() == 10.0e-15f64.to_bits() && instance_params.is_empty() && deferred_params.is_empty())
         {
             return Err(format!(
                 "{LABEL} capacitive load topology changed: {capacitors:?}"
@@ -583,9 +575,9 @@ impl XyceTestRunner {
             || !matches!(&sources[1].kind, ElementKind::VoltageSource(SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero })
                 if sources[1].name.eq_ignore_ascii_case("Va") && Self::bug308_nodes(&sources[1].nodes, &["A", "0"])
                     && v1.to_bits() == 0.0f64.to_bits() && v2.to_bits() == 5.0f64.to_bits()
-                    && delay.to_bits() == 0.0f64.to_bits() && rise.to_bits() == Self::bug308_scaled(0.1, 1.0e-9).to_bits()
-                    && fall.to_bits() == Self::bug308_scaled(0.1, 1.0e-9).to_bits() && width.to_bits() == Self::bug308_scaled(15.0, 1.0e-9).to_bits()
-                    && period.to_bits() == Self::bug308_scaled(30.0, 1.0e-9).to_bits() && pulse_count.to_bits() == 0.0f64.to_bits()
+                    && delay.to_bits() == 0.0f64.to_bits() && rise.to_bits() == 0.1e-9f64.to_bits()
+                    && fall.to_bits() == 0.1e-9f64.to_bits() && width.to_bits() == 15.0e-9f64.to_bits()
+                    && period.to_bits() == 30.0e-9f64.to_bits() && pulse_count.to_bits() == 0.0f64.to_bits()
                     && !width_defaults_to_zero)
             || !matches!(&sources[2].kind, ElementKind::VoltageSource(SourceSpec::Dc(value))
                 if sources[2].name.eq_ignore_ascii_case("Vb") && Self::bug308_nodes(&sources[2].nodes, &["B", "0"])

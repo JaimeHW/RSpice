@@ -128,11 +128,12 @@ const MAX_MANIFEST_BYTES: usize = 1_048_576;
 const MAX_DIRECTORY_ENTRIES: usize = 16_384;
 const PRN_SCIENTIFIC_PRECISION: i32 = 8;
 const RESISTOR_TRAN_STEP: Value = 1.0e-6;
-// Match Xyce's suffix evaluation (`10 * 1e-6`) instead of decimal-literal
-// folding so the sealed typed AST comparison is bit exact.
-const RESISTOR_TRAN_STOP: Value = 10.0 * 1.0e-6;
+// A suffixed number reads as the double nearest the decimal it writes
+// (`10US` is 1e-5, not the double-rounded product `10 * 1e-6`), so the sealed
+// typed AST comparison pins the written decimals bit for bit.
+const RESISTOR_TRAN_STOP: Value = 10.0e-6;
 const RESISTOR_SOURCE_FREQUENCY: Value = 100.0e3;
-const RESISTOR_SOURCE_ADVANCE: Value = 2.5 * 1.0e-6;
+const RESISTOR_SOURCE_ADVANCE: Value = 2.5e-6;
 const BEHAVIORAL_TRAN_STEP: Value = 1.0;
 const BEHAVIORAL_TRAN_STOP: Value = 12.0;
 

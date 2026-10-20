@@ -206,9 +206,9 @@ impl XyceTestRunner {
         };
         let expected_points: [(Value, Value); 4] = [
             (0.0, 0.0),
-            (1.0 * 1.0e-3, 1.0 * 1.0e-3),
-            (2.0 * 1.0e-3, 4.0 * 1.0e-3),
-            (3.0 * 1.0e-3, 9.0 * 1.0e-3),
+            (1.0e-3, 1.0e-3),
+            (2.0e-3, 4.0e-3),
+            (3.0e-3, 9.0e-3),
         ];
         if !voltage.name.eq_ignore_ascii_case("V1")
             || !Self::bug1661_nodes_match(&voltage.nodes, &["$g_1", "0"])

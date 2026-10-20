@@ -6760,8 +6760,8 @@ impl XyceTestRunner {
         else {
             return Err(format!("{LABEL} requires exactly one transient analysis"));
         };
-        if step.to_bits() != (0.1f64 * 1.0e-9).to_bits()
-            || stop.to_bits() != (100.0f64 * 1.0e-12).to_bits()
+        if step.to_bits() != 0.1e-9f64.to_bits()
+            || stop.to_bits() != 100.0e-12f64.to_bits()
             || start.is_some()
             || max_step.is_some()
             || *uic

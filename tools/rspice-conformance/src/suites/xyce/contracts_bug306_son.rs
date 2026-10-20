@@ -129,10 +129,9 @@ const PRINT_PRECISION: usize = 10;
 const PRINT_WIDTH: usize = 19;
 const MAX_ADAPTIVE_RESULT_POINTS: usize = 4_096;
 const MAX_KCL_RESIDUAL: Value = 1.0e-6;
-// Xyce-suffix parsing evaluates `20us` as `20.0 * 1.0e-6`; preserve that
-// canonical parsed value rather than silently substituting the adjacent
-// literal produced by spelling `20.0e-6` directly in Rust.
-const TRANSIENT_STOP: Value = 1.999_999_999_999_999_8e-5;
+// `20us` reads as the double nearest the decimal it writes, 2e-5 (not the
+// double-rounded product `20.0 * 1.0e-6`, which is one ulp below it).
+const TRANSIENT_STOP: Value = 20.0e-6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Bug306SonRole {

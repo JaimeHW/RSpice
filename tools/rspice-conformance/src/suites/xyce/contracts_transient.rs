@@ -2787,8 +2787,8 @@ impl XyceTestRunner {
                 "{LABEL} requires one ordinary unstepped adaptive default .prn relational plan without a file oracle or tolerance override"
             ));
         }
-        if plan.tran.step.to_bits() != (0.1f64 * 1.0e-9).to_bits()
-            || plan.tran.stop.to_bits() != (100.0f64 * 1.0e-12).to_bits()
+        if plan.tran.step.to_bits() != 0.1e-9f64.to_bits()
+            || plan.tran.stop.to_bits() != 100.0e-12f64.to_bits()
             || plan.tran.start.is_some()
             || plan.tran.max_step.is_some()
             || plan.tran.uic

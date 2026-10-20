@@ -563,7 +563,7 @@ impl XyceTestRunner {
                         model: None,
                         instance_params,
                         deferred_params,
-                    } if value.to_bits() == (10.0f64 * 1.0e-6).to_bits()
+                    } if value.to_bits() == 10.0e-6f64.to_bits()
                         && initial_voltage.to_bits() == 0.0f64.to_bits()
                         && instance_params.is_empty()
                         && deferred_params.is_empty())

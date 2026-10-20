@@ -6545,9 +6545,9 @@ impl XyceTestRunner {
             || plan.dc.sweep2.is_some()
             || !matches!(plan.dc.mode, rspice_core::netlist::DcSweepMode::Linear)
             || !plan.dc.source.eq_ignore_ascii_case("I1")
-            || plan.dc.start.to_bits() != (-100.0f64 * 1.0e-6).to_bits()
-            || plan.dc.stop.to_bits() != (100.0f64 * 1.0e-6).to_bits()
-            || plan.dc.step.to_bits() != (10.0f64 * 1.0e-6).to_bits()
+            || plan.dc.start.to_bits() != (-100.0e-6f64).to_bits()
+            || plan.dc.stop.to_bits() != 100.0e-6f64.to_bits()
+            || plan.dc.step.to_bits() != 10.0e-6f64.to_bits()
             || plan
                 .print
                 .probes
@@ -6629,7 +6629,7 @@ impl XyceTestRunner {
             || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
             || plan.require_print("BUG662 transient member")?.probes != ["V(N14950)", "V(N15037)"]
             || plan.tran.step.to_bits() != 0.0f64.to_bits()
-            || plan.tran.stop.to_bits() != (100.0f64 * 1e-9).to_bits()
+            || plan.tran.stop.to_bits() != 100.0e-9f64.to_bits()
             || plan.tran.start.map(Value::to_bits) != Some(0.0f64.to_bits())
             || plan.tran.max_step.is_some()
             || plan.tran.uic
@@ -6854,15 +6854,7 @@ impl XyceTestRunner {
         };
         match role {
             XyceBug647ResistorRole::Owner => {
-                step(
-                    0,
-                    StepTarget::Device,
-                    "R1",
-                    Some("W"),
-                    1e-6,
-                    5.0 * 1e-6,
-                    1e-6,
-                )?;
+                step(0, StepTarget::Device, "R1", Some("W"), 1e-6, 5.0e-6, 1e-6)?;
                 step(1, StepTarget::Device, "R1", Some("TEMP"), 30.0, 35.0, 1.0)?;
                 step(2, StepTarget::Device, "R1", Some("TC1"), 1e-2, 3e-2, 1e-2)?;
                 step(3, StepTarget::Device, "R1", Some("TC2"), 1e-4, 3e-4, 1e-4)?;
@@ -6874,7 +6866,7 @@ impl XyceTestRunner {
                     "RMOD",
                     Some("DEFW"),
                     1e-6,
-                    5.0 * 1e-6,
+                    5.0e-6,
                     1e-6,
                 )?;
                 step(1, StepTarget::Temp, "TEMP", None, 30.0, 35.0, 1.0)?;

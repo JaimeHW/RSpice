@@ -607,8 +607,8 @@ impl XyceTestRunner {
             || plan.timeint_conststep
             || !plan.steps.is_empty()
             || plan.wrapper_tolerance.is_some()
-            || plan.tran.step.to_bits() != (20.0f64 * 1e-9).to_bits()
-            || plan.tran.stop.to_bits() != (30.0f64 * 1e-6).to_bits()
+            || plan.tran.step.to_bits() != 20.0e-9f64.to_bits()
+            || plan.tran.stop.to_bits() != 30.0e-6f64.to_bits()
             || plan.tran.start.is_some()
             || plan.tran.max_step.is_some()
             || plan.tran.uic
@@ -672,7 +672,7 @@ impl XyceTestRunner {
         let pulse = elements["vin1"];
         if pulse.provenance != ElementProvenance::Authored
             || !Self::mosfet_param_alias_nodes_match(&pulse.nodes, &["1", "0"])
-            || !matches!(&pulse.kind, ElementKind::VoltageSource(SourceSpec::DcTransient { dc_value, transient }) if dc_value.to_bits() == 5.0f64.to_bits() && matches!(transient.as_ref(), SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero } if v1.to_bits() == 5.0f64.to_bits() && v2.to_bits() == 0.0f64.to_bits() && delay.to_bits() == (1.5f64 * 1e-6).to_bits() && rise.to_bits() == (5.0f64 * 1e-9).to_bits() && fall.to_bits() == (5.0f64 * 1e-9).to_bits() && width.to_bits() == (1.5f64 * 1e-6).to_bits() && period.to_bits() == (3.0f64 * 1e-6).to_bits() && pulse_count.to_bits() == 0.0f64.to_bits() && !width_defaults_to_zero))
+            || !matches!(&pulse.kind, ElementKind::VoltageSource(SourceSpec::DcTransient { dc_value, transient }) if dc_value.to_bits() == 5.0f64.to_bits() && matches!(transient.as_ref(), SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period, pulse_count, width_defaults_to_zero } if v1.to_bits() == 5.0f64.to_bits() && v2.to_bits() == 0.0f64.to_bits() && delay.to_bits() == 1.5e-6f64.to_bits() && rise.to_bits() == 5.0e-9f64.to_bits() && fall.to_bits() == 5.0e-9f64.to_bits() && width.to_bits() == 1.5e-6f64.to_bits() && period.to_bits() == 3.0e-6f64.to_bits() && pulse_count.to_bits() == 0.0f64.to_bits() && !width_defaults_to_zero))
         {
             return Err(format!("{LABEL} pulse source changed: {:?}", pulse.kind));
         }
@@ -700,15 +700,15 @@ impl XyceTestRunner {
                 "mn1",
                 ["VOUT", "IN", "0", "0"],
                 "CD4012_NMOS",
-                5.0 * 1e-6,
-                175.0 * 1e-6,
+                5.0e-6,
+                175.0e-6,
             ),
             (
                 "mp1",
                 ["VOUT", "IN", "VDD", "VDD"],
                 "CD4012_PMOS",
-                5.0 * 1e-6,
-                270.0 * 1e-6,
+                5.0e-6,
+                270.0e-6,
             ),
         ] {
             let element = elements[key];
@@ -817,7 +817,7 @@ impl XyceTestRunner {
             || table
                 .rows
                 .last()
-                .is_none_or(|row| (row[1] - 30.0 * 1e-6).abs() > 1e-12)
+                .is_none_or(|row| (row[1] - 30.0e-6).abs() > 1e-12)
         {
             return Err(format!("{LABEL} output domain changed"));
         }
@@ -1064,7 +1064,7 @@ mod tests {
     }
 
     fn valid_alias_table() -> XycePrnTable {
-        let stop = 30.0 * 1e-6;
+        let stop = 30.0e-6;
         XycePrnTable {
             columns: vec![
                 "Index".to_string(),

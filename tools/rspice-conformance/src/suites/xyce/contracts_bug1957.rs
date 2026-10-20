@@ -520,7 +520,7 @@ impl XyceTestRunner {
             || plan.contract != XyceStaticTranContract::PlainStatic
             || plan.comparison_mode != XyceStaticTranComparisonMode::Pointwise
             || probes != Self::bug1957_expected_probes(role.family)
-            || plan.tran.step.to_bits() != (100.0f64 * 1.0e-6).to_bits()
+            || plan.tran.step.to_bits() != 100.0e-6f64.to_bits()
             || plan.tran.stop.to_bits() != 25.0e-3f64.to_bits()
             || plan.tran.start.is_some()
             || plan.tran.max_step.is_some()
@@ -732,7 +732,7 @@ impl XyceTestRunner {
 
         if !matches!(&netlist.analyses[0], AnalysisCommand::Tran {
             step, stop, start: None, max_step: None, uic: false,
-        } if step.to_bits() == (100.0f64 * 1.0e-6).to_bits()
+        } if step.to_bits() == 100.0e-6f64.to_bits()
             && stop.to_bits() == 25.0e-3f64.to_bits())
         {
             return Err(format!("{LABEL} typed transient changed"));
