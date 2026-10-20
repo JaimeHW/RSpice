@@ -1,10 +1,11 @@
 //! A discrete event scheduled at the stop time is the stop time.
 //!
-//! `.tran 1n 100n` parses its stop time as `100 * 1e-9`, one ulp above the
-//! nearest double to 100 ns, while a digital tick or a stimulus file's
-//! `1e-7` converts to that nearest double. The two instants are the same; the
-//! run must land the event on `tstop`, process it there, and end there, rather
-//! than accept a point one ulp short and refuse the sliver after it.
+//! A stop time one ulp above the nearest double to 100 ns, which is what
+//! `.tran 1n 100n` read when a scale suffix was a product of two doubles, sits
+//! one ulp after a digital tick or a stimulus file's `1e-7`. These decks write
+//! that stop time out (`STOP_ONE_ULP_LATE`). The two instants are the same;
+//! the run must land the event on `tstop`, process it there, and end there,
+//! rather than accept a point one ulp short and refuse the sliver after it.
 
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
@@ -13,6 +14,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// The double after 1e-7, spelled for a `.tran` card.
+const STOP_ONE_ULP_LATE: &str = "1.0000000000000001e-7";
 
 /// A scratch directory removed on drop.
 struct Scratch(PathBuf);
@@ -127,7 +131,7 @@ fn counter(rise: u32) -> String {
 #[cfg(feature = "veriloga")]
 fn p06b_deck(module: &std::path::Path, cards: &str) -> Netlist {
     Netlist::parse(&format!(
-        "* P0.6b\n.hdl \"{}\"\nvp p 0 1\nx1 p 0 q cnt\nrp p 0 {{r}}\nrq q 0 10k\n{cards}\n.tran 1n 100n\n.end\n",
+        "* P0.6b\n.hdl \"{}\"\nvp p 0 1\nx1 p 0 q cnt\nrp p 0 {{r}}\nrq q 0 10k\n{cards}\n.tran 1n {STOP_ONE_ULP_LATE}\n.end\n",
         module.display().to_string().replace('\\', "/")
     ))
     .expect("deck parses")
@@ -225,14 +229,16 @@ fn an_xspice_event_at_the_stop_time_is_processed_there() {
     scratch.write("stim.stim", "0 0s\n1e-7 1s\n");
     let deck = scratch.write(
         "deck.cir",
-        "* d_source edge at the stop time\n\
-         a_src [d] src\n\
-         a_dac [d] [out] dac\n\
-         .model src d_source (input_file=\"stim.stim\")\n\
-         .model dac dac_bridge (out_low=0 out_high=1 out_undef=0.5 t_rise=1p t_fall=1p)\n\
-         rload out 0 1k\n\
-         .tran 1n 100n\n\
-         .end\n",
+        &format!(
+            "* d_source edge at the stop time\n\
+             a_src [d] src\n\
+             a_dac [d] [out] dac\n\
+             .model src d_source (input_file=\"stim.stim\")\n\
+             .model dac dac_bridge (out_low=0 out_high=1 out_undef=0.5 t_rise=1p t_fall=1p)\n\
+             rload out 0 1k\n\
+             .tran 1n {STOP_ONE_ULP_LATE}\n\
+             .end\n"
+        ),
     );
     let netlist = Netlist::parse_with_path(&fs::read_to_string(&deck).expect("deck"), &deck)
         .expect("deck parses");
