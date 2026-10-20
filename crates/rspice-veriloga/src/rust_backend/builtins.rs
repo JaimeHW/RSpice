@@ -70,6 +70,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/bin",
     "src/canonical_ir",
     "src/codegen",
+    "src/compile_stack.rs",
     "src/complex_arithmetic.rs",
     "src/connect",
     "src/connect.rs",
