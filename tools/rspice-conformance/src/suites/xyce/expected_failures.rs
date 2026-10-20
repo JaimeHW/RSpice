@@ -1504,12 +1504,20 @@ impl XyceTestRunner {
         // The resolver names the whole ordered chain it walked, so the exact
         // tail depends on how many candidates that host produced. The typed
         // failure, the line, and the execution-directory candidate are the
-        // contract; the rest of the chain is evidence.
+        // contract; the rest of the chain is evidence. Diagnostics show a
+        // canonical drive path without its Windows verbatim `\\?\` prefix.
+        let shown = |path: &Path| {
+            let text = path.display().to_string();
+            match text.strip_prefix(r"\\?\") {
+                Some(drive) if drive.as_bytes().get(1) == Some(&b':') => drive.to_owned(),
+                _ => text,
+            }
+        };
         let expected_message = format!(
             "{}:3: .lib resolution failed: Include file not found: plugh.lib (searched ",
-            deck_path.display()
+            shown(deck_path)
         );
-        let expected_candidate = execution_dir.join("plugh.lib");
+        let expected_candidate = shown(&execution_dir.join("plugh.lib"));
         match Self::parse_netlist_with_expression_dialect_and_execution_dir(
             source,
             deck_path,
@@ -1519,7 +1527,7 @@ impl XyceTestRunner {
             Err(ParseError::Syntax { line, message })
                 if line == 3
                     && message.starts_with(&expected_message)
-                    && message.contains(&expected_candidate.display().to_string()) => {}
+                    && message.contains(&expected_candidate) => {}
             Err(error) => {
                 return Err(format!(
                     "{label} produced the wrong typed missing-library failure: expected line 3 / {expected_message:?}, got {error:?}"
