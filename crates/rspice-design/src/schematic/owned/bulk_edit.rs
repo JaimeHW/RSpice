@@ -252,12 +252,17 @@ pub fn validate_bulk_value(
         return Err("A new value is required.".to_owned());
     }
     match property {
+        // A section is whatever the bound library defines (`.lib TT`,
+        // `.lib mc_ss`), so it is kept as authored. Which names the library
+        // actually holds is the caller's to check: this layer has no library.
         SelectionBulkProperty::ModelSection => {
-            let normalized = value.to_ascii_lowercase();
-            if !matches!(normalized.as_str(), "tt" | "ff" | "ss" | "inherit") {
-                return Err("Model section must be tt, ff, ss, or inherit.".to_owned());
+            if value.eq_ignore_ascii_case("inherit") {
+                return Ok("inherit".to_owned());
             }
-            Ok(normalized)
+            if value.chars().any(char::is_whitespace) {
+                return Err("A model section is one section name.".to_owned());
+            }
+            Ok(value.to_owned())
         }
         SelectionBulkProperty::Temperature => {
             let parsed = value

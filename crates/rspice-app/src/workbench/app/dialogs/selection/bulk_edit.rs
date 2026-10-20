@@ -213,6 +213,9 @@ pub(crate) struct SelectionBulkEditDialogState {
     pub(crate) property: SelectionBulkProperty,
     pub(crate) new_value: String,
     pub(crate) unset_behavior: SelectionBulkUnsetBehavior,
+    /// The sections a model section can be set to, from the libraries the
+    /// matched instances are bound to. Resolved when the filter changes.
+    bound_sections: Vec<String>,
     authority: Option<SelectionBulkEditAuthority>,
     pub(crate) error: Option<String>,
     pub(crate) body_scroll_offset: f32,
@@ -228,8 +231,9 @@ impl Default for SelectionBulkEditDialogState {
             filter: SelectionBulkFilter::default(),
             selected: BTreeSet::new(),
             property: SelectionBulkProperty::default(),
-            new_value: "tt".to_owned(),
+            new_value: String::new(),
             unset_behavior: SelectionBulkUnsetBehavior::SetExplicitValue,
+            bound_sections: Vec::new(),
             authority: None,
             error: None,
             body_scroll_offset: 0.0,
@@ -265,13 +269,17 @@ pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
         .filter(|row| row.editable())
         .map(|row| row.key.clone())
         .collect();
+    let bound_sections = bound_library_sections(state, &rows);
+    // Nothing is proposed: the value is the user's to choose, and Apply
+    // waits for it.
     state.dialogs.selection_bulk_edit = SelectionBulkEditDialogState {
         open: true,
         filter,
         selected,
         property,
-        new_value: "tt".to_owned(),
+        new_value: String::new(),
         unset_behavior: SelectionBulkUnsetBehavior::SetExplicitValue,
+        bound_sections,
         authority: Some(authority),
         error: None,
         body_scroll_offset: 0.0,
@@ -315,6 +323,10 @@ impl RSpiceApp {
         let primary_enabled =
             write_allowed && stale.is_none() && impact.error.is_none() && impact.changed > 0;
         let mut body_scroll_offset = self.state.dialogs.selection_bulk_edit.body_scroll_offset;
+        // A value not yet chosen is not a failed edit: the footer says what
+        // Apply is waiting for, and no "nothing was changed" banner opens
+        // over a dialog nobody has touched.
+        let missing_value = missing_value_reason(&self.state.dialogs.selection_bulk_edit);
         let error = self
             .state
             .dialogs
@@ -322,7 +334,7 @@ impl RSpiceApp {
             .error
             .as_deref()
             .or(stale.as_deref())
-            .or(impact.error.as_deref())
+            .or(impact.error.as_deref().filter(|_| missing_value.is_none()))
             .map(str::to_owned);
         let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description("Change one property on every object the filter matches.")
@@ -334,6 +346,9 @@ impl RSpiceApp {
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl)
             .body_scroll_offset(&mut body_scroll_offset);
+        if let Some(reason) = missing_value {
+            dialog = dialog.hint(reason);
+        }
         if !write_allowed {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
@@ -394,12 +409,14 @@ impl RSpiceApp {
                 let filter = self.state.dialogs.selection_bulk_edit.filter.clone();
                 self.state.ui.schematic_bulk_edit_filters.active = filter.clone();
                 let property = self.state.dialogs.selection_bulk_edit.property;
-                self.state.dialogs.selection_bulk_edit.selected =
-                    build_rows(&self.state, &filter, property)
-                        .into_iter()
-                        .filter(SelectionBulkRow::editable)
-                        .map(|row| row.key)
-                        .collect();
+                let rows = build_rows(&self.state, &filter, property);
+                self.state.dialogs.selection_bulk_edit.bound_sections =
+                    bound_library_sections(&self.state, &rows);
+                self.state.dialogs.selection_bulk_edit.selected = rows
+                    .into_iter()
+                    .filter(SelectionBulkRow::editable)
+                    .map(|row| row.key)
+                    .collect();
                 self.state.dialogs.selection_bulk_edit.error = None;
                 self.state.dialogs.selection_bulk_edit.authority =
                     Some(SelectionBulkEditAuthority::capture(&self.state));
@@ -922,7 +939,7 @@ fn bulk_edit_panel(
                 }
             });
         if before != dialog.property {
-            dialog.new_value = default_property_value(dialog.property).to_owned();
+            dialog.new_value.clear();
             *action = SelectionBulkBodyAction::FilterChanged;
         }
         columns[1].label("New value");
@@ -973,14 +990,23 @@ fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> 
     match dialog.property {
         SelectionBulkProperty::ModelSection => {
             let before = dialog.new_value.clone();
-            ComboBox::from_id_salt("selection-bulk-model-section")
-                .width(ui.available_width())
-                .selected_text(&dialog.new_value)
-                .show_ui(ui, |ui| {
-                    for value in ["tt", "ff", "ss", "inherit"] {
-                        ui.selectable_value(&mut dialog.new_value, value.to_owned(), value);
-                    }
-                });
+            let shown = if dialog.bound_sections.is_empty() {
+                RichText::new(NO_BOUND_SECTIONS)
+            } else if dialog.new_value.is_empty() {
+                RichText::new("Choose a section").color(Tokens::get(ui.ctx()).color.text_faint)
+            } else {
+                RichText::new(dialog.new_value.as_str())
+            };
+            ui.add_enabled_ui(!dialog.bound_sections.is_empty(), |ui| {
+                ComboBox::from_id_salt("selection-bulk-model-section")
+                    .width(ui.available_width())
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        for section in &dialog.bound_sections {
+                            ui.selectable_value(&mut dialog.new_value, section.clone(), section);
+                        }
+                    });
+            });
             before != dialog.new_value
         }
         SelectionBulkProperty::Display => {
@@ -1050,14 +1076,71 @@ fn selection_filter_header(ui: &mut Ui, matched: usize) {
     );
 }
 
-fn default_property_value(property: SelectionBulkProperty) -> &'static str {
-    match property {
-        SelectionBulkProperty::ModelSection => "tt",
-        SelectionBulkProperty::Temperature => "27",
-        SelectionBulkProperty::Tolerance => "1%",
-        SelectionBulkProperty::Display => "name and value",
-        SelectionBulkProperty::ParameterOverride => "m=1",
+const NO_BOUND_SECTIONS: &str = "The bound library defines no model sections";
+
+/// Why Apply is waiting on the value, or `None` once there is one to apply.
+///
+/// Restoring the inherited value needs no new value, so it never waits.
+fn missing_value_reason(dialog: &SelectionBulkEditDialogState) -> Option<&'static str> {
+    if dialog.unset_behavior == SelectionBulkUnsetBehavior::RestoreInheritedValue
+        || !dialog.new_value.trim().is_empty()
+    {
+        return None;
     }
+    Some(match dialog.property {
+        SelectionBulkProperty::ModelSection if dialog.bound_sections.is_empty() => {
+            NO_BOUND_SECTIONS
+        }
+        SelectionBulkProperty::ModelSection => "Choose a section to apply",
+        _ => "Enter a new value to apply",
+    })
+}
+
+/// The sections the matched instances' model libraries define, once each.
+///
+/// Read from the same library records Models ▸ Corners & sections lists: the
+/// sections each library's corners bind, and the sections its model
+/// metadata declares. A library this project does not hold contributes
+/// nothing, and nothing is offered that no bound library defines.
+fn bound_library_sections(state: &AppState, rows: &[SelectionBulkRow]) -> Vec<String> {
+    let instances = rows
+        .iter()
+        .filter(|row| row.key.kind == SelectionBulkRowKind::Instance)
+        .map(|row| row.key.object_id)
+        .collect::<BTreeSet<_>>();
+    let libraries = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| instances.contains(&component.id))
+        .filter_map(|component| component.library_cell.as_ref())
+        .map(|binding| binding.library.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut sections = Vec::new();
+    for name in libraries {
+        let Some(library) = state.model_library_manager.get_library(name) else {
+            continue;
+        };
+        sections.extend(
+            library
+                .corners
+                .values()
+                .flat_map(|corner| corner.effective_section_bindings())
+                .map(|binding| binding.section),
+        );
+        sections.extend(
+            library
+                .model_definition_metadata
+                .values()
+                .flat_map(|metadata| metadata.sections.iter())
+                .map(|section| section.name.clone()),
+        );
+    }
+    sections.retain(|section: &String| !section.trim().is_empty());
+    sections.sort_by_key(|section| section.to_ascii_lowercase());
+    sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    sections
 }
 
 /// The occurrence the active schematic is open at — the dialog's scope line and
@@ -1648,6 +1731,67 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].object, "U1");
         assert!(rows[0].editable());
+    }
+
+    /// The dialog proposes nothing: it opens with no value and Apply says
+    /// what it is waiting for.
+    #[test]
+    fn bulk_edit_opens_with_no_value_and_apply_waits_for_one() {
+        let mut state = AppState::default();
+        state.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
+
+        open_selection_bulk_edit_dialog(&mut state);
+
+        let dialog = &state.dialogs.selection_bulk_edit;
+        assert!(dialog.open);
+        assert_eq!(dialog.new_value, "");
+        assert!(missing_value_reason(dialog).is_some());
+    }
+
+    /// The sections offered are the bound library's own, not a fixed list,
+    /// and a library that defines none says so.
+    #[test]
+    fn bulk_edit_offers_the_bound_librarys_sections() {
+        let mut state = AppState::default();
+        state.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
+
+        open_selection_bulk_edit_dialog(&mut state);
+        assert!(state.dialogs.selection_bulk_edit.bound_sections.is_empty());
+        assert_eq!(
+            missing_value_reason(&state.dialogs.selection_bulk_edit),
+            Some(NO_BOUND_SECTIONS)
+        );
+
+        let mut library = crate::state::model_library::ModelLibrary::new("analog");
+        for (name, default) in [("TT_PRE", true), ("mc_ss", false)] {
+            library.corners.insert(
+                name.to_owned(),
+                rspice_model_library::ProcessCorner::from_composite_section(
+                    name,
+                    std::path::PathBuf::from("analog.lib"),
+                    default,
+                ),
+            );
+        }
+        state.model_library_manager.add_library(library);
+
+        open_selection_bulk_edit_dialog(&mut state);
+        let dialog = &state.dialogs.selection_bulk_edit;
+        assert_eq!(dialog.bound_sections, ["mc_ss", "TT_PRE"]);
+        assert_eq!(
+            missing_value_reason(dialog),
+            Some("Choose a section to apply")
+        );
+        assert_eq!(
+            validate_bulk_value(
+                SelectionBulkProperty::ModelSection,
+                "TT_PRE",
+                SelectionBulkUnsetBehavior::SetExplicitValue,
+                None,
+            ),
+            Ok("TT_PRE".to_owned()),
+            "a library's section is applied as it names it"
+        );
     }
 
     #[test]
