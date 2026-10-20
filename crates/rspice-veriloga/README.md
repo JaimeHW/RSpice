@@ -119,6 +119,13 @@ which a compile runs on a thread of its own sized for those bounds.
   resolve. The integration rule for `ddt`/`idt` is not a compile-time choice:
   the engine supplies companion coefficients per timestep, so one compiled
   model runs under backward Euler or Gear-2/trapezoidal.
+- **`limexp`** is `exp(x)` up to `x = 80` and the tangent line
+  `exp(80) * (x - 79)` beyond it, every iterate and the converged answer
+  alike: the LRM gives no threshold, and 80 is the one Xyce's ADMS headers,
+  ngspice and Qucs use. OpenVAF (and so an OSDI build of the same model)
+  switches at `ln(1e30)`, about 69.08, so for arguments between 69.08 and 80 the
+  two disagree, and a model that converges with its argument past either
+  threshold is computing a linear current, not the exponential it wrote.
 - **Limiting**: `$limit(probe, selector, args)` takes an analog function or a
   built-in limiter by name: ngspice's `"pnjlim"`, `"fetlim"`, `"limvds"` and
   `"limitlog"` (the `devsup.c` functions iterate for iterate, except that
