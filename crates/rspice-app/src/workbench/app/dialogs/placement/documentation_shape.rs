@@ -3,7 +3,7 @@
 use egui::Context;
 use rspice_schematic_editor::annotations::shape_placement;
 
-use crate::state::{PendingDocumentationShapePlacement, Tool};
+use crate::state::{DocumentationShapeKind, PendingDocumentationShapePlacement, Tool};
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
 use crate::workbench::app::schematic_editor_request_source;
@@ -63,15 +63,11 @@ pub(in crate::workbench) fn render_documentation_shape_dialog(
         .show(ctx, |rows| shape_placement::show(rows, &mut draft.kind));
     match choice {
         DialogChoice::Primary => {
-            if let Ok(pending) = validate_draft(dialog, model) {
-                model.schematic.session.editor.pending_documentation_shape = Some(pending);
-                model
-                    .schematic
-                    .session
-                    .editor
-                    .documentation_shape_drawing
-                    .clear();
-                model.schematic.arm_tool(Tool::DocumentationShape);
+            // Valid means the document is still the one the dialog
+            // captured, so arming captures that same authority again.
+            if validate_draft(dialog, model).is_ok()
+                && arm_documentation_shape(model, dialog.kind).is_ok()
+            {
                 dialog.close();
             }
         }
@@ -80,6 +76,35 @@ pub(in crate::workbench) fn render_documentation_shape_dialog(
         }
         DialogChoice::None | DialogChoice::Secondary => {}
     }
+}
+
+/// Arm the documentation-shape tool for `kind` on the active schematic.
+///
+/// Each shape is its own command (Place ▸ Shape ▸ Rectangle, Line, Polygon,
+/// Arc, Callout), so nothing is asked first: the document authority the
+/// one-select dialog captured when it opened is captured here, and the tool
+/// is armed at once. A read-only schematic arms nothing; the refusal is the
+/// caller's to state.
+pub(crate) fn arm_documentation_shape(
+    model: &mut Model,
+    kind: DocumentationShapeKind,
+) -> Result<(), &'static str> {
+    if model.schematic_edit_read_only() {
+        return Err("The active schematic is read-only.");
+    }
+    let source = schematic_editor_request_source(model);
+    let expected = model.schematic.document().documentation_shapes.clone();
+    let pending = PendingDocumentationShapePlacement::new(kind, source.topology_version, &expected)
+        .with_source(source);
+    model.schematic.session.editor.pending_documentation_shape = Some(pending);
+    model
+        .schematic
+        .session
+        .editor
+        .documentation_shape_drawing
+        .clear();
+    model.schematic.arm_tool(Tool::DocumentationShape);
+    Ok(())
 }
 
 fn validate_draft(
@@ -140,6 +165,42 @@ mod tests {
     /// The draft's validation, over what the form reads.
     fn validate_draft(state: &AppState) -> Result<PendingDocumentationShapePlacement, String> {
         super::validate_draft(&state.design.documentation_shape, &state.model)
+    }
+
+    /// Each shape arms its tool at once, with no dialog, and nothing is
+    /// drawn until the reader drags on the sheet.
+    #[test]
+    fn each_shape_arms_its_tool_without_a_dialog() {
+        for kind in DocumentationShapeKind::ALL {
+            let mut state = AppState::default();
+            assert_eq!(arm_documentation_shape(&mut state.model, kind), Ok(()));
+            assert!(!state.design.documentation_shape.open);
+            assert_eq!(
+                state.model.schematic.session.editor.tool,
+                Tool::DocumentationShape
+            );
+            let pending = state
+                .model
+                .schematic
+                .session
+                .editor
+                .pending_documentation_shape
+                .as_ref()
+                .expect("the shape is pending");
+            assert_eq!(pending.kind, kind);
+            assert_eq!(
+                pending.source.as_ref(),
+                Some(&schematic_editor_request_source(&state))
+            );
+            assert!(
+                state
+                    .model
+                    .schematic
+                    .document()
+                    .documentation_shapes
+                    .is_empty()
+            );
+        }
     }
 
     #[test]
