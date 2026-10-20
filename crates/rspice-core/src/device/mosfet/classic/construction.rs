@@ -890,9 +890,9 @@ impl Mosfet {
             // - MOS1 keeps its historical KP default unless TOX was given;
             // - MOS2 derives from its default/explicit TOX and mobility;
             // - MOS3 likewise derives from its 0.1um TOX and 600cm²/Vs
-            //   defaults even when neither parameter appears on the card.
-            let derives_kp =
-                self.level == 2 || self.level == 3 || (self.level == 1 && tox.is_some());
+            //   defaults even when neither parameter appears on the card,
+            //   and MOS9 runs the same preprocessing (mos9temp.c:63-69).
+            let derives_kp = matches!(self.level, 2 | 3 | 9) || (self.level == 1 && tox.is_some());
             let u0_cm = derives_kp
                 .then(|| explicit_u0.unwrap_or(self.u0))
                 .filter(|value| value.is_finite() && *value > 0.0);

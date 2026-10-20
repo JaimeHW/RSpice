@@ -236,3 +236,50 @@ fn explicit_xyce_dialect_routes_level9_mos9_shaped_card_to_bsim3() {
 
     assert_eq!(m1.device_kind, "BSIM3");
 }
+
+fn branch_current(result: &rspice_core::solver::SimulationResult, branch: &str) -> Value {
+    result
+        .branch_current_named(branch)
+        .unwrap_or_else(|| panic!("missing {branch} in {:?}", result.branch_names))
+}
+
+#[test]
+fn mos9_without_kp_derives_it_from_uo_and_tox_like_ngspice46() {
+    // ngspice 46 (`set numdgt=12`): mos9temp.c:63-69 derives KP = UO*COX
+    // when the card omits it, exactly as MOS3 does; the 2e-5 KP default
+    // left this card at -2.963e-05 A. The 10 MHz AC current pins gm too
+    // (its imaginary part is the CGDO overlap).
+    let deck = "* MOS9 derived KP\n\
+                vd1 d1 0 dc 2\n\
+                vg g 0 dc 1.5 ac 1\n\
+                m1 d1 g 0 0 n9 w=10u l=2u\n\
+                .model n9 nmos level=9 vto=0.7 tox=20n uo=600 kappa=0.5 theta=0.1 cgso=1n cgdo=2n\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("MOS9 deck parses");
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let engine = engine_with_dialect(dialect);
+        let result = engine.run_dc_op(&netlist).expect("MOS9 op converges");
+        assert_rel(
+            &format!("{dialect:?} i(vd1)"),
+            branch_current(&result, "vd1"),
+            -1.534_730_597_74e-4,
+            1.0e-6,
+        );
+        let point = engine
+            .run_ac(&netlist, &[1.0e7])
+            .expect("MOS9 ac converges")
+            .pop()
+            .expect("one AC point");
+        let index = point
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("vd1"))
+            .expect("vd1 branch");
+        let expected = rspice_core::Complex64::new(-3.694_721_760_99e-4, 1.256_637_061_436e-6);
+        assert!(
+            (point.currents[index] - expected).norm() <= 1.0e-6 * expected.norm(),
+            "{dialect:?} AC i(vd1): {} against ngspice {expected}",
+            point.currents[index]
+        );
+    }
+}
