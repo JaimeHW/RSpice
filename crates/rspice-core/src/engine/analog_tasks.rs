@@ -100,6 +100,39 @@ fn analog_output_record(
     })
 }
 
+/// The accepted `$finish` as the record a digital `$finish` writes (IEEE
+/// 1364-2005 section 17.4.1): empty text, the level, and the call's instance,
+/// file, line and time.
+fn analog_finish_record(
+    event: &AnalogTaskEvent<'_>,
+    point: ModelFinishPoint,
+    level: u8,
+) -> crate::config::HdlOutputRecord {
+    use crate::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlStream};
+    let (point, seconds) = match point {
+        ModelFinishPoint::Initialization => (HdlPoint::Initialization, 0.0),
+        ModelFinishPoint::OperatingPoint | ModelFinishPoint::Frequency { .. } => {
+            (HdlPoint::OperatingPoint, event.call.time)
+        }
+        ModelFinishPoint::Transient { time } => (HdlPoint::Transient { time }, time),
+        ModelFinishPoint::DcSweep { value } => (HdlPoint::DcSweep { value }, event.call.time),
+    };
+    HdlOutputRecord {
+        point,
+        tick: 0,
+        seconds,
+        stream: HdlStream::Finish { stop: false, level },
+        text: String::new(),
+        origin: HdlOrigin {
+            scope: event.instance.into(),
+            file: event
+                .source
+                .map_or_else(|| event.model.into(), |source| source.file.into()),
+            line: event.source.map_or(0, |source| source.line),
+        },
+    }
+}
+
 /// The `$display` formatter of the digital host (IEEE 1364-2005 section
 /// 17.1.1), with `%m` naming the instance.
 #[cfg(feature = "veriloga")]
@@ -373,6 +406,16 @@ impl Engine {
                     point,
                     diagnostic_level: level,
                 });
+            }
+            // The accepted finish, whichever path requested it, tells the
+            // run's console who ended the run, where and when, once.
+            if let Some(sink) = &output
+                && control.finish().is_some_and(|finish| {
+                    finish.instance == event.instance && finish.site == event.call.site
+                })
+                && control.claim_finish_report()
+            {
+                sink.emit(&analog_finish_record(&event, point, level));
             }
         });
         circuit.analog_monitor_values = monitors;

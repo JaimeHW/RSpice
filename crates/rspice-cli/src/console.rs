@@ -191,7 +191,7 @@ fn located(record: &HdlOutputRecord) -> String {
 }
 
 /// A time in seconds with an SI prefix: `65 ns`, `1.5 us`, `0 s`.
-fn si_seconds(seconds: f64) -> String {
+pub(crate) fn si_seconds(seconds: f64) -> String {
     if seconds == 0.0 || !seconds.is_finite() {
         return format!("{seconds} s");
     }

@@ -492,3 +492,41 @@ fn analog_output_tasks_print_once_per_accepted_point() {
     assert!(stderr.contains("printer.va:6, X1)"), "{stderr}");
     assert!(!stderr.contains("VA-SEM-NO-EFFECT-SYSTEM-TASK"), "{stderr}");
 }
+
+/// A model's `$finish` names its instance, file, line and time, and the
+/// transient headline says the run ended before the requested stop.
+#[test]
+fn analog_finish_reports_its_caller_and_the_early_end() {
+    let root = common::test_dir("analog_finish_report");
+    std::fs::write(
+        root.join("finish.va"),
+        "module finish_t(a);\ninout a; electrical a;\nanalog begin\n V(a) <+ 1;\n if ($abstime > 5n) $finish;\nend\nendmodule\n",
+    )
+    .unwrap();
+    let deck = root.join("finish.cir");
+    std::fs::write(
+        &deck,
+        "Analog finish\n.hdl \"finish.va\"\nX1 a finish_t\nRa a 0 1k\n.tran 1n 20n\n.end\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("run")
+        .arg(&deck)
+        .env("RSPICE_VERILOGA_CACHE_DIR", root.join("cache"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains("Transient complete"), "{stdout}");
+    assert!(
+        stdout.contains("Transient ended early at 5.") && stdout.contains("of the requested 20 ns"),
+        "{stdout}"
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(
+        stderr.matches("finished by $finish at 5.").count(),
+        1,
+        "{stderr}"
+    );
+    assert!(stderr.contains("finish.va:5, X1)"), "{stderr}");
+}

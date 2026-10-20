@@ -974,10 +974,25 @@ pub(super) fn finish_transient_result(
     )?;
 
     if !ctx.quiet && !ctx.compress {
-        crate::console::line(format_args!(
-            "✓ Transient complete: {} time points computed",
-            result.time.len()
-        ))?;
+        // A model's `$finish` ends a run successfully at the point the solver
+        // accepted; the headline must not claim the requested interval.
+        match result
+            .time
+            .last()
+            .copied()
+            .filter(|last| tstop - last > 1e-9 * tstop.abs())
+        {
+            Some(last) => crate::console::line(format_args!(
+                "Transient ended early at {} of the requested {}: {} time points computed",
+                crate::console::si_seconds(last),
+                crate::console::si_seconds(tstop),
+                result.time.len()
+            ))?,
+            None => crate::console::line(format_args!(
+                "✓ Transient complete: {} time points computed",
+                result.time.len()
+            ))?,
+        }
     }
 
     // A compressed run already carries the `.MEASURE` results the core

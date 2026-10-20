@@ -62,6 +62,8 @@ pub enum SimulationOutcome<T> {
 pub struct ModelRunControl {
     finished: AtomicBool,
     finish: Mutex<Option<ModelFinish>>,
+    /// The run's output sink has been told who finished it and when.
+    reported: AtomicBool,
 }
 
 impl ModelRunControl {
@@ -74,6 +76,11 @@ impl ModelRunControl {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// Claim the one report of the accepted finish; later callers get `false`.
+    pub(crate) fn claim_finish_report(&self) -> bool {
+        self.is_finished() && !self.reported.swap(true, Ordering::AcqRel)
     }
 
     pub(crate) fn request_finish(&self, finish: ModelFinish) {
