@@ -648,14 +648,32 @@ impl Mosfet {
             && self.vbs == self.eval_vbs
     }
 
-    /// Set model parameters from a DeviceModel
-    pub(crate) fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
+    /// Set model parameters from a DeviceModel, deriving NSUB-dependent
+    /// parameters at the card's TNOM (27 C when the card names none).
+    #[cfg(test)]
+    pub(crate) fn with_params(self, params: &std::collections::HashMap<String, Value>) -> Self {
+        let tnom_kelvin = params
+            .get("TNOM")
+            .copied()
+            .filter(|v| v.is_finite())
+            .map(crate::constants::celsius_to_kelvin)
+            .unwrap_or(crate::constants::TEMP_REFERENCE);
+        self.with_params_at_tnom(params, tnom_kelvin)
+    }
+
+    /// Set model parameters from a DeviceModel whose nominal temperature is
+    /// `tnom_kelvin` (the model TNOM, else `.options tnom`). Berkeley MOS
+    /// derives PHI, GAMMA and VTO from NSUB at that temperature
+    /// (`mos1temp.c`/`mos2temp.c`/`mos3temp.c`/`mos6temp.c`/`mos9temp.c`).
+    pub(crate) fn with_params_at_tnom(
+        mut self,
+        params: &std::collections::HashMap<String, Value>,
+        tnom_kelvin: Value,
+    ) -> Self {
         const EPS0: Value = 8.854_214_871e-12;
         const EPS_SI_REL: Value = 11.7;
         const EPS_OX_REL: Value = 3.9;
         use crate::constants::Q_ELECTRON as Q_E;
-        const V_T_REF: Value = 0.025_85;
-        const REFTEMP: Value = 300.15;
         const N_I_CM3: Value = 1.45e10;
 
         if let Some(level) = params
@@ -886,35 +904,51 @@ impl Mosfet {
                 }
             }
         }
-        if (gamma_explicit.is_none() || phi_explicit.is_none())
-            && let Some(nsub_cm3) = nsub
-        {
+        // Berkeley NSUB preprocessing runs at the model's nominal temperature:
+        // vtnom = k·TNOM/q and the TNOM bandgap egfet1. MOS3/MOS9 also move
+        // the intrinsic density to TNOM (`mos3temp.c:51-53`); MOS1/2/6 keep
+        // 1.45e10 cm^-3. Every level needs an oxide capacitance first, which
+        // MOS1/MOS6 have only when TOX is authored.
+        let tnom = if tnom_kelvin.is_finite() && tnom_kelvin > 0.0 {
+            tnom_kelvin
+        } else {
+            crate::constants::TEMP_REFERENCE
+        };
+        let k_over_q = crate::constants::thermal_voltage(1.0);
+        let vtnom = k_over_q * tnom;
+        let egfet1 = 1.16 - (7.02e-4 * tnom * tnom) / (tnom + 1108.0);
+        let ni_cm3 = if matches!(self.level, 3 | 9) {
+            let ratio = tnom / 300.0;
+            N_I_CM3
+                * ratio
+                * ratio.sqrt()
+                * (0.5 * egfet1 * (1.0 / 300.0 - 1.0 / tnom) / k_over_q).exp()
+        } else {
+            N_I_CM3
+        };
+        let nsub_derives =
+            nsub.filter(|&nsub_cm3| nsub_cm3 > ni_cm3 && self.cox > 0.0 && self.cox.is_finite());
+        if let Some(nsub_cm3) = nsub_derives {
             // NSUB is cm^-3 in SPICE model cards.
             let nsub_m3 = nsub_cm3 * 1e6;
-            if phi_explicit.is_none() && nsub_cm3 > N_I_CM3 {
-                let phi_derived = 2.0 * V_T_REF * (nsub_cm3 / N_I_CM3).ln();
-                if phi_derived.is_finite() && phi_derived > 0.0 {
+            if phi_explicit.is_none() {
+                let phi_derived = (2.0 * vtnom * (nsub_cm3 / ni_cm3).ln()).max(0.1);
+                if phi_derived.is_finite() {
                     self.phi = phi_derived;
                 }
             }
-            if gamma_explicit.is_none() && self.cox > 0.0 && self.cox.is_finite() {
+            if gamma_explicit.is_none() {
                 let gamma_derived = (2.0 * Q_E * EPS_SI_REL * EPS0 * nsub_m3).sqrt() / self.cox;
                 if gamma_derived.is_finite() && gamma_derived >= 0.0 {
                     self.gamma = gamma_derived;
                 }
             }
         }
-        if vto_explicit.is_none()
-            && let Some(nsub_cm3) = nsub
-            && nsub_cm3 > N_I_CM3
-            && self.cox > 0.0
-            && self.cox.is_finite()
-            && self.phi > 0.0
-        {
+        if vto_explicit.is_none() && nsub_derives.is_some() && self.phi > 0.0 {
             // Match the Berkeley MOS1/2/3/6 preprocessing path: when VT0 is
             // omitted, ngspice derives it from flat-band voltage, substrate
             // doping, surface-state density, and gate material at nominal temp.
-            let egfet = 1.16 - (7.02e-4 * REFTEMP * REFTEMP) / (REFTEMP + 1108.0);
+            let egfet = egfet1;
             let p = self.polarity();
             let gate_type = params
                 .get("TPG")

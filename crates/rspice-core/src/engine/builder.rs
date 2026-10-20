@@ -7881,12 +7881,27 @@ impl Engine {
                         }
                     });
 
+                    // Device temperature: instance TEMP is absolute (C),
+                    // DTEMP offsets the circuit temperature; model TNOM
+                    // (or .options tnom) anchors the scaling and the NSUB
+                    // preprocessing.
+                    let tnom_k = params_map
+                        .as_ref()
+                        .and_then(|params| params.get("TNOM").copied())
+                        .filter(|v| v.is_finite())
+                        .map(crate::constants::celsius_to_kelvin)
+                        .unwrap_or_else(|| {
+                            crate::constants::celsius_to_kelvin(
+                                netlist.options.tnom.unwrap_or(27.0),
+                            )
+                        });
+
                     // Look up model and apply parameters including LEVEL
                     if let Some(params_map) = params_map.as_ref() {
                         mosfet = mosfet.with_level(level);
 
                         // Apply all model parameters (VTO, KP, GAMMA, KC, NC, etc.)
-                        mosfet = mosfet.with_params(params_map);
+                        mosfet = mosfet.with_params_at_tnom(params_map, tnom_k);
                     }
 
                     for (name, value) in instance_params {
@@ -7909,19 +7924,6 @@ impl Engine {
                         )));
                     }
 
-                    // Device temperature: instance TEMP is absolute (C),
-                    // DTEMP offsets the circuit temperature; model TNOM
-                    // (or .options tnom) anchors the scaling.
-                    let tnom_k = params_map
-                        .as_ref()
-                        .and_then(|params| params.get("TNOM").copied())
-                        .filter(|v| v.is_finite())
-                        .map(crate::constants::celsius_to_kelvin)
-                        .unwrap_or_else(|| {
-                            crate::constants::celsius_to_kelvin(
-                                netlist.options.tnom.unwrap_or(27.0),
-                            )
-                        });
                     let explicit_temp_k = instance_param(instance_params, &["TEMP"])
                         .map(crate::constants::celsius_to_kelvin);
                     let temp_k = if let Some(temp_k) = explicit_temp_k {

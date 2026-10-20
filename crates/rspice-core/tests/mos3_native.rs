@@ -820,6 +820,80 @@ fn mos3_matches_xyce_710_pmos_and_inverse_dc_points() {
     );
 }
 
+fn nsub_preprocessing_deck(temperature: &str, card_tail: &str) -> String {
+    format!(
+        "* MOS1/2/3 NSUB-derived PHI, GAMMA and VTO\n\
+         .temp {temperature}\n\
+         vd1 d1 0 dc 2\n\
+         vd2 d2 0 dc 2\n\
+         vd3 d3 0 dc 2\n\
+         vd4 d4 0 dc 2\n\
+         vg g 0 dc 1.5\n\
+         vb b 0 dc -1\n\
+         m1 d1 g 0 b n1 w=10u l=2u\n\
+         m2 d2 g 0 b n2 w=10u l=2u\n\
+         m3 d3 g 0 b n3 w=10u l=2u\n\
+         m4 d4 g 0 b n4 w=10u l=2u\n\
+         .model n1 nmos level=1 tox=20n nsub=1e16 uo=600 {card_tail}\n\
+         .model n2 nmos level=2 tox=20n nsub=1e16 uo=600 {card_tail}\n\
+         .model n3 nmos level=3 tox=20n nsub=1e16 uo=600 {card_tail}\n\
+         .model n4 nmos level=1 tox=20n nsub=1e16 vto=0.6 uo=600 {card_tail}\n\
+         .op\n\
+         .end\n"
+    )
+}
+
+#[test]
+fn classic_mos_nsub_preprocessing_runs_at_model_tnom_like_ngspice46() {
+    // ngspice 46 (`set numdgt=12`, `op`) on these decks. mos1temp.c,
+    // mos2temp.c and mos3temp.c derive PHI = 2*vtnom*ln(NSUB/ni), GAMMA and
+    // VTO with vtnom = k*TNOM/q and the TNOM bandgap; MOS3 also moves ni to
+    // TNOM. At TNOM=80 C the 27 C derivation was off by 2-15%; at the
+    // default TNOM the rounded 25.85 mV thermal voltage was off by 4e-4.
+    let at_tnom_80 = nsub_preprocessing_deck("80", "tnom=80");
+    let at_default_tnom = nsub_preprocessing_deck("27", "");
+    for (deck, label, expected) in [
+        (
+            &at_tnom_80,
+            "TNOM=80",
+            [
+                -3.673_330_797_16e-4,
+                -4.131_641_724_14e-4,
+                -4.604_735_797_60e-4,
+                -1.464_136_439_26e-4,
+            ],
+        ),
+        (
+            &at_default_tnom,
+            "default TNOM",
+            [
+                -4.212_189_819_80e-4,
+                -4.715_172_214_04e-4,
+                -4.297_870_528_37e-4,
+                -1.432_719_855_56e-4,
+            ],
+        ),
+    ] {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let result = engine().run_dc_op(&netlist).expect("op converges");
+        for (index, expected) in expected.into_iter().enumerate() {
+            let branch = format!("vd{}", index + 1);
+            let position = result
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(&branch))
+                .unwrap_or_else(|| panic!("missing {branch} in {:?}", result.branch_names));
+            assert_close(
+                &format!("{label} i({branch})"),
+                result.branch_currents[position],
+                expected,
+                1.0e-6,
+                0.0,
+            );
+        }
+    }
+}
+
 /// Cross-coupled MOS3 pair with two stable DC operating points. Which one the
 /// solver reports is exactly what the `OFF` instance keyword is there to
 /// decide: mos1load.c and mos3load.c both take the `vbs = vgs = vds = 0`
