@@ -5204,6 +5204,26 @@ impl VerilogADevice {
         &self.model.name
     }
 
+    /// The variables some path of the analog block reads before assigning
+    /// them, in storage order, an array once by its own name. Each keeps its
+    /// value from the last accepted point (VAMS-2023 sections 4.5.10 and
+    /// 5.10.2), which is state outside the circuit unknowns.
+    pub fn retained_variables(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = Vec::new();
+        for name in self
+            .model
+            .evaluation_input_variables
+            .iter()
+            .filter_map(|&slot| self.model.variable_names.get(slot))
+        {
+            let name = name.split_once('[').map_or(name.as_str(), |(base, _)| base);
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        names
+    }
+
     /// Source identity used to match an instance across circuit reconstruction.
     pub fn source_digest(&self) -> &str {
         &self.model.source_digest

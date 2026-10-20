@@ -676,6 +676,76 @@ fn rational_descriptor_refusal(
     None
 }
 
+/// Whether the analysis solves for a periodic steady state, whose unknowns
+/// are the circuit's waveforms over one period and nothing else.
+#[cfg(feature = "veriloga")]
+const fn solves_a_periodic_steady_state(analysis: CapabilityAnalysis) -> bool {
+    use CapabilityAnalysis as A;
+    matches!(
+        analysis,
+        A::Pss | A::Hb | A::Pac | A::Pnoise | A::Pxf | A::Pstb | A::Envelope | A::QuasiPeriodic
+    )
+}
+
+/// A periodic analysis refuses a runtime Verilog-A instance with a variable
+/// it reads before assigning, naming the variables.
+///
+/// Such a variable keeps its value from the last accepted time point (VAMS-2023
+/// sections 4.5.10 and 5.10.2), so the instance's response depends on its
+/// whole accepted history. Neither the period map a shooting solver iterates
+/// nor a harmonic-balance spectrum carries that history, so no periodic
+/// solution can honor it, which is why SpectreRF refuses the same models.
+/// This holds whatever the Verilog-A cells of the matrix declare, so it is
+/// asked before them.
+fn retained_state_refusal(
+    circuit: &CircuitData,
+    analysis: CapabilityAnalysis,
+) -> Option<UnsupportedCapabilityError> {
+    #[cfg(feature = "veriloga")]
+    {
+        if !solves_a_periodic_steady_state(analysis) {
+            return None;
+        }
+        for device in circuit.veriloga_devices().iter() {
+            let names = device.retained_variables();
+            let Some((last, rest)) = names.split_last() else {
+                continue;
+            };
+            let listed = if rest.is_empty() {
+                format!("`{last}` is read before it is assigned, so it keeps its value")
+            } else {
+                let rest = rest
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "{rest} and `{last}` are read before they are assigned, so they keep \
+                     their values"
+                )
+            };
+            let instance = device.name.to_string();
+            let module = device.model_name().to_owned();
+            return Some(
+                UnsupportedCapabilityError::new(
+                    PERIODIC_VERILOGA,
+                    format!(
+                        "{} '{instance}' (module '{module}') cannot take part in {}: {listed} \
+                         from the last accepted time point, which no periodic solution carries",
+                        CapabilityFamily::VerilogARuntime.label(),
+                        analysis.label(),
+                    ),
+                )
+                .for_analysis_kind(analysis.kind())
+                .for_instance(instance)
+                .for_module(module),
+            );
+        }
+    }
+    let _ = (circuit, analysis);
+    None
+}
+
 /// The order the gate checks families in: the author's own constructs before
 /// what elaboration inserted for them. A mixed module's built-in converters
 /// are XSPICE event models the deck never names, so a refusal that reached
@@ -694,13 +764,18 @@ const REFUSAL_ORDER: [CapabilityFamily; 7] = [
 impl Engine {
     /// The dispatch gate every analysis asks before solver work.
     ///
-    /// Families are checked in [`REFUSAL_ORDER`], and the first failing cell
-    /// decides the refusal. A refusal always records the analysis kind, and
-    /// the instance and module it declined.
+    /// A Verilog-A variable retained between accepted points refuses every
+    /// periodic analysis first; see [`retained_state_refusal`]. Then families
+    /// are checked in [`REFUSAL_ORDER`], and the first failing cell decides the
+    /// refusal. A refusal always records the analysis kind, and the instance
+    /// and module it declined.
     pub(in crate::engine) fn ensure_analysis_capability(
         circuit: &CircuitData,
         analysis: CapabilityAnalysis,
     ) -> Result<(), SimulationError> {
+        if let Some(refusal) = retained_state_refusal(circuit, analysis) {
+            return Err(refusal.into());
+        }
         for family in REFUSAL_ORDER {
             match capability_cell(family, analysis) {
                 CellSupport::Supported { .. } => {}
