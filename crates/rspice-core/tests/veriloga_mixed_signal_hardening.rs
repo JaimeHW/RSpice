@@ -564,10 +564,19 @@ fn mixed_fixture_hashes_are_identical_across_processes() {
 /// earned: seven points to 412 ps. Every event but `clk`'s 2/3 ns fall is
 /// bit-identical, and that fall moved by 7.9e-23 s, the A/D root dated on the
 /// moved grid.
+///
+/// Re-measured when a pending Verilog-A event short of the next breakpoint
+/// began landing once the controller's proposal reaches it (58 -> 56). `clk`'s
+/// 2/3 ns fall lies 1.3 ps before `ca`'s 0.668 ns PWL corner, and the
+/// equalization ahead of that corner halved every step bounded to the fall:
+/// from 604.4 ps the grid crept 636.2, 652.1, 660.1, 664.0, 666.0 ps before
+/// landing. It now steps to 666.46 ps and lands. Every rise, and every `ca`,
+/// `qa` and `qb` event, is bit-identical; the fall, which this test does not
+/// pin, moved 1.3e-21 s toward 2/3 ns (8.6e-21 s late, was 9.9e-21 s).
 const TWO_CROSSINGS_PIN: (&str, &str, usize) = (
     "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
     "hardening_two_crossings",
-    58,
+    56,
 );
 
 /// Print `result`'s fingerprint under `key`, and assert its point count
