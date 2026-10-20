@@ -12,15 +12,6 @@ use crate::diagnostics::{LogSeverity, LogSource};
 thread_local! {
     static REPAINT_CONTEXT: std::cell::RefCell<Option<egui::Context>> =
         const { std::cell::RefCell::new(None) };
-    static PENDING_PAGE_SETUP: std::cell::RefCell<Option<PendingPageSetup>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-pub struct PendingPageSetup {
-    pub opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
-    pub setup: rspice_hardcopy_contract::HardcopySetup,
-    pub staged_mapping: StagedPrintMappingPersistence,
-    pub schematic_authority: Option<super::SchematicPageSetupAuthority>,
 }
 
 pub(super) fn register_repaint_context(context: &egui::Context) {
@@ -213,7 +204,6 @@ enum SourceResolutionPurpose {
     Open(HardcopyWorkflow),
     Select,
     Publish,
-    SavePageSetup,
 }
 
 pub fn open_hardcopy_workflow(parts: &mut HardcopyParts<'_>, workflow: HardcopyWorkflow) {
@@ -462,20 +452,6 @@ pub(super) fn poll_source_resolution(parts: &mut HardcopyParts<'_>) {
                         parts.dialog.error = Some(error);
                     }
                 }
-                SourceResolutionPurpose::SavePageSetup => {
-                    match finish_page_setup_authentication(parts, resolved) {
-                        Ok(message) => {
-                            parts.dialog.busy = false;
-                            parts.workbench.prompt(message);
-                            parts.dialog.close();
-                        }
-                        Err(error) => {
-                            parts.dialog.busy = false;
-                            clear_pending_authentication(purpose);
-                            parts.dialog.error = Some(error);
-                        }
-                    }
-                }
             }
         }
         Err(error) => {
@@ -587,20 +563,6 @@ pub(super) fn poll_source_resolution(parts: &mut HardcopyParts<'_>) {
                         parts.dialog.error = Some(error);
                     }
                 }
-                SourceResolutionPurpose::SavePageSetup => {
-                    match finish_page_setup_authentication(parts, resolved) {
-                        Ok(message) => {
-                            parts.dialog.busy = false;
-                            parts.workbench.prompt(message);
-                            parts.dialog.close();
-                        }
-                        Err(error) => {
-                            parts.dialog.busy = false;
-                            clear_pending_authentication(purpose);
-                            parts.dialog.error = Some(error);
-                        }
-                    }
-                }
             }
         }
         Err(error) => {
@@ -626,9 +588,6 @@ pub(super) fn cancel_source_resolution() {
             super::worker::cancel();
         }
     });
-    PENDING_PAGE_SETUP.with(|slot| {
-        slot.borrow_mut().take();
-    });
 }
 
 pub fn apply_open_resolved(
@@ -644,18 +603,12 @@ pub fn apply_open_resolved(
         .setup_for(resolved.authority())
         .map_err(|error| error.to_string())?
         .map(|saved| saved.setup().clone());
-    let schematic_authority = if workflow == HardcopyWorkflow::PageSetup {
-        active_schematic_page_authority(parts, &resolved)
-    } else {
-        None
-    };
     let metadata = metadata_for(parts, &resolved).map_err(|error| error.to_string())?;
     let source_candidates = parts.dialog.source_candidates.clone();
     parts
         .dialog
         .open_resolved(workflow, resolved, saved.as_ref())
         .map_err(|error| error.to_string())?;
-    parts.dialog.schematic_page_authority = schematic_authority;
     parts.dialog.metadata = Some(metadata);
     parts.dialog.source_candidates = source_candidates;
     #[cfg(not(target_arch = "wasm32"))]
@@ -673,11 +626,6 @@ fn apply_selected_resolved(
     resolved: ResolvedHardcopyDocument,
 ) -> Result<(), String> {
     let workflow = parts.dialog.workflow;
-    let schematic_authority = if workflow == HardcopyWorkflow::PageSetup {
-        active_schematic_page_authority(parts, &resolved)
-    } else {
-        None
-    };
     let saved = parts
         .model
         .workspace
@@ -692,115 +640,9 @@ fn apply_selected_resolved(
         .dialog
         .open_resolved(workflow, resolved, saved.as_ref())
         .map_err(|error| error.to_string())?;
-    parts.dialog.schematic_page_authority = schematic_authority;
     parts.dialog.metadata = Some(metadata);
     parts.dialog.source_candidates = source_candidates;
     Ok(())
-}
-
-fn active_schematic_page_authority(
-    parts: &HardcopyParts<'_>,
-    resolved: &ResolvedHardcopyDocument,
-) -> Option<super::SchematicPageSetupAuthority> {
-    use crate::state::ViewType;
-    use crate::workbench::SurfaceId;
-    use crate::workbench::hardcopy_adapters::sources::HardcopySemanticDocument;
-    use rspice_hardcopy_contract::HardcopyScope;
-
-    if parts.workbench.current_route().surface_id() != SurfaceId::Design
-        || !matches!(
-            parts.model.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
-        )
-        || !matches!(
-            resolved.semantic_document(),
-            HardcopySemanticDocument::Schematic(_)
-        )
-    {
-        return None;
-    }
-
-    let cell_view_key = parts.model.workspace.content.active_key();
-    let base_source_key = format!(
-        "project:{}:cell-view:{cell_view_key}",
-        parts.model.workspace.content.project.id().as_uuid()
-    );
-    let governed_sheet = parts
-        .model
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(&cell_view_key)
-        .and_then(|catalog| catalog.active().map(|sheet| (catalog, sheet)));
-    let governed_sheet = if let Some((catalog, sheet)) = governed_sheet {
-        if resolved.authority().scope() != &HardcopyScope::CurrentSheet
-            || resolved.source_key() != format!("{base_source_key}:sheet:{}", sheet.id())
-        {
-            return None;
-        }
-        Some(super::GovernedSheetPageAuthority {
-            cell_view_key,
-            catalog_revision: catalog.revision(),
-            sheet_id: sheet.id(),
-            sheet_revision: sheet.revision(),
-        })
-    } else {
-        if !matches!(
-            resolved.authority().scope(),
-            HardcopyScope::CurrentSheet | HardcopyScope::ActiveDocument
-        ) || resolved.source_key() != base_source_key
-        {
-            return None;
-        }
-        None
-    };
-
-    Some(super::SchematicPageSetupAuthority {
-        edit: crate::workbench::app::SchematicEditAuthority::capture(&*parts.model),
-        governed_sheet,
-    })
-}
-
-pub fn validate_schematic_page_authority(
-    model: &crate::workbench::app_state::Model,
-    authority: &super::SchematicPageSetupAuthority,
-) -> Result<(), String> {
-    let Some(governed) = &authority.governed_sheet else {
-        let active_governed_sheet = model
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&model.workspace.content.active_key())
-            .and_then(|catalog| catalog.active_sheet_id());
-        return if active_governed_sheet.is_none() {
-            authority.edit.validate(model, "Page Setup")
-        } else {
-            Err(
-                "The active schematic acquired governed sheet authority. Close and reopen Page Setup."
-                    .to_owned(),
-            )
-        };
-    };
-    if model.workspace.content.active_key() != governed.cell_view_key {
-        return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
-    }
-    let catalog = model
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(&governed.cell_view_key)
-        .ok_or_else(|| {
-            "The governed sheet catalog changed. Close and reopen Page Setup.".to_owned()
-        })?;
-    if catalog.revision() != governed.catalog_revision
-        || catalog.active_sheet_id() != Some(governed.sheet_id)
-        || catalog
-            .find(governed.sheet_id)
-            .is_none_or(|sheet| sheet.revision() != governed.sheet_revision)
-    {
-        return Err("The governed active sheet changed. Close and reopen Page Setup.".to_owned());
-    }
-    authority.edit.validate(model, "Page Setup")
 }
 
 pub fn active_retained_source_selection(
@@ -1252,7 +1094,6 @@ pub(super) fn commit_hardcopy_workflow(parts: &mut HardcopyParts<'_>) {
         None
     };
     let result = match workflow {
-        HardcopyWorkflow::PageSetup => save_page_setup(parts),
         HardcopyWorkflow::Print => {
             #[cfg(target_arch = "wasm32")]
             {
@@ -1515,101 +1356,8 @@ fn clear_pending_publication() {
 fn clear_pending_authentication(purpose: SourceResolutionPurpose) {
     match purpose {
         SourceResolutionPurpose::Publish => clear_pending_publication(),
-        SourceResolutionPurpose::SavePageSetup => {
-            PENDING_PAGE_SETUP.with(|slot| {
-                slot.borrow_mut().take();
-            });
-        }
         SourceResolutionPurpose::Open(_) | SourceResolutionPurpose::Select => {}
     }
-}
-
-fn save_page_setup(parts: &mut HardcopyParts<'_>) -> Result<PublicationCompletion, String> {
-    if PENDING_PAGE_SETUP.with(|slot| slot.borrow().is_some()) {
-        return Err("Page setup is already being saved.".to_owned());
-    }
-    let source = parts
-        .dialog
-        .resolved_document
-        .clone()
-        .ok_or_else(|| "The dialog has no source document.".to_owned())?;
-    let setup = parts
-        .dialog
-        .build_setup()
-        .map_err(|error| error.to_string())?;
-    let schematic_authority = parts.dialog.schematic_page_authority.clone();
-    if let Some(authority) = &schematic_authority {
-        validate_schematic_page_authority(parts.model, authority)?;
-    }
-    let staged_mapping = stage_print_mapping_persistence(parts, setup.print_mapping())?;
-    let prepared =
-        crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
-            parts.source_reads(),
-            source.source_key(),
-            source.authority().scope().clone(),
-        )
-        .map_err(|error| error.to_string())?;
-    let generation = parts.dialog.next_source_resolution_generation();
-    start_source_resolution(
-        prepared,
-        SourceResolutionPurpose::SavePageSetup,
-        generation,
-        source.source_key().to_owned(),
-        source.authority().scope().clone(),
-        None,
-    )?;
-    PENDING_PAGE_SETUP.with(|slot| {
-        *slot.borrow_mut() = Some(PendingPageSetup {
-            opened_source: source,
-            setup,
-            staged_mapping,
-            schematic_authority,
-        });
-    });
-    Ok(PublicationCompletion::Pending)
-}
-
-fn finish_page_setup_authentication(
-    parts: &mut HardcopyParts<'_>,
-    source: ResolvedHardcopyDocument,
-) -> Result<String, String> {
-    let pending = PENDING_PAGE_SETUP
-        .with(|slot| slot.borrow_mut().take())
-        .ok_or_else(|| "The pending page setup save was lost.".to_owned())?;
-    if source != *pending.opened_source {
-        return Err("The source document changed while page setup was being saved.".to_owned());
-    }
-    commit_authenticated_page_setup(parts, source, pending)
-}
-
-pub fn commit_authenticated_page_setup(
-    parts: &mut HardcopyParts<'_>,
-    source: ResolvedHardcopyDocument,
-    pending: PendingPageSetup,
-) -> Result<String, String> {
-    if let Some(authority) = pending.schematic_authority.as_ref() {
-        validate_schematic_page_authority(parts.model, authority)?;
-    }
-
-    let mut staged_setups = parts.model.workspace.content.hardcopy_setups.clone();
-    let outcome = staged_setups
-        .save(source.authority(), pending.setup)
-        .map_err(|error| error.to_string())?;
-
-    commit_print_mapping_persistence(parts, pending.staged_mapping)?;
-    parts.model.workspace.content.hardcopy_setups = staged_setups;
-    if outcome.disposition() != rspice_hardcopy_contract::SetupSaveDisposition::Unchanged {
-        parts.model.workspace.content.hardcopy_setups_dirty = true;
-    }
-    Ok(format!(
-        "Page setup {} for {}.",
-        match outcome.disposition() {
-            rspice_hardcopy_contract::SetupSaveDisposition::Inserted => "saved",
-            rspice_hardcopy_contract::SetupSaveDisposition::Updated => "updated",
-            rspice_hardcopy_contract::SetupSaveDisposition::Unchanged => "already matched",
-        },
-        source.authority().display_name()
-    ))
 }
 
 fn publish_print(
@@ -2039,9 +1787,6 @@ fn record_native_finalization_failure(
 
 pub(super) fn cancel_publication() {
     clear_pending_publication();
-    PENDING_PAGE_SETUP.with(|slot| {
-        slot.borrow_mut().take();
-    });
     #[cfg(target_arch = "wasm32")]
     PUBLICATION.with(|active| {
         if active.borrow_mut().take().is_some() {

@@ -294,7 +294,6 @@ impl HardcopyDialogError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardcopyWorkflow {
-    PageSetup,
     Print,
     Export,
 }
@@ -302,7 +301,6 @@ pub enum HardcopyWorkflow {
 impl HardcopyWorkflow {
     pub(crate) const fn title(self) -> &'static str {
         match self {
-            Self::PageSetup => "Page setup",
             Self::Print => "Print and hardcopy",
             Self::Export => "Export active view",
         }
@@ -310,7 +308,6 @@ impl HardcopyWorkflow {
 
     pub(crate) const fn primary_label(self) -> &'static str {
         match self {
-            Self::PageSetup => "Save page setup",
             Self::Print => "Print",
             Self::Export => "Export hardcopy",
         }
@@ -401,20 +398,6 @@ pub(crate) enum HardcopySubflowSnapshot {
     },
 }
 
-#[derive(Debug, Clone)]
-pub struct GovernedSheetPageAuthority {
-    pub cell_view_key: String,
-    pub catalog_revision: u64,
-    pub sheet_id: crate::state::SheetId,
-    pub sheet_revision: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct SchematicPageSetupAuthority {
-    pub edit: crate::workbench::app::SchematicEditAuthority,
-    pub governed_sheet: Option<GovernedSheetPageAuthority>,
-}
-
 /// Runtime-only dialog draft. Source identity and content revision are sealed
 /// when the workflow opens; publication re-resolves them before execution and
 /// fails closed if the active document changed underneath the preview.
@@ -432,7 +415,6 @@ pub struct HardcopyDialogState {
     pub source: Option<ActiveHardcopySource>,
     pub(crate) content_extent: Option<ContentExtent>,
     pub resolved_document: Option<std::sync::Arc<ResolvedHardcopyDocument>>,
-    pub(crate) schematic_page_authority: Option<SchematicPageSetupAuthority>,
     /// A drawing sheet opened with nothing saved: how it was drawn, and how
     /// the dialog last laid it out for its target. Boxed: two whole setups
     /// would hold the dialog over its inline stack budget.
@@ -568,11 +550,10 @@ impl HardcopyDialogState {
             section: HardcopySection::default(),
             region: HardcopyRegion::default(),
             subflow_snapshot: None,
-            workflow: HardcopyWorkflow::PageSetup,
+            workflow: HardcopyWorkflow::Print,
             source: None,
             content_extent: None,
             resolved_document: None,
-            schematic_page_authority: None,
             unsaved_sheet: None,
             source_candidates: Vec::new(),
             paper: PaperDraft::from_paper(physical.paper(), display_unit),
@@ -669,7 +650,6 @@ impl HardcopyDialogState {
         draft.source = Some(source);
         draft.content_extent = Some(extent);
         draft.resolved_document = None;
-        draft.schematic_page_authority = None;
         draft.source_candidates.clear();
         draft.preview = None;
         draft.preview_adjacent = None;
@@ -727,7 +707,6 @@ impl HardcopyDialogState {
         self.source = None;
         self.content_extent = None;
         self.resolved_document = None;
-        self.schematic_page_authority = None;
         self.unsaved_sheet = None;
         self.source_candidates.clear();
         self.error = None;
