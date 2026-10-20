@@ -53,7 +53,7 @@ use super::measure::{
     ErrorFunctionNorm, ExtremaOutput, LegacyFracDelayTracker, MeasureConditionDirection,
     MeasureData, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType,
     MeasureWindow, TrigSpec, TriggerEvent, WhenCondition, accepted_row_at_match,
-    accepted_row_secant_slope, canonical_measure_signal_name,
+    accepted_row_secant_slope, canonical_measure_signal_name, clipped_trapezoid,
 };
 use super::transient::{TransientDeviceOpTrace, TransientResult};
 use crate::Value;
@@ -3141,10 +3141,18 @@ fn evaluate_equation_measurements_with_observations(
                 continue;
             };
             let mut observation = program.observation.take();
+            // Impulses accrue on (previous, current] only from the first
+            // sample inside the window: the state keeps an outside sample to
+            // clip the edge interval, but that sample seeds no impulse.
             let previous_axis = match &state {
-                LiveMeasureState::IntegralStatistic { previous, .. } => {
-                    previous.map(|(axis, _)| axis)
-                }
+                LiveMeasureState::IntegralStatistic {
+                    previous,
+                    lower,
+                    upper,
+                    ..
+                } => previous.map(|(axis, _)| axis).filter(|&axis| {
+                    !starts_segment && live_axis_in_window(axis, *lower, *upper, 1.0e-12)
+                }),
                 _ => None,
             };
             let query_axis = match &state {
@@ -4215,23 +4223,39 @@ impl LiveMeasureState {
                 width,
                 previous,
             } => {
-                if !live_axis_in_window(axis_value, *lower, *upper, 1.0e-12) {
+                // The same intervals the final measurement integrates: a pair
+                // straddling a sweep-segment start is not part of the
+                // waveform, and a window edge between samples cuts its
+                // interval, so a sample outside the window still bounds one.
+                if starts_segment {
                     *previous = None;
-                    return Ok(None);
                 }
-                let value = signal.value(row, signals, reads, params)?;
-                if let Some((previous_axis, previous_value)) = *previous {
-                    let dx = (axis_value - previous_axis).abs();
-                    *width += dx;
-                    *integral += match mode {
-                        LiveIntegralMode::Average => 0.5 * (value + previous_value) * dx,
-                        LiveIntegralMode::Rms => {
-                            0.5 * (value * value + previous_value * previous_value) * dx
-                        }
-                        LiveIntegralMode::Integral { .. } => 0.5 * (value + previous_value) * dx,
-                    };
+                let in_window = live_axis_in_window(axis_value, *lower, *upper, 1.0e-12);
+                let value = match signal.value(row, signals, reads, params) {
+                    Ok(value) => value,
+                    Err(_) if !in_window => {
+                        *previous = None;
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error),
+                };
+                let mut contributed = false;
+                if let Some(last) = *previous
+                    && let Some(piece) =
+                        clipped_trapezoid(last, (axis_value, value), *lower, *upper, |y| match mode
+                        {
+                            LiveIntegralMode::Rms => y * y,
+                            LiveIntegralMode::Average | LiveIntegralMode::Integral { .. } => y,
+                        })
+                {
+                    *width += piece.width;
+                    *integral += piece.integral;
+                    contributed = true;
                 }
                 *previous = Some((axis_value, value));
+                if !in_window && !contributed {
+                    return Ok(None);
+                }
                 Ok(match mode {
                     LiveIntegralMode::Average if *width > 0.0 => Some(*integral / *width),
                     LiveIntegralMode::Rms if *width > 0.0 => Some((*integral / *width).sqrt()),
@@ -11387,7 +11411,11 @@ mod tests {
         };
         let expected_average = [0.0, 6.5, 4.5, 4.5, 8.5, 9.5];
         for (actual, expected) in trace("combined_live").iter().zip(expected_average) {
-            assert!((actual - expected).abs() < 1.0e-12);
+            assert!(
+                (actual - expected).abs() < 1.0e-12,
+                "live {:?}",
+                trace("combined_live")
+            );
         }
         assert_eq!(trace("barrier_live"), &vec![-7.0; 6]);
 
@@ -11396,6 +11424,42 @@ mod tests {
         assert_eq!(results[1].value, Some(9.5));
         assert!(!results[2].passed, "barrier event must not bridge segments");
         assert_eq!(results[3].value, Some(-7.0));
+    }
+
+    #[test]
+    fn live_dc_average_cuts_window_edges_between_samples_like_the_result() {
+        let netlist = Netlist::parse(
+            "live windowed DC average\n\
+             V1 out 0 0\n\
+             .dc V1 0 3 1\n\
+             .measure dc windowed AVG V(out) FROM=0.5 TO=2.5\n\
+             .measure dc windowed_live EQN windowed\n\
+             .end\n",
+        )
+        .expect("windowed live deck parses");
+        let sweep = [(0.0, 0.0), (1.0, 1.0), (2.0, 4.0), (3.0, 9.0)]
+            .into_iter()
+            .map(|(axis, voltage)| {
+                let mut point = SimulationResult::new(1, 0);
+                point.node_voltages = vec![0.0, voltage];
+                point.node_names = vec!["0".to_string(), "out".to_string()];
+                (axis, point)
+            })
+            .collect::<Vec<_>>();
+
+        // (0.375 + 2.5 + 2.625) / 2: the window edges at 0.5 and 2.5 cut the
+        // first and last intervals, which the live trace must count too.
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(results[0].value, Some(2.75));
+        let traces = evaluate_dc_equation_measurements(&netlist, &sweep)
+            .expect("windowed DC equation traces evaluate");
+        let live = &traces
+            .iter()
+            .find(|trace| trace.name.eq_ignore_ascii_case("windowed_live"))
+            .expect("live trace")
+            .values;
+        let last = *live.last().expect("live trace has rows");
+        assert!((last - 2.75).abs() < 1.0e-12, "live {live:?}");
     }
 
     #[test]

@@ -2129,9 +2129,9 @@ impl MeasureEngine {
     }
 }
 
-struct WindowedIntegral {
-    integral: Value,
-    width: Value,
+pub(crate) struct WindowedIntegral {
+    pub(crate) integral: Value,
+    pub(crate) width: Value,
 }
 
 /// Trapezoid integral of `integrand(signal)` over the axis window
@@ -2168,28 +2168,53 @@ fn windowed_trapezoid(
         if segment_starts.binary_search(&index).is_ok() {
             continue;
         }
-        let (x0, x1) = (axis[index - 1], axis[index]);
-        let (y0, y1) = (signal[index - 1], signal[index]);
-        let start = x0.min(x1).max(lower);
-        let end = x0.max(x1).min(upper);
-        let span = end - start;
-        if span.is_nan() || span <= 0.0 {
+        let Some(piece) = clipped_trapezoid(
+            (axis[index - 1], signal[index - 1]),
+            (axis[index], signal[index]),
+            lower,
+            upper,
+            &integrand,
+        ) else {
             continue;
-        }
-        let at = |x: Value| {
-            if x == x0 {
-                y0
-            } else if x == x1 {
-                y1
-            } else {
-                y0 + (y1 - y0) * ((x - x0) / (x1 - x0))
-            }
         };
-        integral += 0.5 * (integrand(at(start)) + integrand(at(end))) * span;
-        width += span;
+        integral += piece.integral;
+        width += piece.width;
         reached = true;
     }
     reached.then_some(WindowedIntegral { integral, width })
+}
+
+/// One interval's share of [`windowed_trapezoid`]: the trapezoid of
+/// `integrand(signal)` over the part of `[x0, x1]` inside `[lower, upper]`,
+/// with the signal interpolated where an edge cuts the interval. `None` when
+/// the interval and the window do not overlap. The live `.MEAS` aggregates
+/// share it, so a trace's last value is the measured one.
+pub(crate) fn clipped_trapezoid(
+    (x0, y0): (Value, Value),
+    (x1, y1): (Value, Value),
+    lower: Value,
+    upper: Value,
+    integrand: impl Fn(Value) -> Value,
+) -> Option<WindowedIntegral> {
+    let start = x0.min(x1).max(lower);
+    let end = x0.max(x1).min(upper);
+    let span = end - start;
+    if span.is_nan() || span <= 0.0 {
+        return None;
+    }
+    let at = |x: Value| {
+        if x == x0 {
+            y0
+        } else if x == x1 {
+            y1
+        } else {
+            y0 + (y1 - y0) * ((x - x0) / (x1 - x0))
+        }
+    };
+    Some(WindowedIntegral {
+        integral: 0.5 * (integrand(at(start)) + integrand(at(end))) * span,
+        width: span,
+    })
 }
 
 #[derive(Clone, Copy)]
