@@ -129,11 +129,9 @@ impl RSpiceApp {
                         summary_card(ui, &info);
                         ui.add_space(tokens::SP_4);
                         ui.label(
-                            egui::RichText::new(
-                                "key will be stored at %APPDATA%\\rspice\\license.key — yours to keep, works offline",
-                            )
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(c.text_faint),
+                            egui::RichText::new(key_storage_line())
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(c.text_faint),
                         );
                     }
                 }
@@ -221,6 +219,24 @@ impl RSpiceApp {
     }
 }
 
+/// Where Activate keeps the key on this platform: the file it writes on the
+/// desktop, this browser on the web.
+fn key_storage_line() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        "Activate keeps the key in this browser; it works offline.".to_owned()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    match license::license_file_path() {
+        Some(path) => format!(
+            "Activate keeps the key in {}; it works offline.",
+            path.display()
+        ),
+        None => "This system has no configuration folder, so the key lasts only for this session."
+            .to_owned(),
+    }
+}
+
 /// The verified summary card: grant rows + feature chips.
 fn summary_card(ui: &mut egui::Ui, info: &LicenseInfo) {
     let t = Tokens::get(ui.ctx());
@@ -289,4 +305,63 @@ fn feature_chip(ui: &mut egui::Ui, label: &str) {
                     .color(c.text_dim),
             );
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every text the dialog published for a reader to hear.
+    fn shown_texts(app: &mut RSpiceApp) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut update = None;
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.render_license_dialog(ui.ctx()),
+            );
+            update = output.platform_output.accesskit_update;
+        }
+        update
+            .expect("the frame published its accessibility tree")
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value().or_else(|| node.label()))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// A verified key says where Activate will keep it on this platform:
+    /// the file it writes, not a Windows variable on every system.
+    #[test]
+    fn a_verified_key_names_where_this_platform_keeps_it() {
+        let mut app = RSpiceApp::test_instance();
+        app.open_license_dialog();
+        app.state.dialogs.license_dialog.text = license::SAMPLE_KEY.to_owned();
+        app.verify_license_input();
+        let shown = shown_texts(&mut app);
+        assert!(
+            !shown.iter().any(|text| text.contains("%APPDATA%")),
+            "no platform's location is named by another's variable: {shown:#?}"
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let file = license::license_file_path()
+                .expect("the test host has a configuration folder")
+                .display()
+                .to_string();
+            assert!(
+                shown.iter().any(|text| text.contains(&file)),
+                "the dialog names {file}: {shown:#?}"
+            );
+        }
+    }
 }
