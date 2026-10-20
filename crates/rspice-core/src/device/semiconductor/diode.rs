@@ -280,6 +280,22 @@ impl ResolvedDiodeJunction {
     }
 }
 
+/// Which junctions an instance evaluates once ngspice's RSW splits the
+/// sidewall onto its own node (`dio.c:58`, `diosetup.c:396-408`): the bottom
+/// junction stays behind RS on the anode, and the sidewall junction sits
+/// behind RSW on a private node, each with its own voltage, limiter and
+/// charge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum DiodeSidewallRole {
+    /// Bottom and sidewall share one junction voltage.
+    #[default]
+    Combined,
+    /// The bottom junction of a split diode.
+    Bottom,
+    /// The sidewall junction of a split diode.
+    Sidewall,
+}
+
 /// Semiconductor diode with Shockley equation model
 #[derive(Debug, Clone)]
 pub struct Diode {
@@ -397,6 +413,8 @@ pub struct Diode {
     /// is ngspice's spelling of TCV (`dio.c:121`), so the law it selects
     /// depends on the dialect chosen after the card is parsed.
     tbv1_given: bool,
+    /// Junctions this instance evaluates; see [`DiodeSidewallRole`].
+    sidewall_role: DiodeSidewallRole,
     /// Quadratic temperature coefficient for the reverse breakdown voltage
     /// (Xyce TBV2, in 1/C^2).
     pub tbv2: Value,
@@ -662,6 +680,7 @@ impl Diode {
             native_xyce_transient_convergence: false,
             tbv1: 0.0,
             tbv1_given: false,
+            sidewall_role: DiodeSidewallRole::Combined,
             tbv2: 0.0,
 
             // Flicker noise off by default (diosetup.c: fNcoef 0, fNexp 1).
@@ -688,6 +707,37 @@ impl Diode {
             temperature_breakdown_voltage: None,
             indices: DiodeIndices::default(),
         }
+    }
+
+    /// Split off ngspice's RSW sidewall junction: this instance keeps the
+    /// bottom junction and the returned twin evaluates the sidewall on
+    /// `sidewall_node`, behind the RSW resistor the caller places from the
+    /// anode. Call after temperature processing, so both keep the breakdown
+    /// voltage diotemp.c matches against the total saturation current. The
+    /// twin carries no series resistance of its own.
+    pub(crate) fn split_rsw_sidewall(&mut self, name: String, sidewall_node: NodeId) -> Diode {
+        let mut sidewall = self.clone();
+        sidewall.name = name;
+        sidewall.node_anode = sidewall_node;
+        sidewall.rs = 0.0;
+        sidewall.sidewall_role = DiodeSidewallRole::Sidewall;
+        sidewall.candidate_eval_valid = false;
+        self.sidewall_role = DiodeSidewallRole::Bottom;
+        self.candidate_eval_valid = false;
+        sidewall
+    }
+
+    /// Operating RSW of a split sidewall: ngspice scales its conductance by
+    /// PJ·M and divides by the RS temperature polynomial (diotemp.c:262-268).
+    /// Call after temperature processing and perimeter scaling.
+    pub(crate) fn rsw_resistance(&self, rsw: Value) -> Option<Value> {
+        let factor = DiodeTemperatureModel::quadratic_factor(
+            self.temperature_model.trs1,
+            self.temperature_model.trs2,
+            self.breakdown_temperature_delta.unwrap_or(0.0),
+        );
+        let resistance = rsw * factor / self.sidewall_perimeter;
+        (resistance.is_finite() && resistance > 0.0).then_some(resistance)
     }
 
     /// The deck marked this instance `OFF`, so its first stamped
@@ -727,10 +777,26 @@ impl Diode {
     /// Breakdown diodes keep the raw voltage: ngspice limits those through
     /// a dedicated branch around `-BV`, and clamping them with the plain
     /// forward law would fight the breakdown exponential.
+    /// The `(vte, Vcrit)` pair the junction limiter is written against. An
+    /// RSW sidewall limits on `NS·vt` and its own `tVcritSW`, and the bottom
+    /// junction it leaves behind on the bottom saturation current alone
+    /// (diotemp.c:201-207, dioload.c:303-304).
+    fn limiter_thermal_and_critical_voltages(&self) -> (Value, Value) {
+        let (emission, saturation) = match self.sidewall_role {
+            DiodeSidewallRole::Combined => (self.n, self.vcrit_saturation_current()),
+            DiodeSidewallRole::Bottom => (self.n, self.is),
+            DiodeSidewallRole::Sidewall => (
+                self.sidewall_emission_coefficient,
+                self.sidewall_saturation_current * self.sidewall_perimeter,
+            ),
+        };
+        let vte = emission * self.vt;
+        let vcrit = vte * (vte / (std::f64::consts::SQRT_2 * saturation.max(1e-300))).ln();
+        (vte, vcrit)
+    }
+
     fn limited_linearization(&self, vd_raw: Value) -> (Value, Value, Value) {
-        let vte = self.n * self.vt;
-        let vcrit = vte
-            * (vte / (std::f64::consts::SQRT_2 * self.vcrit_saturation_current().max(1e-300))).ln();
+        let (vte, vcrit) = self.limiter_thermal_and_critical_voltages();
 
         // dioload.c's MODEINITJCT arms assign the junction voltage outright
         // rather than handing a reference to pnjlim: an instance the deck
@@ -1299,9 +1365,7 @@ impl Diode {
     /// side-effect-free preview of that load.
     #[inline]
     pub(crate) fn limited_junction_voltage_for(&self, vd_raw: Value) -> Value {
-        let vte = self.n * self.vt;
-        let vcrit = vte
-            * (vte / (std::f64::consts::SQRT_2 * self.vcrit_saturation_current().max(1e-300))).ln();
+        let (vte, vcrit) = self.limiter_thermal_and_critical_voltages();
         let limit_junction =
             |candidate: Value, previous: Value, thermal: Value, critical: Value| {
                 if self.xyce_dialect {
@@ -1707,26 +1771,36 @@ impl Diode {
     pub fn junction_charge_and_capacitance(&self, vd: Value) -> (Value, Value) {
         let mut qd = 0.0;
         let mut capd = 0.0;
-        let (bottom_q, bottom_c) = Self::depletion_charge_and_capacitance(
-            vd,
-            self.cj0,
-            self.vj,
-            self.bottom_grading_coefficient(),
-            self.bottom_depletion_coefficient(),
-        );
-        qd += bottom_q;
-        capd += bottom_c;
+        // A split RSW sidewall stores only its own depletion charge; the
+        // bottom junction keeps everything else (dioload.c:592-600).
+        let bottom = self.sidewall_role != DiodeSidewallRole::Sidewall;
+        if bottom {
+            let (bottom_q, bottom_c) = Self::depletion_charge_and_capacitance(
+                vd,
+                self.cj0,
+                self.vj,
+                self.bottom_grading_coefficient(),
+                self.bottom_depletion_coefficient(),
+            );
+            qd += bottom_q;
+            capd += bottom_c;
+        }
 
-        let sidewall_cj0 = self.sidewall_cj0 * self.sidewall_perimeter;
-        let (sidewall_q, sidewall_c) = Self::depletion_charge_and_capacitance(
-            vd,
-            sidewall_cj0,
-            self.sidewall_vj,
-            self.sidewall_m,
-            self.sidewall_fc,
-        );
-        qd += sidewall_q;
-        capd += sidewall_c;
+        if self.sidewall_role != DiodeSidewallRole::Bottom {
+            let sidewall_cj0 = self.sidewall_cj0 * self.sidewall_perimeter;
+            let (sidewall_q, sidewall_c) = Self::depletion_charge_and_capacitance(
+                vd,
+                sidewall_cj0,
+                self.sidewall_vj,
+                self.sidewall_m,
+                self.sidewall_fc,
+            );
+            qd += sidewall_q;
+            capd += sidewall_c;
+        }
+        if !bottom {
+            return (qd, capd);
+        }
 
         if self.tt > 0.0 {
             // Both reference implementations form diffusion charge from the
@@ -2055,6 +2129,15 @@ impl Diode {
     /// switching thresholds, including the dialect's recombination ordering
     /// and the GMIN contribution inside Xyce's forward injection knee.
     fn current_components_before_knees(&self, vd: Value, gmin: Value) -> [(Value, Value); 3] {
+        let [bottom, sidewall, recombination] = self.combined_current_components(vd, gmin);
+        match self.sidewall_role {
+            DiodeSidewallRole::Combined => [bottom, sidewall, recombination],
+            DiodeSidewallRole::Bottom => [bottom, (0.0, 0.0), recombination],
+            DiodeSidewallRole::Sidewall => [(0.0, 0.0), sidewall, (0.0, 0.0)],
+        }
+    }
+
+    fn combined_current_components(&self, vd: Value, gmin: Value) -> [(Value, Value); 3] {
         let (mut bottom_i, mut bottom_g) =
             self.exponential_current_and_conductance(vd, self.bottom_saturation_current(), self.n);
         let recombination = self.recombination_current_and_conductance(vd);
@@ -2149,7 +2232,10 @@ impl Diode {
         }
         let isat = self.sidewall_saturation_current * self.sidewall_perimeter;
         if self.sidewall_emission_given {
-            return self.junction_branch(vd, isat, self.sidewall_emission_coefficient, true);
+            // A sidewall split onto its own RSW node has no breakdown arm
+            // (dioload.c:360: "breakdown, but not for separate sidewall diode").
+            let breakdown = self.sidewall_role != DiodeSidewallRole::Sidewall;
+            return self.junction_branch(vd, isat, self.sidewall_emission_coefficient, breakdown);
         }
         if self.xyce_dialect {
             // Already merged into the bottom junction; see

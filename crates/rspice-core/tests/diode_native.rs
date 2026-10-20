@@ -213,6 +213,78 @@ fn diode_tbv1_is_ngspices_tcv_outside_the_xyce_dialect() {
     }
 }
 
+#[test]
+fn diode_rsw_puts_the_sidewall_behind_its_own_resistance_like_ngspice46() {
+    // ngspice-46 (`set numdgt=12`): RSW gives the sidewall a private node
+    // (diosetup.c:396-408) behind RSW/(PJ*M), scaled by the RS temperature
+    // polynomial (diotemp.c:262-268). The sidewall then limits, conducts and
+    // stores charge on its own voltage and has no breakdown arm
+    // (dioload.c:360, 451), while the bottom keeps RS, TT and breakdown.
+    // Without RSW, d2 is d1: -1.32377159496e-02 A.
+    let deck = "* diode RSW sidewall resistance\n\
+                .options reltol=1e-7 abstol=1e-18 vntol=1e-10\n\
+                .temp 60\n\
+                v1 a1 0 dc 0.8\n\
+                d1 a1 0 m1 pj=10\n\
+                v2 a2 0 dc 0.8\n\
+                d2 a2 0 m2 pj=10\n\
+                v3 a3 0 dc 0.7 ac 1\n\
+                d3 a3 0 m3 pj=4 area=2 m=3\n\
+                v4 a4 0 dc -6\n\
+                d4 a4 0 m4 pj=10\n\
+                .model m1 d(is=1e-14 jsw=1e-14 ns=1.2 rs=10)\n\
+                .model m2 d(is=1e-14 jsw=1e-14 ns=1.2 rs=10 rsw=100)\n\
+                .model m3 d(is=1e-14 jsw=1e-13 ns=1.3 rs=5 rsw=50 cjo=1p cjsw=2p tt=1n trs=1e-3 ikp=1e-3)\n\
+                .model m4 d(is=1e-14 jsw=1e-12 ns=1.2 rs=10 rsw=100 bv=5 ibv=1u)\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("RSW deck parses");
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let config = SimulationConfig::default().with_spice_dialect(dialect);
+        let result = Engine::new(config.clone())
+            .run_dc_op(&netlist)
+            .expect("RSW deck converges");
+        // The diode keeps the exact SI k/q in every non-Xyce dialect. Against
+        // ngspice's CODATA 2014 pair that moves BestAvailable's forward
+        // currents by up to 1e-5, and the breakdown exponent (about 20 at
+        // d4) amplifies it to 1.5e-6 in both, with or without RSW.
+        let rel_tol: f64 = if dialect == SpiceDialect::Ngspice {
+            1.0e-6
+        } else {
+            2.0e-5
+        };
+        for (branch, expected, tolerance) in [
+            ("v1", -1.323_771_594_96e-2, rel_tol),
+            ("v2", -2.006_922_698_41e-2, rel_tol),
+            ("v3", -5.259_210_586_26e-2, rel_tol),
+            ("v4", 5.100_516_849_799e-2, rel_tol.max(5.0e-6)),
+        ] {
+            assert_close(
+                &format!("{dialect:?} i({branch})"),
+                branch_current(&result, branch),
+                expected,
+                tolerance,
+                0.0,
+            );
+        }
+        let point = Engine::new(config)
+            .run_ac(&netlist, &[1.0e6])
+            .expect("RSW AC converges")
+            .pop()
+            .expect("one AC point");
+        let index = point
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("v3"))
+            .expect("v3 branch");
+        let expected = rspice_core::Complex64::new(-7.425_731_010_88e-1, -1.903_478_490_23e-3);
+        assert!(
+            (point.currents[index] - expected).norm() <= rel_tol * expected.norm(),
+            "{dialect:?} AC i(v3): {} against ngspice {expected}",
+            point.currents[index]
+        );
+    }
+}
+
 fn isr_reverse_branch_current(dialect: SpiceDialect, voltage: f64) -> f64 {
     let deck = format!(
         "* diode ISR/NR dialect oracle\n\

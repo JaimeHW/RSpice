@@ -6927,6 +6927,48 @@ impl Engine {
                         diode.set_temperature(temp_k, tnom_k);
                     }
 
+                    // dionoise.c heats the RS/RSW thermal sources by the
+                    // instance offset: DTEMP directly, or with TEMP given,
+                    // temp − CKTtemp + tnom in Celsius terms (ngspice's
+                    // quirk, mirrored).
+                    let noise_dtemp = if instance_param(instance_params, &["TEMP"]).is_some() {
+                        temp_k - self.config.temperature + netlist.options.tnom.unwrap_or(27.0)
+                    } else {
+                        temp_k - self.config.temperature
+                    };
+
+                    // ngspice gives the sidewall a private node behind RSW
+                    // (dio.c:58, diosetup.c:396-408): the junction splits
+                    // into a bottom diode behind RS and a sidewall diode
+                    // behind RSW. Xyce has no RSW. A JSW without its own NS
+                    // stays on the shared junction voltage: dioload.c still
+                    // evaluates that sidewall current at the bottom voltage.
+                    let sidewall = if self.config.spice_dialect != SpiceDialect::Xyce
+                        && (diode.sidewall_current_given || diode.sidewall_cj0 != 0.0)
+                        && (diode.sidewall_emission_given || !diode.sidewall_current_given)
+                        && let Some(rsw) =
+                            diode_model_param(&model_params, "RSW").filter(|rsw| *rsw > 0.0)
+                        && let Some(resistance) = diode.rsw_resistance(rsw)
+                    {
+                        let swint =
+                            circuit.get_or_create_node(&format!("{}.__swint", element.name));
+                        circuit.resistors.add_device_series(
+                            &element.name,
+                            format!("{}.__rsw", element.name),
+                            anode,
+                            swint,
+                            resistance,
+                        );
+                        if noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(noise_dtemp);
+                        }
+                        Some(diode.split_rsw_sidewall(format!("{}.__sw", element.name), swint))
+                    } else {
+                        None
+                    };
+
                     // Series resistance participates in the solution as an
                     // explicit resistor between the anode and an internal
                     // node (the junction model itself never stamps RS). Only
@@ -6945,15 +6987,6 @@ impl Engine {
                         );
                         diode.node_anode = aint;
                         diode.rs = 0.0;
-                        // dionoise.c heats the RS thermal source by the
-                        // instance offset: DTEMP directly, or with TEMP
-                        // given, temp − CKTtemp + tnom in Celsius terms
-                        // (ngspice's quirk, mirrored).
-                        let noise_dtemp = if instance_param(instance_params, &["TEMP"]).is_some() {
-                            temp_k - self.config.temperature + netlist.options.tnom.unwrap_or(27.0)
-                        } else {
-                            temp_k - self.config.temperature
-                        };
                         if noise_dtemp != 0.0 {
                             circuit
                                 .resistors
@@ -6962,6 +6995,9 @@ impl Engine {
                     }
 
                     circuit.diodes.add(diode);
+                    if let Some(sidewall) = sidewall {
+                        circuit.diodes.add(sidewall);
+                    }
                 }
                 ElementKind::Bjt {
                     model,
