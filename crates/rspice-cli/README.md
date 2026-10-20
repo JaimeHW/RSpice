@@ -865,7 +865,10 @@ full 40-character hash to stamp it when building from a source archive.
 Every JSON document the CLI writes, from `health`, a fatal diagnostic,
 `--summary` or `--log-format json`, carries the process `run_id`, so one run's
 logs, failure and summary can be correlated afterwards. The documents below
-also carry the tool identity, a `schema` name and `schema_version` 1:
+also carry the tool identity, a `schema` name and `schema_version` 1, except
+`rspice.compile_va`, which is at version 2 (a parameter's `default` is a string
+for a string parameter and `null` for a default computed from other
+parameters):
 
 | Schema | Written by |
 | :--- | :--- |

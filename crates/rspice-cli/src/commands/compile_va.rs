@@ -175,8 +175,11 @@ pub fn execute(
 
     // Machine-readable interface summary
     if let Some(ref output_path) = args.output {
-        let json = crate::observability::envelope(
+        // Version 2: a parameter's `default` is a string for a string
+        // parameter and null for a default computed from other parameters.
+        let json = crate::observability::versioned_envelope(
             "rspice.compile_va",
+            2,
             serde_json::json!({
                 "source": args.input.display().to_string(),
                 "model": model.name,

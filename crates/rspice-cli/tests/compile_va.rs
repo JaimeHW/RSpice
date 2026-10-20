@@ -152,7 +152,8 @@ fn module_selection_quiet_and_versioned_interface_work_together() {
     let json = common::read_json(&result);
     assert_eq!(json["model"], "second");
     assert_eq!(json["schema"], "rspice.compile_va");
-    assert_eq!(json["schema_version"], 1);
+    // Version 2: a parameter's default changed type (string or null).
+    assert_eq!(json["schema_version"], 2);
     assert!(json["run_id"].is_string());
     assert_eq!(json["tool"]["name"], "rspice");
 }

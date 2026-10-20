@@ -64,10 +64,19 @@ pub fn compiler_diagnostic_text(diagnostic: &rspice_veriloga::SourceCompileDiagn
 }
 
 /// Add version and process correlation to a command's existing JSON fields.
-pub fn envelope(schema: &str, mut payload: serde_json::Value) -> serde_json::Value {
+pub fn envelope(schema: &str, payload: serde_json::Value) -> serde_json::Value {
+    versioned_envelope(schema, 1, payload)
+}
+
+/// [`envelope`] for a schema whose fields have changed shape since version 1.
+pub fn versioned_envelope(
+    schema: &str,
+    version: u32,
+    mut payload: serde_json::Value,
+) -> serde_json::Value {
     if let Some(object) = payload.as_object_mut() {
         object.insert("schema".into(), schema.into());
-        object.insert("schema_version".into(), 1.into());
+        object.insert("schema_version".into(), version.into());
         object.insert("run_id".into(), run_id().into());
         object.insert(
             "tool".into(),
