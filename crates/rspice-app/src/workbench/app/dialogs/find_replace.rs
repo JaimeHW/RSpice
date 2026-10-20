@@ -254,15 +254,7 @@ pub(in crate::workbench) fn render_find_replace_dialog(
     let count: usize = found.as_ref().map_or(0, |found| {
         found.iter().map(|document| document.matches.len()).sum()
     });
-    let summary = match &found {
-        Ok(found) if count > 0 => Ok(Some(match found.len() {
-            1 => format!("{count} {}", plural(count, "match", "matches")),
-            documents => format!("{count} matches in {documents} cell views"),
-        })),
-        Ok(_) if dialog.find.is_empty() => Ok(None),
-        Ok(_) => Ok(Some("No matches".to_owned())),
-        Err(reason) => Err(reason.clone()),
-    };
+    let summary = find_replace_summary(&dialog.find, &found, count);
     let status = match &summary {
         Ok(Some(text)) => Ok(Some(text.as_str())),
         Ok(None) => Ok(None),
@@ -314,6 +306,28 @@ pub(in crate::workbench) fn render_find_replace_dialog(
     }
 }
 
+/// What the footer says about the draft: how many matches, that there are
+/// none, or why Replace all is refused. A form nobody has typed into has
+/// refused nothing, so it states what Replace all is waiting for, without the
+/// failure mark.
+fn find_replace_summary(
+    find: &str,
+    found: &Result<Vec<DocumentMatches>, String>,
+    count: usize,
+) -> Result<Option<String>, String> {
+    if find.is_empty() {
+        return Ok(Some("Enter the text to find.".to_owned()));
+    }
+    match found {
+        Ok(found) if count > 0 => Ok(Some(match found.len() {
+            1 => format!("{count} {}", plural(count, "match", "matches")),
+            documents => format!("{count} matches in {documents} cell views"),
+        })),
+        Ok(_) => Ok(Some("No matches".to_owned())),
+        Err(reason) => Err(reason.clone()),
+    }
+}
+
 fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
     if count == 1 { one } else { many }
 }
@@ -348,6 +362,25 @@ mod tests {
         component.name = name.to_owned();
         component.value = value.to_owned();
         component
+    }
+
+    /// A form nobody has typed into says what Replace all waits for, as a
+    /// fact: it refused nothing, so it carries no failure mark. A pattern
+    /// that does not parse is still a refusal.
+    #[test]
+    fn a_pristine_form_states_a_reason_not_a_refusal() {
+        let mut state = AppState::default();
+        open_find_replace(&mut state);
+        let found = find_replace_matches(&state);
+        assert!(found.is_err(), "the query itself refuses an empty find");
+        assert_eq!(
+            find_replace_summary("", &found, 0),
+            Ok(Some("Enter the text to find.".to_owned()))
+        );
+        state.design.find_replace.options.regex = true;
+        ask(&mut state, "R(", "", FindScope::CellView);
+        let found = find_replace_matches(&state);
+        assert!(find_replace_summary("R(", &found, 0).is_err());
     }
 
     fn ask(state: &mut AppState, find: &str, replace: &str, scope: FindScope) {
