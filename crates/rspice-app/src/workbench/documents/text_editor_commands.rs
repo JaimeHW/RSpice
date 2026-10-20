@@ -20,8 +20,9 @@ use crate::workbench::framework::requests::{
 struct GoToLineState {
     open: bool,
     input: String,
-    error: Option<String>,
-    focus_input: bool,
+    /// The field has been given the caret's line. It is given it once, so a
+    /// field the reader clears stays clear.
+    seeded: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -297,8 +298,7 @@ pub(crate) fn queue_go_to_line(context: &egui::Context, editor_id: Id) {
         .data_mut(|data| data.get_temp::<GoToLineState>(state_id))
         .unwrap_or_default();
     state.open = true;
-    state.focus_input = true;
-    state.error = None;
+    state.seeded = false;
     context.data_mut(|data| data.insert_temp(state_id, state));
 }
 
@@ -367,7 +367,14 @@ pub(crate) fn take_reveal_line(ui: &Ui, editor_id: Id, source: &str) -> Option<u
 
 /// Render the shared line-navigation dialog once Go to line has been asked
 /// for. Returns the accepted one-based logical line exactly once.
+///
+/// It is the kit's command form, placed like every other dialog: one Line
+/// field, its range or its refusal under it, Enter goes and Esc cancels. It
+/// was an egui window with egui's own chrome, opened at the top left over
+/// the title and menu bar, with its buttons inside the body.
 pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<usize> {
+    use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
+
     let state_id = editor_id.with("go-to-line-state");
     let mut state = ui
         .ctx()
@@ -377,86 +384,55 @@ pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<us
         return None;
     }
     let line_count = source.lines().count().max(1) + usize::from(source.ends_with('\n'));
-    if state.input.is_empty() {
+    if !state.seeded {
         state.input = current_one_based_line(ui.ctx(), editor_id, source).to_string();
+        state.seeded = true;
     }
+    let target = state
+        .input
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|line| (1..=line_count).contains(line));
+    let range = format!("1 to {line_count}");
+    let refusal = format!("Enter a line from 1 to {line_count}.");
     let input_id = editor_id.with("go-to-line-input");
-    let mut accepted = false;
-    let mut cancelled = false;
-    let mut window_open = true;
-    egui::Window::new("Go to line")
-        .id(editor_id.with("go-to-line-window"))
-        .collapsible(false)
-        .resizable(false)
-        .default_width(300.0)
-        .open(&mut window_open)
-        .show(ui.ctx(), |dialog| {
-            dialog.label(format!("Line number (1 to {line_count})"));
-            let response = dialog.add(
-                egui::TextEdit::singleline(&mut state.input)
-                    .id(input_id)
-                    .desired_width(f32::INFINITY)
-                    .char_limit(20),
+    let choice = CommandForm::new("Go to line", "Go")
+        .primary_enabled(target.is_some())
+        .status_fixed_at_open()
+        .show(ui.ctx(), |rows| {
+            rows.text("Line", input_id, &mut state.input, "");
+            rows.field_line(
+                Some(input_id),
+                if target.is_some() {
+                    FieldLine::Derived(&range)
+                } else {
+                    FieldLine::Error(&refusal)
+                },
             );
-            response.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::TextEdit,
-                    true,
-                    format!("Line number, 1 through {line_count}"),
-                )
-            });
-            if state.focus_input {
-                response.request_focus();
-                state.focus_input = false;
-            }
-            if let Some(error) = state.error.as_deref() {
-                dialog.colored_label(dialog.visuals().error_fg_color, error);
-            }
-            dialog.add_space(6.0);
-            dialog.horizontal(|dialog| {
-                if dialog.button("Cancel").clicked() {
-                    cancelled = true;
-                }
-                if dialog.button("Go to line").clicked() {
-                    accepted = true;
-                }
-            });
-            if dialog.input(|input| input.key_pressed(Key::Enter)) {
-                accepted = true;
-            }
-            if dialog.input(|input| input.key_pressed(Key::Escape)) {
-                cancelled = true;
-            }
+            Some(input_id)
         });
-    if !window_open {
-        cancelled = true;
-    }
-
-    if cancelled {
-        ui.ctx().data_mut(|data| {
-            data.remove_temp::<GoToLineState>(state_id);
-        });
-        ui.ctx()
-            .memory_mut(|memory| memory.request_focus(editor_id));
-        return None;
-    }
-    if accepted {
-        match state.input.trim().parse::<usize>() {
-            Ok(line) if (1..=line_count).contains(&line) => {
-                ui.ctx().data_mut(|data| {
-                    data.remove_temp::<GoToLineState>(state_id);
-                });
-                place_caret_at_line(ui.ctx(), editor_id, source, line);
-                return Some(line);
-            }
-            _ => {
-                state.error = Some(format!("Enter a line from 1 through {line_count}."));
-                state.focus_input = true;
-            }
+    match (choice, target) {
+        (DialogChoice::Primary, Some(line)) => {
+            ui.ctx().data_mut(|data| {
+                data.remove_temp::<GoToLineState>(state_id);
+            });
+            place_caret_at_line(ui.ctx(), editor_id, source, line);
+            Some(line)
+        }
+        (DialogChoice::Ghost | DialogChoice::Cancelled, _) => {
+            ui.ctx().data_mut(|data| {
+                data.remove_temp::<GoToLineState>(state_id);
+            });
+            ui.ctx()
+                .memory_mut(|memory| memory.request_focus(editor_id));
+            None
+        }
+        _ => {
+            ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
+            None
         }
     }
-    ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
-    None
 }
 
 pub(crate) fn place_caret_at_line(
@@ -1030,6 +1006,56 @@ mod tests {
         assert_eq!(char_index_for_line(source, 2), 8);
         assert_eq!(char_index_for_line(source, 3), 17);
         assert_eq!(char_index_for_line(source, 99), source.chars().count());
+    }
+
+    /// Go to line is the kit's command form, centred like every other
+    /// dialog, and Enter goes. It was an egui window opened at the top left,
+    /// over the title and menu bar.
+    #[test]
+    fn go_to_line_is_a_centred_form_that_enter_accepts() {
+        let context = egui::Context::default();
+        crate::ui::Theme::default().apply(&context);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1440.0, 900.0));
+        let input = |events: Vec<egui::Event>| egui::RawInput {
+            screen_rect: Some(screen),
+            events,
+            ..Default::default()
+        };
+        let editor_id = Id::new("go-to-line-test");
+        let source = "one\ntwo\nthree\nfour\n";
+        queue_go_to_line(&context, editor_id);
+        let mut accepted = None;
+        for _ in 0..3 {
+            let _ = context.run_ui(input(Vec::new()), |ui| {
+                accepted = show_go_to_line(ui, editor_id, source);
+            });
+        }
+        assert_eq!(accepted, None, "nothing is accepted before Enter");
+        let field = context
+            .read_response(editor_id.with("go-to-line-input"))
+            .expect("the Line field is on screen")
+            .rect;
+        assert!(
+            field.top() > 300.0 && (field.center().x - screen.center().x).abs() < 210.0,
+            "the form sits in the middle of the window, not over its title bar: {field:?}"
+        );
+
+        let state_id = editor_id.with("go-to-line-state");
+        context.data_mut(|data| {
+            let state = data.get_temp_mut_or_default::<GoToLineState>(state_id);
+            state.input = "3".to_owned();
+        });
+        let enter = egui::Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let _ = context.run_ui(input(vec![enter]), |ui| {
+            accepted = show_go_to_line(ui, editor_id, source);
+        });
+        assert_eq!(accepted, Some(3));
     }
 
     #[test]
