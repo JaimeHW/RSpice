@@ -51,6 +51,7 @@ impl Engine {
             statistical_mode: StatisticalParamMode::Sample,
             statistical_seed: Some(seed),
             expression_dialect: netlist.params.expression_dialect(),
+            spice_dialect: Some(netlist.parse_dialect),
             parameter_redefinition_policy: netlist.params.parameter_redefinition_policy(),
             parameter_redefinition_diagnostic_policy: netlist
                 .params

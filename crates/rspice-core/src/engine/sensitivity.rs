@@ -697,6 +697,7 @@ impl Engine {
             statistical_mode: netlist.params.statistical_mode(),
             statistical_seed: Some(netlist.params.random().seed()),
             expression_dialect: netlist.params.expression_dialect(),
+            spice_dialect: Some(netlist.parse_dialect),
             parameter_redefinition_policy: netlist.params.parameter_redefinition_policy(),
             parameter_redefinition_diagnostic_policy: netlist
                 .params

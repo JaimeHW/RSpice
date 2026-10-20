@@ -129,6 +129,9 @@ pub(super) struct ParseState {
     /// Xyce warns and ignores an unmatched top-level `.ENDS`; other dialects
     /// retain the strict parser error for this malformed subcircuit card.
     pub(super) allow_unmatched_subckt_ends: bool,
+    /// The compatibility dialect this deck is read in: the parse option, else
+    /// the deck's own `.options rspice_dialect=`, else best-available.
+    pub(super) spice_dialect: crate::config::SpiceDialect,
     /// Xyce closes the current subcircuit on `.ENDS` without validating an
     /// optional terminator name; other dialects retain strict name matching.
     pub(super) enforce_subckt_end_names: bool,
@@ -184,6 +187,7 @@ impl ParseState {
             diagnostics: Vec::new(),
             pspice_chebyshev_source_count: 0,
             allow_unmatched_subckt_ends: false,
+            spice_dialect: crate::config::SpiceDialect::BestAvailable,
             enforce_subckt_end_names: true,
             subckt_stack: Vec::new(),
             conditional_stack: Vec::new(),
@@ -268,7 +272,11 @@ impl ParseState {
             replay_context: None,
             ast_overlay: Default::default(),
             parameter_direction: self.parameter_direction,
+            parse_dialect: self.spice_dialect,
         };
+        if self.spice_dialect == crate::config::SpiceDialect::Ngspice {
+            dialect_instances::apply_ngspice_instance_readings(&mut netlist);
+        }
         apply_temp_directive_to_options(&mut netlist);
         let ground_policy = netlist.ground_policy();
         netlist.saves.apply_ground_policy(ground_policy);

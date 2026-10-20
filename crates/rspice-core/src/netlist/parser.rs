@@ -174,6 +174,7 @@ fn options_overlay(
 
 mod conditionals;
 mod dcmatch_card;
+mod dialect_instances;
 mod elements;
 mod hb_card;
 mod laplace_synthesis;
@@ -314,6 +315,13 @@ pub struct NetlistParseOptions {
     /// in the effective netlist options without rewriting authored source.
     pub statistical_seed: Option<u64>,
     pub expression_dialect: ExpressionDialect,
+    /// Compatibility dialect for the deck's own syntax and semantics, the
+    /// parse-time half of `--spice-dialect`. `None` takes the deck's
+    /// `.options rspice_dialect=` wherever it appears, as the simulation does,
+    /// and otherwise RSpice's own (best-available) reading. Only the ngspice
+    /// dialect changes a reading here: it reproduces ngspice where RSpice
+    /// otherwise reads a card as Spectre or HSPICE would.
+    pub spice_dialect: Option<crate::config::SpiceDialect>,
     pub parameter_redefinition_policy: ParameterRedefinitionPolicy,
     pub parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy,
     /// Limits applied before parser-owned collections are materialized.
@@ -327,6 +335,7 @@ impl Default for NetlistParseOptions {
             statistical_mode: StatisticalParamMode::Sample,
             statistical_seed: None,
             expression_dialect: ExpressionDialect::Ngspice,
+            spice_dialect: None,
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
             parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy::Silent,
             resource_limits: crate::resource::ResourceLimits::default(),
@@ -878,6 +887,20 @@ fn parse_netlist_impl(
         state.params.set_random_seed(seed);
         log::info!("statistical expression functions seeded with {seed} (.options seed)");
     }
+    // The dialect governs readings anywhere in the deck, so a deck's own
+    // `.options rspice_dialect=` counts wherever it appears; an explicit
+    // option (`--spice-dialect`) wins, as it does for the simulation.
+    state.spice_dialect = match options.spice_dialect {
+        Some(dialect) => dialect,
+        None => prescan_spice_dialect_with_abort(
+            &lines,
+            body_start,
+            allow_non_semicolon_comments,
+            xyce_syntax,
+            abort,
+        )?
+        .unwrap_or_default(),
+    };
     let mut temperatures = match replay.temperatures {
         Some(temperatures) => temperatures,
         None => prescan_temperature_options_with_abort(
@@ -4653,6 +4676,47 @@ fn prescan_random_seed_with_abort(
         |line, line_num| scan_options_tokens_for_seed(line, line_num, &mut seed),
     )?;
     Ok(seed)
+}
+
+/// Pre-scan for the deck's `.options rspice_dialect=`, whose dialect governs
+/// how cards before it are read too. The last valid occurrence wins; an
+/// invalid value is left for `parse_options_command` to refuse.
+fn prescan_spice_dialect_with_abort(
+    lines: &[&str],
+    body_start: usize,
+    allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
+    abort: &dyn AbortSignal,
+) -> Result<Option<crate::config::SpiceDialect>, ParseWithAbortError> {
+    let mut dialect = None;
+    for_each_options_line_with_abort(
+        lines,
+        body_start,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+        abort,
+        |line, line_num| {
+            let tokens = tokenize(line).map_err(|error| lex_to_parse_error(error, line_num))?;
+            for window in tokens.windows(3) {
+                let [key, equals, value] = window else {
+                    continue;
+                };
+                if let (TokenKind::Ident(key), TokenKind::Equals, TokenKind::Ident(value)) =
+                    (&key.kind, &equals.kind, &value.kind)
+                    && key.eq_ignore_ascii_case("RSPICE_DIALECT")
+                {
+                    dialect = match value.to_ascii_uppercase().as_str() {
+                        "BEST_AVAILABLE" => Some(crate::config::SpiceDialect::BestAvailable),
+                        "NGSPICE" => Some(crate::config::SpiceDialect::Ngspice),
+                        "XYCE" => Some(crate::config::SpiceDialect::Xyce),
+                        _ => dialect,
+                    };
+                }
+            }
+            Ok(())
+        },
+    )?;
+    Ok(dialect)
 }
 
 /// Scan a complete options card using raw lexer spelling. Expressions and

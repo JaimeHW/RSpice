@@ -1955,6 +1955,7 @@ fn collect_interface_node_aliases_impl_with_limits(
         /// and so does this walk.
         defer_external_module_binding: bool,
         globals: &'a HashSet<String>,
+        ngspice_global_ports: bool,
         ground_policy: super::GroundPolicy,
         aliases: HashMap<String, String>,
         requested_aliases: Option<&'a HashSet<String>>,
@@ -2095,6 +2096,7 @@ fn collect_interface_node_aliases_impl_with_limits(
                     element.nodes.len(),
                     &mapped_ports,
                     self.globals,
+                    self.ngspice_global_ports,
                     abort,
                 )?;
                 if let Some(start) = frame
@@ -2179,6 +2181,7 @@ fn collect_interface_node_aliases_impl_with_limits(
         external_subcircuits: Flattener::collect_external_subckts(netlist),
         defer_external_module_binding: netlist.needs_veriloga_module_discovery(),
         globals: &globals,
+        ngspice_global_ports: netlist.parse_dialect == crate::config::SpiceDialect::Ngspice,
         ground_policy: netlist.ground_policy(),
         aliases: HashMap::new(),
         requested_aliases,

@@ -366,9 +366,14 @@ pub struct DuplicateSubcircuitPortBindingError {
 }
 
 /// A formal global subcircuit port was connected to a differently named node.
+///
+/// The binding is ambiguous: a port joins the X line's node, a global node
+/// is one net everywhere, and the port cannot be both. ngspice silently keeps
+/// the global net (its dialect does too, with a warning); Xyce refuses, and so
+/// does RSpice, saying which names collide and what to rename.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error(
-    "Global node in subcircuit invocation must match same name in .subckt: formal '{formal_port}' at position {position} maps to '{actual_node}'; Error invoking subcircuit {canonical_subcircuit_name} instance {canonical_instance_name}"
+    "Subcircuit instance {instance_name} connects '{actual_node}' to port {position} of {subcircuit_name}, but that port is named '{formal_port}', a global node: it cannot be both the global net and '{actual_node}'. Rename the port in .subckt {subcircuit_name} if '{actual_node}' is meant, or connect '{formal_port}' at position {position} if the global net is"
 )]
 pub struct GlobalSubcircuitPortBindingError {
     pub subcircuit_name: String,
@@ -1221,6 +1226,9 @@ pub struct Netlist {
     /// Canonical electrical overrides layered over the parsed source AST.
     pub(crate) ast_overlay: NetlistAstOverlay,
     pub(crate) parameter_direction: Option<Box<ParameterDirectionCapture>>,
+    /// The compatibility dialect the deck was read in (see
+    /// [`NetlistParseOptions::spice_dialect`]); flattening and replay keep it.
+    pub(crate) parse_dialect: crate::config::SpiceDialect,
 }
 
 impl Netlist {
@@ -2046,6 +2054,7 @@ impl Netlist {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         options.retain_control_script |= self.control_script.is_some();
+        options.spice_dialect.get_or_insert(self.parse_dialect);
         match (&self.replay_context, self.source_path.as_deref()) {
             (Some(NetlistReplayContext::InMemory), _) | (None, None) => {
                 Self::parse_with_parameter_overrides_and_abort(input, options, overrides, abort)
@@ -3867,6 +3876,7 @@ impl Default for Netlist {
             replay_context: None,
             ast_overlay: NetlistAstOverlay::default(),
             parameter_direction: None,
+            parse_dialect: crate::config::SpiceDialect::BestAvailable,
         }
     }
 }

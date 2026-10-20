@@ -839,6 +839,7 @@ fn clone_netlist_with_abort(
         replay_context: None,
         ast_overlay: Default::default(),
         parameter_direction: None,
+        parse_dialect: source.parse_dialect,
     })
 }
 

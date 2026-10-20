@@ -213,12 +213,17 @@ pub struct XspiceAutoBridgeNodeHint {
 /// through the parent scope. Both hierarchy flattening and selective interface
 /// alias projection use this routine so duplicate/global/arity diagnostics
 /// retain identical ordering and typed error payloads.
+///
+/// `ngspice_global_ports` accepts a `.global` port bound to another node, as
+/// ngspice does: the port stays the global net and the parser has already
+/// warned that the X line's connection there is not made.
 pub(super) fn validate_subcircuit_port_bindings(
     subcircuit: &SubcircuitDef,
     names: SubcircuitInstanceNames<'_>,
     actual_count: usize,
     mapped_ports: &[(&String, String)],
     global_nodes: &HashSet<String>,
+    ngspice_global_ports: bool,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     let SubcircuitInstanceNames {
@@ -253,7 +258,7 @@ pub(super) fn validate_subcircuit_port_bindings(
                 || formal
                     .get(..2)
                     .is_some_and(|prefix| prefix.eq_ignore_ascii_case("$G"));
-            if formal_is_global && !formal.eq_ignore_ascii_case(actual) {
+            if formal_is_global && !ngspice_global_ports && !formal.eq_ignore_ascii_case(actual) {
                 return Err(ParseError::GlobalSubcircuitPortBinding(Box::new(
                     GlobalSubcircuitPortBindingError {
                         subcircuit_name: subcircuit.name.clone(),
@@ -352,6 +357,9 @@ pub struct Flattener<'a> {
     options_gmin: Option<Value>,
     /// Global nodes that must not be renamed while flattening hierarchy.
     global_nodes: HashSet<String>,
+    /// ngspice dialect: a `.global` port stays the global net whatever the X
+    /// line connects there (the parser warns), rather than being refused.
+    ngspice_global_ports: bool,
     /// Xyce's explicit ground-synonym preprocessing policy.
     ground_policy: super::GroundPolicy,
     /// Definitions currently being expanded, outermost first. A definition
@@ -445,6 +453,7 @@ impl<'a> Flattener<'a> {
             options_nominal_temperature_celsius: None,
             options_gmin: None,
             global_nodes: HashSet::new(),
+            ngspice_global_ports: false,
             ground_policy: super::GroundPolicy::OnlyZero,
             expansion_stack: Vec::new(),
             random: RandomState::default(),
@@ -591,6 +600,7 @@ impl<'a> Flattener<'a> {
             .iter()
             .map(|node| node.to_ascii_uppercase())
             .collect();
+        self.ngspice_global_ports = netlist.parse_dialect == crate::config::SpiceDialect::Ngspice;
         self.ground_policy = netlist.ground_policy();
         self.expansion_stack.clear();
         self.scoped_models.clear();
@@ -1312,6 +1322,7 @@ impl<'a> Flattener<'a> {
             instance.nodes.len(),
             &mapped_ports,
             &self.global_nodes,
+            self.ngspice_global_ports,
             abort,
         )?;
 
@@ -4546,31 +4557,42 @@ fn resolve_string_parametric_value(
     }
 }
 
+/// Every name an X line may set on `subckt`: a formal on its `.subckt` line
+/// or a `.param` in its body, which an instance may also override (ngspice
+/// reads both as one list).
+pub(super) fn subcircuit_declared_parameters(
+    subckt: &SubcircuitDef,
+) -> impl Iterator<Item = &str> + '_ {
+    fn names(list: &[(String, Value)]) -> impl Iterator<Item = &str> {
+        list.iter().map(|(name, _)| name.as_str())
+    }
+    fn texts(list: &[(String, String)]) -> impl Iterator<Item = &str> {
+        list.iter().map(|(name, _)| name.as_str())
+    }
+    names(&subckt.params)
+        .chain(texts(&subckt.expr_params))
+        .chain(texts(&subckt.string_params))
+        .chain(names(&subckt.body_params))
+        .chain(texts(&subckt.body_expr_params))
+        .chain(texts(&subckt.body_string_params))
+}
+
 /// Refuse an X-line parameter that names nothing the subcircuit declares.
 ///
 /// `X1 a b rr r=5` on a `.subckt rr a b` with no parameters, or `q=5` on one
 /// that declares only `r`, used to bind a value no card reads and run as if
 /// it had not been written. ngspice refuses the first ("Mismatch: 0 formal
 /// but 1 actual params") and silently drops the second; Spectre refuses any
-/// instance parameter its subcircuit does not declare. A declared name is a
-/// formal on the `.subckt` line or a `.param` in its body; `M` is always the
-/// instance's parallel multiplier.
+/// instance parameter its subcircuit does not declare, and so does RSpice
+/// outside the ngspice dialect, whose parser has already dropped the second
+/// kind with a warning. `M` is always the instance's parallel multiplier.
 fn refuse_undeclared_subcircuit_instance_params(
     subckt: &SubcircuitDef,
     instance_name: &str,
     instance_params: &[(String, ParametricValue)],
 ) -> Result<(), ParseError> {
     let declares = |name: &str| {
-        subckt
-            .params
-            .iter()
-            .map(|(formal, _)| formal)
-            .chain(subckt.expr_params.iter().map(|(formal, _)| formal))
-            .chain(subckt.string_params.iter().map(|(formal, _)| formal))
-            .chain(subckt.body_params.iter().map(|(local, _)| local))
-            .chain(subckt.body_expr_params.iter().map(|(local, _)| local))
-            .chain(subckt.body_string_params.iter().map(|(local, _)| local))
-            .any(|declared| declared.eq_ignore_ascii_case(name))
+        subcircuit_declared_parameters(subckt).any(|declared| declared.eq_ignore_ascii_case(name))
     };
     let Some((name, _)) = instance_params
         .iter()
@@ -5751,6 +5773,137 @@ mod tests {
                     .unwrap_or_else(|error| panic!("{dialect:?} {deck}: {error}"));
             }
         }
+    }
+
+    /// ngspice 46 runs `X1 1 0 rr q=5` on a `.subckt rr a b r=1k` (or on one
+    /// whose only declaration is a body `.param`) with V1 at -1 mA, the
+    /// value dropped unread, and stops on a subcircuit with no declarations
+    /// at all ("Mismatch: 0 formal but 1 actual params"). Its dialect does
+    /// both, and says what it dropped, whether `--spice-dialect` or the
+    /// deck's own `.options rspice_dialect` (after the X card) selects it.
+    #[test]
+    fn ngspice_dialect_drops_an_undeclared_instance_parameter_with_a_warning() {
+        let ngspice = |deck: &str| {
+            Netlist::parse_with_options(
+                deck,
+                super::super::parser::NetlistParseOptions {
+                    spice_dialect: Some(crate::config::SpiceDialect::Ngspice),
+                    ..Default::default()
+                },
+            )
+            .expect("deck parses")
+        };
+        for (netlist, kept) in [
+            (
+                ngspice(
+                    "unknown\n.subckt rr a b r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr q=5\n.op\n.end\n",
+                ),
+                &[][..],
+            ),
+            (
+                ngspice(
+                    "params keyword\n.subckt rr a b params: r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr params: r=2k q=5 m=2\n.op\n.end\n",
+                ),
+                &["r", "m"][..],
+            ),
+            (
+                ngspice(
+                    "body\n.subckt rr a b\n.param p=1k\nR1 a b {p}\n.ends\nV1 1 0 1\nX1 1 0 rr q=5\n.op\n.end\n",
+                ),
+                &[][..],
+            ),
+            (
+                Netlist::parse(
+                    "deck option\n.subckt rr a b r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr q=5\n.options rspice_dialect=ngspice\n.op\n.end\n",
+                )
+                .unwrap(),
+                &[][..],
+            ),
+        ] {
+            let warning = netlist
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "undeclared-instance-parameter")
+                .unwrap_or_else(|| panic!("{}: no warning in {:?}", netlist.title, netlist.diagnostics));
+            let x1_line = netlist.source_text.as_deref().unwrap().lines().position(|line| line.starts_with("X1")).unwrap() + 1;
+            assert_eq!(warning.line, x1_line, "{}", warning.message);
+            assert!(warning.message.contains("'X1' sets parameter 'q'"), "{}", warning.message);
+            let ElementKind::Subcircuit { params, .. } = &netlist.elements[1].kind else {
+                panic!("{}: X1 is element 1", netlist.title);
+            };
+            let names = params.iter().map(|(name, _)| name.to_ascii_lowercase()).collect::<Vec<_>>();
+            assert_eq!(names, kept, "{}", netlist.title);
+            flatten_netlist(&netlist).unwrap_or_else(|error| panic!("{}: {error}", netlist.title));
+        }
+        let paramless = ngspice(
+            "no params\n.subckt rr a b\nR1 a b 1k\n.ends\nV1 1 0 1\nX1 1 0 rr r=5\n.op\n.end\n",
+        );
+        assert!(
+            paramless.diagnostics.is_empty(),
+            "{:?}",
+            paramless.diagnostics
+        );
+        let error = flatten_netlist(&paramless).expect_err("ngspice stops on 0 formal params");
+        assert!(
+            error.to_string().contains("declares no parameters"),
+            "{error}"
+        );
+    }
+
+    /// ngspice 46 on `.global vdd`, `.subckt cell vdd p` and `X1 other out
+    /// cell` keeps the port on the global vdd (V(out) = 1 with vdd at 2 V and
+    /// a 1k-1k divider, nothing drawn from `other`). The ngspice dialect does
+    /// the same and warns; every other dialect refuses the ambiguity and says
+    /// what to rename.
+    #[test]
+    fn a_global_node_used_as_a_port_follows_the_dialect() {
+        let deck = ".global vdd\n.subckt cell vdd p\nR1 vdd p 1\n.ends\nX1 other out cell\nR2 out 0 1\n.end\n";
+        let refused = Netlist::parse(&format!("global port\n{deck}")).unwrap();
+        let error = flatten_netlist(&refused).expect_err("ambiguous global port");
+        let message = error.to_string().to_ascii_lowercase();
+        assert!(
+            matches!(error, ParseError::GlobalSubcircuitPortBinding(_))
+                && message.contains("connects 'other' to port 1 of cell")
+                && message.contains("rename the port in .subckt cell"),
+            "{message}"
+        );
+
+        let netlist = Netlist::parse_with_options(
+            &format!("global port\n{deck}"),
+            super::super::parser::NetlistParseOptions {
+                spice_dialect: Some(crate::config::SpiceDialect::Ngspice),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let warning = netlist
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "global-subcircuit-port")
+            .unwrap_or_else(|| panic!("no warning in {:?}", netlist.diagnostics));
+        assert_eq!(warning.line, 6, "{}", warning.message);
+        assert!(
+            warning
+                .message
+                .to_ascii_lowercase()
+                .contains("connects 'other' to port 'vdd'"),
+            "{}",
+            warning.message
+        );
+        let flattened = flatten_netlist(&netlist).expect("ngspice keeps the global net");
+        let r1 = flattened
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("X1.R1"))
+            .expect("X1.R1");
+        assert!(r1.nodes[0].eq_ignore_ascii_case("vdd"), "{:?}", r1.nodes);
+        assert!(r1.nodes[1].eq_ignore_ascii_case("out"), "{:?}", r1.nodes);
+        assert!(
+            flattened.iter().all(|element| element
+                .nodes
+                .iter()
+                .all(|node| !node.eq_ignore_ascii_case("other"))),
+            "nothing connects to 'other'"
+        );
     }
 
     fn transmission_line_fields(netlist: &Netlist) -> Vec<(String, Option<Value>, Option<Value>)> {

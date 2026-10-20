@@ -23,6 +23,7 @@ pub(crate) fn parse_options(
     }
     if let Some(dialect) = args.spice_dialect {
         options.expression_dialect = dialect.expression_dialect();
+        options.spice_dialect = Some(dialect.simulation_dialect());
     }
     options
 }
