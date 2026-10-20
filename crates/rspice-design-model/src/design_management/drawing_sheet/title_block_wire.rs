@@ -11,20 +11,24 @@ use super::*;
 /// A title block as it was written, which names the retired `compact` block
 /// among the templates, may place the block as RSpice no longer does, and
 /// may declare a scale.
+///
+/// The placement and scale were always written as plain values, never as
+/// options, so they are read as written (see [`PresentField`]): an eframe
+/// session is RON, which reads an `Option` only from `Some(…)`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DrawingSheetTitleBlockWire {
     template: DrawingSheetTitleBlockTemplateWire,
     #[serde(default)]
-    anchor: Option<RetiredTitleBlockAnchor>,
+    anchor: PresentField<RetiredTitleBlockAnchor>,
     #[serde(default)]
-    rotation: Option<RetiredTitleBlockRotation>,
+    rotation: PresentField<RetiredTitleBlockRotation>,
     #[serde(default)]
-    offset_x_um: Option<i64>,
+    offset_x_um: PresentField<i64>,
     #[serde(default)]
-    offset_y_um: Option<i64>,
+    offset_y_um: PresentField<i64>,
     #[serde(default)]
-    scale: Option<RetiredDrawingSheetScale>,
+    scale: PresentField<RetiredDrawingSheetScale>,
     #[serde(default)]
     managed_template: Option<DrawingSheetManagedTemplateSnapshot>,
     fields: BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>,

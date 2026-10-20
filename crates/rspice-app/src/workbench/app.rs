@@ -2496,7 +2496,8 @@ mod tests {
         );
         assert_eq!(restored.log_buffer.entries().count(), 0);
 
-        // A session that will not decode starts a new one, and says why.
+        // A session that will not decode starts a new one, and says so in
+        // words: the decoder's position and expectation stay out of it.
         eframe::Storage::set_string(&mut storage, eframe::APP_KEY, "(not a session".to_owned());
         let replaced = AppState::restore_eframe_session(&storage).expect("a stored session");
         let entries: Vec<_> = replaced.log_buffer.entries().collect();
@@ -2505,12 +2506,10 @@ mod tests {
             entries[0].severity,
             crate::diagnostics::LogSeverity::Warning
         );
-        assert!(
-            entries[0].message.starts_with(
-                "The previous session could not be restored, so a new one was started: "
-            ),
-            "{}",
-            entries[0].message
+        assert_eq!(
+            entries[0].message,
+            "The previous session could not be restored, so a new one was started. \
+             Saved projects are unchanged."
         );
     }
 }

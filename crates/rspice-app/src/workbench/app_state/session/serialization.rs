@@ -17,27 +17,34 @@ impl AppState {
     /// writer and independently recoverable decoder shared a wire format.
     ///
     /// `None` only when nothing was stored. A stored session that will not
-    /// decode is replaced by a new one whose Console says so, with the cause:
-    /// otherwise the reader's project and layout vanish without a word.
+    /// decode is replaced by a new one whose Console says so: otherwise the
+    /// reader's project and layout vanish without a word. The decoder's own
+    /// account, a position in the RON text, goes to the log.
     pub(crate) fn restore_eframe_session(storage: &dyn eframe::Storage) -> Option<Self> {
         let text = storage.get_string(eframe::APP_KEY)?;
         Some(Self::from_session_ron(&text).unwrap_or_else(|error| {
+            log::warn!("the stored eframe session did not decode: {error}");
             let mut state = Self::default();
             state.record(
                 LogSeverity::Warning,
                 LogSource::Studio,
-                format!(
-                    "The previous session could not be restored, so a new one was started: \
-                     {error}"
-                ),
+                "The previous session could not be restored, so a new one was started. \
+                 Saved projects are unchanged.",
             );
             state
         }))
     }
 
+    /// An `Option` written as a plain value reads as present. Every session
+    /// this build writes spells one `Some(…)`, but a field an older build
+    /// wrote plainly and this one reads as optional would otherwise cost the
+    /// reader their whole session, as a run's result fields and a title
+    /// block's retired placement each once did.
     fn from_session_ron(text: &str) -> Result<Self, ron::error::SpannedError> {
         let migrated = migrate_legacy_browser_receipt(text);
-        ron::from_str(migrated.as_deref().unwrap_or(text))
+        ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str(migrated.as_deref().unwrap_or(text))
     }
 }
 
@@ -940,6 +947,214 @@ mod tests {
         assert_eq!(
             default.margins(),
             crate::state::DrawingSheetFrameConvention::Iso5457.margins(false)
+        );
+    }
+
+    /// eframe's storage, held in memory, so a session is saved by
+    /// `eframe::set_value` exactly as the app saves it on exit.
+    #[derive(Default)]
+    struct MemoryStorage(std::collections::HashMap<String, String>);
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+
+        fn flush(&mut self) {}
+    }
+
+    fn saved_session(state: &AppState) -> String {
+        let mut storage = MemoryStorage::default();
+        eframe::set_value(&mut storage, eframe::APP_KEY, state);
+        storage
+            .0
+            .remove(eframe::APP_KEY)
+            .expect("eframe stores the session")
+    }
+
+    fn relaunch(session: String) -> AppState {
+        let mut storage = MemoryStorage::default();
+        eframe::Storage::set_string(&mut storage, eframe::APP_KEY, session);
+        let restored = AppState::restore_eframe_session(&storage).expect("a stored session");
+        let messages = restored
+            .log_buffer
+            .entries()
+            .map(|entry| entry.message.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message.contains("could not be restored")),
+            "{messages:#?}"
+        );
+        restored
+    }
+
+    /// Every session RSpice saves restores on the next launch, as it was
+    /// saved. This one is mid-work: a named project with a drawing, a run
+    /// retained, the Console docked open on Problems, and the workbench and
+    /// editor moved off their defaults.
+    #[test]
+    fn a_working_session_restores_on_the_next_launch_as_it_was_saved() {
+        let mut state = AppState::default();
+        state
+            .workspace
+            .content
+            .project
+            .rename("Precision AFE")
+            .expect("valid project name");
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(17, 29),
+        );
+        state.schematic.add_component(
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::new(60, 29),
+        );
+        state.workspace.save_active_schematic(&state.schematic);
+
+        let mut run = crate::state::SimulationRun::new(3);
+        run.label = "Run 3 (bias sweep)".to_owned();
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![crate::state::WaveformData::new(
+                    "V(out)",
+                    vec![0.0, 1.0, 2.0],
+                    vec![0.0, 0.75, 1.5],
+                    "#00aaff",
+                )]),
+        );
+        seal_legacy_unattributed(&mut run);
+        state.simulation.retained.runs = vec![run].into();
+        state.simulation.retained.next_run_id = 3;
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
+
+        let workbench = &mut state.workbench;
+        workbench.console_visible = true;
+        workbench.console_page = crate::workbench::state::ConsolePage::Problems;
+        workbench.console_height = 244.0;
+        workbench.navigator_visible = false;
+        workbench.navigator_width = 311.0;
+        workbench.navigator_width_custom = true;
+        workbench.inspector_width = 287.0;
+        workbench.inspector_width_custom = true;
+        workbench.split_with_results = true;
+        workbench.project_library_filter = "afe".to_owned();
+        workbench.project_dependency_filter = "pdk".to_owned();
+        workbench.project_dependency_selection = Some("models/afe.lib".to_owned());
+        workbench.selected_specification = Some("gain".to_owned());
+        workbench.selected_design_variable = Some("rload".to_owned());
+        workbench.selected_saved_output = Some("vout".to_owned());
+        workbench.selected_model = Some("nch".to_owned());
+        workbench.command_query = "probe".to_owned();
+        workbench.active_analysis_instance = state
+            .sim_setup
+            .stable_analysis_plan()
+            .ok()
+            .map(|plan| plan.instances()[0].id());
+        state.ui.schematic_snap.enabled = false;
+        state.ui.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
+        state.ui.theme.density = crate::ui::Density::Relaxed;
+        state
+            .recent_files
+            .push(crate::workbench::app_state::RecentFile {
+                kind: crate::workbench::app_state::RecentKind::Project,
+                path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
+                opened_at_unix_ms: 1_760_000_000_000,
+                pinned: true,
+                owner: Some("Analog team".to_owned()),
+                tags: vec!["afe".to_owned()],
+            });
+
+        let restored = relaunch(saved_session(&state));
+
+        assert_eq!(restored.workspace.content.project.name(), "Precision AFE");
+        assert_eq!(
+            restored.schematic.document().components,
+            state.schematic.document().components
+        );
+        assert_eq!(
+            restored
+                .simulation
+                .active_run()
+                .expect("the run is retained")
+                .label,
+            "Run 3 (bias sweep)"
+        );
+        assert_eq!(
+            serde_json::to_value(&restored.workbench).unwrap(),
+            serde_json::to_value(&state.workbench).unwrap(),
+            "the workbench restores as it was saved"
+        );
+        assert_eq!(restored.recent_files, state.recent_files);
+        assert!(!restored.ui.schematic_snap.enabled);
+        assert_eq!(
+            restored.ui.schematic_routing_mode,
+            crate::state::WireRoutingMode::FortyFiveDegree
+        );
+        assert_eq!(restored.ui.theme.density, crate::ui::Density::Relaxed);
+    }
+
+    /// The builds of 10-18 wrote a title block's anchor, rotation, offsets
+    /// and scale as plain values. The title block went on to read them as
+    /// options, so every session those builds saved was replaced at the next
+    /// launch with "1:1215: Expected option". Such a session restores.
+    #[test]
+    fn a_session_saved_with_a_placed_and_scaled_title_block_restores() {
+        let mut state = AppState::default();
+        state
+            .workspace
+            .content
+            .project
+            .rename("Saved before the title block was fixed in place")
+            .expect("valid project name");
+        let written = saved_session(&state);
+        let head = "title_block:(template:standard,";
+        assert!(written.contains(head), "the session holds a title block");
+        let legacy = written.replace(
+            head,
+            "title_block:(template:standard,anchor:r#bottom-right,rotation:upright,\
+             offset_x_um:0,offset_y_um:0,\
+             scale:(kind:\"ratio\",drawing_units:1,reality_units:1),",
+        );
+
+        ron::from_str::<Box<AppState>>(&legacy).expect("strict RON reads the title block");
+        let restored = relaunch(legacy);
+
+        assert_eq!(
+            restored.workspace.content.project.name(),
+            "Saved before the title block was fixed in place"
+        );
+    }
+
+    /// A field one build wrote plainly and a later one reads as optional
+    /// costs the reader nothing at the next launch.
+    #[test]
+    fn a_session_holding_an_option_written_plainly_restores() {
+        let mut state = AppState::default();
+        state.workbench.selected_specification = Some("gain".to_owned());
+        let written = saved_session(&state);
+        let plain = written.replace(
+            "selected_specification:Some(\"gain\")",
+            "selected_specification:\"gain\"",
+        );
+        assert_ne!(plain, written, "the session holds the selection");
+        assert!(ron::from_str::<Box<AppState>>(&plain).is_err());
+
+        let restored = relaunch(plain);
+
+        assert_eq!(
+            restored.workbench.selected_specification.as_deref(),
+            Some("gain")
         );
     }
 
