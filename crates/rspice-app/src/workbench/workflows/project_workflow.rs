@@ -861,27 +861,7 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
 
     #[cfg(not(target_arch = "wasm32"))]
     match crate::io::show_save_project_dialog(Some(default_name.as_str())) {
-        Ok(path) => {
-            match crate::workbench::lifecycle::project_lifecycle::save_project_copy_native(
-                state, &path,
-            ) {
-                Ok(()) => {
-                    state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        format!(
-                            "Saved a copy of the project: {}; the open project is unchanged.",
-                            path.display()
-                        ),
-                    );
-                    true
-                }
-                Err(error) => {
-                    lifecycle_error(state, error, "Project copy failed");
-                    false
-                }
-            }
-        }
+        Ok(path) => save_project_as_to_path(state, &path),
         Err(ProjectIoError::Cancelled) => false,
         Err(error) => {
             state.report_failure("Project Save As failed", error.to_string());
@@ -894,6 +874,32 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
         let _ = default_name;
         save_project_copy_in_browser(state)
     }
+}
+
+/// Save the project at `path` and carry on working there.
+///
+/// The file is written under the project's copy rules (its own project
+/// identity, never over the open file), then opened in place of the project
+/// it came from, so the project location, the recent list, the window title
+/// and the saved session all name the new file. The file it came from keeps
+/// what was last saved to it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn save_project_as_to_path(state: &mut AppState, path: &Path) -> bool {
+    if let Err(error) =
+        crate::workbench::lifecycle::project_lifecycle::save_project_copy_native(state, path)
+    {
+        lifecycle_error(state, error, "Project Save As failed");
+        return false;
+    }
+    if !load_project_from_path(state, path) {
+        return false;
+    }
+    state.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!("Saved the project as {}.", path.display()),
+    );
+    true
 }
 
 #[cfg(target_arch = "wasm32")]

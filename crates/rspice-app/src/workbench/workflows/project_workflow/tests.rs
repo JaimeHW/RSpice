@@ -1961,3 +1961,57 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
         "the record is drained once it has been reported"
     );
 }
+
+/// Save As carries on in the new file: the project location, the recent
+/// list and the saved session all name it, and the session read back by
+/// the next start reopens it there.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
+    #[derive(Default)]
+    struct MemoryStorage(std::collections::HashMap<String, String>);
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+        fn flush(&mut self) {}
+    }
+
+    let directory =
+        std::env::temp_dir().join(format!("rspice-save-as-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).expect("fixture directory");
+    let original = directory.join("original.rspiceproj");
+    let renamed = directory.join("renamed.rspiceproj");
+    let mut state = AppState::default();
+    assert!(save_project_to_path(&mut state, &original));
+
+    assert!(save_project_as_to_path(&mut state, &renamed));
+
+    let names_renamed = |path: Option<&Path>| {
+        path.and_then(Path::file_name)
+            .is_some_and(|name| name == "renamed.rspiceproj")
+    };
+    assert!(names_renamed(
+        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&state).as_deref()
+    ));
+    assert!(names_renamed(state.workspace.content.project.path.as_deref()));
+    assert!(names_renamed(
+        state.recent_files.first().map(|recent| recent.path.as_path())
+    ));
+
+    let mut storage = MemoryStorage::default();
+    eframe::set_value(&mut storage, eframe::APP_KEY, &state);
+    let restored = AppState::restore_eframe_session(&storage).expect("the session restores");
+    assert!(names_renamed(restored.workspace.content.project.path.as_deref()));
+    assert!(names_renamed(
+        restored.recent_files.first().map(|recent| recent.path.as_path())
+    ));
+    assert!(original.exists(), "the file it came from is left as last saved");
+    std::fs::remove_dir_all(directory).ok();
+}
