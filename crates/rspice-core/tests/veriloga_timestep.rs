@@ -398,3 +398,84 @@ fn discontinuity_newton_hint_prevents_false_dc_convergence() {
     }
     let _ = std::fs::remove_file(model);
 }
+
+/// A timer whose target falls a hair before a source corner fires instead of
+/// ending the run.
+///
+/// `timer(0, per)` with `per` an ulp to 10 as short of 10 us asks for an event
+/// just before the PULSE corner at 10 us. The device bounded each step to end
+/// on its event, the breakpoint schedule halved every such step to equalize
+/// the approach to the corner, and the run crept up on the corner until it was
+/// within the merge tolerance and was snapped onto it, past the event. The
+/// next scheduling query then aborted the run: `event 0.0000099999999999999
+/// is not strictly after accepted time 0.00001`. Now an event at least one
+/// floor (1e-18 s here) short of the corner is landed on, and one closer than
+/// that is the corner's instant and fires on it.
+///
+/// The count is the analytic one: the timer fires at `k * per` for every
+/// `k * per` in `[0, 100 us]`, eleven times, so `V(g)` steps from 1 to 11; and
+/// the approach to each corner takes a handful of points, not a creep.
+#[test]
+fn a_timer_target_just_before_a_source_corner_fires_at_the_corner() {
+    let model = write_model(
+        &format!("corner_timer_{}.va", std::process::id()),
+        "`include \"disciplines.vams\"\n\
+         module corner_timer(ramp, g); input ramp; output g; electrical ramp, g;\n\
+         integer q; parameter real per = 1e-5;\n\
+         analog begin @(initial_step) q = 0; @(timer(0, per)) q = q + 1; V(g) <+ q; end\n\
+         endmodule\n",
+    );
+    // 1e-19 s, one ulp, 3e-18 s and 1e-17 s short of the corner.
+    for per in [
+        9.9999999999999e-6,
+        9.999_999_999_999_999e-6,
+        9.999999999997e-6,
+        9.99999999999e-6,
+    ] {
+        let deck = Netlist::parse(&format!(
+            "corner timer\nvr ramp 0 pulse(0 1 0 9.9u 0.1u 0 10u)\n\
+             X1 ramp g corner_timer per={per:e}\nRL g 0 1k\n\
+             .va \"{model}\" corner_timer\n.end\n"
+        ))
+        .expect("the deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_tran(&deck, 100e-6, 0.1e-6)
+            .unwrap_or_else(|error| panic!("per={per:e}: the run must complete: {error}"));
+        let g = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("g"))
+            .expect("node g");
+        assert_eq!(result.time.last(), Some(&100e-6), "per={per:e}");
+        for (time, level) in result.time.iter().zip(&result.voltages[g]) {
+            let cycles = time / per;
+            if (cycles - cycles.round()).abs() < 1e-6 {
+                // At a firing (or the corner it moved to) either side may be
+                // sampled; the count is checked strictly between them.
+                continue;
+            }
+            assert_eq!(
+                *level,
+                cycles.floor() + 1.0,
+                "per={per:e}: V(g) at t={time:e} counts the firings so far"
+            );
+        }
+        assert_eq!(result.voltages[g].last(), Some(&11.0), "per={per:e}");
+        let creep = result
+            .time
+            .iter()
+            .filter(|time| {
+                let to_corner = (*time / 1e-5).ceil() * 1e-5 - *time;
+                to_corner > 0.0 && to_corner < 1e-12
+            })
+            .count();
+        // Landing the event takes a point or two per corner (37 in all at
+        // 1e-17 s). Halving towards each corner took about sixteen per corner
+        // inside the last picosecond.
+        assert!(
+            creep <= 60,
+            "per={per:e}: {creep} points crept up on the ten corners"
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}

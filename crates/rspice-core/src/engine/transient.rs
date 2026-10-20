@@ -189,10 +189,25 @@ fn accepted_veriloga_event_time(
     accepted_time: Value,
     hard_min_dt: Value,
     stop_time: Value,
+    next_breakpoint: Option<Value>,
 ) -> Result<(Option<Value>, bool), SimulationError> {
+    // An analog event less than one floor before the next scheduled
+    // breakpoint is that breakpoint's instant computed another way
+    // ([`crate::numerics::integration::coincides_before`]): no interval
+    // separates them, so the event is delivered on the breakpoint. A timer
+    // period a hair short of a PULSE period put its target 1e-19 s before the
+    // corner, the step to the target left a sliver no step could cross, and
+    // the run was snapped onto the corner past the timer instead.
     let analog_event = circuit
         .veriloga_transient_event_time(accepted_time)
-        .map_err(SimulationError::Circuit)?;
+        .map_err(SimulationError::Circuit)?
+        .map(|event| {
+            next_breakpoint
+                .filter(|breakpoint| {
+                    crate::numerics::integration::coincides_before(event, *breakpoint, hard_min_dt)
+                })
+                .unwrap_or(event)
+        });
     let mut target = analog_event;
     // The two discrete lanes have the same exact landing contract as an analog
     // device's event target, and the fold above cannot see either: a shared
@@ -5749,6 +5764,7 @@ impl Engine {
                         resume_time,
                         timestep.hard_min_dt(),
                         tstop,
+                        breakpoints.next_after(resume_time),
                     )?;
                 if circuit.has_any_veriloga_devices()
                     && let Some(bound) = circuit
@@ -6187,6 +6203,7 @@ impl Engine {
                     resume_time,
                     timestep.hard_min_dt(),
                     tstop,
+                    breakpoints.next_after(resume_time),
                 )?;
             if circuit.has_any_veriloga_devices()
                 && let Some(bound) = circuit
@@ -7641,11 +7658,25 @@ impl Engine {
             // and source bias change it. Restart recovery keeps that intent
             // only when the final candidate actually lands an event.
             let proposal_before_event_cut = timestep.dt().max(dt);
+            // A Verilog-A event short of the next breakpoint is a landing the
+            // stepper owns, and equalizing the steps before that breakpoint
+            // must not take it away. The device bounds the proposal to end on
+            // its event; equalization halved it whenever the breakpoint lay
+            // less than 1.9 proposals ahead, so every step fell short of the
+            // event, the next proposal was bounded to the event again, and the
+            // run crept up on the breakpoint until it was close enough to be
+            // snapped onto it, past an event that then never fired.
+            let device_event_within_proposal = |target: Value| {
+                locked_grid.is_none()
+                    && pending_veriloga_event_time == Some(target)
+                    && target - t <= timestep.dt()
+                    && breakpoints.next_after(t).is_none_or(|next| target < next)
+            };
             let mut exact_device_event_time = None;
             if let Some(target) = pending_exact_event_time
                 && target > t
                 && target <= tstop
-                && target - t <= dt
+                && (target - t <= dt || device_event_within_proposal(target))
             {
                 dt = target - t;
                 exact_device_event_time = Some(target);
@@ -11299,6 +11330,7 @@ impl Engine {
                             t,
                             timestep.hard_min_dt(),
                             tstop,
+                            breakpoints.next_after(t),
                         )?;
                     if analysis_final_step {
                         Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
@@ -11917,6 +11949,7 @@ impl Engine {
                     t,
                     timestep.hard_min_dt(),
                     tstop,
+                    breakpoints.next_after(t),
                 )?;
             if analysis_final_step {
                 Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
