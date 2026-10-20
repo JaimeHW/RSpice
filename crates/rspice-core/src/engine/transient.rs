@@ -146,6 +146,20 @@ const fn allows_postsolve_gmin_rescue(xyce_iteration_error_control: bool) -> boo
     !xyce_iteration_error_control
 }
 
+/// Rejected attempts of the current point that bear on Newton's trust region.
+///
+/// A Verilog-A event refinement rejects a candidate whose Newton solve
+/// converged, only because its endpoint lies past a `cross`/`above` root; the
+/// retry lands on the root with the event body applied. Counting it as a
+/// recovery retry armed the global nodal clamp on the landing, and the clamp
+/// walks a node 0.2 V per iteration at most: an event that steps an output by
+/// 20 V, which one linear solve reaches, failed Newton on every landing that
+/// took two refinements, until the step reached the floor and the run died.
+#[inline]
+const fn newton_recovery_retries(retry_count: usize, event_refinement_retries: usize) -> usize {
+    retry_count.saturating_sub(event_refinement_retries)
+}
+
 #[inline]
 const fn xyce_rejected_attempt_order(
     xyce_iteration_error_control: bool,
@@ -6619,6 +6633,11 @@ impl Engine {
 
         // Main transient loop
         let mut retry_count = 0;
+        // The part of `retry_count` spent moving a converged candidate's
+        // endpoint back onto a Verilog-A event root. Those rejections are
+        // timestep control, not evidence that Newton needs its trust region
+        // (`newton_recovery_retries`). Reset with `retry_count`.
+        let mut event_refinement_retries = 0;
         // Diagnostic of a trial this STEP refused to evaluate finitely, with
         // the time and step it was tried at. A rejected trial costs the run
         // nothing while a retry remains, so the message only surfaces once the
@@ -8323,6 +8342,7 @@ impl Engine {
                             veriloga_refinement_approach_step
                                 .get_or_insert_with(|| timestep.dt().max(dt));
                             retry_count = retry_count.saturating_add(1);
+                            event_refinement_retries = event_refinement_retries.saturating_add(1);
                             self.record_convergence(|quality| quality.record_timestep_reduction());
                             trap_order = Self::trapezoidal_order_after_timestep_control_reject(
                                 step_trap_order,
@@ -8394,7 +8414,9 @@ impl Engine {
             // timestep cuts that ngspice does not perform, skewing waveform
             // parity at every fast edge.
             let conservative_limiting_active = requires_conservative_nonlinear_limiting
-                && (startup_recovery || retry_count >= CONSERVATIVE_LIMITING_RETRY_THRESHOLD);
+                && (startup_recovery
+                    || newton_recovery_retries(retry_count, event_refinement_retries)
+                        >= CONSERVATIVE_LIMITING_RETRY_THRESHOLD);
 
             total_top_nanos += attempt_top_start.elapsed().as_nanos();
             let setup_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
@@ -11415,6 +11437,7 @@ impl Engine {
                             ));
                     }
                     retry_count = 0;
+                    event_refinement_retries = 0;
                     nonfinite_trial_failure = None;
                     xyce_step_failure_count = 0;
                     accepted_interval_count =
@@ -11669,6 +11692,7 @@ impl Engine {
             // Success - reset retry counter only after event-root refinement
             // has had the opportunity to reject this candidate endpoint.
             retry_count = 0;
+            event_refinement_retries = 0;
             nonfinite_trial_failure = None;
 
             // Accept this timestep

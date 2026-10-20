@@ -479,3 +479,122 @@ fn a_timer_target_just_before_a_source_corner_fires_at_the_corner() {
     }
     let _ = std::fs::remove_file(model);
 }
+
+/// A `cross` event that steps a linear output by 20 V, with or without a
+/// timer elsewhere in the module.
+fn event_step_model(name: &str, timer: &str, contribution: &str, step: f64) -> String {
+    write_model(
+        &format!("{name}_{}.va", std::process::id()),
+        &format!(
+            "`include \"disciplines.vams\"\n\
+             module ev(in, o1); input in; output o1; electrical in, o1;\n\
+             real ta, tt;\n\
+             analog begin\n\
+             @(initial_step) begin ta = 0; tt = 0; end\n\
+             @(cross(V(in) - 0.9, +1)) ta = {step:e};\n\
+             {timer}\n\
+             {contribution}\n\
+             end\n\
+             endmodule\n"
+        ),
+    )
+}
+
+fn run_event_step(model: &str) -> (rspice_core::engine::TransientResult, Engine) {
+    let deck = Netlist::parse(&format!(
+        "cross step\nv1 in 0 sin(0 1 1k)\nX1 in o1 ev\n.va \"{model}\" ev\n.end\n"
+    ))
+    .expect("the deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let result = engine
+        .run_tran(&deck, 1.5e-3, 10e-6)
+        .unwrap_or_else(|error| panic!("{model}: the run must complete: {error}"));
+    (result, engine)
+}
+
+/// B-4. `@(cross(V(in) - 0.9, +1)) ta = 20; V(o1) <+ ta;` on a 1 kHz, 1 V sine
+/// is a linear circuit, but with any `@(timer(...))` in the module the run
+/// failed with "Convergence failed after 103 iterations" at
+/// t = 178.2168534356 us. Each refinement that moves a straddling candidate
+/// back onto the root counted as a Newton recovery retry; the second one armed
+/// the global nodal trust region, whose 0.2 V-per-iteration clamp walks o1 at
+/// most 16.5 V in the 100-iteration budget, so the landing failed Newton every
+/// time it took two refinements and the chase died at the 1e-16 s floor. The
+/// timer only offset the step grid. The Norton form failed the same way.
+///
+/// The root is analytic: sin(2 pi 1k t) = 0.9 at t = asin(0.9) / (2000 pi)
+/// = 178.2168534356 us. o1 is 0 V before it and 20 V from it on.
+#[test]
+fn a_twenty_volt_cross_step_lands_on_its_root_with_or_without_a_timer() {
+    let root = 0.9_f64.asin() / (2000.0 * std::f64::consts::PI);
+    for (form, contribution) in [
+        ("thevenin", "V(o1) <+ ta;"),
+        ("norton", "I(o1) <+ -ta / 1k; I(o1) <+ V(o1) / 1k;"),
+    ] {
+        for timer in ["", "@(timer(10u)) tt = 1;", "@(timer(1u)) tt = 1;"] {
+            let model = event_step_model(&format!("cross_step_{form}"), timer, contribution, 20.0);
+            let (result, _) = run_event_step(&model);
+            let o1 = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("o1"))
+                .expect("node o1");
+            assert_eq!(result.time.last(), Some(&1.5e-3), "{form} {timer}");
+            for (time, level) in result.time.iter().zip(&result.voltages[o1]) {
+                let expected = if *time < root - 1e-12 {
+                    0.0
+                } else if *time > root + 1e-12 {
+                    20.0
+                } else {
+                    continue;
+                };
+                assert!(
+                    (level - expected).abs() < 1e-9,
+                    "{form} {timer}: V(o1) at t={time:e} is {level}, expected {expected}"
+                );
+            }
+            let landing = result
+                .time
+                .iter()
+                .zip(&result.voltages[o1])
+                .find(|(_, level)| (*level - 20.0).abs() < 1e-9)
+                .map(|(time, _)| *time)
+                .expect("o1 reaches 20 V");
+            assert!(
+                (landing - root).abs() < 1e-12,
+                "{form} {timer}: the event lands at {landing:e}, the root is {root:e}"
+            );
+            let _ = std::fs::remove_file(model);
+        }
+    }
+}
+
+/// B-4, the passing case: without a timer the same module completed, but it
+/// landed the crossing through nine Newton failures, each spending the whole
+/// 100-iteration budget under the trust region. A converged candidate moved
+/// onto an event root is not a Newton failure, and neither is the landing:
+/// a 178 V step costs exactly the iterations and rejections a 1 mV step does.
+#[test]
+fn a_cross_step_costs_no_newton_failure_whatever_its_size() {
+    let cost = |step: f64| {
+        let model = event_step_model("cross_step_cost", "", "V(o1) <+ ta;", step);
+        let (result, engine) = run_event_step(&model);
+        let quality = engine.convergence_quality();
+        let _ = std::fs::remove_file(model);
+        (
+            result.time.len(),
+            quality.total_iterations,
+            quality.timestep_reductions,
+        )
+    };
+    let (points, iterations, reductions) = cost(178.0);
+    // Before the fix: (216, 1164, 37) against (164, 196, 21).
+    assert_eq!((points, iterations, reductions), cost(1e-3));
+    // One failed attempt alone spends the whole 100-iteration ngspice budget;
+    // the run, operating point included, spends fewer than one per point
+    // beyond that.
+    assert!(
+        iterations < points + 100,
+        "{iterations} Newton iterations for {points} points"
+    );
+}
