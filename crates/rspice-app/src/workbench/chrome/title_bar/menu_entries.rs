@@ -250,11 +250,37 @@ impl MenuChoice {
     }
 }
 
+/// The rows a reader sees, in order: hidden rows dropped, and a separator
+/// kept only between two groups that each show a row, so no rule leads or
+/// ends a menu and a group whose rows are all hidden leaves no second rule
+/// beside the first.
+pub(super) fn visible_rows(rows: &[MenuRow]) -> Vec<&MenuRow> {
+    let mut visible = Vec::with_capacity(rows.len());
+    let mut pending_rule = None;
+    for row in rows {
+        match row {
+            MenuRow::Separator => {
+                if !visible.is_empty() {
+                    pending_rule = Some(row);
+                }
+            }
+            MenuRow::Command(command) if command.availability == CommandAvailability::Hidden => {}
+            MenuRow::Command(_) | MenuRow::Submenu { .. } => {
+                if let Some(rule) = pending_rule.take() {
+                    visible.push(rule);
+                }
+                visible.push(row);
+            }
+        }
+    }
+    visible
+}
+
 /// Draw `rows` into an open menu and return the row the reader chose, if
 /// any. Hidden rows are not drawn.
 pub(super) fn show_menu_rows(ui: &mut Ui, rows: &[MenuRow]) -> Option<MenuChoice> {
     let mut choice = None;
-    for row in rows {
+    for row in visible_rows(rows) {
         let chosen = match row {
             MenuRow::Command(row) => command_row(ui, row),
             MenuRow::Separator => {

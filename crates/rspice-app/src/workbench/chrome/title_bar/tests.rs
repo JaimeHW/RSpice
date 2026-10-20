@@ -1183,6 +1183,81 @@ fn every_menu_shows_exactly_its_pinned_rows() {
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n\n"));
 }
 
+/// A build with no cloud endpoints can never host a live session or publish,
+/// so the File menu leaves both rows out instead of showing them grey for
+/// good, and the rule that framed them goes with them.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
+    let app = title_test_app();
+    assert_eq!(
+        app.cloud_account.availability(),
+        crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild,
+        "the test build pins no cloud endpoints"
+    );
+    for command in [Command::LiveSession, Command::PublishToWeb] {
+        assert_eq!(command.availability(&app), CommandAvailability::Hidden);
+    }
+    let rows = menu_entries::resolve_menu_rows(
+        ApplicationMenu::File.entries(),
+        &app,
+        crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+        egui::os::OperatingSystem::Windows,
+    );
+    let shown = visible_row_names(&rows);
+    let export = shown
+        .iter()
+        .position(|name| name == "Export SPICE netlist…")
+        .expect("File lists the SPICE export");
+    assert_eq!(
+        shown[export + 1..export + 3],
+        ["---", "Close active document"],
+        "{shown:?}"
+    );
+}
+
+/// What a reader sees of `rows`: each row's label, `---` for a rule.
+#[cfg(not(target_arch = "wasm32"))]
+fn visible_row_names(rows: &[menu_entries::MenuRow]) -> Vec<String> {
+    menu_entries::visible_rows(rows)
+        .into_iter()
+        .map(|row| match row {
+            menu_entries::MenuRow::Command(row) => row.label.to_owned(),
+            menu_entries::MenuRow::Separator => "---".to_owned(),
+            menu_entries::MenuRow::Submenu { label, .. } => (*label).to_owned(),
+        })
+        .collect()
+}
+
+/// A rule only ever stands between two groups a reader can see: none opens
+/// or closes a menu, and none sits beside another where a whole group is
+/// hidden. The Window menu's last group (previous and next workspace) is
+/// hidden, and it used to leave a rule hanging at the menu's foot.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn no_menu_draws_a_rule_at_its_edge_or_two_rules_together() {
+    for app in [title_test_app(), source_editor_app()] {
+        for menu in ALL_MENUS {
+            let rows = menu_entries::resolve_menu_rows(
+                menu.entries(),
+                &app,
+                crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+                egui::os::OperatingSystem::Windows,
+            );
+            let shown = visible_row_names(&rows);
+            assert_ne!(shown.first().map(String::as_str), Some("---"), "{shown:?}");
+            assert_ne!(shown.last().map(String::as_str), Some("---"), "{shown:?}");
+            assert!(
+                !shown
+                    .windows(2)
+                    .any(|pair| pair[0] == "---" && pair[1] == "---"),
+                "{} draws two rules together: {shown:?}",
+                menu.label()
+            );
+        }
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
     (
@@ -1211,8 +1286,8 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Export publication snapshot… | export-publication-snapshot |  | on",
             "Export SPICE netlist… | export-netlist-spice |  | on",
             "---",
-            "Live session… | live-session |  | off: this build has no cloud endpoints pinned",
-            "Publish to web… | publish-web |  | off: this build has no cloud endpoints pinned",
+            "Live session… | live-session |  | hidden",
+            "Publish to web… | publish-web |  | hidden",
             "---",
             "Close active document | close-document | Ctrl+W | off: no closable document is active",
             "Close project… | close-project | Ctrl+Shift+W | on",

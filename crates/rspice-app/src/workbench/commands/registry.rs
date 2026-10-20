@@ -1078,6 +1078,15 @@ impl Command {
         if matches!(self, Self::PreviousWorkspace | Self::NextWorkspace) {
             return CommandAvailability::Hidden;
         }
+        // A build with no cloud endpoints can never host a session or
+        // publish, whatever the reader does, so it offers neither rather than
+        // showing two rows that are grey for good.
+        if matches!(self, Self::LiveSession | Self::PublishToWeb)
+            && app.cloud_account.availability()
+                == crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild
+        {
+            return CommandAvailability::Hidden;
+        }
         if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
         {
