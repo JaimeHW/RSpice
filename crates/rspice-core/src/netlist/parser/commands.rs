@@ -942,6 +942,104 @@ pub(super) struct SaveCommandContext<'a, 'b> {
     pub origin: Option<&'b NetlistSourceLocation>,
 }
 
+fn is_output_binary_operator(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::Other('^')
+    )
+}
+
+/// Consume one bracketed run, the opening token included, and return where
+/// it ends.
+fn consume_output_group(
+    stream: &mut TokenStream,
+    line_num: usize,
+    open: &TokenKind,
+    close: &TokenKind,
+) -> Result<usize, ParseError> {
+    let mut end = stream.advance().span.end;
+    let mut depth = 1usize;
+    while depth > 0 {
+        let token = stream.peek().clone();
+        if matches!(token.kind, TokenKind::Newline | TokenKind::Eof) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unterminated '{open}' in output expression"),
+            });
+        }
+        if &token.kind == open {
+            depth += 1;
+        } else if &token.kind == close {
+            depth -= 1;
+        }
+        end = stream.advance().span.end;
+    }
+    Ok(end)
+}
+
+/// Consume one operand of an unbraced output expression (signs, then a
+/// probe, number, `@dev[param]`, braced or parenthesized expression).
+fn consume_output_primary(
+    stream: &mut TokenStream,
+    line_num: usize,
+    after: &str,
+) -> Result<usize, ParseError> {
+    while matches!(stream.peek().kind, TokenKind::Plus | TokenKind::Minus) {
+        stream.advance();
+    }
+    let token = stream.peek().clone();
+    match token.kind {
+        TokenKind::Ident(_) => {
+            let end = stream.advance().span.end;
+            if matches!(stream.peek().kind, TokenKind::LParen) {
+                consume_output_group(stream, line_num, &TokenKind::LParen, &TokenKind::RParen)
+            } else {
+                Ok(end)
+            }
+        }
+        TokenKind::Number(_) | TokenKind::Expression(_) => Ok(stream.advance().span.end),
+        TokenKind::LParen => {
+            consume_output_group(stream, line_num, &TokenKind::LParen, &TokenKind::RParen)
+        }
+        TokenKind::AtSign => {
+            stream.advance();
+            let end = match stream.peek().kind {
+                TokenKind::Ident(_) => stream.advance().span.end,
+                _ => token.span.end,
+            };
+            if matches!(stream.peek().kind, TokenKind::LBracket) {
+                consume_output_group(stream, line_num, &TokenKind::LBracket, &TokenKind::RBracket)
+            } else {
+                Ok(end)
+            }
+        }
+        other => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected an operand after '{after}' in output expression, found '{other}'"
+            ),
+        }),
+    }
+}
+
+/// Consume every `<operator> <operand>` that continues an output expression
+/// ending at `end`; ngspice joins operands across whitespace this way.
+fn consume_output_expression_tail(
+    stream: &mut TokenStream,
+    line_num: usize,
+    mut end: usize,
+) -> Result<usize, ParseError> {
+    while is_output_binary_operator(&stream.peek().kind) {
+        let operator = stream.advance().kind.to_string();
+        end = consume_output_primary(stream, line_num, &operator)?;
+    }
+    Ok(end)
+}
+
 pub(super) fn parse_save_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -956,6 +1054,9 @@ pub(super) fn parse_save_command(
         origin,
     } = context;
     use super::SaveSignal;
+    // The operand count, save count and source offset as the latest operand
+    // began, so a following operator can extend it into an expression.
+    let mut previous: Option<(usize, usize, usize)> = None;
 
     let mut first_token = true;
     let mut parsed_any = false;
@@ -975,10 +1076,58 @@ pub(super) fn parse_save_command(
     };
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        // An operator after a complete operand (`V(g)/10`, `v(1) - v(2)`),
+        // or a sign that opens one (`-i(vc)`), makes the operand an
+        // expression that ngspice's vector parser evaluates as one column.
+        // `.save` keeps what such an expression depends on, as ngspice does.
+        let extends = previous
+            .filter(|(operands_before, ..)| operands.len() == operands_before + 1)
+            .filter(|_| is_output_binary_operator(&stream.peek().kind));
+        let opens_signed = matches!(stream.peek().kind, TokenKind::Plus | TokenKind::Minus);
+        if extends.is_some() || opens_signed {
+            let (operands_before, saves_before, start) = match extends {
+                Some(operand) => operand,
+                None => (
+                    operands.len(),
+                    saves.signals.len(),
+                    stream.peek().span.start,
+                ),
+            };
+            operands.truncate(operands_before);
+            saves.signals.truncate(saves_before);
+            let end = if extends.is_some() {
+                consume_output_expression_tail(stream, line_num, start)?
+            } else {
+                let end = consume_output_primary(stream, line_num, "a sign")?;
+                consume_output_expression_tail(stream, line_num, end)?
+            };
+            let body = logical_line
+                .get(start..end)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            // As for an accessor expression below: the raw selector keeps the
+            // directive's save set restrictive, and the request's
+            // dependencies (`V(g)` in `V(g)/10`) decide what is captured.
+            saves.signals.push(SaveSignal::Raw(body.clone()));
+            operands.push(OutputOperand {
+                authored: body.clone(),
+                kind: OutputOperandKind::Expression { body },
+            });
+            parsed_any = true;
+            first_token = false;
+            previous = None;
+            continue;
+        }
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
+        previous = Some((
+            operands.len(),
+            saves.signals.len(),
+            stream.peek().span.start,
+        ));
 
         match &stream.peek().kind {
             TokenKind::Ident(raw) => {
@@ -8527,5 +8676,71 @@ mod tests {
             .find(|element| element.name == "R//")
             .expect("double-slash resistor name is retained");
         assert_eq!(resistor.nodes, ["//", "0"]);
+    }
+
+    /// ngspice prints `.print tran @m1[Vbs], V(g)/10` (bsim3soifd
+    /// RampVg2.cir) as the columns `@m1[vbs]` and `v(g)/10`, and
+    /// `.print dc -i(vc)` (vbic FO.cir) as `-i(vc)`: its vector parser joins
+    /// operands across operators and whitespace. Both were refused here
+    /// ("Unexpected token '/'", "Unexpected token '-'").
+    #[test]
+    fn output_directives_take_unbraced_expressions() {
+        for dialect in [
+            crate::config::ExpressionDialect::Ngspice,
+            crate::config::ExpressionDialect::Xyce,
+        ] {
+            let netlist = Netlist::parse_with_options(
+                "unbraced output expressions\nV1 g 0 1\nR1 g s 1k\nR2 s 0 1k\n\
+                 .print tran @r1[i], V(g)/10\n\
+                 .print dc -i(v1)\n\
+                 .plot tran v(g) - v(s) v(s) 2*v(s)\n\
+                 .probe v(g)*-2\n\
+                 .end\n",
+                crate::netlist::NetlistParseOptions {
+                    expression_dialect: dialect,
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+            let columns = |index: usize| {
+                let request = &netlist.output_requests[index];
+                request
+                    .operands
+                    .iter()
+                    .zip(&request.operand_kinds)
+                    .map(|(operand, kind)| {
+                        (
+                            operand.as_str(),
+                            matches!(kind, super::OutputOperandKind::Expression { .. }),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                columns(0),
+                [("@r1[i]", false), ("V(g)/10", true)],
+                "{dialect:?}"
+            );
+            assert_eq!(columns(1), [("-i(v1)", true)], "{dialect:?}");
+            assert_eq!(
+                columns(2),
+                [("v(g) - v(s)", true), ("v(s)", false), ("2*v(s)", true)],
+                "{dialect:?}"
+            );
+            assert_eq!(netlist.output_requests[1].expressions, ["-i(v1)"]);
+            assert_eq!(netlist.output_requests.len(), 4, "{dialect:?}");
+        }
+        // ngspice also takes `.save @m1[Vbs], V(g)/10` (bsim3soipd
+        // RampVg2.cir) and keeps what the expression reads.
+        let netlist =
+            Netlist::parse("save expression\nV1 g 0 1\n.save @v1[i], V(g)/10\n.end\n").unwrap();
+        let save = &netlist.output_requests[0];
+        assert!(
+            save.dependencies
+                .iter()
+                .any(|dependency| dependency.symbol.eq_ignore_ascii_case("g")),
+            "{:?}",
+            save.dependencies
+        );
     }
 }
