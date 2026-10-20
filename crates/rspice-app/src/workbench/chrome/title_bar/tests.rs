@@ -155,7 +155,7 @@ fn labels(projection: MenuProjection) -> Vec<&'static str> {
 #[cfg(not(target_arch = "wasm32"))]
 fn draw_menu_entries(ui: &mut Ui, app: &RSpiceApp, entries: &[MenuEntry]) {
     let rows = menu_rows(entries, app, ui.ctx());
-    let _ = show_menu_rows(ui, &rows);
+    let _ = menu_entries::show_menu_rows(ui, &rows);
 }
 
 /// Every command `entries` list, in order, whatever context their blocks
@@ -320,81 +320,27 @@ fn simulate_menu_row_description(
         .map(|(_, description)| description.clone())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn rendered_overflow_menu_labels() -> Vec<String> {
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let app = title_test_app();
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(MENU_OUTER_WIDTH, 720.0),
-            )),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(Frame::NONE)
-                .show(ctx, |ui| {
-                    draw_menu_entries(ui, &app, overflow_entries(MenuProjection::ThroughModels))
-                });
-        },
-    );
-    output
-        .platform_output
-        .accesskit_update
-        .expect("AccessKit overflow-menu tree")
-        .nodes
-        .into_iter()
-        .filter_map(|(_, node)| {
-            if matches!(
-                node.role(),
-                egui::accesskit::Role::MenuItem | egui::accesskit::Role::MenuItemCheckBox
-            ) {
-                node.label().map(str::to_owned)
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
+/// Above 820 pt the bar shows every menu; at and below it, and in the
+/// compact shell at any width, one Menu button holds them. The in-between
+/// widths used to drop menus into an overflow.
 #[test]
-fn menu_projection_matches_mockup_breakpoints() {
-    assert_eq!(MenuProjection::for_width(820.0), MenuProjection::Hidden);
+fn the_bar_shows_every_menu_above_820_and_one_menu_button_below() {
+    for width in [821.0, 1_021.0, 1_280.0, 1_440.0] {
+        assert_eq!(
+            MenuProjection::for_layout(width, false),
+            MenuProjection::All
+        );
+    }
     assert_eq!(
-        MenuProjection::for_width(821.0),
-        MenuProjection::ThroughSimulate
+        MenuProjection::for_layout(820.0, false),
+        MenuProjection::Compact
     );
     assert_eq!(
-        MenuProjection::for_width(1020.0),
-        MenuProjection::ThroughSimulate
+        MenuProjection::for_layout(1_024.0, true),
+        MenuProjection::Compact
     );
-    assert_eq!(
-        MenuProjection::for_width(1021.0),
-        MenuProjection::ThroughModels
-    );
-    assert_eq!(
-        MenuProjection::for_width(1360.0),
-        MenuProjection::ThroughModels
-    );
-    assert_eq!(MenuProjection::for_width(1361.0), MenuProjection::All);
-    assert_eq!(
-        MenuProjection::for_layout(844.0, true),
-        MenuProjection::Hidden
-    );
-    assert!(title_context_is_left_aligned(
-        MenuProjection::Hidden,
-        844.0,
-        true
-    ));
-    assert!(!title_context_is_left_aligned(
-        MenuProjection::Hidden,
-        820.0,
-        true
-    ));
+    assert!(title_context_is_left_aligned(844.0, true));
+    assert!(!title_context_is_left_aligned(820.0, true));
 }
 
 #[test]
@@ -408,18 +354,8 @@ fn title_bar_rules_remain_inside_the_browser_clip() {
 }
 
 #[test]
-fn each_projection_exposes_only_the_mockup_menu_prefix() {
-    assert!(labels(MenuProjection::Hidden).is_empty());
-    assert_eq!(
-        labels(MenuProjection::ThroughSimulate),
-        ["File", "Edit", "View", "Design", "Simulate"]
-    );
-    assert_eq!(
-        labels(MenuProjection::ThroughModels),
-        [
-            "File", "Edit", "View", "Design", "Simulate", "Results", "Verify", "Models"
-        ]
-    );
+fn the_full_bar_lists_every_menu_in_order() {
+    assert!(labels(MenuProjection::Compact).is_empty());
     assert_eq!(
         labels(MenuProjection::All),
         [
@@ -439,41 +375,41 @@ fn each_projection_exposes_only_the_mockup_menu_prefix() {
 }
 
 #[test]
-fn overflow_and_compact_title_labels_match_the_mockup() {
-    assert_eq!(
-        MenuProjection::ThroughModels.overflow_trigger_label(),
-        "⋯  More"
-    );
-    assert_eq!(
-        MenuProjection::ThroughSimulate.overflow_trigger_label(),
-        "⋯"
-    );
-    assert!(!MenuProjection::Hidden.has_overflow());
-    assert!(!MenuProjection::Hidden.shows_title_context());
+fn the_compact_bar_drops_the_title_and_the_search_field_narrows() {
+    assert!(!MenuProjection::Compact.shows_title_context());
+    assert!(MenuProjection::All.shows_title_context());
     assert_eq!(search_button_width(1020.0, false), 31.0);
     assert!(search_button_width(1021.0, false) > 31.0);
     assert_eq!(search_button_width(1440.0, true), 44.0);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+/// The overflow menu the in-between widths showed is gone, and each of its
+/// rows still has a home in a real menu. Its jobs row read "Jobs & targets"
+/// and opens what is now the run history, so Simulate lists it under that
+/// name. The specialist tool browser, the overflow's only other own row, is
+/// reached from the palette and the Design menu's specialist row.
 #[test]
-fn overflow_keeps_mockup_specialist_and_jobs_routes_without_dropping_useful_extras() {
-    let labels = rendered_overflow_menu_labels();
-    for expected in [
-        "Automation workspace",
-        "Specialist workspaces\u{2026}",
-        "Workspace layouts\u{2026}",
-        "Windows, documents and session\u{2026}",
-        "Jobs & targets",
-        "Focus mode",
-        "Console",
-        "RSpice Help",
+fn every_row_the_overflow_held_has_a_home_in_a_menu() {
+    let listed = ALL_MENUS
+        .into_iter()
+        .flat_map(|menu| listed_commands(menu.entries()))
+        .collect::<Vec<_>>();
+    for command in [
+        Command::ResultViewer(crate::workbench::ResultViewer::Waves),
+        Command::VerificationPage(VerificationPage::Yield),
+        Command::ModelsPage(ModelsPage::Models),
+        Command::AutomationConsole,
+        Command::WorkspaceLayouts,
+        Command::WindowManager,
+        Command::JobsManager,
+        Command::ToggleFocusMode,
+        Command::ToggleConsole,
+        Command::HelpCenter,
     ] {
-        assert!(
-            labels.iter().any(|label| label == expected),
-            "overflow is missing {expected:?}: {labels:?}"
-        );
+        assert!(listed.contains(&command), "no menu lists {command:?}");
     }
+    assert!(listed_commands(ApplicationMenu::Simulate.entries()).contains(&Command::JobsManager));
+    assert_eq!(Command::JobsManager.spec().label, "Run history\u{2026}");
 }
 
 #[test]
@@ -489,18 +425,6 @@ fn menu_geometry_matches_the_mockup_contract() {
     assert_eq!(SEARCH_KEYCAP_MIN_WIDTH, 19.0);
     assert_eq!(SEARCH_KEYCAP_INLINE_PADDING, 4.0);
     assert_eq!(SEARCH_KEYCAP_BORDER_WIDTH, 1.0);
-    assert_eq!(
-        overflow_trigger_width(MenuProjection::ThroughSimulate, false),
-        28.0
-    );
-    assert_eq!(
-        overflow_trigger_width(MenuProjection::ThroughModels, false),
-        54.0
-    );
-    assert_eq!(
-        overflow_trigger_width(MenuProjection::ThroughModels, true),
-        44.0
-    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1023,7 +947,7 @@ fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
             "Add analysis or workflow\u{2026}",
             "Run active plan",
             "Stop active run",
-            "Jobs, targets and run history\u{2026}",
+            "Run history\u{2026}",
             "Preflight checks",
             "Simulation Studio",
             "Stimulus Library",
@@ -1196,13 +1120,11 @@ fn every_menu_shows_exactly_its_pinned_rows() {
             expected,
         );
     }
-    for (projection, expected) in PINNED_OVERFLOW_MENUS {
-        check(
-            &format!("{projection:?} overflow"),
-            menu_pin(overflow_entries(projection), &title_test_app()),
-            expected,
-        );
-    }
+    check(
+        "Compact Menu button",
+        menu_pin(COMPACT_MENU, &title_test_app()),
+        &PINNED_COMPACT_MENU,
+    );
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n\n"));
 }
 
@@ -1469,18 +1391,18 @@ fn the_keyboard_walks_greyed_rows_and_enter_on_one_does_nothing() {
         .position(|(_, enabled)| !enabled)
         .expect("the Results menu has a grey row without results");
     let grey = shown[grey_index].0.clone();
-    let frame = |app: &mut RSpiceApp, events| {
+    let mut frame = |events| {
         menu_items_after_frame(&ctx, events, |ui| {
-            menus(ui, app, MenuProjection::All, false, 35.0);
+            menus(ui, &mut app, MenuProjection::All, false, 35.0);
         })
     };
 
     Popup::open_id(&ctx, results_menu);
-    let _ = frame(&mut app, Vec::new());
+    let _ = frame(Vec::new());
     let mut walked = Vec::new();
     for _ in &shown {
-        let _ = frame(&mut app, vec![title_key_event(Key::ArrowDown)]);
-        let (_, focused) = frame(&mut app, Vec::new());
+        let _ = frame(vec![title_key_event(Key::ArrowDown)]);
+        let (_, focused) = frame(Vec::new());
         walked.push(focused.expect("a row has the focus"));
     }
     assert_eq!(
@@ -1488,15 +1410,15 @@ fn the_keyboard_walks_greyed_rows_and_enter_on_one_does_nothing() {
         shown.iter().map(|(label, _)| label.clone()).collect::<Vec<_>>()
     );
 
-    let _ = frame(&mut app, vec![title_key_event(Key::Home)]);
+    let _ = frame(vec![title_key_event(Key::Home)]);
     for _ in 0..grey_index {
-        let _ = frame(&mut app, Vec::new());
-        let _ = frame(&mut app, vec![title_key_event(Key::ArrowDown)]);
+        let _ = frame(Vec::new());
+        let _ = frame(vec![title_key_event(Key::ArrowDown)]);
     }
-    let (_, focused) = frame(&mut app, Vec::new());
+    let (_, focused) = frame(Vec::new());
     assert_eq!(focused.as_deref(), Some(grey.as_str()));
-    let _ = frame(&mut app, vec![title_key_event(Key::Enter)]);
-    let (_, focused) = frame(&mut app, Vec::new());
+    let _ = frame(vec![title_key_event(Key::Enter)]);
+    let (_, focused) = frame(Vec::new());
     assert!(
         Popup::is_id_open(&ctx, results_menu),
         "Enter on {grey:?} closed the menu"
@@ -1529,34 +1451,34 @@ fn a_menu_of_greyed_rows_still_answers_its_keys() {
         MenuTriggerKey::Application(menu),
     ));
     let popup = trigger.with("popup");
-    let frame = |app: &mut RSpiceApp, events| {
+    let mut frame = |events| {
         menu_items_after_frame(&ctx, events, |ui| {
-            menus(ui, app, MenuProjection::All, false, 35.0);
+            menus(ui, &mut app, MenuProjection::All, false, 35.0);
         })
     };
     // One frame carries the event, the next shows where the focus went.
-    let press = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
-        let _ = frame(app, events);
-        frame(app, Vec::new()).1
+    let mut press = |events: Vec<egui::Event>| {
+        let _ = frame(events);
+        frame(Vec::new()).1
     };
     let key = |key| vec![title_key_event(key)];
 
     Popup::open_id(&ctx, popup);
-    let _ = press(&mut app, Vec::new());
+    let _ = press(Vec::new());
     assert_eq!(
-        press(&mut app, key(Key::ArrowDown)).as_deref(),
+        press(key(Key::ArrowDown)).as_deref(),
         Some(labels[0])
     );
     assert_eq!(
-        press(&mut app, key(Key::ArrowDown)).as_deref(),
+        press(key(Key::ArrowDown)).as_deref(),
         Some(labels[1])
     );
     assert_eq!(
-        press(&mut app, key(Key::End)).as_deref(),
+        press(key(Key::End)).as_deref(),
         labels.last().copied()
     );
     assert_eq!(
-        press(&mut app, key(Key::Home)).as_deref(),
+        press(key(Key::Home)).as_deref(),
         Some(labels[0])
     );
     let letter = labels[1]
@@ -1573,15 +1495,335 @@ fn a_menu_of_greyed_rows_still_answers_its_keys() {
         .find(|label| label.to_lowercase().starts_with(&letter))
         .copied();
     assert_eq!(
-        press(&mut app, vec![egui::Event::Text(letter.clone())]).as_deref(),
+        press(vec![egui::Event::Text(letter.clone())]).as_deref(),
         found,
         "typing {letter:?} in {labels:?}"
     );
     assert_eq!(
-        press(&mut app, key(Key::Escape)).as_deref(),
+        press(key(Key::Escape)).as_deref(),
         Some(menu.label())
     );
     assert!(!Popup::is_id_open(&ctx, popup), "Escape closes {menu:?}");
+}
+
+/// The title bar in a window of `size`, laid out as the shell lays it out.
+#[cfg(not(target_arch = "wasm32"))]
+struct TitleBarWindow {
+    ctx: Context,
+    app: RSpiceApp,
+    size: egui::Vec2,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TitleBarWindow {
+    fn new(size: egui::Vec2) -> Self {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        Self {
+            ctx,
+            app: title_test_app(),
+            size,
+        }
+    }
+
+    /// One frame carrying `events`, and the labelled AccessKit nodes it
+    /// published with their bounds.
+    fn frame(&mut self, events: Vec<egui::Event>) -> Vec<(String, egui::accesskit::Role, Rect)> {
+        let size = self.size;
+        let app = &mut self.app;
+        let output = self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
+                show(ui, app, layout);
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit title-bar tree")
+            .nodes
+            .into_iter()
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                Some((
+                    node.label()?.to_owned(),
+                    node.role(),
+                    Rect::from_min_max(
+                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                    ),
+                ))
+            })
+            .collect()
+    }
+
+    /// Frames until a just-opened popup has settled its size.
+    fn settle(&mut self) -> Vec<(String, egui::accesskit::Role, Rect)> {
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            nodes = self.frame(Vec::new());
+        }
+        nodes
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_menu_row(role: egui::accesskit::Role) -> bool {
+    matches!(
+        role,
+        egui::accesskit::Role::MenuItem | egui::accesskit::Role::MenuItemCheckBox
+    )
+}
+
+/// At every desktop width above 820 pt the bar shows all eleven menus in
+/// order, clear of the buttons at its right, and each opens onto every row
+/// it holds, on screen. At 821 to 1360 pt the bar used to hide the last
+/// three to six menus behind an overflow.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_menu_is_reachable_on_the_bar_at_every_desktop_width() {
+    for width in [821.0, 1_021.0, 1_280.0, 1_440.0] {
+        let mut window = TitleBarWindow::new(egui::vec2(width, 900.0));
+        let nodes = window.settle();
+        let triggers = ALL_MENUS
+            .into_iter()
+            .map(|menu| {
+                nodes
+                    .iter()
+                    .find(|(label, role, rect)| {
+                        label == menu.label() && is_menu_row(*role) && rect.top() < 40.0
+                    })
+                    .map(|(_, _, rect)| *rect)
+                    .unwrap_or_else(|| panic!("{width} pt: the bar has no {menu:?} menu"))
+            })
+            .collect::<Vec<_>>();
+        let cluster_left = nodes
+            .iter()
+            .filter(|(label, _, _)| {
+                [
+                    "Search and run a command",
+                    "Open preferences",
+                    "Open account, organization, and licensing",
+                ]
+                .contains(&label.as_str())
+            })
+            .map(|(_, _, rect)| rect.left())
+            .fold(f32::INFINITY, f32::min);
+        assert!(cluster_left.is_finite(), "{width} pt: no right-hand buttons");
+        for pair in triggers.windows(2) {
+            assert!(pair[0].right() <= pair[1].left() + 0.5, "{width} pt: {pair:?}");
+        }
+        let last = triggers.last().expect("eleven menus");
+        assert!(
+            last.right() <= cluster_left,
+            "{width} pt: Help ends at {} under the buttons from {cluster_left}",
+            last.right()
+        );
+
+        for menu in ALL_MENUS {
+            let popup = Id::new((
+                "workbench.title_menu.trigger",
+                MenuTriggerKey::Application(menu),
+            ))
+            .with("popup");
+            Popup::open_id(&window.ctx, popup);
+            let nodes = window.settle();
+            for (label, _) in shown_rows(menu, &window.app) {
+                assert!(
+                    nodes.iter().any(|(drawn, role, rect)| {
+                        *drawn == label
+                            && is_menu_row(*role)
+                            && rect.top() >= 35.0
+                            && rect.left() >= 0.0
+                            && rect.right() <= width + 0.5
+                    }),
+                    "{width} pt: {menu:?} does not show {label:?} on screen"
+                );
+            }
+        }
+    }
+}
+
+/// In the compact layout, at phone and tablet widths, one Menu button
+/// holds every menu as a submenu on 44 pt rows, and each submenu opens onto
+/// every row its menu holds, on 44 pt rows too. The compact layout used to
+/// offer no application menu at all.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_compact_menu_button_reaches_every_menu_on_touch_rows() {
+    for size in [egui::vec2(390.0, 844.0), egui::vec2(768.0, 1_024.0)] {
+        let mut window = TitleBarWindow::new(size);
+        let trigger = Id::new(("workbench.title_menu.trigger", MenuTriggerKey::Compact));
+        let nodes = window.settle();
+        assert!(
+            nodes
+                .iter()
+                .any(|(label, role, _)| label == "Menu" && is_menu_row(*role)),
+            "{size:?}: no Menu button"
+        );
+        assert!(
+            !nodes.iter().any(|(label, _, _)| label == "File"),
+            "{size:?}: the compact bar shows no menu of its own"
+        );
+
+        Popup::open_id(&window.ctx, trigger.with("popup"));
+        let nodes = window.settle();
+        for menu in ALL_MENUS {
+            let row = nodes
+                .iter()
+                .find(|(label, role, rect)| {
+                    label == menu.label() && is_menu_row(*role) && rect.top() > 30.0
+                })
+                .unwrap_or_else(|| panic!("{size:?}: the Menu button has no {menu:?} row"));
+            assert!((row.2.height() - MENU_TOUCH_ROW_HEIGHT).abs() < 0.01, "{row:?}");
+        }
+
+        for menu in ALL_MENUS {
+            window.ctx.memory_mut(|memory| {
+                memory.request_focus(menu_entries::submenu_row_id(menu.label()));
+            });
+            let _ = window.frame(Vec::new());
+            let _ = window.frame(vec![title_key_event(Key::ArrowRight)]);
+            let nodes = window.settle();
+            // On screen whole, scrolling where its rows are taller.
+            let area = window
+                .ctx
+                .memory(|memory| {
+                    memory.area_rect(egui::containers::menu::SubMenu::id_from_widget_id(
+                        menu_entries::submenu_row_id(menu.label()),
+                    ))
+                })
+                .unwrap_or_else(|| panic!("{size:?}: {menu:?} did not open"));
+            assert!(
+                area.top() >= 0.0
+                    && area.bottom() <= size.y + 0.5
+                    && area.left() >= -0.5
+                    && area.right() <= size.x + 0.5,
+                "{size:?}: {menu:?} hangs off screen at {area:?}"
+            );
+            for (label, _) in shown_rows(menu, &window.app) {
+                let row = nodes
+                    .iter()
+                    .find(|(drawn, role, rect)| {
+                        *drawn == label && is_menu_row(*role) && rect.top() > 30.0
+                    })
+                    .unwrap_or_else(|| panic!("{size:?}: {menu:?} does not show {label:?}"));
+                assert!(
+                    (row.2.height() - MENU_TOUCH_ROW_HEIGHT).abs() < 0.01,
+                    "{size:?}: {menu:?} row {row:?}"
+                );
+            }
+            let _ = window.frame(vec![title_key_event(Key::ArrowLeft)]);
+        }
+    }
+}
+
+/// Renders the bar at 821, 1021, 1280 and 1440 pt and in the compact
+/// layout, every menu open at 821 pt (the tightest bar), and the compact
+/// Menu button open with its File submenu, in light and dark, to
+/// `RSPICE_RASTER_DIR` for a person to look at.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_the_menu_bar_and_its_menus_for_review() {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+    let popup_of = |key: MenuTriggerKey| Id::new(("workbench.title_menu.trigger", key)).with("popup");
+    for (mode, mode_name) in [
+        (crate::ui::tokens::Mode::Light, "light"),
+        (crate::ui::tokens::Mode::Dark, "dark"),
+    ] {
+        let theme = crate::ui::Theme {
+            mode,
+            ..crate::ui::Theme::default()
+        };
+        // Drives the title bar through its frames, `input` giving each
+        // frame's events after any setup it does on the context.
+        let mut write = |name: &str,
+                         size: egui::Vec2,
+                         rows: usize,
+                         input: &dyn Fn(&Context, usize) -> Vec<egui::Event>| {
+            let ctx = Context::default();
+            ctx.set_os(egui::os::OperatingSystem::Nix);
+            theme.apply(&ctx);
+            // No fade: a popup mid-fade is not what a reader sees.
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            let mut app = title_test_app();
+            let mut output = None;
+            for pass in 0..8 {
+                let events = input(&ctx, pass);
+                output = Some(ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
+                        show(ui, &mut app, layout);
+                    },
+                ));
+            }
+            let canvas =
+                crate::ui::raster::rasterize(&ctx, size, &output.expect("eight passes ran"));
+            let path = directory.join(format!("{name}-{mode_name}.png"));
+            std::fs::write(&path, canvas.png(rows)).expect("write the render");
+            writeln!(report, "{}", path.display()).ok();
+        };
+        let nothing = |_: &Context, _: usize| Vec::new();
+        for width in [821.0, 1_021.0, 1_280.0, 1_440.0] {
+            write(&format!("bar-{width}"), egui::vec2(width, 900.0), 48, &nothing);
+        }
+        write("bar-compact-390", egui::vec2(390.0, 844.0), 60, &nothing);
+        write("bar-compact-768", egui::vec2(768.0, 1_024.0), 60, &nothing);
+        for menu in ALL_MENUS {
+            let open = move |ctx: &Context, pass: usize| {
+                if pass == 0 {
+                    Popup::open_id(ctx, popup_of(MenuTriggerKey::Application(menu)));
+                }
+                Vec::new()
+            };
+            write(
+                &format!("menu-821-{}", menu.label().to_lowercase()),
+                egui::vec2(821.0, 900.0),
+                900,
+                &open,
+            );
+        }
+        let compact = |ctx: &Context, pass: usize| match pass {
+            0 => {
+                Popup::open_id(ctx, popup_of(MenuTriggerKey::Compact));
+                Vec::new()
+            }
+            3 => {
+                ctx.memory_mut(|memory| {
+                    memory.request_focus(menu_entries::submenu_row_id("File"));
+                });
+                Vec::new()
+            }
+            4 => vec![title_key_event(Key::ArrowRight)],
+            _ => Vec::new(),
+        };
+        write("menu-compact-390-file", egui::vec2(390.0, 844.0), 844, &compact);
+        let compact_closed = |ctx: &Context, pass: usize| {
+            if pass == 0 {
+                Popup::open_id(ctx, popup_of(MenuTriggerKey::Compact));
+            }
+            Vec::new()
+        };
+        write("menu-compact-768", egui::vec2(768.0, 1_024.0), 1_024, &compact_closed);
+    }
 }
 
 /// Every menu and submenu is as wide as its longest row needs, so no label
@@ -1910,7 +2152,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Add analysis or workflow… | add-analysis |  | on",
             "Run active plan | start-run | F5 | on",
             "Stop active run | stop-run | Shift+F5 | off: no simulation is running",
-            "Jobs, targets and run history… | jobs-manager |  | on",
+            "Run history… | jobs-manager |  | on",
             "Preflight checks | check | Ctrl+E | on",
             "---",
             "Simulation Studio | simulate | Alt+3 | on",
@@ -2061,40 +2303,18 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
 ];
 
 #[cfg(not(target_arch = "wasm32"))]
-const PINNED_OVERFLOW_MENUS: [(MenuProjection, &[&str]); 2] = [
-    (
-        MenuProjection::ThroughSimulate,
-        &[
-            "Results workspace | waveforms |  | on",
-            "Verification workspace | yield |  | on",
-            "Models workspace | models-catalog |  | on",
-            "Automation workspace | automation |  | on",
-            "Specialist workspaces… | specialist-tool-browser |  | on",
-            "---",
-            "Workspace layouts… | workspace-layouts |  | on",
-            "Windows, documents and session… | window-manager |  | on",
-            "Jobs & targets | jobs-manager |  | on",
-            "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
-            "Console | console | Ctrl+J | on | unchecked",
-            "---",
-            "RSpice Help | help-center | F1 | on",
-        ],
-    ),
-    (
-        MenuProjection::ThroughModels,
-        &[
-            "Automation workspace | automation |  | on",
-            "Specialist workspaces… | specialist-tool-browser |  | on",
-            "---",
-            "Workspace layouts… | workspace-layouts |  | on",
-            "Windows, documents and session… | window-manager |  | on",
-            "Jobs & targets | jobs-manager |  | on",
-            "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
-            "Console | console | Ctrl+J | on | unchecked",
-            "---",
-            "RSpice Help | help-center | F1 | on",
-        ],
-    ),
+const PINNED_COMPACT_MENU: [&str; 11] = [
+    "File >",
+    "Edit >",
+    "View >",
+    "Design >",
+    "Simulate >",
+    "Results >",
+    "Verify >",
+    "Models >",
+    "Automation >",
+    "Window >",
+    "Help >",
 ];
 
 #[cfg(not(target_arch = "wasm32"))]

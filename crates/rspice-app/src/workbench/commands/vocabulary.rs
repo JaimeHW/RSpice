@@ -762,7 +762,7 @@ impl Command {
             Self::PreviousViolation => spec("previous-violation", "Previous violation", "Verify"),
             Self::RunSimulation => spec("start-run", "Run active plan", "Simulate"),
             Self::StopSimulation => spec("stop-run", "Stop active run", "Simulate"),
-            Self::JobsManager => spec("jobs-manager", "Jobs, targets and run history…", "Simulate"),
+            Self::JobsManager => spec("jobs-manager", "Run history…", "Simulate"),
             Self::PreflightChecks => spec("check", "Preflight checks", "Simulate"),
             Self::ManageSimulationPlans => spec(
                 "manage-simulation-plans",

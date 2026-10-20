@@ -34,7 +34,7 @@ pub(super) enum MenuEntry {
 pub(super) struct MenuCommand {
     pub(super) command: Command,
     label: MenuLabel,
-    /// `None` shows the command's own key; `Some("")` shows none.
+    /// `None` shows the command's own key; `Some(key)` shows `key`.
     shortcut: Option<&'static str>,
     /// The row opens the command palette narrowed to this scope instead of
     /// running the command.
@@ -91,16 +91,6 @@ pub(super) const fn command_as(command: Command, label: &'static str) -> MenuEnt
         command,
         label: MenuLabel::Fixed(label),
         shortcut: None,
-        palette_scope: None,
-    })
-}
-
-/// The command's row under a label of the menu's own, with no key shown.
-pub(super) const fn command_without_key(command: Command, label: &'static str) -> MenuEntry {
-    MenuEntry::Command(MenuCommand {
-        command,
-        label: MenuLabel::Fixed(label),
-        shortcut: Some(""),
         palette_scope: None,
     })
 }
@@ -243,6 +233,35 @@ pub(super) fn visible_rows(rows: &[MenuRow]) -> Vec<&MenuRow> {
         }
     }
     visible
+}
+
+/// Draw `rows` into an open menu sized by [`configure_menu_popup`], inside
+/// a scroll area that scrolls only when the rows are taller than the window
+/// allows; then the scroll bar takes its width from the rows, so the menu
+/// widens by it and no row is cut short.
+pub(super) fn show_scrolled_menu_rows(
+    ui: &mut Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    rows: &[MenuRow],
+) -> Option<MenuChoice> {
+    let rows_height = menu_rows_height(ui, rows);
+    let max_height = menu_popup_max_height(ui);
+    if rows_height > max_height {
+        let width = menu_rows_width(ui, rows) + ui.spacing().scroll.allocated_width();
+        ui.set_min_width(width);
+        ui.set_max_width(width);
+    }
+    // A popup is first laid out in egui's default 400 pt area and keeps the
+    // height it took, so without this floor every menu over 388 pt of rows
+    // scrolled at that height for good.
+    egui::ScrollArea::vertical()
+        .id_salt(("workbench.title_menu.scroll", id_salt))
+        .max_height(max_height)
+        .min_scrolled_height(rows_height.min(max_height))
+        .auto_shrink([false, true])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+        .show(ui, |ui| show_menu_rows(ui, rows))
+        .inner
 }
 
 /// Draw `rows` into an open menu and return the row the reader chose, if
@@ -416,7 +435,7 @@ fn submenu_row(ui: &mut Ui, label: &'static str, rows: &[MenuRow]) -> Option<Men
         let recorded = render_nested_menu_rows(
             &ctx,
             focus_first.is_some().then_some(InitialMenuFocus::First),
-            || choice = show_menu_rows(ui, rows),
+            || choice = show_scrolled_menu_rows(ui, row_id, rows),
         );
         handle_submenu_keyboard(&ctx, parent_menu, submenu_id, &response, &recorded.rows);
         choice

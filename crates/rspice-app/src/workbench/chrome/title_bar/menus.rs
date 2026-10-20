@@ -5,7 +5,7 @@
 use super::*;
 use menu_entries::MenuEntry::Separator;
 use menu_entries::{
-    MenuContext, MenuEntry, MenuRow, command, command_as, command_without_key, palette_scope,
+    MenuContext, MenuEntry, MenuRow, command, command_as, palette_scope,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -390,57 +390,28 @@ const HELP_MENU: &[MenuEntry] = &[
     command(Command::About),
 ];
 
-/// What the bar's overflow menu holds where it hides menus: the three
-/// workspaces of the hidden menus while only File through Simulate show,
-/// then the rows every overflow keeps.
-pub(super) const fn overflow_entries(projection: MenuProjection) -> &'static [MenuEntry] {
-    if matches!(projection, MenuProjection::ThroughSimulate) {
-        OVERFLOW_THROUGH_SIMULATE_MENU
-    } else {
-        OVERFLOW_MENU
+/// What the compact layout's Menu button holds: every application menu,
+/// in the bar's order, as a submenu.
+pub(super) const COMPACT_MENU: &[MenuEntry] = &[
+    compact_submenu(ApplicationMenu::File),
+    compact_submenu(ApplicationMenu::Edit),
+    compact_submenu(ApplicationMenu::View),
+    compact_submenu(ApplicationMenu::Design),
+    compact_submenu(ApplicationMenu::Simulate),
+    compact_submenu(ApplicationMenu::Results),
+    compact_submenu(ApplicationMenu::Verify),
+    compact_submenu(ApplicationMenu::Models),
+    compact_submenu(ApplicationMenu::Automation),
+    compact_submenu(ApplicationMenu::Window),
+    compact_submenu(ApplicationMenu::Help),
+];
+
+const fn compact_submenu(menu: ApplicationMenu) -> MenuEntry {
+    MenuEntry::Submenu {
+        label: menu.label(),
+        entries: menu.entries(),
     }
 }
-
-const OVERFLOW_THROUGH_SIMULATE_MENU: &[MenuEntry] = &[
-    command_without_key(
-        Command::ResultViewer(crate::workbench::ResultViewer::Waves),
-        "Results workspace",
-    ),
-    command_without_key(
-        Command::VerificationPage(VerificationPage::Yield),
-        "Verification workspace",
-    ),
-    command_without_key(Command::ModelsPage(ModelsPage::Models), "Models workspace"),
-    command_without_key(Command::AutomationConsole, "Automation workspace"),
-    command_without_key(
-        Command::SpecialistToolBrowser,
-        "Specialist workspaces\u{2026}",
-    ),
-    Separator,
-    command(Command::WorkspaceLayouts),
-    command(Command::WindowManager),
-    command_without_key(Command::JobsManager, "Jobs & targets"),
-    command_as(Command::ToggleFocusMode, "Focus mode"),
-    command_as(Command::ToggleConsole, "Console"),
-    Separator,
-    command(Command::HelpCenter),
-];
-
-const OVERFLOW_MENU: &[MenuEntry] = &[
-    command_without_key(Command::AutomationConsole, "Automation workspace"),
-    command_without_key(
-        Command::SpecialistToolBrowser,
-        "Specialist workspaces\u{2026}",
-    ),
-    Separator,
-    command(Command::WorkspaceLayouts),
-    command(Command::WindowManager),
-    command_without_key(Command::JobsManager, "Jobs & targets"),
-    command_as(Command::ToggleFocusMode, "Focus mode"),
-    command_as(Command::ToggleConsole, "Console"),
-    Separator,
-    command(Command::HelpCenter),
-];
 
 /// The source editor's right-click menu: the language group, shown only
 /// where the document's language service can answer it, then the
@@ -562,7 +533,7 @@ pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app:
             node.set_label("Source editor menu");
         });
         begin_menu_render(ui.ctx(), popup_id);
-        let choice = show_menu_rows(ui, &rows);
+        let choice = menu_entries::show_menu_rows(ui, &rows);
         let render_state = finish_menu_render(ui.ctx());
         handle_popup_keyboard(ui.ctx(), popup_id, response, &render_state.rows);
         choice

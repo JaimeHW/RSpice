@@ -23,14 +23,14 @@ use keyboard::{
     claim_menu_keys, finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard,
     record_menu_row, step_menu_row_focus, typeahead_menu_row_focus,
 };
-use menu_entries::{MenuEntry, menu_rows, show_menu_rows};
+use menu_entries::{MenuEntry, menu_rows, show_scrolled_menu_rows};
 use menu_row::{MenuRowLead, MenuRowTrailing, paint_menu_row};
 #[cfg(test)]
 use menus::menu_popup_height_for_viewport;
 pub(in crate::workbench) use menus::source_editor_context_menu;
 use menus::{
-    ALL_MENUS, ApplicationMenu, command_icon, configure_menu_popup, file_menu_shows_exit,
-    menu_popup_max_height, overflow_entries, shortcut_for_occurrence,
+    ALL_MENUS, ApplicationMenu, COMPACT_MENU, command_icon, configure_menu_popup,
+    file_menu_shows_exit, menu_popup_max_height, shortcut_for_occurrence,
 };
 
 #[cfg(test)]
@@ -161,11 +161,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         ui.max_rect().y_range(),
                     ),
                     !menu_projection.shows_title_context(),
-                    title_context_is_left_aligned(
-                        menu_projection,
-                        viewport_width,
-                        layout.compact_shell,
-                    ),
+                    title_context_is_left_aligned(viewport_width, layout.compact_shell),
                 );
             });
         });
@@ -178,57 +174,25 @@ fn title_bar_separator_positions(rect: egui::Rect) -> (f32, f32) {
     )
 }
 
-fn title_context_is_left_aligned(
-    projection: MenuProjection,
-    viewport_width: f32,
-    compact_shell: bool,
-) -> bool {
-    projection == MenuProjection::ThroughSimulate || (compact_shell && viewport_width > 820.0)
+fn title_context_is_left_aligned(viewport_width: f32, compact_shell: bool) -> bool {
+    compact_shell && viewport_width > 820.0
 }
 
-const THROUGH_MODELS_MENUS: [ApplicationMenu; 8] = [
-    ApplicationMenu::File,
-    ApplicationMenu::Edit,
-    ApplicationMenu::View,
-    ApplicationMenu::Design,
-    ApplicationMenu::Simulate,
-    ApplicationMenu::Results,
-    ApplicationMenu::Verify,
-    ApplicationMenu::Models,
-];
-
-const THROUGH_SIMULATE_MENUS: [ApplicationMenu; 5] = [
-    ApplicationMenu::File,
-    ApplicationMenu::Edit,
-    ApplicationMenu::View,
-    ApplicationMenu::Design,
-    ApplicationMenu::Simulate,
-];
-
+/// How the bar offers the application menus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuProjection {
-    Hidden,
-    ThroughSimulate,
-    ThroughModels,
+    /// One Menu button holding every menu as a submenu, with touch rows:
+    /// phone widths and the compact shell.
+    Compact,
+    /// Every menu on the bar. It never hides one: where space is short,
+    /// the centred title shortens instead.
     All,
 }
 
 impl MenuProjection {
     const fn for_layout(viewport_width: f32, compact_shell: bool) -> Self {
-        if compact_shell {
-            Self::Hidden
-        } else {
-            Self::for_width(viewport_width)
-        }
-    }
-
-    const fn for_width(viewport_width: f32) -> Self {
-        if viewport_width <= 820.0 {
-            Self::Hidden
-        } else if viewport_width <= 1020.0 {
-            Self::ThroughSimulate
-        } else if viewport_width <= 1360.0 {
-            Self::ThroughModels
+        if compact_shell || viewport_width <= 820.0 {
+            Self::Compact
         } else {
             Self::All
         }
@@ -236,29 +200,13 @@ impl MenuProjection {
 
     const fn visible_menus(self) -> &'static [ApplicationMenu] {
         match self {
-            Self::Hidden => &[],
-            Self::ThroughSimulate => &THROUGH_SIMULATE_MENUS,
-            Self::ThroughModels => &THROUGH_MODELS_MENUS,
+            Self::Compact => &[],
             Self::All => &ALL_MENUS,
         }
     }
 
-    const fn has_overflow(self) -> bool {
-        matches!(self, Self::ThroughSimulate | Self::ThroughModels)
-    }
-
-    #[cfg(test)]
-    const fn overflow_trigger_label(self) -> &'static str {
-        match self {
-            // The mockup adds a text label only in its 1021-1360 px range.
-            Self::ThroughModels => "⋯  More",
-            Self::ThroughSimulate => "⋯",
-            Self::Hidden | Self::All => "",
-        }
-    }
-
     const fn shows_title_context(self) -> bool {
-        !matches!(self, Self::Hidden)
+        matches!(self, Self::All)
     }
 }
 
@@ -328,11 +276,7 @@ fn menus(
     large_targets: bool,
     title_bar_height: f32,
 ) {
-    if projection == MenuProjection::Hidden {
-        return;
-    }
-
-    let bar_width = menu_bar_width(ui, projection, large_targets);
+    let bar_width = menu_bar_width(ui, projection);
     let mut triggers = Vec::new();
     let menu_bar = ui.allocate_ui_with_layout(
         Vec2::new(bar_width, title_bar_height),
@@ -348,14 +292,8 @@ fn menus(
             for &menu in projection.visible_menus() {
                 triggers.push(top_menu(ui, app, menu, large_targets, title_bar_height));
             }
-            if projection.has_overflow() {
-                triggers.push(overflow_menu_button(
-                    ui,
-                    app,
-                    projection,
-                    large_targets,
-                    title_bar_height,
-                ));
+            if projection == MenuProjection::Compact {
+                triggers.push(compact_menu_button(ui, app, title_bar_height));
             }
         },
     );
@@ -370,17 +308,20 @@ fn menus(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum MenuTriggerKey {
     Application(ApplicationMenu),
-    Overflow,
+    /// The compact layout's one button, holding every menu.
+    Compact,
 }
 
 impl MenuTriggerKey {
     fn label(self) -> &'static str {
         match self {
             Self::Application(menu) => menu.label(),
-            Self::Overflow => "More application menus",
+            Self::Compact => COMPACT_MENU_LABEL,
         }
     }
 }
+
+const COMPACT_MENU_LABEL: &str = "Menu";
 
 #[derive(Clone)]
 struct MenuTriggerResponse {
@@ -396,25 +337,25 @@ struct MenuTriggerPresentation {
     large_targets: bool,
 }
 
-fn menu_bar_width(ui: &Ui, projection: MenuProjection, large_targets: bool) -> f32 {
+fn menu_bar_width(ui: &Ui, projection: MenuProjection) -> f32 {
+    match projection {
+        MenuProjection::All => projection
+            .visible_menus()
+            .iter()
+            .map(|menu| menu_trigger_width(ui, menu.label()))
+            .sum::<f32>(),
+        MenuProjection::Compact => menu_trigger_width(ui, COMPACT_MENU_LABEL),
+    }
+}
+
+/// A bar trigger's width: its label and 7 pt either side.
+fn menu_trigger_width(ui: &Ui, label: &str) -> f32 {
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
-    let menu_width = projection
-        .visible_menus()
-        .iter()
-        .map(|menu| {
-            ui.painter()
-                .layout_no_wrap(menu.label().to_owned(), font.clone(), egui::Color32::WHITE)
-                .size()
-                .x
-                + 14.0
-        })
-        .sum::<f32>();
-    menu_width
-        + if projection.has_overflow() {
-            overflow_trigger_width(projection, large_targets)
-        } else {
-            0.0
-        }
+    ui.painter()
+        .layout_no_wrap(label.to_owned(), font, egui::Color32::WHITE)
+        .size()
+        .x
+        + 14.0
 }
 
 fn top_menu(
@@ -424,13 +365,7 @@ fn top_menu(
     large_targets: bool,
     title_bar_height: f32,
 ) -> MenuTriggerResponse {
-    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
-    let width = ui
-        .painter()
-        .layout_no_wrap(menu.label().to_owned(), font, egui::Color32::WHITE)
-        .size()
-        .x
-        + 14.0;
+    let width = menu_trigger_width(ui, menu.label());
     menu_trigger(
         ui,
         app,
@@ -444,39 +379,25 @@ fn top_menu(
     )
 }
 
-fn overflow_menu_button(
+/// The compact layout's Menu button: every application menu as a submenu,
+/// on touch rows whatever the pointer, since the layout is a touch one.
+fn compact_menu_button(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    projection: MenuProjection,
-    large_targets: bool,
     title_bar_height: f32,
 ) -> MenuTriggerResponse {
-    let height = if large_targets {
-        MENU_TOUCH_ROW_HEIGHT
-    } else {
-        27.0_f32.min(title_bar_height)
-    };
+    let width = menu_trigger_width(ui, COMPACT_MENU_LABEL).max(MENU_TOUCH_ROW_HEIGHT);
     menu_trigger(
         ui,
         app,
-        MenuTriggerKey::Overflow,
+        MenuTriggerKey::Compact,
         MenuTriggerPresentation {
-            width: overflow_trigger_width(projection, large_targets),
-            height,
-            large_targets,
+            width,
+            height: title_bar_height,
+            large_targets: true,
         },
-        overflow_entries(projection),
+        COMPACT_MENU,
     )
-}
-
-const fn overflow_trigger_width(projection: MenuProjection, large_targets: bool) -> f32 {
-    if large_targets {
-        44.0
-    } else if matches!(projection, MenuProjection::ThroughModels) {
-        54.0
-    } else {
-        28.0
-    }
 }
 
 fn menu_trigger(
@@ -541,11 +462,7 @@ fn menu_trigger(
     if response.hovered() || response.has_focus() || open_for_paint {
         ui.painter().rect_filled(
             rect,
-            if key == MenuTriggerKey::Overflow {
-                t.radius
-            } else {
-                0.0
-            },
+            0.0,
             if open_for_paint {
                 t.color.bg_active
             } else {
@@ -558,71 +475,24 @@ fn menu_trigger(
     } else {
         t.color.text_dim
     };
-    match key {
-        MenuTriggerKey::Application(menu) => {
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                menu.label(),
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                ink,
-            );
-        }
-        MenuTriggerKey::Overflow => {
-            let show_label = width >= 54.0;
-            let icon_center = if show_label {
-                egui::pos2(rect.left() + 15.0, rect.center().y)
-            } else {
-                rect.center()
-            };
-            WorkbenchIcon::More.paint(
-                ui.painter(),
-                egui::Rect::from_center_size(icon_center, Vec2::splat(16.0)),
-                ink,
-            );
-            if show_label {
-                ui.painter().text(
-                    egui::pos2(rect.left() + 27.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    "More",
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    ink,
-                );
-            }
-        }
-    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        key.label(),
+        theme::sans(tokens::FS_1, FontWeight::Regular),
+        ink,
+    );
     theme::paint_focus_ring_outset(ui, &response, rect);
 
     let popup = Popup::menu(&response).gap(MENU_POPUP_GAP).show(|ui| {
         let rows = menu_rows(entries, app, ui.ctx());
         configure_menu_popup(ui, large_targets, &rows);
-        // A menu scrolls only when it is taller than the window allows, and
-        // then the scroll bar takes its width from the rows: the menu widens
-        // by it instead, so no row is cut short.
-        let rows_height = menu_entries::menu_rows_height(ui, &rows);
-        let max_height = menu_popup_max_height(ui);
-        if rows_height > max_height {
-            let width =
-                menu_entries::menu_rows_width(ui, &rows) + ui.spacing().scroll.allocated_width();
-            ui.set_min_width(width);
-            ui.set_max_width(width);
-        }
         ui.ctx().accesskit_node_builder(popup_id, |node| {
             node.set_role(egui::accesskit::Role::Menu);
             node.set_label(format!("{} menu", key.label()));
         });
         begin_menu_render(ui.ctx(), popup_id);
-        // The popup is first laid out in egui's default 400 pt area and
-        // keeps the height it took, so without a floor here every menu
-        // over 388 pt of rows scrolled at that height for good.
-        let choice = egui::ScrollArea::vertical()
-            .id_salt(("workbench.title_menu.scroll", key))
-            .max_height(max_height)
-            .min_scrolled_height(rows_height.min(max_height))
-            .auto_shrink([false, true])
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-            .show(ui, |ui| show_menu_rows(ui, &rows))
-            .inner;
+        let choice = show_scrolled_menu_rows(ui, key, &rows);
         let render_state = finish_menu_render(ui.ctx());
         handle_popup_keyboard(ui.ctx(), popup_id, &response, &render_state.rows);
         choice
@@ -664,7 +534,7 @@ fn known_application_popup_ids() -> Vec<Id> {
             .with("popup")
         })
         .chain(std::iter::once(
-            Id::new(("workbench.title_menu.trigger", MenuTriggerKey::Overflow)).with("popup"),
+            Id::new(("workbench.title_menu.trigger", MenuTriggerKey::Compact)).with("popup"),
         ))
         .collect()
 }
