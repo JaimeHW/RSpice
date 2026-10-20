@@ -138,6 +138,19 @@ impl RenameValidation {
     }
 }
 
+/// What the footer says: why Rename is refused, or, for a name nobody has
+/// changed yet, what Rename is waiting for, as a plain fact.
+fn rename_status<'a>(
+    message: Option<&'a str>,
+    validation: &RenameValidation,
+) -> Result<Option<&'a str>, &'a str> {
+    match (message, validation) {
+        (Some(message), _) => Err(message),
+        (None, RenameValidation::Unchanged) => Ok(Some("Type a new name.")),
+        (None, _) => Ok(None),
+    }
+}
+
 /// Whether the active schematic currently owns exactly one live, renameable
 /// object. This is the single availability predicate used by menus, the
 /// command palette, and keyboard dispatch.
@@ -239,22 +252,19 @@ pub(in crate::workbench) fn render_rename_selection_dialog(
     let mut edited = false;
     let choice = CommandForm::new(TITLE, PRIMARY)
         .primary_enabled(validation.can_commit())
+        .status(rename_status(validation_message.as_deref(), &validation))
         .show(ctx, |rows| {
             rows.value("Object", &object);
             let field = Id::new(FIELD_ID);
             let response = rows.text("New name", field, &mut dialog.draft, "A SPICE-safe name");
             // A prior publication error belongs to an older candidate;
-            // the live validation under this field now owns what is
-            // typed.
+            // the live validation now owns what is typed.
             edited = response.changed();
-            rows.field_line(
-                Some(field),
-                match (validation_message.as_deref(), scope.as_deref()) {
-                    (Some(message), _) => FieldLine::Error(message),
-                    (None, Some(scope)) => FieldLine::Derived(scope),
-                    (None, None) => FieldLine::Blank,
-                },
-            );
+            // How far the rename reaches is fixed by what it renames, so
+            // the line is there for the form's whole life or never.
+            if let Some(scope) = scope.as_deref() {
+                rows.field_line(Some(field), FieldLine::Derived(scope));
+            }
             Some(field)
         });
     if edited {
@@ -612,6 +622,22 @@ mod tests {
         assert_eq!(context, "Resistor R1");
         assert!(!context.contains("COMPONENT-"));
         assert_eq!(rename_scope(&app.state.model.schematic, &target), None);
+    }
+
+    /// A name nobody has changed says what Rename waits for, as a fact; a
+    /// refusal is stated as one. Both in the footer, so the body ends at the
+    /// field.
+    #[test]
+    fn an_unchanged_name_says_what_rename_waits_for() {
+        assert_eq!(
+            rename_status(None, &RenameValidation::Unchanged),
+            Ok(Some("Type a new name."))
+        );
+        let refused = RenameValidation::Invalid("R2 is already used.".to_owned());
+        assert_eq!(
+            rename_status(refused.message(), &refused),
+            Err("R2 is already used.")
+        );
     }
 
     #[test]
