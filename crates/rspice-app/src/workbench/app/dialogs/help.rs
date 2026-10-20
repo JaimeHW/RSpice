@@ -1,5 +1,5 @@
-//! Help dialogs on the modal primitive: About, keyboard shortcuts, and the
-//! waveform calculator host.
+//! Help dialogs on the modal primitive: the Help Center, Report a problem,
+//! About, and the keyboard shortcuts.
 
 use egui::{Context, Grid, RichText};
 
@@ -11,6 +11,8 @@ use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
 use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
+
+pub(in crate::workbench) mod report_problem;
 
 const PRODUCT_LICENSE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE"));
 const THIRD_PARTY_NOTICES: &str =
@@ -60,67 +62,54 @@ impl RSpiceApp {
             return;
         }
 
+        // System diagnostics and Create support bundle both open Report a
+        // problem, which is its own dialog rather than two of these pages.
+        if report_problem::is_report_page(self.state.dialogs.help_center.page) {
+            self.render_report_problem_dialog(ctx);
+            return;
+        }
+
         let mut page = self.state.dialogs.help_center.page;
         let mut query = self.state.dialogs.help_center.query.clone();
-        let mut include_session_log = self.state.dialogs.help_center.include_session_log;
-        let mut disclosure_reviewed = self.state.dialogs.help_center.disclosure_reviewed;
         let mut action = None;
 
-        let mut dialog = Dialog::new(page.label(), "Close")
-        .description(
-            "Browse product guidance, compatibility changes, migration requirements, diagnostics, support disclosure, and notices.",
-        )
-        .size(DialogSize::Manager);
-        if page == HelpCenterPage::SupportBundle {
-            dialog = dialog.ghost("Create support bundle\u{2026}");
-        }
-        let choice = dialog.show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for candidate in HelpCenterPage::ALL {
-                    if ui
-                        .selectable_label(page == candidate, candidate.label())
-                        .clicked()
+        let choice = Dialog::new(page.label(), "Close")
+            .description(
+                "Browse product guidance, release notes, migration requirements, and legal notices.",
+            )
+            .size(DialogSize::Manager)
+            .show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for candidate in HelpCenterPage::ALL
+                        .into_iter()
+                        .filter(|candidate| !report_problem::is_report_page(*candidate))
                     {
-                        page = candidate;
+                        if ui
+                            .selectable_label(page == candidate, candidate.label())
+                            .clicked()
+                        {
+                            page = candidate;
+                        }
                     }
+                });
+                ui.separator();
+                match page {
+                    HelpCenterPage::Help => render_help_page(ui, &mut query, &mut action),
+                    HelpCenterPage::ReleaseNotes => render_release_notes(ui),
+                    HelpCenterPage::MigrationGuide => render_migration_guide(ui),
+                    HelpCenterPage::LegalPrivacy => render_legal_privacy(ui),
+                    // Report a problem draws these; the strip above never
+                    // offers them.
+                    HelpCenterPage::Diagnostics | HelpCenterPage::SupportBundle => {}
                 }
             });
-            ui.separator();
-            match page {
-                HelpCenterPage::Help => render_help_page(ui, &mut query, &mut action),
-                HelpCenterPage::ReleaseNotes => render_release_notes(ui),
-                HelpCenterPage::MigrationGuide => render_migration_guide(ui),
-                HelpCenterPage::Diagnostics => render_diagnostics(ui, self),
-                HelpCenterPage::SupportBundle => render_support_bundle(
-                    ui,
-                    self,
-                    &mut include_session_log,
-                    &mut disclosure_reviewed,
-                ),
-                HelpCenterPage::LegalPrivacy => render_legal_privacy(ui),
-            }
-        });
 
         self.state.dialogs.help_center.page = page;
         self.state.dialogs.help_center.query = query;
-        self.state.dialogs.help_center.include_session_log = include_session_log;
-        self.state.dialogs.help_center.disclosure_reviewed = disclosure_reviewed;
 
-        match choice {
-            DialogChoice::None => {}
-            DialogChoice::Ghost if page == HelpCenterPage::SupportBundle => {
-                if disclosure_reviewed {
-                    export_support_bundle(self, include_session_log);
-                } else {
-                    self.state.prompt(
-                        "Review and acknowledge the support-bundle contents before export.",
-                    );
-                }
-            }
-            _ => {
-                self.close_help_center_route();
-                return;
-            }
+        if choice != DialogChoice::None {
+            self.close_help_center_route();
+            return;
         }
 
         if let Some(HelpAction::Command(command)) = action {
@@ -445,98 +434,10 @@ fn render_migration_guide(ui: &mut egui::Ui) {
     ui.label("5. Save only after the accepted baseline and generated artifacts match the intended project.");
 }
 
-fn render_diagnostics(ui: &mut egui::Ui, app: &RSpiceApp) {
-    let config = dirs::config_dir()
-        .map(|path| path.join("rspice").display().to_string())
-        .unwrap_or_else(|| "Host configuration directory unavailable".to_owned());
-    section_heading(ui, "System diagnostics");
-    Grid::new("help.system-diagnostics")
-        .num_columns(2)
-        .spacing([24.0, 7.0])
-        .show(ui, |ui| {
-            ui.label("Version");
-            ui.label(concat!(
-                env!("CARGO_PKG_VERSION"),
-                " / ",
-                env!("RSPICE_BUILD_HASH")
-            ));
-            ui.end_row();
-            ui.label("Platform");
-            ui.label(format!(
-                "{} / {}",
-                std::env::consts::OS,
-                std::env::consts::ARCH
-            ));
-            ui.end_row();
-            ui.label("Host");
-            ui.label(if cfg!(target_arch = "wasm32") {
-                "Browser / WebAssembly"
-            } else {
-                "Native desktop / wgpu"
-            });
-            ui.end_row();
-            ui.label("Project");
-            ui.label(if app.state.project_lifecycle.is_open() {
-                app.state.workspace.content.project.display_name()
-            } else {
-                "No project open"
-            });
-            ui.end_row();
-            ui.label("Workspace");
-            ui.label(app.state.workbench.workspace.label());
-            ui.end_row();
-            ui.label("Session log");
-            ui.label(format!(
-                "{} entries in the in-memory console ring buffer",
-                app.state.log_buffer.len()
-            ));
-            ui.end_row();
-            ui.label("Configuration");
-            ui.label(config);
-            ui.end_row();
-            ui.label("Persistent log file");
-            ui.label("Not configured; native logging is emitted to the launch host");
-            ui.end_row();
-        });
-}
-
-fn render_support_bundle(
-    ui: &mut egui::Ui,
-    app: &RSpiceApp,
-    include_session_log: &mut bool,
-    disclosure_reviewed: &mut bool,
-) {
-    section_heading(ui, "Disclosure preview");
-    ui.label("Always included:");
-    ui.label("Product version, build identity, operating system, architecture, and host class");
-    ui.label("Active workspace, project-open state, document counts, and schema versions");
-    ui.checkbox(
-        include_session_log,
-        format!(
-            "Include {} session-log entries after home-path redaction",
-            app.state.log_buffer.len()
-        ),
-    );
-    ui.add_space(8.0);
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(
-            "Never included: project files, schematic/netlist/model contents, waveforms, license keys, authentication material, clipboard contents, or autosave bytes.",
-        )
-        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-        .color(t.color.text_dim),
-    );
-    ui.add_space(10.0);
-    ui.checkbox(
-        disclosure_reviewed,
-        "I reviewed the data listed above and approve this local export",
-    );
-}
-
 fn render_legal_privacy(ui: &mut egui::Ui) {
     section_heading(ui, "Privacy and support data");
     ui.label(
-        "RSpice support export is explicit and local. The disclosure preview controls whether the redacted in-memory session log is included.",
+        "A support bundle is made only when you create one from Report a problem, and saved where you choose. You decide whether it carries the session log, with your home folder removed.",
     );
     ui.label(
         "Project content, models, results, credentials, license keys, and recovery checkpoints are excluded from the support artifact.",
@@ -758,6 +659,45 @@ mod tests {
                 "the legal page shows {name} as shipped"
             );
         }
+    }
+
+    /// Both rows that each opened half of it open Report a problem, which
+    /// names the file the session log is written to and where to send a
+    /// report; the Help Center stops offering the two pages it replaced.
+    #[test]
+    fn report_a_problem_replaces_the_diagnostics_and_support_bundle_pages() {
+        for command in [Command::SystemDiagnostics, Command::SupportBundle] {
+            let mut app = RSpiceApp::test_instance();
+            command.execute(&mut app);
+            let shown = shown_texts(app);
+            for expected in ["Report a problem", report_problem::SUPPORT_ADDRESS] {
+                assert!(
+                    shown.iter().any(|text| text == expected),
+                    "{command:?} shows {expected:?}"
+                );
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let log = crate::workbench::lifecycle::recovery::diagnostics_directory()
+                    .expect("the test host has an application-data directory")
+                    .join("current-session.log")
+                    .display()
+                    .to_string();
+                assert!(
+                    shown.iter().any(|text| *text == log),
+                    "{command:?} names the session log file {log}"
+                );
+            }
+        }
+        let mut app = RSpiceApp::test_instance();
+        Command::HelpCenter.execute(&mut app);
+        let shown = shown_texts(app);
+        assert!(
+            !shown
+                .iter()
+                .any(|text| text == "Diagnostics" || text == "Support bundle"),
+            "the Help Center no longer offers the pages Report a problem replaced"
+        );
     }
 
     /// Writes nothing, and fails the write when told to.

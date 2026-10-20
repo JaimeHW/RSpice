@@ -916,6 +916,19 @@ pub(crate) const fn diagnostics_folder_supported() -> bool {
     ))
 }
 
+/// The file the diagnostic folder keeps the session log in.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const SESSION_LOG_FILE: &str = "current-session.log";
+
+/// Where the diagnostic snapshot and its session log are written: the
+/// application-data directory's `rspice/diagnostics`.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn diagnostics_directory() -> Option<PathBuf> {
+    dirs::data_local_dir()
+        .or_else(dirs::config_dir)
+        .map(|directory| directory.join("rspice").join("diagnostics"))
+}
+
 /// The session log as the diagnostic folder keeps it: one line per entry,
 /// each message redacted as the support bundle redacts it.
 #[cfg(all(
@@ -950,13 +963,9 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
     {
         use std::fmt::Write as _;
 
-        let directory = dirs::data_local_dir()
-            .or_else(dirs::config_dir)
-            .ok_or_else(|| {
-                "The operating system did not provide an application-data directory".to_owned()
-            })?
-            .join("rspice")
-            .join("diagnostics");
+        let directory = diagnostics_directory().ok_or_else(|| {
+            "The operating system did not provide an application-data directory".to_owned()
+        })?;
         std::fs::create_dir_all(&directory).map_err(|error| {
             format!(
                 "diagnostic directory '{}' could not be created: {error}",
@@ -992,7 +1001,7 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
             crate::diagnostics::home_directory().as_deref(),
         ));
 
-        let snapshot_path = directory.join("current-session.log");
+        let snapshot_path = directory.join(SESSION_LOG_FILE);
         crate::io::durable_file::atomic_write_bytes(&snapshot_path, snapshot.as_bytes()).map_err(
             |error| {
                 format!(

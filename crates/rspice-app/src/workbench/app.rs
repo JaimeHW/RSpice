@@ -462,6 +462,9 @@ impl RSpiceApp {
         // Apply the design-system theme (canvas painters read the active
         // palette directly).
         state.ui.theme.apply(&cc.egui_ctx);
+        if let Some(render_state) = &cc.wgpu_render_state {
+            dialogs::help::report_problem::record_graphics_adapter(&render_state.adapter.get_info());
+        }
 
         // Persisted sessions may still carry the legacy seeded
         // "primitives" library (and tabs pointing into it); migrate any
