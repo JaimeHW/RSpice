@@ -94,6 +94,7 @@ mod branch_identity;
 mod canonical_compat;
 pub mod canonical_ir;
 pub mod codegen;
+mod compile_stack;
 mod complex_arithmetic;
 pub mod connect;
 mod connection_artifact;
@@ -965,6 +966,27 @@ impl VerilogACompiler {
         qualifications: RuntimeQualificationOptions,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<RuntimeCompileReport> {
+        compile_stack::run(|| {
+            self.compile_runtime_analyzed_measured_inline(
+                source_package,
+                preprocessed,
+                analyzed,
+                module_name,
+                qualifications,
+                measurements,
+            )
+        })
+    }
+
+    fn compile_runtime_analyzed_measured_inline(
+        &self,
+        source_package: &str,
+        preprocessed: &str,
+        analyzed: &semantic::AnalyzedFile,
+        module_name: Option<&str>,
+        qualifications: RuntimeQualificationOptions,
+        measurements: &mut metrics::MetricsRecorder,
+    ) -> CompileResult<RuntimeCompileReport> {
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
@@ -1143,6 +1165,17 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<(CompiledModel, Vec<CompileDiagnostic>)> {
+        compile_stack::run(|| {
+            self.compile_preprocessed_measured_inline(source, module_name, measurements)
+        })
+    }
+
+    fn compile_preprocessed_measured_inline(
+        &self,
+        source: &str,
+        module_name: Option<&str>,
+        measurements: &mut metrics::MetricsRecorder,
+    ) -> CompileResult<(CompiledModel, Vec<CompileDiagnostic>)> {
         let analyzed = self.analyze_preprocessed("<input>", source, module_name, measurements)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
 
@@ -1183,6 +1216,25 @@ impl VerilogACompiler {
     }
 
     fn analyze_preprocessed_with_parameters(
+        &self,
+        source_package: &str,
+        source: &str,
+        module_name: Option<&str>,
+        parameters: &[(&str, ScalarParameterValue)],
+        measurements: &mut metrics::MetricsRecorder,
+    ) -> CompileResult<semantic::AnalyzedFile> {
+        compile_stack::run(|| {
+            self.analyze_preprocessed_with_parameters_inline(
+                source_package,
+                source,
+                module_name,
+                parameters,
+                measurements,
+            )
+        })
+    }
+
+    fn analyze_preprocessed_with_parameters_inline(
         &self,
         source_package: &str,
         source: &str,
@@ -1351,15 +1403,17 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
-        let module = self.select_executable_module(analyzed, module_name)?;
-        self.build_canonical_ir_artifact_from_module(
-            source_package,
-            source,
-            analyzed,
-            &module,
-            measurements,
-            None,
-        )
+        compile_stack::run(|| {
+            let module = self.select_executable_module(analyzed, module_name)?;
+            self.build_canonical_ir_artifact_from_module(
+                source_package,
+                source,
+                analyzed,
+                &module,
+                measurements,
+                None,
+            )
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2239,6 +2293,18 @@ impl VerilogACompiler {
     }
 
     fn compile_prepared_runtime_with_control(
+        &self,
+        prepared: &PreparedRuntimeSource,
+        module_name: Option<&str>,
+        configuration: Option<&ConnectionConfiguration>,
+        control: &dyn PipelineControl,
+    ) -> CompileResult<CompiledRuntimeFile> {
+        compile_stack::run(|| {
+            self.compile_prepared_runtime_inline(prepared, module_name, configuration, control)
+        })
+    }
+
+    fn compile_prepared_runtime_inline(
         &self,
         prepared: &PreparedRuntimeSource,
         module_name: Option<&str>,

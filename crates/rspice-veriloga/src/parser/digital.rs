@@ -660,6 +660,14 @@ impl Parser<'_> {
 
     /// One procedural statement.
     pub(super) fn parse_digital_statement(&mut self) -> Result<DigitalStatement, ParseError> {
+        self.nested(
+            super::Nesting::Statement,
+            Self::parse_digital_statement_level,
+        )
+    }
+
+    /// One procedural statement, a level below the statement that contains it.
+    fn parse_digital_statement_level(&mut self) -> Result<DigitalStatement, ParseError> {
         // Attribute instances may decorate any statement; they carry no
         // meaning for this compiler and are consumed, as in an analog block.
         if self.check(TokenKind::LParen) && self.peek_is(TokenKind::Star) {

@@ -19,6 +19,61 @@ mod implicit_nets;
 
 pub(crate) use config::WORK_LIBRARY;
 
+/// The deepest statement nesting the front end reads: every statement inside
+/// another statement, including a `begin` block and each `else if` of a
+/// chain, is one level.
+///
+/// Parsing, semantic analysis, lowering and code generation all recurse over
+/// the tree, so a source nested without bound would exhaust the stack of one
+/// of them and abort the process. The bounds here are where that is refused.
+/// They are far above real models: across the shipped models and the OpenVAF
+/// and Xyce corpora the deepest statement nesting is 27 levels (HiSIM-HV), the
+/// deepest expression nesting 14 and the deepest operator tree 22 (BSIM-CMG).
+pub const MAX_STATEMENT_NESTING: usize = 256;
+
+/// The deepest expression nesting the front end reads: every parenthesis,
+/// `?:` branch, unary operator and call argument is one level. See
+/// [`MAX_STATEMENT_NESTING`].
+pub const MAX_EXPRESSION_NESTING: usize = 256;
+
+/// The deepest operator tree one expression may build. A chain of binary
+/// operators (`a + b + c ...`) nests its tree without nesting its text, so it
+/// is bounded separately from [`MAX_EXPRESSION_NESTING`].
+pub const MAX_EXPRESSION_DEPTH: usize = 1024;
+
+/// Which bound a nesting level counts against; see [`Parser::nested`].
+#[derive(Clone, Copy)]
+enum Nesting {
+    Statement = 0,
+    Expression = 1,
+}
+
+impl Nesting {
+    fn limit_exceeded(self) -> ParseErrorKind {
+        match self {
+            Self::Statement => ParseErrorKind::NestingLimit {
+                what: "Statement",
+                limit: MAX_STATEMENT_NESTING,
+                counted: "every statement inside another statement is a level, including a \
+                          `begin` block and each `else if`",
+            },
+            Self::Expression => ParseErrorKind::NestingLimit {
+                what: "Expression",
+                limit: MAX_EXPRESSION_NESTING,
+                counted: "every parenthesis, `?:` branch, unary operator and call argument is \
+                          a level",
+            },
+        }
+    }
+
+    const fn limit(self) -> usize {
+        match self {
+            Self::Statement => MAX_STATEMENT_NESTING,
+            Self::Expression => MAX_EXPRESSION_NESTING,
+        }
+    }
+}
+
 /// Declared attributes carried forward to the bare names that follow a typed
 /// port in an ANSI port list.
 struct AnsiPortContext {
@@ -47,6 +102,8 @@ pub struct Parser<'a> {
     library: Option<SmolStr>,
     /// The library map's declaration order, after its marker.
     library_order: Option<Vec<SmolStr>>,
+    /// Open statement and expression levels, indexed by [`Nesting`].
+    nesting: [usize; 2],
 }
 
 impl<'a> Parser<'a> {
@@ -79,7 +136,25 @@ impl<'a> Parser<'a> {
             next_reference_id: 0,
             library: None,
             library_order: None,
+            nesting: [0; 2],
         }
+    }
+
+    /// Parse one nesting level of `nesting`'s kind, refusing it at the token
+    /// that would open the level past the bound.
+    fn nested<T>(
+        &mut self,
+        nesting: Nesting,
+        parse: impl FnOnce(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<T, ParseError> {
+        let depth = self.nesting[nesting as usize];
+        if depth >= nesting.limit() {
+            return Err(self.error(nesting.limit_exceeded()));
+        }
+        self.nesting[nesting as usize] = depth + 1;
+        let parsed = parse(self);
+        self.nesting[nesting as usize] = depth;
+        parsed
     }
 
     /// Parse a complete source file
@@ -2118,6 +2193,11 @@ impl<'a> Parser<'a> {
 
     /// Parse an analog statement
     fn parse_analog_statement(&mut self) -> Result<AnalogStatement, ParseError> {
+        self.nested(Nesting::Statement, Self::parse_analog_statement_level)
+    }
+
+    /// One analog statement, a level below the statement that contains it.
+    fn parse_analog_statement_level(&mut self) -> Result<AnalogStatement, ParseError> {
         // Attribute instances may precede statements; parse and discard
         if self.check(TokenKind::LParen) && self.peek_is(TokenKind::Star) {
             self.parse_attributes()?;
@@ -2791,7 +2871,29 @@ impl<'a> Parser<'a> {
 
     /// Parse an expression
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        self.parse_ternary()
+        let outermost = self.nesting[Nesting::Expression as usize] == 0;
+        let expression = self.nested(Nesting::Expression, Self::parse_ternary)?;
+        if outermost {
+            // One walk per outermost expression bounds every tree, nested
+            // expressions included, in time linear in the source.
+            let mut too_deep = false;
+            visit_expression_at_depth(&expression, &mut |_, depth| {
+                too_deep |= depth > MAX_EXPRESSION_DEPTH;
+                !too_deep
+            });
+            if too_deep {
+                return Err(ParseError::new(
+                    ParseErrorKind::NestingLimit {
+                        what: "Operator",
+                        limit: MAX_EXPRESSION_DEPTH,
+                        counted: "every operator whose operand is another operator's result is \
+                                  a level, as in a long `a + b + ...` chain",
+                    },
+                    expression.span(),
+                ));
+            }
+        }
+        Ok(expression)
     }
 
     /// Parse ternary conditional
@@ -3138,7 +3240,7 @@ impl<'a> Parser<'a> {
         let start = self.current_span();
 
         if let Some(op) = self.reduction_operator() {
-            let operand = self.parse_unary()?;
+            let operand = self.nested(Nesting::Expression, Self::parse_unary)?;
             return Ok(Expression::Digital(DigitalExpr::Reduction(ReductionExpr {
                 op,
                 operand: Box::new(operand),
@@ -3167,7 +3269,7 @@ impl<'a> Parser<'a> {
         };
 
         if let Some(op) = op {
-            let operand = self.parse_unary()?;
+            let operand = self.nested(Nesting::Expression, Self::parse_unary)?;
             return Ok(Expression::Unary(UnaryExpr {
                 op,
                 operand: Box::new(operand),

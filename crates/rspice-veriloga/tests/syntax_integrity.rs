@@ -418,3 +418,147 @@ endmodule
         vec![4.0]
     );
 }
+
+/// A module whose analog block holds `statement`, two statement levels deep
+/// (the block is the first), with `x` holding the branch voltage.
+fn nesting_module(statement: &str) -> String {
+    format!(
+        "module deep(p, n); inout p, n; electrical p, n; real x, y;\n\
+         analog begin x = V(p, n); y = 0.0;\n{statement}\nI(p, n) <+ y * 1e-6; end\nendmodule\n"
+    )
+}
+
+/// `levels` statement levels in all: `begin` blocks around one assignment.
+fn statement_nesting(levels: usize) -> String {
+    let blocks = levels - 2;
+    nesting_module(&format!(
+        "{}y = 2.0;{}",
+        "begin ".repeat(blocks),
+        " end".repeat(blocks)
+    ))
+}
+
+/// `levels` expression levels in all: parentheses around one operand.
+fn expression_nesting(levels: usize) -> String {
+    let parentheses = levels - 1;
+    nesting_module(&format!(
+        "y = {}x{};",
+        "(".repeat(parentheses),
+        ")".repeat(parentheses)
+    ))
+}
+
+/// An operator tree `depth` deep: a chain of `depth` operands.
+fn operator_chain(depth: usize) -> String {
+    nesting_module(&format!("y = {};", vec!["x"; depth].join(" + ")))
+}
+
+/// The nesting refusal for `source`: its message and byte offset.
+fn nesting_refusal(source: &str) -> (String, usize) {
+    match VerilogACompiler::default().compile(source).map(|_| ()) {
+        Err(rspice_veriloga::CompileError::Parser(error)) => {
+            assert_eq!(error.kind.code(), "VA-PARSE-NESTING-LIMIT", "{error}");
+            (error.kind.to_string(), error.span.start as usize)
+        }
+        other => panic!("expected a nesting refusal, got {other:?}"),
+    }
+}
+
+/// Nesting past the front end's bounds is refused by name, at the construct
+/// that crosses the bound.
+///
+/// Every phase after the parser recurses over the tree, and before these
+/// bounds a deep enough source overflowed the stack of one of them and aborted
+/// the process: 1000 nested parentheses in the parser, a 3000-branch `?:`
+/// chain and 1000 nested `if`s in semantic analysis, a 20000-operand sum in a
+/// later phase. Each shape below aborted `rspice compile-va` that way.
+#[test]
+fn nesting_past_the_front_end_bounds_is_refused_by_name() {
+    use rspice_veriloga::parser::{
+        MAX_EXPRESSION_DEPTH, MAX_EXPRESSION_NESTING, MAX_STATEMENT_NESTING,
+    };
+
+    let source = statement_nesting(MAX_STATEMENT_NESTING + 1);
+    let (message, offset) = nesting_refusal(&source);
+    assert!(
+        message.contains(&format!(
+            "Statement nesting exceeds the compiler's limit of {MAX_STATEMENT_NESTING} levels"
+        )),
+        "{message}"
+    );
+    assert_eq!(offset, source.find("y = 2.0").unwrap(), "{message}");
+
+    let source = expression_nesting(MAX_EXPRESSION_NESTING + 1);
+    let (message, offset) = nesting_refusal(&source);
+    assert!(
+        message.contains(&format!(
+            "Expression nesting exceeds the compiler's limit of {MAX_EXPRESSION_NESTING} levels"
+        )),
+        "{message}"
+    );
+    assert_eq!(offset, source.find("(x)").unwrap() + 1, "{message}");
+
+    let source = operator_chain(MAX_EXPRESSION_DEPTH + 1);
+    let (message, offset) = nesting_refusal(&source);
+    assert!(
+        message.contains(&format!(
+            "Operator nesting exceeds the compiler's limit of {MAX_EXPRESSION_DEPTH} levels"
+        )),
+        "{message}"
+    );
+    assert_eq!(offset, source.find("x + x").unwrap(), "{message}");
+
+    // The shapes that overflowed, each far past its bound.
+    let nested_ifs = (0..1000)
+        .map(|i| format!("if (x > {i}) begin "))
+        .collect::<String>()
+        + "y = 1.0;"
+        + &" end".repeat(1000);
+    let else_ifs = "if (x > 0) y = 0.0;".to_owned()
+        + &(1..3000)
+            .map(|i| format!(" else if (x > {i}) y = {i}.0;"))
+            .collect::<String>();
+    let ternaries = format!(
+        "y = {}0.0;",
+        (0..3000)
+            .map(|i| format!("(x < {i}.0) ? {i}.0 : "))
+            .collect::<String>()
+    );
+    let negations = format!("y = {}x;", "-".repeat(3000));
+    let sum = format!("y = {};", vec!["x"; 20000].join(" + "));
+    for statement in [nested_ifs, else_ifs, ternaries, negations, sum] {
+        nesting_refusal(&nesting_module(&statement));
+    }
+}
+
+/// A source at every bound compiles, through the full runtime pipeline, from a
+/// thread with a small stack.
+///
+/// The bounds keep the tree small enough for the compiler's own stack, not the
+/// caller's: the compile runs on a thread the compiler sizes, so a caller on a
+/// spawned thread or a Windows main thread (1 MiB) still gets a diagnostic or
+/// a model, never a stack overflow.
+#[test]
+fn sources_at_the_nesting_bounds_compile_from_a_small_stack() {
+    use rspice_veriloga::parser::{
+        MAX_EXPRESSION_DEPTH, MAX_EXPRESSION_NESTING, MAX_STATEMENT_NESTING,
+    };
+
+    let sources = [
+        statement_nesting(MAX_STATEMENT_NESTING),
+        expression_nesting(MAX_EXPRESSION_NESTING),
+        operator_chain(MAX_EXPRESSION_DEPTH),
+    ];
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(move || {
+            for source in &sources {
+                VerilogACompiler::default()
+                    .compile_runtime(source, None)
+                    .unwrap_or_else(|error| panic!("{error}"));
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

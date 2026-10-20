@@ -107,6 +107,13 @@ impl Parser<'_> {
     /// sections 12.4.1 and 12.4.2. Nothing else can: no module item begins with
     /// one of those keywords, so the dispatch needs no lookahead.
     fn parse_generate_construct(&mut self) -> Result<GenerateConstruct, ParseError> {
+        self.nested(
+            super::Nesting::Statement,
+            Self::parse_generate_construct_level,
+        )
+    }
+
+    fn parse_generate_construct_level(&mut self) -> Result<GenerateConstruct, ParseError> {
         match self.current().kind {
             TokenKind::For => self.parse_generate_loop(),
             TokenKind::If => self.parse_generate_conditional(),

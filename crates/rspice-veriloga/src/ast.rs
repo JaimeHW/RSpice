@@ -13,7 +13,7 @@ use smol_str::SmolStr;
 
 #[path = "ast_walk.rs"]
 mod walk;
-pub(crate) use walk::visit_expression;
+pub(crate) use walk::{visit_expression, visit_expression_at_depth};
 
 /// A complete Verilog-A source file
 #[derive(Debug, Clone)]

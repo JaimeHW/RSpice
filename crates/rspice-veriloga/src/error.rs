@@ -225,6 +225,20 @@ pub enum ParseErrorKind {
     /// dying as an unrecognized module item.
     #[error("Verilog-AMS digital construct not yet supported: `{keyword}`")]
     UnsupportedAmsConstruct { keyword: String },
+
+    /// Source nested deeper than the front end reads.
+    ///
+    /// Every compiler phase walks the syntax tree recursively, so depth is
+    /// bounded once, where the tree is built (see
+    /// [`crate::parser::MAX_STATEMENT_NESTING`] and its neighbours), instead of
+    /// being left to exhaust the stack of whichever later phase recurses
+    /// deepest.
+    #[error("{what} nesting exceeds the compiler's limit of {limit} levels; {counted}")]
+    NestingLimit {
+        what: &'static str,
+        limit: usize,
+        counted: &'static str,
+    },
 }
 
 impl LexerErrorKind {
@@ -268,6 +282,7 @@ impl ParseErrorKind {
             Self::UnsupportedConstruct { .. } => "VA-PARSE-UNSUPPORTED-CONSTRUCT",
             Self::UnsupportedGenerate { .. } => "VA-PARSE-UNSUPPORTED-GENERATE",
             Self::UnsupportedAmsConstruct { .. } => "VA-PARSE-UNSUPPORTED-AMS-DIGITAL",
+            Self::NestingLimit { .. } => "VA-PARSE-NESTING-LIMIT",
         }
     }
 }
