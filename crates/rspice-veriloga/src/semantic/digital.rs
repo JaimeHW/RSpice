@@ -1605,7 +1605,7 @@ impl SemanticAnalyzer {
                 if inputs.contains(name) {
                     self.record_error_at(
                         SemanticErrorKind::InvalidContribution(format!(
-                            "`{name}`, which module `{}` declares an `input` port; IEEE \
+                            "cannot contribute to `{name}`, which module `{}` declares an `input` port; IEEE \
                              1364-2005 section 12.3.9.1 drives an input port from outside the \
                              instance, so nothing inside the module may assign one",
                             module.name
@@ -2710,7 +2710,7 @@ impl SemanticAnalyzer {
                 if !procedural {
                     self.record_error_at(
                         SemanticErrorKind::InvalidContribution(format!(
-                            "`{name}`, which is a process-local `{}`; a continuous `assign` \
+                            "cannot contribute to `{name}`, which is a process-local `{}`; a continuous `assign` \
                              drives a net declared in the module",
                             local.kind.keyword()
                         )),
@@ -2725,7 +2725,7 @@ impl SemanticAnalyzer {
                 if procedural && !signal.class.is_variable() {
                     self.record_error_at(
                         SemanticErrorKind::InvalidContribution(format!(
-                            "`{name}`, which is a `{}`; IEEE 1364-2005 section 6.2 lets a \
+                            "cannot contribute to `{name}`, which is a `{}`; IEEE 1364-2005 section 6.2 lets a \
                              procedural assignment write only a variable, so declare it \
                              `reg` or drive it with a continuous `assign`",
                             signal.class.keyword()
@@ -2737,7 +2737,7 @@ impl SemanticAnalyzer {
                 if !procedural && signal.class.is_variable() {
                     self.record_error_at(
                         SemanticErrorKind::InvalidContribution(format!(
-                            "`{name}`, which is a `{}`; a continuous `assign` drives a net, \
+                            "cannot contribute to `{name}`, which is a `{}`; a continuous `assign` drives a net, \
                              so declare it `wire` or write it from an `always` process",
                             signal.class.keyword()
                         )),
@@ -2754,7 +2754,7 @@ impl SemanticAnalyzer {
                 if !assignable {
                     self.record_error_at(
                         SemanticErrorKind::InvalidContribution(format!(
-                            "`{name}`, which is a {kind:?} of the continuous-domain module \
+                            "cannot contribute to `{name}`, which is a {kind:?} of the continuous-domain module \
                              and is not a discrete-domain assignment target"
                         )),
                         span,

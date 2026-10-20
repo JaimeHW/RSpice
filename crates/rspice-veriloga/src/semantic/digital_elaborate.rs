@@ -1294,7 +1294,8 @@ fn variable_connection_error(
 ) -> CompileError {
     semantic_error(
         SemanticErrorKind::InvalidContribution(format!(
-            "`{}`, which is a variable connected to the `{}` port `{}` of instance `{path}`; \
+            "cannot contribute to `{}`, which is a variable connected to the `{}` port `{}` of \
+             instance `{path}`; \
              IEEE 1364-2005 section 12.3.9.2 connects an output or inout port to a net",
             outer.elaborated,
             direction_keyword(port.direction),
@@ -1312,7 +1313,8 @@ fn input_port_connection_error(
 ) -> CompileError {
     semantic_error(
         SemanticErrorKind::InvalidContribution(format!(
-            "`{}`, which the connecting module receives through an input port and the `{}` port \
+            "cannot contribute to `{}`, which the connecting module receives through an input \
+             port and the `{}` port \
              `{}` of instance `{path}` would drive; IEEE 1364-2005 section 12.3.9.1 drives an \
              input port from outside",
             outer.elaborated,

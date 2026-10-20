@@ -1407,6 +1407,17 @@ impl DigitalExpr {
         }
     }
 
+    /// [`Self::construct`] with its indefinite article, for prose.
+    pub fn described(&self) -> String {
+        let construct = self.construct();
+        let article = if construct.starts_with(['a', 'e', 'i', 'o', 'u']) {
+            "an"
+        } else {
+            "a"
+        };
+        format!("{article} {construct}")
+    }
+
     /// Sub-expressions, so a generic expression walk can descend without
     /// knowing the discrete forms.
     pub fn children(&self) -> Vec<&Expression> {

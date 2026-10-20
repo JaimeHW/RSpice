@@ -384,8 +384,14 @@ pub enum SemanticErrorKind {
     #[error("Library binding error: {0}")]
     LibraryBinding(String),
 
-    #[error("Invalid contribution: cannot contribute to {0}")]
+    /// The message is a whole clause: either "cannot contribute to …" naming
+    /// the target, or a sentence stating the rule the contribution breaks.
+    #[error("Invalid contribution: {0}")]
     InvalidContribution(String),
+
+    /// A procedural assignment whose target is not a variable.
+    #[error("Invalid assignment: {0}")]
+    InvalidAssignment(String),
 
     #[error("Invalid branch: {0}")]
     InvalidBranch(String),
@@ -462,6 +468,7 @@ impl SemanticErrorKind {
             Self::PortWithoutDirection { .. } => "VA-SEM-PORT-WITHOUT-DIRECTION",
             Self::LibraryBinding(_) => "VA-SEM-LIBRARY-BINDING",
             Self::InvalidContribution(_) => "VA-SEM-INVALID-CONTRIBUTION",
+            Self::InvalidAssignment(_) => "VA-SEM-INVALID-ASSIGNMENT",
             Self::InvalidBranch(_) => "VA-SEM-INVALID-BRANCH",
             Self::InvalidNodeReference { .. } => "VA-SEM-INVALID-NODE-REFERENCE",
             Self::ParameterOutOfRange { .. } => "VA-SEM-PARAMETER-OUT-OF-RANGE",

@@ -1226,12 +1226,11 @@ fn reject_overdriven_real_nets(
         let count = on_this_net.len();
         // Not `UnsupportedFeature`: the LRM admits one driver of a real-valued
         // net and this design has two, so the program is illegal rather than
-        // ahead of the compiler. The message is phrased to complete
-        // `InvalidContribution`'s "cannot contribute to …".
+        // ahead of the compiler.
         diagnostics.push(DigitalLoweringDiagnostic::refusal_with_kind(
             DigitalRefusalKind::InvalidContribution,
             format!(
-                "`{}`, which is a `wreal` with {count} drivers; Verilog-AMS LRM 2.4 section \
+                "cannot contribute to `{}`, which is a `wreal` with {count} drivers; Verilog-AMS LRM 2.4 section \
                  6.5.3 permits a maximum of one driver of a real-valued net, and the standard \
                  defines no resolution to combine two — declare it `wrealsum`, `wrealavg`, \
                  `wrealmin` or `wrealmax` to say which one you want",

@@ -228,8 +228,6 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         ("reg", "reg r;"),
         ("wire", "wire w;"),
         ("wait", "wait (x) x = 1.0;"),
-        ("casex", "casex (1) default: x = 1.0; endcase"),
-        ("casez", "casez (1) default: x = 1.0; endcase"),
         ("fork", "fork x = 1.0; join"),
         ("join", "join"),
         ("assign", "assign x = 1.0;"),
@@ -240,6 +238,18 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         assert_unsupported(
             &module_with_statement(statement),
             &format!("Verilog-AMS digital construct not yet supported: `{keyword}`"),
+        );
+    }
+
+    // `casez` and `casex` are analog statements in Verilog-AMS, so they are
+    // refused as unimplemented there, not as digital constructs.
+    for keyword in ["casex", "casez"] {
+        assert_unsupported(
+            &module_with_statement(&format!("{keyword} (1) default: x = 1.0; endcase")),
+            &format!(
+                "Unsupported analog statement: `{keyword}`: Verilog-AMS permits it in an \
+                 analog block, but this compiler implements only `case` there"
+            ),
         );
     }
 

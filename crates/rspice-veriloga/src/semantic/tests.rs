@@ -3245,3 +3245,71 @@ fn an_indirect_equation_left_side_that_is_not_an_access_reads_as_one_sentence() 
         "{diagnostic}"
     );
 }
+
+/// A contribution rule stated as a sentence is not spliced into "cannot
+/// contribute to ...": it used to read "cannot contribute to contributions
+/// inside loops require compile-time-constant bounds".
+#[test]
+fn a_contribution_rule_sentence_is_not_spliced_into_cannot_contribute_to() {
+    let error = analyze(&module_src(
+        "integer i;\nanalog for (i = 0; i < V(p); i = i + 1) I(p, n) <+ 1.0;",
+    ))
+    .expect_err("a contribution in a runtime loop");
+    let diagnostic = error.to_string();
+    assert!(
+        diagnostic.contains(
+            "Invalid contribution: contributions inside loops require compile-time-constant bounds"
+        ),
+        "{diagnostic}"
+    );
+    assert!(!diagnostic.contains("cannot contribute to"), "{diagnostic}");
+}
+
+/// Reading `Temp(p, n)` on electrical nets is a probe, not a contribution,
+/// and the message says which net lacks the access function.
+#[test]
+fn a_probe_through_a_foreign_access_function_is_not_called_a_contribution() {
+    let error = analyze(&format!(
+        "nature Temperature\n  units = \"K\";\n  access = Temp;\n  abstol = 1e-4;\n\
+         endnature\n{}",
+        module_src("analog I(p, n) <+ Temp(p, n);")
+    ))
+    .expect_err("electrical has no Temp access function");
+    let diagnostic = error.to_string();
+    assert!(
+        diagnostic.contains(
+            "Invalid branch: 'p' has discipline 'electrical', which has no access function 'Temp'"
+        ),
+        "{diagnostic}"
+    );
+    assert!(!diagnostic.contains("contribut"), "{diagnostic}");
+}
+
+/// Assigning a parameter names the rule, not a type mismatch between
+/// "variable" and "parameter".
+#[test]
+fn assigning_a_parameter_says_it_cannot_be_assigned() {
+    let error = analyze(&module_src(
+        "parameter real r = 1;\nanalog begin r = 2; I(p, n) <+ V(p, n) / r; end",
+    ))
+    .expect_err("a parameter is not an assignment target");
+    let diagnostic = error.to_string();
+    assert!(
+        diagnostic.contains("Invalid assignment: cannot assign to parameter 'r'"),
+        "{diagnostic}"
+    );
+    assert!(!diagnostic.contains("Type mismatch"), "{diagnostic}");
+}
+
+/// A discrete construct named in prose takes the right article.
+#[test]
+fn a_discrete_construct_in_the_analog_domain_takes_its_article() {
+    let error = analyze(&module_src("analog I(p, n) <+ V(p, n) >>> 1;"))
+        .expect_err("an arithmetic shift has no continuous-domain value");
+    let diagnostic = error.to_string();
+    assert!(
+        diagnostic.contains("an arithmetic right shift operator"),
+        "{diagnostic}"
+    );
+    assert!(!diagnostic.contains("a arithmetic"), "{diagnostic}");
+}

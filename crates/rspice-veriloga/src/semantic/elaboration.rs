@@ -2012,8 +2012,8 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
         Expression::Digital(digital) => {
             return Err(semantic_error(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "a {} cannot be elaborated into a continuous-domain module body",
-                    digital.construct()
+                    "{} cannot be elaborated into a continuous-domain module body",
+                    digital.described()
                 )),
                 digital.span(),
             ));

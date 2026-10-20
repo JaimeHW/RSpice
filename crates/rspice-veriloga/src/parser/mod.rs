@@ -2238,6 +2238,17 @@ impl<'a> Parser<'a> {
             TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::SystemIdentifier => {
                 self.parse_assignment_or_contribution()
             }
+            // Verilog-AMS has analog `casez`/`casex`; they are not digital
+            // constructs here, only ones this compiler does not implement.
+            TokenKind::Casez | TokenKind::Casex if self.is_digital_statement_start() => Err(self
+                .error(ParseErrorKind::UnsupportedConstruct {
+                    context: "analog statement".into(),
+                    found: format!(
+                        "`{}`: Verilog-AMS permits it in an analog block, but this \
+                         compiler implements only `case` there",
+                        self.current().kind.spelling().trim_matches('\'')
+                    ),
+                })),
             _ if self.is_digital_statement_start() => Err(self.unsupported_ams_construct()),
             _ => {
                 // Keywords might be used as variable names (e.g., voltage, current)

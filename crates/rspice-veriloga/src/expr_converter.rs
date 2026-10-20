@@ -738,8 +738,8 @@ impl<'a> ExprConverter<'a> {
             // can turn one into a number.
             Expression::Digital(digital) => Err(CodeGenError::new(
                 CodeGenErrorKind::UnsupportedFeature(format!(
-                    "a {} has no continuous-domain value",
-                    digital.construct()
+                    "{} has no continuous-domain value",
+                    digital.described()
                 )),
             )
             .into()),

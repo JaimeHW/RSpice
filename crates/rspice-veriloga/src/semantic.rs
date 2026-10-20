@@ -5356,7 +5356,7 @@ impl SemanticAnalyzer {
         if !valid_lhs {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidContribution(
-                    "an indirect equation whose left side is not an access function, or ddt, idt or idtmod applied to one".into(),
+                    "cannot contribute to an indirect equation whose left side is not an access function, or ddt, idt or idtmod applied to one".into(),
                 ),
                 stmt.lhs.span(),
             )));
@@ -5848,8 +5848,10 @@ impl SemanticAnalyzer {
         if let (Some(pos), Some(neg)) = (pos_kind, neg_kind)
             && pos != neg
         {
+            // Probes and contributions share this resolution, so these are
+            // branch errors rather than contribution errors.
             return Err(CompileError::Semantic(SemanticError::new(
-                SemanticErrorKind::InvalidContribution(format!(
+                SemanticErrorKind::InvalidBranch(format!(
                     "access function '{access}' has different physical roles at the branch endpoints"
                 )),
                 span,
@@ -5870,7 +5872,7 @@ impl SemanticAnalyzer {
             .or_else(|| self.disciplines.access_kind("electrical", access))
             .ok_or_else(|| {
                 CompileError::Semantic(SemanticError::new(
-                    SemanticErrorKind::InvalidContribution(format!(
+                    SemanticErrorKind::InvalidBranch(format!(
                         "access function '{access}' has no resolved branch discipline"
                     )),
                     span,
@@ -5916,9 +5918,7 @@ impl SemanticAnalyzer {
     ) -> CompileResult<Option<AccessKind>> {
         if self.disciplines.resolve_access(access).is_none() {
             return Err(CompileError::Semantic(SemanticError::new(
-                SemanticErrorKind::InvalidContribution(format!(
-                    "unknown access function '{access}'"
-                )),
+                SemanticErrorKind::InvalidBranch(format!("unknown access function '{access}'")),
                 span,
             )));
         }
@@ -5959,9 +5959,11 @@ impl SemanticAnalyzer {
             return Ok(Some(kind));
         }
 
+        // Reached by probes as well as contributions: `Temp(p, n)` on an
+        // electrical net reads nothing it could name.
         Err(CompileError::Semantic(SemanticError::new(
-            SemanticErrorKind::InvalidContribution(format!(
-                "access function '{access}' is incompatible with discipline '{discipline}'"
+            SemanticErrorKind::InvalidBranch(format!(
+                "'{name}' has discipline '{discipline}', which has no access function '{access}'"
             )),
             span,
         )))
@@ -6075,12 +6077,25 @@ impl SemanticAnalyzer {
         if let Some(sym) = self.symbols.lookup(&symbol_name)
             && sym.kind != SymbolKind::Variable
         {
+            let (what, remedy) = match sym.kind {
+                SymbolKind::Parameter | SymbolKind::ParamAlias => (
+                    "parameter",
+                    "its value is fixed for the analysis; assign a variable instead",
+                ),
+                SymbolKind::Port | SymbolKind::Node => {
+                    ("net", "contribute to its potential or flow with `<+`")
+                }
+                SymbolKind::Branch => (
+                    "branch",
+                    "contribute to it with an access function and `<+`",
+                ),
+                SymbolKind::LoopVar => ("genvar", "only its generate loop sets it"),
+                SymbolKind::Variable => unreachable!("variables are assignable"),
+            };
             self.record_error_at(
-                SemanticErrorKind::TypeMismatch {
-                    expected: "variable".to_string(),
-                    found: format!("{:?}", sym.kind).to_lowercase(),
-                    context: format!("assignment to '{}'", target_name),
-                },
+                SemanticErrorKind::InvalidAssignment(format!(
+                    "cannot assign to {what} '{target_name}': {remedy}"
+                )),
                 span,
             );
             return Ok(());
@@ -7448,9 +7463,9 @@ impl SemanticAnalyzer {
             Expression::Digital(digital) => {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::UnsupportedFeature(format!(
-                        "a {} has no value in the continuous (analog) domain on this backend; \
+                        "{} has no value in the continuous (analog) domain on this backend; \
                          it is supported in discrete expressions, including variable initializers",
-                        digital.construct()
+                        digital.described()
                     )),
                     digital.span(),
                 )));
@@ -7961,7 +7976,7 @@ impl SemanticAnalyzer {
             | Expression::Identifier(_)
             | Expression::BranchAccess(_) => Ok(()),
             Expression::Digital(digital) => reject(
-                format!("a {} is not a continuous-domain value", digital.construct()),
+                format!("{} is not a continuous-domain value", digital.described()),
                 digital.span(),
             ),
             Expression::Binary(binary) => {
@@ -9284,8 +9299,8 @@ impl SemanticAnalyzer {
         match expr {
             Expression::Digital(digital) => Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "a {} has no continuous-domain type",
-                    digital.construct()
+                    "{} has no continuous-domain type",
+                    digital.described()
                 )),
                 digital.span(),
             ))),
@@ -10646,8 +10661,8 @@ impl SemanticAnalyzer {
             Expression::Digital(digital) => {
                 self.record_error_at(
                     SemanticErrorKind::InvalidExpression(format!(
-                        "{owner} uses a {}, which has no continuous-domain value",
-                        digital.construct()
+                        "{owner} uses {}, which has no continuous-domain value",
+                        digital.described()
                     )),
                     digital.span(),
                 );
