@@ -834,15 +834,13 @@ fn code_pane(
     }
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,
+    ) && let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
+        app,
+        ProjectSourceLanguage::RSpiceAutomation,
+        bundle.id(),
+        selected_path,
     ) {
-        if let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
-            app,
-            ProjectSourceLanguage::RSpiceAutomation,
-            bundle.id(),
-            selected_path,
-        ) {
-            app.state.prompt(error);
-        }
+        app.state.prompt(error);
     }
     drop(preceding_input);
     if let Some(input) = search_input {
