@@ -580,7 +580,7 @@ fn ccvs_source_slope_changes_have_finite_voltage_and_capacitor_charge() {
         (0.0, 3e-14),
         (1e-9, -3e-14),
         (2e-9, -3e-14),
-        (3.0 * 1e-9, 3e-14),
+        (3e-9, 3e-14),
     ] {
         let inverse_steps: f64 = result
             .time
