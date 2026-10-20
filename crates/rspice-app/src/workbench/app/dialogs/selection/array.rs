@@ -121,21 +121,10 @@ const TITLE: &str = "Create array";
 const PRIMARY: &str = "Create";
 const DEFAULT_COUNT: &str = "8 \u{00d7} 1";
 const COUNT_HINT: &str = "8 x 1";
-const NAMING_HINT: &str = "U4...U11, DATA[0]...DATA[7]";
 
 /// `×` is the only separator the count has, and it is not on a keyboard.
 pub(crate) fn canonical_count(typed: &str) -> String {
     typed.replace(['x', 'X', '*'], "\u{00d7}")
-}
-
-/// `…` separates a naming range's endpoints and `·` separates two ranges.
-/// A reference endpoint can itself contain `x`, so the count's rewrite does
-/// not apply here.
-pub(crate) fn canonical_naming(typed: &str) -> String {
-    typed
-        .replace("...", "\u{2026}")
-        .replace(", ", " \u{00b7} ")
-        .replace(',', " \u{00b7} ")
 }
 
 #[derive(Debug)]
@@ -184,6 +173,7 @@ impl DraftValidation {
         matches!(self, Self::Valid)
     }
 
+    #[cfg(test)]
     fn field_errors(&self) -> (bool, bool, bool) {
         match self {
             Self::Invalid(errors) => (
@@ -273,8 +263,16 @@ pub(in crate::workbench) fn render_array_selection_dialog(
     if !dialog.open {
         return;
     }
+    derive_naming_from_count(dialog, model);
     let validation = validate_draft(dialog, model);
-    let form_refusal = validation.form_refusal();
+    let (array_error, _, naming_error) = validation.field_error_details();
+    // The count's refusal stands under the count. Everything else — the
+    // array kind, the names the count derives, a stale baseline — belongs
+    // to no field the reader can type into, so the footer states it.
+    let form_refusal = array_error
+        .or(naming_error)
+        .map(str::to_owned)
+        .or_else(|| validation.form_refusal());
     let choice = CommandForm::new(TITLE, PRIMARY)
         .primary_enabled(validation.can_commit())
         .status(match form_refusal.as_deref() {
@@ -410,16 +408,28 @@ pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
     }
 }
 
-/// The three rows, each with the refusal that names it underneath. Returns
-/// the field that takes focus: the first one with something wrong with it,
-/// else the one at the top.
+/// The names a component array takes follow from its count: the first unused
+/// run of the selection's own prefix, as many as the count makes. They are
+/// derived, not typed, so they are worked out again whenever the count
+/// parses, and a count that does not parse leaves the last ones standing.
+fn derive_naming_from_count(dialog: &mut ArraySelectionDialogState, model: &Model) {
+    let Ok(count) = SchematicArrayCount::parse(&dialog.count) else {
+        return;
+    };
+    if let Ok(naming) = model.schematic.default_array_naming(count) {
+        dialog.naming = naming.to_string();
+    }
+}
+
+/// The two rows: the kind of array, and its count with the names the count
+/// derives read off under it, or the count's refusal in their place. Returns
+/// the count field, which takes focus.
 fn array_form(
     rows: &mut FormRows<'_>,
     validation: &DraftValidation,
     draft: &mut ArraySelectionDialogState,
 ) -> Option<Id> {
-    let (array_invalid, count_invalid, naming_invalid) = validation.field_errors();
-    let (array_error, count_error, naming_error) = validation.field_error_details();
+    let (_, count_error, _) = validation.field_error_details();
 
     let labels = SchematicArrayKind::ALL.map(|kind| kind.label().to_owned());
     if let Some(index) = rows.select("Array", "array-selection-kind", draft.kind.label(), &labels) {
@@ -429,7 +439,6 @@ fn array_form(
             draft.mark_edited();
         }
     }
-    rows.field_line(None, error_or_blank(array_error));
 
     let count_id = field_id("count");
     if rows
@@ -439,31 +448,25 @@ fn array_form(
         draft.count = canonical_count(&draft.count);
         draft.mark_edited();
     }
-    rows.field_line(Some(count_id), error_or_blank(count_error));
-
-    let naming_id = field_id("naming");
-    if rows
-        .text("Naming", naming_id, &mut draft.naming, NAMING_HINT)
-        .changed()
-    {
-        draft.naming = canonical_naming(&draft.naming);
-        draft.mark_edited();
-    }
-    rows.field_line(Some(naming_id), error_or_blank(naming_error));
-
-    if array_invalid {
-        None
-    } else if count_invalid {
-        Some(count_id)
-    } else if naming_invalid {
-        Some(naming_id)
-    } else {
-        Some(count_id)
-    }
+    let names = naming_line(&draft.naming);
+    rows.field_line(
+        Some(count_id),
+        match count_error {
+            Some(error) => FieldLine::Error(error),
+            None if names.is_empty() => FieldLine::Blank,
+            None => FieldLine::Derived(&names),
+        },
+    );
+    Some(count_id)
 }
 
-fn error_or_blank(error: Option<&str>) -> FieldLine<'_> {
-    error.map_or(FieldLine::Blank, FieldLine::Error)
+/// The derived names as the line under Count states them.
+fn naming_line(naming: &str) -> String {
+    if naming.is_empty() {
+        String::new()
+    } else {
+        format!("Names {naming}")
+    }
 }
 
 fn radial_documentation_center(model: &Model) -> Option<Point> {
@@ -507,6 +510,11 @@ mod tests {
         super::validate_draft(&state.design.array_selection, &state.model)
     }
 
+    /// The names the count derives, over what the form reads.
+    fn derive_naming_from_count(state: &mut AppState) {
+        super::derive_naming_from_count(&mut state.design.array_selection, &state.model);
+    }
+
     /// The radial array's centre, over the model it reads.
     fn radial_documentation_center(state: &AppState) -> Option<Point> {
         super::radial_documentation_center(&state.model)
@@ -520,20 +528,53 @@ mod tests {
         );
     }
 
-    /// `×`, `…` and `·` are not on a keyboard. What a reader can type has to
-    /// reach the model, and what it reaches has to be what the model prints.
+    /// `×` is not on a keyboard. What a reader can type has to reach the
+    /// model, and what it reaches has to be what the model prints.
     #[test]
-    fn the_two_separators_are_typed_in_ascii_and_read_back_canonical() {
+    fn the_count_separator_is_typed_in_ascii_and_read_back_canonical() {
         assert_eq!(canonical_count("8x1"), "8\u{00d7}1");
         assert_eq!(canonical_count("2 X 4"), "2 \u{00d7} 4");
         assert_eq!(canonical_count("3*3"), "3\u{00d7}3");
         assert!(SchematicArrayCount::parse(&canonical_count("8 x 1")).is_ok());
+    }
 
-        let typed = canonical_naming("U4...U11, DATA[0]...DATA[7]");
-        assert_eq!(typed, "U4\u{2026}U11 \u{00b7} DATA[0]\u{2026}DATA[7]");
-        assert!(SchematicArrayNaming::parse(&typed).is_ok());
-        // A reference endpoint may contain `x`; only the count rewrites it.
-        assert_eq!(canonical_naming("Mx1...Mx8"), "Mx1\u{2026}Mx8");
+    /// The names are derived from the count, not typed: a new count derives
+    /// a new run of names, and the line under Count reads them off.
+    #[test]
+    fn the_names_follow_the_count() {
+        let mut state = AppState::default();
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(4, ComponentType::Resistor, Point::origin())
+                    .with_name_value("R1", "1k"),
+            );
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(4);
+        open_array_selection_dialog(&mut state);
+        let eight = state.design.array_selection.naming.clone();
+        state.design.array_selection.count = "4 \u{00d7} 1".to_owned();
+        derive_naming_from_count(&mut state);
+        let four = state.design.array_selection.naming.clone();
+        assert_ne!(four, eight);
+        let expected = state
+            .model
+            .schematic
+            .default_array_naming(SchematicArrayCount::parse("4 \u{00d7} 1").unwrap())
+            .unwrap()
+            .to_string();
+        assert_eq!(four, expected);
+        assert!(validate_draft(&state).can_commit());
+        assert_eq!(naming_line(&four), format!("Names {four}"));
+        assert_eq!(naming_line(""), "");
     }
 
     #[test]
