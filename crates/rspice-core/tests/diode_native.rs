@@ -114,6 +114,59 @@ fn op_branch_current(model_tail: &str, voltage: f64) -> f64 {
     branch_current(&result, "v1")
 }
 
+/// A Verilog-A junction limited by the built-in `"pnjlim"` selector converges
+/// to the operating point of the native diode beside it, 100 V through 1 ohm:
+/// the limiter shapes the Newton path, not the answer. ngspice 46 with
+/// reltol=1e-12 gives v(s2) = 0.9526511736943477 for the native half. The
+/// module spells ngspice's diode thermal voltage (CODATA 2014 k and q at
+/// 300.15 K) so the comparison isolates the limiter from `$vt`'s constants.
+#[cfg(feature = "veriloga")]
+#[test]
+fn veriloga_pnjlim_diode_converges_to_the_native_diode_operating_point() {
+    let directory = std::env::temp_dir().join(format!("rspice_pnjlim_{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("create the module directory");
+    let path = directory.join("dl14.va");
+    std::fs::write(
+        &path,
+        r#"`include "disciplines.vams"
+module dl14(a, c); inout a, c; electrical a, c; parameter real is = 1e-14;
+real vd, vt, vcrit;
+analog begin
+  vt = 1.38064852e-23 * 300.15 / 1.6021766208e-19;
+  vcrit = vt * ln(vt / (1.41421356237 * is));
+  vd = $limit(V(a, c), "pnjlim", vt, vcrit);
+  I(a, c) <+ is * (exp(vd / vt) - 1);
+end
+endmodule
+"#,
+    )
+    .expect("write the limited diode");
+    let deck = format!(
+        "* pnjlim diode beside the native one\n\
+         .va \"{}\" dl14\n\
+         v1 s 0 100\n\
+         r1 s a 1\n\
+         x1 a 0 dl14\n\
+         r2 s s2 1\n\
+         d1 s2 0 dm\n\
+         .model dm d is=1e-14\n\
+         .op\n\
+         .end\n",
+        path.display().to_string().replace('\\', "/")
+    );
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&Netlist::parse(&deck).expect("deck parses"));
+    let _ = std::fs::remove_dir_all(&directory);
+    let result = result.expect("the limited diode converges");
+    let voltage = |name: &str| {
+        result
+            .try_voltage_named(name)
+            .unwrap_or_else(|| panic!("missing node {name}"))
+    };
+    assert_close("pnjlim VA diode", voltage("a"), voltage("s2"), 1e-9, 0.0);
+    assert_close("native diode", voltage("s2"), 0.9526511736943477, 1e-9, 0.0);
+}
+
 fn assert_close(label: &str, got: f64, expected: f64, rel_tol: f64, abs_tol: f64) {
     let abs = (got - expected).abs();
     let tol = abs_tol.max(rel_tol * expected.abs().max(got.abs()));
