@@ -350,6 +350,16 @@ impl PreprocessorError {
         error
     }
 
+    /// Whether this is the refusal of a backtick name that is neither a
+    /// defined macro nor a directive.
+    pub fn names_an_undefined_macro(&self) -> bool {
+        self.message.starts_with("undefined macro `")
+            || self
+                .message
+                .starts_with("unknown compiler directive or undefined macro `")
+            || self.message.starts_with("unknown compiler directive `")
+    }
+
     pub fn cancelled() -> Self {
         let mut error = Self::new("source preprocessing was cancelled", None, 0);
         error.cancelled = true;

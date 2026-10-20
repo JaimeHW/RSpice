@@ -127,9 +127,21 @@ fn module_names_in_file(
     for (name, value) in &profile.defines {
         preprocessor.define(name, MacroDef::simple(value.as_deref().unwrap_or_default()));
     }
-    let preprocessed = preprocessor.preprocess_file(path).map_err(|error| {
-        RustBackendError::internal(path.display().to_string(), "<scan>", error.to_string())
-    })?;
+    let preprocessed = match preprocessor.preprocess_file(path) {
+        Ok(preprocessed) => preprocessed,
+        // A fragment that another file includes after defining its macros
+        // (EKV3's `ekv3_include/*.va`) cannot be read on its own, so it is
+        // no compilation root. A root that stopped reading this way would
+        // drop out of the generated catalog, which the manifest shows.
+        Err(error) if error.names_an_undefined_macro() => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(RustBackendError::internal(
+                path.display().to_string(),
+                "<scan>",
+                error.to_string(),
+            ));
+        }
+    };
     Ok(module_names_in_source(&preprocessed))
 }
 
@@ -624,4 +636,40 @@ fn is_identifier_start(ch: char) -> bool {
 
 fn is_identifier_continue(ch: char) -> bool {
     is_identifier_start(ch) || ch.is_ascii_digit()
+}
+
+#[cfg(test)]
+mod tests {
+    /// A `.va` fragment that uses the macros of the file including it is no
+    /// compilation root, and reading it alone must not stop discovery: the
+    /// preprocessor refuses its undefined macros, where it used to leave them
+    /// in the text.
+    #[test]
+    fn a_fragment_that_needs_its_includers_macros_is_not_a_root() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-veriloga-discover-fragment-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("inc")).unwrap();
+        std::fs::write(
+            root.join("top.va"),
+            "`define GAIN 2.0\nmodule top(p, n); inout p, n; electrical p, n;\n\
+             analog begin\n`include \"inc/body.va\"\nend\nendmodule\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("inc").join("body.va"),
+            "I(p, n) <+ `GAIN * V(p, n);\n",
+        )
+        .unwrap();
+        let found = super::discover_veriloga_sources(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        let modules: Vec<_> = found
+            .unwrap_or_else(|error| panic!("{error}"))
+            .into_iter()
+            .flat_map(|candidate| candidate.modules)
+            .collect();
+        assert_eq!(modules, ["top"]);
+    }
 }
