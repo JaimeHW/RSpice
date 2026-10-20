@@ -5566,6 +5566,60 @@ for voltage in [0.5_f64,-0.25,0.75] {
     .unwrap_or_else(|report| panic!("{report}"));
 }
 
+/// The generated route runs the counter and sample-and-hold of the route
+/// parity row `retained_counter_and_hold_agree_across_lowerings_and_rejected_trials`
+/// through the same accepted points and rejected trials. Every evaluation must
+/// start from the last accepted values, so each acceptance commits exactly
+/// what the accepted inputs alone produce, and a rejected trial that crossed
+/// the threshold leaves no trace.
+#[test]
+fn generated_retained_counter_and_hold_commit_only_accepted_points() {
+    let (state, stamp, noise) = generated_parts(
+        "module retained_counter(sense,out); inout sense,out; electrical sense,out;
+         real points,changes,was_above,above,held;
+         analog begin points=points+1; above=V(sense)>0.5;
+         if (above!=was_above) changes=changes+1; was_above=above;
+         if (above) held=V(sense);
+         I(out)<+points+10.0*changes+100.0*held+1.0e-3*V(out); end endmodule",
+        "retained counter and hold",
+    );
+    run_generated_main(
+        "retained counter and hold",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+assert_eq!(device::state::Instance::EVENT_STATE_COUNT,4);
+let evaluate=|[points,changes,was_above,held]:[f64;4],sense:f64| {
+    let above=if sense>0.5 {1.0} else {0.0};
+    [points+1.0,changes+if above!=was_above {1.0} else {0.0},above,if above!=0.0 {sense} else {held}]
+};
+let mut accepted=[0.0;4];
+for (sense,accept) in [(0.0,true),(0.8,false),(0.3,true),(0.9,true),(0.2,false),(0.7,true),(0.1,true),(0.95,false),(0.05,true)] {
+    for _ in 0..2 {
+        instance.begin_stateful_evaluation();
+        let bias=[sense,0.0];
+        let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.15};
+        let mut sink=[0.0;32];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+        assert!(!ctx.evaluation_failed());
+        assert_eq!(instance.capture_persistent_state().event_variables,accepted.to_vec());
+    }
+    if accept {
+        instance.validate_advance_state().unwrap();
+        instance.apply_validated_advance_state();
+        accepted=evaluate(accepted,sense);
+        assert_eq!(instance.capture_persistent_state().event_variables,accepted.to_vec(),"sense={sense}");
+    }
+}
+assert_eq!(accepted,[6.0,2.0,0.0,0.7]);
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
 #[test]
 fn generated_event_variables_are_transactional_across_real_reactive_and_noise_evaluations() {
     let (state, stamp, noise) = generated_parts(

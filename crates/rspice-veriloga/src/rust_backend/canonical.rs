@@ -3127,7 +3127,7 @@ impl ModelPlan {
             let _ = writeln!(
                 out,
                 "        if ctx.dynamic_operators_enabled() {{ self.event_state_candidate[{slot}] = {}; }}",
-                values[position]
+                self.numeric_newton_output(newton, &values, position)
             );
         }
 
@@ -3780,6 +3780,30 @@ impl ModelPlan {
             *value = format!("staged[{slot}]");
         }
         Ok((body, values))
+    }
+
+    /// `values[position]` as the `f64` an accepted-state slot stores.
+    ///
+    /// A value the Newton pass computes keeps its native type, so a predicate
+    /// assigned to a retained `real` (`was_above = V(in) > vth;`) arrives as a
+    /// `bool` and converts here. One read back from a stage cache is already
+    /// numeric; see [`numeric_output_names`].
+    fn numeric_newton_output(
+        &self,
+        newton: Option<&Stage>,
+        values: &[String],
+        position: usize,
+    ) -> String {
+        let native = match newton {
+            None => Some((&self.function, self.outputs[position])),
+            Some(stage) => stage.outputs[position].map(|value| (&stage.function, value)),
+        };
+        match native {
+            Some((function, value)) => {
+                numeric_output_names(function, &[value], &values[position..=position]).remove(0)
+            }
+            None => values[position].clone(),
+        }
     }
 
     fn activation_expression(&self, equation: usize, values: &[String]) -> String {
