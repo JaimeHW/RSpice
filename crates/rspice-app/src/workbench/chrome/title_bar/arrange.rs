@@ -63,6 +63,8 @@ pub(super) fn arrange_submenu(ui: &mut Ui, rows: impl FnOnce(&mut Ui)) {
     }
 
     let label = "Arrange";
+    #[cfg(test)]
+    super::menus::row_log::push(|| format!("{label} >"));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     record_menu_row(ui.ctx(), &response, label, true);
     let is_open = MenuState::from_id(ui.ctx(), parent_menu, |state| {

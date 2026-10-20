@@ -135,6 +135,49 @@ pub(super) const ALL_MENUS: [ApplicationMenu; 11] = [
     ApplicationMenu::Help,
 ];
 
+/// What the menus drew, row by row, while a test was listening: the record a
+/// test pins a menu's exact rows against.
+#[cfg(test)]
+pub(super) mod row_log {
+    use super::{Command, CommandAvailability};
+    use std::cell::RefCell;
+
+    thread_local! {
+        static ROWS: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    }
+
+    /// Run `draw` and return the line of every row it drew, hidden ones too.
+    pub(in super::super) fn record(draw: impl FnOnce()) -> Vec<String> {
+        ROWS.with(|rows| *rows.borrow_mut() = Some(Vec::new()));
+        draw();
+        ROWS.with(|rows| rows.borrow_mut().take().unwrap_or_default())
+    }
+
+    pub(in super::super) fn push(line: impl FnOnce() -> String) {
+        ROWS.with(|rows| {
+            if let Some(rows) = rows.borrow_mut().as_mut() {
+                rows.push(line());
+            }
+        });
+    }
+
+    /// `label | command id | key | state`, the state being `on`, `off: why`
+    /// or `hidden`.
+    pub(in super::super) fn command_line(
+        label: &str,
+        command: Command,
+        shortcut: &str,
+        availability: CommandAvailability,
+    ) -> String {
+        let state = match availability {
+            CommandAvailability::Available => "on".to_owned(),
+            CommandAvailability::Disabled(reason) => format!("off: {reason}"),
+            CommandAvailability::Hidden => "hidden".to_owned(),
+        };
+        format!("{label} | {} | {shortcut} | {state}", command.stable_id())
+    }
+}
+
 pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool) {
     ui.set_min_width(MENU_CONTENT_WIDTH);
     ui.set_max_width(MENU_CONTENT_WIDTH);
@@ -181,10 +224,6 @@ fn command_item_as_impl(
     palette_scope: Option<&'static str>,
 ) {
     let availability = command.availability(app);
-    if availability == CommandAvailability::Hidden {
-        return;
-    }
-    let enabled = availability.is_available();
     let shortcut = shortcut_for_occurrence(
         app.state.ui.preferences.shortcuts(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -192,6 +231,12 @@ fn command_item_as_impl(
         command,
         shortcut_override,
     );
+    #[cfg(test)]
+    row_log::push(|| row_log::command_line(label, command, &shortcut, availability));
+    if availability == CommandAvailability::Hidden {
+        return;
+    }
+    let enabled = availability.is_available();
     let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
     let (rect, response) = ui
         .add_enabled_ui(enabled, |ui| {
@@ -417,6 +462,8 @@ pub(super) fn command_icon(command: Command) -> WorkbenchIcon {
 }
 
 fn menu_separator(ui: &mut Ui) {
+    #[cfg(test)]
+    row_log::push(|| "---".to_owned());
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 9.0), Sense::hover());
     ui.painter().hline(

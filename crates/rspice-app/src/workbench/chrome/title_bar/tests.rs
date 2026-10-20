@@ -1054,6 +1054,419 @@ fn canonical_menu_icons_do_not_fall_back_to_generic_file_glyphs() {
     }
 }
 
+/// Every row `draw` puts in a menu, hidden ones included, as
+/// `label | command id | key | state`; separators read `---` and a submenu
+/// row `label >`. Keys are the Windows desktop ones.
+#[cfg(not(target_arch = "wasm32"))]
+fn menu_pin(mut draw: impl FnMut(&mut Ui)) -> Vec<String> {
+    let ctx = Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Windows);
+    crate::ui::Theme::default().apply(&ctx);
+    menus::row_log::record(|| {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE)
+                    .show(ctx, |ui| draw(ui));
+            },
+        );
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn source_editor_app() -> RSpiceApp {
+    let mut app = title_test_app();
+    app.state.ui.active_source_editor = Some(
+        crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+            id: Id::new("menu-pin-source"),
+            editable: true,
+            navigable: true,
+        },
+    );
+    app
+}
+
+/// Each menu's rows exactly, for an open project with nothing selected and
+/// for a source editor in front, so a change to what a menu shows is a
+/// change to this list.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_menu_shows_exactly_its_pinned_rows() {
+    let mut mismatches = Vec::new();
+    let mut check = |name: &str, actual: Vec<String>, expected: &[&str]| {
+        if actual != expected {
+            mismatches.push(format!(
+                "{name}:\n{}",
+                actual
+                    .iter()
+                    .map(|line| format!("        {line:?},"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+    };
+    for (menu, expected) in PINNED_MENUS {
+        let mut app = title_test_app();
+        check(
+            menu.label(),
+            menu_pin(|ui| menu.show(ui, &mut app)),
+            expected,
+        );
+    }
+    for (menu, expected) in PINNED_SOURCE_EDITOR_MENUS {
+        let mut app = source_editor_app();
+        check(
+            &format!("{} with a source editor", menu.label()),
+            menu_pin(|ui| menu.show(ui, &mut app)),
+            expected,
+        );
+    }
+    for (projection, expected) in PINNED_OVERFLOW_MENUS {
+        let mut app = title_test_app();
+        check(
+            &format!("{projection:?} overflow"),
+            menu_pin(|ui| overflow_menu(ui, &mut app, projection)),
+            expected,
+        );
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n\n"));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
+    (
+        ApplicationMenu::File,
+        &[
+            "Project launcher… | project-launcher | Ctrl+Shift+O | on",
+            "---",
+            "Open project… | open-project | Ctrl+O | on",
+            "Open netlist… | open-netlist | Ctrl+Shift+L | on",
+            "New project… | new-project | Ctrl+Shift+N | on",
+            "Recent projects… | recent-projects |  | on",
+            "---",
+            "New cell… | new-cell |  | on",
+            "Open schematic… | open-schematic |  | on",
+            "---",
+            "Save | save-project | Ctrl+S | on",
+            "Save as… | save-project-as | Ctrl+Alt+Shift+S | on",
+            "Save all | save-all | Ctrl+Shift+S | on",
+            "Revert active document… | revert-document |  | off: active document has no changes to revert",
+            "---",
+            "Import SPICE deck… | import-netlist |  | on",
+            "Import Verilog-A… | import-veriloga |  | on",
+            "---",
+            "Export schematic SVG… | export-schematic-svg |  | on",
+            "Export dataset… | export-results |  | off: no result dataset is available",
+            "Export publication snapshot… | export-publication-snapshot |  | on",
+            "Export SPICE netlist… | export-netlist-spice |  | on",
+            "---",
+            "Live session… | live-session |  | off: this build has no cloud endpoints pinned",
+            "Publish to web… | publish-web |  | off: this build has no cloud endpoints pinned",
+            "---",
+            "Close active document | close-document | Ctrl+W | off: no closable document is active",
+            "Close project… | close-project | Ctrl+Shift+W | on",
+            "---",
+            "Sheet properties | page-setup | Ctrl+Alt+Shift+P | on",
+            "Sheet formats across this document… | sheet-format-manager |  | off: give the open sheet a property of its own in Sheet properties first",
+            "Custom sheet sizes… | sheet-preset-library |  | on",
+            "Sheet defaults… | sheet-defaults |  | on",
+            "Print / hardcopy… | print-hardcopy | Ctrl+P | off: command is unavailable in this context",
+            "Export active view… | export-active-view | Ctrl+Shift+P | off: command is unavailable in this context",
+            "---",
+            "Exit RSpice… | exit-rspice | Alt+F4 | on",
+        ],
+    ),
+    (
+        ApplicationMenu::Edit,
+        &[
+            "Undo | undo | Ctrl+Z | off: nothing to undo",
+            "Redo | redo | Ctrl+Shift+Z | off: nothing to redo",
+            "---",
+            "Cut selection | cut-selection | Ctrl+X | off: select an editable object",
+            "Copy selection | copy-selection | Ctrl+C | off: select an editable object",
+            "Paste | paste-selection | Ctrl+V | off: clipboard has no compatible content",
+            "Duplicate selection | duplicate-selection | Ctrl+D | off: select an editable object",
+            "Delete selection | delete-selection | Delete | off: select an editable object",
+            "Select all | select-all | Ctrl+A | on",
+            "---",
+            "Rename selected object… | rename-selection | F2 | off: select one editable component, net label, or declared bus",
+            "Object properties… | object-properties | Q | off: select one inspectable object",
+            "Find in design… | find-design | Ctrl+F | on",
+            "Find and replace… | find-replace | Ctrl+H | on",
+            "---",
+            "Preferences… | preferences | Ctrl+, | on",
+        ],
+    ),
+    (
+        ApplicationMenu::View,
+        &[
+            "Zoom in | zoom-in | + | on",
+            "Zoom out | zoom-out | − | on",
+            "Fit drawing sheet | canvas-fit-sheet | F | on",
+            "Fit schematic content | canvas-fit-content | Shift+F | on",
+            "Zoom 100% | zoom-one-to-one |  | on",
+            "Zoom to selection | zoom-to-selection |  | off: command is unavailable in this context",
+            "Zoom box | zoom-box | Z | on",
+            "Cycle grid display | cycle-grid | G | on",
+            "Grid, snap and wire routing… | grid-snap-routing |  | on",
+            "Drawing-sheet layers… | sheet-layer-visibility |  | on",
+            "Schematic visibility… | visibility-options |  | on",
+            "---",
+            "Enter full screen | full-screen | F11 | on",
+            "Reset active view | reset-active-view |  | on",
+            "---",
+            "Engineering table view… | engineering-table-manager | Ctrl+Shift+T | on",
+        ],
+    ),
+    (
+        ApplicationMenu::Design,
+        &[
+            "Open active schematic | design | Alt+2 | on",
+            "Ascend hierarchy | ascend-hierarchy | Shift+H | off: already at top hierarchy",
+            "Descend into selected instance… | descend-hierarchy | H | off: select one hierarchical instance",
+            "---",
+            "Place instance… | place-instance | Shift+I | on",
+            "Draw wire | place-wire | W | on",
+            "Draw bus | place-bus | B | on",
+            "Place bus tap | place-bus-tap | T | on",
+            "Place junction | place-junction | J | on",
+            "Place net label | place-label | N | on",
+            "Place probe | place-probe | P | on",
+            "Create pins… | place-pin | Shift+P | on",
+            "Place text or note… | place-text | Shift+T | on",
+            "Draw documentation shape… | place-shape |  | on",
+            "---",
+            "Move selection | move-selection | M | off: select an editable object",
+            "Stretch selection | stretch-selection | S | off: select an editable object",
+            "Create array… | array-selection |  | off: select an editable object",
+            "Replace instance… | replace-instance |  | off: select an editable object",
+            "Arrange >",
+            "Join collinear wires | join-collinear-wires |  | on",
+            "---",
+            "Previous sheet | previous-sheet | PageUp | off: the active cell view has a single sheet",
+            "Next sheet | next-sheet | PageDown | off: the active cell view has a single sheet",
+            "New sheet | new-sheet |  | on",
+            "Delete active sheet | delete-sheet |  | off: the active cell view has a single sheet",
+            "---",
+            "Create hierarchy from selection… | create-hierarchy |  | off: select an editable object",
+            "Sheets, variants and annotation… | design-management |  | on",
+            "Selection and bulk editing… | design-bulk-tools |  | on",
+            "Connectivity and bus manager… | design-connectivity-tools |  | on",
+            "Configuration sets… | configuration-sets |  | on",
+            "Design rule setup… | design-rule-setup |  | on",
+            "Review comments… | review-comments |  | on",
+            "Revision history… | revision-history |  | on",
+            "---",
+            "Specialist workspaces… | specialist-tools-design |  | on",
+            "---",
+            "Check cellview | check-cellview | Ctrl+E | on",
+            "Check design | check-design |  | on",
+            "Check and save | check-and-save | Ctrl+Shift+E | on",
+            "---",
+            "Browse all design commands… | command-palette | Ctrl+K | on",
+        ],
+    ),
+    (
+        ApplicationMenu::Simulate,
+        &[
+            "Manage simulation plans… | manage-simulation-plans |  | on",
+            "Add analysis or workflow… | add-analysis |  | on",
+            "Run active plan | start-run | F5 | on",
+            "Stop active run | stop-run | Shift+F5 | off: no simulation is running",
+            "Jobs, targets and run history… | jobs-manager |  | on",
+            "Preflight checks | check | Ctrl+E | on",
+            "---",
+            "Simulation Studio | simulate | Alt+3 | on",
+            "Stimulus Library | stimulus | Alt+8 | on",
+            "Global solver & convergence | solver |  | on",
+            "Open generated netlist | generated-netlist | Ctrl+L | on",
+            "Edit specification matrix | specifications |  | on",
+        ],
+    ),
+    (
+        ApplicationMenu::Results,
+        &[
+            "Open waveform viewer | waveforms |  | on",
+            "Dataset and manifest browser… | dataset-browser |  | off: no retained result dataset is available",
+            "Create result document… | create-result-document |  | off: no retained result dataset is available",
+            "Add result comparison… | compare-datasets |  | off: open an active result document",
+            "Report page and datasheet editor… | report-page-editor |  | on",
+            "---",
+            "Linked A/B cursors | toggle-linked-cursors | Shift+C | off: command is unavailable in this context",
+            "Calculator… | calculator |  | on",
+            "Expression and unit diagnostics… | expression-diagnostics |  | off: command is unavailable in this context",
+            "Measurement library… | measurement-library |  | off: open a result in Results",
+            "Family slicing and pivot… | family-slicing |  | off: open a result in Results",
+            "Plot document properties… | plot-properties |  | off: open a result in Results",
+            "---",
+            "Import result dataset… | import-dataset |  | on",
+            "Export dataset… | export-results |  | off: no result dataset is available",
+        ],
+    ),
+    (
+        ApplicationMenu::Verify,
+        &[
+            "Verification cockpit | yield |  | on",
+            "Corner matrix | corners |  | on",
+            "Optimization | optimization |  | on",
+            "Safe operating area | device-safety |  | on",
+            "Regression plan | regression |  | on",
+        ],
+    ),
+    (
+        ApplicationMenu::Models,
+        &[
+            "Model & library catalog | models-catalog |  | on",
+            "Device model and parameter editor… | model-editor |  | off: select one model in Model & library catalog",
+            "Measurement correlation… | model-correlation |  | off: command is unavailable in this context",
+            "---",
+            "Verilog-A/AMS compiler | veriloga |  | off: command is unavailable in this context",
+        ],
+    ),
+    (
+        ApplicationMenu::Automation,
+        &["Automation workspace | automation | Ctrl+` | on"],
+    ),
+    (
+        ApplicationMenu::Window,
+        &[
+            "Toggle navigator | toggle-navigator | Ctrl+B | on",
+            "Toggle inspector | toggle-inspector | Ctrl+I | on",
+            "Toggle console | console | Ctrl+J | on",
+            "Split with results | toggle-split-view | Ctrl+\\ | off: no retained result dataset is available",
+            "Focus workspace | toggle-focus-mode | Ctrl+Shift+F | on",
+            "---",
+            "New application window… | new-application-window | Ctrl+Alt+Shift+N | on",
+            "Detach active document… | detach-document |  | on",
+            "Move active document to window… | move-document-window |  | off: create another application window before moving this document",
+            "Reattach active document | reattach-document |  | off: the active document is already in the main window",
+            "Consolidate all windows… | consolidate-windows |  | off: there are no detached application windows",
+            "Recover off-screen windows… | monitor-recovery |  | off: there are no secondary application windows to recover",
+            "---",
+            "Previous document | previous-document | Ctrl+Shift+Tab | off: command is unavailable in this context",
+            "Next document | next-document | Ctrl+Tab | off: command is unavailable in this context",
+            "Close other documents | close-other-documents |  | off: command is unavailable in this context",
+            "Close all documents | close-all-documents |  | off: command is unavailable in this context",
+            "---",
+            "Workspace layouts… | workspace-layouts |  | on",
+            "Windows, documents and session… | window-manager |  | on",
+            "Reset workspace layout… | reset-workspace-layout |  | on",
+            "---",
+            "Previous workspace | previous-workspace |  | hidden",
+            "Next workspace | next-workspace |  | hidden",
+        ],
+    ),
+    (
+        ApplicationMenu::Help,
+        &[
+            "RSpice Help | help-center | F1 | on",
+            "Command reference | command-reference |  | on",
+            "Release notes and compatibility changes… | release-notes |  | on",
+            "Project migration guide… | migration-guide |  | on",
+            "System diagnostics and log locations… | system-diagnostics |  | on",
+            "Create support bundle… | support-bundle |  | on",
+            "Legal, privacy and notices… | legal-privacy-center |  | on",
+            "---",
+            "About RSpice | about |  | on",
+        ],
+    ),
+];
+
+#[cfg(not(target_arch = "wasm32"))]
+const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
+    (
+        ApplicationMenu::Edit,
+        &[
+            "Undo | undo | Ctrl+Z | on",
+            "Redo | redo | Ctrl+Shift+Z | on",
+            "---",
+            "Cut selection | cut-selection | Ctrl+X | on",
+            "Copy selection | copy-selection | Ctrl+C | on",
+            "Paste | paste-selection | Ctrl+V | on",
+            "Duplicate line | duplicate-line | Ctrl+D | on",
+            "Delete selection | delete-selection | Delete | on",
+            "Select all | select-all | Ctrl+A | on",
+            "---",
+            "Toggle line comment | toggle-line-comment | Ctrl+/ | on",
+            "Format document | format-document |  | on",
+            "Go to line… | go-to-line | Ctrl+G | on",
+            "Find in source… | find-code | Ctrl+F | off: command is unavailable in this context",
+            "---",
+            "Preferences… | preferences | Ctrl+, | on",
+        ],
+    ),
+    (
+        ApplicationMenu::View,
+        &[
+            "Zoom in | zoom-in | + | on",
+            "Zoom out | zoom-out | − | on",
+            "Fit drawing sheet | canvas-fit-sheet | F | on",
+            "Fit schematic content | canvas-fit-content | Shift+F | on",
+            "Zoom 100% | zoom-one-to-one |  | on",
+            "Zoom to selection | zoom-to-selection |  | off: command is unavailable in this context",
+            "Zoom box | zoom-box | Z | on",
+            "Cycle grid display | cycle-grid | G | on",
+            "Grid, snap and wire routing… | grid-snap-routing |  | on",
+            "Drawing-sheet layers… | sheet-layer-visibility |  | on",
+            "Schematic visibility… | visibility-options |  | on",
+            "---",
+            "Fold selection | fold-selection | Ctrl+Shift+[ | on",
+            "Unfold at caret | unfold-at-caret | Ctrl+Shift+] | on",
+            "Fold all | fold-all |  | on",
+            "Unfold all | unfold-all |  | on",
+            "---",
+            "Enter full screen | full-screen | F11 | on",
+            "Reset active view | reset-active-view |  | on",
+            "---",
+            "Engineering table view… | engineering-table-manager | Ctrl+Shift+T | on",
+        ],
+    ),
+];
+
+#[cfg(not(target_arch = "wasm32"))]
+const PINNED_OVERFLOW_MENUS: [(MenuProjection, &[&str]); 2] = [
+    (
+        MenuProjection::ThroughSimulate,
+        &[
+            "Results workspace | waveforms |  | on",
+            "Verification workspace | yield |  | on",
+            "Models workspace | models-catalog |  | on",
+            "Automation workspace | automation |  | on",
+            "Specialist workspaces… | specialist-tool-browser |  | on",
+            "---",
+            "Workspace layouts… | workspace-layouts |  | on",
+            "Windows, documents and session… | window-manager |  | on",
+            "Jobs & targets | jobs-manager |  | on",
+            "Focus workspace | toggle-focus-mode | Ctrl+Shift+F | on",
+            "Toggle console | console | Ctrl+J | on",
+            "---",
+            "RSpice Help | help-center | F1 | on",
+        ],
+    ),
+    (
+        MenuProjection::ThroughModels,
+        &[
+            "Automation workspace | automation |  | on",
+            "Specialist workspaces… | specialist-tool-browser |  | on",
+            "---",
+            "Workspace layouts… | workspace-layouts |  | on",
+            "Windows, documents and session… | window-manager |  | on",
+            "Jobs & targets | jobs-manager |  | on",
+            "Focus workspace | toggle-focus-mode | Ctrl+Shift+F | on",
+            "Toggle console | console | Ctrl+J | on",
+            "---",
+            "RSpice Help | help-center | F1 | on",
+        ],
+    ),
+];
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn title_context_ellipsis_is_measured_instead_of_character_estimated() {
