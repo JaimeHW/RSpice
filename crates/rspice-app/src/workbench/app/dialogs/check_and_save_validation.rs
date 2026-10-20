@@ -657,7 +657,7 @@ impl CheckAndSaveValidationReport {
             SaveScope::ActiveDocument => {
                 format!("{} \u{00b7} {}", active_view.cell, active_view.view)
             }
-            SaveScope::AllDocuments => "All project documents \u{00b7} first save".to_owned(),
+            SaveScope::AllDocuments => "All project documents (first save)".to_owned(),
         };
 
         #[derive(Serialize)]
@@ -751,14 +751,6 @@ impl CheckAndSaveValidationReport {
             blockers: u32::try_from(self.blockers.len()).unwrap_or(u32::MAX),
             advisories: u32::try_from(self.advisories.len()).unwrap_or(u32::MAX),
         }
-    }
-
-    pub(crate) fn checks_label(&self) -> String {
-        format!(
-            "{} blockers \u{00b7} {} advisories",
-            self.blockers.len(),
-            self.advisories.len()
-        )
     }
 
     pub(crate) fn document_scope_label(&self) -> &str {

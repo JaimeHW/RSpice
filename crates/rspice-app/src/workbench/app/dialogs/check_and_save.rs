@@ -1,18 +1,14 @@
-//! Mockup-owned transactional Check and save operation.
+//! Check and save: what the design checks found, the documents the save
+//! covers, and the revision note it records.
 
-use egui::{Align, Align2, Context, Frame, Layout, Margin, Sense, Stroke, Ui, vec2};
+use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionJournal,
     ValidatedRevisionRequest,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, Problem,
-    paint_problem_mark,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::workflows::project_workflow::{
     SaveRequestOutcome, save_active_for_continuation,
 };
@@ -21,18 +17,10 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::check_and_save_validation::{
     CheckAndSaveValidationReport, run_design_checks,
 };
-use crate::workbench::app::dialogs::operation_primitives::{
-    CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, heading, operation_steps,
-    paint_body_dividers,
-};
-use crate::workbench::app::dialogs::review_primitives::{
-    input_field, purpose_line, read_only_field,
-};
-use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 
-/// Retained review state for the mockup-owned Check and save transaction.
+/// Retained state for the Check and save form.
 /// Validation evidence is frozen when the dialog opens and re-derived before
 /// publication; the editable revision note never mutates the live document
 /// until a canonical save request has been accepted.
@@ -45,13 +33,6 @@ pub(crate) struct CheckAndSaveDialogState {
         crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport,
     >,
     pub(crate) validation_error: Option<String>,
-    /// The validated revision was published; the dialog now only reviews it.
-    pub(crate) saved: bool,
-    /// Edits arrived while the browser save was in flight, so the saved
-    /// snapshot does not hold them.
-    pub(crate) saved_with_newer_changes: bool,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
     #[cfg(target_arch = "wasm32")]
     pub(crate) pending_transaction: Option<crate::product::TransactionId>,
     #[cfg(target_arch = "wasm32")]
@@ -81,34 +62,15 @@ impl CheckAndSaveDialogState {
     }
 
     pub(crate) fn mark_edited(&mut self) {
-        if self.saved || self.is_pending() {
+        if self.is_pending() {
             return;
         }
-        self.dirty = !self.revision_note.is_empty();
         self.revision_note_touched = true;
-        self.discard_confirm = false;
         self.validation_error = None;
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.is_pending() {
-            return false;
-        }
-        if self.saved {
-            self.close();
-            return true;
-        }
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
     }
 
     pub(crate) fn is_pending(&self) -> bool {
@@ -124,33 +86,62 @@ impl CheckAndSaveDialogState {
 }
 
 const TITLE: &str = "Check and save schematic";
-const PRIMARY: &str = "Save validated revision";
-const DESCRIPTION: &str =
-    "Run connectivity, parameter, hierarchy, model, pin, and naming checks before explicit save.";
-const SAVING_TITLE: &str = "Saving";
-const SAVING_DETAIL: &str = "Keep this dialog open until the save completes.";
-const NEWER_CHANGES_HINT: &str = "Edits made after validation are still unsaved.";
-/// The form column: its 10 pt frame margins over three 47 pt fields with
-/// 9 pt between them. It was 291 while the change preview sat under the
-/// fields — a 29 pt heading over three 28 pt rows of constants — and holding
-/// that number once the preview went would have left the band as bare
-/// surface instead of as a table.
-const CHECK_AND_SAVE_BODY_HEIGHT: f32 = 179.0;
-/// Side of a leading problem mark, and the advance from its left edge to the
-/// text behind it. Read from the kit rather than restated here, so a marked
-/// line in this dialog sits where a marked line sits anywhere else, now and
-/// after the kit moves it.
-use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
-/// The first frame's height hint: the shared operation surface less the
-/// 112 pt the change preview used to add to the body under it.
-const CHECK_AND_SAVE_SURFACE_HEIGHT: f32 = SURFACE_HEIGHT - 51.0;
+const PRIMARY: &str = "Save";
+/// The sentence assistive technology reads for the whole form.
+const DESCRIPTION: &str = "The design checks have run; save the project as a revision with a note.";
+const SAVING: &str = "Saving. Keep this dialog open until the save completes.";
+const STALE_CHECKS: &str = "The design changed after these checks ran. Save runs them again first.";
+const NEWER_CHANGES: &str = "Edits made after validation are still unsaved.";
+const SHOW_IN_PROBLEMS: &str = "Show in Problems";
+const NOTE_FIELD: &str = "check-and-save-revision-note";
 
+/// Everything the footer's status is decided from.
 #[derive(Clone, Copy)]
-struct CheckAndSavePreconditions<'a> {
-    project: &'a str,
-    revision: &'a str,
-    source_current: bool,
-    saved_snapshot: bool,
+struct CheckAndSaveStatus<'a> {
+    pending: bool,
+    save_error: Option<&'a str>,
+    first_blocker: Option<&'a str>,
+    note_error: Option<&'a str>,
+    note_touched: bool,
+    checks_current: bool,
+}
+
+/// What the footer says: a save in flight, why Save is refused, or, while
+/// the note is still untouched, that it is needed, as a plain fact. A
+/// refusal on a form nobody has typed in yet reads as a fault they made.
+fn check_and_save_status(status: CheckAndSaveStatus<'_>) -> Result<Option<&str>, &str> {
+    if status.pending {
+        return Ok(Some(SAVING));
+    }
+    if let Some(error) = status.save_error.or(status.first_blocker) {
+        return Err(error);
+    }
+    if let Some(error) = status.note_error {
+        return if status.note_touched {
+            Err(error)
+        } else {
+            Ok(Some(error))
+        };
+    }
+    if !status.checks_current {
+        return Ok(Some(STALE_CHECKS));
+    }
+    Ok(None)
+}
+
+/// The checks' verdict in words: "No blockers or advisories", or the two
+/// counts.
+fn checks_summary(report: &CheckAndSaveValidationReport) -> String {
+    let blockers = report.blockers().len();
+    let advisories = report.advisories().len();
+    if blockers == 0 && advisories == 0 {
+        return "No blockers or advisories".to_owned();
+    }
+    format!(
+        "{blockers} blocker{}, {advisories} advisor{}",
+        if blockers == 1 { "" } else { "s" },
+        if advisories == 1 { "y" } else { "ies" }
+    )
 }
 
 pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
@@ -209,95 +200,22 @@ impl RSpiceApp {
             );
             return;
         };
-        let project = self
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .display_name()
-            .to_owned();
-        let revision = report.project_revision().to_string();
-        let note_error = revision_note_error(&self.state.project.check_and_save.revision_note);
-        let displayed_note_error = self
-            .state
-            .project
-            .check_and_save
-            .revision_note_touched
-            .then(|| note_error.clone())
-            .flatten();
-        let discard_confirm = self.state.project.check_and_save.discard_confirm;
-        let pending = self.state.project.check_and_save.is_pending();
-        let saved = self.state.project.check_and_save.saved;
-        let saved_with_newer_changes = self.state.project.check_and_save.saved_with_newer_changes;
-        let validation_error = self.state.project.check_and_save.validation_error.clone();
-        let has_transaction = discard_confirm
-            || pending
-            || validation_error.is_some()
-            || !report.blockers().is_empty();
-        let primary_label = if saved { "Close" } else { PRIMARY };
-        let primary_enabled = saved || (!pending && report.can_save() && note_error.is_none());
-        let source_current = report.source_is_current(&self.state);
-        let preconditions = CheckAndSavePreconditions {
-            project: &project,
-            revision: &revision,
-            source_current,
-            saved_snapshot: saved,
-        };
-        let mut dialog = Dialog::new(TITLE, primary_label)
-            .description(DESCRIPTION)
-            .size(DialogSize::SimulationWorkflow)
-            .initial_height(
-                CHECK_AND_SAVE_SURFACE_HEIGHT
-                    + if has_transaction {
-                        TRANSACTION_HEIGHT
-                    } else {
-                        0.0
-                    },
-            )
-            .flush_body()
-            .ghost_enabled(!pending)
-            .primary_enabled(primary_enabled)
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if !saved {
-            dialog = dialog.ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            });
-        }
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        } else if pending {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Progress,
-                SAVING_TITLE,
-                SAVING_DETAIL,
-            );
-        } else if saved {
-            // The body already says the snapshot was saved and the console
-            // names the revision. Only edits the snapshot missed need a word.
-            if saved_with_newer_changes {
-                dialog = dialog.hint(NEWER_CHANGES_HINT);
-            }
-        } else if let Some(error) = validation_error.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Validated revision was not saved",
-                error,
-            );
-        } else if let Some(blocker) = report.blockers().first() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Validation blockers must be resolved",
-                &blocker.message,
-            );
-        }
-
+        let dialog = &self.state.project.check_and_save;
+        let pending = dialog.is_pending();
+        let note_error = revision_note_error(&dialog.revision_note);
+        let save_error = dialog.validation_error.clone();
+        let first_blocker = report.blockers().first().map(|item| item.message.clone());
+        let status = check_and_save_status(CheckAndSaveStatus {
+            pending,
+            save_error: save_error.as_deref(),
+            first_blocker: first_blocker.as_deref(),
+            note_error: note_error.as_deref(),
+            note_touched: dialog.revision_note_touched,
+            checks_current: report.source_is_current(&self.state),
+        });
+        let primary_enabled = !pending && report.can_save() && note_error.is_none();
+        let checks = checks_summary(&report);
+        let has_findings = !report.blockers().is_empty() || !report.advisories().is_empty();
         // The dialog is modal, so the author cannot go and select the stale
         // instance first. The row therefore names one and repairs it in place,
         // and the receipt is re-derived afterwards because it described the
@@ -305,44 +223,65 @@ impl RSpiceApp {
         let repair_instance = report
             .stale_interface_instances()
             .first()
-            .filter(|_| !pending && !saved)
+            .filter(|_| !pending)
             .cloned();
         let mut note_changed = false;
         let mut repair_requested = false;
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let response = check_and_save_body(
-                ui,
-                &report,
-                &mut self.state.project.check_and_save.revision_note,
-                displayed_note_error.as_deref(),
-                pending || saved,
-                preconditions,
-                StaleInterfaceRepair {
-                    instance: repair_instance.as_deref(),
-                    requested: &mut repair_requested,
-                },
-            );
-            note_changed = response.changed();
-            Some(response.id)
-        });
+        let mut show_problems = false;
+        let note = egui::Id::new(NOTE_FIELD);
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .describe(DESCRIPTION)
+            .primary_enabled(primary_enabled)
+            .cancel_enabled(!pending)
+            .fields_enabled(!pending)
+            .status(status)
+            .show(ctx, |rows| {
+                if has_findings {
+                    show_problems = rows.value_action("Checks", &checks, SHOW_IN_PROBLEMS);
+                } else {
+                    rows.value("Checks", &checks);
+                }
+                if let Some(instance) = repair_instance.as_deref() {
+                    repair_requested = rows.value_action(
+                        "Instance",
+                        &format!("{instance} is out of date"),
+                        Command::UpdateInstanceInterface.spec().label,
+                    );
+                }
+                rows.value("Documents", report.document_scope_label());
+                note_changed = rows
+                    .text(
+                        "Revision note",
+                        note,
+                        &mut self.state.project.check_and_save.revision_note,
+                        "",
+                    )
+                    .changed();
+                Some(note)
+            });
         if note_changed {
             self.state.project.check_and_save.mark_edited();
         }
         if let Some(instance) = repair_instance.filter(|_| repair_requested) {
             self.repair_stale_instance_interface(&instance);
         }
-        match response.choice {
-            DialogChoice::Primary if saved => {
+        if show_problems {
+            // The findings are visited on the Problems page, which the modal
+            // would otherwise cover.
+            self.state.project.check_and_save.close();
+            self.state.show_problem_findings();
+            return;
+        }
+        match choice {
+            DialogChoice::Primary => self.commit_check_and_save(),
+            // A save in flight cannot be abandoned half-done; Esc waits.
+            DialogChoice::Ghost | DialogChoice::Cancelled if !pending => {
                 self.state.project.check_and_save.close();
             }
-            DialogChoice::Primary => self.commit_check_and_save(),
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.project.check_and_save.attempt_close();
-                if self.state.project.check_and_save.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
+            DialogChoice::Ghost
+            | DialogChoice::Cancelled
+            | DialogChoice::Secondary
+            | DialogChoice::None => {}
         }
     }
 
@@ -641,20 +580,23 @@ fn revision_note_error(note: &str) -> Option<String> {
     None
 }
 
+/// A save that landed closes the form, as any command does once it has run;
+/// the record says what was saved, and whether edits made while the save was
+/// landing missed it.
 fn complete_validated_save(state: &mut AppState, newer_changes: bool) {
     clear_pending_save_state(state);
-    state.project.check_and_save.saved = true;
-    state.project.check_and_save.saved_with_newer_changes = newer_changes;
-    state.project.check_and_save.validation_error = None;
-    state.project.check_and_save.dirty = false;
-    state.project.check_and_save.discard_confirm = false;
-    let message = match state.project.check_and_save.report.as_ref() {
+    let mut message = match state.project.check_and_save.report.as_ref() {
         Some(report) => format!(
             "Saved a validated revision of {}.",
             report.document_scope_label()
         ),
         None => "Saved a validated revision.".to_owned(),
     };
+    if newer_changes {
+        message.push(' ');
+        message.push_str(NEWER_CHANGES);
+    }
+    state.project.check_and_save.close();
     state.record(LogSeverity::Info, LogSource::Studio, message);
 }
 
@@ -776,332 +718,44 @@ fn clear_pending_save_state(state: &mut AppState) {
     let _ = state;
 }
 
-/// The one stale instance the checks can repair in place, and the flag the
-/// row sets when the author asks for it.
-struct StaleInterfaceRepair<'a> {
-    instance: Option<&'a str>,
-    requested: &'a mut bool,
-}
-
-fn check_and_save_body(
-    ui: &mut Ui,
-    report: &CheckAndSaveValidationReport,
-    note: &mut String,
-    note_error: Option<&str>,
-    read_only: bool,
-    preconditions: CheckAndSavePreconditions<'_>,
-    repair: StaleInterfaceRepair<'_>,
-) -> egui::Response {
-    purpose_line(ui, DESCRIPTION);
-    operation_steps(ui);
-    let width = ui.available_width();
-    let stacked = check_and_save_uses_stacked_layout(ui.ctx().content_rect().width());
-    let context_width = CONTEXT_WIDTH.min((width * 0.42).max(220.0));
-    let form_width = if stacked {
-        width
-    } else {
-        (width - context_width).max(1.0)
-    };
-    if stacked {
-        let form = ui.allocate_ui_with_layout(
-            vec2(form_width, CHECK_AND_SAVE_BODY_HEIGHT),
-            Layout::top_down(Align::Min),
-            |ui| {
-                ui.set_min_size(vec2(form_width, CHECK_AND_SAVE_BODY_HEIGHT));
-                check_and_save_form(ui, report, note, note_error, read_only, repair)
-            },
-        );
-        ui.painter().hline(
-            form.response.rect.x_range(),
-            form.response.rect.bottom(),
-            Stroke::new(1.0, Tokens::get(ui.ctx()).color.border_strong),
-        );
-        // Stacked, the panel sits under the form rather than beside it, so
-        // the form's height is not a measure it has to match: holding it to
-        // one left the two facts of the snapshot over 94 points of bare
-        // panel at 560.
-        preconditions_panel(ui, 0.0, preconditions);
-        return form.inner;
-    }
-    let body = ui.allocate_ui_with_layout(
-        vec2(width, CHECK_AND_SAVE_BODY_HEIGHT),
-        Layout::left_to_right(Align::Min),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            let response = ui
-                .allocate_ui_with_layout(
-                    vec2(form_width, CHECK_AND_SAVE_BODY_HEIGHT),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_min_size(vec2(form_width, CHECK_AND_SAVE_BODY_HEIGHT));
-                        check_and_save_form(ui, report, note, note_error, read_only, repair)
-                    },
-                )
-                .inner;
-            ui.allocate_ui_with_layout(
-                vec2(context_width, CHECK_AND_SAVE_BODY_HEIGHT),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    ui.set_min_size(vec2(context_width, CHECK_AND_SAVE_BODY_HEIGHT));
-                    preconditions_panel(ui, CHECK_AND_SAVE_BODY_HEIGHT, preconditions);
-                },
-            );
-            response
-        },
-    );
-    paint_body_dividers(ui, body.response.rect, form_width);
-    body.inner
-}
-
-const fn check_and_save_uses_stacked_layout(viewport_width: f32) -> bool {
-    viewport_width <= 760.0
-}
-
-fn check_and_save_form(
-    ui: &mut Ui,
-    report: &CheckAndSaveValidationReport,
-    note: &mut String,
-    note_error: Option<&str>,
-    read_only: bool,
-    repair: StaleInterfaceRepair<'_>,
-) -> egui::Response {
-    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    let mut note_response = None;
-    let StaleInterfaceRepair {
-        instance: repair_instance,
-        requested: repair_requested,
-    } = repair;
-    Frame::NONE
-        .inner_margin(Margin::symmetric(12, 10))
-        .show(ui, |ui| {
-            let field_width = ui.available_width();
-            ui.allocate_ui(vec2(field_width, 47.0), |ui| {
-                let response = read_only_field(
-                    ui,
-                    "Checks",
-                    &report.checks_label(),
-                    &checks_review_description(report),
-                );
-                let tooltip = checks_review_description(report);
-                if !tooltip.is_empty() {
-                    response.on_hover_text(tooltip);
-                }
-            });
-            if let Some(instance) = repair_instance {
-                ui.add_space(9.0);
-                *repair_requested = stale_interface_repair_row(ui, instance);
-            }
-            ui.add_space(9.0);
-            ui.allocate_ui(vec2(field_width, 47.0), |ui| {
-                read_only_field(
-                    ui,
-                    "Documents",
-                    report.document_scope_label(),
-                    "The documents this save covers",
-                );
-            });
-            ui.add_space(9.0);
-            ui.allocate_ui(vec2(field_width, 47.0), |ui| {
-                note_response = Some(
-                    ui
-                    .add_enabled_ui(!read_only, |ui| {
-                        input_field(
-                            ui,
-                            "Revision note",
-                            note,
-                            "Update input-pair compensation",
-                            note_error,
-                            "Required revision history note; saving records this note as the disposition for every disclosed advisory",
-                        )
-                    })
-                    .inner,
-                );
-            });
-        });
-    note_response.unwrap_or_else(|| ui.allocate_response(egui::Vec2::ZERO, Sense::hover()))
-}
-
-/// The blocker the checks can clear without closing the dialog.
-///
-/// The button carries the command's own label, so the row and the Design
-/// command it runs cannot drift into naming the same repair differently.
-fn stale_interface_repair_row(ui: &mut Ui, instance: &str) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let mut requested = false;
-    Frame::NONE
-        .fill(t.color.bg_elevated)
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                requested = ui
-                    .add(egui::Button::new(
-                        Command::UpdateInstanceInterface.spec().label,
-                    ))
-                    .on_hover_text(format!(
-                        "Select {instance} and re-bind it to the interface its master presents now"
-                    ))
-                    .clicked();
-                let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-                let text = format!("{instance}: pins differ from master");
-                let galley = ui
-                    .painter()
-                    .layout_no_wrap(text.clone(), font, t.color.text);
-                let (rect, response) = ui.allocate_exact_size(
-                    vec2(galley.size().x + MARK_ADVANCE, galley.size().y),
-                    Sense::hover(),
-                );
-                // The blocker the mark states is painted text only, so it had
-                // no node of its own and was never announced.
-                let announcement = Problem::Failure.announce(&text);
-                response.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Label,
-                        ui.is_enabled(),
-                        &announcement,
-                    )
-                });
-                paint_problem_mark(
-                    ui.painter(),
-                    egui::Rect::from_center_size(
-                        egui::pos2(rect.left() + MARK_SIDE * 0.5, rect.center().y),
-                        egui::Vec2::splat(MARK_SIDE),
-                    ),
-                    Problem::Failure,
-                );
-                ui.painter().galley(
-                    rect.left_top() + vec2(MARK_ADVANCE, 0.0),
-                    galley,
-                    t.color.text,
-                );
-            });
-        });
-    requested
-}
-
-fn preconditions_panel(ui: &mut Ui, height: f32, preconditions: CheckAndSavePreconditions<'_>) {
-    let t = Tokens::get(ui.ctx());
-    Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.set_min_height(height);
-        ui.spacing_mut().item_spacing.y = 0.0;
-        heading(
-            ui,
-            if preconditions.saved_snapshot {
-                "Saved snapshot"
-            } else {
-                "Validated snapshot"
-            },
-        );
-        fact_row(ui, "Project", preconditions.project);
-        fact_row(ui, "Revision", preconditions.revision);
-        // The gates a blocker already states are not repeated here: the Checks
-        // field counts them and the strip names the first one. Only an edit
-        // made after the checks ran is invisible everywhere else, and it is
-        // what makes the save refuse.
-        if !preconditions.saved_snapshot && !preconditions.source_current {
-            unmet_line(ui, "The design changed after these checks ran.");
-        }
-    });
-}
-
-/// The one precondition the rest of the dialog cannot state.
-fn unmet_line(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
-    paint_problem_mark(
-        ui.painter(),
-        egui::Rect::from_center_size(
-            egui::pos2(rect.left() + 10.0 + MARK_SIDE * 0.5, rect.center().y),
-            egui::Vec2::splat(MARK_SIDE),
-        ),
-        Problem::Warning,
-    );
-    ui.painter().text(
-        rect.left_center() + vec2(10.0 + MARK_ADVANCE, 0.0),
-        Align2::LEFT_CENTER,
-        text,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    let announcement = Problem::Warning.announce(text);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
-    });
-}
-
-fn checks_review_description(report: &CheckAndSaveValidationReport) -> String {
-    let mut detail = String::from(
-        "Blocking and advisory findings from the frozen validation receipt. Saving records the revision note as the explicit disposition for each advisory.",
-    );
-    for finding in report.blockers().iter().chain(report.advisories()) {
-        detail.push('\n');
-        detail.push_str(match finding.level {
-            crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveFindingLevel::Blocker => "BLOCKER",
-            crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveFindingLevel::Advisory => "ADVISORY",
-        });
-        detail.push_str(" · ");
-        detail.push_str(&finding.identity);
-        detail.push_str(" · ");
-        detail.push_str(&finding.message);
-    }
-    detail
-}
-
-fn fact_row(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
-    let response_id = response.id;
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    ui.painter().text(
-        rect.left_center() + vec2(10.0, 0.0),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
-    let columns_width = (rect.width() - 28.0).max(0.0);
-    let label_width = (columns_width * (0.8 / 2.2)).max(76.0).min(columns_width);
-    let clip = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 10.0 + label_width + 8.0, rect.top()),
-        egui::pos2(rect.right() - 10.0, rect.bottom()),
-    );
-    let value_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let (display_value, truncated) =
-        ellipsized_text(ui, value, clip.width(), &value_font, t.color.text);
-    ui.painter().with_clip_rect(clip).text(
-        clip.left_center(),
-        Align2::LEFT_CENTER,
-        display_value,
-        value_font,
-        t.color.text,
-    );
-    // The builder alone would leave a roleless, bounds-less node that no
-    // assistive technology can reach, which is how both facts of the snapshot
-    // went missing. `widget_info` supplies the role and the bounds, and the
-    // builder then states the pair the row paints.
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    ui.ctx().accesskit_node_builder(response_id, |node| {
-        node.set_label(label);
-        node.set_value(value);
-    });
-    if truncated {
-        response.on_hover_text(value);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::product::ContentDigest;
     use crate::state::{ValidatedRevisionRequest, ValidationFindingCounts};
     use uuid::Uuid;
+
+    fn status(
+        note: &str,
+        note_touched: bool,
+        first_blocker: Option<&'static str>,
+    ) -> Result<Option<&'static str>, String> {
+        let note_error = revision_note_error(note);
+        check_and_save_status(CheckAndSaveStatus {
+            pending: false,
+            save_error: None,
+            first_blocker,
+            note_error: note_error.as_deref(),
+            note_touched,
+            checks_current: true,
+        })
+        .map(|fact| fact.map(|_| "fact"))
+        .map_err(str::to_owned)
+    }
+
+    /// Save is off until a note is typed, and the footer says why: as a
+    /// plain fact on a form nobody has typed in, as a refusal once the note
+    /// was typed and emptied again, and a blocker outranks both.
+    #[test]
+    fn a_disabled_save_says_why_without_blaming_an_untouched_form() {
+        assert_eq!(status("", false, None), Ok(Some("fact")));
+        assert!(status("", true, None).is_err());
+        assert_eq!(status("Compensation update", true, None), Ok(None));
+        assert_eq!(
+            status("", false, Some("R1 is open")),
+            Err("R1 is open".to_owned())
+        );
+    }
 
     #[test]
     fn revision_note_is_required_and_bounded() {
@@ -1110,23 +764,31 @@ mod tests {
         assert!(revision_note_error(&"x".repeat(MAX_VALIDATED_REVISION_NOTE_LEN + 1)).is_some());
     }
 
+    /// A save that landed closes the form, and edits that missed it are
+    /// said in the record rather than in a dialog left open to say it.
     #[test]
-    fn operation_layout_stacks_only_at_the_mockup_breakpoint() {
-        assert!(!check_and_save_uses_stacked_layout(761.0));
-        assert!(check_and_save_uses_stacked_layout(760.0));
+    fn a_landed_save_closes_the_form_and_records_what_it_missed() {
+        let mut state = AppState::default();
+        state.project.check_and_save.open = true;
+        state.project.check_and_save.revision_note = "Compensation update".to_owned();
+        complete_validated_save(&mut state, true);
+        assert!(!state.project.check_and_save.open);
+        assert!(state.project.check_and_save.revision_note.is_empty());
+        let line = state
+            .model
+            .log_buffer
+            .entries()
+            .last()
+            .expect("the save is recorded");
+        assert!(line.message.starts_with("Saved a validated revision"));
+        assert!(line.message.ends_with(NEWER_CHANGES), "{}", line.message);
     }
 
-    /// Everything Check and save paints must also reach assistive technology.
-    ///
-    /// The row helpers used to write their text straight into an AccessKit
-    /// node builder with no `widget_info` call in front of it. That leaves a
-    /// node with no role and, decisively, no bounds, and a bounds-less node is
-    /// dropped by every consumer of the tree: the facts of the snapshot and
-    /// the whole change preview were unreadable. Each case below therefore
-    /// asserts the bounds as well as the text, because the text alone was
-    /// always there.
+    /// Check and save is a command form: its rows on one label grid, and
+    /// none of the wizard it was drawn as — four step tabs, a purpose line, a
+    /// "Validated snapshot" side table — nor the sample revision note.
     #[test]
-    fn every_painted_row_is_published_with_bounds() {
+    fn check_and_save_is_a_command_form_without_the_wizard() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -1182,21 +844,15 @@ mod tests {
             }
         };
 
-        // The section heading, named once: a `Role::Label`'s text is filed
-        // under `value`, so a heading that still carries one is being
-        // announced twice over.
-        published("Validated snapshot", &|node| {
-            node.role() == egui::accesskit::Role::Heading
-                && node.label() == Some("Validated snapshot")
-                && node.value().is_none()
-        });
-
-        // The two facts of the snapshot, each as the pair it paints.
-        for fact in ["Project", "Revision"] {
+        // The two facts, each as the pair it paints, and the note field.
+        for fact in ["Checks", "Documents"] {
             published(fact, &|node| {
                 node.label() == Some(fact) && node.value().is_some_and(|value| !value.is_empty())
             });
         }
+        published("Revision note", &|node| {
+            node.label() == Some("Revision note")
+        });
 
         assert!(
             unpublished.is_empty(),
@@ -1204,22 +860,20 @@ mod tests {
             unpublished.join("\n  ")
         );
 
-        // The change preview is gone: four columns of the same two sentences
-        // about what the save retains, at every width and for every design.
-        // It said nothing a reader could act on and every cell ellipsized.
-        let still_painted = nodes
+        let wizard = nodes
             .iter()
-            .filter_map(|(_, node)| node.label())
-            .filter(|label| {
-                label.contains("Exact change preview")
-                    || label.contains("Owned object")
-                    || label.contains("remain retained")
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .filter(|text| {
+                text.contains("Scope")
+                    || text.contains("Difference")
+                    || text.contains("snapshot")
+                    || text.contains("Update input-pair compensation")
+                    || text.contains("before explicit save")
             })
+            .map(str::to_owned)
             .collect::<Vec<_>>();
-        assert!(
-            still_painted.is_empty(),
-            "the change preview is back: {still_painted:?}"
-        );
+        assert!(wizard.is_empty(), "the wizard is back: {wizard:?}");
     }
 
     #[test]
