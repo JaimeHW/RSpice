@@ -293,12 +293,19 @@ impl<'a> Lexer<'a> {
         // Unsigned digit-leading names are legal SPICE node/model names
         // (`1A`, `2N2222`). Preserve them as identifiers; value parsers still
         // resolve `1A`, `4U`, `10V`, etc. through parse_spice_value. Keep
-        // scientific notation on the numeric path.
+        // scientific notation on the numeric path. An unsigned Fortran
+        // exponent (`1d3`) stays a name here and resolves as a value through
+        // parse_spice_value; a signed one (`1d-3`) would otherwise split at
+        // its sign, so it takes the numeric path like `1e-3`.
         if !had_sign && i < chars.len() && i > digit_start {
             let next_char = chars[i].to_ascii_uppercase();
-            let sci_exp = next_char == 'E'
+            let sci_exp = (next_char == 'E'
                 && i + 1 < chars.len()
-                && (chars[i + 1].is_ascii_digit() || chars[i + 1] == '+' || chars[i + 1] == '-');
+                && (chars[i + 1].is_ascii_digit() || chars[i + 1] == '+' || chars[i + 1] == '-'))
+                || (next_char == 'D'
+                    && i + 2 < chars.len()
+                    && (chars[i + 1] == '+' || chars[i + 1] == '-')
+                    && chars[i + 2].is_ascii_digit());
             if next_char.is_ascii_alphabetic() && !sci_exp {
                 return self.parse_ident(input);
             }
@@ -318,7 +325,8 @@ impl<'a> Lexer<'a> {
                 if after.is_ascii_alphanumeric() {
                     // Check if it's a valid suffix pattern
                     let could_be_suffix = match next_char {
-                        'E' => after == '+' || after == '-' || after.is_ascii_digit(), // Scientific notation
+                        // Scientific notation, with `D` as the Fortran marker.
+                        'E' | 'D' => after == '+' || after == '-' || after.is_ascii_digit(),
                         'M' => {
                             // MEG suffix, MS (milliseconds), MHZ (megahertz)
                             if chars.len() > i + 2 {
@@ -430,21 +438,23 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Exponent part (e or E)
-        if end < chars.len() && (chars[end] == 'e' || chars[end] == 'E') {
-            end += 1;
-            // Optional exponent sign
-            if end < chars.len() && (chars[end] == '-' || chars[end] == '+') {
-                end += 1;
+        // Exponent part. ngspice's INPevaluate (inpeval.c) reads the Fortran
+        // double-precision marker `D` exactly like `E`, so `1d3` is 1000. A
+        // marker with no digits after it is not an exponent: ngspice reads
+        // `1.5e` as 1.5, so the marker is left to the text after the number.
+        let mut fortran_exponent = false;
+        if end < chars.len() && matches!(chars[end], 'e' | 'E' | 'd' | 'D') {
+            let mut exp_end = end + 1;
+            if exp_end < chars.len() && (chars[exp_end] == '-' || chars[exp_end] == '+') {
+                exp_end += 1;
             }
-            // Exponent digits
-            let exp_start = end;
-            while end < chars.len() && chars[end].is_ascii_digit() {
-                end += 1;
+            let exp_start = exp_end;
+            while exp_end < chars.len() && chars[exp_end].is_ascii_digit() {
+                exp_end += 1;
             }
-            if end == exp_start {
-                // No exponent digits after E
-                return Err(LexError::InvalidNumber(input[..end].to_string(), self.line));
+            if exp_end > exp_start {
+                fortran_exponent = matches!(chars[end], 'd' | 'D');
+                end = exp_end;
             }
         }
 
@@ -456,6 +466,11 @@ impl<'a> Lexer<'a> {
         let base: Value =
             if num_str.is_empty() || num_str == "." || num_str == "-" || num_str == "+" {
                 return Err(LexError::InvalidNumber(num_str.to_string(), self.line));
+            } else if fortran_exponent {
+                num_str
+                    .replace(['d', 'D'], "e")
+                    .parse()
+                    .map_err(|_| LexError::InvalidNumber(num_str.to_string(), self.line))?
             } else {
                 num_str
                     .parse()
@@ -1114,6 +1129,42 @@ mod tests {
         assert!((parse_spice_value("50nm").expect("50nm parses") - 50.0e-9).abs() <= 1.0e-21);
         assert!((parse_spice_value("1.0e3m").expect("bare m is milli") - 1.0).abs() <= 1.0e-15);
         assert!((parse_spice_value("1.0e3M").expect("bare M is milli") - 1.0).abs() <= 1.0e-15);
+    }
+
+    /// ngspice's INPevaluate reads `D` as an exponent marker exactly like `E`
+    /// (inpeval.c), so `1d3` is 1000, and an exponent marker with no digits
+    /// after it is no exponent at all: `1.5e` and `1d` keep their mantissa.
+    /// `1d3` used to resolve to 1 because the `D` was an unknown suffix.
+    #[test]
+    fn fortran_d_exponents_read_like_e_exponents() {
+        for (literal, expected) in [
+            ("1d3", 1.0e3),
+            ("1D3", 1.0e3),
+            ("2d1", 20.0),
+            ("2.2D+3", 2.2e3),
+            ("1d-6", 1.0e-6),
+            ("1.5d0", 1.5),
+            ("1.5d2k", 1.5e5),
+            ("1.5e", 1.5),
+            ("1d", 1.0),
+        ] {
+            let parsed = parse_spice_value(literal)
+                .unwrap_or_else(|error| panic!("{literal} must parse: {error}"));
+            assert!(
+                (parsed - expected).abs() <= expected.abs() * 1.0e-15,
+                "{literal} parsed as {parsed:e}, expected {expected:e}"
+            );
+        }
+        // A complete-token boundary still refuses the dangling marker.
+        assert!(parse_spice_value_complete("1.5e").is_err());
+        assert_eq!(parse_spice_value_complete("1d3"), Ok(1.0e3));
+
+        let tokens = tokenize("R1 1 0 1d-3\nV3 3 0 DC 2.5D+1\n").expect("tokenize");
+        let kinds: Vec<_> = tokens.iter().map(|token| token.kind.clone()).collect();
+        assert!(kinds.contains(&TokenKind::Number(1.0e-3)), "{kinds:?}");
+        assert!(kinds.contains(&TokenKind::Number(25.0)), "{kinds:?}");
+        assert!(!kinds.contains(&TokenKind::Minus), "{kinds:?}");
+        assert!(!kinds.contains(&TokenKind::Plus), "{kinds:?}");
     }
 
     #[test]

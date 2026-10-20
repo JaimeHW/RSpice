@@ -2647,6 +2647,24 @@ mod tests {
         }
     }
 
+    /// ngspice reads the Fortran exponent `1d3` as 1000 (inpeval.c); the
+    /// unknown `D` suffix used to make it 1, silently. ngspice 46 on this
+    /// deck: V(2) = 1000, V(3) = 20, I(V1) = -1 mA.
+    #[test]
+    fn fortran_d_exponent_values_reach_the_circuit() {
+        let netlist = Netlist::parse(
+            "d exponent\nV1 1 0 1\nR1 1 0 1d3\nV2 2 0 1d3\nV3 3 0 DC 2d1\nR3 3 0 1k\n.op\n.end\n",
+        )
+        .unwrap();
+        let result = crate::engine::Engine::default()
+            .run_dc_op(&netlist)
+            .unwrap();
+        assert_eq!(result.try_voltage_named("2"), Some(1000.0));
+        assert_eq!(result.try_voltage_named("3"), Some(20.0));
+        let current = result.branch_current_named("V1").unwrap();
+        assert!((current + 1.0e-3).abs() < 1.0e-12, "I(V1) = {current}");
+    }
+
     #[test]
     fn instance_value_expressions_consume_each_authored_random_draw_once() {
         use crate::config::ExpressionDialect;
