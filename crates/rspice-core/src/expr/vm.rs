@@ -965,25 +965,45 @@ fn xyce_linear_table_derivative(x: Value, points: &[(Value, Value)]) -> Value {
                 return 0.0;
             }
 
-            let mut previous_x = first_x;
-            let mut previous_slope = 0.0;
-            for pair in points.windows(2) {
-                let midpoint = 0.5 * (pair[0].0 + pair[1].0);
-                let slope = (pair[1].1 - pair[0].1) / (pair[1].0 - pair[0].0);
-                if x <= midpoint {
-                    return interpolate_segment(
-                        x,
-                        previous_x,
-                        previous_slope,
-                        midpoint,
-                        slope,
-                        previous_slope,
-                    );
+            // The slope blends from one segment's slope to the next between
+            // segment midpoints. Lookup tables are sorted with distinct
+            // abscissas, so the midpoints never decrease and the first one at
+            // or above `x` is found by bisection instead of a scan: a
+            // 100k-row `tablefile` is evaluated at every Newton iteration.
+            // `x <= midpoint` failing for a NaN input keeps NaN on the
+            // past-the-last-midpoint branch, as a scan would.
+            let midpoint = |segment: usize| 0.5 * (points[segment].0 + points[segment + 1].0);
+            let slope = |segment: usize| {
+                (points[segment + 1].1 - points[segment].1)
+                    / (points[segment + 1].0 - points[segment].0)
+            };
+            let segments = points.len() - 1;
+            let (mut low, mut high) = (0, segments);
+            while low < high {
+                let middle = low + (high - low) / 2;
+                if x <= midpoint(middle) {
+                    high = middle;
+                } else {
+                    low = middle + 1;
                 }
-                previous_x = midpoint;
-                previous_slope = slope;
             }
-            interpolate_segment(x, previous_x, previous_slope, last_x, 0.0, previous_slope)
+            let (previous_x, previous_slope) = if low == 0 {
+                (first_x, 0.0)
+            } else {
+                (midpoint(low - 1), slope(low - 1))
+            };
+            if low == segments {
+                interpolate_segment(x, previous_x, previous_slope, last_x, 0.0, previous_slope)
+            } else {
+                interpolate_segment(
+                    x,
+                    previous_x,
+                    previous_slope,
+                    midpoint(low),
+                    slope(low),
+                    previous_slope,
+                )
+            }
         }
     }
 }
@@ -1596,5 +1616,84 @@ mod tests {
             vm.execute(&program, &Context::transient(&[], &[], 1.0)),
             3.0
         );
+    }
+
+    /// The segment-by-segment walk the bisection replaced, kept as the oracle.
+    fn xyce_linear_table_derivative_by_scan(x: Value, points: &[(Value, Value)]) -> Value {
+        let first_x = points[0].0;
+        let last_x = points[points.len() - 1].0;
+        if x <= first_x || x >= last_x {
+            return 0.0;
+        }
+        let mut previous_x = first_x;
+        let mut previous_slope = 0.0;
+        for pair in points.windows(2) {
+            let midpoint = 0.5 * (pair[0].0 + pair[1].0);
+            let slope = (pair[1].1 - pair[0].1) / (pair[1].0 - pair[0].0);
+            if x <= midpoint {
+                return interpolate_segment(
+                    x,
+                    previous_x,
+                    previous_slope,
+                    midpoint,
+                    slope,
+                    previous_slope,
+                );
+            }
+            previous_x = midpoint;
+            previous_slope = slope;
+        }
+        interpolate_segment(x, previous_x, previous_slope, last_x, 0.0, previous_slope)
+    }
+
+    #[test]
+    fn xyce_linear_table_derivative_bisects_to_the_scan_bits() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as Value / (1u64 << 53) as Value
+        };
+        for count in [3usize, 4, 5, 17, 256, 1_001] {
+            let mut x = -1.0e-3;
+            let points = (0..count)
+                .map(|_| {
+                    x += 1.0e-9 + next() * 1.0e-6;
+                    (x, next() * 2.0 - 1.0)
+                })
+                .collect::<Vec<_>>();
+            let mut probes = vec![
+                Value::NAN,
+                Value::NEG_INFINITY,
+                Value::INFINITY,
+                points[0].0 - 1.0,
+                points[count - 1].0 + 1.0,
+            ];
+            for (index, pair) in points.windows(2).enumerate() {
+                let midpoint = 0.5 * (pair[0].0 + pair[1].0);
+                probes.extend([
+                    pair[0].0,
+                    pair[0].0.next_up(),
+                    midpoint.next_down(),
+                    midpoint,
+                    midpoint.next_up(),
+                    pair[1].0.next_down(),
+                    pair[0].0 + next() * (pair[1].0 - pair[0].0),
+                ]);
+                if index == count - 2 {
+                    probes.push(pair[1].0);
+                }
+            }
+            for probe in probes {
+                let bisected = xyce_linear_table_derivative(probe, &points);
+                let scanned = xyce_linear_table_derivative_by_scan(probe, &points);
+                assert!(
+                    bisected.to_bits() == scanned.to_bits()
+                        || (bisected.is_nan() && scanned.is_nan()),
+                    "{count}-point table at x={probe:e}: bisection {bisected:e} != scan {scanned:e}"
+                );
+            }
+        }
     }
 }
