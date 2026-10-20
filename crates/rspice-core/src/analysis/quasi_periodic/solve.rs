@@ -33,6 +33,11 @@ use std::sync::Arc;
 
 const MAX_DENSE_UNKNOWNS: usize = 512;
 const MAX_WORKSPACE_VALUES: usize = 32_000_000;
+/// The largest direct system a sparse solve that fails its backward-error
+/// check retries with extended-precision dense elimination. The retry is
+/// O(n^3) and certified against the same matrix, so it is bounded while
+/// covering moderate QP lattices.
+const MAX_EXTENDED_UNKNOWNS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

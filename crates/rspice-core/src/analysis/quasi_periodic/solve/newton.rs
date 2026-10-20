@@ -27,7 +27,11 @@ impl Workspace<'_> {
         drop(triplets);
         let rhs = coordinates::encode(&evaluation.residual);
         let correction = match matrix.solve(&rhs) {
-            Err(SolverError::InaccurateSolution(_)) if size <= 64 => {
+            // The transformed Jacobian stores the transform's roundoff as
+            // entries, and the sparse factorization of a 125-unknown
+            // capacitor-clock lattice failed its certificate on a one-ulp
+            // change of one deck value while the dense retry certified.
+            Err(SolverError::InaccurateSolution(_)) if size <= MAX_EXTENDED_UNKNOWNS => {
                 matrix.solve_dense_extended(&rhs)
             }
             result => result,

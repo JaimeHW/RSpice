@@ -5,8 +5,6 @@ use crate::analysis::quasi_periodic::{check_abort, finite};
 use crate::numerics::krylov::{GmresError, try_gmres_with_abort};
 use crate::solver::{SolverError, StaticMatrix};
 
-const MAX_EXTENDED_BORDER_UNKNOWNS: usize = 256;
-
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QuasiPeriodicAutonomousConfig {
@@ -151,7 +149,7 @@ impl Workspace<'_> {
                 // The sparse bordered factorization can lose accuracy for a
                 // near-neutral oscillator mode. Keep the extended-precision
                 // fallback bounded while covering moderate QP lattices.
-                Err(SolverError::InaccurateSolution(_)) if size <= MAX_EXTENDED_BORDER_UNKNOWNS => {
+                Err(SolverError::InaccurateSolution(_)) if size <= MAX_EXTENDED_UNKNOWNS => {
                     matrix.solve_dense_extended(&rhs)
                 }
                 other => other,
