@@ -511,6 +511,9 @@ pub(crate) enum NativeRuntimeErrorKind {
 pub(crate) struct NativeRuntimeError {
     pub(crate) kind: NativeRuntimeErrorKind,
     pub(crate) message: String,
+    /// The stamp index of the contribution that evaluated to a non-finite
+    /// value, which the device can name by its source.
+    pub(crate) contribution: Option<usize>,
 }
 
 /// Per-dispatch failure state owned by one [`EvalContext`].
@@ -522,6 +525,9 @@ pub(crate) struct NativeRuntimeError {
 pub struct NativeRuntimeStatus {
     failed: UnsafeCell<u8>,
     kind: UnsafeCell<NativeRuntimeErrorKind>,
+    /// One more than the failing contribution's stamp index, zero for none.
+    /// It sits in the padding before `message`, so the layout is unchanged.
+    contribution: UnsafeCell<u32>,
     message: UnsafeCell<Option<String>>,
 }
 
@@ -530,6 +536,7 @@ impl Default for NativeRuntimeStatus {
         Self {
             failed: UnsafeCell::new(0),
             kind: UnsafeCell::new(NativeRuntimeErrorKind::NativeJit),
+            contribution: UnsafeCell::new(0),
             message: UnsafeCell::new(None),
         }
     }
@@ -537,12 +544,24 @@ impl Default for NativeRuntimeStatus {
 
 impl NativeRuntimeStatus {
     fn record(&self, kind: NativeRuntimeErrorKind, message: impl Into<String>) {
+        self.record_contribution(kind, None, message);
+    }
+
+    fn record_contribution(
+        &self,
+        kind: NativeRuntimeErrorKind,
+        contribution: Option<usize>,
+        message: impl Into<String>,
+    ) {
         // Safety: EvalContext's contract requires exclusive dispatch access.
         // Helpers execute synchronously on that dispatching thread.
         unsafe {
             let slot = &mut *self.message.get();
             if slot.is_none() {
                 *self.kind.get() = kind;
+                *self.contribution.get() = contribution
+                    .and_then(|index| u32::try_from(index).ok()?.checked_add(1))
+                    .unwrap_or(0);
                 *slot = Some(message.into());
                 *self.failed.get() = 1;
             }
@@ -554,11 +573,15 @@ impl NativeRuntimeStatus {
         // status is cleared or drained.
         unsafe {
             *self.failed.get() = 0;
+            let contribution = std::mem::take(&mut *self.contribution.get());
             (&mut *self.message.get())
                 .take()
                 .map(|message| NativeRuntimeError {
                     kind: *self.kind.get(),
                     message,
+                    contribution: contribution
+                        .checked_sub(1)
+                        .and_then(|index| usize::try_from(index).ok()),
                 })
         }
     }
@@ -871,6 +894,17 @@ impl EvalContext {
             .record(NativeRuntimeErrorKind::InvalidNumericResult, message);
     }
 
+    fn record_non_finite_contribution(&self, contribution: usize) {
+        self.invalidate_task_candidate();
+        self.runtime_status.record_contribution(
+            NativeRuntimeErrorKind::InvalidNumericResult,
+            Some(contribution),
+            format!(
+                "contribution {contribution} evaluated to a non-finite value (NaN or infinity)"
+            ),
+        );
+    }
+
     /// Record a refusal the producer has already classified.
     ///
     /// The native helpers call the same `zfilter`, `laplace` and `integer`
@@ -993,9 +1027,7 @@ pub extern "C" fn rspice_native_non_finite_contribution_error(
 ) {
     // SAFETY: A non-null pointer comes from the active native entry point.
     if let Some(ctx) = unsafe { ctx.as_ref() } {
-        ctx.record_invalid_numeric_result(format!(
-            "contribution {contribution} evaluated to a non-finite value (NaN or infinity)"
-        ));
+        ctx.record_non_finite_contribution(contribution);
     }
 }
 

@@ -705,7 +705,12 @@ endmodule
     let error = device
         .try_evaluate()
         .expect_err("NaN contribution must be a runtime diagnostic");
-    assert_numeric_error(error, "contribution 0");
+    // Named by where it was written and what it says, not only by an index
+    // the author never sees. A compile from a string has no document, so
+    // the line is the compiled text's; the command line's file and line are
+    // pinned by the CLI's a_non_finite_contribution_names_its_source_line.
+    assert_numeric_error(error.clone(), "contribution 0 (<input>:");
+    assert_numeric_error(error, ": I(p, n) <+ sqrt(V(p, n)))");
 }
 
 #[test]

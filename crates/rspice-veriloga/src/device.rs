@@ -2940,6 +2940,7 @@ impl VerilogADevice {
     #[inline]
     fn finite_stamp_value(
         value: f64,
+        model: &CompiledModel,
         stamp: usize,
         entry: Option<usize>,
         phase: &'static str,
@@ -2947,10 +2948,13 @@ impl VerilogADevice {
         if value.is_finite() {
             return Ok(value);
         }
-        let context = match entry {
+        let mut context = match entry {
             Some(entry) => format!("{phase} {stamp}:{entry}"),
             None => format!("{phase} {stamp}"),
         };
+        if let Some(source) = model.contribution_source(stamp) {
+            context.push_str(&format!(" ({source})"));
+        }
         Err(VmError::InvalidNumericResult(format!(
             "{context} evaluated to {value}"
         )))
@@ -3592,6 +3596,22 @@ impl VerilogADevice {
                 VmError::InvalidNumericResult(error.message)
             }
         }
+    }
+
+    /// [`Self::native_runtime_error_to_vm`] for a kernel that evaluates
+    /// contributions: a non-finite one is named by where it was written.
+    #[cfg(feature = "native")]
+    fn native_kernel_error_to_vm(
+        model: &CompiledModel,
+        mut error: crate::native::NativeRuntimeError,
+    ) -> VmError {
+        if let Some(index) = error.contribution {
+            error.message = format!(
+                "{} evaluated to a non-finite value (NaN or infinity)",
+                model.contribution_label(index)
+            );
+        }
+        Self::native_runtime_error_to_vm(error)
     }
 
     #[cfg(feature = "native-bytecode-contract-tests")]
@@ -6886,7 +6906,10 @@ impl VerilogADevice {
                 WasmJitExecutableEntry::StampValue(program_idx),
             )?;
             let value = Self::finite_result(value, || {
-                format!("contribution {program_idx} during device evaluation")
+                format!(
+                    "{} during device evaluation",
+                    self.model.contribution_label(program_idx)
+                )
             })?;
             currents.push(value);
             vm.context.currents.push(value);
@@ -6945,6 +6968,7 @@ impl VerilogADevice {
             if self.fused_program_active[program_idx] != 0 {
                 Self::finite_stamp_value(
                     self.context.currents[program_idx],
+                    &self.model,
                     program_idx,
                     None,
                     "contribution during device evaluation",
@@ -7004,7 +7028,7 @@ impl VerilogADevice {
                 ));
             }
             if let Some(error) = ctx.take_native_runtime_error() {
-                return Err(Self::native_runtime_error_to_vm(error));
+                return Err(Self::native_kernel_error_to_vm(model, error));
             }
         }
 
@@ -7012,6 +7036,7 @@ impl VerilogADevice {
             if self.fused_program_active[program_idx] != 0 {
                 Self::finite_stamp_value(
                     self.context.currents[program_idx],
+                    &self.model,
                     program_idx,
                     None,
                     "contribution during device evaluation",
@@ -7920,7 +7945,10 @@ impl VerilogADevice {
                     NativeValueEntry::StampValue(program_idx),
                 )?;
                 Self::finite_result(value, || {
-                    format!("contribution {program_idx} during noise evaluation")
+                    format!(
+                        "{} during noise evaluation",
+                        model.contribution_label(program_idx)
+                    )
                 })?
             } else {
                 0.0
@@ -7947,7 +7975,10 @@ impl VerilogADevice {
                     WasmJitExecutableEntry::StampValue(program_idx),
                 )?;
                 Self::finite_result(value, || {
-                    format!("contribution {program_idx} during noise evaluation")
+                    format!(
+                        "{} during noise evaluation",
+                        model.contribution_label(program_idx)
+                    )
                 })?
             } else {
                 0.0
@@ -7971,7 +8002,10 @@ impl VerilogADevice {
             let value = if active {
                 let value = vm.execute(&program.value_program)?;
                 Self::finite_result(value, || {
-                    format!("contribution {program_idx} during noise evaluation")
+                    format!(
+                        "{} during noise evaluation",
+                        model.contribution_label(program_idx)
+                    )
                 })?
             } else {
                 0.0
@@ -8153,7 +8187,10 @@ impl VerilogADevice {
                 WasmJitExecutableEntry::StampValue(prog_idx),
             )?;
             let value = Self::finite_result(value, || {
-                format!("contribution {prog_idx} during Jacobian evaluation")
+                format!(
+                    "{} during Jacobian evaluation",
+                    model.contribution_label(prog_idx)
+                )
             })?;
             vm.context.currents.push(value);
             if program.branch_ordinal.is_none()
@@ -8440,7 +8477,7 @@ impl VerilogADevice {
                 ));
             }
             if let Some(error) = ctx.take_native_runtime_error() {
-                return Err(Self::native_runtime_error_to_vm(error));
+                return Err(Self::native_kernel_error_to_vm(model, error));
             }
         }
 
@@ -8490,6 +8527,7 @@ impl VerilogADevice {
             if self.fused_program_active[program_idx] != 0 {
                 let value = Self::finite_stamp_value(
                     self.context.currents[program_idx],
+                    &self.model,
                     program_idx,
                     None,
                     "contribution",
@@ -8503,6 +8541,7 @@ impl VerilogADevice {
                 for entry_idx in 0..program.jacobian_programs.len() {
                     Self::finite_stamp_value(
                         self.fused_stamp_jacobians[jacobian_base + entry_idx],
+                        model,
                         program_idx,
                         Some(entry_idx),
                         "Jacobian",
@@ -8543,13 +8582,19 @@ impl VerilogADevice {
                 1.0
             };
             let value = self.context.currents[program_idx];
-            let mut eq_value =
-                Self::finite_stamp_value(value * scale, program_idx, None, "scaled contribution")?;
+            let mut eq_value = Self::finite_stamp_value(
+                value * scale,
+                model,
+                program_idx,
+                None,
+                "scaled contribution",
+            )?;
 
             for jacobian_entry in &self.matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
                 let deriv = Self::finite_stamp_value(
                     self.fused_stamp_jacobians[jacobian_base + jacobian_entry.jacobian_idx] * scale,
+                    model,
                     program_idx,
                     Some(jacobian_entry.jacobian_idx),
                     "Jacobian",
@@ -8576,6 +8621,7 @@ impl VerilogADevice {
 
             eq_value = Self::finite_stamp_value(
                 eq_value,
+                model,
                 program_idx,
                 None,
                 "equivalent source for contribution",
@@ -8683,7 +8729,7 @@ impl VerilogADevice {
                 #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
                 WasmJitExecutableEntry::StampValue(program_idx),
             )?;
-            let value = Self::finite_result(value, || format!("contribution {program_idx}"))?;
+            let value = Self::finite_result(value, || model.contribution_label(program_idx))?;
 
             let correction = if vm.context.evaluation_mode.limiting_enabled()
                 && let Some(correction) = &program.limiter_correction
@@ -8742,7 +8788,7 @@ impl VerilogADevice {
             // and the RHS receives Eeq = E - sum dE/dx * x_old, which is
             // exactly value + sum(sign * deriv * x_old).
             let mut eq_value = Self::finite_result((value - correction) * scale, || {
-                format!("scaled contribution {program_idx}")
+                format!("scaled {}", model.contribution_label(program_idx))
             })?;
 
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
@@ -8804,7 +8850,10 @@ impl VerilogADevice {
             }
 
             eq_value = Self::finite_result(eq_value, || {
-                format!("equivalent source for contribution {program_idx}")
+                format!(
+                    "equivalent source for {}",
+                    model.contribution_label(program_idx)
+                )
             })?;
 
             // RHS: current contributions stamp -/+ Ieq at the KCL rows;

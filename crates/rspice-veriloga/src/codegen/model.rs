@@ -129,6 +129,11 @@ pub struct CompiledModel {
     /// had no source text to locate a call in.
     #[serde(default)]
     pub analog_task_origins: Vec<crate::analog_tasks::AnalogTaskOrigin>,
+    /// Where each contribution was written, by stamp-program index, as
+    /// `file:line: text`, for a run-time diagnostic that has to name one.
+    /// Empty when the compile had no source text to locate them in.
+    #[serde(default)]
+    pub contribution_sources: Vec<SmolStr>,
     /// Compiled stamp programs for each contribution
     pub stamp_programs: Vec<StampProgram>,
     /// Lookup tables for $table_model (x_data, y_data pairs)
@@ -1057,6 +1062,32 @@ impl CompiledModel {
             }
         }
         None
+    }
+
+    /// Contribution `index` as a diagnostic names it: its index, then where
+    /// it was written and what it says when the compile recorded that.
+    pub fn contribution_label(&self, index: usize) -> String {
+        match self.contribution_source(index) {
+            Some(source) => format!("contribution {index} ({source})"),
+            None => format!("contribution {index}"),
+        }
+    }
+
+    /// `file:line: text` of contribution `index`, when the compile knew it.
+    pub fn contribution_source(&self, index: usize) -> Option<&str> {
+        self.contribution_sources
+            .get(index)
+            .map(SmolStr::as_str)
+            .filter(|source| !source.is_empty())
+    }
+
+    /// Record where each contribution was written. `sources` is indexed like
+    /// the stamp programs; a list of any other length describes some other
+    /// module and is not recorded.
+    pub(crate) fn locate_contributions(&mut self, sources: Vec<SmolStr>) {
+        if sources.len() == self.stamp_programs.len() {
+            self.contribution_sources = sources;
+        }
     }
 
     /// Where the task call at `site` was written, when the compile knew.

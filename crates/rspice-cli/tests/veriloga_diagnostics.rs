@@ -530,3 +530,33 @@ fn analog_finish_reports_its_caller_and_the_early_end() {
     );
     assert!(stderr.contains("finish.va:5, X1)"), "{stderr}");
 }
+
+/// A contribution that evaluates to NaN is named by the file, line and text
+/// it was written as, not only by an index the author never sees.
+#[test]
+fn a_non_finite_contribution_names_its_source_line() {
+    let root = common::test_dir("non_finite_contribution_source");
+    std::fs::write(
+        root.join("sq.va"),
+        "`include \"disciplines.vams\"\nmodule sq(p,n); inout p,n; electrical p,n;\nanalog I(p,n) <+ 1m*sqrt(V(p,n));\nendmodule\n",
+    )
+    .unwrap();
+    let deck = root.join("sq.cir");
+    std::fs::write(
+        &deck,
+        "Square root of a negative bias\n.hdl \"sq.va\"\nV1 a 0 -1\nR1 a b 1k\nX1 b 0 sq\n.op\n.end\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("run")
+        .arg(&deck)
+        .env("RSPICE_VERILOGA_CACHE_DIR", root.join("cache"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("contribution 0 (sq.va:3: I(p,n) <+ 1m*sqrt(V(p,n))"),
+        "{stderr}"
+    );
+}

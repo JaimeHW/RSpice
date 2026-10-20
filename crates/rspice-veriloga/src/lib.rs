@@ -1024,7 +1024,7 @@ impl VerilogACompiler {
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir)?;
-        Self::locate_analog_tasks(&mut model, source_package, preprocessed, None);
+        Self::locate_analog_tasks(&mut model, &executable, source_package, preprocessed, None);
         measurements.checkpoint(PipelinePhase::RuntimeQualification)?;
         let phase_started = web_time::Instant::now();
         let mut report = RuntimeCompileReport::from_artifacts(model, canonical_ir, qualifications);
@@ -1085,13 +1085,18 @@ impl VerilogACompiler {
     /// Record the file and line of every analog task call, the way a digital
     /// system call is located: through the prepared source map when there is
     /// one, else by counting the compiled text's lines.
+    ///
+    /// Contributions are located the same way, with their text, so a run-time
+    /// refusal of one can say which line of the model it was.
     fn locate_analog_tasks(
         model: &mut CompiledModel,
+        executable: &semantic::AnalyzedModule,
         source_package: &str,
         source: &str,
         source_map: Option<&prepared_diagnostics::PreparedSourceMap>,
     ) {
-        model.locate_analog_tasks(|span| {
+        use smol_str::SmolStr;
+        let locate = |span: canonical_ir::SourceSpanRef| -> Option<(SmolStr, u32)> {
             // Only the compiled document's own text is indexed here.
             if span.source_file_id != 0 {
                 return None;
@@ -1107,7 +1112,34 @@ impl VerilogACompiler {
                 source_package.into(),
                 prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1,
             ))
-        });
+        };
+        model.locate_analog_tasks(locate);
+        let contributions = executable
+            .contributions
+            .iter()
+            .map(|contribution| {
+                let span = canonical_ir::SourceSpanRef::from(contribution.span);
+                let Some((file, line)) = locate(span) else {
+                    return SmolStr::default();
+                };
+                let text = source
+                    .get(span.start as usize..span.end as usize)
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let text = text.trim_end_matches(';').trim_end().to_string();
+                let text = match text.char_indices().nth(120) {
+                    Some((cut, _)) => format!("{}...", &text[..cut]),
+                    None => text,
+                };
+                let file = std::path::Path::new(file.as_str())
+                    .file_name()
+                    .map_or(file.to_string(), |name| name.to_string_lossy().into_owned());
+                SmolStr::from(format!("{file}:{line}: {text}"))
+            })
+            .collect();
+        model.locate_contributions(contributions);
     }
 
     /// It runs for every runtime, not only the JIT: the VM and the JIT read the
@@ -2430,6 +2462,7 @@ impl VerilogACompiler {
         Self::renumber_state_slots(&mut model, &canonical_ir)?;
         Self::locate_analog_tasks(
             &mut model,
+            &executable,
             &prepared.source_package,
             &prepared.source,
             Some(&prepared.source_map),
