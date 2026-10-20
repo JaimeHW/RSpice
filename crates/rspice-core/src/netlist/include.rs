@@ -480,7 +480,13 @@ impl SourceDirectiveKind {
 fn describe_search_chain(tried: &[IncludeSearchCandidate]) -> String {
     tried
         .iter()
-        .map(|candidate| format!("{} ({})", candidate.path.display(), candidate.stage))
+        .map(|candidate| {
+            format!(
+                "{} ({})",
+                display_source_path(&candidate.path),
+                candidate.stage
+            )
+        })
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -686,8 +692,8 @@ impl IncludeKey {
 
     fn describe(&self) -> String {
         match &self.section {
-            Some(section) => format!("{} [{}]", self.path.display(), section),
-            None => self.path.display().to_string(),
+            Some(section) => format!("{} [{}]", display_source_path(&self.path), section),
+            None => display_source_path(&self.path),
         }
     }
 }
@@ -1422,7 +1428,7 @@ impl IncludeProcessor {
                     line: error.line,
                     message: format!(
                         "{}:{}: Spectre model-library adaptation failed: {}",
-                        current_path.display(),
+                        display_source_path(current_path),
                         error.line,
                         error.message
                     ),
@@ -1457,7 +1463,7 @@ impl IncludeProcessor {
                         line: line_number,
                         message: format!(
                             "{}:{}: malformed .lib directive",
-                            current_path.display(),
+                            display_source_path(current_path),
                             line_number
                         ),
                     }
@@ -1518,7 +1524,7 @@ impl IncludeProcessor {
                         line: line_number,
                         message: format!(
                             "{}:{}: malformed include directive",
-                            current_path.display(),
+                            display_source_path(current_path),
                             line_number
                         ),
                     }
@@ -1533,7 +1539,7 @@ impl IncludeProcessor {
                             line: line_number,
                             message: format!(
                                 "{}:{}: sealed model materialization cannot defer SPEF dependency '{}'; filesystem-backed parasitic reads are forbidden",
-                                current_path.display(),
+                                display_source_path(current_path),
                                 line_number,
                                 filename
                             ),
@@ -1601,7 +1607,7 @@ impl IncludeProcessor {
                 line: 0,
                 message: format!(
                     "{}: library section '{}' was not found",
-                    current_path.display(),
+                    display_source_path(current_path),
                     selected_section.unwrap_or_default()
                 ),
             }
@@ -1785,7 +1791,7 @@ fn include_error_at(
         line: source_line,
         message: format!(
             "{}:{}: {directive} resolution failed: {detail}",
-            source_path.display(),
+            display_source_path(source_path),
             source_line
         ),
     }
@@ -1988,9 +1994,42 @@ pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
         return None;
     }
 
-    let section = remainder.split_whitespace().next().map(str::to_owned);
+    let section = remainder
+        .split_whitespace()
+        .next()
+        .map(|section| unquote_section_name(section).to_owned());
 
     Some((filename, section))
+}
+
+/// A `.lib`/`.endl` section name without the quotes around it. ngspice skips
+/// quote characters around both the file and the section name
+/// (expand_section_ref in inpcom.c), so `.lib models.lib 'tt'` selects `tt`.
+fn unquote_section_name(name: &str) -> &str {
+    name.trim_matches(|character| matches!(character, '\'' | '"'))
+}
+
+/// A path as a diagnostic shows it. A canonical Windows path carries the
+/// verbatim `\\?\` prefix, which is not what anyone wrote; a drive or UNC
+/// path reads the same without it. Device paths reached through `\\?\` have
+/// no plain spelling and keep it.
+fn display_source_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}");
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(drive)
+            if drive
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphabetic)
+                && drive.get(1..3) == Some(":\\") =>
+        {
+            drive.to_owned()
+        }
+        _ => text,
+    }
 }
 
 fn parse_endl_directive(
@@ -2010,7 +2049,11 @@ fn parse_endl_directive(
             ".ENDL at line {line_number} has extraneous fields after the section name; ignoring them"
         );
     }
-    Ok(Some(fields.first().map(|name| (*name).to_string())))
+    Ok(Some(
+        fields
+            .first()
+            .map(|name| unquote_section_name(name).to_string()),
+    ))
 }
 
 //=============================================================================
@@ -2264,6 +2307,46 @@ mod tests {
         assert!(expanded.contains("RWIN 1 0 6"), "{expanded}");
         assert!(!expanded.contains("RLOSE"), "{expanded}");
         let _ = std::fs::remove_dir_all(exec_dir);
+    }
+
+    /// ngspice skips the quotes around a `.lib` section name, so `'tt'`
+    /// selects section `tt` (expand_section_ref in inpcom.c). The quotes used
+    /// to stay in the name, and the failure printed the library with its
+    /// Windows verbatim `\\?\` prefix.
+    #[test]
+    fn quoted_library_section_names_select_the_section() {
+        let dir = unique_include_temp_dir("quoted-section");
+        std::fs::create_dir_all(&dir).expect("create quoted section fixture");
+        let deck_path = dir.join("deck.cir");
+        std::fs::write(
+            dir.join("models.lib"),
+            ".lib TT\nRTT 1 0 2k\n.endl 'TT'\n.lib FF\nRFF 1 0 500\n.endl FF\n",
+        )
+        .expect("write sectioned library");
+
+        for card in [
+            ".lib models.lib 'tt'",
+            ".lib models.lib \"tt\"",
+            ".lib 'models.lib' 'tt'",
+        ] {
+            let mut processor = IncludeProcessor::new(&deck_path);
+            let expanded = processor
+                .expand_content(&format!("quoted section\n{card}\n.end\n"), &deck_path)
+                .unwrap_or_else(|error| panic!("{card}: {error}"));
+            assert!(expanded.contains("RTT 1 0 2k"), "{card}: {expanded}");
+            assert!(!expanded.contains("RFF"), "{card}: {expanded}");
+        }
+
+        let error = IncludeProcessor::new(&deck_path)
+            .expand_content("missing section\n.lib models.lib 'ss'\n.end\n", &deck_path)
+            .expect_err("section ss is absent");
+        let message = error.to_string();
+        assert!(
+            message.contains("library section 'ss' was not found"),
+            "{message}"
+        );
+        assert!(!message.contains(r"\\?\"), "{message}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

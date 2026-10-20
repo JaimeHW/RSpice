@@ -3184,12 +3184,18 @@ mod spectre_root_title_tests {
                 .expect_err("unsupported included first card fails closed");
         let canonical_child = child.canonicalize().expect("canonicalize child source");
         let _ = std::fs::remove_dir_all(directory);
+        // Include diagnostics print a canonical path without the Windows
+        // verbatim prefix.
+        let canonical_child = canonical_child.display().to_string();
+        let canonical_child = canonical_child
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&canonical_child);
 
         match error {
             ParseError::Syntax { line, message } => {
                 assert_eq!(line, 2, "outer include directive remains root line two");
                 assert!(
-                    message.contains(&format!("{}:1:", canonical_child.display())),
+                    message.contains(&format!("{canonical_child}:1:")),
                     "child source identity and physical line were not retained: {message}"
                 );
             }
