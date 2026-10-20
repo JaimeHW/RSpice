@@ -492,17 +492,18 @@ impl<'a> Lexer<'a> {
         let num_end_bytes: usize = chars[..end].iter().map(|c| c.len_utf8()).sum();
         let num_str = &input[..num_end_bytes];
 
-        // Parse the numeric part
+        // Parse the numeric part. A Fortran exponent is spelled with `e` so
+        // both the parse and the exact decimal scaling below read it.
+        let written: std::borrow::Cow<'_, str> = if fortran_exponent {
+            num_str.replace(['d', 'D'], "e").into()
+        } else {
+            num_str.into()
+        };
         let base: Value =
             if num_str.is_empty() || num_str == "." || num_str == "-" || num_str == "+" {
                 return Err(LexError::InvalidNumber(num_str.to_string(), self.line));
-            } else if fortran_exponent {
-                num_str
-                    .replace(['d', 'D'], "e")
-                    .parse()
-                    .map_err(|_| LexError::InvalidNumber(num_str.to_string(), self.line))?
             } else {
-                num_str
+                written
                     .parse()
                     .map_err(|_| LexError::InvalidNumber(num_str.to_string(), self.line))?
             };
@@ -522,7 +523,7 @@ impl<'a> Lexer<'a> {
         let total_bytes = num_end_bytes + suffix_bytes;
 
         Ok((
-            TokenKind::Number(scaled_spice_value(num_str, base, multiplier)),
+            TokenKind::Number(scaled_spice_value(&written, base, multiplier)),
             total_bytes,
         ))
     }
@@ -1200,6 +1201,19 @@ mod tests {
             );
         }
         assert_eq!(parse_spice_value_complete("1d3"), Ok(1.0e3));
+        // A scaled Fortran value is the double nearest its decimal, as the
+        // same number written with `e` is.
+        for (fortran, decimal) in [
+            ("1.5d2k", "1.5e2k"),
+            ("2.2d-3u", "2.2e-3u"),
+            ("7.1d1n", "7.1e1n"),
+        ] {
+            assert_eq!(
+                parse_spice_value(fortran).map(f64::to_bits),
+                parse_spice_value(decimal).map(f64::to_bits),
+                "{fortran}"
+            );
+        }
 
         let tokens = tokenize("R1 1 0 1d-3\nV3 3 0 DC 2.5D+1\n").expect("tokenize");
         let kinds: Vec<_> = tokens.iter().map(|token| token.kind.clone()).collect();
