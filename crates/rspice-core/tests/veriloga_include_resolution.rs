@@ -221,6 +221,37 @@ fn a_missing_verilog_a_source_names_the_path_it_tried_and_the_deck_line() {
     );
 }
 
+/// A `.hdl` source whose module is not named after its file (`d.va` holding
+/// `dres`) declares that module only once it is compiled. Hierarchy expansion
+/// leaves such a master to the builder, but resolving the hierarchy for an
+/// output or startup directive did not: every one of `.ic`, `.nodeset`,
+/// `.save`, `.print` and `.meas` refused the deck as `Syntax error at line 0:
+/// Undefined subcircuit: dres`.
+#[test]
+fn an_hdl_module_named_apart_from_its_file_takes_output_and_startup_directives() {
+    let fixture = Fixture::new("hdl_module_directives");
+    fixture.write("sub/d.va", &resistor_module(HALF_DIVIDER_OHMS));
+    fixture.write("sub/vals.cir", DIVIDER_VALUES);
+    for directive in [
+        ".ic v(out)=0.5",
+        ".nodeset v(out)=0.5",
+        ".save v(out)",
+        ".print tran v(out)",
+        ".meas tran vmax max v(out)",
+    ] {
+        let deck = fixture.write(
+            "sub/deck.cir",
+            &divider_deck(&format!(".hdl \"d.va\"\n{directive}\n.tran 1n 10n")),
+        );
+        let out = out_voltage(&deck);
+        let expected = divider_out(HALF_DIVIDER_OHMS);
+        assert!(
+            (out - expected).abs() < 1e-9,
+            "{directive}: the divider must solve, got {out}"
+        );
+    }
+}
+
 // The HDL sources of one deck are one compilation unit, the library `work`,
 // read in deck order (IEEE 1364-2005 clause 19): a module of one file may
 // instantiate a module of another, macros and `timescale` carry from one file

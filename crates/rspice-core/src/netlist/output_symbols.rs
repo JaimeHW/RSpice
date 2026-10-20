@@ -1949,6 +1949,11 @@ fn collect_interface_node_aliases_impl_with_limits(
     struct AliasCollector<'a> {
         definitions: HashMap<String, &'a super::SubcircuitDef>,
         external_subcircuits: HashSet<String>,
+        /// An unselected Verilog-A import names its module only once it is
+        /// compiled, so a master missing from the deck may still be one of
+        /// its modules. The flattener leaves those instances to the builder,
+        /// and so does this walk.
+        defer_external_module_binding: bool,
         globals: &'a HashSet<String>,
         ground_policy: super::GroundPolicy,
         aliases: HashMap<String, String>,
@@ -2057,7 +2062,9 @@ fn collect_interface_node_aliases_impl_with_limits(
                 }
                 let canonical_subcircuit = subckt_name.to_ascii_uppercase();
                 let Some(definition) = self.definitions.get(&canonical_subcircuit).copied() else {
-                    if self.external_subcircuits.contains(&canonical_subcircuit) {
+                    if self.external_subcircuits.contains(&canonical_subcircuit)
+                        || self.defer_external_module_binding
+                    {
                         self.charge_emitted_element()?;
                         continue;
                     }
@@ -2170,6 +2177,7 @@ fn collect_interface_node_aliases_impl_with_limits(
     let mut collector = AliasCollector {
         definitions,
         external_subcircuits: Flattener::collect_external_subckts(netlist),
+        defer_external_module_binding: netlist.needs_veriloga_module_discovery(),
         globals: &globals,
         ground_policy: netlist.ground_policy(),
         aliases: HashMap::new(),
