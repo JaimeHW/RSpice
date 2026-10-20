@@ -116,9 +116,14 @@ which a compile runs on a thread of its own sized for those bounds.
   `transition`, `slew`, `laplace_zp/zd/np/nd`, `zi_nd/zp/zd/np`,
   `last_crossing`, `$limit`, `$table_model`. The `zi_*` sample periods may
   depend on scalar parameters and freeze per instance when its parameters
-  resolve. The integration rule for `ddt`/`idt` is not a compile-time choice:
-  the engine supplies companion coefficients per timestep, so one compiled
-  model runs under backward Euler or Gear-2/trapezoidal.
+  resolve. The `laplace_*` coefficient and root vectors may be written with
+  literals, parameters, localparams or a parameter array: each instance gets
+  the filter its own parameter values describe (an instance that changes one
+  compiles its own specialization); a coefficient that reads a variable or a
+  probe is refused by name. The integration rule for `ddt`/`idt` is not a
+  compile-time choice: the engine supplies companion coefficients per
+  timestep, so one compiled model runs under backward Euler or
+  Gear-2/trapezoidal.
 - **`limexp`** is `exp(x)` up to `x = 80` and the tangent line
   `exp(80) * (x - 79)` beyond it, every iterate and the converged answer
   alike: the LRM gives no threshold, and 80 is the one Xyce's ADMS headers,

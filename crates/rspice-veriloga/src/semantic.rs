@@ -7549,6 +7549,7 @@ impl SemanticAnalyzer {
                     )));
                 }
                 let call = self.materialize_filter_call_replication(call)?;
+                let call = self.freeze_laplace_coefficients(call)?;
                 if is_zi_operator_name(&call.name) {
                     self.validate_zi_operand_budget(&call)?;
                     self.validate_zi_definition_purity(&call)?;
@@ -8391,6 +8392,10 @@ impl SemanticAnalyzer {
                         array.span,
                     )));
                 }
+                // `freeze_laplace_coefficients` reads its declared elements.
+                Expression::Identifier(identifier)
+                    if normalized.starts_with("laplace_")
+                        && self.parameter_arrays.contains(&identifier.name) => {}
                 Expression::Identifier(identifier)
                     if self.parameter_arrays.contains(&identifier.name)
                         || self.arrays.contains_key(&identifier.name) =>
@@ -8444,6 +8449,84 @@ impl SemanticAnalyzer {
             )?;
         }
         Ok(materialized)
+    }
+
+    /// Fold the coefficient and root vectors of a `laplace_*` call that depend
+    /// on parameters, localparams or a parameter array to the numbers they
+    /// have for this elaboration.
+    ///
+    /// A Laplace filter's realization is built once, from numbers, on every
+    /// route. A coefficient that reads a parameter is still fixed for the
+    /// life of an instance, so each parameter it reads becomes an elaboration
+    /// dependency: an instance that gives it a different value compiles its
+    /// own specialization, the way a parameter-dependent array bound does,
+    /// and every instance gets the filter its own parameters describe. An
+    /// element that reads anything else (a variable, a probe) is left for the
+    /// converter, which refuses it by name.
+    fn freeze_laplace_coefficients(&self, mut call: CallExpr) -> CompileResult<CallExpr> {
+        if !call.name.to_ascii_lowercase().starts_with("laplace_") {
+            return Ok(call);
+        }
+        for index in [1, 2] {
+            let Some(argument) = call.args.get_mut(index) else {
+                continue;
+            };
+            if let Expression::Identifier(identifier) = &*argument
+                && self.parameter_arrays.contains(&identifier.name)
+            {
+                let declared = self
+                    .digital_selector_constants
+                    .definitions
+                    .iter()
+                    .find(|declaration| declaration.name == identifier.name)
+                    .and_then(|declaration| declaration.default.as_ref());
+                let Some(declared) = declared else {
+                    continue;
+                };
+                *argument = self.materialize_replication_expression(
+                    declared,
+                    MAX_ANALOG_FILTER_VECTOR_ELEMENTS,
+                    MAX_ANALOG_FILTER_VECTOR_ELEMENTS.saturating_mul(4),
+                    &format!("{} array '{}'", call.name, identifier.name),
+                    true,
+                )?;
+            }
+            let Expression::ArrayLiteral(array) = argument else {
+                continue;
+            };
+            for element in &mut array.elements {
+                let ArrayLiteralElement::Value(value) = element else {
+                    continue;
+                };
+                if matches!(value, Expression::Number(_) | Expression::ArrayLiteral(_)) {
+                    continue;
+                }
+                let Some(folded) = constant_dependencies::bound_expression(self, value)
+                    .and_then(|bound| {
+                        crate::canonical_ir::digital_lower::elaboration_constant(
+                            &bound,
+                            &self.digital_selector_constants,
+                            self.current_time_scale,
+                        )
+                    })
+                    .and_then(|folded| folded.as_exact_f64("laplace coefficient").ok())
+                    .filter(|folded| folded.is_finite())
+                else {
+                    continue;
+                };
+                // Protected with the physical selectors at the end of the
+                // module: the parameters it read become elaboration
+                // dependencies.
+                self.physical_selectors.borrow_mut().push(value.clone());
+                let span = value.span();
+                *value = Expression::Number(NumberLit {
+                    value: folded,
+                    raw: SmolStr::new(format!("{folded:e}")),
+                    span,
+                });
+            }
+        }
+        Ok(call)
     }
 
     const MAX_INLINE_DEPTH: usize = 16;

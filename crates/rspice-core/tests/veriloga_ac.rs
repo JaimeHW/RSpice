@@ -1240,3 +1240,87 @@ fn laplace_filter_behind_a_converter_driven_ac_source_matches_its_closed_form() 
     let _ = std::fs::remove_file(level);
     let _ = std::fs::remove_file(filter);
 }
+
+/// `laplace_*` coefficients may read parameters, a localparam derived from
+/// them, or a parameter array. Each instance gets the filter its own values
+/// describe: two instances of one module with different `fc` in one deck
+/// answer two different analytic low-passes. These were refused as
+/// "compile-time constants (parameter-dependent values are not supported
+/// yet)" and, for the array, "executable filter array operands are not
+/// implemented yet".
+#[test]
+fn laplace_coefficients_follow_each_instances_parameters() {
+    let models = [
+        (
+            "lap_fc",
+            "parameter real fc = 1k;
+localparam real tau = 1 / (2 * 3.141592653589793 * fc);
+analog V(out) <+ laplace_nd(V(in), '{1}, '{1, tau});",
+        ),
+        (
+            "lap_array",
+            "parameter real den[0:1] = '{1, 1m};
+analog V(out) <+ laplace_nd(V(in), '{1}, den);",
+        ),
+        (
+            "lap_pole",
+            "parameter real wp = 1k;
+analog V(out) <+ laplace_zp(V(in), , '{-wp, 0});",
+        ),
+    ]
+    .map(|(module, body)| {
+        let path = write_model(
+            module,
+            &format!(
+                "`include \"disciplines.vams\"\nmodule {module}(in, out); input in; output out; electrical in, out;\n{body}\nendmodule\n"
+            ),
+        );
+        (module, path)
+    });
+    let directives = models
+        .iter()
+        .map(|(module, path)| format!(".va \"{}\" {module}\n", deck_path(path)))
+        .collect::<String>();
+    let netlist = Netlist::parse(&format!(
+        "* per-instance laplace coefficients\nv1 in 0 dc 0 ac 1\n\
+         x1 in o1 lap_fc\nx2 in o2 lap_fc fc=10k\nx3 in o3 lap_array\n\
+         x4 in o4 lap_pole\nx5 in o5 lap_pole wp=5k\n\
+         r1 o1 0 1k\nr2 o2 0 1k\nr3 o3 0 1k\nr4 o4 0 1k\nr5 o5 0 1k\n\
+         {directives}.end\n"
+    ))
+    .unwrap();
+    let frequencies = [100.0, 1.0e3, 7.0e3];
+    let points = Engine::default()
+        .run_ac(&netlist, &frequencies)
+        .expect("the sweep solves");
+    let one = rspice_core::Complex64::new(1.0, 0.0);
+    for point in &points {
+        let s = rspice_core::Complex64::new(0.0, 2.0 * std::f64::consts::PI * point.frequency);
+        let voltage = |node: &str| {
+            let index = point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(node))
+                .unwrap_or_else(|| panic!("node {node} is reported"));
+            point.voltages[index]
+        };
+        let low_pass = |fc: f64| one / (one + s / (2.0 * std::f64::consts::PI * fc));
+        for (node, expected) in [
+            ("o1", low_pass(1.0e3)),
+            ("o2", low_pass(10.0e3)),
+            ("o3", one / (one + s * 1.0e-3)),
+            ("o4", one / (one + s / 1.0e3)),
+            ("o5", one / (one + s / 5.0e3)),
+        ] {
+            let got = voltage(node);
+            assert!(
+                (got - expected).norm() <= 1e-12 * expected.norm(),
+                "f = {} Hz: V({node}) = {got}, expected {expected}",
+                point.frequency
+            );
+        }
+    }
+    for (_, path) in models {
+        let _ = std::fs::remove_file(path);
+    }
+}

@@ -2082,7 +2082,7 @@ impl<'a> ExprConverter<'a> {
                 None => {
                     return Err(CodeGenError::with_span(
                         CodeGenErrorKind::UnsupportedFeature(format!(
-                            "{operator} {role} values must be compile-time constants (parameter-dependent values are not supported yet)"
+                            "{operator} {role} values must be fixed for the instance: literals, parameters, localparams and parameter arrays, not variables or probes"
                         )),
                         element.span(),
                     )

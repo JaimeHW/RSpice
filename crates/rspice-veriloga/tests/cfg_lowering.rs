@@ -917,26 +917,73 @@ endmodule
     );
 }
 
-/// A Laplace coefficient that is not a compile-time constant is refused rather
+/// A Laplace coefficient that reads parameters, a localparam or a parameter
+/// array reaches CFG lowering as the number it has for this elaboration, and
+/// each parameter it read becomes an elaboration dependency, so an instance
+/// that gives another value compiles its own specialization.
+#[test]
+fn a_parameter_dependent_laplace_coefficient_folds_for_its_elaboration() {
+    let artifact = artifact(
+        r#"
+module laplace_parametric(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real fc = 1.0e6;
+    parameter real den[0:1] = '{1.0, 2.0e-9};
+    localparam real tau = 1.0 / fc;
+    analog I(p, n) <+ 1.0e-3 * (laplace_nd(V(p, n), '{1.0}, '{1.0, tau})
+        + laplace_nd(V(p, n), '{1.0}, den));
+endmodule
+"#,
+    );
+    let model = CfgModel::from_hir(&artifact.hir, &artifact.mir)
+        .expect("a parameter-dependent laplace coefficient folds");
+    let mut denominators = model
+        .function
+        .values
+        .iter()
+        .filter_map(|value| match &value.kind {
+            CfgValueKind::Laplace {
+                transfer: CfgLaplaceTransfer::Coefficients { denominator, .. },
+                ..
+            } => Some(denominator.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    denominators.sort_by(|left, right| left[1].total_cmp(&right[1]));
+    assert_eq!(denominators, vec![vec![1.0, 2.0e-9], vec![1.0, 1.0e-6]]);
+    let fc = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "fc")
+        .expect("fc is declared");
+    assert_eq!(fc.elaboration_value, Some(1.0e6));
+}
+
+/// A Laplace coefficient that is not fixed for the instance is refused rather
 /// than guessed at.
 ///
 /// The front end refuses one by name; this is the canonical level holding the
 /// same line, so that a route which reached CFG lowering without passing
 /// through that refusal cannot quietly install a coefficient of zero.
 #[test]
-fn a_parameter_dependent_laplace_coefficient_is_refused() {
+fn a_variable_laplace_coefficient_is_refused() {
     let artifact = artifact(
         r#"
-module laplace_parametric(p, n);
+module laplace_variable(p, n);
     inout p, n;
     electrical p, n;
-    parameter real tau = 1.0e-9;
-    analog I(p, n) <+ 1.0e-3 * laplace_nd(V(p, n), '{1.0}, '{1.0, tau});
+    real tau;
+    analog begin
+        tau = 1.0e-9 * V(p, n);
+        I(p, n) <+ 1.0e-3 * laplace_nd(V(p, n), '{1.0}, '{1.0, tau});
+    end
 endmodule
 "#,
     );
     let diagnostics = CfgModel::from_hir(&artifact.hir, &artifact.mir)
-        .expect_err("a parameter-dependent laplace coefficient must be refused");
+        .expect_err("a variable laplace coefficient must be refused");
     let rendered = render(&diagnostics);
     assert!(
         rendered.contains("laplace coefficient"),
