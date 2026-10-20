@@ -21,8 +21,9 @@ use crate::workbench::workflows::project_workflow::{
 
 /// The name column every row shares.
 const NAME_COLUMN: f32 = 220.0;
-/// Inset of a row's text from its highlight.
-const ROW_INSET: f32 = 8.0;
+/// How far a row's highlight reaches past its words on either side: the
+/// words keep the dialog's left edge, and the highlight stands proud of it.
+const HIGHLIGHT_BLEED: f32 = 6.0;
 
 /// Replace the session with a new project holding `example`, named after it.
 ///
@@ -45,6 +46,12 @@ fn open_refusal(state: &AppState) -> Option<&'static str> {
     .then_some("Save or close the open project first: an example replaces it")
 }
 
+/// Where a row of `rect` paints: its highlight, and the x its name starts
+/// at, which is the dialog's left edge.
+fn row_geometry(rect: egui::Rect) -> (egui::Rect, f32) {
+    (rect.expand2(vec2(HIGHLIGHT_BLEED, 0.0)), rect.left())
+}
+
 /// One example in the list: its name, then what it is.
 fn example_row(ui: &mut egui::Ui, example: Example, selected: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -62,20 +69,21 @@ fn example_row(ui: &mut egui::Ui, example: Example, selected: bool) -> egui::Res
     });
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
+        let (highlight, name_left) = row_geometry(rect);
         if selected {
-            painter.rect_filled(rect, t.radius, t.color.bg_active);
+            painter.rect_filled(highlight, t.radius, t.color.bg_active);
         } else if response.hovered() {
-            painter.rect_filled(rect, t.radius, t.color.bg_hover);
+            painter.rect_filled(highlight, t.radius, t.color.bg_hover);
         }
         painter.text(
-            egui::pos2(rect.left() + ROW_INSET, rect.center().y),
+            egui::pos2(name_left, rect.center().y),
             egui::Align2::LEFT_CENTER,
             example.name,
             theme::sans(tokens::FS_1, FontWeight::Medium),
             t.color.text,
         );
         painter.text(
-            egui::pos2(rect.left() + NAME_COLUMN, rect.center().y),
+            egui::pos2(name_left + NAME_COLUMN, rect.center().y),
             egui::Align2::LEFT_CENTER,
             example.summary,
             theme::sans(tokens::FS_1, FontWeight::Regular),
@@ -107,6 +115,9 @@ pub(crate) fn show(ctx: &Context, state: &mut AppState) {
     let choice = Dialog::new("Examples", "Open")
         .description("Open a demonstration circuit as a new project of its own.")
         .size(DialogSize::Transaction)
+        // Six rows never scroll: no gutter cutting the rows short of the
+        // right edge.
+        .overlay_scrollbar()
         .ghost("Cancel")
         .primary_enabled(refusal.is_none())
         .hint(hint)
@@ -267,6 +278,18 @@ mod tests {
             example.name
         );
         app
+    }
+
+    /// An example's name starts on the dialog's left edge, the title's, and
+    /// its highlight stands proud of the row on both sides rather than
+    /// pushing the words in.
+    #[test]
+    fn an_example_row_keeps_the_dialog_left_edge() {
+        let rect = egui::Rect::from_min_size(egui::pos2(353.0, 0.0), vec2(734.0, 36.0));
+        let (highlight, name_left) = row_geometry(rect);
+        assert_eq!(name_left, rect.left());
+        assert!(highlight.left() < rect.left() && highlight.right() > rect.right());
+        assert_eq!(highlight.y_range(), rect.y_range());
     }
 
     /// Opening an example refuses while the open project has unsaved
