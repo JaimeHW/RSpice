@@ -334,9 +334,14 @@ impl fmt::Debug for MixedDigitalCoordinator {
     }
 }
 
-fn port_net_name(instance: &str, signal: DigitalSignalId) -> String {
+/// The linked net one instance's discrete port joins, unique per instance
+/// and port signal. The port's own name ends it so that what reports the
+/// design's signals (its own `$dumpvars`) can show the port as the source
+/// wrote it; [`crate::xspice::verilog::effects::dump::port_net_spelling`]
+/// reads it back.
+fn port_net_name(instance: &str, signal: DigitalSignalId, port: &str) -> String {
     format!(
-        "@port:{}:{}:{}",
+        "@port:{}:{}:{}:{port}",
         instance.len(),
         instance,
         usize::from(signal)
@@ -445,7 +450,7 @@ impl MixedDigitalCoordinator {
                             .push((host.instance.clone(), name.clone()));
                     } else {
                         private_nets.push(DigitalLinkNet {
-                            name: port_net_name(&host.instance, signal),
+                            name: port_net_name(&host.instance, signal, &name),
                             ports: vec![(host.instance.clone(), name.clone())],
                         });
                     }
@@ -512,7 +517,7 @@ impl MixedDigitalCoordinator {
                             .node;
                         format!("@real:{node}")
                     } else {
-                        port_net_name(&host.instance, port.signal)
+                        port_net_name(&host.instance, port.signal, &port.name)
                     };
                     signals[usize::from(port.signal)] = linked.signal_names[&net];
                 }

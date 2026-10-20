@@ -5787,6 +5787,81 @@ fn a_rolled_back_trial_writes_nothing_to_its_files() {
     assert_eq!(clk.changes.len(), 14, "time zero and thirteen toggles");
 }
 
+/// IEEE 1364-2005 section 18.1: a design's own `$dumpvars` lists its ports by
+/// their source names, as the HDL alone does (Icarus dumps `in`, `o` and
+/// `w [1:0]` in one scope). Linking the instance into the deck renamed the
+/// wire ports to the linker's nets (`@port:2:x1:0 [1:0]`), so `in` and `w`
+/// were missing by name, added `@port:2:x1:2` beside the reg `o`, and nested
+/// the instance's scope inside itself (`x1` > `x1`).
+#[test]
+fn the_designs_own_dump_names_its_ports_as_the_source_does() {
+    let model = ModelFile::new(
+        "dump_ports",
+        "`timescale 1ns/1ps\n\
+         module dump_ports(in, o, w);\n\
+         \x20 input in; output o; output [1:0] w; reg o; wire [1:0] w;\n\
+         \x20 assign w = {in, o};\n\
+         \x20 initial begin $dumpfile(\"ports.vcd\"); $dumpvars(0, dump_ports); o = 0; end\n\
+         \x20 always @(in) o = in;\n\
+         endmodule\n",
+    );
+    let deck = format!(
+        "* a design that dumps its ports\n\
+         v1 in 0 pulse(0 1.8 2n 0.1n 0.1n 3n 10n)\n\
+         x1 in o w1 w0 dump_ports\n\
+         r1 o 0 1k\nr2 w1 0 1k\nr3 w0 0 1k\n\
+         .hdl \"{}\" module=dump_ports\n.end\n",
+        model.deck_path()
+    );
+    let directory =
+        std::env::temp_dir().join(format!("rspice-hdl-dump-ports-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut config = SimulationConfig::default();
+    config.hdl.run_directory = Some(directory.clone());
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    Engine::new(config)
+        .run_tran(&netlist, 12e-9, 0.1e-9)
+        .expect("the run completes");
+    let text = std::fs::read_to_string(directory.join("ports.vcd")).unwrap();
+    let _ = std::fs::remove_dir_all(&directory);
+    let dump = rspice_core::io::vcd::parse_vcd_reader(text.as_bytes())
+        .unwrap_or_else(|error| panic!("{error}:\n{text}"));
+    let base = |name: &str| name.split('[').next().unwrap().trim().to_string();
+    let mut vars: Vec<(Vec<String>, String, u32)> = dump
+        .signals
+        .iter()
+        .flat_map(|signal| {
+            signal
+                .variables
+                .iter()
+                .map(|variable| (variable.scope.clone(), base(&variable.name), signal.width))
+        })
+        .collect();
+    vars.sort();
+    let scope = vec!["x1".to_string()];
+    assert_eq!(
+        vars,
+        [
+            (scope.clone(), "in".to_string(), 1),
+            (scope.clone(), "o".to_string(), 1),
+            (scope, "w".to_string(), 2),
+        ],
+        "{text}"
+    );
+    let rises = |name: &str| {
+        dump.signals
+            .iter()
+            .find(|signal| base(&signal.variables[0].name) == name)
+            .unwrap()
+            .changes
+            .iter()
+            .filter(|change| format!("{:?}", change.value).contains("One"))
+            .count()
+    };
+    assert!(rises("in") > 0 && rises("o") > 0, "{text}");
+}
+
 // ---------------------------------------------------------------------------
 // Cross-domain events and values
 // ---------------------------------------------------------------------------

@@ -148,22 +148,62 @@ impl Dump {
     }
 }
 
-/// A signal's place in the hierarchy: its enclosing scope path and its own
-/// name. A flattened plan names a child's signal `u1.x` under the root it was
-/// compiled for; a linked plan prefixes every name with its root, which is an
-/// instance path that may have dots of its own (`x1.xtb`).
-fn hierarchy(plan: &CanonicalDigitalPlan, name: &str) -> (String, String) {
+/// The instance and port a linked port net joins, read from its name
+/// (`@port:2:x1:0:in` is port `in` of `x1`), or `None` for any other signal.
+/// The instance length comes first because an instance path may hold any
+/// character.
+pub(crate) fn port_net_spelling(name: &str) -> Option<(&str, &str)> {
+    let rest = name.strip_prefix("@port:")?;
+    let (length, rest) = rest.split_once(':')?;
+    let instance = rest.get(..length.parse().ok()?)?;
+    let rest = rest.get(instance.len()..)?.strip_prefix(':')?;
+    let (_, port) = rest.split_once(':')?;
+    Some((instance, port))
+}
+
+/// Whether `plan` was linked from deck instances. Linking prefixes every
+/// signal with its instance path, which is also its root scope's path, and
+/// adds nets named `@…`; a flattened plan names its root's own signals bare.
+fn is_linked(plan: &CanonicalDigitalPlan) -> bool {
     let roots: Vec<&str> = plan
         .scopes
         .iter()
         .filter(|scope| scope.parent.is_none())
         .map(|scope| scope.path.as_str())
         .collect();
-    let rooted = roots.len() > 1
-        && roots.iter().any(|root| {
-            name.strip_prefix(root)
-                .is_some_and(|rest| rest.starts_with('.'))
-        });
+    !roots.is_empty()
+        && plan.signals.iter().all(|signal| {
+            signal.name.starts_with('@')
+                || roots.iter().any(|root| {
+                    signal
+                        .name
+                        .strip_prefix(root)
+                        .is_some_and(|rest| rest.starts_with('.'))
+                })
+        })
+}
+
+/// A signal's place in the hierarchy: its enclosing scope path and its own
+/// name. A flattened plan names a child's signal `u1.x` under the root it was
+/// compiled for; a linked plan prefixes every name with its root, which is an
+/// instance path that may have dots of its own (`x1.xtb`), and names the net
+/// a port joins after the port (see [`port_net_spelling`]).
+fn hierarchy(plan: &CanonicalDigitalPlan, name: &str, linked: bool) -> (String, String) {
+    if let Some((instance, port)) = port_net_spelling(name) {
+        return (instance.to_owned(), port.to_owned());
+    }
+    let roots: Vec<&str> = plan
+        .scopes
+        .iter()
+        .filter(|scope| scope.parent.is_none())
+        .map(|scope| scope.path.as_str())
+        .collect();
+    let rooted = linked
+        || (roots.len() > 1
+            && roots.iter().any(|root| {
+                name.strip_prefix(root)
+                    .is_some_and(|rest| rest.starts_with('.'))
+            }));
     let full = if rooted || roots.is_empty() {
         name.to_owned()
     } else {
@@ -197,6 +237,7 @@ fn var_for(
     plan: &CanonicalDigitalPlan,
     signal: u32,
     types: &BTreeMap<String, &'static str>,
+    linked: bool,
 ) -> Option<DumpVar> {
     let declared = plan.signals.get(signal as usize)?;
     let real = declared.kind.is_real();
@@ -204,7 +245,7 @@ fn var_for(
         // A named event has no value to dump.
         return None;
     }
-    let (scope, name) = hierarchy(plan, &declared.name);
+    let (scope, name) = hierarchy(plan, &declared.name, linked);
     let mut path = String::new();
     let mut levels = Vec::new();
     for segment in scope.split('.').filter(|segment| !segment.is_empty()) {
@@ -419,12 +460,27 @@ impl HdlEffects {
         if site.arguments.len() <= 1 {
             scopes = roots;
         }
+        let linked = is_linked(plan);
+        // A variable port keeps its own storage beside the net it drives, and
+        // that storage is what the source declared: the net would be a second
+        // `o` in the same scope.
+        let own_storage: BTreeSet<&str> = plan
+            .signals
+            .iter()
+            .map(|signal| signal.name.as_str())
+            .filter(|name| !name.starts_with('@'))
+            .collect();
         for (index, signal) in plan.signals.iter().enumerate() {
             let index = index as u32;
             if signal.local.is_some() || memories.contains(&index) || scopes.is_empty() {
                 continue;
             }
-            let (scope, _) = hierarchy(plan, &signal.name);
+            if let Some((instance, port)) = port_net_spelling(&signal.name)
+                && own_storage.contains(format!("{instance}.{port}").as_str())
+            {
+                continue;
+            }
+            let (scope, _) = hierarchy(plan, &signal.name, linked);
             let inside = scopes.iter().any(|root| {
                 let depth = if scope == *root {
                     1
@@ -445,7 +501,7 @@ impl HdlEffects {
         let mut known: BTreeSet<u32> = self.dump.vars.iter().map(|var| var.signal).collect();
         for signal in chosen {
             if known.insert(signal)
-                && let Some(var) = var_for(plan, signal, &types)
+                && let Some(var) = var_for(plan, signal, &types, linked)
             {
                 self.dump.vars.push(var);
             }
@@ -709,5 +765,18 @@ mod tests {
         assert_eq!(spell(&value("zz01"), true), "bz01");
         assert_eq!(spell(&value("1100"), true), "b1100");
         assert_eq!(spell(&value("1"), false), "1");
+    }
+
+    /// A port net names its instance by length, so an instance path with
+    /// dots or colons still reads back whole.
+    #[test]
+    fn a_port_net_reads_back_as_its_instance_and_port() {
+        assert_eq!(port_net_spelling("@port:2:x1:0:in"), Some(("x1", "in")));
+        assert_eq!(
+            port_net_spelling("@port:7:x1.x:t2:3:data"),
+            Some(("x1.x:t2", "data"))
+        );
+        assert_eq!(port_net_spelling("@real:4"), None);
+        assert_eq!(port_net_spelling("x1.o"), None);
     }
 }
