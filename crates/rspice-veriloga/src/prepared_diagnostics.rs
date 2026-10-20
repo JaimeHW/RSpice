@@ -169,7 +169,9 @@ impl PreparedSourceMap {
                     phase: diagnostic.phase,
                     code: diagnostic.code,
                     message: diagnostic.message,
-                    path: mapped.as_ref().map(|span| span.path.display().to_string()),
+                    path: mapped
+                        .as_ref()
+                        .map(|span| crate::source::display_path(span.path)),
                     byte_start: mapped.as_ref().map(|span| span.range.start),
                     byte_end: mapped.as_ref().map(|span| span.range.end),
                     line: mapped.as_ref().map(|span| span.line),

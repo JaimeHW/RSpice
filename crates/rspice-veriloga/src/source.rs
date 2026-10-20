@@ -3,7 +3,24 @@
 //! This module provides infrastructure for tracking source locations throughout
 //! the compilation pipeline, enabling precise error messages and source maps.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// A path as an author reads it in a diagnostic.
+///
+/// Source files are read through `canonicalize`, which on Windows returns the
+/// verbatim form (`\\?\C:\models\r.va`, `\\?\UNC\server\share\r.va`). That
+/// prefix is an API detail; the path the author recognizes is the one
+/// without it. Other paths are shown unchanged.
+pub(crate) fn display_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}");
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(drive) if drive.as_bytes().get(1) == Some(&b':') => drive.to_string(),
+        _ => text,
+    }
+}
 
 /// Unique identifier for a source file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -255,5 +272,20 @@ mod tests {
         assert_eq!(source.get_line(1), Some("αβ"));
         assert_eq!(map.format_span(Span::new(id, 2, 4)), "utf8.va:1:2");
         assert_eq!(map.format_span(Span::new(id, 1, 2)), "<unknown>:1-2");
+    }
+
+    /// Diagnostics used to read `\\?\C:\...`, the include-cycle message once
+    /// per file in the cycle.
+    #[test]
+    fn displayed_paths_drop_the_windows_verbatim_prefix() {
+        for (path, shown) in [
+            (r"\\?\C:\models\r.va", r"C:\models\r.va"),
+            (r"\\?\UNC\server\share\r.va", r"\\server\share\r.va"),
+            (r"\\?\Volume{0}\r.va", r"\\?\Volume{0}\r.va"),
+            (r"C:\models\r.va", r"C:\models\r.va"),
+            ("models/r.va", "models/r.va"),
+        ] {
+            assert_eq!(display_path(Path::new(path)), shown);
+        }
     }
 }

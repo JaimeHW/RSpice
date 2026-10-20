@@ -1549,7 +1549,7 @@ impl VerilogACompiler {
                 if let Some(map) = source_map {
                     return map.locate(offset as usize).map(|(path, line)| {
                         canonical_ir::digital::DigitalSourceLine {
-                            file: path.display().to_string().into(),
+                            file: crate::source::display_path(path).into(),
                             line: line as u32,
                         }
                     });
@@ -2110,7 +2110,7 @@ impl VerilogACompiler {
         // lexicographic dependency order used by the preprocessor. The
         // absolute path remains diagnostic-only so moving an otherwise
         // identical source package does not change the canonical artifact.
-        let diagnostic_source = source_package_path.display().to_string();
+        let diagnostic_source = crate::source::display_path(&source_package_path);
         let source_package = self.logical_file_source_package(&source_package_path);
         let analyzed = self.analyze_preprocessed(
             &diagnostic_source,
@@ -2344,7 +2344,7 @@ impl VerilogACompiler {
                 diagnostics: vec![diagnostic],
             });
         }
-        let diagnostic_source = source_package_path.display().to_string();
+        let diagnostic_source = crate::source::display_path(&source_package_path);
         let source_package = self.logical_file_source_package(&source_package_path);
         let analyzed = self
             .analyze_preprocessed(

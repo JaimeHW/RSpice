@@ -10,6 +10,7 @@
 //!
 //! This preprocessor runs before lexing, producing a single expanded source string.
 
+use crate::source::display_path;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -295,11 +296,13 @@ impl std::fmt::Display for PreprocessorError {
             (Some(path), Some(column)) => write!(
                 f,
                 "{}:{}:{column}: {}",
-                path.display(),
+                display_path(path),
                 self.line,
                 self.message
             ),
-            (Some(path), None) => write!(f, "{}:{}: {}", path.display(), self.line, self.message),
+            (Some(path), None) => {
+                write!(f, "{}:{}: {}", display_path(path), self.line, self.message)
+            }
             (None, Some(column)) => write!(f, "line {}:{column}: {}", self.line, self.message),
             (None, None) => write!(f, "line {}: {}", self.line, self.message),
         }
@@ -868,10 +871,10 @@ impl Preprocessor {
             let mut chain = self
                 .include_stack
                 .iter()
-                .map(|path| path.display().to_string())
+                .map(|path| display_path(path))
                 .collect::<Vec<_>>();
             chain.sort();
-            chain.push(logical_path.display().to_string());
+            chain.push(display_path(&logical_path));
             return Err(PreprocessorError::new(
                 format!("Circular include detected: {}", chain.join(" -> ")),
                 Some(logical_path),
@@ -910,7 +913,7 @@ impl Preprocessor {
                 return Err(PreprocessorError::new(
                     format!(
                         "Source provider returned different contents for logical path {}",
-                        document.logical_path.display()
+                        display_path(&document.logical_path)
                     ),
                     Some(document.logical_path.clone()),
                     0,
