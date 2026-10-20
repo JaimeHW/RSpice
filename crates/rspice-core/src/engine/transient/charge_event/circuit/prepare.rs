@@ -514,7 +514,7 @@ impl<'a> PreparedEventCircuit<'a> {
             if diode.rs != 0.0 {
                 return Err(error(format!(
                     "diode '{}' has an unprepared series-resistance node",
-                    diode.name
+                    diode.reported_label()
                 )));
             }
             if diode.has_charge_storage()

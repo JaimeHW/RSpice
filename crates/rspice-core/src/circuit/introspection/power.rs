@@ -173,7 +173,7 @@ impl CircuitData {
         // A split RSW sidewall dissipates inside the diode it belongs to.
         for diode in &self.diodes.devices {
             let value = conductive_power(diode, solution, self.num_nodes(), &[])
-                .map_err(|error| format!("device '{}': {error}", diode.name))?;
+                .map_err(|error| format!("device '{}': {error}", diode.reported_label()))?;
             *powers
                 .entry(diode.split_sidewall_owner().unwrap_or(&diode.name))
                 .or_insert(0.0) += value;

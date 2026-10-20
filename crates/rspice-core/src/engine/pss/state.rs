@@ -507,7 +507,9 @@ impl PssStateBasis {
             .iter()
             .map(|branch| match *branch {
                 ChargeBranch::Capacitor(index) => format!("C:{}", circuit.capacitors.names[index]),
-                ChargeBranch::Diode(index) => format!("D:{}", circuit.diodes.devices[index].name),
+                ChargeBranch::Diode(index) => {
+                    format!("D:{}", circuit.diodes.devices[index].reported_label())
+                }
                 ChargeBranch::Bjt { device, charge, .. } => {
                     const NAMES: [&str; 11] = [
                         "qbe", "qbex", "qbc", "qbcx", "qbep", "qbeo", "qbco", "qbcp", "qcth",

@@ -1454,14 +1454,23 @@ fn print_noise_contribution_summary(
         "  Noise Contributors (band-integrated, ranked):"
     ))?;
     crate::console::line(format_args!(
-        "    {:<20} {:<9} {:>14} {:>8}",
-        "DEVICE", "TYPE", "POWER (V^2)", "SHARE"
+        "    {:<20} {:<8} {:<9} {:>14} {:>8}",
+        "DEVICE", "SOURCE", "TYPE", "POWER (V^2)", "SHARE"
     ))?;
     for contribution in summary.iter().take(cap) {
+        // The mechanism tells a device's sources apart: a diode's RS and RSW
+        // are both thermal, its ID and IDSW both shot.
+        let label = contribution.noise_type.label();
+        let source = if contribution.mechanism.eq_ignore_ascii_case(label) {
+            "-"
+        } else {
+            contribution.mechanism.as_str()
+        };
         crate::console::line(format_args!(
-            "    {:<20} {:<9} {:>14.4e} {:>7.2}%",
+            "    {:<20} {:<8} {:<9} {:>14.4e} {:>7.2}%",
             contribution.device_name,
-            contribution.noise_type.label(),
+            source,
+            label,
             contribution.integrated_power,
             contribution.percentage
         ))?;

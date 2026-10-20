@@ -2590,6 +2590,26 @@ impl Engine {
                 ),
             ]);
         }
+        // A diode's externalized RS and its sidewall's RSW are the diode's
+        // own thermal sources (dionoise.c's `_rs` and `_rsw`), not resistors
+        // a user wrote.
+        for diode in circuit
+            .diodes
+            .devices
+            .iter()
+            .filter(|diode| diode.split_sidewall_owner().is_none())
+        {
+            device_series_noise_owners.extend([
+                (
+                    format!("{}.__rs", diode.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&diode.name, "RS"),
+                ),
+                (
+                    format!("{}.__rsw", diode.name).to_ascii_lowercase(),
+                    crate::analysis::NoiseSourceIdentity::mechanism(&diode.name, "RSW"),
+                ),
+            ]);
+        }
 
         // Resistor thermal noise (4kT/R) and model-card flicker noise
         // (resnoise.c), both gated by the per-instance `noisy` switch.

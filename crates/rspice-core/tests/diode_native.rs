@@ -1274,3 +1274,37 @@ fn diode_hb_admits_finite_cutoff_normalized_by_the_native_model() {
         assert_diode_hb_depletion_oracle(dialect, 0.5, 1.2, 0.96);
     }
 }
+
+#[test]
+fn split_sidewall_noise_reports_the_authored_diode() {
+    // An RSW sidewall is built as a twin diode with its own RS and RSW
+    // resistors, but ngspice's dionoise.c reports all of them as D2's own
+    // sources (`_rs`, `_rsw`, `_id`, `_idsw`): no builder name may surface.
+    let deck = Netlist::parse(
+        "RSW noise names\nV2 a2 0 dc 0.8 ac 1\nR1 a2 b2 1k\nD2 b2 0 M2 PJ=10\n\
+         .model M2 D(IS=1e-14 JSW=1e-14 NS=1.2 RS=10 RSW=100)\n.end\n",
+    )
+    .unwrap();
+    let point = Engine::new(SimulationConfig::default())
+        .run_noise_named_with_input_source(&deck, "b2", None, "V2", &[1e3], 300.15)
+        .expect("noise through a split sidewall")
+        .pop()
+        .unwrap();
+    let mut diode_sources = Vec::new();
+    for contribution in &point.contributions {
+        let identity = &contribution.identity;
+        assert!(
+            !identity.device.contains("__") && !identity.device.contains('.'),
+            "a builder twin surfaced as a noise source: {identity:?}"
+        );
+        if identity.device.eq_ignore_ascii_case("D2") {
+            diode_sources.push(identity.mechanism.clone().unwrap_or_default());
+        }
+    }
+    for mechanism in ["RS", "RSW", "ID", "IDSW"] {
+        assert!(
+            diode_sources.iter().any(|m| m == mechanism),
+            "D2 lacks its {mechanism} source: {diode_sources:?}"
+        );
+    }
+}

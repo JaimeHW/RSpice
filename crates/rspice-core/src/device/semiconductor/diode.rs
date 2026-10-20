@@ -594,7 +594,9 @@ impl Diode {
         if checkpoint.runtime_tag != DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG {
             return Err(format!(
                 "diode '{}' runtime mismatch: captured '{}', runtime requires '{}'",
-                self.name, checkpoint.runtime_tag, DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG
+                self.reported_label(),
+                checkpoint.runtime_tag,
+                DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG
             ));
         }
         let state = checkpoint.state;
@@ -612,13 +614,13 @@ impl Diode {
         if numeric.iter().any(|value| !value.is_finite()) {
             return Err(format!(
                 "diode '{}' accepted nonlinear checkpoint contains a non-finite value",
-                self.name
+                self.reported_label()
             ));
         }
         if state.junction_gmin < 0.0 {
             return Err(format!(
                 "diode '{}' accepted nonlinear checkpoint has negative junction gmin",
-                self.name
+                self.reported_label()
             ));
         }
         Ok(())
@@ -737,6 +739,16 @@ impl Diode {
     /// user-facing report.
     pub(crate) fn split_sidewall_owner(&self) -> Option<&str> {
         self.sidewall_owner.as_deref()
+    }
+
+    /// The device a user knows this instance as: the authored diode, and for
+    /// a split RSW sidewall, its owner's sidewall (`D1 sidewall`). Messages
+    /// name this rather than the builder's `D1.__sw` twin.
+    pub(crate) fn reported_label(&self) -> std::borrow::Cow<'_, str> {
+        match self.split_sidewall_owner() {
+            Some(owner) => std::borrow::Cow::Owned(format!("{owner} sidewall")),
+            None => std::borrow::Cow::Borrowed(&self.name),
+        }
     }
 
     /// Operating RSW of a split sidewall: ngspice scales its conductance by

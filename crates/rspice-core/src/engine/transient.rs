@@ -4075,10 +4075,11 @@ impl Engine {
         // The native accepted-state capture, device by device, in its order.
         for diode in &circuit.diodes.devices {
             if let Err(message) = diode.accepted_nonlinear_checkpoint() {
+                // A refusal names the authored diode, not its RSW sidewall twin.
                 push(
                     TransientCheckpointBlockerSource::NativeNonlinearState,
                     message,
-                    Some(&diode.name),
+                    Some(diode.split_sidewall_owner().unwrap_or(&diode.name)),
                 );
             }
         }

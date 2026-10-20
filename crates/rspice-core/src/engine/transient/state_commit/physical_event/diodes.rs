@@ -69,7 +69,7 @@ pub(super) fn prepare(
         {
             return Err(failure(format!(
                 "diode '{}' has nonfinite outgoing charge",
-                diode.name
+                diode.reported_label()
             )));
         }
         let current = if capacitance == 0.0 {
