@@ -6,6 +6,9 @@ use egui::{Id, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
+/// Options a drop-down shows before its list scrolls.
+const SELECT_VISIBLE_OPTIONS: usize = 12;
+
 pub struct SelectOutput {
     pub picked: Option<usize>,
     pub response: egui::Response,
@@ -179,68 +182,77 @@ fn select_with_font(
             ui.set_min_width(ui.available_width());
             ui.set_min_width(width.max(rect.width()));
             ui.spacing_mut().item_spacing.y = 0.0;
-            let listbox = ui.scope(|ui| {
-                for (index, option) in options.iter().enumerate() {
-                    let is_current = option == selected;
-                    let unavailable = disabled
-                        .iter()
-                        .find_map(|(candidate, reason)| (*candidate == index).then_some(*reason));
-                    // The owning surface may raise `ctl_h` for a coarse pointer;
-                    // option rows must honor the same target rather than falling
-                    // back to a mouse-only 24 px hit area.
-                    let option_height = t.metrics.ctl_h.max(24.0);
-                    let (row, row_response) = ui.allocate_exact_size(
-                        vec2(ui.available_width(), option_height),
-                        if unavailable.is_some() {
-                            Sense::hover()
-                        } else {
-                            Sense::click()
-                        },
-                    );
-                    let row_response = if let Some(reason) = unavailable {
-                        row_response.on_hover_text(reason)
-                    } else {
-                        row_response
-                    };
-                    row_response.widget_info(|| {
-                        WidgetInfo::selected(
-                            WidgetType::SelectableLabel,
-                            ui.is_enabled() && unavailable.is_none(),
-                            is_current,
-                            option,
-                        )
-                    });
-                    ui.ctx().accesskit_node_builder(row_response.id, |node| {
-                        node.set_role(egui::accesskit::Role::ListBoxOption);
-                        node.set_selected(is_current);
-                    });
-                    let painter = ui.painter();
-                    if row_response.hovered() {
-                        painter.rect_filled(row, t.radius, c.bg_hover);
-                    }
-                    painter.text(
-                        egui::pos2(row.left() + 8.0, row.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        option,
-                        value_font.clone(),
-                        if unavailable.is_some() {
-                            c.text_faint
-                        } else if is_current {
-                            c.accent
-                        } else {
-                            c.text
-                        },
-                    );
-                    theme::paint_focus_ring(ui, &row_response, row);
-                    if unavailable.is_none()
-                        && row_response
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .clicked()
-                    {
-                        picked = Some(index);
-                    }
-                }
-            });
+            // A long list scrolls inside the drop-down rather than running
+            // the drop-down off the screen; a short one is laid out as is.
+            let option_rows = t.metrics.ctl_h.max(24.0) * SELECT_VISIBLE_OPTIONS as f32;
+            let listbox = egui::ScrollArea::vertical()
+                .id_salt(("rspice.select.options", id_salt))
+                .max_height(option_rows)
+                .show(ui, |ui| {
+                    ui.scope(|ui| {
+                        for (index, option) in options.iter().enumerate() {
+                            let is_current = option == selected;
+                            let unavailable = disabled.iter().find_map(|(candidate, reason)| {
+                                (*candidate == index).then_some(*reason)
+                            });
+                            // The owning surface may raise `ctl_h` for a coarse pointer;
+                            // option rows must honor the same target rather than falling
+                            // back to a mouse-only 24 px hit area.
+                            let option_height = t.metrics.ctl_h.max(24.0);
+                            let (row, row_response) = ui.allocate_exact_size(
+                                vec2(ui.available_width(), option_height),
+                                if unavailable.is_some() {
+                                    Sense::hover()
+                                } else {
+                                    Sense::click()
+                                },
+                            );
+                            let row_response = if let Some(reason) = unavailable {
+                                row_response.on_hover_text(reason)
+                            } else {
+                                row_response
+                            };
+                            row_response.widget_info(|| {
+                                WidgetInfo::selected(
+                                    WidgetType::SelectableLabel,
+                                    ui.is_enabled() && unavailable.is_none(),
+                                    is_current,
+                                    option,
+                                )
+                            });
+                            ui.ctx().accesskit_node_builder(row_response.id, |node| {
+                                node.set_role(egui::accesskit::Role::ListBoxOption);
+                                node.set_selected(is_current);
+                            });
+                            let painter = ui.painter();
+                            if row_response.hovered() {
+                                painter.rect_filled(row, t.radius, c.bg_hover);
+                            }
+                            painter.text(
+                                egui::pos2(row.left() + 8.0, row.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                option,
+                                value_font.clone(),
+                                if unavailable.is_some() {
+                                    c.text_faint
+                                } else if is_current {
+                                    c.accent
+                                } else {
+                                    c.text
+                                },
+                            );
+                            theme::paint_focus_ring(ui, &row_response, row);
+                            if unavailable.is_none()
+                                && row_response
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked()
+                            {
+                                picked = Some(index);
+                            }
+                        }
+                    })
+                })
+                .inner;
             ui.ctx()
                 .accesskit_node_builder(listbox.response.id, |node| {
                     node.set_role(egui::accesskit::Role::ListBox);
@@ -394,6 +406,45 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect()
+    }
+
+    /// A long list scrolls inside its drop-down: the drop-down never grows
+    /// past twelve options, so it cannot run off the screen.
+    #[test]
+    fn a_long_list_scrolls_inside_its_drop_down() {
+        let ctx = egui::Context::default();
+        crate::Theme::default().apply(&ctx);
+        let options = (0..40)
+            .map(|index| format!("Option {index}"))
+            .collect::<Vec<_>>();
+        let mut popup = None;
+        for _ in 0..3 {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        vec2(800.0, 2000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let id = ui.make_persistent_id(("rspice.select", "long"));
+                    egui::Popup::open_id(ui.ctx(), id);
+                    popup = Some(id);
+                    let _ = select(ui, "long", "Long", "Option 0", &options, 200.0);
+                },
+            );
+        }
+        let rect = ctx
+            .memory(|memory| memory.area_rect(popup.expect("the frame ran")))
+            .expect("the drop-down is shown");
+        let row = Tokens::get(&ctx).metrics.ctl_h.max(24.0);
+        assert!(
+            rect.height() <= row * (SELECT_VISIBLE_OPTIONS as f32 + 1.0),
+            "the drop-down is {} tall for {} options",
+            rect.height(),
+            options.len()
+        );
     }
 
     #[test]
