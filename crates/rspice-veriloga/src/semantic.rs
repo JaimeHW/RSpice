@@ -544,6 +544,10 @@ pub struct SemanticAnalyzer {
     /// The module's tasks and functions by name, while its digital content
     /// is analyzed (IEEE 1364-2005 section 10).
     digital_routines: HashMap<SmolStr, digital_routines::RoutineSignature>,
+    /// The module's digital functions, which a parameter may call as
+    /// constant functions (IEEE 1364-2005 section 10.4.5) before its digital
+    /// content is analyzed.
+    digital_function_names: HashSet<SmolStr>,
     /// What a `disable` in this module may name: its named blocks and tasks.
     digital_scope_names: HashSet<SmolStr>,
     /// Dense identity assigned once, before an analyzed expression is cloned
@@ -612,6 +616,7 @@ impl SemanticAnalyzer {
             warnings: Vec::new(),
             digital_scopes: Vec::new(),
             digital_routines: HashMap::new(),
+            digital_function_names: HashSet::new(),
             digital_scope_names: HashSet::new(),
             next_noise_process: 0,
             implicit_integrators: Vec::new(),
@@ -1195,6 +1200,12 @@ impl SemanticAnalyzer {
             .map(|f| (f.name.clone(), f.clone()))
             .collect();
         self.effectful_functions = function_effects::effectful_functions(&self.user_functions);
+        self.digital_function_names = module
+            .digital_routines
+            .iter()
+            .filter(|routine| routine.is_function())
+            .map(|routine| routine.name.clone())
+            .collect();
         self.in_analog_initial = false;
         self.implicit_integrators.clear();
         self.arrays.clear();
@@ -7643,7 +7654,9 @@ impl SemanticAnalyzer {
                     }
                     self.inline_function(&call.name, &call.args, call.span)?
                 } else {
-                    if !crate::expr_converter::LOWERED_CALL_NAMES.contains(&call.name.as_str()) {
+                    if !crate::expr_converter::LOWERED_CALL_NAMES.contains(&call.name.as_str())
+                        && !self.digital_function_names.contains(&call.name)
+                    {
                         let kind = if call.name == "ac_stim" {
                             SemanticErrorKind::UnsupportedFeature(
                                 "the analog operator 'ac_stim' is not implemented; describe \
