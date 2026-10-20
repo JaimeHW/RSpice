@@ -26,6 +26,21 @@ impl<'a> SchematicLoadOrigin<'a> {
         }
     }
 
+    /// The file's name without its extension.
+    fn file_stem(self) -> &'a str {
+        match self {
+            Self::PersistentPath(path) => path
+                .file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_default(),
+            #[cfg(any(test, target_arch = "wasm32"))]
+            Self::BrowserImport(name) => Path::new(name)
+                .file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_default(),
+        }
+    }
+
     fn recent_path(self) -> Option<&'a Path> {
         match self {
             Self::PersistentPath(path) => Some(path),
@@ -203,6 +218,32 @@ pub(crate) fn apply_loaded_schematic(
     schematic: SchematicState,
     origin: SchematicLoadOrigin<'_>,
 ) -> bool {
+    // Inside a project a schematic file is added to it, never poured over
+    // the cell view the user has open.
+    if state.project_lifecycle.is_open() {
+        return match import_loaded_schematic_as_cell_view(state, schematic, origin) {
+            Ok(reference) => {
+                state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!(
+                        "Imported {} as {}.",
+                        origin.display_label(),
+                        reference.display_path()
+                    ),
+                );
+                true
+            }
+            Err(error) => {
+                state.record(
+                    LogSeverity::Error,
+                    LogSource::Studio,
+                    format!("Schematic import failed: {error}"),
+                );
+                false
+            }
+        };
+    }
     let schematic = prepare_loaded_schematic(state, schematic, origin);
     replace_active_schematic_document(state, schematic);
     state.clear_design_execution_context();
@@ -215,6 +256,92 @@ pub(crate) fn apply_loaded_schematic(
         format!("{} {}.", origin.success_prefix(), origin.display_label()),
     );
     true
+}
+
+/// Add a loaded schematic to the open project as a new cell, and open it.
+///
+/// The cell is named after the file (its stem, with anything but letters,
+/// digits and underscores replaced), made unique in the library of the
+/// active view, and given one schematic view holding the file's drawing.
+/// The active cell view is not touched. The drawing now belongs to the
+/// project, so it keeps no file binding and is unsaved until the project is.
+pub(crate) fn import_loaded_schematic_as_cell_view(
+    state: &mut AppState,
+    mut schematic: SchematicState,
+    origin: SchematicLoadOrigin<'_>,
+) -> Result<crate::state::CellViewRef, String> {
+    use crate::state::{Cell, CellViewRef, ProjectLibraryMutation, View};
+
+    let library = state.workspace.content.active_view.library.clone();
+    let Some(existing) = state.library_manager.get_library(&library) else {
+        return Err(format!("library `{library}` is not in this project"));
+    };
+    if existing.read_only {
+        return Err(format!("library `{library}` is read only"));
+    }
+    let name = unique_cell_name(existing, &cell_name_from_file(origin.file_stem()));
+    let mut cell = Cell::new(&name);
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    let mut candidate_libraries = state.library_manager.clone();
+    let Some(mut candidate_library) = candidate_libraries.edit_library(&library) else {
+        return Err(format!("library `{library}` is not in this project"));
+    };
+    candidate_library.add_cell(cell);
+    let mutation =
+        state.preflight_project_library_mutation(ProjectLibraryMutation::CreateCell {
+            library: library.clone(),
+            cell: name.clone(),
+        })?;
+
+    schematic.session.current_file = None;
+    schematic.session.is_dirty = true;
+    schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
+    schematic.reconcile_grid_pitch_runtime();
+    state.library_manager = candidate_libraries;
+    let reference = CellViewRef::new(&library, &name, "schematic");
+    state
+        .workspace
+        .insert_schematic_editor(reference.key(), schematic);
+    state.publish_project_library_mutation(mutation);
+    state.open_workspace_view(reference.clone());
+    Ok(reference)
+}
+
+/// A cell name from a file stem: letters, digits and underscores kept, every
+/// other run of characters one underscore, never empty.
+fn cell_name_from_file(stem: &str) -> String {
+    let mut name = String::new();
+    for character in stem.chars() {
+        if character.is_alphanumeric() || character == '_' {
+            name.push(character);
+        } else if !name.ends_with('_') {
+            name.push('_');
+        }
+    }
+    let name = name.trim_matches('_');
+    if name.is_empty() {
+        "imported_schematic".to_owned()
+    } else {
+        name.to_owned()
+    }
+}
+
+/// `base`, or `base_2`, `base_3`, … : the first the library does not hold,
+/// compared as cell identities are (ignoring letter case).
+fn unique_cell_name(library: &crate::state::Library, base: &str) -> String {
+    let taken = |candidate: &str| {
+        let identity = crate::state::canonical_cell_view_owner_key(&library.name, candidate, "");
+        library.cells.values().any(|cell| {
+            crate::state::canonical_cell_view_owner_key(&library.name, &cell.name, "") == identity
+        })
+    };
+    if !taken(base) {
+        return base.to_owned();
+    }
+    (2..)
+        .map(|suffix| format!("{base}_{suffix}"))
+        .find(|candidate| !taken(candidate))
+        .expect("an unbounded suffix range finds a free name")
 }
 
 fn prepare_loaded_schematic(
@@ -534,6 +661,14 @@ mod tests {
         }
     }
 
+    /// The no-project screen, the one place opening a schematic file replaces
+    /// the drawing; inside a project the file is imported as a new cell view.
+    fn no_project_state() -> AppState {
+        let mut state = AppState::default();
+        state.project_lifecycle.authority.close_project();
+        state
+    }
+
     #[test]
     fn replacing_the_active_document_reconciles_document_pitch_and_session_snap_preferences() {
         let mut state = AppState::default();
@@ -577,7 +712,7 @@ mod tests {
 
     #[test]
     fn browser_import_applies_schematic_clears_runs_and_skips_recents() {
-        let mut state = AppState::default();
+        let mut state = no_project_state();
         state.simulation.start_run();
         assert!(state.simulation.retained.has_results());
 
@@ -602,7 +737,7 @@ mod tests {
 
     #[test]
     fn browser_import_keeps_filename_as_save_suggestion_without_native_path() {
-        let mut state = AppState::default();
+        let mut state = no_project_state();
         let mut schematic = SchematicState::default();
         schematic.session.current_file = Some(PathBuf::from("stale-native-path.rsch"));
 
@@ -623,7 +758,7 @@ mod tests {
 
     #[test]
     fn browser_import_filename_is_used_for_next_schematic_save_as_dialog() {
-        let mut state = AppState::default();
+        let mut state = no_project_state();
         let defaults = Rc::new(RefCell::new(Vec::new()));
         let io = TestFileWorkflowIo {
             saved_paths_are_reopenable: false,
@@ -753,7 +888,7 @@ mod tests {
 
     #[test]
     fn apply_loaded_schematic_resets_stale_netlist_and_result_context() {
-        let mut state = AppState::default();
+        let mut state = no_project_state();
         seed_stale_design_execution_context(&mut state);
 
         let mut schematic = SchematicState::default();
@@ -772,9 +907,50 @@ mod tests {
         );
     }
 
+    /// Inside a project a schematic file becomes a new cell view named after
+    /// the file, and the cell view that was open keeps its drawing.
+    #[test]
+    fn opening_a_schematic_inside_a_project_imports_it_as_a_new_cell_view() {
+        use crate::state::{ComponentType, Point};
+
+        let mut state = AppState::default();
+        state.project_lifecycle.authority.open_session();
+        let active = state.workspace.content.active_view.clone();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::origin());
+        state.sync_active_schematic_to_workspace();
+        let mut file = SchematicState::default();
+        file.add_component(ComponentType::Capacitor, Point::origin());
+        file.add_component(ComponentType::Capacitor, Point::new(40, 0));
+        let path = Path::new("designs/RC low-pass.rsch");
+
+        assert!(apply_loaded_schematic(
+            &mut state,
+            file.clone(),
+            SchematicLoadOrigin::PersistentPath(path),
+        ));
+        let imported = CellViewRef::new(&active.library, "RC_low_pass", "schematic");
+        assert_eq!(state.workspace.content.active_view, imported);
+        assert_eq!(state.schematic.document().components.len(), 2);
+        assert_eq!(state.schematic.session.current_file, None);
+        let original = state
+            .workspace
+            .clone_schematic_editor(&active.key())
+            .expect("the open cell view keeps its buffer");
+        assert_eq!(original.document().components.len(), 1, "nothing was replaced");
+
+        assert!(apply_loaded_schematic(
+            &mut state,
+            file,
+            SchematicLoadOrigin::PersistentPath(path),
+        ));
+        assert_eq!(state.workspace.content.active_view.cell, "RC_low_pass_2");
+    }
+
     #[test]
     fn load_schematic_from_symbol_view_replaces_paired_schematic_buffer() {
-        let mut state = AppState::default();
+        let mut state = no_project_state();
         let schematic_reference = open_default_symbol_view(&mut state);
         let symbol_key = state.workspace.content.active_key();
         install_stale_paired_schematic(&mut state, &schematic_reference);

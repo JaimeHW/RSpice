@@ -248,16 +248,11 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
             .ui
             .results
             .reconcile_retained_datasets(&state.simulation);
+        // Opening a schematic file inside a project imports it beside the
+        // drawing rather than replacing it, so the drawing is replaced here
+        // by a new document in place.
         if replace_drawing {
-            assert!(
-                crate::workbench::workflows::file_workflow::apply_loaded_schematic(
-                    &mut state,
-                    crate::state::SchematicState::default(),
-                    crate::workbench::workflows::file_workflow::SchematicLoadOrigin::BrowserImport(
-                        "replacement.rsp"
-                    )
-                )
-            );
+            crate::workbench::workflows::file_workflow::create_new_schematic(&mut state);
         } else {
             state.clear_simulation_results();
         }

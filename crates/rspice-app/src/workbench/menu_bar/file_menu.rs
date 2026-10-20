@@ -65,7 +65,11 @@ pub(crate) fn dispatch_file_menu_action(
             crate::workbench::workflows::project_workflow::request_close_project(state);
         }
         FileMenuAction::Open => {
-            if require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen) {
+            // Inside a project the file is imported as a new cell view and
+            // nothing open is replaced, so there is nothing to save first.
+            if !state.project_lifecycle.is_open()
+                && require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen)
+            {
                 return;
             }
             crate::workbench::workflows::file_actions::action_file_open_with_io(
