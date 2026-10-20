@@ -316,8 +316,9 @@ endmodule
 /// The deck that instantiates it, with the model written beside it.
 ///
 /// A vector boundary port is one deck node per bit, declared MSB first, so
-/// `x1.count [1:0]` is carried by `COUNT#1` and `COUNT#0`. Fifteen
-/// nanoseconds is four counter states: `00 01 10 11`, one every `#5`.
+/// `X1.COUNT [1:0]` (spelled, like the nets, in the deck's upper case) is
+/// carried by `COUNT#1` and `COUNT#0`. Fifteen nanoseconds is four counter
+/// states: `00 01 10 11`, one every `#5`.
 fn bus_deck(dir: &Path) -> String {
     let model = dir.join("vector_mixed.va");
     std::fs::write(&model, VECTOR_PORT_MODEL).expect("write the model");
@@ -733,7 +734,7 @@ fn a_declared_bus_reaches_every_carrier_as_one_vector() {
     let expected = std::fs::read_to_string(&published).expect("read the published dump");
 
     assert!(
-        expected.contains("$var wire 2 ! x1.count [1:0] $end"),
+        expected.contains("$var wire 2 ! X1.COUNT [1:0] $end"),
         "the bus is one vector variable of its own width: {expected}"
     );
     assert!(
@@ -834,17 +835,17 @@ fn a_bus_reaches_a_table_as_one_column_per_bit_from_either_artifact() {
         .collect();
     assert_eq!(
         digital,
-        vec!["D(x1.count[1])", "D(x1.count[0])"],
+        vec!["D(X1.COUNT[1])", "D(X1.COUNT[0])"],
         "the bus bits and nothing else: {header:?}"
     );
 
     let msb = header
         .iter()
-        .position(|column| column == "D(x1.count[1])")
+        .position(|column| column == "D(X1.COUNT[1])")
         .expect("the msb column");
     let lsb = header
         .iter()
-        .position(|column| column == "D(x1.count[0])")
+        .position(|column| column == "D(X1.COUNT[0])")
         .expect("the lsb column");
     assert_eq!(
         rows.iter().map(|row| row[msb]).collect::<Vec<_>>(),
@@ -863,10 +864,12 @@ fn a_bus_reaches_a_table_as_one_column_per_bit_from_either_artifact() {
 /// `--variables` reaches a bus by its name, its range, or one of its bits.
 ///
 /// The bare bus name is not one of the vector variable's own spellings — it is
-/// declared `x1.count [1:0]` — so without the bus grammar the obvious thing to
-/// type would have failed. A bit-select does select, and takes the whole word
-/// with it, because a `$var` is as wide as it is declared and no dump carries
-/// one bit of one; that is said out loud rather than done quietly.
+/// declared `X1.COUNT [1:0]` — so without the bus grammar the obvious thing to
+/// type would have failed. The selections below are typed in lower case,
+/// which a bus name answers to as the deck's own names do. A bit-select does
+/// select, and takes the whole word with it, because a `$var` is as wide as it
+/// is declared and no dump carries one bit of one; that is said out loud
+/// rather than done quietly.
 #[test]
 fn a_bus_is_selected_by_its_name_its_range_or_any_of_its_bits() {
     let dir = test_dir("vcd_bus_variables");
@@ -883,7 +886,7 @@ fn a_bus_is_selected_by_its_name_its_range_or_any_of_its_bits() {
         convert(&published, &filtered, "vcd", &["--variables", want]);
         let text = std::fs::read_to_string(&filtered).expect("read the filtered dump");
         assert!(
-            text.contains("$var wire 2 ! x1.count [1:0] $end"),
+            text.contains("$var wire 2 ! X1.COUNT [1:0] $end"),
             "'{want}' must select the vector: {text}"
         );
     }
@@ -914,7 +917,7 @@ fn a_bus_is_selected_by_its_name_its_range_or_any_of_its_bits() {
     );
     let text = std::fs::read_to_string(&one_bit).expect("read the dump");
     assert!(
-        text.contains("$var wire 2 ! x1.count [1:0] $end"),
+        text.contains("$var wire 2 ! X1.COUNT [1:0] $end"),
         "the vector is kept whole: {text}"
     );
 
@@ -1002,8 +1005,8 @@ fn expanding_a_bus_writes_its_members_as_the_scalars_a_dump_had_before() {
     convert(&published, &split, "vcd", &["--expand-buses"]);
     let text = std::fs::read_to_string(&split).expect("read the split dump");
     assert!(
-        text.contains("$var wire 1 ! x1.count[1] $end")
-            && text.contains("$var wire 1 \" x1.count[0] $end")
+        text.contains("$var wire 1 ! X1.COUNT[1] $end")
+            && text.contains("$var wire 1 \" X1.COUNT[0] $end")
             && !text.contains("wire 2"),
         "a vector read back expands to its own bit-selects: {text}"
     );

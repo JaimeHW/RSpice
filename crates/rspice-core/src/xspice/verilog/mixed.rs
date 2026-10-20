@@ -2691,7 +2691,7 @@ impl MixedSignalHost {
             .filter(|_| port.trace_node.is_none() || tied_member)
         {
             let signal = self.state.digital.plan().signal(port.signal).unwrap();
-            let bus_name = format!("{}.{}", self.instance, signal.name);
+            let bus_name = format!("{}.{}", self.instance, signal.name).to_uppercase();
             for bus in &mut self.boundary_buses {
                 if bus.name == bus_name {
                     // Boundary members run from MSB to LSB for either range

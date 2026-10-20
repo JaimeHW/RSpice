@@ -428,7 +428,9 @@ fn classify_boundary_ports(
         }
         if let Some((msb, lsb)) = signal.bounds {
             layout.buses.push(BoundaryBus {
-                name: format!("{}.{}", element.name, port.name),
+                // Spelled as the deck spells the nets beside it (`X1.B` next
+                // to `S`): the parser folds deck names to upper case.
+                name: format!("{}.{}", element.name, port.name).to_uppercase(),
                 msb,
                 lsb,
                 members: terminal_nodes[first..first + bits.len()].to_vec(),

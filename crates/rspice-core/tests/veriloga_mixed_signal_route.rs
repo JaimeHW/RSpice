@@ -938,7 +938,7 @@ fn a_vector_discrete_port_bridges_one_net_per_bit() {
         result.digital_buses
     );
     let bus = &result.digital_buses[0];
-    assert_eq!(bus.name, "x1.count");
+    assert_eq!(bus.name, "X1.COUNT");
     assert_eq!((bus.msb, bus.lsb), (1, 0));
     assert_eq!(
         bus.members,
@@ -1787,7 +1787,7 @@ fn a_boundary_bus_reaches_the_vcd_and_the_rawfile_as_one_vector() {
     rspice_core::io::write_vcd(&mut vcd, &document).expect("the VCD document writes");
     let vcd = String::from_utf8(vcd).expect("the VCD writer emits UTF-8");
     assert!(
-        vcd.contains("$var wire 2 ") && vcd.contains("x1.count [1:0] $end"),
+        vcd.contains("$var wire 2 ") && vcd.contains("X1.COUNT [1:0] $end"),
         "the VCD must declare the boundary bus as one two-bit vector:\n{vcd}"
     );
     assert!(
@@ -1816,7 +1816,7 @@ fn a_boundary_bus_reaches_the_vcd_and_the_rawfile_as_one_vector() {
         "the rawfile must carry the one bus the run declared"
     );
     let read_back = &decoded.digital_buses[0];
-    assert_eq!(read_back.name, "x1.count");
+    assert_eq!(read_back.name, "X1.COUNT");
     assert_eq!((read_back.msb, read_back.lsb), (1, 0));
     assert_eq!(
         read_back.members,
@@ -1932,7 +1932,7 @@ fn a_boundary_port_declared_above_bit_zero_bridges_every_bit_it_names() {
     let bus = result
         .digital_buses
         .iter()
-        .find(|bus| bus.name == "x1.count")
+        .find(|bus| bus.name == "X1.COUNT")
         .unwrap_or_else(|| panic!("no bus for the [7:4] port: {:?}", result.digital_buses));
     assert_eq!((bus.msb, bus.lsb), (7, 4));
     assert_eq!(
@@ -1982,11 +1982,11 @@ fn a_boundary_port_declared_above_bit_zero_bridges_every_bit_it_names() {
     rspice_core::io::write_vcd(&mut vcd, &document).expect("the VCD document writes");
     let vcd = String::from_utf8(vcd).expect("the VCD writer emits UTF-8");
     assert!(
-        vcd.contains("$var wire 4 ") && vcd.contains("x1.count [7:4] $end"),
+        vcd.contains("$var wire 4 ") && vcd.contains("X1.COUNT [7:4] $end"),
         "the VCD must declare the port under the range its author wrote:\n{vcd}"
     );
 
-    let words = vcd_bus_words(&vcd, "x1.count [7:4]");
+    let words = vcd_bus_words(&vcd, "X1.COUNT [7:4]");
     let expected: Vec<String> = (0..16).map(|value| format!("b{value:04b}")).collect();
     assert!(
         words.len() >= expected.len(),
@@ -2018,7 +2018,7 @@ fn a_boundary_port_declared_above_bit_zero_bridges_every_bit_it_names() {
     let read_back = decoded
         .digital_buses
         .iter()
-        .find(|bus| bus.name == "x1.count")
+        .find(|bus| bus.name == "X1.COUNT")
         .expect("the rawfile carries the [7:4] bus");
     assert_eq!((read_back.msb, read_back.lsb), (7, 4));
     assert_eq!(
@@ -2072,7 +2072,7 @@ fn an_ascending_boundary_port_puts_its_leading_index_on_the_decks_first_net() {
     let bus = result
         .digital_buses
         .iter()
-        .find(|bus| bus.name == "x1.q")
+        .find(|bus| bus.name == "X1.Q")
         .unwrap_or_else(|| panic!("no bus for the [4:7] port: {:?}", result.digital_buses));
     assert_eq!((bus.msb, bus.lsb), (4, 7));
     assert_eq!(
@@ -2113,11 +2113,11 @@ fn an_ascending_boundary_port_puts_its_leading_index_on_the_decks_first_net() {
     rspice_core::io::write_vcd(&mut vcd, &document).expect("the VCD document writes");
     let vcd = String::from_utf8(vcd).expect("the VCD writer emits UTF-8");
     assert!(
-        vcd.contains("$var wire 4 ") && vcd.contains("x1.q [4:7] $end"),
+        vcd.contains("$var wire 4 ") && vcd.contains("X1.Q [4:7] $end"),
         "the VCD must declare the port as `[4:7]`, the range its author wrote:\n{vcd}"
     );
     assert_eq!(
-        vcd_bus_words(&vcd, "x1.q [4:7]"),
+        vcd_bus_words(&vcd, "X1.Q [4:7]"),
         vec![
             "b0000".to_string(),
             "b1000".to_string(),
