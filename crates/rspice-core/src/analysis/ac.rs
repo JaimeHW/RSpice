@@ -183,6 +183,22 @@ fn checked_ac_sweep_parameters(
         }
     };
 
+    // A point count so large that one step cannot leave `fstart` in double
+    // precision (`.ac dec 1e18 1 10` has a ratio that rounds to exactly 1)
+    // describes a grid no simulator can visit. Refuse it here: stepping it
+    // would stop after the first point and silently report a one-point
+    // sweep for a card that asked for 1e18.
+    if fstop > fstart {
+        let first_step = match variation {
+            FreqVariation::Lin if delta == 0.0 => None,
+            FreqVariation::Lin => Some(fstart + delta),
+            FreqVariation::Dec | FreqVariation::Oct => Some(fstart * delta),
+        };
+        if first_step.is_some_and(|next| !next.is_finite() || next <= fstart) {
+            return Err(FrequencyGridError::UnrepresentableSpacing);
+        }
+    }
+
     let freq_tol = match variation {
         FreqVariation::Lin => delta * SWEEP_RELTOL,
         _ => delta * fstop * SWEEP_RELTOL,
@@ -233,12 +249,15 @@ fn populate_ac_sweep(
                 freq * delta
             }
         };
-        // A representable positive delta/ratio can still fail to advance a
-        // large floating-point frequency, and the step after the largest
-        // finite value can overflow. Neither result can add a valid sweep
-        // point; accepting either would make this loop non-terminating.
-        if !next.is_finite() || next <= freq {
+        // The step after the largest finite value can overflow; that step
+        // is past the stop anyway. A representable positive delta/ratio can
+        // also fail to advance a larger frequency, which would end the sweep
+        // short of its stop without saying so.
+        if !next.is_finite() {
             break;
+        }
+        if next <= freq {
+            return Err(FrequencyGridError::UnrepresentableSpacing);
         }
         freq = next;
         index = index
@@ -289,8 +308,11 @@ fn bounded_ac_sweep_point_count(
                 freq * delta
             }
         };
-        if !next.is_finite() || next <= freq {
+        if !next.is_finite() {
             break;
+        }
+        if next <= freq {
+            return Err(FrequencyGridError::UnrepresentableSpacing);
         }
         freq = next;
     }
@@ -483,15 +505,35 @@ mod tests {
         assert!(frequencies.iter().all(|frequency| frequency.is_finite()));
     }
 
+    /// A point count whose step rounding cannot take is refused. Stepping it
+    /// stops after the first point, which used to come back as a one-point
+    /// sweep for a card that asked for billions (`.ac dec 1e18 1 10`).
     #[test]
-    fn linear_sweep_stops_when_rounding_prevents_forward_progress() {
-        let start = 1.0e300;
-        let stop = 1.000_000_000_000_001e300;
-        assert_eq!(
-            try_ac_sweep_frequencies(FreqVariation::Lin, usize::MAX, start, stop)
-                .expect("non-advancing checked grid remains a valid single point"),
-            vec![start]
-        );
+    fn a_step_rounding_cannot_take_is_refused_not_cut_to_one_point() {
+        let huge = 1_000_000_000_000_000_000_usize;
+        for (variation, points, start, stop) in [
+            (FreqVariation::Lin, usize::MAX, 1.0e300, 1.000_000_000_000_001e300),
+            (FreqVariation::Dec, huge, 1.0, 10.0),
+            (FreqVariation::Dec, huge, 1.0, 2.0),
+            (FreqVariation::Oct, huge, 1.0, 10.0),
+            (FreqVariation::Lin, huge, 1.0, 10.0),
+        ] {
+            assert_eq!(
+                try_ac_sweep_frequencies(variation, points, start, stop),
+                Err(FrequencyGridError::UnrepresentableSpacing),
+                "{variation:?} {points} {start} {stop}"
+            );
+            assert_eq!(
+                try_ac_sweep_point_count_bounded_with_abort(
+                    variation, points, start, stop, 2_000_000, &NoAbort
+                ),
+                Err(FrequencyGridError::UnrepresentableSpacing),
+                "{variation:?} {points} {start} {stop}"
+            );
+        }
+        // A one-point span is still one point, however dense the card.
+        assert_eq!(sweep(FreqVariation::Dec, huge, 5.0, 5.0), vec![5.0]);
+        assert_eq!(sweep(FreqVariation::Oct, huge, 5.0, 5.0), vec![5.0]);
     }
 
     #[test]
