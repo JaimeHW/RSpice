@@ -555,7 +555,7 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
             .preprocess_source_mapped(source)
-            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+            .map_err(CompileError::preprocess)?;
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
@@ -624,7 +624,7 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
             .preprocess_source_mapped(source)
-            .map_err(|error| CompileError::io_error(format!("Preprocessor error: {error}")))?;
+            .map_err(CompileError::preprocess)?;
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
@@ -1227,7 +1227,7 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
             .preprocess_source(source)
-            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+            .map_err(CompileError::preprocess)?;
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
         let output = self.compile_canonical_ir_preprocessed_with_metadata_measured(
@@ -1847,7 +1847,7 @@ impl VerilogACompiler {
         let mut preprocessor = self.configured_preprocessor();
         let preprocessed = preprocessor
             .preprocess_file(path)
-            .map_err(|error| CompileError::io_error(format!("Preprocessor error: {error}")))?;
+            .map_err(CompileError::preprocess)?;
         self.connect_specification_from_preprocessed(&preprocessed)
     }
 
@@ -1941,7 +1941,7 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
             .preprocess_provider_root_mapped(&preprocessor::FileSystemSourceProvider, path)
-            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+            .map_err(CompileError::preprocess)?;
         let dependencies = pp.take_dependencies();
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes =
@@ -2077,9 +2077,7 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         trace_compiler_phase(trace, &trace_target, "preprocess", None, None);
         let phase_started = web_time::Instant::now();
-        let preprocessed = pp
-            .preprocess_file(path)
-            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+        let preprocessed = pp.preprocess_file(path).map_err(CompileError::preprocess)?;
         let dependencies = pp.take_dependencies();
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
@@ -2192,9 +2190,7 @@ impl VerilogACompiler {
                         phase: PipelinePhase::Preprocess,
                     })
                 }
-                ProviderCompileError::Source(error) => {
-                    CompileError::io_error(format!("Preprocessor error: {error}"))
-                }
+                ProviderCompileError::Source(error) => CompileError::preprocess(error),
             })
     }
 

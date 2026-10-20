@@ -16,6 +16,11 @@ pub enum CompileError {
     #[error("I/O error: {message}")]
     IoError { message: String },
 
+    /// Preprocessing refused the source: an undefined macro, a missing
+    /// include file, a resource limit. Shown as the preprocessor states it.
+    #[error("{0}")]
+    Preprocess(Box<crate::preprocessor::PreprocessorError>),
+
     /// Lexical analysis error
     #[error("{}", .0)]
     Lexer(#[from] LexerError),
@@ -76,6 +81,12 @@ impl CompileError {
         Self::IoError {
             message: message.into(),
         }
+    }
+
+    /// A preprocessing refusal, reported as the preprocessor states it
+    /// (it used to read "I/O error: Preprocessor error: ...").
+    pub fn preprocess(error: crate::preprocessor::PreprocessorError) -> Self {
+        Self::Preprocess(Box::new(error))
     }
 
     /// Create a multiple error from a vec of errors
@@ -601,6 +612,7 @@ impl CompileError {
     pub fn diagnostic_code(&self) -> &'static str {
         match self {
             Self::IoError { .. } => COMPILE_INPUT_CODE,
+            Self::Preprocess(error) => error.code(),
             Self::Lexer(error) => error.kind.code(),
             Self::Parser(error) => error.kind.code(),
             Self::Semantic(error) => error.kind.code(),

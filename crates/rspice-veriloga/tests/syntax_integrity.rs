@@ -694,3 +694,18 @@ fn parse_errors_name_tokens_as_source_text() {
         );
     }
 }
+
+/// A preprocessing refusal from an in-memory compile is reported as the
+/// preprocessor states it, under its own code; it used to read "I/O error:
+/// Preprocessor error: ..." with the code of a file-system failure.
+#[test]
+fn an_in_memory_preprocessing_refusal_is_not_framed_as_an_io_error() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile(&module_with_statement("x = `NOT_DEFINED;"))
+        .expect_err("an undefined macro is refused");
+    let message = error.to_string();
+    assert!(message.contains("undefined macro `NOT_DEFINED"), "{message}");
+    assert!(!message.contains("I/O error"), "{message}");
+    assert!(!message.contains("Preprocessor error"), "{message}");
+    assert_eq!(error.diagnostic_code(), "VA-INPUT-PREPROCESS");
+}

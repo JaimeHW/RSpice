@@ -994,7 +994,7 @@ impl ContractHasher {
 }
 
 pub(crate) fn map_preprocessor_error(error: crate::PreprocessorError) -> CompileError {
-    CompileError::io_error(format!("Preprocessor error: {error}"))
+    CompileError::preprocess(error)
 }
 
 pub(crate) fn validate_compilation(compilation: &VirtualRuntimeCompilation) -> CompileResult<()> {

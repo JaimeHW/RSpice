@@ -78,16 +78,7 @@ impl From<&crate::PreprocessorError> for SourceCompileDiagnostic {
         Self {
             severity: CompileDiagnosticSeverity::Error,
             phase: CompileDiagnosticPhase::Input,
-            code: if error.cancelled {
-                "VA-INPUT-CANCELLED"
-            } else if error.resource_limit.is_some() {
-                "VA-INPUT-RESOURCE-LIMIT"
-            } else if error.io_error.is_some() {
-                "VA-INPUT-IO"
-            } else {
-                "VA-INPUT-PREPROCESS"
-            }
-            .into(),
+            code: error.code().into(),
             message: error.message.clone(),
             path: error.file.as_deref().map(crate::source::display_path),
             byte_start: None,

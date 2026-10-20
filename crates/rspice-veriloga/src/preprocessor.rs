@@ -318,6 +318,19 @@ impl std::error::Error for PreprocessorError {
 }
 
 impl PreprocessorError {
+    /// Stable diagnostic code for this refusal.
+    pub fn code(&self) -> &'static str {
+        if self.cancelled {
+            "VA-INPUT-CANCELLED"
+        } else if self.resource_limit.is_some() {
+            "VA-INPUT-RESOURCE-LIMIT"
+        } else if self.io_error.is_some() {
+            "VA-INPUT-IO"
+        } else {
+            "VA-INPUT-PREPROCESS"
+        }
+    }
+
     pub fn new(message: impl Into<String>, file: Option<PathBuf>, line: usize) -> Self {
         Self {
             message: message.into(),
@@ -1403,7 +1416,10 @@ impl Preprocessor {
                 }
                 '`' if !in_string => {
                     let name = macro_name(&text[offset + 1..]);
-                    if !name.is_empty() && !self.macros.contains_key(name) {
+                    if !name.is_empty()
+                        && !self.macros.contains_key(name)
+                        && !PREDEFINED_MACROS.contains(&name)
+                    {
                         return Some((offset, name));
                     }
                 }
@@ -1780,7 +1796,9 @@ impl Preprocessor {
         line_num: usize,
         max_expanded_bytes: usize,
     ) -> Result<String, PreprocessorError> {
-        const MAX_EXPANSION_DEPTH: usize = 100;
+        // Each pass expands one level of nesting, so this bounds how deeply
+        // invocations may nest (`F(`F(...)) or a chain of bodies).
+        const MAX_EXPANSION_DEPTH: usize = 1024;
 
         let mut result = line.to_string();
         if result.len() > max_expanded_bytes {
@@ -1794,14 +1812,83 @@ impl Preprocessor {
             result = expanded;
         }
 
-        // Still changing after the depth limit: macro expansion does not
-        // terminate (mutually recursive definitions). Fail loudly instead
-        // of emitting partially-expanded text.
+        // Still changing after the depth limit. Fail loudly instead of
+        // emitting partially-expanded text, saying whether a definition
+        // reaches itself or the nesting is only deep.
+        let message = match self.macro_cycle(line) {
+            Some(cycle) => format!(
+                "recursive macro `{} ({}): its expansion never ends",
+                cycle[0],
+                cycle
+                    .iter()
+                    .map(|name| format!("`{name}"))
+                    .collect::<Vec<_>>()
+                    .join(" -> ")
+            ),
+            None => format!(
+                "macro invocations nest more than {MAX_EXPANSION_DEPTH} levels deep; this \
+                 preprocessor expands at most that many"
+            ),
+        };
         Err(PreprocessorError::new(
-            "Macro expansion did not terminate (recursive `define?)",
+            message,
             self.current_file.clone(),
             line_num,
         ))
+    }
+
+    /// A cycle of macro definitions reachable from the invocations in
+    /// `text`, as the names along it with the first repeated at the end.
+    fn macro_cycle(&self, text: &str) -> Option<Vec<String>> {
+        // Depth-first over "the body of A invokes B", one path at a time.
+        fn visit(
+            preprocessor: &Preprocessor,
+            name: &str,
+            path: &mut Vec<String>,
+            done: &mut HashSet<String>,
+        ) -> Option<Vec<String>> {
+            if let Some(start) = path.iter().position(|open| open == name) {
+                let mut cycle = path[start..].to_vec();
+                cycle.push(name.to_string());
+                return Some(cycle);
+            }
+            if done.contains(name) {
+                return None;
+            }
+            let body = &preprocessor.macros.get(name)?.body;
+            path.push(name.to_string());
+            for next in invoked_macro_names(body) {
+                if let Some(cycle) = visit(preprocessor, next, path, done) {
+                    return Some(cycle);
+                }
+            }
+            path.pop();
+            done.insert(name.to_string());
+            None
+        }
+        let mut done = HashSet::new();
+        invoked_macro_names(text).find_map(|name| visit(self, name, &mut Vec::new(), &mut done))
+    }
+
+    /// The value of a predefined macro the source has not defined itself:
+    /// IEEE 1800-2017 section 22.13 `` `__FILE__ `` (the current source file
+    /// as a string literal) and `` `__LINE__ `` (the line of the use).
+    fn predefined_macro(&self, name: &str, line_num: usize) -> Option<String> {
+        match name {
+            "__FILE__" => {
+                let path = self
+                    .current_file
+                    .as_deref()
+                    .map(display_path)
+                    .unwrap_or_default();
+                Some(format!(
+                    "\"{}\"",
+                    path.replace('\\', "\\\\").replace('"', "\\\"")
+                ))
+            }
+            "__LINE__" => Some(line_num.to_string()),
+            _ => None,
+        }
     }
 
     /// Single pass of macro expansion
@@ -1896,6 +1983,8 @@ impl Preprocessor {
                         })?;
                         append_text(&mut result, &expanded)?;
                     }
+                } else if let Some(value) = self.predefined_macro(&name, line_num) {
+                    append_text(&mut result, &value)?;
                 } else if name.is_empty() {
                     // A backtick that names nothing, such as one left by a
                     // stringification operator, is not an invocation.
@@ -2013,6 +2102,10 @@ fn strip_utf8_bom(source: &str) -> &str {
     source.strip_prefix('\u{feff}').unwrap_or(source)
 }
 
+/// Macros every source has without defining them (see
+/// `Preprocessor::predefined_macro`).
+const PREDEFINED_MACROS: [&str; 2] = ["__FILE__", "__LINE__"];
+
 /// The directives the preprocessor processes itself.
 const KNOWN_DIRECTIVES: [&str; 13] = [
     "include",
@@ -2054,6 +2147,28 @@ fn macro_name(text: &str) -> &str {
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .unwrap_or(text.len());
     &text[..end]
+}
+
+/// The names `text` invokes with a backtick, outside string literals.
+fn invoked_macro_names(text: &str) -> impl Iterator<Item = &str> {
+    let mut in_string = false;
+    let mut escaped = false;
+    text.char_indices().filter_map(move |(offset, ch)| {
+        if escaped {
+            escaped = false;
+            return None;
+        }
+        match ch {
+            '"' => in_string = !in_string,
+            '\\' if in_string => escaped = true,
+            '`' if !in_string => {
+                let name = macro_name(&text[offset + 1..]);
+                return (!name.is_empty()).then_some(name);
+            }
+            _ => {}
+        }
+        None
+    })
 }
 
 /// The candidate closest to `name` in edit distance (a transposition counts as
@@ -2425,7 +2540,66 @@ value = `KEEP("a, \"quoted\", {braces}, [brackets], (parentheses)");
     #[test]
     fn mutually_recursive_macros_error() {
         let src = "`define A `B\n`define B `A\nx = `A;\n";
-        assert!(Preprocessor::new().preprocess_source(src).is_err());
+        let error = Preprocessor::new().preprocess_source(src).unwrap_err();
+        assert!(
+            error
+                .message
+                .starts_with("recursive macro `A (`A -> `B -> `A)"),
+            "{error}"
+        );
+    }
+
+    /// Deep nesting that terminates is not recursion: 300 nested `F(...)
+    /// used to fail as "Macro expansion did not terminate (recursive
+    /// `define?)". Nesting past the bound says it is a bound.
+    #[test]
+    fn deep_macro_nesting_expands_and_its_bound_is_not_called_recursion() {
+        let nested = |depth: usize| {
+            format!(
+                "`define F(a) (a)\ny = {}x{};\n",
+                "`F(".repeat(depth),
+                ")".repeat(depth)
+            )
+        };
+        let out = pp(&nested(300));
+        assert!(out.contains(&format!("y = {}x{};", "(".repeat(300), ")".repeat(300))));
+        let error = Preprocessor::new()
+            .preprocess_source(&nested(1100))
+            .unwrap_err();
+        assert!(
+            error
+                .message
+                .starts_with("macro invocations nest more than 1024 levels deep"),
+            "{error}"
+        );
+    }
+
+    /// IEEE 1800-2017 section 22.13: `__FILE__ and `__LINE__, including from
+    /// a macro body (the line of the use) and inside an included file. They
+    /// used to fail as undefined macros.
+    #[test]
+    fn file_and_line_macros_name_the_use_site() {
+        let out = pp("`define WHERE `__LINE__\n\ny = `__LINE__ + `WHERE;\n");
+        assert!(out.contains("y = 3 + 3;"), "got: {out}");
+
+        let bundle = crate::VirtualSourceBundle::from_sources(
+            "root.va",
+            [
+                ("root.va", "a = `__LINE__;\n`include \"dir/child.vams\"\n"),
+                ("dir/child.vams", "\nb = `__FILE__; c = `__LINE__;\n"),
+            ],
+        )
+        .unwrap();
+        let provider = crate::virtual_source::VirtualBundleProvider::new(
+            &bundle,
+            crate::VirtualCompileLimits::default(),
+        );
+        let out = Preprocessor::new()
+            .preprocess_provider_root_mapped(&provider, Path::new("root.va"))
+            .unwrap()
+            .source;
+        assert!(out.contains("a = 1;"), "got: {out}");
+        assert!(out.contains("b = \"dir/child.vams\"; c = 2;"), "got: {out}");
     }
 
     #[test]

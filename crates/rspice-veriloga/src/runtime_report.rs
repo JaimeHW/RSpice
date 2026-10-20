@@ -1260,16 +1260,16 @@ fn collect_compile_diagnostics(
             error.to_string(),
             None,
         )),
-        CompileError::IoError { .. } | CompileError::VirtualSource(_) => {
-            diagnostics.push(diagnostic(
-                source,
-                CompileDiagnosticSeverity::Error,
-                CompileDiagnosticPhase::Input,
-                code,
-                error.to_string(),
-                None,
-            ))
-        }
+        CompileError::IoError { .. }
+        | CompileError::Preprocess(_)
+        | CompileError::VirtualSource(_) => diagnostics.push(diagnostic(
+            source,
+            CompileDiagnosticSeverity::Error,
+            CompileDiagnosticPhase::Input,
+            code,
+            error.to_string(),
+            None,
+        )),
     }
 }
 
