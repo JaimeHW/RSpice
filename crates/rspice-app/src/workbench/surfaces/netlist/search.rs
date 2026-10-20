@@ -10,8 +10,7 @@
 use egui::Ui;
 use std::ops::Range;
 
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{AppState, MessageCatalog, MessageId, RSpiceApp};
 
@@ -628,23 +627,55 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     let scope_replaceable = find.scope != NetlistFindScope::ProjectReferences
         && documents.iter().any(|document| document.editable);
     let compact_fields = ctx.content_rect().width() < 360.0;
-    let find_hint = if find.find.is_empty() {
-        messages.text(MessageId::NetlistFindEnterTextHint)
-    } else if find.error.is_some() {
-        messages.text(MessageId::NetlistFindCorrectExpressionHint)
+    // One status line, in the footer beside the actions: why Find next is
+    // off, or how many matches it walks.
+    let (status, tone) = if let Some(error) = &find.error {
+        (error.clone(), DialogHintTone::Error)
+    } else if find.find.is_empty() {
+        (
+            messages.text(MessageId::NetlistFindEnterTextHint),
+            DialogHintTone::Neutral,
+        )
     } else {
-        messages.text(MessageId::NetlistFindGeneratedImmutableHint)
+        let count = matches.len().to_string();
+        (
+            messages.format(
+                if truncated {
+                    // The rows are a first page, and a count that did not say
+                    // so would be read as the number of matches in the deck.
+                    MessageId::NetlistFindFirstMatches
+                } else if matches.len() == 1 {
+                    MessageId::NetlistFindMatchSingular
+                } else {
+                    MessageId::NetlistFindMatches
+                },
+                &[("count", &count)],
+            ),
+            DialogHintTone::Neutral,
+        )
+    };
+    // A scope with nothing editable in it, such as the generated deck, is
+    // searched, never replaced in: it has no Replace field or actions.
+    let title = if scope_replaceable {
+        MessageId::NetlistFindTitle
+    } else {
+        MessageId::CodeSearchTitle
     };
     let choice = Dialog::new(
-        messages.text(MessageId::NetlistFindTitle),
+        messages.text(title),
         messages.text(MessageId::NetlistFindNext),
     )
     .description(messages.text(MessageId::NetlistFindDescription))
     .size(DialogSize::Transaction)
+    // The fields end where the footer's buttons do, not a bar's width in.
+    .overlay_scrollbar()
     .initial_focus(DialogInitialFocus::BodyControl)
     .primary_enabled(has_matches && find.error.is_none())
+    .secondary(messages.text(MessageId::NetlistFindPrevious))
+    .secondary_enabled(has_matches && find.error.is_none())
     .ghost(messages.text(MessageId::CommonClose))
-    .hint(find_hint)
+    .hint(status)
+    .hint_tone(tone)
     .show_with_initial_body_focus(ctx, |ui| {
         let mut find_control_id = None;
         if compact_fields {
@@ -655,14 +686,15 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                     .hint_text(messages.text(MessageId::NetlistFindExpressionHint)),
             );
             find_control_id = Some(response.id);
-            ui.label(messages.text(MessageId::CommonReplace));
-            ui.add_enabled(
-                scope_replaceable,
-                egui::TextEdit::singleline(&mut find.replacement)
-                    .desired_width(ui.available_width()),
-            );
+            if scope_replaceable {
+                ui.label(messages.text(MessageId::CommonReplace));
+                ui.add(
+                    egui::TextEdit::singleline(&mut find.replacement)
+                        .desired_width(ui.available_width()),
+                );
+            }
             ui.label(messages.text(MessageId::CommonScope));
-            find_scope_combo(ui, &mut find, messages);
+            find_scope_select(ui, &mut find, messages);
         } else {
             egui::Grid::new("rspice.code.find-fields")
                 .num_columns(2)
@@ -676,15 +708,16 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                     );
                     find_control_id = Some(response.id);
                     ui.end_row();
-                    ui.label(messages.text(MessageId::CommonReplace));
-                    ui.add_enabled(
-                        scope_replaceable,
-                        egui::TextEdit::singleline(&mut find.replacement)
-                            .desired_width(ui.available_width().max(180.0)),
-                    );
-                    ui.end_row();
+                    if scope_replaceable {
+                        ui.label(messages.text(MessageId::CommonReplace));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut find.replacement)
+                                .desired_width(ui.available_width().max(180.0)),
+                        );
+                        ui.end_row();
+                    }
                     ui.label(messages.text(MessageId::CommonScope));
-                    find_scope_combo(ui, &mut find, messages);
+                    find_scope_select(ui, &mut find, messages);
                     ui.end_row();
                 });
         }
@@ -711,28 +744,10 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 messages.text(MessageId::NetlistFindIncludeGeneratedReferences),
             );
         });
-        ui.separator();
-
-        if let Some(error) = &find.error {
-            ui.colored_label(Tokens::get(ctx).color.err, error);
-        } else if find.find.is_empty() {
-            ui.weak(messages.text(MessageId::NetlistFindEnterExactArtifact));
-        } else {
-            let count = matches.len().to_string();
-            ui.label(messages.format(
-                if truncated {
-                    // The rows are a first page, and a count that did not say
-                    // so would be read as the number of matches in the deck.
-                    MessageId::NetlistFindFirstMatches
-                } else if matches.len() == 1 {
-                    MessageId::NetlistFindMatchSingular
-                } else {
-                    MessageId::NetlistFindMatches
-                },
-                &[("count", &count)],
-            ));
+        if !has_matches {
+            return find_control_id;
         }
-
+        ui.separator();
         let row_height = 24.0;
         egui::ScrollArea::vertical()
             .id_salt("rspice.code.find-results")
@@ -768,22 +783,11 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 }
             });
 
+        if !scope_replaceable {
+            return find_control_id;
+        }
         ui.separator();
         ui.horizontal(|ui| {
-            if ui
-                .add_enabled(
-                    has_matches,
-                    egui::Button::new(messages.text(MessageId::NetlistFindPrevious)),
-                )
-                .clicked()
-            {
-                let next = if find.selected_match == 0 {
-                    matches.len().saturating_sub(1)
-                } else {
-                    find.selected_match - 1
-                };
-                action = Some(FindWindowAction::Select(next));
-            }
             let selected_owned = matches
                 .get(find.selected_match)
                 .and_then(|result| documents.get(result.document))
@@ -823,8 +827,15 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 (find.selected_match + 1) % matches.len().max(1),
             ));
         }
+        DialogChoice::Secondary => {
+            action = Some(FindWindowAction::Select(if find.selected_match == 0 {
+                matches.len().saturating_sub(1)
+            } else {
+                find.selected_match - 1
+            }));
+        }
         DialogChoice::Ghost | DialogChoice::Cancelled => find.open = false,
-        DialogChoice::None | DialogChoice::Secondary => {}
+        DialogChoice::None => {}
     }
 
     let scoped_replacements = if matches!(action, Some(FindWindowAction::ReplaceAll)) {
@@ -1057,55 +1068,49 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
 }
 
-fn find_scope_combo(
+/// The scope as the kit's select, in the order the search widens.
+fn find_scope_select(
     ui: &mut Ui,
     find: &mut crate::workbench::documents::netlist_document::NetlistFindState,
     messages: MessageCatalog,
 ) {
     use crate::workbench::documents::netlist_document::NetlistFindScope;
 
-    egui::ComboBox::from_id_salt("rspice.code.find-scope")
-        .selected_text(match find.scope {
-            NetlistFindScope::CurrentDocument => {
-                messages.text(MessageId::NetlistFindCurrentDocument)
-            }
-            NetlistFindScope::Selection => messages.text(MessageId::NetlistFindSelection),
-            NetlistFindScope::OpenDocuments => messages.text(MessageId::NetlistFindOpenDocuments),
-            NetlistFindScope::ActiveLanguageProject => {
-                messages.text(MessageId::NetlistFindActiveLanguageProject)
-            }
-            NetlistFindScope::ProjectReferences => {
-                messages.text(MessageId::NetlistFindProjectReferences)
-            }
-        })
-        .width(ui.available_width().max(180.0))
-        .show_ui(ui, |ui| {
-            ui.selectable_value(
-                &mut find.scope,
-                NetlistFindScope::CurrentDocument,
-                messages.text(MessageId::NetlistFindCurrentDocument),
-            );
-            ui.selectable_value(
-                &mut find.scope,
-                NetlistFindScope::Selection,
-                messages.text(MessageId::NetlistFindSelection),
-            );
-            ui.selectable_value(
-                &mut find.scope,
-                NetlistFindScope::OpenDocuments,
-                messages.text(MessageId::NetlistFindOpenDocuments),
-            );
-            ui.selectable_value(
-                &mut find.scope,
-                NetlistFindScope::ActiveLanguageProject,
-                messages.text(MessageId::NetlistFindActiveLanguageProject),
-            );
-            ui.selectable_value(
-                &mut find.scope,
-                NetlistFindScope::ProjectReferences,
-                messages.text(MessageId::NetlistFindProjectReferences),
-            );
-        });
+    const SCOPES: [(NetlistFindScope, MessageId); 5] = [
+        (
+            NetlistFindScope::CurrentDocument,
+            MessageId::NetlistFindCurrentDocument,
+        ),
+        (NetlistFindScope::Selection, MessageId::NetlistFindSelection),
+        (
+            NetlistFindScope::OpenDocuments,
+            MessageId::NetlistFindOpenDocuments,
+        ),
+        (
+            NetlistFindScope::ActiveLanguageProject,
+            MessageId::NetlistFindActiveLanguageProject,
+        ),
+        (
+            NetlistFindScope::ProjectReferences,
+            MessageId::NetlistFindProjectReferences,
+        ),
+    ];
+    let labels = SCOPES.map(|(_, label)| messages.text(label));
+    let current = SCOPES
+        .iter()
+        .position(|(scope, _)| *scope == find.scope)
+        .unwrap_or_default();
+    if let Some(picked) = crate::ui::widgets::select(
+        ui,
+        "rspice.code.find-scope",
+        &messages.text(MessageId::CommonScope),
+        &labels[current],
+        &labels,
+        ui.available_width().max(180.0),
+    ) && let Some((scope, _)) = SCOPES.get(picked)
+    {
+        find.scope = *scope;
+    }
 }
 
 #[cfg(test)]
@@ -1201,5 +1206,72 @@ mod tests {
             true,
         );
         assert_eq!(with_comments.matches.len(), 4);
+    }
+
+    /// What the find dialog names, by accessible label or value, after a few
+    /// frames over `app`.
+    fn find_dialog_names(app: &mut RSpiceApp) -> Vec<String> {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| find_replace_window(ui.ctx(), app),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        nodes
+            .values()
+            .flat_map(|node| [node.label(), node.value()])
+            .flatten()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The generated deck is read-only, so finding in it offers no Replace
+    /// field and no Replace actions, and the dialog is called Find; an owned
+    /// deck is replaced in. The dialog used to show a disabled Replace field
+    /// and disabled Replace buttons over the generated deck, and three status
+    /// lines: a footer hint, a body line and the error.
+    #[test]
+    fn a_read_only_deck_is_found_in_but_offers_no_replace() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.ui.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        app.state.ui.netlist.find.open = true;
+        let names = find_dialog_names(&mut app);
+        let says = |text: &str| names.iter().any(|name| name == text);
+        assert!(says("Find in source"), "{names:?}");
+        assert!(says("Find"), "the Find field is missing");
+        assert!(!says("Replace"), "a read-only deck offers Replace");
+        assert!(!says("Replace all"), "a read-only deck offers Replace all");
+        assert!(
+            !says("Enter text to search the current document."),
+            "a second status line in the body"
+        );
+
+        crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
+            &mut app.state,
+            crate::workbench::documents::code_workspace::CodeSourceFileAction::New,
+        )
+        .unwrap();
+        crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+            &mut app.state,
+        )
+        .unwrap();
+        let names = find_dialog_names(&mut app);
+        let says = |text: &str| names.iter().any(|name| name == text);
+        assert!(says("Find and replace in source"), "{names:?}");
+        assert!(says("Replace"), "an owned deck offers no Replace");
     }
 }
