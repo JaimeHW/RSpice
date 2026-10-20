@@ -11336,9 +11336,12 @@ mod tests {
         })
         .collect::<Vec<_>>();
 
+        // Each pass contributes its own curve: (9 + 29) / (2 + 2). The jump
+        // from the end of one pass to the start of the next is not part of
+        // either waveform, as in Xyce's AvgTest2DC gold.
         let results = evaluate_dc_measurements(&netlist, &sweep);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value, Some(58.0 / 6.0));
+        assert_eq!(results[0].value, Some(9.5));
         assert!(results[0].passed);
     }
 
@@ -11382,15 +11385,15 @@ mod tests {
                 .expect("named trace")
                 .values
         };
-        let expected_average = [0.0, 6.5, 4.5, 7.25, 9.1, 58.0 / 6.0];
+        let expected_average = [0.0, 6.5, 4.5, 4.5, 8.5, 9.5];
         for (actual, expected) in trace("combined_live").iter().zip(expected_average) {
             assert!((actual - expected).abs() < 1.0e-12);
         }
         assert_eq!(trace("barrier_live"), &vec![-7.0; 6]);
 
         let results = evaluate_dc_measurements(&netlist, &sweep);
-        assert_eq!(results[0].value, Some(58.0 / 6.0));
-        assert_eq!(results[1].value, Some(58.0 / 6.0));
+        assert_eq!(results[0].value, Some(9.5));
+        assert_eq!(results[1].value, Some(9.5));
         assert!(!results[2].passed, "barrier event must not bridge segments");
         assert_eq!(results[3].value, Some(-7.0));
     }
