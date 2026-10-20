@@ -7,7 +7,7 @@
 //! - Parameter expressions ({value+1k})
 
 use crate::Value;
-use crate::spice_number::parse_spice_suffix;
+use crate::spice_number::{parse_spice_suffix, scaled_spice_value};
 
 //=============================================================================
 // Token Types
@@ -476,7 +476,10 @@ impl<'a> Lexer<'a> {
             .sum();
         let total_bytes = num_end_bytes + suffix_bytes;
 
-        Ok((TokenKind::Number(base * multiplier), total_bytes))
+        Ok((
+            TokenKind::Number(scaled_spice_value(num_str, base, multiplier)),
+            total_bytes,
+        ))
     }
 
     /// Parse a braced expression {expr}
@@ -1175,6 +1178,81 @@ mod tests {
         // after it are nothing this dialect knows, which is what keeps
         // `1atto` a rejection at a boundary that demands full consumption.
         assert_eq!(spice_suffix_scale("atto"), (1.0, 1));
+    }
+
+    /// Every scale suffix, in every case spelling, reads as the double
+    /// nearest the decimal it writes. The double nearest the mantissa times
+    /// the double nearest the scale rounds twice: `10u` read as
+    /// 9.999999999999999e-6, a unit in the last place below 10e-6, and these
+    /// mantissas each missed for at least one suffix.
+    #[test]
+    fn every_scale_suffix_reads_as_the_double_nearest_its_decimal() {
+        let decades = [
+            ("f", -15),
+            ("F", -15),
+            ("fs", -15),
+            ("p", -12),
+            ("P", -12),
+            ("pF", -12),
+            ("n", -9),
+            ("N", -9),
+            ("ns", -9),
+            ("u", -6),
+            ("U", -6),
+            ("uF", -6),
+            ("m", -3),
+            ("M", -3),
+            ("mV", -3),
+            ("k", 3),
+            ("K", 3),
+            ("kHz", 3),
+            ("meg", 6),
+            ("MEG", 6),
+            ("Meg", 6),
+            ("MHz", 6),
+            ("x", 6),
+            ("X", 6),
+            ("g", 9),
+            ("G", 9),
+            ("GHz", 9),
+            ("t", 12),
+            ("T", 12),
+            ("THz", 12),
+        ];
+        let mut misses = Vec::new();
+        for (suffix, decade) in decades {
+            for mantissa in [
+                "1.1", "1.3", "3.3", "4.1", "8.2", "10", "-6.8", "0.13", "1.5e2", "+2.2E-1",
+            ] {
+                let (digits, exponent) = mantissa
+                    .split_once(['e', 'E'])
+                    .map_or((mantissa, 0), |(digits, exponent)| {
+                        (digits, exponent.parse::<i32>().expect("an exponent"))
+                    });
+                let written: Value = format!("{digits}e{}", exponent + decade)
+                    .parse()
+                    .expect("a decimal");
+                let literal = format!("{mantissa}{suffix}");
+                let parsed = parse_spice_value_complete(&literal)
+                    .unwrap_or_else(|error| panic!("{literal} must parse: {error}"));
+                if parsed.to_bits() != written.to_bits() {
+                    misses.push(format!("{literal} read as {parsed:e}, not {written:e}"));
+                }
+            }
+        }
+        for (literal, written) in [
+            ("3mil", 762e-7),
+            ("6MIL", 1524e-7),
+            ("1.1mil", 279.4e-7),
+            ("4.7Mil", 1193.8e-7),
+        ] {
+            let parsed = parse_spice_value_complete(literal).expect("a mil value");
+            if parsed.to_bits() != f64::to_bits(written) {
+                misses.push(format!("{literal} read as {parsed:e}, not {written:e}"));
+            }
+        }
+        assert!(misses.is_empty(), "{} misses: {misses:#?}", misses.len());
+        assert_eq!(parse_spice_value("10u").expect("10u") - 10e-6, 0.0);
     }
 
     #[test]

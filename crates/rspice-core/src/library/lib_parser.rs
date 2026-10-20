@@ -2508,12 +2508,14 @@ mod tests {
             .first()
             .expect("one top-level model");
 
-        // Each value is the literal times its scale, in that order, which is
-        // not always the nearest double to the decimal the two spell together.
-        assert_eq!(model.parameters.get("cj").copied(), Some(10.0 * 1e-6));
-        assert_eq!(model.parameters.get("tox").copied(), Some(1.0 * 25.4e-6));
-        assert_eq!(model.parameters.get("gain").copied(), Some(1e3 * 1e3));
-        assert_eq!(model.parameters.get("scale").copied(), Some(1.0 * 1e6));
+        // Each value is the double nearest the decimal the literal and its
+        // scale spell together: `10u` is 10e-6, not the double nearest 10
+        // times the double nearest 1e-6, which is a unit in the last place
+        // below it.
+        assert_eq!(model.parameters.get("cj").copied(), Some(10e-6));
+        assert_eq!(model.parameters.get("tox").copied(), Some(25.4e-6));
+        assert_eq!(model.parameters.get("gain").copied(), Some(1e6));
+        assert_eq!(model.parameters.get("scale").copied(), Some(1e6));
 
         assert!(!model.parameters.contains_key("part"));
         assert_eq!(

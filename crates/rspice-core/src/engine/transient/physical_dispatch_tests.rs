@@ -693,7 +693,7 @@ fn physical_dispatch_nearby_event_trains_preserve_controller_proposal() {
         50e-9,
         1e-9,
     );
-    let jump = 0.52 * 1e-9; // Preserve the authored suffix multiplication.
+    let jump = 0.52e-9; // The authored `.52n` is the double nearest its decimal.
     assert!(result.time.contains(&jump));
     let voltage = result.try_voltage_waveform_named("c").unwrap();
     for (&time, &actual) in result.time.iter().zip(voltage) {

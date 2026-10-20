@@ -8184,8 +8184,8 @@ mod tests {
                     Some(
                         &[
                             "<11000000000000 12000000000>".to_string(),
-                            // Preserve the binary64 product of 13 and 1e-3.
-                            "<0.013000000000000001 14>".to_string()
+                            // `13.0m` is the double nearest 0.013.
+                            "<0.013 14>".to_string()
                         ][..]
                     )
                 );
@@ -14005,11 +14005,12 @@ mod tests {
         }
         // Times are carried as the exact double the deck's suffixed value
         // resolved to, so the program round-trips rather than re-rounding.
-        // `25ns` is 2.5000000000000002e-8 through the shared SPICE value
-        // lexer, the same double every other numeric field on the card gets.
+        // `25ns` is 2.5e-8, the double nearest its decimal, through the
+        // shared SPICE value lexer, the same double every other numeric
+        // field on the card gets.
         assert_eq!(
             pspice_u_stim_program(&netlist, "U1"),
-            "W1 V:A:0.0:0 V:R:1e-8:1 V:A:2.5000000000000002e-8:0"
+            "W1 V:A:0.0:0 V:R:1e-8:1 V:A:2.5e-8:0"
         );
     }
 

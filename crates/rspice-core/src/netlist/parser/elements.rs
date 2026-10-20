@@ -7546,10 +7546,10 @@ fn expect_chebyshev_value(
             ("", 1.0),
         ];
         for (suffix, mut scale) in scales {
-            let Some(mantissa) = numeric.strip_suffix(suffix) else {
+            let Some(written) = numeric.strip_suffix(suffix) else {
                 continue;
             };
-            let Ok(mantissa) = mantissa.parse::<Value>() else {
+            let Ok(mantissa) = written.parse::<Value>() else {
                 continue;
             };
             if explicit_dimension_unit
@@ -7560,7 +7560,9 @@ fn expect_chebyshev_value(
                 // though a bare case-insensitive SPICE `M` means milli.
                 scale = 1.0e6;
             }
-            return Ok(mantissa * scale);
+            return Ok(crate::spice_number::scaled_spice_value(
+                written, mantissa, scale,
+            ));
         }
         Err(invalid_literal(raw))
     };

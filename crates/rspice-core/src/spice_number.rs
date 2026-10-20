@@ -20,6 +20,31 @@ pub(crate) fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
     (scale.parts().0, consumed)
 }
 
+/// `number`, the decimal text `value` was parsed from, scaled by
+/// `multiplier`, a scale [`spice_suffix_scale`] returned, and rounded once.
+///
+/// `10u` written out is 10e-6, but the double nearest 10 times the double
+/// nearest 1e-6 is 9.999999999999999e-6, so `10u - 10e-6` was not zero. Each
+/// suffix's exact decimal ratio moves the exponent of the written number (and
+/// multiplies its digits, for `mil`), and the result is parsed once.
+pub(crate) fn scaled_spice_value(number: &str, value: Value, multiplier: Value) -> Value {
+    if multiplier == 1.0 {
+        return value;
+    }
+    SuffixScale::ALL
+        .iter()
+        .map(|scale| scale.parts())
+        .find(|(scale, _, _)| *scale == multiplier)
+        .and_then(|(_, coefficient, exponent)| {
+            rspice_veriloga_runtime::arithmetic::scaled_decimal(
+                number,
+                u32::try_from(coefficient).ok()?,
+                i32::try_from(exponent).ok()?,
+            )
+        })
+        .unwrap_or(value * multiplier)
+}
+
 fn parse_suffix(chars: &[char]) -> (SuffixScale, usize) {
     if chars.is_empty() {
         return (SuffixScale::Unit, 0);
@@ -194,6 +219,20 @@ enum SuffixScale {
 }
 
 impl SuffixScale {
+    const ALL: [Self; 11] = [
+        Self::Unit,
+        Self::Femto,
+        Self::Pico,
+        Self::Nano,
+        Self::Micro,
+        Self::Milli,
+        Self::Kilo,
+        Self::Mega,
+        Self::Giga,
+        Self::Tera,
+        Self::Mil,
+    ];
+
     /// The existing floating-point multiplier and its exact decimal ratio.
     /// Keep the literal multipliers: computing powers at runtime can change
     /// their bits and would alter ordinary SPICE numeric-token behavior.

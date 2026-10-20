@@ -255,7 +255,9 @@ fn tokenize_rational(text: &str) -> Result<Vec<RatTok>, String> {
                 let mult = suffix_multiplier(&suffix).ok_or_else(|| {
                     format!("unknown magnitude suffix '{suffix}' in LAPLACE expression")
                 })?;
-                tokens.push(RatTok::Num(base * mult));
+                tokens.push(RatTok::Num(crate::spice_number::scaled_spice_value(
+                    &body, base, mult,
+                )));
             }
             other => {
                 return Err(format!(

@@ -556,7 +556,7 @@ fn ccvs_source_slope_changes_have_finite_voltage_and_capacitor_charge() {
     let deck=Netlist::parse("CCVS source jets\nV1 in 0 PWL(0 0 1n 1 2n 1 3n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
     let result = ccvs_engine().run_tran(&deck, 4e-9, 5e-12).unwrap();
     let voltage = result.try_voltage_waveform_named("out").unwrap();
-    for (time, expected) in [(0.0, -0.006), (1e-9, 0.0), (2e-9, 0.006), (3.0 * 1e-9, 0.0)] {
+    for (time, expected) in [(0.0, -0.006), (1e-9, 0.0), (2e-9, 0.006), (3e-9, 0.0)] {
         let i = result.time.iter().position(|&t| t == time).unwrap();
         assert!(
             (voltage[i] - expected).abs() < 1e-12,

@@ -13,7 +13,7 @@
 //! had: `1micro` is a rejection here rather than the 1e-3 the engine would
 //! actually read out of it, and `1milli` rather than 25.4e-6 for `MIL`.
 
-use rspice_core::netlist::lexer::spice_suffix_scale;
+use rspice_core::netlist::lexer::{parse_spice_value_complete, spice_suffix_scale};
 
 pub fn parse_spice_value_checked(s: &str) -> Result<f64, String> {
     let s = s.trim();
@@ -42,21 +42,25 @@ pub fn parse_spice_value_checked(s: &str) -> Result<f64, String> {
     }
 
     let (num_str, suffix) = s.split_at(num_end);
-    let base: f64 = num_str
-        .parse()
+    num_str
+        .parse::<f64>()
         .map_err(|_| format!("invalid numeric value '{}'", s))?;
 
     // The engine's reader consumes the suffix it knows and stops. What it
     // leaves behind is not a unit this boundary may quietly ignore, because a
     // deck would tokenize the remainder separately: `1wat` has to stay a
     // rejection rather than becoming a bare `1`.
-    let (multiplier, consumed) = spice_suffix_scale(suffix);
+    let (_, consumed) = spice_suffix_scale(suffix);
     let consumed_bytes: usize = suffix.chars().take(consumed).map(char::len_utf8).sum();
     if consumed_bytes != suffix.len() {
         return Err(format!("unsupported SPICE suffix '{}'", suffix));
     }
 
-    let value = base * multiplier;
+    // The number is the engine's own reading of the whole token, so a scale
+    // names the decimal it writes (`10u` is 10e-6, not the double nearest 10
+    // times the double nearest 1e-6) exactly as it does in a deck.
+    let value =
+        parse_spice_value_complete(s).map_err(|_| format!("invalid numeric value '{}'", s))?;
     if value.is_finite() {
         Ok(value)
     } else {
@@ -72,6 +76,7 @@ mod tests {
     fn parses_scientific_notation_and_spice_suffixes_without_non_finite_values() {
         assert_eq!(parse_spice_value_checked("1e-6").unwrap(), 1.0e-6);
         assert_eq!(parse_spice_value_checked("10n").unwrap(), 10.0e-9);
+        assert_eq!(parse_spice_value_checked("10u").unwrap(), 10e-6);
         assert!(parse_spice_value_checked("NaN").is_err());
         assert!(parse_spice_value_checked("1wat").is_err());
     }
@@ -156,12 +161,13 @@ mod tests {
                 .find(|&(_, c)| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
                 .map_or(trimmed.len(), |(index, _)| index);
             let (mantissa, suffix) = trimmed.split_at(split);
+            // The product of two rounded doubles may sit a unit in the last
+            // place from the decimal the token writes, which is what is read.
             let (multiplier, _) = spice_suffix_scale(suffix);
             let through_core_suffix =
                 mantissa.parse::<f64>().expect("a plain mantissa") * multiplier;
-            assert_eq!(
-                ours.to_bits(),
-                through_core_suffix.to_bits(),
+            assert!(
+                (ours - through_core_suffix).abs() <= f64::EPSILON * ours.abs(),
                 "{text}: this parser reads {ours:e}, the core suffix table reads {through_core_suffix:e}"
             );
 

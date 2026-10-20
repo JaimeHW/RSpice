@@ -192,16 +192,14 @@ impl<'a> Lexer<'a> {
             multiplier = crate::spice_number::spice_suffix_scale(&tail).0;
         }
 
+        let value = crate::spice_number::scaled_spice_value(&s, base, multiplier);
         let lexeme = if tail.is_empty() {
             s
         } else {
             format!("{s}{tail}")
         };
 
-        Token::Number {
-            value: base * multiplier,
-            lexeme,
-        }
+        Token::Number { value, lexeme }
     }
 
     fn read_ident(&mut self) -> String {
@@ -1377,11 +1375,22 @@ mod tests {
         assert_eq!(eval_const("10kohm"), 10_000.0);
         assert_eq!(eval_const("1e3k/1e6"), 1.0);
         assert_eq!(eval_const("3meg"), 3e6);
-        assert_eq!(eval_const("100n"), 100.0 * 1e-9);
+        assert_eq!(eval_const("100n"), 100e-9);
         assert_eq!(eval_const("1a"), 1.0);
         assert_eq!(eval_const("1MHz"), 1e6);
         assert_eq!(eval_const("3x"), 3e6);
         assert_eq!(eval_const("5xyz"), 5.0);
+    }
+
+    /// A suffixed number is the double nearest the decimal it writes. The
+    /// double nearest 10 times the double nearest 1e-6 is a unit in the last
+    /// place below 10e-6, which this B-source expression magnified to -1.694.
+    #[test]
+    fn a_suffixed_number_is_the_double_nearest_its_decimal() {
+        assert_eq!(eval_const("(10u-10e-6)*1e21"), 0.0);
+        assert_eq!(eval_const("(1.3p-1.3e-12)*1e40"), 0.0);
+        assert_eq!(eval_const("(8.2t-8.2e12)*1e3"), 0.0);
+        assert_eq!(eval_const("(3mil-762e-7)*1e21"), 0.0);
     }
 
     #[test]

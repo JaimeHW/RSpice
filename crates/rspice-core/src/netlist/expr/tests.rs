@@ -158,6 +158,20 @@ fn bare_named_constants_parse_as_numbers() {
     assert_eq!(eval_with(&ctx, "FALSE"), 0.0);
 }
 
+/// A suffixed number in a parameter expression is the double nearest the
+/// decimal it writes, as it is in a value position: `10u` was the double
+/// nearest 10 times the double nearest 1e-6, and `(10u-10e-6)*1e21` read
+/// -1.694 instead of 0.
+#[test]
+fn suffixed_numbers_are_the_double_nearest_their_decimal() {
+    let ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "(10u-10e-6)*1e21"), 0.0);
+    assert_eq!(eval_with(&ctx, "(1.1f-1.1e-15)*1e45"), 0.0);
+    assert_eq!(eval_with(&ctx, "(4.1meg-4.1e6)*1e21"), 0.0);
+    assert_eq!(eval_with(&ctx, "(3mil-762e-7)*1e21"), 0.0);
+    assert_eq!(eval_with(&ctx, "(10uF-10e-6)*1e21"), 0.0);
+}
+
 #[test]
 fn ngspice_min_max_reduce_one_or_many_arguments() {
     let ctx = ParamContext::new();
@@ -1961,9 +1975,11 @@ fn number_suffixes_read_the_deck_suffix_table() {
     assert_eq!(eval_with(&ctx, "1mil"), 25.4e-6);
     assert_eq!(eval_with(&ctx, "1MHz"), 1e6);
     assert_eq!(eval_with(&ctx, "1e3k"), 1e6);
-    // ngspice computes `mantissa * scale`, so pin the same product (one
-    // ulp off the decimal literal 2.5e-6).
-    assert_eq!(eval_with(&ctx, "2.5u"), 2.5 * 1e-6);
+    // numparam computes `mantissa * scale`, a unit in the last place off the
+    // decimal literal 2.5e-6 (ngspice-46 reads `{(2.5u-2.5e-6)*1e22}` as
+    // -4.235). A suffix here names the decimal it writes, as it does in a
+    // B-source, where ngspice-46 reads `(10u-10e-6)*1e21` as 0.
+    assert_eq!(eval_with(&ctx, "2.5u"), 2.5e-6);
     assert_eq!(eval_with(&ctx, "1a"), 1.0);
     assert_eq!(eval_with(&ctx, "5xyz"), 5.0);
     assert_eq!(eval_with(&ctx, "10k + 1"), 10_001.0);

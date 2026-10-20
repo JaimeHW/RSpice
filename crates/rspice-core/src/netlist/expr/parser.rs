@@ -543,7 +543,7 @@ impl<'a> ExprParser<'a> {
         let num_str = &self.input[start..numeric_end];
         match num_str.parse::<f64>() {
             Ok(v) => {
-                let value = v * multiplier;
+                let value = crate::spice_number::scaled_spice_value(num_str, v, multiplier);
                 if imaginary_literal {
                     Ok(Expr::ComplexNumber(ComplexValue::new(0.0, value)))
                 } else {

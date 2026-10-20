@@ -4275,7 +4275,9 @@ mod tests {
                 })
                 .expect("row retains capacitor");
             assert_eq!(resistance, scale * 1.0e3);
-            assert_eq!(capacitance, (scale + 1.0) * 1.0e-6);
+            // `5u` is the double nearest 5e-6, not 5 times the double nearest
+            // 1e-6.
+            assert_eq!(capacitance, [2e-6, 3e-6, 4e-6, 5e-6, 6e-6, 7e-6][index]);
 
             let omega = 2.0 * PI * result.frequency;
             let impedance_magnitude =
