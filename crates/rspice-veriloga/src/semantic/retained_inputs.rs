@@ -2,9 +2,23 @@
 
 use super::{AnalyzedAssignment, AnalyzedModule, AnalyzedRegion, AnalyzedStatement};
 use crate::ast::Expression;
+use crate::source::Span;
+use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
-pub(super) fn record(module: &mut AnalyzedModule) {
+/// One source variable whose value carries from the last accepted point,
+/// with the first read that can see it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RetainedVariable {
+    /// The variable as the author declared it; an array is named once.
+    pub(super) name: SmolStr,
+    /// The first read, in execution order, that no assignment reaches.
+    pub(super) first_read: Span,
+}
+
+/// Mark every variable some path reads before it is assigned as retained
+/// state, and return them in the order their first such read executes.
+pub(super) fn record(module: &mut AnalyzedModule) -> Vec<RetainedVariable> {
     let mut flow = Flow {
         module,
         names: module
@@ -13,8 +27,9 @@ pub(super) fn record(module: &mut AnalyzedModule) {
             .enumerate()
             .map(|(slot, variable)| (variable.name.as_str(), slot))
             .collect(),
-        reads: HashSet::new(),
+        reads: HashMap::new(),
         writes: HashSet::new(),
+        site: 0,
     };
     let mut defined = HashSet::new();
     for &index in &module.prologue_statements {
@@ -23,9 +38,14 @@ pub(super) fn record(module: &mut AnalyzedModule) {
         }
     }
     flow.regions(&module.body, &mut defined);
-    let mut retained: Vec<_> = flow.reads.intersection(&flow.writes).copied().collect();
-    retained.sort_unstable();
-    for slot in retained {
+    let Flow { reads, writes, .. } = flow;
+    let mut retained: Vec<_> = reads
+        .into_iter()
+        .filter(|(slot, _)| writes.contains(slot))
+        .collect();
+    retained.sort_unstable_by_key(|&(slot, _)| slot);
+    let mut reported = Vec::new();
+    for (slot, first_read) in retained {
         // Event-controlled storage has a distinct publication contract: the
         // executable backend consumes the assignment pass's settled candidate.
         // Ordinary procedural lifetimes must not change those reads.
@@ -35,24 +55,71 @@ pub(super) fn record(module: &mut AnalyzedModule) {
         module.variables[slot].retains_input = true;
         module.variables[slot].is_state = true;
         module.event_state_variables.push(slot);
+        reported.push((slot, first_read));
     }
     module.event_state_variables.sort_unstable();
     module.event_state_variables.dedup();
+    report(module, reported)
 }
+
+/// Name each retained variable once, an array by its own name, at the first
+/// read of any of its slots.
+fn report(module: &AnalyzedModule, slots: Vec<(usize, (Order, Span))>) -> Vec<RetainedVariable> {
+    let mut first: HashMap<SmolStr, (Order, Span)> = HashMap::new();
+    for (slot, read) in slots {
+        let name = module
+            .arrays
+            .iter()
+            .find(|(_, array)| (array.base..array.base + array.len).contains(&slot))
+            .map_or_else(
+                || module.variables[slot].name.clone(),
+                |(name, _)| name.clone(),
+            );
+        first
+            .entry(name)
+            .and_modify(|earliest| {
+                if read.0 < earliest.0 {
+                    *earliest = read;
+                }
+            })
+            .or_insert(read);
+    }
+    let mut variables: Vec<_> = first.into_iter().collect();
+    variables.sort_unstable_by_key(|(_, (order, _))| *order);
+    variables
+        .into_iter()
+        .map(|(name, (_, first_read))| RetainedVariable { name, first_read })
+        .collect()
+}
+
+/// Where a read runs: the expression's place in the walk, then its offset
+/// within that expression, whose operands the walk need not visit in order.
+type Order = (usize, u32);
 
 struct Flow<'a> {
     module: &'a AnalyzedModule,
     names: HashMap<&'a str, usize>,
-    reads: HashSet<usize>,
+    /// Each slot read with no reaching assignment, with the execution order
+    /// and site of its first such read.
+    reads: HashMap<usize, (Order, Span)>,
     writes: HashSet<usize>,
+    /// Expressions walked so far.
+    site: usize,
 }
 
 impl Flow<'_> {
     fn expression(&mut self, expression: &Expression, defined: &HashSet<usize>) {
+        self.site += 1;
+        let site = self.site;
         super::flow_probes::visit_expression(expression, &mut |expression| {
+            let span = expression.span();
+            let read_at = ((site, span.start), span);
             let mut read = |slot| {
                 if !defined.contains(&slot) {
-                    self.reads.insert(slot);
+                    let first = self.reads.entry(slot).or_insert(read_at);
+                    if read_at.0 < first.0 {
+                        *first = read_at;
+                    }
                 }
             };
             match expression {
@@ -221,6 +288,108 @@ mod tests {
         assert_eq!(
             retained("real held=3, seen; analog begin seen=held; held=2*V(p,n); I(p,n)<+seen; end"),
             ["held"]
+        );
+    }
+
+    /// A case with no default leaves its variable unassigned when no arm
+    /// matches; a default that assigns it closes that path. Neither direction
+    /// may be approximated: the first must retain, the second must not.
+    #[test]
+    fn retained_inputs_are_exact_on_case_arms() {
+        let case = |default: &str| {
+            retained(&format!(
+                "real x; integer sel; analog begin sel=V(p,n)>0; \
+                 case (sel) 0: x=1; 1: x=2; {default} endcase I(p,n)<+x; end"
+            ))
+        };
+        assert_eq!(case(""), ["x"]);
+        assert!(case("default: x=3;").is_empty());
+        assert_eq!(case("default: ;"), ["x"]);
+    }
+
+    /// A runtime loop's first trip reads what the previous evaluation left in
+    /// a variable its body assigns later; a read after the body's own
+    /// assignment on the same trip does not. A compile-time-bounded loop runs
+    /// its body, so its assignments reach the reads after it.
+    #[test]
+    fn retained_inputs_are_exact_on_loop_carried_and_unrolled_reads() {
+        assert_eq!(
+            retained(
+                "real x, y; integer i; parameter integer trips=2; analog begin y=0; i=0; \
+                 while (i<trips) begin y=y+x; x=V(p,n); i=i+1; end I(p,n)<+y; end"
+            ),
+            ["x"]
+        );
+        assert!(
+            retained(
+                "real x, y; integer i; parameter integer trips=2; analog begin y=0; i=0; \
+                 while (i<trips) begin x=V(p,n); y=y+x; i=i+1; end I(p,n)<+y; end"
+            )
+            .is_empty()
+        );
+        assert!(
+            retained(
+                "real x; integer i; analog begin for (i=0; i<2; i=i+1) x=V(p,n)*i; I(p,n)<+x; end"
+            )
+            .is_empty()
+        );
+    }
+
+    fn warnings(source: &str) -> Vec<(String, String)> {
+        let tokens = crate::lexer::Lexer::new(source, crate::source::SourceId::new(0))
+            .collect_tokens()
+            .unwrap();
+        let file = crate::parser::Parser::new(&tokens).parse().unwrap();
+        super::super::SemanticAnalyzer::new()
+            .analyze(&file)
+            .unwrap()
+            .warnings
+            .into_iter()
+            .filter(|warning| warning.code == super::super::RETAINED_VARIABLE_CODE)
+            .map(|warning| {
+                let line = source[..warning.span.start as usize].lines().count();
+                let text = &source[warning.span.start as usize..warning.span.end as usize];
+                (warning.message, format!("{line}: {text}"))
+            })
+            .collect()
+    }
+
+    /// Each retained variable is reported once, an array by its own name, at
+    /// the first read no assignment reaches, in the order those reads run.
+    #[test]
+    fn each_retained_variable_is_reported_once_at_its_first_unassigned_read() {
+        let source = "module m(p,n); inout p,n; electrical p,n;\n\
+                      real count, a[0:2], seen, x;\n\
+                      analog begin\n\
+                      x = V(p,n);\n\
+                      if (x > 0.5) count = count + 1;\n\
+                      seen = a[1] + count + a[2];\n\
+                      a[1] = x; a[2] = seen;\n\
+                      I(p,n) <+ count + seen + x;\n\
+                      end endmodule";
+        assert_eq!(
+            warnings(source),
+            [
+                (
+                    "`count` is read before it is assigned, so it keeps its value from the last \
+                     accepted time point"
+                        .to_string(),
+                    "5: count".to_string()
+                ),
+                (
+                    "`a` is read before it is assigned, so it keeps its value from the last \
+                     accepted time point"
+                        .to_string(),
+                    "6: a[1]".to_string()
+                ),
+            ]
+        );
+        assert!(
+            warnings(
+                "module m(p,n); inout p,n; electrical p,n; real x; analog begin \
+                 x = V(p,n); I(p,n) <+ x; end endmodule"
+            )
+            .is_empty()
         );
     }
 }

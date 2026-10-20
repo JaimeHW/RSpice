@@ -371,6 +371,10 @@ const NO_EFFECT_SYSTEM_TASK_CODE: &str = "VA-SEM-NO-EFFECT-SYSTEM-TASK";
 /// Diagnostic code for `posedge`/`negedge` lowered to an analog `cross`.
 const EDGE_EVENT_AS_CROSS_CODE: &str = "VA-SEM-EDGE-EVENT-AS-CROSS";
 
+/// Diagnostic code for a variable some path reads before assigning it, which
+/// therefore carries its value from the last accepted point.
+const RETAINED_VARIABLE_CODE: &str = "VA-SEM-RETAINED-VARIABLE";
+
 /// Widest packed vector this front end will resolve.
 ///
 /// Nothing materializes a bit per entry yet, but a declared width becomes an
@@ -2414,7 +2418,17 @@ impl SemanticAnalyzer {
 
         analyzed.symbol_table = self.symbols.clone();
         analyzed.noise_process_count = self.next_noise_process;
-        retained_inputs::record(&mut analyzed);
+        for retained in retained_inputs::record(&mut analyzed) {
+            self.warn(
+                RETAINED_VARIABLE_CODE,
+                format!(
+                    "`{}` is read before it is assigned, so it keeps its value from the last \
+                     accepted time point",
+                    retained.name
+                ),
+                retained.first_read,
+            );
+        }
         self.assignment_events.finish(&mut analyzed)?;
         for (item, _) in &parameter_arrays {
             analyzed
