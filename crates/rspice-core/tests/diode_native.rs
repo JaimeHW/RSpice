@@ -338,6 +338,118 @@ fn diode_rsw_puts_the_sidewall_behind_its_own_resistance_like_ngspice46() {
     }
 }
 
+#[test]
+fn diode_rsw_split_presents_one_device_carrying_the_whole_anode_current() {
+    // ngspice-46 (`set numdgt=12`) on the DC deck: i(v2) = -1.29792187492e-02,
+    // @d2[vd] = 7.115109978507e-01, @d2[gd] = 3.421197992556e-01 and the
+    // bottom-junction @d2[id] = 8.848900214927e-03, so the RSW sidewall
+    // carries the remaining 4.1303185342e-03 A. RSpice reports D2 as the
+    // one authored device: I(D2) and its ID are the whole anode current,
+    // and the sidewall junction rides along as D2's VDSW/IDSW/GDSW/CDSW.
+    let card = ".model m2 d(is=1e-14 jsw=1e-14 ns=1.2 rs=10 rsw=100 cjo=1p cjsw=2p)\n";
+    let dc = format!(
+        "* RSW presentation\n\
+         .options reltol=1e-7 abstol=1e-18 vntol=1e-10\n\
+         v2 a2 0 dc 0.8\n\
+         d2 a2 0 m2 pj=10\n\
+         {card}.end\n"
+    );
+    let total = 1.297_921_874_92e-2;
+    let bottom = 8.848_900_214_927e-3;
+    let netlist = Netlist::parse(&dc).expect("RSW deck parses");
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
+    let (result, report) = engine
+        .run_dc_op_with_report(&netlist)
+        .expect("RSW deck converges");
+    assert_close("i(v2)", branch_current(&result, "v2"), -total, 1.0e-6, 0.0);
+    let observable = |name: &str| {
+        result
+            .try_dc_observable_named(name)
+            .unwrap_or_else(|| panic!("missing {name}"))
+    };
+    assert_close("I(D2)", observable("I(D2)"), total, 1.0e-6, 0.0);
+    assert!(
+        result.try_dc_observable_named("I(D2.__sw)").is_none(),
+        "the split sidewall must not publish a current of its own"
+    );
+    assert!(
+        report
+            .entries
+            .iter()
+            .all(|entry| !entry.name.to_ascii_lowercase().starts_with("d2.")),
+        "the split sidewall must not appear as a device: {:?}",
+        report.entries
+    );
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("d2"))
+        .expect("D2 operating point");
+    let field = |name: &str| {
+        entry
+            .params
+            .iter()
+            .find(|(parameter, _)| *parameter == name)
+            .unwrap_or_else(|| panic!("D2 is missing {name}: {entry:?}"))
+            .1
+    };
+    assert_close("D2 id", field("id"), total, 1.0e-6, 0.0);
+    assert_close("D2 idsw", field("idsw"), total - bottom, 1.0e-6, 0.0);
+    assert_close("D2 vd", field("vd"), 7.115_109_978_507e-1, 1.0e-6, 0.0);
+    assert_close("D2 gd", field("gd"), 3.421_197_992_556e-1, 1.0e-6, 0.0);
+    for parameter in ["id", "idsw", "vdsw", "gdsw", "cdsw"] {
+        assert_eq!(
+            result.try_dc_observable_named(&format!("D2:{parameter}")),
+            Some(field(parameter)),
+            "D2:{parameter} must read the folded report"
+        );
+    }
+
+    // Transient: the derived I(D2) and the reported ID stay the whole anode
+    // current, displacement included, so KCL holds against the source.
+    let tran = format!(
+        "* RSW presentation transient\n\
+         .options reltol=1e-7 abstol=1e-18 vntol=1e-10\n\
+         v2 a2 0 dc 0.8 sin(0.8 0.05 10meg)\n\
+         d2 a2 0 m2 pj=10\n\
+         {card}.tran 1n 200n\n\
+         .save i(v2) i(d2) @d2[id] @d2[idsw]\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&tran).expect("RSW transient deck parses");
+    let tran = engine
+        .run_tran(&netlist, 2.0e-7, 1.0e-9)
+        .expect("RSW transient converges");
+    let source = tran.try_branch_current_waveform_named("v2").unwrap();
+    let diode = tran
+        .try_branch_current_waveform_named("d2")
+        .expect("derived I(D2) waveform");
+    let reported = tran
+        .try_device_op_waveform_named("d2", "id")
+        .expect("@d2[id] waveform");
+    let sidewall = tran
+        .try_device_op_waveform_named("d2", "idsw")
+        .expect("@d2[idsw] waveform");
+    let peak = source
+        .iter()
+        .fold(0.0_f64, |peak, value| peak.max(value.abs()));
+    for (index, &supplied) in source.iter().enumerate() {
+        for (label, value) in [("I(D2)", diode[index]), ("@d2[id]", reported[index])] {
+            assert!(
+                (value + supplied).abs() <= 1.0e-6 * peak,
+                "{label} at sample {index}: {value:e} against the anode current {:e}",
+                -supplied
+            );
+        }
+        assert!(
+            sidewall[index] > 0.0 && sidewall[index] < reported[index],
+            "@d2[idsw] at sample {index}: {:e} of {:e}",
+            sidewall[index],
+            reported[index]
+        );
+    }
+}
+
 fn isr_reverse_branch_current(dialect: SpiceDialect, voltage: f64) -> f64 {
     let deck = format!(
         "* diode ISR/NR dialect oracle\n\

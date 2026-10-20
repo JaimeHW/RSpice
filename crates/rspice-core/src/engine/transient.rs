@@ -2129,7 +2129,14 @@ impl Engine {
                 },
             );
         }
-        for (index, diode) in circuit.diodes.devices.iter().enumerate() {
+        // A split RSW sidewall's current is part of its owner's I(D).
+        for (index, diode) in circuit
+            .diodes
+            .devices
+            .iter()
+            .enumerate()
+            .filter(|(_, diode)| diode.split_sidewall_owner().is_none())
+        {
             consider(
                 &diode.name,
                 DerivedTransientBranchCurrent {
@@ -2346,21 +2353,27 @@ impl Engine {
                     })?
             }
             DerivedTransientBranchCurrentKind::NativeDiode => {
-                let diode = &circuit.diodes.devices[branch.index];
-                let voltage = Self::solution_node_voltage(solution, diode.node_anode)
-                    - Self::solution_node_voltage(solution, diode.node_cathode);
-                let displacement_current = match diode_history {
-                    Some(history) => {
-                        history.cqd_prev.get(branch.index).copied().ok_or_else(|| {
+                let junction_current = |index: usize| -> Result<Value, SimulationError> {
+                    let diode = &circuit.diodes.devices[index];
+                    let voltage = Self::solution_node_voltage(solution, diode.node_anode)
+                        - Self::solution_node_voltage(solution, diode.node_cathode);
+                    let displacement_current = match diode_history {
+                        Some(history) => history.cqd_prev.get(index).copied().ok_or_else(|| {
                             SimulationError::Circuit(format!(
                                 "accepted diode current history is missing instance '{}'",
                                 diode.name
                             ))
-                        })?
-                    }
-                    None => 0.0,
+                        })?,
+                        None => 0.0,
+                    };
+                    Ok(diode.stamped_conduction_current(voltage) + displacement_current)
                 };
-                diode.stamped_conduction_current(voltage) + displacement_current
+                // The anode current also feeds a split RSW sidewall.
+                junction_current(branch.index)?
+                    + match circuit.diodes.split_sidewall_of(branch.index) {
+                        Some(sidewall) => junction_current(sidewall)?,
+                        None => 0.0,
+                    }
             }
             DerivedTransientBranchCurrentKind::VerilogATerminalMeter => circuit
                 .veriloga_terminal_meter_current(

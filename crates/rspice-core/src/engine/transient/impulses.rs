@@ -159,6 +159,12 @@ pub(super) fn initialize(
             }
         }
     }
+    // A split RSW sidewall's charge jump lands on its owner's I(D) trace.
+    for index in 0..diodes.len() {
+        if let Some(sidewall) = circuit.diodes.split_sidewall_of(index) {
+            diodes[sidewall] = diodes[index];
+        }
+    }
     let mut bjt_terminals = allocated(circuit.bjts.len())?;
     for model in &circuit.bjts.devices {
         if abort.is_aborted() {

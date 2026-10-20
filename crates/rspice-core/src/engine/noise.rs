@@ -2756,23 +2756,28 @@ impl Engine {
         // contributes thermal noise through the resistor walk above —
         // dionoise.c's source set exactly). Flicker follows dionoise.c:
         // m·KF·max(|Id/m|, 1e-38)^AF / f.
+        // A split RSW sidewall is its owner's sidewall shot and flicker
+        // source (dionoise.c's `_idsw`/`_1overfsw`), not a device of its own.
         for diode in &circuit.diodes.devices {
+            let (device, shot, flicker) = match diode.split_sidewall_owner() {
+                Some(owner) => (owner, "IDSW", "FNSW"),
+                None => (diode.name.as_str(), "ID", "FN"),
+            };
             let vd = Self::noise_node_voltage(dc_solution, diode.node_anode)
                 - Self::noise_node_voltage(dc_solution, diode.node_cathode);
             let id = diode.current(vd);
             if id != 0.0 {
                 noise_sources.push(
-                    NoiseSource::shot(diode.name.clone(), diode.node_anode, diode.node_cathode, id)
+                    NoiseSource::shot(device.to_string(), diode.node_anode, diode.node_cathode, id)
                         .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                            &diode.name,
-                            "ID",
+                            device, shot,
                         )),
                 );
             }
             if let Some((kf, af)) = diode.flicker_noise_coefficients() {
                 noise_sources.push(Self::semiconductor_flicker_source(
                     NoiseSource::flicker_with_frequency_exponent(
-                        diode.name.clone(),
+                        device.to_string(),
                         diode.node_anode,
                         diode.node_cathode,
                         kf,
@@ -2781,7 +2786,7 @@ impl Engine {
                         id,
                     )
                     .with_identity(
-                        crate::analysis::NoiseSourceIdentity::mechanism(&diode.name, "FN"),
+                        crate::analysis::NoiseSourceIdentity::mechanism(device, flicker),
                     ),
                     diode.multiplicity,
                 )?);

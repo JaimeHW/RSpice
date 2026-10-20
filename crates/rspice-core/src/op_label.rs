@@ -201,6 +201,11 @@ op_labels! {
     GDS = "gds",
     GD = "gd",
     CD = "cd",
+    // Sidewall junction of a diode whose RSW gives it a node of its own.
+    VDSW = "vdsw",
+    IDSW = "idsw",
+    GDSW = "gdsw",
+    CDSW = "cdsw",
     GMB = "gmb",
     GMBS = "gmbs",
     BETA = "beta",

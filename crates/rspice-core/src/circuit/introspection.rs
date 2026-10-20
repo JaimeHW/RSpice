@@ -683,22 +683,42 @@ impl CircuitData {
             ));
         }
 
-        for diode in &self.diodes.devices {
+        // A diode whose RSW splits its sidewall onto a node of its own is
+        // still one device: ID is the whole anode current and the sidewall
+        // junction's own values ride along as its *SW fields.
+        let sidewalls = self.diodes.split_sidewall_indices();
+        for (diode, sidewall) in self.diodes.devices.iter().zip(&sidewalls) {
+            if diode.split_sidewall_owner().is_some() {
+                continue;
+            }
             let (vd, id, gd, cd) = diode.op_values();
+            let sidewall = sidewall.map(|index| self.diodes.devices[index].op_values());
+            let mut params = vec![
+                (OpLabel::VD, vd),
+                (
+                    OpLabel::ID,
+                    id + sidewall.map_or(0.0, |(_, idsw, _, _)| idsw),
+                ),
+                (OpLabel::GD, gd),
+                (OpLabel::CD, cd),
+                (
+                    OpLabel::TEMP,
+                    crate::constants::kelvin_to_celsius(diode.operating_temperature_kelvin()),
+                ),
+            ];
+            if let Some((vdsw, idsw, gdsw, cdsw)) = sidewall {
+                params.extend([
+                    (OpLabel::VDSW, vdsw),
+                    (OpLabel::IDSW, idsw),
+                    (OpLabel::GDSW, gdsw),
+                    (OpLabel::CDSW, cdsw),
+                ]);
+            }
             entries.push(DeviceOpEntry::new(
                 diode.name.clone(),
                 OpLabel::DIODE,
                 None,
-                vec![
-                    (OpLabel::VD, vd),
-                    (OpLabel::ID, id),
-                    (OpLabel::GD, gd),
-                    (OpLabel::CD, cd),
-                    (
-                        OpLabel::TEMP,
-                        crate::constants::kelvin_to_celsius(diode.operating_temperature_kelvin()),
-                    ),
-                ],
+                params,
             ));
         }
 
@@ -1062,21 +1082,30 @@ impl CircuitData {
             solution,
             accepted_jfet_displacement_currents,
         )?;
-        for (diode, displacement_current) in self
+        let node_voltage = |node: NodeId| {
+            if node == 0 {
+                0.0
+            } else {
+                solution.get(node - 1).copied().unwrap_or(0.0)
+            }
+        };
+        let junction_currents = self
             .diodes
             .devices
             .iter()
             .zip(accepted_diode_displacement_currents.iter().copied())
-        {
-            let node_voltage = |node: NodeId| {
-                if node == 0 {
-                    0.0
-                } else {
-                    solution.get(node - 1).copied().unwrap_or(0.0)
-                }
-            };
-            let voltage = node_voltage(diode.node_anode) - node_voltage(diode.node_cathode);
-            let total_current = diode.stamped_conduction_current(voltage) + displacement_current;
+            .map(|(diode, displacement_current)| {
+                let voltage = node_voltage(diode.node_anode) - node_voltage(diode.node_cathode);
+                diode.stamped_conduction_current(voltage) + displacement_current
+            })
+            .collect::<Vec<_>>();
+        let sidewalls = self.diodes.split_sidewall_indices();
+        for (index, diode) in self.diodes.devices.iter().enumerate() {
+            if diode.split_sidewall_owner().is_some() {
+                continue;
+            }
+            let sidewall_current = sidewalls[index].map(|sidewall| junction_currents[sidewall]);
+            let total_current = junction_currents[index] + sidewall_current.unwrap_or(0.0);
             let entry = report
                 .entries
                 .iter_mut()
@@ -1103,6 +1132,14 @@ impl CircuitData {
                     )
                 })?;
             id.1 = total_current;
+            if let Some(sidewall_current) = sidewall_current
+                && let Some(idsw) = entry
+                    .params
+                    .iter_mut()
+                    .find(|(parameter, _)| parameter.eq_ignore_ascii_case(OpLabel::IDSW.as_str()))
+            {
+                idsw.1 = sidewall_current;
+            }
         }
         if accepted_bjt_external_bc_currents
             .is_some_and(|currents| currents.len() != self.bjts.devices.len())

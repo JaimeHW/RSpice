@@ -122,7 +122,14 @@ impl CircuitData {
                 }
             }
         }
-        for dev in &self.diodes.devices {
+        // A split RSW sidewall reports its junction voltage as its owner's
+        // VDSW, not as a device of its own.
+        for dev in self
+            .diodes
+            .devices
+            .iter()
+            .filter(|dev| dev.split_sidewall_owner().is_none())
+        {
             visit(
                 &dev.name,
                 OpLabel::INTRINSIC_VAK,

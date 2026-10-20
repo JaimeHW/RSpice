@@ -706,9 +706,20 @@ impl Engine {
         // converged terminal voltage used by the device's constitutive law.
         // Keep the positive-to-negative anode/cathode convention consistent
         // with voltage-source and resistor I(...) observables.
-        for diode in &circuit.diodes.devices {
+        // A split RSW sidewall carries part of its owner's anode current, so
+        // I(D) is the sum of both junctions and the sidewall has no I() of
+        // its own.
+        let diode_current = |diode: &crate::device::Diode| {
             let voltage = node_voltage(diode.node_anode) - node_voltage(diode.node_cathode);
-            let current = diode.stamped_conduction_current(voltage);
+            diode.stamped_conduction_current(voltage)
+        };
+        let sidewalls = circuit.diodes.split_sidewall_indices();
+        for (diode, sidewall) in circuit.diodes.devices.iter().zip(&sidewalls) {
+            if diode.split_sidewall_owner().is_some() {
+                continue;
+            }
+            let current = diode_current(diode)
+                + sidewall.map_or(0.0, |index| diode_current(&circuit.diodes.devices[index]));
             result.push_dc_observable(format!("I({})", diode.name), current);
         }
 

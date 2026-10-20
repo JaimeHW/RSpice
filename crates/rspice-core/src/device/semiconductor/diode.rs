@@ -415,6 +415,9 @@ pub struct Diode {
     tbv1_given: bool,
     /// Junctions this instance evaluates; see [`DiodeSidewallRole`].
     sidewall_role: DiodeSidewallRole,
+    /// The authored diode a split RSW sidewall belongs to. Reports and
+    /// terminal currents present the two junctions as that one device.
+    sidewall_owner: Option<String>,
     /// Quadratic temperature coefficient for the reverse breakdown voltage
     /// (Xyce TBV2, in 1/C^2).
     pub tbv2: Value,
@@ -681,6 +684,7 @@ impl Diode {
             tbv1: 0.0,
             tbv1_given: false,
             sidewall_role: DiodeSidewallRole::Combined,
+            sidewall_owner: None,
             tbv2: 0.0,
 
             // Flicker noise off by default (diosetup.c: fNcoef 0, fNexp 1).
@@ -721,10 +725,18 @@ impl Diode {
         sidewall.node_anode = sidewall_node;
         sidewall.rs = 0.0;
         sidewall.sidewall_role = DiodeSidewallRole::Sidewall;
+        sidewall.sidewall_owner = Some(self.name.clone());
         sidewall.candidate_eval_valid = false;
         self.sidewall_role = DiodeSidewallRole::Bottom;
         self.candidate_eval_valid = false;
         sidewall
+    }
+
+    /// The authored diode this instance is the split RSW sidewall of. Its
+    /// currents, power and operating point belong to that device in every
+    /// user-facing report.
+    pub(crate) fn split_sidewall_owner(&self) -> Option<&str> {
+        self.sidewall_owner.as_deref()
     }
 
     /// Operating RSW of a split sidewall: ngspice scales its conductance by

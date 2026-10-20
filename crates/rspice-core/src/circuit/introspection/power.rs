@@ -170,7 +170,14 @@ impl CircuitData {
         sample!(&self.vdmoses.devices, d, []);
         sample!(&self.bjts.devices, d, [d.node_rth, d.node_xf1, d.node_xf2]);
         sample!(&self.jfets, d, []);
-        sample!(&self.diodes.devices, d, []);
+        // A split RSW sidewall dissipates inside the diode it belongs to.
+        for diode in &self.diodes.devices {
+            let value = conductive_power(diode, solution, self.num_nodes(), &[])
+                .map_err(|error| format!("device '{}': {error}", diode.name))?;
+            *powers
+                .entry(diode.split_sidewall_owner().unwrap_or(&diode.name))
+                .or_insert(0.0) += value;
+        }
         for (index, owner) in self.resistors.device_owners.iter().enumerate() {
             let Some(power) = owner.as_deref().and_then(|owner| powers.get_mut(owner)) else {
                 continue;

@@ -1019,11 +1019,15 @@ fn periodic_residual_gaps_in_context(circuit: &CircuitData, carrier: bool) -> Ve
     if F::Diode.instance_count(circuit) > 0
         && matches!(capability_support(F::Diode, Cap), Restricted(_))
     {
+        // A split RSW sidewall is part of the diode that owns it.
         let reduced = circuit
             .diodes
             .devices
             .iter()
-            .filter(|diode| !diode_has_exact_periodic_residual_form(diode))
+            .filter(|diode| {
+                diode.split_sidewall_owner().is_none()
+                    && !diode_has_exact_periodic_residual_form(diode)
+            })
             .count();
         if reduced > 0 {
             gaps.push(describe(
@@ -1728,7 +1732,7 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
     }
     if !capability_support(F::Diode, Cap).admits_every_instance() {
         for diode in &circuit.diodes.devices {
-            if diode.kf != 0.0 {
+            if diode.kf != 0.0 && diode.split_sidewall_owner().is_none() {
                 gaps.push(CapabilityGap::new(
                     F::Diode,
                     format!(

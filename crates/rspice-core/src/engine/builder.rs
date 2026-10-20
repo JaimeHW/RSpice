@@ -7001,6 +7001,8 @@ impl Engine {
                     }
 
                     circuit.diodes.add(diode);
+                    // Directly after its owner: reports find it there
+                    // (`Diodes::split_sidewall_of`).
                     if let Some(sidewall) = sidewall {
                         circuit.diodes.add(sidewall);
                     }

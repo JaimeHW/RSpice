@@ -43,6 +43,29 @@ impl Diodes {
         Self::default()
     }
 
+    /// The index of the split RSW sidewall that belongs to device `index`,
+    /// if any. The builder stores a split sidewall directly after its owner.
+    /// A split sidewall is never presented as a device of its own: its
+    /// terminal current, power and operating point are its owner's.
+    pub(crate) fn split_sidewall_of(&self, index: usize) -> Option<usize> {
+        let owner = self.devices.get(index)?;
+        if owner.split_sidewall_owner().is_some() {
+            return None;
+        }
+        let next = index + 1;
+        self.devices
+            .get(next)
+            .filter(|sidewall| sidewall.split_sidewall_owner() == Some(owner.name.as_str()))
+            .map(|_| next)
+    }
+
+    /// [`Self::split_sidewall_of`] for every device, in storage order.
+    pub(crate) fn split_sidewall_indices(&self) -> Vec<Option<usize>> {
+        (0..self.devices.len())
+            .map(|index| self.split_sidewall_of(index))
+            .collect()
+    }
+
     pub(crate) fn add(&mut self, diode: Diode) {
         self.devices.push(diode);
     }
