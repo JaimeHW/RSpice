@@ -5,15 +5,10 @@
 //! Keeping one isolated draft across those owners gives the upgraded mockup a
 //! real Apply/Cancel boundary and prevents partially applied canvas settings.
 
-use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
+use egui::Context;
 
 use crate::state::{GridStyle, SchematicWireRoutingStyle, WireRoutingMode};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-    select_mono_with_response,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 use crate::workbench::app::{
     GridSnapRoutingDialogState, GridSnapRoutingDraft, GridSnapRoutingFocusTarget,
     GridSnapSpacingChoice, RSpiceApp, SchematicEditAuthority,
@@ -23,7 +18,6 @@ use crate::workbench::app_state::AppState;
 const TITLE: &str = "Grid, snap and wire routing";
 const PRIMARY: &str = "Apply canvas settings";
 const DESCRIPTION: &str = "Grid display is what you see; snap pitch and snap targets are what the cursor commits to. They are set separately because a coarse grid with fine snapping is a normal way to work.";
-const ERROR_TITLE: &str = "Canvas settings were not applied";
 const GRID_STYLES: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
 
 pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
@@ -62,7 +56,6 @@ impl RSpiceApp {
             return;
         }
 
-        let dirty = self.state.dialogs.grid_snap_routing.dirty();
         let read_only = self.state.schematic_edit_read_only();
         let angled_routing = angled_routing_allowed(&self.state);
         let validation_error = self
@@ -71,22 +64,25 @@ impl RSpiceApp {
             .grid_snap_routing
             .validation_error
             .clone();
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .ghost(if dirty { "Discard changes" } else { "Cancel" })
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if let Some(error) = validation_error.as_deref() {
-            dialog = dialog.transaction_state(DialogTransactionTone::Error, ERROR_TITLE, error);
+        let transaction = &mut self.state.dialogs.grid_snap_routing;
+        let mut spacing_id = None;
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .describe(DESCRIPTION)
+            // A refusal is known only once Apply is pressed; while there is
+            // none, the form reserves no slot for it.
+            .status(validation_error.as_deref().map_or(Ok(None), Err))
+            .status_fixed_at_open()
+            .show(ctx, |rows| {
+                let (grid, spacing) =
+                    grid_snap_routing_rows(rows, transaction, read_only, angled_routing);
+                spacing_id = Some(spacing);
+                Some(grid)
+            });
+        if let Some(GridSnapRoutingFocusTarget::SnapSpacing) = transaction.focus_target.take()
+            && let Some(id) = spacing_id
+        {
+            ctx.memory_mut(|memory| memory.request_focus(id));
         }
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            Some(grid_snap_routing_body(
-                ui,
-                &mut self.state.dialogs.grid_snap_routing,
-                read_only,
-                angled_routing,
-            ))
-        });
 
         match choice {
             DialogChoice::Primary => {
@@ -235,86 +231,84 @@ pub(in crate::workbench) const fn routing_style(
     }
 }
 
-fn grid_snap_routing_body(
-    ui: &mut Ui,
+/// The form's rows. Returns the grid display's and the snap spacing's
+/// controls: the first takes the caret on open, the second after Apply
+/// refused the spacing.
+fn grid_snap_routing_rows(
+    rows: &mut FormRows<'_>,
     transaction: &mut GridSnapRoutingDialogState,
     read_only: bool,
     angled_routing: bool,
-) -> egui::Id {
-    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-
-    let grid = enum_row(
-        ui,
+) -> (egui::Id, egui::Id) {
+    let grid_options = GRID_STYLES.map(|style| grid_style_label(style).to_owned());
+    let grid = rows.select_with_response(
         "Grid display",
-        "Visual canvas grid; this never changes snapping.",
         "grid-snap-routing-display",
         grid_style_label(transaction.draft.grid_style),
-        &["Dots", "Lines", "Off"],
+        &grid_options,
     );
-    if let Some(index) = grid.0 {
+    if let Some(index) = grid.picked {
         transaction.draft.grid_style = GRID_STYLES[index];
         transaction.validation_error = None;
     }
 
     let spacing_labels = GridSnapSpacingChoice::ALL.map(GridSnapSpacingChoice::label);
-    let spacing = enum_row(
-        ui,
+    let spacing = rows.select_with_response(
         "Snap spacing",
-        if read_only {
-            "Free is session-only; changing the document pitch is locked in this view."
-        } else {
-            "Independent interaction pitch; Free disables the snap engine."
-        },
         "grid-snap-routing-spacing",
         &transaction.draft.snap_spacing.label(),
-        &spacing_labels.each_ref().map(String::as_str),
+        &spacing_labels,
     );
-    if let Some(index) = spacing.0 {
+    if let Some(index) = spacing.picked {
         transaction.draft.snap_spacing = GridSnapSpacingChoice::ALL[index];
         transaction.draft.snap_engine.enabled =
             transaction.draft.snap_spacing != GridSnapSpacingChoice::Free;
         transaction.validation_error = None;
     }
+    if read_only {
+        rows.derived("Only Free applies here: this view cannot change the document pitch.");
+    }
 
-    let (snap_target_id, snap_targets_changed) = snap_targets_row(ui, &mut transaction.draft);
-    if snap_targets_changed {
+    let snap = &mut transaction.draft.snap_engine;
+    if rows.checks(
+        "Snap targets",
+        &mut [
+            ("Grid intersections", &mut snap.snap_to_grid),
+            ("Terminals", &mut snap.snap_to_terminals),
+            ("Junctions", &mut snap.snap_to_junctions),
+            ("Wire endpoints", &mut snap.snap_to_wire_endpoints),
+            ("Wire segments", &mut snap.snap_to_wire_segments),
+        ],
+    ) {
         transaction.validation_error = None;
     }
-
-    let routing = ui
-        .add_enabled_ui(angled_routing, |ui| {
-            enum_row(
-                ui,
-                "Wire routing",
-                if angled_routing {
-                    "Shared interactive routing policy for wires and buses."
-                } else {
-                    ANGLED_ROUTING_REASON
-                },
-                "grid-snap-routing-wire-routing",
-                routing_label(transaction.draft.wire_routing),
-                &["Orthogonal", "45\u{00b0}", "Free"],
-            )
-        })
-        .inner;
-    if let Some(index) = routing.0 {
-        transaction.draft.wire_routing = match index {
-            1 => WireRoutingMode::FortyFiveDegree,
-            2 => WireRoutingMode::Diagonal,
-            _ if transaction.draft.wire_routing.is_orthogonal() => transaction.draft.wire_routing,
-            _ => WireRoutingMode::HorizontalFirst,
-        };
-        transaction.validation_error = None;
+    if transaction.draft.snap_spacing == GridSnapSpacingChoice::Free {
+        rows.derived("Free spacing turns snapping off; these apply once a pitch is chosen.");
     }
 
-    if let Some(target) = transaction.focus_target.take() {
-        let id = match target {
-            GridSnapRoutingFocusTarget::SnapSpacing => spacing.1,
-            GridSnapRoutingFocusTarget::SnapTargets => snap_target_id,
-        };
-        ui.memory_mut(|memory| memory.request_focus(id));
+    if angled_routing {
+        let routing_options = ["Orthogonal", "45\u{00b0}", "Free"].map(str::to_owned);
+        if let Some(index) = rows.select(
+            "Wire routing",
+            "grid-snap-routing-wire-routing",
+            routing_label(transaction.draft.wire_routing),
+            &routing_options,
+        ) {
+            transaction.draft.wire_routing = match index {
+                1 => WireRoutingMode::FortyFiveDegree,
+                2 => WireRoutingMode::Diagonal,
+                _ if transaction.draft.wire_routing.is_orthogonal() => {
+                    transaction.draft.wire_routing
+                }
+                _ => WireRoutingMode::HorizontalFirst,
+            };
+            transaction.validation_error = None;
+        }
+    } else {
+        rows.value("Wire routing", "Orthogonal");
+        rows.derived("45\u{00b0} and free routing need the any-angle junction policy.");
     }
-    grid.1
+    (grid.response.id, spacing.response.id)
 }
 
 const fn grid_style_label(style: GridStyle) -> &'static str {
@@ -323,118 +317,6 @@ const fn grid_style_label(style: GridStyle) -> &'static str {
         GridStyle::Lines => "Lines",
         GridStyle::Off => "Off",
     }
-}
-
-fn snap_targets_row(ui: &mut Ui, draft: &mut GridSnapRoutingDraft) -> (egui::Id, bool) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let row = Frame::new()
-        .fill(t.color.bg_app)
-        .inner_margin(Margin::symmetric(12, 9))
-        .show(ui, |ui| {
-            ui.set_min_width((width - 24.0).max(1.0));
-            setting_copy(ui, "Snap targets", "Geometry the cursor snaps to.");
-            ui.add_space(7.0);
-            ui.add_enabled_ui(draft.snap_spacing != GridSnapSpacingChoice::Free, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    let first =
-                        ui.checkbox(&mut draft.snap_engine.snap_to_grid, "Grid intersections");
-                    let mut changed = first.changed();
-                    changed |= ui
-                        .checkbox(&mut draft.snap_engine.snap_to_terminals, "Terminals")
-                        .changed();
-                    changed |= ui
-                        .checkbox(&mut draft.snap_engine.snap_to_junctions, "Junctions")
-                        .changed();
-                    changed |= ui
-                        .checkbox(
-                            &mut draft.snap_engine.snap_to_wire_endpoints,
-                            "Wire endpoints",
-                        )
-                        .changed();
-                    changed |= ui
-                        .checkbox(
-                            &mut draft.snap_engine.snap_to_wire_segments,
-                            "Wire segments",
-                        )
-                        .changed();
-                    (first.id, changed)
-                })
-                .inner
-            })
-            .inner
-        });
-    ui.painter().hline(
-        row.response.rect.x_range(),
-        row.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    row.inner
-}
-
-fn enum_row(
-    ui: &mut Ui,
-    title: &str,
-    detail: &str,
-    id: &str,
-    selected: &str,
-    options: &[&str],
-) -> (Option<usize>, egui::Id) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let options = options
-        .iter()
-        .map(|option| (*option).to_owned())
-        .collect::<Vec<_>>();
-    let row = Frame::new()
-        .fill(t.color.bg_app)
-        .inner_margin(Margin::symmetric(12, 9))
-        .show(ui, |ui| {
-            ui.set_min_width((width - 24.0).max(1.0));
-            if ui.available_width() < 520.0 {
-                setting_copy(ui, title, detail);
-                ui.add_space(7.0);
-                let control_width = ui.available_width();
-                let output =
-                    select_mono_with_response(ui, id, title, selected, &options, control_width);
-                (output.picked, output.response.id)
-            } else {
-                ui.horizontal(|ui| {
-                    let copy_width = (ui.available_width() * 0.43).clamp(190.0, 270.0);
-                    ui.allocate_ui_with_layout(
-                        vec2(copy_width, t.metrics.ctl_h),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| setting_copy(ui, title, detail),
-                    );
-                    ui.add_space(12.0);
-                    let control_width = ui.available_width();
-                    let output =
-                        select_mono_with_response(ui, id, title, selected, &options, control_width);
-                    (output.picked, output.response.id)
-                })
-                .inner
-            }
-        });
-    ui.painter().hline(
-        row.response.rect.x_range(),
-        row.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    row.inner
-}
-
-fn setting_copy(ui: &mut Ui, title: &str, detail: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(title)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text),
-    );
-    ui.label(
-        egui::RichText::new(detail)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
 }
 
 const fn routing_label(mode: WireRoutingMode) -> &'static str {
@@ -794,5 +676,56 @@ mod tests {
         assert_eq!(state.schematic.session.editor.snap_engine, original_snap);
         assert!(!state.schematic.can_undo());
         assert!(state.dialogs.grid_snap_routing.open);
+    }
+
+    /// Grid, snap and wire routing is a command form: four rows whose
+    /// controls share one column, not a 760 pt card of tinted rows each
+    /// restating what its control is for.
+    #[test]
+    fn grid_snap_and_routing_is_a_command_form_without_restated_rows() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        assert!(open_grid_snap_routing_dialog(&mut app.state));
+        // Access updates are incremental: keep the latest of every node.
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..4 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| app.render_grid_snap_routing_dialog(ctx),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        // The modal's own node is the whole screen. The surface is centred
+        // on it, and the primary ends 12 pt in from its right edge.
+        let primary = nodes
+            .values()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some(PRIMARY)
+            })
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("the primary has bounds");
+        let width = 2.0 * (primary.x1 + 12.0) - 1440.0;
+        assert!(width <= 424.0, "the form is {width} pt wide");
+        let says = |text: &str| {
+            nodes.values().any(|node| {
+                node.label().is_some_and(|label| label.contains(text))
+                    || node.value().is_some_and(|value| value.contains(text))
+            })
+        };
+        assert!(
+            !says("never changes snapping"),
+            "a row restates its control"
+        );
+        assert!(says("Snap spacing"));
     }
 }

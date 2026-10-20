@@ -544,7 +544,6 @@ pub(crate) enum GridSnapRoutingFocusTarget {
 pub(crate) struct GridSnapRoutingDialogState {
     pub(crate) open: bool,
     pub(crate) draft: GridSnapRoutingDraft,
-    pub(crate) original: GridSnapRoutingDraft,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) validation_error: Option<String>,
     pub(crate) focus_target: Option<GridSnapRoutingFocusTarget>,
@@ -554,7 +553,6 @@ impl GridSnapRoutingDialogState {
     pub(crate) fn open(&mut self, draft: GridSnapRoutingDraft, authority: SchematicEditAuthority) {
         *self = Self {
             open: true,
-            original: draft.clone(),
             draft,
             authority: Some(authority),
             validation_error: None,
@@ -564,10 +562,6 @@ impl GridSnapRoutingDialogState {
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
-    }
-
-    pub(crate) fn dirty(&self) -> bool {
-        self.open && self.draft != self.original
     }
 }
 
