@@ -133,8 +133,9 @@ fn apply(app: &mut RSpiceApp, action: StripAction, entries: &[SheetEntry]) {
         StripAction::NewSheetAfter(after) => {
             let _ = sheet_actions::new_sheet_after(&mut app.state, after);
         }
+        // The menu row the delete was chosen from named its outcome.
         StripAction::Delete(id) => {
-            let _ = sheet_actions::delete_sheet(&mut app.state, id);
+            let _ = sheet_actions::commit_delete_sheet(&mut app.state, id);
         }
         StripAction::MoveSelection(id) => {
             let _ = sheet_actions::move_selection_to_sheet(&mut app.state, id);

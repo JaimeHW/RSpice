@@ -920,6 +920,7 @@ impl RSpiceApp {
         self.render_create_hierarchy_dialog(ctx);
         self.render_check_and_save_dialog(ctx);
         self.render_connectivity_manager_dialog(ctx);
+        dialogs::delete_sheet::render_delete_sheet_confirmation(ctx, &mut self.state);
         self.render_design_management_dialog(ctx);
         self.render_selection_bulk_edit_dialog(ctx);
         self.render_project_revision_history_dialog(ctx);

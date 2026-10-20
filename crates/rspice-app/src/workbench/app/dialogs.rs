@@ -12,6 +12,7 @@ pub(in crate::workbench) mod confirmation;
 pub(in crate::workbench) mod confirmation_state;
 pub(in crate::workbench) mod connectivity_manager;
 pub(in crate::workbench) mod create_model_bound_symbol;
+pub(in crate::workbench) mod delete_sheet;
 pub(in crate::workbench) mod design_management;
 pub(in crate::workbench) mod design_review_comments;
 pub(in crate::workbench) mod drawing_sheet_defaults;

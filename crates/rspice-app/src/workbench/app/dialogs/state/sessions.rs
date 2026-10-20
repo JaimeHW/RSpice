@@ -467,6 +467,10 @@ pub struct DialogState {
     /// Live connectivity, typed-bus, and reviewed repair manager.
     pub(crate) connectivity_manager: ConnectivityManagerDialogState,
 
+    /// A sheet delete waiting for confirmation because it moves objects.
+    pub(crate) delete_sheet:
+        Option<crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete>,
+
     /// Filtered selection query and atomic active-owner property transaction.
     pub(crate) selection_bulk_edit: SelectionBulkEditDialogState,
 
@@ -581,6 +585,7 @@ impl DialogState {
             || self.create_hierarchy.open
             || self.check_and_save.open
             || self.connectivity_manager.open
+            || self.delete_sheet.is_some()
             || self.design_management.open
             || self.selection_bulk_edit.open
             || self.design_review_comments.open

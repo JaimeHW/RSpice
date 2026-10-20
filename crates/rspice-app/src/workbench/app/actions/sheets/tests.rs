@@ -256,7 +256,19 @@ fn a_moving_delete_policy_relocates_the_objects_and_undo_restores_them() {
             destination_name: "Sheet 1".to_owned(),
         }
     );
-    delete_sheet(&mut state, second).expect("delete publishes");
+    // The menu's delete moves nothing until the move is confirmed.
+    delete_sheet(&mut state, second).expect("the delete waits for confirmation");
+    assert_eq!(sheet_count(&state), 2, "nothing moved before the confirmation");
+    let pending = state
+        .dialogs
+        .delete_sheet
+        .clone()
+        .expect("the confirmation names the outcome");
+    assert_eq!(
+        (pending.objects, pending.destination_name.as_str()),
+        (1, "Sheet 1")
+    );
+    crate::workbench::app::dialogs::delete_sheet::confirm_sheet_delete(&mut state, &pending);
 
     let catalog = active_sheet_catalog(&state).expect("catalog");
     assert_eq!(catalog.sheets().len(), 1);
@@ -268,6 +280,24 @@ fn a_moving_delete_policy_relocates_the_objects_and_undo_restores_them() {
     let catalog = active_sheet_catalog(&state).expect("catalog");
     assert_eq!(catalog.sheets().len(), 2);
     assert_eq!(catalog.sheet_for_object(20), Some(second));
+}
+
+/// A confirmation is for the outcome it showed. When the sheet empties while
+/// it is open, the confirmed delete is not run on the new outcome.
+#[test]
+fn a_confirmed_delete_whose_outcome_changed_deletes_nothing() {
+    let (mut state, _, second) = two_sheet_state();
+    delete_behavior(
+        &mut state,
+        SheetDeleteBehavior::MoveReferencesToReviewedReplacement,
+    );
+    delete_sheet(&mut state, second).expect("the delete waits for confirmation");
+    let mut pending = state.dialogs.delete_sheet.clone().expect("pending");
+    pending.objects += 1;
+
+    crate::workbench::app::dialogs::delete_sheet::confirm_sheet_delete(&mut state, &pending);
+
+    assert_eq!(sheet_count(&state), 2);
 }
 
 #[test]

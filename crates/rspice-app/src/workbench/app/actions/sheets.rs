@@ -203,7 +203,42 @@ pub(in crate::workbench) fn plan_delete(state: &AppState, id: SheetId) -> SheetD
     }
 }
 
+/// Delete a sheet from a menu or a chord, which state no outcome beforehand.
+///
+/// The outcome is resolved first. A delete that would move objects onto the
+/// neighbouring sheet waits for a confirmation naming how many and where;
+/// any other outcome (an empty sheet, a refusal) is run, or reported, now.
 pub(in crate::workbench) fn delete_sheet(
+    state: &mut AppState,
+    id: SheetId,
+) -> Result<String, String> {
+    if let SheetDeletePlan::MovesObjects {
+        objects,
+        destination,
+        destination_name,
+    } = plan_delete(state, id)
+    {
+        let name = state_sheet_name(state, id);
+        let message = format!("Deleting sheet `{name}` waits for confirmation.");
+        state.dialogs.delete_sheet = Some(
+            crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete {
+                sheet: id,
+                name,
+                objects,
+                destination,
+                destination_name,
+            },
+        );
+        return Ok(message);
+    }
+    commit_delete_sheet(state, id)
+}
+
+/// Delete a sheet now, under the catalog's own delete policy.
+///
+/// For a caller that has already shown the outcome (the sheet strip's menu
+/// row names it) or had it confirmed.
+pub(in crate::workbench) fn commit_delete_sheet(
     state: &mut AppState,
     id: SheetId,
 ) -> Result<String, String> {
