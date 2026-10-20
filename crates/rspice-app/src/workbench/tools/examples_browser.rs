@@ -261,7 +261,11 @@ mod tests {
             .as_ref()
             .map(|report| report.blockers.clone())
             .unwrap_or_default();
-        assert!(blockers.is_empty(), "{} is blocked: {blockers:#?}", example.name);
+        assert!(
+            blockers.is_empty(),
+            "{} is blocked: {blockers:#?}",
+            example.name
+        );
         app
     }
 
