@@ -820,6 +820,39 @@ fn mos3_matches_xyce_710_pmos_and_inverse_dc_points() {
     );
 }
 
+#[test]
+fn mos3_model_delvto_shifts_threshold_like_ngspice46() {
+    // ngspice 46 (`set numdgt=12`, `op`): mos3temp.c:219-224 adds the model
+    // DELVTO (alias DELVT0) to tVbi, so the 0.2 V shift lowers the drain
+    // current from -1.53473059774e-04 to -8.79574384172e-05.
+    let deck = "* MOS3 model DELVTO\n\
+                vd1 d1 0 dc 2\n\
+                vd2 d2 0 dc 2\n\
+                vd3 d3 0 dc 2\n\
+                vg g 0 dc 1.5\n\
+                m1 d1 g 0 0 n3 w=10u l=2u\n\
+                m2 d2 g 0 0 n3d w=10u l=2u\n\
+                m3 d3 g 0 0 n3z w=10u l=2u\n\
+                .model n3 nmos level=3 vto=0.7 tox=20n uo=600 kappa=0.5 theta=0.1\n\
+                .model n3d nmos level=3 vto=0.7 tox=20n uo=600 kappa=0.5 theta=0.1 delvto=0.2\n\
+                .model n3z nmos level=3 vto=0.7 tox=20n uo=600 kappa=0.5 theta=0.1 delvt0=0.2\n\
+                .op\n\
+                .end\n";
+    for (branch, expected) in [
+        ("vd1", -1.534_730_597_74e-4),
+        ("vd2", -8.795_743_841_72e-5),
+        ("vd3", -8.795_743_841_72e-5),
+    ] {
+        assert_close(
+            &format!("i({branch})"),
+            dc_branch_current(deck, branch),
+            expected,
+            1.0e-6,
+            0.0,
+        );
+    }
+}
+
 fn nsub_preprocessing_deck(temperature: &str, card_tail: &str) -> String {
     format!(
         "* MOS1/2/3 NSUB-derived PHI, GAMMA and VTO\n\

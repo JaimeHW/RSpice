@@ -975,6 +975,18 @@ impl Mosfet {
                 self.vto = derived_vto;
             }
         }
+        // MOS3/MOS9 DELVTO shifts the built-in voltage after the NSUB
+        // preprocessing, so it moves tVbi and tVto alike (`mos3temp.c:219-224`,
+        // `mos9temp.c:225-230`). MOS1/2/6 have no such parameter.
+        if matches!(self.level, 3 | 9)
+            && let Some(delvto) = params
+                .get("DELVTO")
+                .or_else(|| params.get("DELVT0"))
+                .copied()
+                .filter(|v| v.is_finite())
+        {
+            self.vto += delvto;
+        }
         // BSIM3 parameters
         if let Some(&v) = params.get("U0").or_else(|| params.get("UO")) {
             self.u0 = v;
