@@ -62,6 +62,18 @@ impl AppState {
     /// stale row click from opening an apparently valid transaction against a
     /// different or read-only object.
     pub(crate) fn open_new_view_dialog(&mut self, library: &str, cell: &str) -> Result<(), String> {
+        self.open_new_view_dialog_as(library, cell, None)
+    }
+
+    /// [`Self::open_new_view_dialog`] preset to `view_type`, so a "Create
+    /// symbol from schematic" row opens New view on the active cell's symbol.
+    /// `None` picks the first type the cell does not have yet.
+    pub(crate) fn open_new_view_dialog_as(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view_type: Option<crate::state::ViewType>,
+    ) -> Result<(), String> {
         let target = self
             .library_manager
             .get_library(library)
@@ -74,13 +86,15 @@ impl AppState {
         let cell_target = target
             .get_cell(cell)
             .ok_or_else(|| format!("Cell '{library}/{cell}' no longer exists."))?;
-        let view_type = CREATABLE_VIEW_TYPES
-            .into_iter()
-            .find(|view_type| {
-                !cell_target
-                    .views
-                    .values()
-                    .any(|view| view.view_type == *view_type)
+        let view_type = view_type
+            .filter(|view_type| is_creatable_view_type(*view_type))
+            .or_else(|| {
+                CREATABLE_VIEW_TYPES.into_iter().find(|view_type| {
+                    !cell_target
+                        .views
+                        .values()
+                        .any(|view| view.view_type == *view_type)
+                })
             })
             .unwrap_or(crate::state::ViewType::Schematic);
 
@@ -931,6 +945,30 @@ mod tests {
             state.dialogs.new_view_library_revision,
             state.library_manager.revision()
         );
+    }
+
+    /// "Create symbol from schematic" opens New view on the symbol of the
+    /// active cell, not on the first type the cell lacks (a testbench).
+    #[test]
+    fn new_view_opens_preset_to_a_requested_view_type() {
+        let mut state = AppState::default();
+        let mut library = Library::new("preset_test");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        state.library_manager.add_library(library);
+
+        state
+            .open_new_view_dialog("preset_test", "amp")
+            .expect("writable target");
+        assert_eq!(state.dialogs.new_view_type, ViewType::Testbench);
+
+        state
+            .open_new_view_dialog_as("preset_test", "amp", Some(ViewType::Symbol))
+            .expect("writable target");
+        assert!(state.dialogs.new_view_dialog);
+        assert_eq!(state.dialogs.new_view_type, ViewType::Symbol);
+        assert_eq!(state.dialogs.new_view_name, "symbol");
     }
 
     #[test]
