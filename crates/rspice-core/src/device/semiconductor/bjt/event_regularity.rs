@@ -46,8 +46,11 @@ impl Bjt {
     }
 
     pub(crate) fn legacy_event_locally_c1(&self, solution: &[Value]) -> bool {
+        // The quasi-saturation epi branch switches law at Vrci = 0
+        // (bjtload.c:508), which this chart does not certify.
         if !self.uses_legacy_gummel_poon()
             || !self.mna_promoted()
+            || self.legacy_quasi_saturation().is_some()
             || self.avc1 != 0.0
             || !self.is.is_finite()
             || self.is <= 0.0

@@ -386,6 +386,97 @@ fn legacy_gummel_poon_c2_c4_and_tref_follow_each_dialects_meaning() {
 }
 
 #[test]
+fn legacy_gummel_poon_quasi_saturation_matches_ngspice46() {
+    // ngspice 46 (`set numdgt=12`): bjtload.c:504-561 adds the Kull epi
+    // branch between the RC node and the intrinsic collector when RCO is
+    // authored, VO and QCO stay Gummel-Poon parameters, QCO adds the epi
+    // charges (bjtload.c:542-547, 714-718) and QUASIMOD=1 maps RCO, VO and
+    // GAMMA through temperature (bjttemp.c:215-224).
+    let dc = "* GP quasi-saturation\n\
+              .options reltol=1e-7 abstol=1e-16 vntol=1e-10\n\
+              vb b 0 dc 0.85\n\
+              vc1 c1 0 dc 1.0\n\
+              q1 c1 b 0 qa\n\
+              vc2 c2 0 dc 1.0\n\
+              q2 c2 b 0 qb\n\
+              vc3 c3 0 dc 1.0\n\
+              q3 c3 b 0 qc\n\
+              vc4 c4 0 dc 1.0\n\
+              q4 c4 b 0 qd\n\
+              vc5 c5 0 dc 1\n\
+              q5 c5 b 0 qt\n\
+              .model qa npn(is=1e-16 bf=100 vaf=50 rc=5)\n\
+              .model qb npn(is=1e-16 bf=100 vaf=50 rc=5 rco=100 gamma=1e-11)\n\
+              .model qc npn(is=1e-16 bf=100 vaf=50 rc=5 rco=100 gamma=1e-11 vo=5)\n\
+              .model qd npn(is=1e-16 bf=100 vaf=50 rc=5 rco=100 gamma=1e-11 vo=5 qco=1e-12)\n\
+              .model qt npn(is=1e-16 bf=100 vaf=50 rc=5 rco=100 gamma=1e-11 vo=5 quasimod=1 tnom=50)\n\
+              .op\n\
+              .end\n";
+    // BestAvailable keeps the exact SI k/q, about 1e-5 from ngspice's
+    // CODATA 2014 pair at these junction biases.
+    for (dialect, rel_tol) in [
+        (SpiceDialect::Ngspice, 1.0e-6),
+        (SpiceDialect::BestAvailable, 5.0e-5),
+    ] {
+        let config = SimulationConfig::default().with_spice_dialect(dialect);
+        for (branch, expected) in [
+            ("vc1", -1.873_825_169_21e-2),
+            ("vc2", -1.179_438_960_41e-2),
+            ("vc3", -1.112_386_825_32e-2),
+            ("vc4", -1.112_386_825_32e-2),
+            ("vc5", -7.083_608_444_88e-4),
+        ] {
+            assert_rel_close(
+                &format!("{dialect:?} i({branch})"),
+                branch_current_with_config(dc, branch, config.clone()),
+                expected,
+                rel_tol,
+            );
+        }
+    }
+
+    // Deep quasi-saturation at 10 MHz: QCO moves both parts of the
+    // collector admittance; without it the current is purely real.
+    let ac = "* GP quasi-saturation charge\n\
+              .options reltol=1e-7 abstol=1e-16 vntol=1e-10\n\
+              vb b 0 dc 0.85 ac 1\n\
+              vc c 0 dc 0.2\n\
+              q1 c b 0 qd\n\
+              vc2 c2 0 dc 0.2\n\
+              q2 c2 b 0 qe\n\
+              .model qd npn(is=1e-16 bf=100 vaf=50 rc=5 rco=100 gamma=1e-11 vo=5 qco=1e-12)\n\
+              .model qe npn(is=1e-16 bf=100 vaf=50 rc=5 rco=100 gamma=1e-11 vo=5)\n\
+              .end\n";
+    let netlist = Netlist::parse(ac).expect("deck parses");
+    let point = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice))
+        .run_ac(&netlist, &[1.0e7])
+        .expect("ac converges")
+        .pop()
+        .expect("one AC point");
+    for (branch, expected) in [
+        (
+            "vc",
+            rspice_core::Complex64::new(-1.359_111_626_40e-1, 1.043_635_258_513e-2),
+        ),
+        (
+            "vc2",
+            rspice_core::Complex64::new(-1.363_908_267_59e-1, 0.0),
+        ),
+    ] {
+        let index = point
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(branch))
+            .unwrap_or_else(|| panic!("missing {branch} in {:?}", point.branch_names));
+        let actual = point.currents[index];
+        assert!(
+            (actual - expected).norm() <= 1.0e-6 * expected.norm(),
+            "AC i({branch}): {actual} against ngspice {expected}"
+        );
+    }
+}
+
+#[test]
 fn legacy_gummel_poon_does_not_stamp_vbic_parasitic_gmin_branches() {
     let deck = "* legacy GP BJT GMIN topology\n\
                 VCC 4 0 5\n\

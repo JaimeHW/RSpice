@@ -687,6 +687,23 @@ struct LegacyJunctionParameters {
     // ISE/ISC (bjt.c:94,102); Xyce scales IS by them (N_DEV_BJT.C
     // `Model::processParams`). The dialect is known only after parsing.
     leakage_coefficients: [Option<Value>; 2],
+    quasi_saturation: Option<LegacyQuasiSaturation>,
+}
+
+/// ngspice's Gummel-Poon quasi-saturation (Kull epi) card, present when RCO
+/// is authored. Defaults are bjtsetup.c:163-175 and :364-381.
+#[derive(Debug, Clone, Copy)]
+struct LegacyQuasiSaturation {
+    /// RCO, floored at 0.01 Ohm.
+    rco: Value,
+    vo: Value,
+    gamma: Value,
+    qco: Value,
+    /// QUASIMOD=1 selects the bjttemp.c:215-228 temperature law.
+    temperature_law: bool,
+    vg: Value,
+    cn: Value,
+    d: Value,
 }
 
 /// BJT device using the Ebers-Moll model
@@ -2511,15 +2528,16 @@ impl Bjt {
         }
 
         // XTF, VTF, ITF, PS, and MS are shared by the SPICE Gummel-Poon model
-        // and VBIC (PS/MS are Xyce aliases for VJS/MJS). Their presence
+        // and VBIC (PS/MS are Xyce aliases for VJS/MJS), and so are VO and
+        // QCO (ngspice's GP quasi-saturation, bjt.c). Their presence
         // therefore cannot select VBIC; explicit VBIC levels and parameters
         // unique to that family remain authoritative.
         [
-            "RCX", "RBI", "RCI", "RS", "RBP", "VO", "GAMM", "HRCF", "AVC1", "AVC2", "TAVC", "CJEP",
+            "RCX", "RBI", "RCI", "RS", "RBP", "GAMM", "HRCF", "AVC1", "AVC2", "TAVC", "CJEP",
             "CJCP", "AJE", "AJC", "ISP", "WSP", "NFP", "IKP", "IBEIP", "IBENP", "IBCIP", "IBCNP",
             "NCIP", "NCNP", "XRE", "XRBI", "XRCI", "XRS", "XVO", "XRBP", "TNF", "XIKF", "XRCX",
-            "XRBX", "EAIS", "EANS", "EAP", "CBEO", "CBCO", "QCO", "AJS", "WBE", "QTF", "VBBE",
-            "NBBE", "IBBE", "TVBBE1", "TVBBE2", "TNBBE", "EBBE", "CCSO", "QBM", "TD", "RTH", "CTH",
+            "XRBX", "EAIS", "EANS", "EAP", "CBEO", "CBCO", "AJS", "WBE", "QTF", "VBBE", "NBBE",
+            "IBBE", "TVBBE1", "TVBBE2", "TNBBE", "EBBE", "CCSO", "QBM", "TD", "RTH", "CTH",
             "SELFT",
         ]
         .iter()

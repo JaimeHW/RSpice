@@ -933,12 +933,48 @@ impl Bjt {
                 Self::charge_branch(charges.qbe, d_internal, base_terminal, emitter_terminal);
         }
 
-        if self.tr != 0.0 || self.cjc * self.xcjc != 0.0 || self.cbco != 0.0 {
+        // ngspice's GP epi charges (bjtload.c:542-559, 714-718): QCO*Kbci
+        // joins the intrinsic B-C charge and QCO*Kbcx sits between the base
+        // and the epi node, both zero unless the epi branch is forward biased.
+        let p = self.polarity();
+        let epi = self
+            .legacy_quasi_saturation()
+            .filter(|_| self.qco != 0.0 && Self::series_active(self.rci))
+            .map(|_| {
+                if p * (internal[IDX_VCX] - internal[IDX_VCI]) > 0.0 {
+                    let (kbci, kbci_vbci, kbcx, kbcx_vbcx) = self.legacy_epi_doping_factors(
+                        p * (internal[IDX_VBI] - internal[IDX_VCI]),
+                        p * (internal[IDX_VBI] - internal[IDX_VCX]),
+                    );
+                    [kbci, kbci_vbci, kbcx, kbcx_vbcx].map(|value| self.qco * value)
+                } else {
+                    [0.0; 4]
+                }
+            });
+
+        if self.tr != 0.0 || self.cjc * self.xcjc != 0.0 || self.cbco != 0.0 || epi.is_some() {
+            let [qbci, capbci, _, _] = epi.unwrap_or_default();
             let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
-            d_internal[IDX_VBI] = charges.capbc;
-            d_internal[IDX_VCI] = -charges.capbc;
-            branches[2] =
-                Self::charge_branch(charges.qbc, d_internal, base_terminal, collector_terminal);
+            d_internal[IDX_VBI] = charges.capbc + capbci;
+            d_internal[IDX_VCI] = -(charges.capbc + capbci);
+            branches[2] = Self::charge_branch(
+                charges.qbc + p * qbci,
+                d_internal,
+                base_terminal,
+                collector_terminal,
+            );
+        }
+
+        if let Some([_, _, qbcx, capbcx]) = epi {
+            let epi_terminal = if Self::series_active(self.rcx) {
+                (Some(IDX_VCX), None)
+            } else {
+                (None, Some(EXT_C))
+            };
+            let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
+            d_internal[IDX_VBI] = capbcx;
+            d_internal[IDX_VCX] = -capbcx;
+            branches[1] = Self::charge_branch(p * qbcx, d_internal, base_terminal, epi_terminal);
         }
 
         if self.cjc * (1.0 - self.xcjc) != 0.0 && self.legacy_external_bc_base_node().is_none() {
@@ -1077,10 +1113,15 @@ impl Bjt {
             ),
             // RCI is an existing GP extension using the Kull epi branch. Its
             // self-conductance is supplied by that same physical branch law.
+            // ngspice's own RCO epi branch is noiseless (bjtnoise.c).
             source(
                 "RC",
-                self.irci_branch_with_self_conductance(v[IDX_VCX], v[IDX_VCI], v[IDX_VBI])
-                    .1,
+                if self.legacy_quasi_saturation().is_some() {
+                    0.0
+                } else {
+                    self.irci_branch_with_self_conductance(v[IDX_VCX], v[IDX_VCI], v[IDX_VBI])
+                        .1
+                },
                 collector_outer,
                 self.legacy_charge_collector_terminal(),
             ),

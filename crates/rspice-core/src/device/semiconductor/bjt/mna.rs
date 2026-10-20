@@ -144,13 +144,26 @@ impl Bjt {
             let reverse_storage = self.legacy_reverse_saturation_current() != 0.0
                 || self.legacy_current_scale(LegacyCurrent::Reverse).is_some()
                 || gmin_charge;
+            let epi_storage = self.legacy_quasi_saturation().is_some()
+                && self.qco != 0.0
+                && self.gamm != 0.0
+                && Self::series_active(self.rci);
             let mut storage = [None; BJT_DYNAMIC_CHARGE_COUNT - 3];
             if self.cje != 0.0 || self.cbeo != 0.0 || (self.tf != 0.0 && forward_storage) {
                 storage[0] = pair(base, self.legacy_charge_emitter_terminal());
             }
+            if epi_storage {
+                let epi = if Self::series_active(self.rcx) {
+                    (Some(IDX_VCX), None)
+                } else {
+                    (None, Some(EXT_C))
+                };
+                storage[1] = pair(base, epi);
+            }
             if self.cjc * self.xcjc != 0.0
                 || self.cbco != 0.0
                 || (self.tr != 0.0 && reverse_storage)
+                || epi_storage
             {
                 storage[2] = pair(base, collector);
             }

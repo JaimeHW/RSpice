@@ -1341,6 +1341,9 @@ impl Bjt {
         self.ccso = (self.ccso_nominal * scale).max(0.0);
         self.vo = vo_temp.max(0.0);
         self.gamm = gamm_temp.max(0.0);
+        if legacy_model {
+            self.refresh_legacy_quasi_saturation(temp, vt);
+        }
         self.ikf = if ikf_temp > 0.0 {
             ikf_temp * scale
         } else {
@@ -1597,6 +1600,40 @@ impl Bjt {
         self.resolve_legacy_leakage_coefficients();
     }
 
+    /// ngspice's GP quasi-saturation card, when RCO authored one.
+    pub(in crate::device::semiconductor::bjt) fn legacy_quasi_saturation(
+        &self,
+    ) -> Option<LegacyQuasiSaturation> {
+        self.legacy_junction_params
+            .as_ref()
+            .and_then(|junctions| junctions.quasi_saturation)
+            .filter(|_| self.uses_legacy_gummel_poon())
+    }
+
+    /// Operating RCO, VO, GAMMA and QCO of the GP epi branch, which reuses
+    /// the RCI/VO/GAMM/QCO slots of the shared Kull network. ngspice scales
+    /// none of them by AREA, multiplies every stamp by M, and applies a
+    /// temperature law only under QUASIMOD=1 (bjttemp.c:215-228).
+    fn refresh_legacy_quasi_saturation(&mut self, temp: Value, vt: Value) {
+        let Some(quasi) = self.legacy_quasi_saturation() else {
+            return;
+        };
+        let (rco, vo, gamma) = if quasi.temperature_law {
+            let ratio = temp / self.tnom;
+            (
+                quasi.rco * ratio.powf(quasi.cn),
+                quasi.vo * ratio.powf(quasi.d),
+                quasi.gamma * ratio.powf(self.xis) * (-quasi.vg * (1.0 - ratio) / vt).exp(),
+            )
+        } else {
+            (quasi.rco, quasi.vo, quasi.gamma)
+        };
+        self.rci = rco / self.m;
+        self.vo = vo;
+        self.gamm = gamma;
+        self.qco = quasi.qco * self.m;
+    }
+
     /// Resolve GP C2/C4 under the selected dialect: ngspice's ISE/ISC
     /// aliases, or Xyce's SPICE2 multipliers of IS.
     fn resolve_legacy_leakage_coefficients(&mut self) {
@@ -1706,6 +1743,7 @@ impl Bjt {
             junctions.base_resistance = None;
             junctions.excess_phase = None;
             junctions.leakage_coefficients = [None; 2];
+            junctions.quasi_saturation = None;
         }
         if self.charge_model == BjtChargeModel::LegacyGummelPoon
             && let Some(v) = legacy_irb
@@ -2405,6 +2443,30 @@ impl Bjt {
                     .get_or_insert_with(Default::default)
                     .leakage_coefficients = leakage;
                 self.resolve_legacy_leakage_coefficients();
+            }
+            // ngspice adds the Kull epi node only when RCO is authored
+            // (bjtsetup.c:431-439); VO, GAMMA and QCO mean nothing without it.
+            if let Some(&rco) = params.get("RCO").filter(|v| v.is_finite()) {
+                let npn = self.bjt_type == BjtType::Npn;
+                let value = |name: &str, default: Value| {
+                    params
+                        .get(name)
+                        .copied()
+                        .filter(|v| v.is_finite())
+                        .unwrap_or(default)
+                };
+                self.legacy_junction_params
+                    .get_or_insert_with(Default::default)
+                    .quasi_saturation = Some(LegacyQuasiSaturation {
+                    rco: rco.max(0.01),
+                    vo: value("VO", 10.0),
+                    gamma: value("GAMMA", 1.0e-11),
+                    qco: value("QCO", 0.0),
+                    temperature_law: params.get("QUASIMOD").is_some_and(|v| *v == 1.0),
+                    vg: value("VG", 1.206),
+                    cn: value("CN", if npn { 2.42 } else { 2.2 }),
+                    d: value("D", if npn { 0.87 } else { 0.52 }),
+                });
             }
         }
         if let Some(&v) = params.get("IBEIP") {

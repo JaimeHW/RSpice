@@ -612,6 +612,9 @@ impl Bjt {
         if !Self::series_active(self.rci) {
             return (branch, 0.0);
         }
+        if self.legacy_quasi_saturation().is_some() {
+            return self.legacy_epi_branch(vcx, vci, vbi);
+        }
 
         let p = self.polarity();
         let vt = self.vt.max(1e-12);
@@ -718,6 +721,79 @@ impl Bjt {
         branch.d_internal[IDX_VCI] = -(d_irci_eff_dvrci_eff + d_irci_eff_dvbci_eff);
         branch.d_internal[IDX_VBI] = d_irci_eff_dvbci_eff + d_irci_eff_dvbcx_eff;
         (branch, d_irci_eff_dvrci_eff)
+    }
+
+    /// Kull doping factors `K = sqrt(1 + GAMMA·exp(V/vt))` of the GP epi
+    /// layer at its two ends and their slopes, as polarity-normalized
+    /// `(Kbci, dKbci/dVbci, Kbcx, dKbcx/dVbcx)` (bjtload.c:513-516).
+    pub(in crate::device::semiconductor::bjt) fn legacy_epi_doping_factors(
+        &self,
+        vbci_eff: Value,
+        vbcx_eff: Value,
+    ) -> (Value, Value, Value, Value) {
+        let vt = self.vt.max(1e-12);
+        let factor = |v: Value| {
+            let scaled = self.gamm * (v / vt).min(crate::constants::MAX_EXP_ARG).exp();
+            let k = (1.0 + scaled).sqrt();
+            (k, scaled / (2.0 * vt * k))
+        };
+        let (kbci, kbci_vbci) = factor(vbci_eff);
+        let (kbcx, kbcx_vbcx) = factor(vbcx_eff);
+        (kbci, kbci_vbci, kbcx, kbcx_vbcx)
+    }
+
+    /// ngspice's Gummel-Poon quasi-saturation current from the epi node to
+    /// the intrinsic collector (bjtload.c:504-561): the Kull ohmic current
+    /// limited by `1 + |Vrci|/VO` in forward epi bias, a plain RCO resistor
+    /// otherwise, each with its CKTgmin parallel on Vrci. Returns the branch
+    /// and `dIrci/dVrci`.
+    fn legacy_epi_branch(
+        &self,
+        vcx: Value,
+        vci: Value,
+        vbi: Value,
+    ) -> (BranchLinearization, Value) {
+        let p = self.polarity();
+        let vt = self.vt.max(1e-12);
+        let rci = self.guarded_series_resistance(self.rci);
+        let gmin = self.nonlinear_branch_gmin();
+        let vrci = p * (vcx - vci);
+        let vbci = p * (vbi - vci);
+        let vbcx = p * (vbi - vcx);
+        let (irci, irci_vrci, irci_vbci, irci_vbcx) = if vrci > 0.0 {
+            let (kbci, kbci_vbci, kbcx, kbcx_vbcx) = self.legacy_epi_doping_factors(vbci, vbcx);
+            let rkp1 = (1.0 + kbci) / (1.0 + kbcx);
+            let rkp1_vbci = kbci_vbci / (1.0 + kbci);
+            let rkp1_vbcx = -(1.0 + kbci) * kbcx_vbcx / ((kbcx + 1.0) * (kbcx + 1.0));
+            let xvar1 = rkp1.ln();
+            let xvar1_vbci = rkp1_vbci / rkp1;
+            let xvar1_vbcx = rkp1_vbcx / rkp1;
+            let vcorr = vt * (kbci - kbcx - xvar1);
+            let vcorr_vbci = vt * (kbci_vbci - xvar1_vbci);
+            let vcorr_vbcx = vt * (-kbcx_vbcx - xvar1_vbcx);
+            let iohm = (vrci + vcorr) / rci;
+            let (quot, quot_vrci) = if self.vo > 0.0 {
+                (1.0 + vrci / self.vo, 1.0 / self.vo)
+            } else {
+                (1.0, 0.0)
+            };
+            (
+                iohm / quot + gmin * vrci,
+                1.0 / (rci * quot) - iohm * quot_vrci / (quot * quot) + gmin,
+                vcorr_vbci / (rci * quot),
+                vcorr_vbcx / (rci * quot),
+            )
+        } else {
+            (vrci / rci + gmin * vrci, 1.0 / rci + gmin, 0.0, 0.0)
+        };
+        let mut branch = BranchLinearization {
+            current: p * irci,
+            ..Default::default()
+        };
+        branch.d_internal[IDX_VCX] = irci_vrci - irci_vbcx;
+        branch.d_internal[IDX_VCI] = -(irci_vrci + irci_vbci);
+        branch.d_internal[IDX_VBI] = irci_vbci + irci_vbcx;
+        (branch, irci_vrci)
     }
 
     #[inline]
