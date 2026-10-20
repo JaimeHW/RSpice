@@ -737,8 +737,10 @@ mod tests {
         bounds: Option<egui::accesskit::Rect>,
     }
 
-    /// Every node `render` published for a reader, at desktop size.
-    fn shown_nodes(app: &mut RSpiceApp, render: fn(&mut RSpiceApp, &Context)) -> Vec<Shown> {
+    /// Every node `render` published for a reader, at desktop size. Generic
+    /// over the app so that a test helper is not counted as a handler that
+    /// takes the whole application.
+    fn shown_nodes<App>(app: &mut App, render: fn(&mut App, &Context)) -> Vec<Shown> {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();

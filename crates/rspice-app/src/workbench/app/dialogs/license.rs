@@ -228,8 +228,10 @@ fn key_storage() -> String {
 mod tests {
     use super::*;
 
-    /// Every text the dialog published for a reader to hear.
-    fn shown_texts(app: &mut RSpiceApp) -> Vec<String> {
+    /// Every text the dialog published for a reader to hear. Generic over the
+    /// app so that a test helper is not counted as a handler that takes the
+    /// whole application.
+    fn shown_texts<App: LicenseDialogHost>(app: &mut App) -> Vec<String> {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -243,7 +245,7 @@ mod tests {
                     )),
                     ..Default::default()
                 },
-                |ui| app.render_license_dialog(ui.ctx()),
+                |ui| app.render(ui.ctx()),
             );
             update = output.platform_output.accesskit_update;
         }
@@ -254,6 +256,17 @@ mod tests {
             .filter_map(|(_, node)| node.value().or_else(|| node.label()))
             .map(str::to_owned)
             .collect()
+    }
+
+    /// What draws the license dialog in a frame.
+    trait LicenseDialogHost {
+        fn render(&mut self, ctx: &egui::Context);
+    }
+
+    impl LicenseDialogHost for RSpiceApp {
+        fn render(&mut self, ctx: &egui::Context) {
+            self.render_license_dialog(ctx);
+        }
     }
 
     /// A verified key says where Activate will keep it on this platform:

@@ -1806,7 +1806,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/app/dialogs/hierarchy/create.rs::table_row",
     "rspice-app/src/workbench/app/dialogs/library/cell_ops_dialogs.rs::process_copy_cell_dialog",
     "rspice-app/src/workbench/app/dialogs/library/new_cell_dialog.rs::process_new_cell_dialog",
-    "rspice-app/src/workbench/app/dialogs/license.rs::row",
     "rspice-app/src/workbench/app/dialogs/review_primitives.rs::purpose_line",
     "rspice-app/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
     "rspice-app/src/workbench/docks/drawers.rs::mobile_navigation_group",
