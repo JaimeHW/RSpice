@@ -94,6 +94,7 @@ pub enum WorkbenchIcon {
     Run,
     Stop,
     ChevronDown,
+    ChevronUp,
     ChevronRight,
     Close,
     More,
@@ -484,6 +485,7 @@ impl WorkbenchIcon {
                 painter.rect_filled(Rect::from_min_max(p(7.0, 7.0), p(17.0, 17.0)), 1.0, color);
             }
             Self::ChevronDown => line(&[(6.0, 9.0), (12.0, 15.0), (18.0, 9.0)]),
+            Self::ChevronUp => line(&[(6.0, 15.0), (12.0, 9.0), (18.0, 15.0)]),
             Self::ChevronRight => line(&[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)]),
             Self::Close => {
                 line(&[(6.0, 6.0), (18.0, 18.0)]);
