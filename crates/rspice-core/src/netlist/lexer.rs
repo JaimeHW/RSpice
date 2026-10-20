@@ -234,7 +234,7 @@ impl<'a> Lexer<'a> {
                     let next = input[1..].chars().next();
                     if matches!(next, Some('0'..='9')) {
                         // It's a decimal number like .5
-                        self.parse_number(input)
+                        self.parse_deck_number(input)
                     } else {
                         // It's a dot-command like .PARAM
                         self.parse_ident(input)
@@ -410,7 +410,23 @@ impl<'a> Lexer<'a> {
         }
 
         // Not a model name, parse as number
-        self.parse_number(input)
+        self.parse_deck_number(input)
+    }
+
+    /// Parse a number in deck text, where a unit word after the scale suffix
+    /// belongs to the same token. ngspice's INPevaluate gobbles the rest of
+    /// the token (`2.2kohm`, `4.7uFarad`, `1.5msec`, `1.5Volt`). Digit-led
+    /// spellings such as `2kohm` already reach the value parsers whole, as
+    /// names; the decimal ones used to split and leave the unit word behind
+    /// as a stray token.
+    fn parse_deck_number(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
+        let (kind, consumed) = self.parse_number(input)?;
+        let unit_word: usize = input[consumed..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .map(char::len_utf8)
+            .sum();
+        Ok((kind, consumed + unit_word))
     }
 
     /// Parse a numeric value with optional SPICE suffix
@@ -1165,6 +1181,43 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Number(25.0)), "{kinds:?}");
         assert!(!kinds.contains(&TokenKind::Minus), "{kinds:?}");
         assert!(!kinds.contains(&TokenKind::Plus), "{kinds:?}");
+    }
+
+    /// A unit word after a decimal value's scale suffix is part of the value
+    /// token, as ngspice's INPevaluate gobbles it. It used to be left behind
+    /// as a stray identifier after the number.
+    #[test]
+    fn decimal_values_swallow_their_unit_words() {
+        for (literal, expected) in [
+            ("2.2kohm", 2.2e3),
+            ("1.5MEGohm", 1.5e6),
+            ("2.5mVolts", 2.5e-3),
+            ("3.3uAmp", 3.3e-6),
+            ("1.5Volt", 1.5),
+            ("0.1us", 0.1e-6),
+            ("1.5msec", 1.5e-3),
+            ("4.7uFarad", 4.7e-6),
+            (".5nHenry", 0.5e-9),
+            ("-2.5mA", -2.5e-3),
+            ("1.5e", 1.5),
+        ] {
+            let tokens = tokenize(&format!("{literal} next"))
+                .unwrap_or_else(|error| panic!("{literal} must tokenize: {error}"));
+            assert_eq!(tokens.len(), 3, "{literal} left a stray token: {tokens:?}");
+            assert_eq!(tokens[0].lexeme, literal);
+            let TokenKind::Number(value) = tokens[0].kind else {
+                panic!("{literal} is not a number: {tokens:?}");
+            };
+            assert!(
+                (value - expected).abs() <= expected.abs() * 1.0e-15,
+                "{literal} lexed as {value:e}, expected {expected:e}"
+            );
+            assert_eq!(tokens[1].kind, TokenKind::Ident("NEXT".to_string()));
+        }
+        // Delimiters still end the value.
+        let tokens = tokenize("PULSE(0 1.5V,2.5ms)").expect("tokenize");
+        assert!(tokens.iter().any(|token| token.lexeme == "1.5V"));
+        assert!(tokens.iter().any(|token| token.kind == TokenKind::RParen));
     }
 
     #[test]

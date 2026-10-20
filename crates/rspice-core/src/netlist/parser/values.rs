@@ -2665,6 +2665,44 @@ mod tests {
         assert!((current + 1.0e-3).abs() < 1.0e-12, "I(V1) = {current}");
     }
 
+    /// ngspice ignores a unit word after a value's scale suffix whether the
+    /// mantissa is an integer or a decimal. The decimal spellings used to
+    /// leave the word behind as a stray token (`4.7uFarad` named a model
+    /// `ARAD`). ngspice 46 on this deck: V(1) = 2.5 mV, V(2) = 4.95 V,
+    /// I(V1) = -1.13636 uA, C1 = 4.7 uF.
+    #[test]
+    fn decimal_values_with_unit_words_reach_the_circuit() {
+        let netlist = Netlist::parse(
+            "unit words\nV1 1 0 2.5mVolts\nR1 1 0 2.2kohm\nI2 0 2 3.3uAmp\n\
+             R2 2 0 1.5MEGohm\nC1 1 0 4.7uFarad\nV3 3 0 SIN(0 1.5Volt 1.5kHz)\n\
+             R3 3 0 1k\n.tran 0.1us 1.5msec\n.end\n",
+        )
+        .unwrap();
+        let capacitance = netlist
+            .elements
+            .iter()
+            .find_map(|element| match element.kind {
+                crate::netlist::ElementKind::Capacitor { value, .. } => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        assert!((capacitance - 4.7e-6).abs() < 1.0e-20, "C1 = {capacitance}");
+        let result = crate::engine::Engine::default()
+            .run_dc_op(&netlist)
+            .unwrap();
+        // GMIN across the 1.5 Mohm load moves V(2) in its sixth digit.
+        let close = |actual: Option<f64>, expected: f64| {
+            actual.is_some_and(|actual| (actual - expected).abs() <= expected.abs() * 1.0e-5)
+        };
+        assert!(close(result.try_voltage_named("1"), 2.5e-3));
+        assert!(
+            close(result.try_voltage_named("2"), 4.95),
+            "V(2) = {:?}",
+            result.try_voltage_named("2")
+        );
+        assert!(close(result.branch_current_named("V1"), -1.13636e-6));
+    }
+
     #[test]
     fn instance_value_expressions_consume_each_authored_random_draw_once() {
         use crate::config::ExpressionDialect;
