@@ -250,6 +250,24 @@ pub struct JfetParams {
     pub ef: Value,
     /// Nominal temperature (K)
     pub tnom: Value,
+    /// ngspice level-1 Sydney doping-tail parameter `B`; 1 is the plain
+    /// Shichman-Hodges channel.
+    pub(crate) doping_tail: Value,
+    /// ngspice level-1 threshold temperature coefficient `TCV` (V/K,
+    /// subtracted), used when `VTOTC` is absent.
+    pub(crate) tcv: Value,
+    /// ngspice level-1 threshold temperature coefficient `VTOTC` (V/K, added).
+    pub(crate) vtotc: Option<Value>,
+    /// ngspice level-1 beta temperature exponent `BEX`, used when `BETATCE`
+    /// is absent.
+    pub(crate) bex: Value,
+    /// ngspice level-1 beta temperature coefficient `BETATCE` (%/K).
+    pub(crate) betatce: Option<Value>,
+    /// ngspice level-1 gate saturation-current activation energy `EG` (eV).
+    pub(crate) eg: Value,
+    /// ngspice level-1 gate saturation-current temperature exponent `XTI`,
+    /// which jfettemp.c applies only when authored.
+    pub(crate) xti: Option<Value>,
     /// Channel model to evaluate.
     pub channel_model: JfetChannelModel,
     /// JFET2 drain-source zero-bias capacitance `CDS`.

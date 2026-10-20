@@ -54,6 +54,40 @@ impl Jfet {
         (t_gate_pot, t_cgs, t_cgd)
     }
 
+    /// ngspice level-1 operating `(threshold, beta, gate saturation current)`
+    /// at a resolved temperature, before area and multiplicity (jfettemp.c:
+    /// IS through EG, N and an authored XTI; VTO through VTOTC else TCV; BETA
+    /// through BETATCE else BEX).
+    pub(super) fn ngspice_level1_temperature_terms(&self, temp: Value) -> (Value, Value, Value) {
+        let p = &self.params;
+        let tnom = if p.tnom.is_finite() && p.tnom > 0.0 {
+            p.tnom
+        } else {
+            NG_REFTEMP
+        };
+        let temp = if temp.is_finite() && temp > 0.0 {
+            temp
+        } else {
+            tnom
+        };
+        let delta = temp - tnom;
+        let threshold = match p.vtotc {
+            Some(vtotc) => p.vto + vtotc * delta,
+            None => p.vto - p.tcv * delta,
+        };
+        let beta = match p.betatce {
+            Some(betatce) => p.beta * 1.01_f64.powf(betatce * delta),
+            None => p.beta * (temp / tnom).powf(p.bex),
+        };
+        let ratio1 = temp / tnom - 1.0;
+        let vtn = temp * NG_K_OVER_Q * p.n;
+        let mut saturation = p.is * (ratio1 * p.eg / vtn).exp();
+        if let Some(xti) = p.xti {
+            saturation *= (ratio1 + 1.0).powf(xti);
+        }
+        (threshold, beta, saturation)
+    }
+
     /// Thermal voltage at given temperature
     pub(super) fn thermal_voltage(&self, temp: Value) -> Value {
         use crate::constants::K_BOLTZMANN;
@@ -305,7 +339,12 @@ impl Jfet {
             self.params.tnom.max(1.0)
         };
         let nvt = (self.params.n.max(1e-12) * self.thermal_voltage(temp_k)).max(1e-12);
-        let isat = (self.params.is * self.junction_scale()).max(0.0);
+        let model_isat = if matches!(self.params.channel_model, JfetChannelModel::ShichmanHodges) {
+            self.ngspice_level1_temperature_terms(temp_k).2
+        } else {
+            self.params.is
+        };
+        let isat = (model_isat * self.junction_scale()).max(0.0);
 
         if v_ak < -3.0 * nvt {
             // ngspice `jfetload.c` reverse-bias asymptote:
@@ -922,10 +961,14 @@ impl Jfet {
         let mut vgs_int = pol * vgs_new;
         let mut vgd_int = pol * vgd_new;
 
+        // jfetload.c limits against the temperature-mapped threshold.
+        let threshold = self
+            .ngspice_level1_temperature_terms(self.resolved_instance_temperature())
+            .0;
         vgs_int = Self::pnjlim(vgs_int, vgs_old_int, nvt, vcrit);
         vgd_int = Self::pnjlim(vgd_int, vgd_old_int, nvt, vcrit);
-        vgs_int = Self::fetlim(vgs_int, vgs_old_int, self.params.vto);
-        vgd_int = Self::fetlim(vgd_int, vgd_old_int, self.params.vto);
+        vgs_int = Self::fetlim(vgs_int, vgs_old_int, threshold);
+        vgd_int = Self::fetlim(vgd_int, vgd_old_int, threshold);
 
         (vgs_int / pol, vgd_int / pol)
     }
@@ -1228,77 +1271,35 @@ impl Jfet {
         (ids, gm, gds, igs, igd, ggs, ggd, vds_linear, 0.0, 0.0)
     }
 
-    /// Calculate classic Shichman-Hodges drain current and conductances.
+    /// ngspice level-1 JFET drain current and conductances: the Sydney
+    /// University channel (jfetload.c:238-312) at the temperature-mapped
+    /// threshold and beta. Its doping-tail factor is formed from the model
+    /// PB and VTO (jfettemp.c), and B=1 reduces it to Shichman-Hodges.
     pub(super) fn calculate_shichman_hodges(
         &self,
         vgs: Value,
         vds: Value,
+        temperature: Value,
     ) -> (Value, Value, Value) {
         let pol = self.jfet_type.polarity();
-
-        // Apply polarity for P-JFET
-        let vgs_int = pol * vgs;
-        let vds_int = pol * vds;
-
-        let vto = self.params.vto;
-        let beta = self.params.beta * self.area * self.m;
-        let lambda = self.params.lambda;
-
-        // Effective Vgs (gate-source overdrive)
-        let vgst = vgs_int - vto;
-
-        let (ids, gm, gds) = if vgst <= 0.0 {
-            // Cutoff region
-            (0.0, 0.0, 0.0)
-        } else if vds_int < 0.0 {
-            // Reverse operation - swap drain and source
-            // This handles the symmetric JFET behavior
-            let vds_rev = -vds_int;
-            let vgs_rev = vgs_int - vds_int;
-            let vgst_rev = vgs_rev - vto;
-
-            if vgst_rev <= 0.0 {
-                (0.0, 0.0, 0.0)
-            } else if vds_rev <= vgst_rev {
-                // Linear (reversed)
-                // Evaluate forward current from swapped terminals, then map back
-                // to the original drain-source orientation.
-                let ids_fwd = beta
-                    * (2.0 * vgst_rev * vds_rev - vds_rev * vds_rev)
-                    * (1.0 + lambda * vds_rev);
-                let gm_fwd = 2.0 * beta * vds_rev * (1.0 + lambda * vds_rev);
-                let gds_fwd = beta * 2.0 * (vgst_rev - vds_rev) * (1.0 + lambda * vds_rev)
-                    + beta * (2.0 * vgst_rev * vds_rev - vds_rev * vds_rev) * lambda;
-                (-ids_fwd, -gm_fwd, gm_fwd + gds_fwd)
-            } else {
-                // Saturation (reversed)
-                let ids_fwd = beta * vgst_rev * vgst_rev * (1.0 + lambda * vds_rev);
-                let gm_fwd = 2.0 * beta * vgst_rev * (1.0 + lambda * vds_rev);
-                let gds_fwd = beta * vgst_rev * vgst_rev * lambda;
-                (-ids_fwd, -gm_fwd, gm_fwd + gds_fwd)
-            }
-        } else if vds_int <= vgst {
-            // Linear (triode) region: Vds < Vgs - Vto
-            let ids = beta * (2.0 * vgst * vds_int - vds_int * vds_int) * (1.0 + lambda * vds_int);
-
-            // gm = dIds/dVgs = 2 * beta * Vds * (1 + lambda * Vds)
-            let gm = 2.0 * beta * vds_int * (1.0 + lambda * vds_int);
-
-            // gds = dIds/dVds
-            let gds = beta * 2.0 * (vgst - vds_int) * (1.0 + lambda * vds_int)
-                + beta * (2.0 * vgst * vds_int - vds_int * vds_int) * lambda;
-
-            (ids, gm, gds)
+        let (vto, beta, _) = self.ngspice_level1_temperature_terms(temperature);
+        let b = self.params.doping_tail;
+        let bfac_numerator = 1.0 - b;
+        let bfac_base = if bfac_numerator == 0.0 {
+            0.0
         } else {
-            // Saturation region: Vds >= Vgs - Vto
-            let ids = beta * vgst * vgst * (1.0 + lambda * vds_int);
-            let gm = 2.0 * beta * vgst * (1.0 + lambda * vds_int);
-            let gds = beta * vgst * vgst * lambda;
-            (ids, gm, gds)
+            bfac_numerator / (self.params.pb - self.params.vto)
         };
-
-        // Apply polarity for output current
-        (pol * ids, gm, gds)
+        let (cdrain, gm, gds) = Self::sydney_channel(
+            pol * vgs,
+            pol * vds,
+            beta * self.area * self.m,
+            vto,
+            self.params.lambda,
+            b,
+            bfac_base,
+        );
+        (pol * cdrain, gm, gds)
     }
 
     /// Calculate Xyce level-1 Sydney University JFET drain current.
@@ -1309,13 +1310,8 @@ impl Jfet {
         temperature: Value,
     ) -> (Value, Value, Value) {
         let pol = self.jfet_type.polarity();
-        let vgs_int = pol * vgs;
-        let vds_int = pol * vds;
-        let vgd_int = vgs_int - vds_int;
-
         let beta = (self.params.beta * self.area * self.m).max(0.0);
         let vto = self.params.vto;
-        let lambda = self.params.lambda;
         let pb = self
             .xyce_jfet1_temperature_terms_at(temperature)
             .junction_potential;
@@ -1326,8 +1322,32 @@ impl Jfet {
         } else {
             bfac_numerator / (pb - vto)
         };
+        let (cdrain, gm, gds) = Self::sydney_channel(
+            pol * vgs,
+            pol * vds,
+            beta,
+            vto,
+            self.params.lambda,
+            b,
+            bfac_base,
+        );
+        (pol * cdrain, gm, gds)
+    }
 
-        let (cdrain, gm, gds) = if vds_int >= 0.0 {
+    /// Sydney University channel current and its `(gm, gds)` in
+    /// polarity-normalized voltages, shared by ngspice's jfetload.c and
+    /// Xyce's level-1 JFET.
+    fn sydney_channel(
+        vgs_int: Value,
+        vds_int: Value,
+        beta: Value,
+        vto: Value,
+        lambda: Value,
+        b: Value,
+        bfac_base: Value,
+    ) -> (Value, Value, Value) {
+        let vgd_int = vgs_int - vds_int;
+        if vds_int >= 0.0 {
             let vgst = vgs_int - vto;
             if vgst <= 0.0 {
                 (0.0, 0.0, 0.0)
@@ -1371,9 +1391,7 @@ impl Jfet {
                     (cdrain, gm, gds)
                 }
             }
-        };
-
-        (pol * cdrain, gm, gds)
+        }
     }
 
     /// Calculate Berkeley SPICE level-1 MESFET drain current and conductances.

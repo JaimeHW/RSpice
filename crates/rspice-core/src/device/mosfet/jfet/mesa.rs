@@ -1032,7 +1032,9 @@ impl Jfet {
     pub fn calculate(&self, vgs: Value, vds: Value, temp: Value) -> (Value, Value, Value) {
         let (temp_common, temp_source, _) = self.resolved_temperatures(temp);
         match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges => self.calculate_shichman_hodges(vgs, vds),
+            JfetChannelModel::ShichmanHodges => {
+                self.calculate_shichman_hodges(vgs, vds, temp_common)
+            }
             JfetChannelModel::XyceSydney => {
                 self.calculate_xyce_sydney_level1(vgs, vds, temp_common)
             }

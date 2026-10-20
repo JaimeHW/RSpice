@@ -30,13 +30,16 @@ impl Jfet {
             p.vto = v;
         }
 
+        // Level 1 spells the Sydney doping tail `B` (jfet.c), so B is never
+        // BETA there.
         let beta_from_card = params
             .get("BETA")
             .copied()
             .or_else(|| {
                 (!matches!(
                     p.channel_model,
-                    JfetChannelModel::LegacyMesfet
+                    JfetChannelModel::ShichmanHodges
+                        | JfetChannelModel::LegacyMesfet
                         | JfetChannelModel::XyceSydney
                         | JfetChannelModel::XyceModifiedShockley
                 ))
@@ -198,6 +201,29 @@ impl Jfet {
             .filter(|v| v.is_finite() && *v >= 0.0)
         {
             p.mes_b = v;
+        }
+        if matches!(p.channel_model, JfetChannelModel::ShichmanHodges) {
+            if let Some(v) = params.get("B").copied().filter(|v| v.is_finite()) {
+                p.doping_tail = v;
+            }
+            if let Some(v) = params.get("TCV").copied().filter(|v| v.is_finite()) {
+                p.tcv = v;
+            }
+            if let Some(v) = params.get("VTOTC").copied().filter(|v| v.is_finite()) {
+                p.vtotc = Some(v);
+            }
+            if let Some(v) = params.get("BEX").copied().filter(|v| v.is_finite()) {
+                p.bex = v;
+            }
+            if let Some(v) = params.get("BETATCE").copied().filter(|v| v.is_finite()) {
+                p.betatce = Some(v);
+            }
+            if let Some(v) = params.get("EG").copied().filter(|v| v.is_finite()) {
+                p.eg = v;
+            }
+            if let Some(v) = params.get("XTI").copied().filter(|v| v.is_finite()) {
+                p.xti = Some(v);
+            }
         }
         if let Some(v) = params.get("TC").copied().filter(|v| v.is_finite()) {
             p.mesa_tc = v;

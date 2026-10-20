@@ -635,3 +635,112 @@ fn jfet_gate_shot_noise_is_the_junction_leakage_in_every_dialect() {
         }
     }
 }
+
+/// ngspice 46 (`set numdgt=12`, `op`) on the decks below. Level 1 is always
+/// the Sydney University channel: B is the doping-tail parameter (default 1,
+/// which is plain Shichman-Hodges), never BETA (jfetload.c:238-312).
+/// jfettemp.c maps IS through EG, N and an authored XTI, VTO through
+/// VTOTC or TCV, and BETA through BETATCE or BEX.
+#[test]
+fn level1_jfet_follows_ngspice_sydney_channel_and_temperature_laws() {
+    use rspice_core::engine::SpiceDialect;
+    let at_100 = "* JFET level-1 ngspice temperature and Sydney parameters\n\
+                  .temp 100\n\
+                  vg g 0 dc -1\n\
+                  vd1 d1 0 dc 5\n\
+                  j1 d1 g 0 jb\n\
+                  vd2 d2 0 dc 5\n\
+                  j2 d2 g 0 jt\n\
+                  vd3 d3 0 dc 5\n\
+                  j3 d3 g 0 jv\n\
+                  vd4 d4 0 dc 0\n\
+                  vg4 g4 0 dc -1\n\
+                  j4 d4 g4 0 ji\n\
+                  vd5 d5 0 dc 0\n\
+                  vg5 g5 0 dc -1\n\
+                  j5 d5 g5 0 je\n\
+                  vd6 d6 0 dc 0.5\n\
+                  j6 d6 g 0 jb\n\
+                  vd7 d7 0 dc -0.5\n\
+                  j7 d7 g 0 jb\n\
+                  vd8 d8 0 dc -1\n\
+                  vg8 g8 0 dc -2.5\n\
+                  j8 d8 g8 0 jb\n\
+                  .model jb njf(vto=-2 beta=1m b=0.5)\n\
+                  .model jt njf(vto=-2 beta=1m tcv=2m bex=-1.5)\n\
+                  .model jv njf(vto=-2 beta=1m vtotc=-2m betatce=-0.5 tcv=5m bex=3)\n\
+                  .model ji njf(vto=-2 beta=1m is=1e-14)\n\
+                  .model je njf(vto=-2 beta=1m is=1e-14 eg=1.2 xti=2 n=1.2)\n\
+                  .op\n\
+                  .end\n";
+    let at_90 = "* JFET gate current temperature\n\
+                 .temp 90\n\
+                 vd1 d1 0 dc 0\n\
+                 vg1 g1 0 dc -1\n\
+                 j1 d1 g1 0 ja\n\
+                 vd2 d2 0 dc 0\n\
+                 vg2 g2 0 dc -1\n\
+                 j2 d2 g2 0 jd\n\
+                 vd3 d3 0 dc 0\n\
+                 vg3 g3 0 dc -1\n\
+                 j3 d3 g3 0 jn\n\
+                 vd4 d4 0 dc 5\n\
+                 vg4 g4 0 dc -1\n\
+                 j4 d4 g4 0 jb\n\
+                 .model ja njf(vto=-2 beta=1m is=1e-14)\n\
+                 .model jd njf(vto=-2 beta=1m is=1e-14 xti=3)\n\
+                 .model jn njf(vto=-2 beta=1m is=1e-14 n=1.5)\n\
+                 .model jb njf(vto=-2 b=0.9)\n\
+                 .op\n\
+                 .end\n";
+    let cases: [(&str, &[(&str, f64)]); 2] = [
+        (
+            at_100,
+            &[
+                ("vd1", -6.666_667_169_42e-4),
+                ("vd2", -9.474_397_701_50e-4),
+                ("vd3", -9.133_539_600_64e-4),
+                ("vg4", 9.054_615_021_747e-11),
+                ("vg5", 6.155_451_152_910e-11),
+                ("vd6", -5.208_333_791_08e-4),
+                ("vd7", 1.020_833_288_574e-3),
+                ("vd8", 1.458_332_875_589e-4),
+            ],
+        ),
+        (
+            at_90,
+            &[
+                ("vg1", 3.622_528_649_066e-11),
+                ("vg2", 6.261_640_760_604e-11),
+                ("vg3", 4.861_055_399_207e-12),
+                ("vd4", -9.333_335_644_67e-5),
+            ],
+        ),
+    ];
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let mut config = SimulationConfig {
+            spice_dialect: dialect,
+            ..Default::default()
+        };
+        // Keep RSpice's 1e-15 S nodal conditioning floor off the picoamp
+        // gate currents.
+        config.convergence_config.gmin_target = 0.0;
+        for (deck, expected) in cases {
+            let netlist = Netlist::parse(deck).expect("JFET deck parses");
+            let result = Engine::new(config.clone())
+                .run_dc_op(&netlist)
+                .expect("JFET deck converges");
+            for &(branch, expected) in expected {
+                let actual = result
+                    .branch_current_named(branch)
+                    .unwrap_or_else(|| panic!("missing {branch} in {:?}", result.branch_names));
+                let relative = (actual - expected).abs() / expected.abs();
+                assert!(
+                    relative <= 1.0e-6,
+                    "{dialect:?} i({branch}): {actual:.12e} against ngspice {expected:.12e} \
+                     (rel {relative:.3e})"
+                );
+            }
+        }
+    }
+}

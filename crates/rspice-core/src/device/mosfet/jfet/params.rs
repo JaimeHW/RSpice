@@ -23,6 +23,14 @@ impl Default for JfetParams {
             af: 1.0,
             ef: 1.0,
             tnom: 300.15, // 27C nominal
+            // ngspice jfetset.c level-1 defaults.
+            doping_tail: 1.0,
+            tcv: 0.0,
+            vtotc: None,
+            bex: 0.0,
+            betatce: None,
+            eg: 1.11,
+            xti: None,
             channel_model: JfetChannelModel::ShichmanHodges,
             jfet2_capds: 0.0,
             jfet2_acgam: 0.0,
