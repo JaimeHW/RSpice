@@ -72,6 +72,8 @@ const LIST_VISIBLE_ENTRIES: usize = 5;
 const LIST_ADD_GAP: f32 = 4.0;
 /// Air between a list's add field and its add button.
 const LIST_BUTTON_GAP: f32 = 4.0;
+/// Air between two columns of a table.
+const TABLE_COLUMN_GAP: f32 = 16.0;
 
 /// The words a list row shows besides its label. See [`FormRows::list`].
 #[derive(Debug, Clone, Copy)]
@@ -683,6 +685,156 @@ impl<'u> FormRows<'u> {
             ListEdit { field, add, remove }
         })
     }
+
+    /// A read-only fact with the one action it offers at the row's end: a
+    /// count of findings beside the place they can be visited, a defect
+    /// beside its repair. Returns whether the action was pressed.
+    pub fn value_action(&mut self, label: &str, value: &str, action: &str) -> bool {
+        self.row(label, |ui, width| {
+            let t = Tokens::get(ui.ctx());
+            ui.allocate_ui_with_layout(
+                vec2(width, t.metrics.ctl_h),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = LABEL_GAP;
+                    let clicked = super::Button::new(action).show(ui).clicked();
+                    let (rect, response) = ui.allocate_exact_size(
+                        vec2(ui.available_width().max(1.0), t.metrics.ctl_h),
+                        egui::Sense::hover(),
+                    );
+                    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+                    let shown =
+                        middle_elided(ui, value, &font, t.color.text, rect.width() - VALUE_INSET);
+                    ui.painter().text(
+                        pos2(rect.left() + VALUE_INSET, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        shown,
+                        font,
+                        t.color.text,
+                    );
+                    let spoken = format!("{label}: {value}");
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &spoken)
+                    });
+                    clicked
+                },
+            )
+            .inner
+        })
+    }
+
+    /// A read-only table across the whole form, its first column on the
+    /// labels' edge: what a command will make or keep, one line per item, read
+    /// before the primary is pressed. Columns are as wide as their widest
+    /// entry and start at one x each, left-aligned; a table wider than the
+    /// form shortens its longest entries from the middle. `rows` holds one
+    /// entry per column.
+    pub fn table(&mut self, columns: &[TableColumn<'_>], rows: &[Vec<String>]) {
+        if self.started {
+            self.ui.add_space(ROW_GAP);
+        }
+        self.started = true;
+        let t = Tokens::get(self.ui.ctx());
+        let width = self.ui.available_width();
+        let line_h = mark_line_height(self.ui);
+        let header_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+        let cell_font = |column: &TableColumn<'_>| {
+            if column.mono {
+                theme::mono(tokens::FS_0, FontWeight::Regular)
+            } else {
+                theme::sans(tokens::FS_0, FontWeight::Regular)
+            }
+        };
+        let measure = |ui: &Ui, text: &str, font: &egui::FontId| {
+            ui.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(text.to_owned(), font.clone(), t.color.text)
+                    .size()
+                    .x
+            })
+        };
+        let mut widths = columns
+            .iter()
+            .enumerate()
+            .map(|(index, column)| {
+                rows.iter()
+                    .filter_map(|row| row.get(index))
+                    .map(|cell| measure(self.ui, cell, &cell_font(column)))
+                    .fold(measure(self.ui, column.header, &header_font), f32::max)
+            })
+            .collect::<Vec<_>>();
+        let gaps = TABLE_COLUMN_GAP * columns.len().saturating_sub(1) as f32;
+        let natural = widths.iter().sum::<f32>() + gaps;
+        if natural > width {
+            let scale = ((width - gaps).max(1.0)) / (natural - gaps).max(1.0);
+            for column in &mut widths {
+                *column *= scale;
+            }
+        }
+        let paint_line = |ui: &mut Ui, cells: &[&str], header: bool| {
+            let (rect, response) =
+                ui.allocate_exact_size(vec2(width, line_h), egui::Sense::hover());
+            let mut x = rect.left();
+            for (index, (column, text)) in columns.iter().zip(cells).enumerate() {
+                let font = if header {
+                    header_font.clone()
+                } else {
+                    cell_font(column)
+                };
+                let color = if header {
+                    t.color.text_dim
+                } else {
+                    t.color.text
+                };
+                let shown = middle_elided(ui, text, &font, color, widths[index]);
+                ui.painter().text(
+                    pos2(x, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    shown,
+                    font,
+                    color,
+                );
+                x += widths[index] + TABLE_COLUMN_GAP;
+            }
+            if header {
+                ui.painter().hline(
+                    rect.x_range(),
+                    rect.bottom() - 0.5,
+                    egui::Stroke::new(1.0, t.color.border),
+                );
+            }
+            let spoken = if header {
+                cells.join(", ")
+            } else {
+                columns
+                    .iter()
+                    .zip(cells)
+                    .map(|(column, cell)| format!("{}: {cell}", column.header))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &spoken)
+            });
+        };
+        let headers = columns
+            .iter()
+            .map(|column| column.header)
+            .collect::<Vec<_>>();
+        paint_line(self.ui, &headers, true);
+        for row in rows {
+            let cells = row.iter().map(String::as_str).collect::<Vec<_>>();
+            paint_line(self.ui, &cells, false);
+        }
+    }
+}
+
+/// One column of a [`FormRows::table`]: its heading, and whether its entries
+/// are identifiers, set in mono, or words.
+#[derive(Debug, Clone, Copy)]
+pub struct TableColumn<'a> {
+    pub header: &'a str,
+    pub mono: bool,
 }
 
 /// Which mark a [`mark_control`] paints.
@@ -1002,7 +1154,10 @@ pub struct CommandForm<'a> {
     fields_enabled: bool,
     label_col: f32,
     status: Result<Option<&'a str>, &'a str>,
+    consequence: Option<&'a str>,
     primary_on_enter: bool,
+    cancel_enabled: bool,
+    size: DialogSize,
 }
 
 impl<'a> CommandForm<'a> {
@@ -1017,8 +1172,34 @@ impl<'a> CommandForm<'a> {
             fields_enabled: true,
             label_col: form::LABEL_COL,
             status: Ok(None),
+            consequence: None,
             primary_on_enter: true,
+            cancel_enabled: true,
+            size: DialogSize::CommandForm,
         }
+    }
+
+    /// The 480-point card, for a form whose last row is a table of what the
+    /// command will make or keep, which the 420-point card would elide.
+    pub fn wide(mut self) -> Self {
+        self.size = DialogSize::Confirmation;
+        self
+    }
+
+    /// Hold Cancel off while the command is finishing what it started — a
+    /// save in flight — so leaving cannot abandon it half-done. Esc still
+    /// reports [`DialogChoice::Cancelled`]; the caller ignores it meanwhile.
+    pub fn cancel_enabled(mut self, enabled: bool) -> Self {
+        self.cancel_enabled = enabled;
+        self
+    }
+
+    /// What the primary will cost that a reader would want to know first —
+    /// values it discards. Stated in the footer behind the warning mark,
+    /// unless the status refuses, which says more.
+    pub fn consequence(mut self, consequence: Option<&'a str>) -> Self {
+        self.consequence = consequence;
+        self
     }
 
     /// Hand Enter to the body, for a form holding a
@@ -1088,9 +1269,10 @@ impl<'a> CommandForm<'a> {
         // Cancel is the only word any form in this family has for leaving.
         // Enter commits, except in a form that said its body owns the key.
         let mut dialog = Dialog::new(self.title, self.primary)
-            .size(DialogSize::CommandForm)
+            .size(self.size)
             .overlay_scrollbar()
             .ghost("Cancel")
+            .ghost_enabled(self.cancel_enabled)
             .primary_enabled(self.primary_enabled)
             .primary_on_enter(self.primary_on_enter)
             .initial_focus(DialogInitialFocus::BodyControl);
@@ -1102,12 +1284,15 @@ impl<'a> CommandForm<'a> {
         if let Some(describe) = self.describe {
             dialog = dialog.description(describe);
         }
-        match status {
-            Ok(None) => {}
-            Ok(Some(fact)) => dialog = dialog.hint(fact),
-            Err(refusal) => {
+        match (status, self.consequence) {
+            (Err(refusal), _) => {
                 dialog = dialog.hint(refusal).hint_tone(DialogHintTone::Error);
             }
+            (Ok(_), Some(consequence)) => {
+                dialog = dialog.hint(consequence).hint_tone(DialogHintTone::Warn);
+            }
+            (Ok(Some(fact)), None) => dialog = dialog.hint(fact),
+            (Ok(None), None) => {}
         }
         let mut focused_field = None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
@@ -1727,6 +1912,124 @@ mod tests {
                     assert!(width <= 120.0, "elided path is {width} points wide");
                 });
             },
+        );
+    }
+
+    /// Every text painted by one settled pass of `pass`, with its ink.
+    fn painted_texts(pass: impl FnMut(&Context)) -> Vec<egui::epaint::TextShape> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<egui::epaint::TextShape>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                egui::Shape::Text(text) => into.push(text.clone()),
+                _ => {}
+            }
+        }
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let input = || egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 640.0),
+            )),
+            ..Default::default()
+        };
+        let mut pass = pass;
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = ctx.run_ui(input(), |ctx| pass(ctx)).shapes;
+        }
+        let mut texts = Vec::new();
+        for clipped in &shapes {
+            walk(&clipped.shape, &mut texts);
+        }
+        texts
+    }
+
+    /// A table starts on the labels' edge, and each column's entries start
+    /// where its heading does.
+    #[test]
+    fn a_table_starts_on_the_labels_edge_and_aligns_its_columns() {
+        let painted = painted_runs(egui::vec2(1024.0, 640.0), Mode::Light, 3, |ctx| {
+            let mut name = String::from("child");
+            let _ = CommandForm::new("Create hierarchy", "Create")
+                .wide()
+                .show(ctx, |rows| {
+                    let id = Id::new("command-form.table.name");
+                    rows.text("Cell name", id, &mut name, "");
+                    rows.table(
+                        &[
+                            TableColumn {
+                                header: "Port",
+                                mono: true,
+                            },
+                            TableColumn {
+                                header: "Direction",
+                                mono: false,
+                            },
+                            TableColumn {
+                                header: "Net",
+                                mono: true,
+                            },
+                        ],
+                        &[
+                            vec!["in".to_owned(), "Input".to_owned(), "net1".to_owned()],
+                            vec!["out".to_owned(), "Inout".to_owned(), "out".to_owned()],
+                        ],
+                    );
+                    Some(id)
+                });
+        });
+        painted.assert_inside_clip_and_surface_with_horizontal_scroll("table", &["child"]);
+        assert_eq!(painted.surface.width(), 480.0, "a wide form is 480 wide");
+        let left = |text: &str| painted.rect_of(text).expect(text).left();
+        assert!((left("Port") - left("Cell name")).abs() < 0.5);
+        for (header, cells) in [
+            ("Port", ["in", "out"]),
+            ("Direction", ["Input", "Inout"]),
+            ("Net", ["net1", "out"]),
+        ] {
+            for cell in cells {
+                let rect = painted
+                    .runs
+                    .iter()
+                    .filter(|(text, _, _)| text == cell)
+                    .map(|(_, rect, _)| *rect)
+                    .find(|rect| (rect.left() - left(header)).abs() < 0.5);
+                assert!(rect.is_some(), "{cell} does not start under {header}");
+            }
+        }
+    }
+
+    /// A consequence is stated behind the warning mark in dim text, and a
+    /// refusal, which says more, takes its place.
+    #[test]
+    fn a_consequence_is_marked_and_gives_way_to_a_refusal() {
+        let consequence = "2 authored parameter values are discarded.";
+        let refusal = "The schematic changed. Close and reopen Replace instance.";
+        let form = |status: Result<Option<&'static str>, &'static str>| {
+            painted_texts(move |ctx| {
+                let _ = CommandForm::new("Replace instance", "Replace")
+                    .status(status)
+                    .consequence(Some(consequence))
+                    .show(ctx, |rows| {
+                        rows.value("Current", "Resistor R1");
+                        None
+                    });
+            })
+        };
+        let warned = form(Ok(None));
+        let text = warned
+            .iter()
+            .find(|text| text.galley.job.text == consequence)
+            .expect("the consequence is stated");
+        assert_eq!(text.fallback_color, Tokens::default().color.text_dim);
+        let refused = form(Err(refusal));
+        assert!(refused.iter().any(|text| text.galley.job.text == refusal));
+        assert!(
+            !refused
+                .iter()
+                .any(|text| text.galley.job.text == consequence)
         );
     }
 }

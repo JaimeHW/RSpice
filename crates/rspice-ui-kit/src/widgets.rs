@@ -44,7 +44,7 @@ pub use button::{Button, IconButton};
 pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
 pub use chip::chip;
 pub(crate) use command_form::middle_elided;
-pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords};
+pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords, TableColumn};
 pub use dialog::{
     Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogResponse, DialogSize,
     DialogTransactionTone, focus_is_within_modal,
