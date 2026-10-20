@@ -507,8 +507,8 @@ endmodule
 "#;
     let error = VerilogACompiler::new(CompilerOptions::default())
         .compile_runtime(source, None)
-        .err()
-        .expect("a misspelled or vendor-only limiter must not compile as some other one")
+        .map(|_| ())
+        .expect_err("a misspelled or vendor-only limiter must not compile as some other one")
         .to_string();
     assert!(
         error.contains("$limit selector \"unavailable_vendor_algorithm\" names no built-in"),
