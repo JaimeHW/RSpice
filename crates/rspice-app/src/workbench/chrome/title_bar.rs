@@ -20,8 +20,8 @@ mod menu_row;
 mod menus;
 use keyboard::{
     InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, begin_menu_render,
-    finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard, record_menu_row,
-    step_menu_row_focus, typeahead_menu_row_focus,
+    claim_menu_keys, finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard,
+    record_menu_row, step_menu_row_focus, typeahead_menu_row_focus,
 };
 use menu_entries::{MenuEntry, menu_rows, show_menu_rows};
 use menu_row::{MenuRowLead, MenuRowTrailing, paint_menu_row};

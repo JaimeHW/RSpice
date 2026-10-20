@@ -1,7 +1,8 @@
 //! The menus' keyboard: F10 and the arrow keys across the bar, the arrow
 //! keys, Home, End, Escape and Tab inside an open menu, and type-to-find on
 //! both. Each menu records its rows while it is drawn, so the keys move
-//! among the rows the reader can see.
+//! among the rows the reader can see, greyed ones included: a greyed row
+//! takes the focus so it can say why it is grey, and only refuses to run.
 
 use super::*;
 
@@ -19,7 +20,6 @@ pub(super) enum InitialMenuFocus {
 pub(super) struct MenuRowRecord {
     pub(super) id: Id,
     pub(super) label: String,
-    pub(super) enabled: bool,
     pub(super) response: Response,
 }
 
@@ -54,33 +54,28 @@ pub(super) fn begin_menu_render(ctx: &Context, popup_id: Id) {
     });
 }
 
-pub(super) fn record_menu_row(ctx: &Context, response: &Response, label: &str, enabled: bool) {
+pub(super) fn record_menu_row(ctx: &Context, response: &Response, label: &str) {
     let request_row_focus = ctx.data_mut(|data| {
         let id = Id::new(MENU_RENDER_STATE_ID);
         let Some(mut state) = data.get_temp::<MenuRenderState>(id) else {
             return false;
         };
-        let request_row_focus = if enabled {
-            match state.initial_focus {
-                Some(InitialMenuFocus::First) if !state.initial_focus_claimed => {
-                    state.initial_focus_claimed = true;
-                    true
-                }
-                Some(InitialMenuFocus::Last) => {
-                    // Every enabled row requests focus while rendering; the last
-                    // enabled row therefore owns the final request.
-                    state.initial_focus_claimed = true;
-                    true
-                }
-                Some(InitialMenuFocus::First) | None => false,
+        let request_row_focus = match state.initial_focus {
+            Some(InitialMenuFocus::First) if !state.initial_focus_claimed => {
+                state.initial_focus_claimed = true;
+                true
             }
-        } else {
-            false
+            Some(InitialMenuFocus::Last) => {
+                // Every row requests focus while rendering; the last row
+                // therefore owns the final request.
+                state.initial_focus_claimed = true;
+                true
+            }
+            Some(InitialMenuFocus::First) | None => false,
         };
         state.rows.push(MenuRowRecord {
             id: response.id,
             label: label.to_owned(),
-            enabled,
             response: response.clone(),
         });
         data.insert_temp(id, state);
@@ -106,20 +101,37 @@ fn request_focus(ctx: &Context, id: Id) {
     ctx.memory_mut(|memory| memory.request_focus(id));
 }
 
+/// Keep egui's own focus moves off the keys a menu row answers itself: an
+/// arrow would hop the focus on from the row the menu just moved it to, to
+/// whatever widget lies that way, under the menu or beside it, and Escape
+/// would drop the focus before the menu could hand it back.
+pub(super) fn claim_menu_keys(ctx: &Context, id: Id) {
+    ctx.memory_mut(|memory| {
+        memory.set_focus_lock_filter(
+            id,
+            egui::EventFilter {
+                tab: false,
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                escape: true,
+            },
+        );
+    });
+}
+
 pub(super) fn handle_popup_keyboard(
     ctx: &Context,
     popup_id: Id,
     trigger: &Response,
     rows: &[MenuRowRecord],
 ) {
-    let enabled_rows = rows.iter().filter(|row| row.enabled).collect::<Vec<_>>();
-    if enabled_rows.is_empty() {
-        return;
-    }
     let focused = ctx.memory(|memory| memory.focused());
-    let focused_index = focused.and_then(|id| enabled_rows.iter().position(|row| row.id == id));
+    let focused_index = focused.and_then(|id| rows.iter().position(|row| row.id == id));
+    if let Some(index) = focused_index {
+        claim_menu_keys(ctx, rows[index].id);
+    }
 
-    if step_menu_row_focus(ctx, &enabled_rows, focused_index) {
+    if step_menu_row_focus(ctx, rows, focused_index) {
         return;
     }
 
@@ -134,54 +146,55 @@ pub(super) fn handle_popup_keyboard(
     }
 
     if let Some(index) = focused_index {
-        typeahead_menu_row_focus(ctx, &enabled_rows, index);
+        typeahead_menu_row_focus(ctx, rows, index);
     }
 }
 
-/// Up, Down, Home and End among a menu's enabled rows. Returns whether one
-/// of them was pressed.
+/// Up, Down, Home and End among a menu's rows. Returns whether one of them
+/// was pressed.
 pub(super) fn step_menu_row_focus(
     ctx: &Context,
-    enabled_rows: &[&MenuRowRecord],
+    rows: &[MenuRowRecord],
     focused_index: Option<usize>,
 ) -> bool {
+    if rows.is_empty() {
+        return false;
+    }
     let destination = if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown)) {
-        Some(focused_index.map_or(0, |index| (index + 1) % enabled_rows.len()))
+        Some(focused_index.map_or(0, |index| (index + 1) % rows.len()))
     } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowUp)) {
-        Some(focused_index.map_or(enabled_rows.len() - 1, |index| {
-            (index + enabled_rows.len() - 1) % enabled_rows.len()
+        Some(focused_index.map_or(rows.len() - 1, |index| {
+            (index + rows.len() - 1) % rows.len()
         }))
     } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Home)) {
         Some(0)
     } else if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::End)) {
-        Some(enabled_rows.len() - 1)
+        Some(rows.len() - 1)
     } else {
         None
     };
     let Some(index) = destination else {
         return false;
     };
-    enabled_rows[index].response.request_focus();
-    enabled_rows[index]
-        .response
-        .scroll_to_me(Some(Align::Center));
+    rows[index].response.request_focus();
+    rows[index].response.scroll_to_me(Some(Align::Center));
+    // egui read the same arrow when the pass began and would move the focus
+    // on from the row just chosen at its end; a row that has not held the
+    // focus for a pass yet cannot claim the arrows, so the move is cancelled.
+    ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
     true
 }
 
 /// Typing a row's first letters moves the focus to it.
-pub(super) fn typeahead_menu_row_focus(
-    ctx: &Context,
-    enabled_rows: &[&MenuRowRecord],
-    focused_index: usize,
-) {
+pub(super) fn typeahead_menu_row_focus(ctx: &Context, rows: &[MenuRowRecord], focused_index: usize) {
     let Some(query) = menu_typeahead_query(ctx) else {
         return;
     };
-    if let Some(row) = enabled_rows
+    if let Some(row) = rows
         .iter()
         .cycle()
         .skip(focused_index + 1)
-        .take(enabled_rows.len())
+        .take(rows.len())
         .find(|row| row.label.to_lowercase().starts_with(&query))
     {
         row.response.request_focus();

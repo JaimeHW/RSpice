@@ -278,17 +278,11 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
     let label = row.label;
     let enabled = availability.is_available();
     let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
-    let (rect, response) = ui
-        .add_enabled_ui(enabled, |ui| {
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click())
-        })
-        .inner;
-    let response = match availability {
-        CommandAvailability::Disabled(reason) => {
-            response.on_hover_text(format!("Unavailable: {reason}"))
-        }
-        CommandAvailability::Available | CommandAvailability::Hidden => response,
-    };
+    // A greyed row is still a live widget: it takes the focus, so the keys
+    // walk every row a reader can see and the row can say why it is grey.
+    // Choosing it does nothing.
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
     response.widget_info(|| match row.checked {
         Some(checked) => {
             egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, checked, label)
@@ -311,9 +305,11 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
             node.set_keyboard_shortcut(row.shortcut.as_str());
         }
     });
-    record_menu_row(ui.ctx(), &response, label, enabled);
+    record_menu_row(ui.ctx(), &response, label);
 
-    let highlighted = enabled && (response.hovered() || response.has_focus());
+    // The pointer lights only a row it can choose; the keyboard's focus
+    // lights any row, so the reader sees where it is.
+    let highlighted = response.has_focus() || (enabled && response.hovered());
     paint_menu_row(
         ui,
         rect,
@@ -327,10 +323,10 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
     theme::paint_focus_ring_outset(ui, &response, rect);
 
     let response = match availability {
-        CommandAvailability::Disabled(reason) => response.on_disabled_hover_text(reason),
+        CommandAvailability::Disabled(reason) => response.on_hover_text(sentence(reason)),
         CommandAvailability::Available | CommandAvailability::Hidden => response,
     };
-    if response.clicked() {
+    if enabled && response.clicked() {
         ui.close();
         return Some(MenuChoice {
             command: row.command,
@@ -338,6 +334,14 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
         });
     }
     None
+}
+
+/// A greyed row's reason as its tooltip reads it: a sentence.
+fn sentence(reason: &str) -> String {
+    let mut characters = reason.chars();
+    characters.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(characters).collect()
+    })
 }
 
 fn menu_separator(ui: &mut Ui) {
@@ -359,7 +363,7 @@ pub(super) fn submenu_row_id(label: &str) -> Id {
 ///
 /// The submenu's rows are recorded apart from the enclosing menu's, so that
 /// menu's arrow keys step over the row rather than into its children. Right
-/// arrow, Enter or Space opens it with its first available row focused; Left
+/// arrow, Enter or Space opens it with its first row focused; Left
 /// arrow or Escape closes it back onto the row.
 fn submenu_row(
     ui: &mut Ui,
@@ -394,7 +398,7 @@ fn submenu_row(
     }
 
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-    record_menu_row(ui.ctx(), &response, label, true);
+    record_menu_row(ui.ctx(), &response, label);
     let is_open = MenuState::from_id(ui.ctx(), parent_menu, |state| {
         state.open_item == Some(submenu_id)
     });
@@ -499,14 +503,12 @@ fn handle_submenu_keyboard(
     row: &Response,
     rows: &[MenuRowRecord],
 ) {
-    let enabled_rows = rows.iter().filter(|row| row.enabled).collect::<Vec<_>>();
     let focused = ctx.memory(|memory| memory.focused());
-    let Some(focused_index) =
-        focused.and_then(|id| enabled_rows.iter().position(|row| row.id == id))
+    let Some(focused_index) = focused.and_then(|id| rows.iter().position(|row| row.id == id))
     else {
         return;
     };
-    claim_menu_keys(ctx, enabled_rows[focused_index].id);
+    claim_menu_keys(ctx, rows[focused_index].id);
     if ctx.input_mut(|input| {
         input.consume_key(Modifiers::NONE, Key::ArrowLeft)
             || input.consume_key(Modifiers::NONE, Key::Escape)
@@ -519,25 +521,7 @@ fn handle_submenu_keyboard(
         row.request_focus();
         return;
     }
-    if !step_menu_row_focus(ctx, &enabled_rows, Some(focused_index)) {
-        typeahead_menu_row_focus(ctx, &enabled_rows, focused_index);
+    if !step_menu_row_focus(ctx, rows, Some(focused_index)) {
+        typeahead_menu_row_focus(ctx, rows, focused_index);
     }
-}
-
-/// Keep egui's own focus moves off the keys these rows answer themselves:
-/// an arrow would hop the focus to whatever widget lies that way, under the
-/// menu or beside it, and Escape would drop the focus before the submenu
-/// could close back onto its row.
-fn claim_menu_keys(ctx: &Context, id: Id) {
-    ctx.memory_mut(|memory| {
-        memory.set_focus_lock_filter(
-            id,
-            egui::EventFilter {
-                tab: false,
-                horizontal_arrows: true,
-                vertical_arrows: true,
-                escape: true,
-            },
-        );
-    });
 }

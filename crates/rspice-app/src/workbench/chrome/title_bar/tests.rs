@@ -1366,6 +1366,164 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
     assert_eq!(read("Reset workspace layout…"), (Role::MenuItem, None));
 }
 
+/// The labels of the command and submenu rows `menu` shows for `app`, in
+/// order, and whether each one can be chosen.
+#[cfg(not(target_arch = "wasm32"))]
+fn shown_rows(menu: ApplicationMenu, app: &RSpiceApp) -> Vec<(String, bool)> {
+    let rows = menu_entries::resolve_menu_rows(
+        menu.entries(),
+        app,
+        crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+        egui::os::OperatingSystem::Windows,
+    );
+    menu_entries::visible_rows(&rows)
+        .into_iter()
+        .filter_map(|row| match row {
+            menu_entries::MenuRow::Command(row) => {
+                Some((row.label.to_owned(), row.availability.is_available()))
+            }
+            menu_entries::MenuRow::Submenu { label, .. } => Some(((*label).to_owned(), true)),
+            menu_entries::MenuRow::Separator => None,
+        })
+        .collect()
+}
+
+/// A greyed row takes the keyboard focus like any other, so Down walks
+/// every row a reader can see and a screen reader hears why a row is grey.
+/// Enter on a greyed row does nothing: the menu stays open on it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_keyboard_walks_greyed_rows_and_enter_on_one_does_nothing() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = title_test_app();
+    let results_menu = Id::new((
+        "workbench.title_menu.trigger",
+        MenuTriggerKey::Application(ApplicationMenu::Results),
+    ))
+    .with("popup");
+    let shown = shown_rows(ApplicationMenu::Results, &app);
+    let grey_index = shown
+        .iter()
+        .position(|(_, enabled)| !enabled)
+        .expect("the Results menu has a grey row without results");
+    let grey = shown[grey_index].0.clone();
+    let frame = |app: &mut RSpiceApp, events| {
+        menu_items_after_frame(&ctx, events, |ui| {
+            menus(ui, app, MenuProjection::All, false, 35.0);
+        })
+    };
+
+    Popup::open_id(&ctx, results_menu);
+    let _ = frame(&mut app, Vec::new());
+    let mut walked = Vec::new();
+    for _ in &shown {
+        let _ = frame(&mut app, vec![title_key_event(Key::ArrowDown)]);
+        let (_, focused) = frame(&mut app, Vec::new());
+        walked.push(focused.expect("a row has the focus"));
+    }
+    assert_eq!(
+        walked,
+        shown.iter().map(|(label, _)| label.clone()).collect::<Vec<_>>()
+    );
+
+    let _ = frame(&mut app, vec![title_key_event(Key::Home)]);
+    for _ in 0..grey_index {
+        let _ = frame(&mut app, Vec::new());
+        let _ = frame(&mut app, vec![title_key_event(Key::ArrowDown)]);
+    }
+    let (_, focused) = frame(&mut app, Vec::new());
+    assert_eq!(focused.as_deref(), Some(grey.as_str()));
+    let _ = frame(&mut app, vec![title_key_event(Key::Enter)]);
+    let (_, focused) = frame(&mut app, Vec::new());
+    assert!(
+        Popup::is_id_open(&ctx, results_menu),
+        "Enter on {grey:?} closed the menu"
+    );
+    assert_eq!(focused.as_deref(), Some(grey.as_str()));
+}
+
+/// A menu whose rows are all grey still answers Down, End, Home,
+/// type-to-find and Escape. It answered none of them: the keys stepped only
+/// among enabled rows and gave up when there were none.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_menu_of_greyed_rows_still_answers_its_keys() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = title_test_app();
+    app.state.project_lifecycle.authority.close_project();
+    let (menu, shown) = ALL_MENUS
+        .into_iter()
+        .map(|menu| (menu, shown_rows(menu, &app)))
+        .find(|(_, rows)| rows.len() > 2 && rows.iter().all(|(_, enabled)| !enabled))
+        .expect("some menu is all grey with no project open");
+    let labels = shown
+        .iter()
+        .map(|(label, _)| label.as_str())
+        .collect::<Vec<_>>();
+    let trigger = Id::new((
+        "workbench.title_menu.trigger",
+        MenuTriggerKey::Application(menu),
+    ));
+    let popup = trigger.with("popup");
+    let frame = |app: &mut RSpiceApp, events| {
+        menu_items_after_frame(&ctx, events, |ui| {
+            menus(ui, app, MenuProjection::All, false, 35.0);
+        })
+    };
+    // One frame carries the event, the next shows where the focus went.
+    let press = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
+        let _ = frame(app, events);
+        frame(app, Vec::new()).1
+    };
+    let key = |key| vec![title_key_event(key)];
+
+    Popup::open_id(&ctx, popup);
+    let _ = press(&mut app, Vec::new());
+    assert_eq!(
+        press(&mut app, key(Key::ArrowDown)).as_deref(),
+        Some(labels[0])
+    );
+    assert_eq!(
+        press(&mut app, key(Key::ArrowDown)).as_deref(),
+        Some(labels[1])
+    );
+    assert_eq!(
+        press(&mut app, key(Key::End)).as_deref(),
+        labels.last().copied()
+    );
+    assert_eq!(
+        press(&mut app, key(Key::Home)).as_deref(),
+        Some(labels[0])
+    );
+    let letter = labels[1]
+        .chars()
+        .next()
+        .expect("a label")
+        .to_lowercase()
+        .to_string();
+    let found = labels
+        .iter()
+        .cycle()
+        .skip(1)
+        .take(labels.len())
+        .find(|label| label.to_lowercase().starts_with(&letter))
+        .copied();
+    assert_eq!(
+        press(&mut app, vec![egui::Event::Text(letter.clone())]).as_deref(),
+        found,
+        "typing {letter:?} in {labels:?}"
+    );
+    assert_eq!(
+        press(&mut app, key(Key::Escape)).as_deref(),
+        Some(menu.label())
+    );
+    assert!(!Popup::is_id_open(&ctx, popup), "Escape closes {menu:?}");
+}
+
 /// What a reader sees of `rows`: each row's label, `---` for a rule.
 #[cfg(not(target_arch = "wasm32"))]
 fn visible_row_names(rows: &[menu_entries::MenuRow]) -> Vec<String> {
