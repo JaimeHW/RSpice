@@ -751,7 +751,7 @@ impl IncludeProcessor {
     }
 
     /// Read included sources under `dialect`'s rules.
-    pub fn with_expression_dialect(mut self, dialect: ExpressionDialect) -> Self {
+    pub(crate) fn with_expression_dialect(mut self, dialect: ExpressionDialect) -> Self {
         self.expression_dialect = dialect;
         self
     }

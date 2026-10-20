@@ -715,7 +715,7 @@ impl LexError {
     /// The error without its line. A card is lexed on its own, so the
     /// lexer's line counts from the start of that card's text; a caller that
     /// reports the card's source line says where it is instead.
-    pub fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         match self {
             LexError::UnexpectedChar(c, _) => format!("Unexpected character '{c}'"),
             LexError::InvalidNumber(s, _) => format!("Invalid number '{s}'"),
