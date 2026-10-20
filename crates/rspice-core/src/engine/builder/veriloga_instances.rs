@@ -88,6 +88,22 @@ fn public_parameter<'a>(entry: &'a CachedVerilogAModel, name: &str) -> Option<Pu
         })
 }
 
+/// The name a card already set `parameter` by, when `written` is another of
+/// its names (the declared one or an alias). Records the first name used.
+fn set_by_another_name<'n>(
+    set_as: &mut Vec<(&'n str, &'n str)>,
+    parameter: &'n str,
+    written: &'n str,
+) -> Option<&'n str> {
+    match set_as.iter().find(|(declared, _)| *declared == parameter) {
+        Some(&(_, previous)) => (!previous.eq_ignore_ascii_case(written)).then_some(previous),
+        None => {
+            set_as.push((parameter, written));
+            None
+        }
+    }
+}
+
 pub(super) fn prepare<'a>(
     netlist: &crate::Netlist,
     element: &crate::netlist::Element,
@@ -117,6 +133,20 @@ pub(super) fn prepare<'a>(
     let mut overrides = Vec::with_capacity(params.len());
     let mut strings = Vec::new();
     let mut multiplicity = None;
+    // Verilog-AMS 2.4 section 3.4.7: overriding a parameter by its name and
+    // an alias, or by two aliases, is an error even when the values agree.
+    let mut set_as = Vec::new();
+    let set_twice = |parameter: &str, previous: &str, written: &str| {
+        refuse(
+            &element.name,
+            subckt_name,
+            ElaborationErrorKind::ParameterValue,
+            format!(
+                "parameter '{parameter}' is set twice, as '{previous}' and as '{written}': \
+                 an instance sets a parameter by its name or by one alias, not both"
+            ),
+        )
+    };
     let mut specializes = entry
         .canonical_ir
         .as_deref()
@@ -134,6 +164,9 @@ pub(super) fn prepare<'a>(
                     format!("parameter '{name}' is a string parameter and requires a string value"),
                 ));
             };
+            if let Some(previous) = set_by_another_name(&mut set_as, parameter.name, name) {
+                return Err(set_twice(parameter.name, previous, name));
+            }
             specializes = true;
             strings.push((parameter.name, text.as_str()));
             continue;
@@ -167,6 +200,9 @@ pub(super) fn prepare<'a>(
                 format!("unknown parameter '{name}'"),
             )
         })?;
+        if let Some(previous) = set_by_another_name(&mut set_as, parameter.name, name) {
+            return Err(set_twice(parameter.name, previous, name));
+        }
         specializes |= parameter.needs_source;
         overrides.push((parameter.name, value));
     }

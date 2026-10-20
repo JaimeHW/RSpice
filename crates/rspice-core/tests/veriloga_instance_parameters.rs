@@ -340,6 +340,56 @@ fn one_offset_spelled_twice_with_two_values_is_refused() {
     );
 }
 
+/// A conductance whose resistance has two aliases.
+const VALIAS: &str = r#"
+`include "disciplines.vams"
+module valias(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    aliasparam ralias = r;
+    aliasparam rbis = r;
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#;
+
+/// Verilog-AMS 2.4 section 3.4.7: a card sets a parameter by its name or by
+/// one alias. Its name and an alias, or two aliases, are an error even when
+/// the values agree; the last spelling used to win silently.
+#[test]
+fn a_parameter_set_by_its_name_and_an_alias_is_refused() {
+    let model = ModelFile::new("alias_conflict", VALIAS);
+    let deck = |card: &str| {
+        format!(
+            "* a parameter and its aliases\n\
+             v1 in 0 dc 1.0\n\
+             r1 in out 1k\n\
+             x1 out 0 valias {card}\n\
+             .va \"{}\" valias\n\
+             .op\n\
+             .end\n",
+            model.deck_path()
+        )
+    };
+    assert_close(
+        "one alias sets the parameter",
+        node_voltage(&deck("ralias=3k"), "out"),
+        divided(3000.0),
+    );
+    for (card, first, second) in [
+        ("r=3k ralias=9k", "r", "ralias"),
+        ("ralias=3k rbis=3k", "ralias", "rbis"),
+    ] {
+        let message = refusal(&deck(card)).to_ascii_lowercase();
+        assert!(
+            message.contains(&format!(
+                "parameter 'r' is set twice, as '{first}' and as '{second}'"
+            )),
+            "{card}: {message}"
+        );
+    }
+}
+
 /// A string parameter selecting the law: `half` halves the resistance.
 const VMODE: &str = r#"
 `include "disciplines.vams"
