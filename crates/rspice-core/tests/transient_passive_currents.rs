@@ -2,6 +2,135 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use rspice_core::numerics::integration::IntegrationMethod;
 
+/// ngspice 46 (`set numdgt=12`) on these decks. Negative C and L are valid
+/// elements there (capsetup.c/indsetup.c check no sign), and a K coupling a
+/// negative inductor uses M = k*sqrt(|L1*L2|) (muttemp.c:56).
+#[test]
+fn negative_capacitance_and_inductance_match_ngspice46_in_ac_and_transient() {
+    let ac = "* negative C and L, AC\n\
+              v1 1 0 dc 0 ac 1\n\
+              r1 1 2 1k\n\
+              c1 2 0 -1n\n\
+              c2 2 0 3n\n\
+              v2 3 0 dc 0 ac 1\n\
+              r3 3 4 1\n\
+              l1 4 0 -1u\n\
+              rl 4 8 0.1\n\
+              l2 8 0 0.5u\n\
+              v5 5 0 dc 0 ac 1\n\
+              r5 5 6 10\n\
+              l5 6 0 -2u\n\
+              l6 7 0 3u\n\
+              r6 7 0 50\n\
+              k1 l5 l6 0.5\n\
+              .end\n";
+    let tran = "* negative C and L, transient\n\
+                .options reltol=1e-6 abstol=1e-15 vntol=1e-9\n\
+                v1 1 0 pulse(0 1 0 10n 10n 200n 500n)\n\
+                r1 1 2 1k\n\
+                c1 2 0 -1n\n\
+                c2 2 0 3n\n\
+                v2 3 0 pulse(0 1 0 10n 10n 200n 500n)\n\
+                r3 3 4 2\n\
+                l1 4 8 -1u\n\
+                l2 8 0 3u\n\
+                v5 5 0 pulse(0 1 0 10n 10n 200n 500n)\n\
+                r5 5 6 10\n\
+                l7 6 9 5u\n\
+                l5 9 0 -2u\n\
+                l6 7 0 3u\n\
+                r6 7 0 50\n\
+                k1 l5 l6 0.5\n\
+                .end\n";
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let netlist = Netlist::parse(ac).unwrap();
+        let point = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_ac(&netlist, &[1.0e6])
+            .unwrap_or_else(|error| panic!("{dialect:?}: {error}"))
+            .pop()
+            .unwrap();
+        let voltage = |name: &str| {
+            let index = point
+                .node_names
+                .iter()
+                .position(|node| node.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing node {name}"));
+            point.voltages[index]
+        };
+        let current = |name: &str| {
+            let index = point
+                .branch_names
+                .iter()
+                .position(|branch| branch.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing branch {name}"));
+            point.currents[index]
+        };
+        for (label, actual, expected) in [
+            (
+                "v(2)",
+                voltage("2"),
+                (6.292_724_832_126e-3, -7.907_671_241_47e-2),
+            ),
+            (
+                "i(v2)",
+                current("v2"),
+                (-3.390_688_555_39e-2, 1.519_096_218_285e-1),
+            ),
+            (
+                "i(v5)",
+                current("v5"),
+                (-3.809_709_569_85e-2, -4.472_561_808_75e-2),
+            ),
+            (
+                "v(7)",
+                voltage("7"),
+                (-2.045_797_251_09e-1, 3.702_932_810_835e-1),
+            ),
+        ] {
+            let expected = rspice_core::Complex64::new(expected.0, expected.1);
+            assert!(
+                (actual - expected).norm() <= 1.0e-9 * expected.norm(),
+                "{dialect:?} AC {label}: {actual} against ngspice {expected}"
+            );
+        }
+
+        // Both simulators run this stable transient (each negative element
+        // sits beside a larger positive one) with a 0.1 ns ceiling, so the
+        // remaining difference is truncation error, about 1e-8 here.
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.max_timestep = 0.1e-9;
+        let netlist = Netlist::parse(tran).unwrap();
+        let result = Engine::new(config)
+            .run_tran(&netlist, 300.0e-9, 1.0e-9)
+            .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+        let at = |values: &[f64], time: f64| {
+            let upper = result.time.partition_point(|&t| t < time);
+            let (t0, t1) = (result.time[upper - 1], result.time[upper]);
+            let weight = (time - t0) / (t1 - t0);
+            values[upper - 1] + weight * (values[upper] - values[upper - 1])
+        };
+        let voltage = |name: &str| result.try_voltage_waveform_named(name).unwrap();
+        let current = |name: &str| result.try_branch_current_waveform_named(name).unwrap();
+        for (label, values, time, expected) in [
+            ("v(2)", voltage("2"), 100e-9, 4.638_853_543_259e-2),
+            ("v(2)", voltage("2"), 250e-9, 9.794_643_257_930e-2),
+            ("i(v2)", current("v2"), 100e-9, -4.531_163_962_33e-2),
+            ("i(v2)", current("v2"), 250e-9, -9.145_081_986_28e-2),
+            ("v(8)", voltage("8"), 100e-9, 1.364_065_081_131),
+            ("i(v5)", current("v5"), 100e-9, -2.895_500_745_96e-2),
+            ("i(v5)", current("v5"), 250e-9, -4.397_684_525_45e-2),
+            ("v(7)", voltage("7"), 100e-9, 2.778_536_512_574e-1),
+            ("v(9)", voltage("9"), 100e-9, -4.835_833_691_55e-1),
+        ] {
+            let actual = at(values, time);
+            assert!(
+                (actual - expected).abs() <= 1.0e-5 * expected.abs(),
+                "{dialect:?} {label} at {time:e}: {actual:.12e} against ngspice {expected:.12e}"
+            );
+        }
+    }
+}
+
 #[test]
 fn tied_passive_and_diode_terminals_preserve_dc_and_transient_voltages() {
     for dialect in [

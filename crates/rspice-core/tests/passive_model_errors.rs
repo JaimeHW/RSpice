@@ -2,32 +2,48 @@ use rspice_core::{Engine, Netlist, SimulationConfig, SpiceDialect};
 
 #[test]
 fn negative_explicit_capacitance_cannot_select_a_model_default() {
+    // Negative capacitance is a valid element (ngspice, HSPICE, Spectre), and
+    // an authored negative value is the value: never the model's default.
     for element in ["C1 in 0 -1n", "C1 in 0 -1n CM", "C1 in 0 CM C=-1n"] {
         let source =
-            format!("Invalid capacitance\nV1 in 0 1\n{element}\n.model CM C(C=1n)\n.end\n");
+            format!("Negative capacitance\nV1 in 0 1\n{element}\n.model CM C(C=1n)\n.end\n");
         let netlist = Netlist::parse(&source).unwrap();
-        let error = Engine::default()
+        let circuit = Engine::default()
             .build_circuit(&netlist)
-            .expect_err("negative capacitance");
-        assert!(
-            matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
-            "{element}: {error}"
+            .unwrap_or_else(|error| panic!("{element}: {error}"));
+        assert_eq!(
+            circuit.capacitor_storage().capacitances[0],
+            -1.0e-9,
+            "{element}: the authored negative value must be the resolved one"
         );
     }
 }
 
 #[test]
 fn nonpositive_explicit_inductance_cannot_select_a_model_default() {
-    for element in ["L1 in 0 0 LM", "L1 in 0 -1m LM", "L1 in 0 LM L=-1m"] {
-        let source = format!("Invalid inductance\nV1 in 0 1\n{element}\n.model LM L(L=1m)\n.end\n");
+    // Zero inductance stays outside the supported domain; a negative one is
+    // a valid element whose authored value is never replaced by the model's.
+    let source = "Zero inductance\nV1 in 0 1\nL1 in 0 0 LM\n.model LM L(L=1m)\n.end\n";
+    let error = Engine::default()
+        .build_circuit(&Netlist::parse(source).unwrap())
+        .err()
+        .expect("an explicit zero inductance must not select the model default");
+    assert!(
+        matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
+        "L=0: {error}"
+    );
+    for element in ["L1 out 0 -1m LM", "L1 out 0 LM L=-1m"] {
+        let source = format!(
+            "Negative inductance\nV1 in 0 1\nR1 in out 1\n{element}\n.model LM L(L=1m)\n.end\n"
+        );
         let netlist = Netlist::parse(&source).unwrap();
-        let error = Engine::default()
+        let circuit = Engine::default()
             .build_circuit(&netlist)
-            .err()
-            .unwrap_or_else(|| panic!("{element}: invalid explicit value selected a fallback"));
-        assert!(
-            matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
-            "{element}: {error}"
+            .unwrap_or_else(|error| panic!("{element}: {error}"));
+        assert_eq!(
+            circuit.inductor_storage().inductances[0],
+            -1.0e-3,
+            "{element}: the authored negative value must be the resolved one"
         );
     }
 }

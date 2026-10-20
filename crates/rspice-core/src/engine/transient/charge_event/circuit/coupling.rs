@@ -101,7 +101,7 @@ pub(super) fn validate(
                     d.name
                 ))
             })?;
-            if value <= 0.0 || value != l.inductances[i] || p != l.node_pos[i] || n != l.node_neg[i]
+            if value == 0.0 || value != l.inductances[i] || p != l.node_pos[i] || n != l.node_neg[i]
             {
                 return Err(error(format!(
                     "mutual coupling '{}' disagrees with its canonical inductor",

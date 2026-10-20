@@ -152,10 +152,13 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
             element_name, resolved
         )));
     }
-    if resolved <= 0.0 {
+    // A negative inductance is a valid circuit element, as in ngspice
+    // (indsetup.c/indtemp.c check no sign). Zero stays outside the
+    // supported domain.
+    if resolved == 0.0 {
         return Err(SimulationError::ParameterDomain(format!(
-            "Inductor '{}' resolved to nonpositive inductance {}",
-            element_name, resolved
+            "Inductor '{}' resolved to zero inductance",
+            element_name
         )));
     }
 

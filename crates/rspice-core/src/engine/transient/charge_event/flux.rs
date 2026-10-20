@@ -35,16 +35,23 @@ impl FluxConservation {
         ExactElimination::<usize>::ensure_words(overhead, options.limits.max_result_values)?;
         let mut coefficients = BTreeMap::new();
         let mut roots = BTreeMap::new();
+        // A negative winding (M = k*sqrt(|L1*L2|), muttemp.c:56) keeps
+        // L = S K S with S = sqrt(|L|) once K's diagonal carries sign(L).
         for &(branch, inductance) in windings {
             check_abort(abort)?;
             if branch >= size
                 || !inductance.is_finite()
-                || inductance <= 0.0
-                || coefficients.insert(branch, vec![(branch, 1.0)]).is_some()
+                || inductance == 0.0
+                || coefficients
+                    .insert(branch, vec![(branch, inductance.signum())])
+                    .is_some()
             {
                 return Err(error("invalid winding in flux descriptor"));
             }
-            roots.insert(branch, integer_coefficient(inductance.sqrt()).unwrap());
+            roots.insert(
+                branch,
+                integer_coefficient(inductance.abs().sqrt()).unwrap(),
+            );
         }
         for &(first, second, value) in couplings {
             check_abort(abort)?;

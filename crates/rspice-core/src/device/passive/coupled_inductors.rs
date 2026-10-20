@@ -68,9 +68,13 @@ pub(crate) struct CoupledWinding {
     pub inductance: Value,
 }
 
+/// `M = k·sqrt(|L1·L2|)`: ngspice's muttemp.c:56 takes the magnitude, so a
+/// negative self-inductance (a fitted macromodel element) couples with a
+/// real mutual term of the coefficient's sign.
 fn mutual_inductance_value(k: Value, l1: Value, l2: Value) -> Value {
+    let (l1, l2) = (l1.abs(), l2.abs());
     let product = l1 * l2;
-    if product.is_normal() || !l1.is_finite() || !l2.is_finite() || l1 <= 0.0 || l2 <= 0.0 {
+    if product.is_normal() || !l1.is_finite() || !l2.is_finite() || l1 == 0.0 || l2 == 0.0 {
         return k * product.sqrt();
     }
     if l1 == l2 {
@@ -210,11 +214,11 @@ impl CoupledInductorPair {
 
     /// Get turns ratio (approximate, for ideal transformer)
     pub fn turns_ratio(&self) -> Value {
-        let ratio = self.l1 / self.l2;
+        let ratio = (self.l1 / self.l2).abs();
         if ratio.is_normal() {
             ratio.sqrt()
         } else {
-            self.l1.sqrt() / self.l2.sqrt()
+            self.l1.abs().sqrt() / self.l2.abs().sqrt()
         }
     }
 

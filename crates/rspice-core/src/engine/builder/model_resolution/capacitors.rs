@@ -240,15 +240,12 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
         resolved *= mult;
     }
 
+    // A negative capacitance is a valid circuit element: ngspice, HSPICE and
+    // Spectre all stamp it (capsetup.c/captemp.c check no sign), and fitted
+    // macromodels and vector-fitted RLC networks depend on it.
     if !resolved.is_finite() {
         return Err(SimulationError::Circuit(format!(
             "Capacitor '{}' resolved to invalid capacitance {}",
-            element_name, resolved
-        )));
-    }
-    if resolved < 0.0 {
-        return Err(SimulationError::ParameterDomain(format!(
-            "Capacitor '{}' resolved to negative capacitance {}",
             element_name, resolved
         )));
     }

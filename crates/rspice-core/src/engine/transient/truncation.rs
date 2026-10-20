@@ -532,8 +532,10 @@ impl Engine {
                 accepted_states_complete = false;
                 continue;
             }
+            // captrunc.c walks every capacitor's charge; CKTterr's
+            // tolerances take magnitudes, so a negative C is walked too.
             let capacitance = circuit.capacitors.capacitances[idx];
-            if !capacitance.is_finite() || capacitance <= 0.0 {
+            if !capacitance.is_finite() || capacitance == 0.0 {
                 accepted_states_complete = false;
                 continue;
             }
@@ -660,8 +662,9 @@ impl Engine {
         let mut found_branch = false;
 
         for idx in 0..inductors.names.len() {
+            // indtrunc.c walks every inductor's flux, negative L included.
             let inductance = inductors.inductances[idx];
-            if !inductance.is_finite() || inductance <= 0.0 {
+            if !inductance.is_finite() || inductance == 0.0 {
                 continue;
             }
             let branch = inductors.branch_indices[idx];
@@ -727,7 +730,7 @@ impl Engine {
                 .capacitors
                 .capacitances
                 .iter()
-                .any(|capacitance| !capacitance.is_finite() || *capacitance <= 0.0)
+                .any(|capacitance| !capacitance.is_finite() || *capacitance == 0.0)
         {
             return None;
         }
@@ -808,7 +811,7 @@ impl Engine {
                 .capacitors
                 .capacitances
                 .iter()
-                .all(|capacitance| capacitance.is_finite() && *capacitance > 0.0)
+                .all(|capacitance| capacitance.is_finite() && *capacitance != 0.0)
         );
 
         accepted_states_out.resize(count, CapacitorAcceptedState::default());

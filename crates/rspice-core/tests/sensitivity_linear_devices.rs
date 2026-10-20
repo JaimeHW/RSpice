@@ -87,9 +87,18 @@ fn a_small_physical_derivative_is_retained_below_probe_roundoff() {
 }
 
 fn rlc_response(frequency: f64, current: bool) -> (ComplexValue, [ComplexValue; 3]) {
+    rlc_response_with(frequency, current, 0.01, 1e-6)
+}
+
+fn rlc_response_with(
+    frequency: f64,
+    current: bool,
+    inductance: f64,
+    capacitance: f64,
+) -> (ComplexValue, [ComplexValue; 3]) {
     let jw = ComplexValue::new(0.0, std::f64::consts::TAU * frequency);
-    let series = 100.0 + jw * 0.01;
-    let load = 1e-6 + jw * 1e-6;
+    let series = 100.0 + jw * inductance;
+    let load = 1e-6 + jw * capacitance;
     let denominator = 1.0 + series * load;
     if current {
         (
@@ -109,6 +118,29 @@ fn rlc_response(frequency: f64, current: bool) -> (ComplexValue, [ComplexValue; 
                 -jw * series / denominator.powi(2),
             ],
         )
+    }
+}
+
+/// Negative L and C are valid elements, so a field derivative at a negative
+/// nominal is two-sided and follows the same closed form.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn negative_inductance_and_capacitance_keep_their_closed_form_derivatives() {
+    let body = "Negative LC derivatives\nV1 in 0 DC 1 AC 1\nR1 in mid 100\nL1 mid out -10m\nC1 out 0 -1u\nRload out 0 1meg\n";
+    for frequency in [123.0, 10000.0] {
+        let SensitivityCardResult::Ac(ac) = run(
+            body,
+            "V(out)",
+            "R1 L1 C1",
+            &format!(" AC LIN 1 {frequency} {frequency}"),
+        ) else {
+            panic!("expected AC")
+        };
+        let (value, derivatives) = rlc_response_with(frequency, false, -0.01, -1e-6);
+        close(ac.output_values[0], value);
+        for (name, expected) in ["R1", "L1", "C1"].into_iter().zip(derivatives) {
+            close(ac.get(name).unwrap().absolute[0], expected);
+        }
     }
 }
 
