@@ -121,6 +121,13 @@ pub(crate) struct MixedEquilibriumImage {
     hosts: Vec<crate::xspice::verilog::HostEquilibriumImage>,
 }
 
+/// Refuse how an HDL instance's ports meet the deck's nets.
+fn port_discipline_refusal(instance: &str, detail: impl Into<String>) -> SimulationError {
+    crate::ElaborationError::new(crate::ElaborationErrorKind::PortDiscipline, detail)
+        .instance(instance)
+        .into()
+}
+
 /// The potential of one circuit node in a solution, ground at zero.
 fn node_voltage(solution: &[Value], node: usize) -> Value {
     if node == 0 {
@@ -348,8 +355,8 @@ impl CircuitData {
                     .get(node - 1)
                     .map(String::as_str)
                     .unwrap_or("<unnamed>");
-                return Err(crate::ElaborationError::new(
-                    crate::ElaborationErrorKind::PortDiscipline,
+                return Err(port_discipline_refusal(
+                    host.instance_name(),
                     format!(
                         "its port '{port}' drives the wreal net '{node_name}', which port \
                          '{first_port}' of instance '{instance}' drives as well; Verilog-AMS LRM \
@@ -357,9 +364,7 @@ impl CircuitData {
                          '{node_name}' one driver, or give both ports the resolution that \
                          combines them: `wrealsum`, `wrealavg`, `wrealmin` or `wrealmax`"
                     ),
-                )
-                .instance(host.instance_name())
-                .into());
+                ));
             }
         }
         Ok(())
@@ -429,21 +434,17 @@ impl CircuitData {
         for host in &self.mixed_signal_hosts {
             host.validate_direct_event_ports(event_nodes)
                 .map_err(|error| {
-                    crate::ElaborationError::new(
-                        crate::ElaborationErrorKind::PortDiscipline,
-                        error.to_string(),
-                    )
-                    .instance(host.instance_name())
+                    port_discipline_refusal(host.instance_name(), error.to_string())
                 })?;
             for node in host.direct_real_nodes() {
                 if matches!(
                     self.net_kinds.kind(node),
                     super::NetKind::Digital | super::NetKind::DigitalAndReal
                 ) {
-                    return Err(crate::ElaborationError::new(
-                        crate::ElaborationErrorKind::PortDiscipline,
+                    return Err(port_discipline_refusal(
+                        host.instance_name(),
                         "a real-valued HDL port and a four-state XSPICE event port require explicit domain conversion",
-                    ).instance(host.instance_name()).into());
+                    ));
                 }
             }
             for (signal, node) in host.boundary_connections() {
@@ -461,8 +462,8 @@ impl CircuitData {
                     .get(node - 1)
                     .map(String::as_str)
                     .unwrap_or("<unnamed>");
-                return Err(crate::ElaborationError::new(
-                    crate::ElaborationErrorKind::PortDiscipline,
+                return Err(port_discipline_refusal(
+                    host.instance_name(),
                     format!(
                         "connects its discrete port '{signal}' to node '{node_name}', \
                          which carries {} event-driven XSPICE values. This connection requires \
@@ -470,9 +471,7 @@ impl CircuitData {
                          event domains; direct shared resolution currently requires a digital-only net",
                         kind.description(),
                     ),
-                )
-                .instance(host.instance_name())
-                .into());
+                ));
             }
         }
         Ok(())
