@@ -522,3 +522,67 @@ fn legacy_autosave_values_migrate_to_mockup_supported_intervals() {
     assert_eq!(normalize_autosave_minutes(5), 5);
     assert_eq!(normalize_autosave_minutes(15), 10);
 }
+
+/// Workspace layout closes without applying anything: Cancel is in its
+/// footer and Esc dismisses it. The manager it replaced had no Cancel or
+/// Close, and listed remembered panel widths in pixels.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_layout_form_closes_without_applying() {
+    use crate::workbench::framework::command_registry::ids;
+    use crate::workbench::framework::host::Host;
+
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = test_app();
+    Host::execute(&mut app, ids::WORKSPACE_LAYOUTS);
+    assert!(app.state.settings.workspace_layout_manager.open);
+    let before = app.state.workbench.current_workspace_layout();
+    let input = |events: Vec<egui::Event>| egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1440.0, 900.0),
+        )),
+        events,
+        ..Default::default()
+    };
+    let frame = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
+        ctx.run_ui(input(events), |ui| {
+            app.prepare_frame(ui.ctx());
+            app.render_frame_chrome(ui);
+            app.render_frame_dialogs(ui.ctx());
+        })
+    };
+    // Access updates are incremental: keep the latest of every node.
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..3 {
+        if let Some(update) = frame(&mut app, Vec::new()).platform_output.accesskit_update {
+            nodes.extend(update.nodes);
+        }
+    }
+    assert!(
+        nodes
+            .values()
+            .any(|node| node.label().is_some_and(|label| label == "Cancel")),
+        "the form has a Cancel button"
+    );
+    assert!(!nodes.values().any(|node| {
+        node.label().is_some_and(|label| label.contains(" px"))
+            || node.value().is_some_and(|value| value.contains(" px"))
+    }));
+    let escape = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let _ = frame(&mut app, vec![escape]);
+    assert!(!app.state.settings.workspace_layout_manager.open);
+    assert_eq!(
+        app.state.workbench.current_workspace_layout(),
+        before,
+        "closing applies nothing"
+    );
+}

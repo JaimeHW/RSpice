@@ -1,14 +1,17 @@
-//! Mockup-defined device-local workspace layout manager.
+//! Workspace layout: apply a dock arrangement to this workspace or to every
+//! workspace, on this device.
+//!
+//! It is a command form: the layout, what it shows, where it applies, Apply
+//! and Cancel. It was a manager surface with no way to close it but Apply or
+//! Esc, a table of remembered panel widths in pixels that labelled the Verify
+//! workspace "DRC", and a scope row half hidden under the footer.
 
-use egui::{Context, Grid, Sense, Stroke, Ui, vec2};
+use egui::Context;
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select};
-use crate::workbench::{WorkspacePreset, state::Workspace};
+use crate::ui::widgets::{CommandForm, DialogChoice};
+use crate::workbench::WorkspacePreset;
 
 use super::PreferencesDialogs;
-use super::preferences_shell::{control_width, setting_row, value_column};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum LayoutTemplate {
@@ -20,6 +23,7 @@ enum LayoutTemplate {
 }
 
 impl LayoutTemplate {
+    #[cfg(test)]
     const ALL: [Self; 4] = [
         Self::Engineering,
         Self::Canvas,
@@ -29,11 +33,20 @@ impl LayoutTemplate {
 
     const LABELS: [&'static str; 4] = ["Engineering", "Canvas", "Diagnostics", "Results review"];
     const DETAILS: [&'static str; 4] = [
-        "Navigator · editor · inspector · console",
-        "Editor-focused with hidden docks",
-        "Wide console and inspector",
-        "Wide plot · measurements · no navigator",
+        "Navigator, editor, inspector and console",
+        "The editor alone, every dock hidden",
+        "A wide console and inspector",
+        "A wide plot with measurements, no navigator",
     ];
+
+    const fn from_index(index: usize) -> Self {
+        match index {
+            1 => Self::Canvas,
+            2 => Self::Diagnostics,
+            3 => Self::ResultsReview,
+            _ => Self::Engineering,
+        }
+    }
 
     const fn index(self) -> usize {
         match self {
@@ -62,10 +75,7 @@ enum LayoutScope {
 }
 
 impl LayoutScope {
-    const LABELS: [&'static str; 2] = [
-        "Current workspace on this device",
-        "All workspaces on this device",
-    ];
+    const LABELS: [&'static str; 2] = ["This workspace", "Every workspace"];
 
     const fn index(self) -> usize {
         match self {
@@ -104,185 +114,44 @@ pub(super) fn render(ctx: &Context, state: &mut PreferencesDialogs<'_>) {
     }
 
     let mut draft = state.workspace_layout_manager.clone();
-    let choice = Dialog::new("Workspace layout manager", "Apply selected layout")
-        .description(
-            "Apply a device-local dock and console composition without changing project data.",
-        )
-        .size(DialogSize::Manager)
-        .show(ctx, |ui| {
-            render_templates(ui, &mut draft);
-            render_workspace_table(ui, state);
-            render_scope(ui, &mut draft);
+    let mut template = draft.template.index();
+    let scopes = LayoutScope::LABELS.map(str::to_owned);
+    let choice = CommandForm::new(TITLE, "Apply")
+        .describe("Apply a dock arrangement on this device. Project data is unchanged.")
+        .show(ctx, |rows| {
+            rows.choice("Layout", &LayoutTemplate::LABELS, &mut template);
+            rows.derived(LayoutTemplate::DETAILS[template]);
+            if let Some(picked) = rows.select(
+                "Apply to",
+                "preferences.workspace.layout-manager.scope",
+                LayoutScope::LABELS[draft.scope.index()],
+                &scopes,
+            ) {
+                draft.scope = if picked == 0 {
+                    LayoutScope::CurrentWorkspace
+                } else {
+                    LayoutScope::AllWorkspaces
+                };
+            }
+            None
         });
+    draft.template = LayoutTemplate::from_index(template);
 
     match choice {
         DialogChoice::Primary => {
             apply_layout(state, draft.template, draft.scope);
             state.workspace_layout_manager.close();
         }
-        DialogChoice::Cancelled => state.workspace_layout_manager.close(),
-        _ => *state.workspace_layout_manager = draft,
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            state.workspace_layout_manager.close();
+        }
+        DialogChoice::Secondary | DialogChoice::None => {
+            *state.workspace_layout_manager = draft;
+        }
     }
 }
 
-fn render_templates(ui: &mut Ui, state: &mut WorkspaceLayoutManagerState) {
-    ui.heading("Layout preset");
-    ui.label("Choose the dock, document and console arrangement to apply.");
-    ui.add_space(8.0);
-    let columns = if ui.ctx().content_rect().width() <= 560.0 {
-        1
-    } else {
-        2
-    };
-    for chunk in LayoutTemplate::ALL.chunks(columns) {
-        ui.columns(columns, |cells| {
-            for (column, template) in chunk.iter().copied().enumerate() {
-                if layout_template_card(
-                    &mut cells[column],
-                    LayoutTemplate::LABELS[template.index()],
-                    LayoutTemplate::DETAILS[template.index()],
-                    state.template == template,
-                ) {
-                    state.template = template;
-                }
-            }
-        });
-        ui.add_space(8.0);
-    }
-}
-
-fn layout_template_card(ui: &mut Ui, label: &str, detail: &str, selected: bool) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 62.0), Sense::click());
-    ui.painter().rect(
-        rect,
-        t.radius,
-        if selected {
-            t.color.bg_active
-        } else {
-            t.color.bg_inset
-        },
-        Stroke::new(
-            1.0,
-            if selected {
-                t.color.accent
-            } else {
-                t.color.border
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let mut content = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(12.0, 8.0)))
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
-    // Painted, not labels: a label over the card takes the presses on its text.
-    crate::workbench::design_system::painted_label(
-        &mut content,
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-            .color(t.color.text),
-        egui::TextWrapMode::Wrap,
-    );
-    crate::workbench::design_system::painted_label(
-        &mut content,
-        egui::RichText::new(detail)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-        egui::TextWrapMode::Wrap,
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, label)
-    });
-    theme::paint_focus_ring(ui, &response, rect);
-    response.clicked()
-}
-
-fn render_workspace_table(ui: &mut Ui, state: &PreferencesDialogs<'_>) {
-    ui.add_space(12.0);
-    ui.heading("Remembered layouts");
-    egui::ScrollArea::horizontal()
-        .id_salt("preferences.workspace.layout-manager.table-scroll")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.set_min_width(600.0);
-            Grid::new("preferences.workspace.layout-manager.table")
-                .num_columns(5)
-                .striped(true)
-                .show(ui, |ui| {
-                    for header in [
-                        "Workspace",
-                        "Navigator",
-                        "Inspector",
-                        "Console",
-                        "Remembered",
-                    ] {
-                        ui.strong(header);
-                    }
-                    ui.end_row();
-                    for workspace in [
-                        Workspace::Design,
-                        Workspace::Simulate,
-                        Workspace::Results,
-                        Workspace::Verify,
-                    ] {
-                        let layout = state.workbench.workspace_layout(workspace);
-                        ui.label(if workspace == Workspace::Verify {
-                            "DRC"
-                        } else {
-                            workspace.label()
-                        });
-                        ui.label(if layout.navigator_visible && !layout.focus_mode {
-                            format!("{:.0} px", layout.navigator_width)
-                        } else {
-                            "collapsed".to_owned()
-                        });
-                        ui.label(if layout.inspector_visible && !layout.focus_mode {
-                            format!("{:.0} px", layout.inspector_width)
-                        } else {
-                            "collapsed".to_owned()
-                        });
-                        ui.label(if layout.console_visible && !layout.focus_mode {
-                            format!("{:.0} px", layout.console_height)
-                        } else {
-                            "collapsed".to_owned()
-                        });
-                        ui.label("this device");
-                        ui.end_row();
-                    }
-                });
-        });
-}
-
-fn render_scope(ui: &mut Ui, state: &mut WorkspaceLayoutManagerState) {
-    ui.add_space(12.0);
-    setting_row(
-        ui,
-        "Scope",
-        "Layout never changes portable project documents or result data.",
-        |ui| {
-            value_column(ui, |ui| {
-                let labels = LayoutScope::LABELS.map(str::to_owned);
-                let selected = select(
-                    ui,
-                    "preferences.workspace.layout-manager.scope",
-                    "Workspace layout scope",
-                    LayoutScope::LABELS[state.scope.index()],
-                    &labels,
-                    control_width(ui),
-                );
-                if let Some(selected) = selected {
-                    state.scope = if selected == 0 {
-                        LayoutScope::CurrentWorkspace
-                    } else {
-                        LayoutScope::AllWorkspaces
-                    };
-                }
-            });
-        },
-    );
-}
+const TITLE: &str = "Workspace layout";
 
 fn apply_layout(state: &mut PreferencesDialogs<'_>, template: LayoutTemplate, scope: LayoutScope) {
     if let Some(preset) = template.workspace_preset() {
@@ -301,5 +170,22 @@ fn apply_layout(state: &mut PreferencesDialogs<'_>, template: LayoutTemplate, sc
             LayoutScope::CurrentWorkspace => state.workbench.apply_results_review_layout(),
             LayoutScope::AllWorkspaces => state.workbench.apply_results_review_to_all_workspaces(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_and_scope_order_are_stable() {
+        assert_eq!(
+            LayoutTemplate::LABELS,
+            ["Engineering", "Canvas", "Diagnostics", "Results review"]
+        );
+        for template in LayoutTemplate::ALL {
+            assert_eq!(LayoutTemplate::from_index(template.index()), template);
+        }
+        assert_eq!(LayoutScope::LABELS, ["This workspace", "Every workspace"]);
     }
 }
