@@ -512,7 +512,12 @@ mod tests {
     fn a_step_rounding_cannot_take_is_refused_not_cut_to_one_point() {
         let huge = 1_000_000_000_000_000_000_usize;
         for (variation, points, start, stop) in [
-            (FreqVariation::Lin, usize::MAX, 1.0e300, 1.000_000_000_000_001e300),
+            (
+                FreqVariation::Lin,
+                usize::MAX,
+                1.0e300,
+                1.000_000_000_000_001e300,
+            ),
             (FreqVariation::Dec, huge, 1.0, 10.0),
             (FreqVariation::Dec, huge, 1.0, 2.0),
             (FreqVariation::Oct, huge, 1.0, 10.0),
