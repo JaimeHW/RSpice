@@ -309,6 +309,21 @@ fn an_hdl_input_dumps_at_the_tick_the_hdl_saw_it_at() {
     let converted = convert(&dir.join("run.raw"), &dir.join("raw.vcd"), "vcd", &[]);
     assert!(converted.status.success(), "{converted:?}");
     assert_eq!(std::fs::read_to_string(dir.join("raw.vcd")).unwrap(), run);
+
+    // `d2a_s` uses `transition`, which the JIT's CFG route does not lower, so
+    // it compiles on the postfix plan. That is a route choice with the same
+    // results, and it printed `WARN [JIT] Model 'd2a_s' takes the postfix
+    // plan: ...` on every run.
+    let loud = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["run", "m10.cir", "-f", "csv", "-o", "loud.csv"])
+        .current_dir(&dir)
+        .env_remove("RSPICE_OUTPUT_FORMAT")
+        .env_remove("RUST_LOG")
+        .output()
+        .unwrap();
+    assert!(loud.status.success(), "{loud:?}");
+    let stderr = String::from_utf8_lossy(&loud.stderr);
+    assert!(!stderr.contains("[JIT]"), "{stderr}");
 }
 
 #[test]

@@ -1805,14 +1805,9 @@ pub(crate) fn build_default_model_plan(
 ) -> JitResult<NativeModelPlan> {
     let (plan, refused) = build_default_model_plan_reported(model, artifact)?;
     if let Some(refused) = refused {
-        log::warn!(
-            "[JIT] Model '{}' takes the postfix plan: {} ({})",
-            refused.module,
-            refused.class.name(),
-            refused.detail
-        );
-        #[cfg(debug_assertions)]
-        eprintln!(
+        // A route choice inside the compiler, with the same results either
+        // way: nothing a deck's author can act on, so not a warning.
+        log::debug!(
             "[JIT] Model '{}' takes the postfix plan: {} ({})",
             refused.module,
             refused.class.name(),
