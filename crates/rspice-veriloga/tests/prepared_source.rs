@@ -713,9 +713,11 @@ fn files_prepared_as_one_unit_share_directives_and_modules() {
         "twice.v",
         "module leaf(y); output y; reg y; initial y = 1'b0; endmodule\n",
     );
+    // defs.v leads the unit: leaf.v uses its `LEVEL, and an undefined macro
+    // is refused before module selection is reached.
     let error = compiler
         .prepare_unit_runtime_source_with_diagnostics(
-            &[&leaf, &twice],
+            &[&defs, &leaf, &twice],
             SourceProviderLimits::UNBOUNDED,
             &NoPipelineControl,
         )
