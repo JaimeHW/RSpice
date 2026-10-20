@@ -160,11 +160,10 @@ const RETAINED: [(&str, usize, &str, &str); 6] = [
     ),
 ];
 
-const NANOSECOND: Value = 1.0e-9;
-const PRINT_STEP: Value = 0.25 * NANOSECOND;
-const FINAL_STOP: Value = 50.0 * NANOSECOND;
-const RESTART_INTERVAL: Value = 5.0 * NANOSECOND;
-const RESTART_TARGET: Value = 10.0 * NANOSECOND;
+const PRINT_STEP: Value = 0.25e-9;
+const FINAL_STOP: Value = 50.0e-9;
+const RESTART_INTERVAL: Value = 5.0e-9;
+const RESTART_TARGET: Value = 10.0e-9;
 const SAVE_TIMES: [Value; 3] = [0.0, RESTART_INTERVAL, RESTART_TARGET];
 const MAX_MANIFEST_BYTES: usize = 1_048_576;
 const MAX_DIRECTORY_ENTRIES: usize = 16_384;
@@ -746,10 +745,10 @@ impl XyceTestRunner {
             }) if v1.to_bits() == 0.0f64.to_bits()
                 && v2.to_bits() == 5.0f64.to_bits()
                 && delay.to_bits() == 0.0f64.to_bits()
-                && rise.to_bits() == (0.1 * NANOSECOND).to_bits()
-                && fall.to_bits() == (0.1 * NANOSECOND).to_bits()
-                && width.to_bits() == (5.0 * NANOSECOND).to_bits()
-                && period.to_bits() == (25.0 * NANOSECOND).to_bits()
+                && rise.to_bits() == 0.1e-9f64.to_bits()
+                && fall.to_bits() == 0.1e-9f64.to_bits()
+                && width.to_bits() == 5.0e-9f64.to_bits()
+                && period.to_bits() == 25.0e-9f64.to_bits()
                 && pulse_count.to_bits() == 0.0f64.to_bits()
         );
         let line = tline.provenance == ElementProvenance::Authored
@@ -769,7 +768,7 @@ impl XyceTestRunner {
                     model: None,
                     ..
                 } if z0.to_bits() == 50.0f64.to_bits()
-                    && td.to_bits() == (10.0 * NANOSECOND).to_bits()
+                    && td.to_bits() == 10.0e-9f64.to_bits()
             );
         if vin.provenance != ElementProvenance::Authored
             || !vin.nodes.iter().map(String::as_str).eq(["1", "0"])

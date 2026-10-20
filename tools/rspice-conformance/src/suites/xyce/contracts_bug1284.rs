@@ -111,20 +111,21 @@ const RETAINED_ARTIFACTS: [(&str, usize, &str, &str); RETAINED_RECORD_COUNT] = [
 
 const RESTART_JOB: &str = "trans_test";
 const RESTART_FILE: &str = "trans_test2e-08";
-// The parser applies the authored `N` suffix as an IEEE-754 multiplication.
-// Preserve that same operation here so bit-exact horizon checks do not replace
-// the deck's parsed semantics with a separately rounded decimal literal.
-const NANOSECOND: Value = 1.0e-9;
-const PRINT_STEP: Value = 0.25 * NANOSECOND;
-const FIRST_STOP: Value = 20.0 * NANOSECOND;
-const FINAL_STOP: Value = 50.0 * NANOSECOND;
-const RESTART_INTERVAL: Value = 5.0 * NANOSECOND;
+// An authored `N` suffix reads as the double nearest the decimal it writes, so
+// the deck's horizons are the decimals themselves (`50N` is 5e-8, not the
+// double-rounded product `50.0 * 1e-9`).
+const PRINT_STEP: Value = 0.25e-9;
+const FIRST_STOP: Value = 20.0e-9;
+const FINAL_STOP: Value = 50.0e-9;
+const RESTART_INTERVAL: Value = 5.0e-9;
+// The restart cadence accumulates (`current + initial_interval`), so the third
+// save is 5n + 5n + 5n = 1.5000000000000002e-8, not the decimal 15n.
 const HISTORICAL_SAVE_TIMES: [Value; 5] = [
     0.0,
-    5.0 * NANOSECOND,
-    10.0 * NANOSECOND,
-    15.0 * NANOSECOND,
-    20.0 * NANOSECOND,
+    RESTART_INTERVAL,
+    RESTART_INTERVAL + RESTART_INTERVAL,
+    RESTART_INTERVAL + RESTART_INTERVAL + RESTART_INTERVAL,
+    RESTART_INTERVAL + RESTART_INTERVAL + RESTART_INTERVAL + RESTART_INTERVAL,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -901,23 +902,14 @@ mod tests {
     #[test]
     fn bug1284_historical_restart_schedule_and_filename_are_exact() {
         let oracle = XyceTestRunner::bug1284_restart_oracle();
-        assert_eq!(oracle.print_step.to_bits(), (0.25 * 1.0e-9f64).to_bits());
-        assert_eq!(oracle.first_stop.to_bits(), (20.0 * 1.0e-9f64).to_bits());
-        assert_eq!(oracle.final_stop.to_bits(), (50.0 * 1.0e-9f64).to_bits());
-        assert_eq!(
-            oracle.restart_interval.to_bits(),
-            (5.0 * 1.0e-9f64).to_bits()
-        );
+        assert_eq!(oracle.print_step.to_bits(), 0.25e-9f64.to_bits());
+        assert_eq!(oracle.first_stop.to_bits(), 20.0e-9f64.to_bits());
+        assert_eq!(oracle.final_stop.to_bits(), 50.0e-9f64.to_bits());
+        assert_eq!(oracle.restart_interval.to_bits(), 5.0e-9f64.to_bits());
+        // The accumulated cadence: the third save is one ulp above 15n.
         assert_eq!(
             oracle.save_times.map(Value::to_bits),
-            [
-                0.0,
-                5.0 * 1.0e-9,
-                10.0 * 1.0e-9,
-                15.0 * 1.0e-9,
-                20.0 * 1.0e-9,
-            ]
-            .map(Value::to_bits)
+            [0.0, 5.0e-9, 10.0e-9, 1.500_000_000_000_000_2e-8, 20.0e-9].map(Value::to_bits)
         );
         assert_eq!(oracle.restart_job, "trans_test");
         assert_eq!(oracle.restart_file, "trans_test2e-08");
