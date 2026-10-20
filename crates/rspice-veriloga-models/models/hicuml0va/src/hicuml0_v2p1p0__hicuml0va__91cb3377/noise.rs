@@ -184,7 +184,7 @@ impl Instance {
 		}
 		BK=BL;
 		}
-		let BM=(1.3806226e-23f64* BK)/ 1.602176462e-19f64;
+		let BM=(1.3806503e-23f64* BK)/ 1.602176462e-19f64;
 		let BN=I/ BM;
 		let BO=BK- G;
 		let BP=BK/ G;
@@ -707,7 +707,7 @@ impl Instance {
 		};
 		let ML=B* LK;
 		let MN=B* (MM- KP);
-		let MU=5.5224904e-23f64* MT;
+		let MU=5.5226012e-23f64* MT;
 		let ND;
 		let NE;
 		if MS{
@@ -851,7 +851,7 @@ impl Instance {
 		let A=0f64;
 		let B=parameters[110];
 		let C=node_potentials[6];
-		let H=1.3806226e-23f64;
+		let H=1.3806503e-23f64;
 		let I=1.602176462e-19f64;
 		let L=0.5f64;
 		let M=parameters[76];
@@ -1612,7 +1612,7 @@ impl Instance {
 		let PX=EH>= EK;
 		let PZ=EB>= EK;
 		let QB=(CZ>= EK)|| (EE>= EK);
-		let QD=5.5224904e-23f64* QC;
+		let QD=5.5226012e-23f64* QC;
 		let QM;
 		let QN;
 		let QT;

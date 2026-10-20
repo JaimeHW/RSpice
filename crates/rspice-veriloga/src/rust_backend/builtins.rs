@@ -1823,7 +1823,7 @@ fn generate_device_work_item(
     // not an include path. Its own `constants.vams` carries the CODATA 2018
     // constants, so a generated model compiled through it took a different
     // `P_Q` and `P_K` from the same source on the `.va` route and from
-    // OpenVAF, which both use the LRM's.
+    // OpenVAF, which both use the LRM 2.4 header's default NIST 1998 set.
     let options = CompilerOptions {
         defines: item.compile_profile.defines,
         undefines: item.compile_profile.undefines,

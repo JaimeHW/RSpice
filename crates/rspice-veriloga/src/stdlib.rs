@@ -6,9 +6,10 @@
 //! out of the box, matching the behavior of commercial simulators that ship
 //! the standard headers.
 //!
-//! Constant values follow the Verilog-AMS LRM 2.4 `constants.vams` so that
-//! models calibrated against other LRM-compliant simulators reproduce the
-//! same numbers.
+//! Constant values follow the Verilog-AMS LRM 2.4 `constants.vams`, with its
+//! default NIST 1998 physical constants, as OpenVAF does, so that models
+//! calibrated against other LRM-compliant simulators reproduce the same
+//! numbers.
 
 /// Standard `disciplines.vams` header (Verilog-AMS LRM 2.4, Annex D).
 pub const DISCIPLINES_VAMS: &str = r#"
@@ -180,7 +181,10 @@ enddiscipline
 `endif
 "#;
 
-/// Standard `constants.vams` header (Verilog-AMS LRM 2.4, Annex D).
+/// Standard `constants.vams` header (Verilog-AMS LRM 2.4, Annex D), as
+/// OpenVAF ships it: `P_Q`, `P_K`, `P_H` and `P_EPS0` default to the NIST
+/// 1998 set, and `PHYSICAL_CONSTANTS_SPICE`, `PHYSICAL_CONSTANTS_OLD` or
+/// `PHYSICAL_CONSTANTS_NIST2010` selects another.
 pub const CONSTANTS_VAMS: &str = r#"
 `ifdef CONSTANTS_VAMS
 `else
@@ -202,25 +206,65 @@ pub const CONSTANTS_VAMS: &str = r#"
 `define M_SQRT2     1.41421356237309504880
 `define M_SQRT1_2   0.70710678118654752440
 
-// Physical constants (per Verilog-AMS LRM 2.4)
-// Charge of an electron in coulombs
-`define P_Q         1.602176462e-19
-// Speed of light in a vacuum in meters/second
-`define P_C         2.99792458e8
-// Boltzmann's constant in joules/kelvin
-`define P_K         1.3806226e-23
-// Planck's constant in joules*second
-`define P_H         6.6260755e-34
-// Permittivity of vacuum in farads/meter
-`define P_EPS0      8.85418792394420013968e-12
-// Permeability of vacuum in henrys/meter
-`define P_U0        (4.0e-7 * `M_PI)
-// Zero Celsius in kelvin
-`define P_CELSIUS0  273.15
+// Physical constants (Verilog-AMS LRM 2.4, Annex D)
+// charge of electron in Coulombs
+`define P_Q_SPICE       1.60219e-19
+`define P_Q_OLD         1.6021918e-19
+`define P_Q_NIST1998    1.602176462e-19
+`define P_Q_NIST2010    1.602176565e-19
+// speed of light in vacuum in meters/second
+`define P_C             2.99792458e8
+// Boltzmann's constant in Joules/Kelvin
+`define P_K_SPICE       1.38062e-23
+`define P_K_OLD         1.3806226e-23
+`define P_K_NIST1998    1.3806503e-23
+`define P_K_NIST2010    1.3806488e-23
+// Planck's constant in Joules*second
+`define P_H_SPICE       6.62620e-34
+`define P_H_OLD         6.6260755e-34
+`define P_H_NIST1998    6.62606876e-34
+`define P_H_NIST2010    6.62606957e-34
+// permittivity of vacuum in Farads/meter
+`define P_EPS0_SPICE    8.854214871e-12
+`define P_EPS0_OLD      8.85418792394420013968e-12
+`define P_EPS0_NIST1998 8.854187817e-12
+`define P_EPS0_NIST2010 8.854187817e-12
+// permeability of vacuum in Henrys/meter
+`define P_U0            (4.0e-7 * `M_PI)
+// zero Celsius in Kelvin
+`define P_CELSIUS0      273.15
 
-// Legacy compact-model aliases from older constants.vams revisions.
-`define P_Q_NIST1998 1.602176462e-19
-`define P_K_NIST1998 1.3806503e-23
+`ifdef PHYSICAL_CONSTANTS_SPICE
+// from UC Berkeley SPICE 3F5
+`define P_Q             `P_Q_SPICE
+`define P_K             `P_K_SPICE
+`define P_H             `P_H_SPICE
+`define P_EPS0          `P_EPS0_SPICE
+
+`else
+`ifdef PHYSICAL_CONSTANTS_OLD
+// from Verilog-A LRM 1.0 and Verilog-AMS LRM 2.0
+`define P_Q             `P_Q_OLD
+`define P_K             `P_K_OLD
+`define P_H             `P_H_OLD
+`define P_EPS0          `P_EPS0_OLD
+
+`else
+`ifdef PHYSICAL_CONSTANTS_NIST2010
+`define P_Q             `P_Q_NIST2010
+`define P_K             `P_K_NIST2010
+`define P_H             `P_H_NIST2010
+`define P_EPS0          `P_EPS0_NIST2010
+
+`else
+// use NIST1998 values as in LRM 2.2 - 2.3 for backwards-compatibility
+`define P_Q             `P_Q_NIST1998
+`define P_K             `P_K_NIST1998
+`define P_H             `P_H_NIST1998
+`define P_EPS0          `P_EPS0_NIST1998
+`endif
+`endif
+`endif
 
 `endif
 "#;
@@ -285,6 +329,50 @@ pub fn builtin_include_document(filename: &str) -> Option<(&'static str, &'stati
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `P_Q`, `P_K`, `P_H` and `P_EPS0` as the built-in header expands them
+    /// after `prelude`.
+    fn physical_constants(prelude: &str) -> [f64; 4] {
+        let source = format!("{prelude}\n{CONSTANTS_VAMS}\n`P_Q `P_K `P_H `P_EPS0\n");
+        let expanded = crate::preprocessor::Preprocessor::new()
+            .preprocess_source(&source)
+            .expect("the built-in constants header preprocesses");
+        let values = expanded
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .expect("the expanded constants")
+            .split_whitespace()
+            .map(|value| value.parse::<f64>().expect("a constant"))
+            .collect::<Vec<_>>();
+        values.try_into().expect("four constants")
+    }
+
+    /// The built-in header is the one OpenVAF compiles against, so a shipped
+    /// model generated through it takes OpenVAF's (and the OSDI reference's)
+    /// constants: the LRM 2.4 default NIST 1998 set. It once mixed that set's
+    /// `P_Q` with the LRM 1.0/2.0 `P_K`, `P_H` and `P_EPS0`, a set no LRM
+    /// defines.
+    #[test]
+    fn physical_constants_are_the_lrm_default_set_openvaf_uses() {
+        assert_eq!(
+            physical_constants(""),
+            [1.602176462e-19, 1.3806503e-23, 6.62606876e-34, 8.854187817e-12]
+        );
+        assert_eq!(
+            physical_constants("`define PHYSICAL_CONSTANTS_NIST2010"),
+            [1.602176565e-19, 1.3806488e-23, 6.62606957e-34, 8.854187817e-12]
+        );
+        let old_eps0 = "8.85418792394420013968e-12".parse::<f64>().expect("a constant");
+        assert_eq!(
+            physical_constants("`define PHYSICAL_CONSTANTS_OLD"),
+            [1.6021918e-19, 1.3806226e-23, 6.6260755e-34, old_eps0]
+        );
+        assert_eq!(
+            physical_constants("`define PHYSICAL_CONSTANTS_SPICE"),
+            [1.60219e-19, 1.38062e-23, 6.62620e-34, 8.854214871e-12]
+        );
+    }
 
     #[test]
     fn resolves_standard_header_names() {

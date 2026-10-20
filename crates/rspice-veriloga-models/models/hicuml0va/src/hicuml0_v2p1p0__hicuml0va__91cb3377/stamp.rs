@@ -17,7 +17,7 @@ pub(super) fn canonical_model_preprocess(
     temperature: f64,
     thermal_voltage: f64,
 ) -> [f64; 59] {
-	let B=1.3806226e-23f64;
+	let B=1.3806503e-23f64;
 	let C=1.602176462e-19f64;
 	let F=parameters[76];
 	let G=parameters[77];
@@ -211,7 +211,7 @@ pub(super) fn canonical_temperature_preprocess(
 	};
 	F=AW;
 	}
-	let G=(1.3806226e-23f64* F)/ 1.602176462e-19f64;
+	let G=(1.3806503e-23f64* F)/ 1.602176462e-19f64;
 	let I=H/ G;
 	let K=F- J;
 	let L=F/ J;
@@ -508,7 +508,7 @@ impl Instance {
 		let BW=staged[68];
 		let BX=0f64;
 		let EZ=173.14999999999998f64;
-		let FD=1.3806226e-23f64;
+		let FD=1.3806503e-23f64;
 		let FE=1.602176462e-19f64;
 		let FH=1f64;
 		let FK=staged[0];
