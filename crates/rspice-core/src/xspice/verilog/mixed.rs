@@ -2098,6 +2098,63 @@ impl MixedSignalHost {
         &self.instance
     }
 
+    /// Name the discrete quantities an analog read refused as unknown.
+    ///
+    /// The analog code checks a discrete value's validity lane where it reads
+    /// it and refuses with one fixed sentence, the same on every backend,
+    /// naming neither the quantity nor the time. The host knows both: every
+    /// analog-read input whose lane holds "unknown" at the failed evaluation
+    /// is named with its four-state value.
+    pub(crate) fn explain_analog_refusal(&self, error: MixedSignalError) -> MixedSignalError {
+        const UNKNOWN_READ: &str = "analog read of discrete input has an X, Z, or non-finite value";
+        let MixedSignalError::Analog { detail } = &error else {
+            return error;
+        };
+        if !detail.contains(UNKNOWN_READ) {
+            return error;
+        }
+        let unknown: Vec<String> = self
+            .discrete_inputs
+            .iter()
+            .filter(|input| self.analog.discrete_state_value(input.validity) == Some(0.0))
+            .map(|input| {
+                let value = self.state.digital.read(input.signal).map(|value| {
+                    let bits: String = (0..value.width())
+                        .rev()
+                        .map(|bit| match value.bit(bit) {
+                            FourStateBit::Zero => '0',
+                            FourStateBit::One => '1',
+                            FourStateBit::Unknown => 'x',
+                            FourStateBit::HighImpedance => 'z',
+                        })
+                        .collect();
+                    match bits.as_bytes() {
+                        [first, rest @ ..] if rest.iter().all(|bit| bit == first) => {
+                            char::from(*first).to_string()
+                        }
+                        _ => format!("{}'b{bits}", value.width()),
+                    }
+                });
+                match value {
+                    Some(value) => format!("`{}` = {value}", input.name),
+                    None => format!("`{}`", input.name),
+                }
+            })
+            .collect();
+        if unknown.is_empty() {
+            return error;
+        }
+        MixedSignalError::Analog {
+            detail: format!(
+                "at {} the analog block read a discrete value that is x or z: {}; a continuous \
+                 quantity has no x or z level, so every bit an analog expression reads must be \
+                 0 or 1 when it reads it",
+                si_seconds(self.analog_inputs.time_seconds),
+                unknown.join(", ")
+            ),
+        }
+    }
+
     /// The tick this instance's HDL runs on: its design's finest `timescale`
     /// precision, or the linked design's when the deck links instances.
     pub(crate) fn time_resolution(&self) -> TimeResolution {
@@ -5881,6 +5938,23 @@ fn node_voltage(values: &[f64], node: usize) -> f64 {
         Some(row) => values.get(row).copied().unwrap_or(0.0),
         None => 0.0,
     }
+}
+
+/// A time in seconds with an SI prefix and at most six decimals: `10.0003 ns`.
+fn si_seconds(seconds: f64) -> String {
+    let (scale, unit) = [
+        (1.0, "s"),
+        (1e-3, "ms"),
+        (1e-6, "us"),
+        (1e-9, "ns"),
+        (1e-12, "ps"),
+    ]
+    .into_iter()
+    .find(|(scale, _)| seconds.abs() >= *scale * (1.0 - 1e-12))
+    .unwrap_or((1e-15, "fs"));
+    let text = format!("{:.6}", seconds / scale);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{text} {unit}")
 }
 
 fn analog_error(error: impl fmt::Display) -> MixedSignalError {

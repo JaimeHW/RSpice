@@ -97,7 +97,7 @@ pub(in crate::circuit) fn named<T>(
     host: &MixedSignalHost,
     result: Result<T, MixedSignalError>,
 ) -> Result<T, SimulationError> {
-    result.map_err(|error| mixed_error(host.instance_name(), error))
+    result.map_err(|error| mixed_error(host.instance_name(), host.explain_analog_refusal(error)))
 }
 
 /// The timepoint a trial is opened at.

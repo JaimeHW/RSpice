@@ -2127,6 +2127,52 @@ fn an_ascending_boundary_port_puts_its_leading_index_on_the_decks_first_net() {
     );
 }
 
+/// An analog read of a discrete value that is x or z names what it read and
+/// when.
+///
+/// The analog code refuses such a read with one fixed sentence on every
+/// backend: it said "native JIT error: analog read of discrete input has an
+/// X, Z, or non-finite value", about a local `reg` that is no input, with no
+/// name and no time.
+#[test]
+fn an_analog_read_of_x_names_the_variable_and_the_time() {
+    let model = ModelFile::new(
+        "unknown_read",
+        r#"
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module unknown_read(a, b);
+    output a, b; electrical a, b;
+    reg d; reg [3:0] v;
+    initial begin d = 0; v = 4'd5; #10 d = 1'bx; v = 4'b01x1; end
+    analog begin
+        V(a) <+ transition(d ? 1.0 : 0.0, 0, 1n);
+        V(b) <+ v;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* an x reaches the analog block at 10 ns\n\
+         x1 a b unknown_read\n\
+         r1 a 0 1k\n\
+         r2 b 0 1k\n\
+         .va \"{}\" unknown_read\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let error = error_for(&deck, 20.0e-9, 1.0e-9);
+    assert!(
+        error.contains("`d` = x")
+            && error.contains("`v` = 4'b01x1")
+            && error.contains(" ns")
+            && !error.contains("JIT")
+            && !error.contains("discrete input"),
+        "{error}"
+    );
+}
+
 #[test]
 fn linked_circuit_instances_share_precision_and_sample_their_own_analog_inputs() {
     // The coarse process retains its 1 ns delay unit, but every boundary uses
