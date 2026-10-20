@@ -852,10 +852,12 @@ fn source_intervals_reveal_pulses_between_both_initial_pss_grids() {
 fn rounded_periods_preserve_and_qualify_adjacent_source_clocks() {
     use rspice_core::numerics::integration::IntegrationMethod;
 
-    for (period_text, frequency, authored_period) in [
-        ("100u", 1e4, 100.0 * 1e-6_f64),
-        ("10u", 1e5, 10.0 * 1e-6_f64),
-    ] {
+    // The source clock is the period one ulp below the PSS period, the double
+    // product `100.0 * 1e-6` a deck rounded through the suffix's scale once
+    // read. A deck's `100u` is now the double nearest 1e-4, the PSS period
+    // itself, so the adjacent clock is written out as its shortest decimal.
+    for (frequency, authored_period) in [(1e4, 100.0 * 1e-6_f64), (1e5, 10.0 * 1e-6_f64)] {
+        let period_text = format!("{authored_period:e}");
         let period = 1.0 / frequency;
         assert_eq!(authored_period.next_up(), period);
         let width = 0.4 * period;
