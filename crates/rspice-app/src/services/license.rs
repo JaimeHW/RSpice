@@ -81,7 +81,7 @@ pub const SAMPLE_KEY: &str = "RSPICE-K1.040MW2YJEZ0NGEMZ040011TG000F6M80003G0000
 
 /// Feature bitfield labels, LSB first (spec §payload).
 pub(crate) const FEATURE_LABELS: &[(u32, &str)] = &[
-    (1, "RF suite — HB · PSS · PNoise · PAC"),
+    (1, "RF suite: HB, PSS, PNoise, PAC"),
     (2, "Python API"),
     (4, "Encrypted models"),
     (8, "Cloud runners"),
@@ -118,7 +118,7 @@ impl LicenseError {
         match self {
             LicenseError::Malformed(message) => message,
             LicenseError::BadSignature => {
-                "Signature check failed — the key looks truncated or altered. Paste the RSPICE-K1.… string in full, including both dot-separated parts."
+                "The key is truncated or altered. Paste the whole key from your purchase email."
             }
             LicenseError::Revoked => {
                 "This license id has been revoked. Contact support with the id from your purchase email."
@@ -404,7 +404,7 @@ fn parse_and_verify_with_policy(
     }
     let Some(rest) = cleaned.strip_prefix(KEY_TAG) else {
         return Err(LicenseError::Malformed(
-            "Keys start with RSPICE-K1. — paste the whole string from your purchase email.",
+            "A key starts with RSPICE-K1. Paste the whole key from your purchase email.",
         ));
     };
     let mut parts = rest.split('.');
@@ -429,7 +429,7 @@ fn parse_and_verify_with_policy(
     let payload = LicensePayload::parse(&payload_bytes).ok_or(LicenseError::BadSignature)?;
     if payload.version != 1 {
         return Err(LicenseError::Malformed(
-            "This key uses a newer layout than this build understands — update RSpice.",
+            "This key needs a newer version of RSpice. Update RSpice to activate it.",
         ));
     }
 

@@ -3,20 +3,40 @@
 
 use egui::{Context, Grid, RichText};
 
+use crate::services::license::LicenseInfo;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
 use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
+use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
+pub(super) mod fact_grid;
 pub(in crate::workbench) mod report_problem;
 
 const PRODUCT_LICENSE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE"));
 const THIRD_PARTY_NOTICES: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../NOTICE"));
+
+/// This build's version and the commit it was built from.
+const VERSION_LINE: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (build ",
+    env!("RSPICE_BUILD_HASH"),
+    ")"
+);
+/// The simulation core's version. rspice-core takes the workspace version,
+/// as this crate does, so the two cannot differ within one build.
+const ENGINE_LINE: &str = concat!("rspice-core ", env!("CARGO_PKG_VERSION"));
+/// The product mark beside the line under About's title.
+const MARK_SIDE: f32 = 32.0;
+/// One topic row of the Help page: the air above and below its words, and
+/// between its title and what it covers.
+const TOPIC_PAD: f32 = 8.0;
+const TOPIC_LINE_GAP: f32 = 2.0;
 
 #[derive(Debug, Clone, Copy)]
 enum HelpAction {
@@ -25,21 +45,39 @@ enum HelpAction {
     Examples,
 }
 
+/// One command reference row: the command's shortcut, empty for a command
+/// with none, and its name.
 fn shortcut_help_row(
     shortcuts: &ShortcutPreferences,
     command: Command,
     platform: CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> (String, &'static str) {
-    let shortcut = shortcuts.resolved_label(command, platform, operating_system);
     (
-        if shortcut.is_empty() {
-            "\u{2014}".to_owned()
-        } else {
-            shortcut
-        },
+        shortcuts.resolved_label(command, platform, operating_system),
         command.spec().label,
     )
+}
+
+/// The license this machine holds, in words.
+fn license_state(license: Option<&LicenseInfo>) -> String {
+    match license {
+        None => "Not activated".to_owned(),
+        Some(info) if info.updates_expired => {
+            format!("{}, updates ended {}", info.tier, info.updates_until)
+        }
+        Some(info) => format!("{}, updates until {}", info.tier, info.updates_until),
+    }
+}
+
+/// Who holds the copyright, as the shipped license states it.
+fn copyright_holder() -> &'static str {
+    PRODUCT_LICENSE
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Copyright (c) "))
+        .map_or("RSpice Contributors", |holder| {
+            holder.split_once(". ").map_or(holder, |(holder, _)| holder)
+        })
 }
 
 fn shortcut_row_matches(
@@ -144,57 +182,56 @@ impl RSpiceApp {
             return;
         }
 
-        let license_line = match &self.state.license {
-            Some(info) => format!("{} · until {}", info.tier, info.updates_until),
-            None => "—".to_owned(),
-        };
-
-        let license_for_body = license_line.clone();
-        let choice = Dialog::new("About", "Close")
+        let license = license_state(self.state.license.as_ref());
+        let copyright = format!("\u{a9} {}", copyright_holder());
+        let mut notices = false;
+        let choice = Dialog::new("About RSpice", "Close")
             .description(
-                "Review the RSpice version, engine, matrix package, and local license status, or copy diagnostics.",
+                "The RSpice version and build, its simulation engine, this machine's license, and \
+                 the notices it ships with.",
             )
-            .size(DialogSize::Transaction)
+            .size(DialogSize::CommandForm)
+            .overlay_scrollbar()
             .ghost("Copy diagnostics")
             .show(ctx, |ui| {
                 let t = Tokens::get(ui.ctx());
-                let c = t.color;
-                ui.label(
-                    egui::RichText::new("RSpice")
-                        .font(theme::sans(tokens::FS_4, FontWeight::SemiBold))
-                        .color(c.text),
-                );
-                ui.label(
-                    egui::RichText::new("Analog circuit design and simulation")
-                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                        .color(c.text_dim),
-                );
-                ui.add_space(10.0);
-                ui.spacing_mut().item_spacing.y = 0.0;
-                kv_row(
-                    ui,
-                    "Version",
-                    concat!(env!("CARGO_PKG_VERSION"), " · ", env!("RSPICE_BUILD_HASH")),
-                );
-                kv_row(
-                    ui,
-                    "Engine",
-                    concat!("rspice-core ", env!("CARGO_PKG_VERSION")),
-                );
-                kv_row(ui, "Matrix pkg", "faer sparse");
-                kv_row(ui, "License", &license_for_body);
+                // The mark stands as far below the body's edge as the last
+                // row's words stand above it.
+                ui.add_space(fact_grid::row_air(ui));
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = tokens::SP_5;
+                    let (mark, _) =
+                        ui.allocate_exact_size(egui::Vec2::splat(MARK_SIDE), egui::Sense::hover());
+                    WorkbenchIcon::Brand.paint(ui.painter(), mark, t.color.accent);
+                    ui.label(
+                        RichText::new("Analog circuit design and simulation")
+                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
+                });
+                ui.add_space(tokens::SP_5);
+                fact_grid::show(ui, |rows| {
+                    rows.mono("Version", VERSION_LINE);
+                    rows.mono("Engine", ENGINE_LINE);
+                    rows.text("License", &license);
+                    rows.text("Copyright", &copyright);
+                    rows.row("Notices", |ui| {
+                        notices = ui.link("Third-party notices").clicked();
+                    });
+                });
             });
 
+        if notices {
+            self.state.dialogs.about = false;
+            Command::LegalPrivacy.execute(self);
+            return;
+        }
         match choice {
             DialogChoice::None => {}
             DialogChoice::Ghost => {
                 // The first thing support asks for, one click to produce.
                 let diagnostics = format!(
-                    "RSpice {} ({}) · rspice-core {} · faer sparse · license {} · {}-{}",
-                    env!("CARGO_PKG_VERSION"),
-                    env!("RSPICE_BUILD_HASH"),
-                    env!("CARGO_PKG_VERSION"),
-                    license_line,
+                    "RSpice {VERSION_LINE} \u{b7} {ENGINE_LINE} \u{b7} license {license} \u{b7} {}-{}",
                     std::env::consts::OS,
                     std::env::consts::ARCH,
                 );
@@ -241,8 +278,7 @@ impl RSpiceApp {
 
                 ui.add(
                     egui::TextEdit::singleline(filter_text)
-                        .hint_text("Filter — try 'project' or 'zoom'")
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .hint_text("Filter by name or shortcut")
                         .desired_width(f32::INFINITY),
                 );
                 let filter = filter_text.trim().to_lowercase();
@@ -269,20 +305,13 @@ impl RSpiceApp {
                     any_shown = true;
 
                     ui.add_space(8.0);
-                    // Category heads are painted as written, in sentence
-                    // case, like every kit header.
-                    ui.label(
-                        RichText::new(category.display_name())
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(c.text_faint),
-                    );
-                    ui.add_space(2.0);
+                    section_heading(ui, category.display_name());
 
                     for command in commands {
                         let (shortcut, display_name) =
                             shortcut_help_row(&shortcuts, command, platform, operating_system);
-                        // Description left, key chord right in mono — the
-                        // kv pattern with the value rendered as a key cap.
+                        // Name left, key chord right in mono as a key cap;
+                        // a command with no shortcut leaves the cell blank.
                         let (rect, _) = ui.allocate_exact_size(
                             egui::vec2(ui.available_width(), 24.0),
                             egui::Sense::hover(),
@@ -295,6 +324,9 @@ impl RSpiceApp {
                             theme::sans(tokens::FS_1, FontWeight::Regular),
                             c.text_dim,
                         );
+                        if shortcut.is_empty() {
+                            continue;
+                        }
                         let key_galley = ui.fonts_mut(|f| {
                             f.layout_no_wrap(
                                 shortcut.to_owned(),
@@ -324,7 +356,7 @@ impl RSpiceApp {
                 if !any_shown {
                     ui.add_space(8.0);
                     ui.label(
-                        egui::RichText::new("nothing matches — clear the filter")
+                        egui::RichText::new("No command matches the filter")
                             .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                             .color(c.text_faint),
                     );
@@ -372,18 +404,19 @@ fn render_help_page(ui: &mut egui::Ui, query: &mut String, action: &mut Option<H
             "A module is a cell view: create one with New View or File > Import Verilog-A, then edit and compile it in Design.",
         ),
     ];
-    for (title, detail) in topics {
-        if !filter.is_empty()
-            && !title.to_ascii_lowercase().contains(&filter)
-            && !detail.to_ascii_lowercase().contains(&filter)
-        {
-            continue;
+    ui.scope(|ui| {
+        // The rows are ruled off from each other; no gap between them.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (title, detail) in topics {
+            if !filter.is_empty()
+                && !title.to_ascii_lowercase().contains(&filter)
+                && !detail.to_ascii_lowercase().contains(&filter)
+            {
+                continue;
+            }
+            topic_row(ui, title, detail);
         }
-        ui.group(|ui| {
-            ui.strong(title);
-            ui.label(detail);
-        });
-    }
+    });
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         if ui.button("Command reference").clicked() {
@@ -393,6 +426,56 @@ fn render_help_page(ui: &mut egui::Ui, query: &mut String, action: &mut Option<H
             *action = Some(HelpAction::Examples);
         }
     });
+}
+
+/// One Help topic: a row the width of the page, its title over what it
+/// covers, both from the page's left edge, ruled off from the next.
+fn topic_row(ui: &mut egui::Ui, title: &str, detail: &str) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let title_galley = ui.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(
+            title.to_owned(),
+            theme::sans(tokens::FS_1, FontWeight::Medium),
+            t.color.text,
+        )
+    });
+    let detail_galley = ui.fonts_mut(|fonts| {
+        fonts.layout(
+            detail.to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+            width,
+        )
+    });
+    let height = TOPIC_PAD * 2.0 + title_galley.size().y + TOPIC_LINE_GAP + detail_galley.size().y;
+    let enabled = ui.is_enabled();
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            enabled,
+            format!("{title}: {detail}"),
+        )
+    });
+    let painter = ui.painter();
+    let title_top = rect.top() + TOPIC_PAD;
+    let detail_top = title_top + title_galley.size().y + TOPIC_LINE_GAP;
+    painter.galley(
+        egui::pos2(rect.left(), title_top),
+        title_galley,
+        t.color.text,
+    );
+    painter.galley(
+        egui::pos2(rect.left(), detail_top),
+        detail_galley,
+        t.color.text_dim,
+    );
+    painter.hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
 }
 
 fn render_release_notes(ui: &mut egui::Ui) {
@@ -450,12 +533,23 @@ fn render_migration_guide(ui: &mut egui::Ui) {
 
 fn render_legal_privacy(ui: &mut egui::Ui) {
     section_heading(ui, "Privacy and support data");
-    ui.label(
-        "A support bundle is made only when you create one from Report a problem, and saved where you choose. You decide whether it carries the session log, with your home folder removed.",
-    );
-    ui.label(
-        "Project content, models, results, credentials, license keys, and recovery checkpoints are excluded from the support artifact.",
-    );
+    let t = Tokens::get(ui.ctx());
+    for paragraph in [
+        "A support bundle is made only when you create one from Report a problem, and saved \
+         where you choose. You decide whether it carries the session log, with your home \
+         folder removed.",
+        "Project content, models, results, credentials, license keys, and recovery checkpoints \
+         are excluded from the support artifact.",
+    ] {
+        ui.add(
+            egui::Label::new(
+                RichText::new(paragraph)
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text),
+            )
+            .wrap(),
+        );
+    }
     ui.add_space(10.0);
     // Both documents read in the dialog's own scrolling body: a second
     // scroller inside it left the notices with nowhere to go.
@@ -593,13 +687,20 @@ fn support_bundle_log(
         .collect()
 }
 
+/// A caption over one part of a Help page, in the face the kit titles a
+/// panel section in, and a heading to assistive technology.
 fn section_heading(ui: &mut egui::Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.label(
+    let response = ui.label(
         RichText::new(text)
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
+            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+            .color(t.color.text_dim),
     );
+    let label = text.to_owned();
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(label.clone());
+    });
     ui.add_space(4.0);
 }
 
@@ -628,8 +729,16 @@ mod tests {
         );
     }
 
-    /// Every text the frame published for a reader to hear.
-    fn shown_texts(mut app: RSpiceApp) -> Vec<String> {
+    /// One node the frame published for a reader: what it says, what it is,
+    /// and where it was drawn.
+    struct Shown {
+        text: String,
+        role: egui::accesskit::Role,
+        bounds: Option<egui::accesskit::Rect>,
+    }
+
+    /// Every node `render` published for a reader, at desktop size.
+    fn shown_nodes(app: &mut RSpiceApp, render: fn(&mut RSpiceApp, &Context)) -> Vec<Shown> {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -643,7 +752,7 @@ mod tests {
                     )),
                     ..Default::default()
                 },
-                |ui| app.render_help_center_dialog(ui.ctx()),
+                |ui| render(app, ui.ctx()),
             );
             update = output.platform_output.accesskit_update;
         }
@@ -651,9 +760,144 @@ mod tests {
             .expect("the frame published its accessibility tree")
             .nodes
             .iter()
-            .filter_map(|(_, node)| node.value().or_else(|| node.label()))
-            .map(str::to_owned)
+            .filter_map(|(_, node)| {
+                Some(Shown {
+                    text: node.value().or_else(|| node.label())?.to_owned(),
+                    role: node.role(),
+                    bounds: node.bounds(),
+                })
+            })
             .collect()
+    }
+
+    /// Every text the Help Center published for a reader to hear.
+    fn shown_texts(mut app: RSpiceApp) -> Vec<String> {
+        shown_nodes(&mut app, RSpiceApp::render_help_center_dialog)
+            .into_iter()
+            .map(|shown| shown.text)
+            .collect()
+    }
+
+    /// About says what the build, its engine and this machine's license are
+    /// in words, beside their labels: no dash for "no license", no
+    /// abbreviation, and the copyright the shipped license states.
+    #[test]
+    fn about_states_the_build_engine_and_license_in_words() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(app.state.license.is_none());
+        Command::About.execute(&mut app);
+        let shown = shown_nodes(&mut app, RSpiceApp::render_about_dialog);
+        let texts: Vec<&str> = shown.iter().map(|shown| shown.text.as_str()).collect();
+        for expected in [
+            "About RSpice",
+            VERSION_LINE,
+            ENGINE_LINE,
+            "Not activated",
+            "\u{a9} 2026 RSpice Contributors",
+            "Third-party notices",
+        ] {
+            assert!(
+                texts.contains(&expected),
+                "About shows {expected:?}: {texts:#?}"
+            );
+        }
+        assert!(PRODUCT_LICENSE.contains(&format!("Copyright (c) {}.", copyright_holder())));
+        for text in &texts {
+            assert!(!text.contains('\u{2014}'), "{text:?} has an em dash");
+            assert!(!text.contains("pkg"), "{text:?} abbreviates");
+        }
+        // Each value starts at one x, beside its label rather than at the
+        // dialog's far edge.
+        let value_left: Vec<f64> = shown
+            .iter()
+            .filter(|shown| {
+                [VERSION_LINE, ENGINE_LINE, "Not activated"].contains(&shown.text.as_str())
+            })
+            .filter_map(|shown| shown.bounds.map(|bounds| bounds.x0.round()))
+            .collect();
+        // A selectable label publishes its words twice: as the label and as
+        // its text run, at one place.
+        assert!(value_left.len() >= 3, "{value_left:?}");
+        assert!(
+            value_left.windows(2).all(|pair| pair[0] == pair[1]),
+            "{value_left:?}"
+        );
+    }
+
+    /// A command with no shortcut leaves its cell blank rather than marking
+    /// it with a dash.
+    #[test]
+    fn an_unbound_command_leaves_its_shortcut_cell_blank() {
+        let shortcuts = ShortcutPreferences::default();
+        let os = egui::os::OperatingSystem::Windows;
+        let unbound = ShortcutCategory::ALL
+            .iter()
+            .flat_map(|category| category.commands())
+            .find(|command| {
+                shortcuts
+                    .resolved_label(*command, CommandPlatform::Desktop, os)
+                    .is_empty()
+            })
+            .expect("some listed command has no shortcut");
+        let (shortcut, name) = shortcut_help_row(&shortcuts, unbound, CommandPlatform::Desktop, os);
+        assert_eq!(shortcut, "", "{name} shows a blank shortcut cell");
+    }
+
+    /// The Help page's topics are rows the width of the page, every one on
+    /// the same two edges, rather than boxes as wide as their words.
+    #[test]
+    fn the_help_topics_are_full_width_rows_on_one_edge() {
+        let mut app = RSpiceApp::test_instance();
+        Command::HelpCenter.execute(&mut app);
+        let shown = shown_nodes(&mut app, RSpiceApp::render_help_center_dialog);
+        let rows: Vec<_> = shown
+            .iter()
+            .filter(|shown| {
+                shown.text.starts_with("Schematic authoring: ")
+                    || shown.text.starts_with("Simulation setup: ")
+                    || shown.text.starts_with("Results and measurements: ")
+                    || shown.text.starts_with("Project recovery: ")
+                    || shown.text.starts_with("Automation and netlists: ")
+                    || shown.text.starts_with("Verilog-A modules: ")
+            })
+            .filter_map(|shown| shown.bounds)
+            .collect();
+        assert_eq!(rows.len(), 6, "every topic is one row");
+        let field = shown
+            .iter()
+            .find(|shown| shown.role == egui::accesskit::Role::TextInput)
+            .and_then(|shown| shown.bounds);
+        for row in &rows {
+            assert_eq!(row.x0.round(), rows[0].x0.round(), "one left edge");
+            assert_eq!(row.x1.round(), rows[0].x1.round(), "one right edge");
+        }
+        if let Some(field) = field {
+            assert!(
+                (rows[0].x1 - field.x1).abs() < 1.0,
+                "the rows are as wide as the page"
+            );
+        }
+    }
+
+    /// The legal page's captions are headings in the kit's section face.
+    #[test]
+    fn the_legal_page_captions_are_headings() {
+        let mut app = RSpiceApp::test_instance();
+        Command::LegalPrivacy.execute(&mut app);
+        let shown = shown_nodes(&mut app, RSpiceApp::render_help_center_dialog);
+        for caption in [
+            "Privacy and support data",
+            "Product license",
+            "Third-party notices",
+        ] {
+            assert!(
+                shown
+                    .iter()
+                    .any(|shown| shown.text == caption
+                        && shown.role == egui::accesskit::Role::Heading),
+                "{caption:?} is a heading"
+            );
+        }
     }
 
     /// The legal page shows the license and the third-party notices the

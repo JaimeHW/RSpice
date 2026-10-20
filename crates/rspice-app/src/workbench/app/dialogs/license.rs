@@ -1,25 +1,24 @@
-//! License activation — the egui implementation of
-//! the product dialog pattern.
+//! License key: enter, verify and activate a key, or read and remove the one
+//! this machine holds.
 //!
-//! Three phases on one RSpice modal: Entry (textarea + field note),
-//! Error (same pane, note in `err`), Verified (summary card with the
-//! grant + feature chips + offline-storage note). Verification is fully
-//! offline; Activate stores the key locally and nothing phones home.
+//! Three phases on one modal: entry (the key field and the line under it),
+//! the same with the refusal in that line, and the verified grant on the
+//! label/value grid. Verification is offline; Activate stores the key on this
+//! machine, or in this browser, and nothing is sent anywhere.
 
 use egui::Context;
 
+use super::help::fact_grid;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::license::{self, LicenseInfo};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 
 use crate::workbench::app::{LicensePhase, RSpiceApp};
 
-#[cfg(any(test, rspice_development_build))]
-const DEVELOPMENT_SAMPLE_ACTION_LABEL: Option<&str> = Some("Paste sample key");
-#[cfg(not(any(test, rspice_development_build)))]
-const DEVELOPMENT_SAMPLE_ACTION_LABEL: Option<&str> = None;
+/// Lines the key field shows: a whole key, wrapped, without scrolling.
+const KEY_LINES: usize = 3;
 
 impl RSpiceApp {
     /// Open the dialog: fresh entry, or the stored grant when already
@@ -46,96 +45,84 @@ impl RSpiceApp {
             && self.state.dialogs.license_dialog.text.is_empty();
 
         let phase = self.state.dialogs.license_dialog.phase.clone();
-        let (primary, secondary, hint): (&str, Option<&str>, String) = match &phase {
-            LicensePhase::Entry | LicensePhase::Error(_) => (
-                "Verify",
-                DEVELOPMENT_SAMPLE_ACTION_LABEL,
-                "signature: ed25519 · offline verification".to_owned(),
-            ),
-            LicensePhase::Verified(_) if already_active => (
-                "Close",
-                Some("Remove license"),
-                "verified · ed25519 · denylist clear".to_owned(),
-            ),
-            LicensePhase::Verified(_) => (
-                "Activate",
-                DEVELOPMENT_SAMPLE_ACTION_LABEL,
-                "verified · ed25519 · denylist clear".to_owned(),
-            ),
+        let empty = self.state.dialogs.license_dialog.text.trim().is_empty();
+        let (title, primary) = match &phase {
+            LicensePhase::Entry | LicensePhase::Error(_) => ("Enter license key", "Verify"),
+            LicensePhase::Verified(_) if already_active => ("License", "Close"),
+            LicensePhase::Verified(_) => ("Enter license key", "Activate"),
         };
-        let primary_enabled = match &phase {
-            LicensePhase::Entry => !self.state.dialogs.license_dialog.text.trim().is_empty(),
-            _ => true,
+        // The footer says why Verify waits, how to give it the key from the
+        // keyboard, and what Activate will do; a refusal is under the field.
+        let hint = match &phase {
+            LicensePhase::Entry if empty => Some("Paste a license key to verify it"),
+            LicensePhase::Entry => Some("Ctrl+Enter verifies the key"),
+            LicensePhase::Error(_) => None,
+            LicensePhase::Verified(_) if already_active => None,
+            LicensePhase::Verified(_) if cfg!(target_arch = "wasm32") => {
+                Some("Activate keeps the key in this browser; it works offline")
+            }
+            LicensePhase::Verified(_) => {
+                Some("Activate keeps the key on this machine; it works offline")
+            }
         };
+        let primary_enabled = !matches!(phase, LicensePhase::Entry) || !empty;
+        let entering = matches!(phase, LicensePhase::Entry | LicensePhase::Error(_));
 
-        // Ctrl+Enter verifies; bare Enter belongs to the textarea (the
-        // field note explicitly invites line breaks).
+        // Ctrl+Enter verifies; bare Enter belongs to the key field, where a
+        // line break pasted from an email is part of the key.
         let ctrl_enter = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
 
         let state = &mut self.state;
-        let mut dialog = Dialog::new("Enter license key", primary)
-            .description("Paste, verify, and activate a license key locally on this machine.")
+        let mut dialog = Dialog::new(title, primary)
+            .description(
+                "Verify a license key on this machine, then activate it; nothing is sent anywhere.",
+            )
             .size(DialogSize::Transaction)
+            // Scroll-free: a reserved gutter would end the key field short
+            // of the right edge the title and footer share.
+            .overlay_scrollbar()
             .ghost("Cancel")
-            .hint(&hint)
             .primary_enabled(primary_enabled)
-            .primary_on_enter(false);
-        if let Some(label) = secondary {
-            dialog = dialog.secondary(label);
+            .primary_on_enter(!entering);
+        if let Some(hint) = hint {
+            dialog = dialog.hint(hint).hint_tone(DialogHintTone::Neutral);
         }
+        if already_active {
+            dialog = dialog.secondary("Remove license");
+        }
+        let mut edited = false;
         let choice = dialog.show(ctx, |ui| {
-                let t = Tokens::get(ui.ctx());
-                let c = t.color;
-
-                let subtext = match &state.dialogs.license_dialog.phase {
-                    LicensePhase::Verified(_) => {
-                        "Key verified on this machine. Activating stores it locally; nothing is sent anywhere."
-                    }
-                    _ => {
-                        "Paste the key from your purchase email. License verification happens entirely on this machine."
-                    }
-                };
-                ui.label(
-                    egui::RichText::new(subtext)
-                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                        .color(c.text_dim),
-                );
-                ui.add_space(tokens::SP_4);
-
-                match state.dialogs.license_dialog.phase.clone() {
-                    LicensePhase::Entry | LicensePhase::Error(_) => {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut state.dialogs.license_dialog.text)
-                                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                                .desired_rows(3)
-                                .desired_width(f32::INFINITY)
-                                .hint_text("RSPICE-K1.XXXXX-XXXXX-…"),
-                        );
-                        ui.add_space(4.0);
-                        let (note, color) = match &state.dialogs.license_dialog.phase {
-                            LicensePhase::Error(message) => (message.as_str(), c.err),
-                            _ => (
-                                "Line breaks and grouping dashes are fine — the whole string from the email works.",
-                                c.text_faint,
-                            ),
-                        };
-                        ui.label(
-                            egui::RichText::new(note)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(color),
-                        );
-                    }
-                    LicensePhase::Verified(info) => {
-                        summary_card(ui, &info);
-                        ui.add_space(tokens::SP_4);
-                        ui.label(
-                            egui::RichText::new(key_storage_line())
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(c.text_faint),
-                        );
+            fact_grid::show(ui, |rows| match &phase {
+                LicensePhase::Entry | LicensePhase::Error(_) => {
+                    let text = &mut state.dialogs.license_dialog.text;
+                    rows.block("Key", |ui, width| {
+                        edited = ui
+                            .add(
+                                egui::TextEdit::multiline(text)
+                                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                                    .desired_rows(KEY_LINES)
+                                    .desired_width(width)
+                                    .hint_text("RSPICE-K1.\u{2026}"),
+                            )
+                            .changed();
+                    });
+                    match &phase {
+                        LicensePhase::Error(message) => {
+                            rows.note_toned(message, Tokens::get(ctx).color.err);
+                        }
+                        _ => rows.note(
+                            "Paste the whole key from your purchase email; line breaks are fine.",
+                        ),
                     }
                 }
+                LicensePhase::Verified(info) => grant_rows(rows, info),
             });
+        });
+        // A key edited after a refusal is a new key: the refusal was about
+        // the old one.
+        if edited && matches!(phase, LicensePhase::Error(_)) {
+            self.state.dialogs.license_dialog.phase = LicensePhase::Entry;
+        }
 
         let choice = if choice == DialogChoice::None && ctrl_enter && primary_enabled {
             DialogChoice::Primary
@@ -148,22 +135,8 @@ impl RSpiceApp {
             DialogChoice::Cancelled | DialogChoice::Ghost => {
                 self.state.dialogs.license_dialog.open = false;
             }
-            DialogChoice::Secondary => match &self.state.dialogs.license_dialog.phase {
-                LicensePhase::Verified(_) if already_active => self.remove_license(),
-                #[cfg(any(test, rspice_development_build))]
-                _ => {
-                    // Debug/test walkthrough: fill the field and exercise the
-                    // real development-signature verification path.
-                    self.state.dialogs.license_dialog.text = license::SAMPLE_KEY.to_owned();
-                    self.verify_license_input();
-                }
-                #[cfg(not(any(test, rspice_development_build)))]
-                _ => {
-                    // No release-build dialog state exposes a second action
-                    // here. Remain fail-closed if an unexpected choice is
-                    // ever synthesized by a future dialog implementation.
-                }
-            },
+            DialogChoice::Secondary if already_active => self.remove_license(),
+            DialogChoice::Secondary => {}
             DialogChoice::Primary => match self.state.dialogs.license_dialog.phase.clone() {
                 LicensePhase::Entry | LicensePhase::Error(_) => self.verify_license_input(),
                 LicensePhase::Verified(_) if already_active => {
@@ -219,92 +192,36 @@ impl RSpiceApp {
     }
 }
 
+/// The grant a verified key carries, and where the key is kept.
+fn grant_rows(rows: &mut fact_grid::Rows<'_>, info: &LicenseInfo) {
+    rows.text("Licensed to", &info.licensed_to);
+    rows.text("Tier", &info.tier);
+    if info.updates_expired {
+        // Perpetual fallback: the key still activates; this build just
+        // postdates its updates window.
+        rows.text("Updates", &format!("Ended {}", info.updates_until));
+    } else {
+        rows.text("Updates", &format!("Until {}", info.updates_until));
+    }
+    rows.mono("License id", &info.license_id);
+    for (index, feature) in info.features.iter().enumerate() {
+        rows.text(if index == 0 { "Features" } else { "" }, feature);
+    }
+    rows.mono("Stored in", &key_storage());
+}
+
 /// Where Activate keeps the key on this platform: the file it writes on the
 /// desktop, this browser on the web.
-fn key_storage_line() -> String {
+fn key_storage() -> String {
     #[cfg(target_arch = "wasm32")]
     {
-        "Activate keeps the key in this browser; it works offline.".to_owned()
+        "This browser".to_owned()
     }
     #[cfg(not(target_arch = "wasm32"))]
-    match license::license_file_path() {
-        Some(path) => format!(
-            "Activate keeps the key in {}; it works offline.",
-            path.display()
-        ),
-        None => "This system has no configuration folder, so the key lasts only for this session."
-            .to_owned(),
-    }
-}
-
-/// The verified summary card: grant rows + feature chips.
-fn summary_card(ui: &mut egui::Ui, info: &LicenseInfo) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-
-    let frame = egui::Frame::NONE
-        .fill(c.bg_elevated)
-        .stroke(egui::Stroke::new(1.0, c.border))
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(12, 10));
-    frame.show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        row(ui, "Licensed to", &info.licensed_to, c.text);
-        row(ui, "Tier", &info.tier, c.accent);
-        if info.updates_expired {
-            // Perpetual fallback: the key still activates; this build just
-            // postdates its updates window.
-            let label = format!("{} · updates ended", info.updates_until);
-            row(ui, "Updates until", &label, c.warn);
-        } else {
-            row(ui, "Updates until", &info.updates_until, c.text);
-        }
-        row(ui, "License id", &info.license_id, c.text);
-        ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            for feature in &info.features {
-                feature_chip(ui, feature);
-            }
-        });
-    });
-}
-
-fn row(ui: &mut egui::Ui, key: &str, value: &str, value_color: egui::Color32) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    ui.horizontal(|ui| {
-        let (label_rect, _) = ui.allocate_exact_size(egui::vec2(110.0, 20.0), egui::Sense::hover());
-        ui.painter().text(
-            egui::pos2(label_rect.left(), label_rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            key,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            c.text_dim,
-        );
-        ui.label(
-            egui::RichText::new(value)
-                .font(theme::mono(tokens::FS_1, FontWeight::Medium))
-                .color(value_color),
-        );
-    });
-}
-
-fn feature_chip(ui: &mut egui::Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    egui::Frame::NONE
-        .fill(c.bg_panel)
-        .stroke(egui::Stroke::new(1.0, c.border_strong))
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(8, 3))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(label)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(c.text_dim),
-            );
-        });
+    license::license_file_path().map_or_else(
+        || "Nowhere: this system has no configuration folder".to_owned(),
+        |path| path.display().to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -362,6 +279,34 @@ mod tests {
                 shown.iter().any(|text| text.contains(&file)),
                 "the dialog names {file}: {shown:#?}"
             );
+        }
+    }
+
+    /// The dialog a buyer pastes their key into offers no sample key to
+    /// paste instead, and says nothing in signature jargon or with an em
+    /// dash, while it waits for a key, refuses one, or shows its grant.
+    #[test]
+    fn the_license_dialog_offers_no_sample_key_and_speaks_plainly() {
+        let mut app = RSpiceApp::test_instance();
+        app.open_license_dialog();
+        let mut seen = shown_texts(&mut app);
+        app.state.dialogs.license_dialog.text = "RSPICE-K1.TRUNCATED".to_owned();
+        app.verify_license_input();
+        seen.extend(shown_texts(&mut app));
+        app.state.dialogs.license_dialog.text = license::SAMPLE_KEY.to_owned();
+        app.verify_license_input();
+        seen.extend(shown_texts(&mut app));
+        assert!(
+            seen.iter().any(|text| text == "Verify") && seen.iter().any(|text| text == "Activate"),
+            "the three phases were drawn: {seen:#?}"
+        );
+        for text in &seen {
+            assert!(!text.contains("sample"), "{text:?} offers a sample key");
+            assert!(
+                !text.contains("ed25519"),
+                "{text:?} names the signature scheme"
+            );
+            assert!(!text.contains('\u{2014}'), "{text:?} has an em dash");
         }
     }
 }

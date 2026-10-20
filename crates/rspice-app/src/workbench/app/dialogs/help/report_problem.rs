@@ -8,19 +8,14 @@
 
 use std::sync::OnceLock;
 
-use egui::{Context, RichText};
+use egui::Context;
 
-use super::export_support_bundle;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use super::{VERSION_LINE, export_support_bundle, fact_grid};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 
 /// Where a problem report goes.
 pub(crate) const SUPPORT_ADDRESS: &str = "hello@rspice.app";
-
-/// The label column every row of the dialog shares.
-const LABEL_COLUMN: f32 = 96.0;
 
 /// The adapter the window renders with, recorded once when it is created.
 static GRAPHICS_ADAPTER: OnceLock<String> = OnceLock::new();
@@ -28,11 +23,7 @@ static GRAPHICS_ADAPTER: OnceLock<String> = OnceLock::new();
 /// Record the graphics adapter for the dialog to report. The first record
 /// wins: the window keeps one adapter for its lifetime.
 pub(crate) fn record_graphics_adapter(info: &eframe::egui_wgpu::wgpu::AdapterInfo) {
-    let _ = GRAPHICS_ADAPTER.set(graphics_summary(
-        &info.name,
-        info.backend,
-        info.device_type,
-    ));
+    let _ = GRAPHICS_ADAPTER.set(graphics_summary(&info.name, info.backend, info.device_type));
 }
 
 fn graphics_summary(
@@ -100,30 +91,6 @@ fn session_log_file() -> Option<String> {
     None
 }
 
-/// One row of the dialog's grid: its label, then what `value` adds.
-fn row(ui: &mut egui::Ui, label: &str, value: impl FnOnce(&mut egui::Ui)) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(label)
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
-    ui.horizontal(value);
-    ui.end_row();
-}
-
-fn fact(ui: &mut egui::Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.add(
-        egui::Label::new(
-            RichText::new(text)
-                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                .color(t.color.text),
-        )
-        .selectable(true),
-    );
-}
-
 impl RSpiceApp {
     pub(in crate::workbench) fn render_report_problem_dialog(&mut self, ctx: &Context) {
         let mut include_session_log = self.state.dialogs.help_center.include_session_log;
@@ -138,6 +105,8 @@ impl RSpiceApp {
                  support bundle that carries them, and the address to send it to.",
             )
             .size(DialogSize::Transaction)
+            // Scroll-free: no gutter down the trailing edge.
+            .overlay_scrollbar()
             .ghost("Close")
             .primary_enabled(reviewed);
         if !reviewed {
@@ -146,61 +115,32 @@ impl RSpiceApp {
                 .hint_tone(DialogHintTone::Warn);
         }
         let choice = dialog.show(ctx, |ui| {
-            let t = Tokens::get(ui.ctx());
-            egui::Grid::new("help.report-problem")
-                .num_columns(2)
-                .min_col_width(LABEL_COLUMN)
-                .min_row_height(t.metrics.ctl_h)
-                .spacing([tokens::SP_4 * 2.0, tokens::SP_2])
-                .show(ui, |ui| {
-                    row(ui, "Version", |ui| {
-                        fact(
-                            ui,
-                            concat!(
-                                env!("CARGO_PKG_VERSION"),
-                                " (build ",
-                                env!("RSPICE_BUILD_HASH"),
-                                ")"
-                            ),
-                        );
-                    });
-                    row(ui, "Platform", |ui| fact(ui, &operating_system()));
-                    if let Some(graphics) = GRAPHICS_ADAPTER.get() {
-                        row(ui, "Graphics", |ui| fact(ui, graphics));
-                    }
-                    if let Some(log_file) = &log_file {
-                        row(ui, "Session log", |ui| {
-                            fact(ui, log_file);
-                            open_folder = ui.button("Open folder").clicked();
-                        });
-                    }
-                    row(ui, "Contact", |ui| fact(ui, SUPPORT_ADDRESS));
-                    row(ui, "Bundle", |ui| {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(
-                                    "A JSON file with the facts above, the open workspace, \
-                                     document counts and file-format versions. Never project \
-                                     files, models, results, license keys or credentials.",
-                                )
-                                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                            )
-                            .wrap(),
-                        );
-                    });
-                    row(ui, "", |ui| {
-                        ui.checkbox(
-                            &mut include_session_log,
-                            format!(
-                                "Include the session log: {entries} entries, home folder removed"
-                            ),
-                        );
-                    });
-                    row(ui, "", |ui| {
-                        ui.checkbox(&mut reviewed, "I reviewed what the bundle contains");
-                    });
+            fact_grid::show(ui, |rows| {
+                rows.mono("Version", VERSION_LINE);
+                rows.text("Platform", &operating_system());
+                if let Some(graphics) = GRAPHICS_ADAPTER.get() {
+                    rows.text("Graphics", graphics);
+                }
+                if let Some(log_file) = &log_file {
+                    rows.mono("Session log", log_file);
+                    rows.row("", |ui| open_folder = ui.button("Open folder").clicked());
+                }
+                rows.mono("Contact", SUPPORT_ADDRESS);
+                rows.row("Bundle", |ui| {
+                    ui.checkbox(
+                        &mut include_session_log,
+                        format!("Include the session log: {entries} entries, home folder removed"),
+                    );
                 });
+                rows.row("", |ui| {
+                    ui.checkbox(&mut reviewed, "I reviewed what the bundle contains");
+                });
+                rows.note(
+                    "The bundle is a JSON file of the facts above, the open workspace, document \
+                     counts and file-format versions. It never holds project files, models, \
+                     results, license keys or credentials.",
+                );
+            });
         });
 
         self.state.dialogs.help_center.include_session_log = include_session_log;
@@ -210,8 +150,9 @@ impl RSpiceApp {
             if let Err(error) =
                 crate::workbench::lifecycle::recovery::open_diagnostics_folder(&self.state)
             {
-                self.state
-                    .prompt(format!("The session log folder could not be opened: {error}"));
+                self.state.prompt(format!(
+                    "The session log folder could not be opened: {error}"
+                ));
             }
         }
         match choice {
