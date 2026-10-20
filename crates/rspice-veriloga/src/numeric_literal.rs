@@ -97,12 +97,8 @@ fn parse_real_literal(compact: &str) -> Result<f64, String> {
     let invalid = || format!("'{compact}' is not a valid real number");
     let value = match scale_suffix(compact) {
         Some((suffix_start, decade)) => {
-            rspice_veriloga_runtime::arithmetic::scaled_decimal(
-                &compact[..suffix_start],
-                1,
-                decade,
-            )
-            .ok_or_else(invalid)?
+            rspice_veriloga_runtime::arithmetic::scaled_decimal(&compact[..suffix_start], 1, decade)
+                .ok_or_else(invalid)?
         }
         None => compact.parse::<f64>().map_err(|_| invalid())?,
     };
@@ -369,7 +365,8 @@ mod tests {
                     .expect("a decimal");
                 let raw = format!("{mantissa}{factor}");
                 match parse_numeric_literal(&raw) {
-                    Ok(NumericLiteralValue::Real(value)) if value.to_bits() == written.to_bits() => {}
+                    Ok(NumericLiteralValue::Real(value))
+                        if value.to_bits() == written.to_bits() => {}
                     other => misses.push(format!("{raw} read as {other:?}, not {written:e}")),
                 }
             }

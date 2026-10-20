@@ -348,8 +348,8 @@ fn bind_veriloga_model(
 }
 
 mod model_policy;
-use model_policy::*;
 pub(crate) use model_policy::without_repeated_topology_reports;
+use model_policy::*;
 mod advanced_mos;
 mod version_metadata;
 use advanced_mos::{

@@ -3194,10 +3194,8 @@ fn parameter_defaults_and_array_bounds_can_read_earlier_localparams() {
 /// indirect equation must be an access function, ...".
 #[test]
 fn an_indirect_equation_left_side_that_is_not_an_access_reads_as_one_sentence() {
-    let error = analyze(&module_src(
-        "analog V(p, n): V(p, n) * V(p, n) == 1.0;",
-    ))
-    .expect_err("a product is not an indirect equation's left side");
+    let error = analyze(&module_src("analog V(p, n): V(p, n) * V(p, n) == 1.0;"))
+        .expect_err("a product is not an indirect equation's left side");
     let diagnostic = error.to_string();
     assert!(
         diagnostic.contains(

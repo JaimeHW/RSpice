@@ -357,13 +357,25 @@ mod tests {
     fn physical_constants_are_the_lrm_default_set_openvaf_uses() {
         assert_eq!(
             physical_constants(""),
-            [1.602176462e-19, 1.3806503e-23, 6.62606876e-34, 8.854187817e-12]
+            [
+                1.602176462e-19,
+                1.3806503e-23,
+                6.62606876e-34,
+                8.854187817e-12
+            ]
         );
         assert_eq!(
             physical_constants("`define PHYSICAL_CONSTANTS_NIST2010"),
-            [1.602176565e-19, 1.3806488e-23, 6.62606957e-34, 8.854187817e-12]
+            [
+                1.602176565e-19,
+                1.3806488e-23,
+                6.62606957e-34,
+                8.854187817e-12
+            ]
         );
-        let old_eps0 = "8.85418792394420013968e-12".parse::<f64>().expect("a constant");
+        let old_eps0 = "8.85418792394420013968e-12"
+            .parse::<f64>()
+            .expect("a constant");
         assert_eq!(
             physical_constants("`define PHYSICAL_CONSTANTS_OLD"),
             [1.6021918e-19, 1.3806226e-23, 6.6260755e-34, old_eps0]
