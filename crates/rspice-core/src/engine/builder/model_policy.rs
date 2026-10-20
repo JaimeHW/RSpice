@@ -590,28 +590,31 @@ pub(super) fn effective_native_bjt_tnom_celsius(
     params: &HashMap<String, f64>,
     global_tnom_celsius: Option<f64>,
 ) -> Result<f64, SimulationError> {
+    // ngspice also spells TNOM as TREF (bjt.c:83).
+    let is_tnom =
+        |name: &str| name.eq_ignore_ascii_case("TNOM") || name.eq_ignore_ascii_case("TREF");
     let deferred_tnom = model.is_some_and(|model| {
         model
             .expr_params
             .iter()
             .chain(model.string_params.iter())
-            .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+            .any(|(name, _)| is_tnom(name))
             || model
                 .string_vector_params
                 .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+                .any(|(name, _)| is_tnom(name))
             || model
                 .real_vector_params
                 .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+                .any(|(name, _)| is_tnom(name))
             || model
                 .real_vector_expr_params
                 .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+                .any(|(name, _)| is_tnom(name))
             || model
                 .integer_vector_params
                 .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+                .any(|(name, _)| is_tnom(name))
     });
     if deferred_tnom {
         return Err(SimulationError::Circuit(format!(
@@ -621,6 +624,7 @@ pub(super) fn effective_native_bjt_tnom_celsius(
 
     let tnom_celsius = params
         .get("TNOM")
+        .or_else(|| params.get("TREF"))
         .copied()
         .or(global_tnom_celsius)
         .unwrap_or(27.0);

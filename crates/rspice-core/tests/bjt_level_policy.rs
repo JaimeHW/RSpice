@@ -314,6 +314,77 @@ fn assert_rel_close(label: &str, got: f64, expected: f64, rel_tol: f64) {
     );
 }
 
+fn leakage_alias_deck(c2: &str, c4: &str) -> String {
+    format!(
+        "* GP C2/C4/TREF aliases\n\
+         vb2 b2 0 dc 0.55\n\
+         vc2 c2 0 dc 1\n\
+         q2 c2 b2 0 qb\n\
+         vb3 b3 0 dc 0.55\n\
+         vc3 c3 0 dc 0\n\
+         q3 c3 b3 0 qc\n\
+         vb4 b4 0 dc 0.55\n\
+         vc4 c4 0 dc 1\n\
+         q4 c4 b4 0 qd\n\
+         .model qb npn(is=1e-16 bf=100 c2={c2} ne=2)\n\
+         .model qc npn(is=1e-16 bf=100 c4={c4} nc=2)\n\
+         .model qd npn(is=1e-16 bf=100 tref=60)\n\
+         .op\n\
+         .end\n"
+    )
+}
+
+#[test]
+fn legacy_gummel_poon_c2_c4_and_tref_follow_each_dialects_meaning() {
+    // ngspice 46 (`set numdgt=12`): bjt.c:94/102 alias C2/C4 to ISE/ISC and
+    // bjt.c:83 aliases TREF to TNOM, so the C2/C4 cards equal ISE=1e-13 and
+    // ISC=1e-13 cards and TREF=60 shifts the measurement temperature.
+    let deck = leakage_alias_deck("1e-13", "1e-13");
+    let ngspice = [
+        ("vb2", -5.862_490_734_50e-9),
+        ("vb3", -1.776_460_174_59e-7),
+        ("vb4", -1.800_236_301_85e-11),
+        ("vc4", -1.791_686_408_12e-9),
+    ];
+    // BestAvailable keeps the exact SI k/q, which moves these junction
+    // currents about 5e-6 from ngspice's CODATA 2014 pair. RSpice's nodal
+    // conditioning floor is off so the 1.8e-11 A TREF base current is not
+    // shifted by its 1e-15 S shunt.
+    for (dialect, rel_tol) in [
+        (SpiceDialect::Ngspice, 1.0e-6),
+        (SpiceDialect::BestAvailable, 2.0e-5),
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        for (branch, expected) in ngspice {
+            assert_rel_close(
+                &format!("{dialect:?} i({branch})"),
+                branch_current_with_config(&deck, branch, config.clone()),
+                expected,
+                rel_tol,
+            );
+        }
+    }
+
+    // Xyce 7.10 reads C2/C4 as SPICE2 multipliers of IS (N_DEV_BJT.C
+    // `Model::processParams`), so C2=C4=1e3 with IS=1e-16 is ISE=ISC=1e-13:
+    // I(VB2) = -5.864223417760e-09, I(VB3) = -1.777509681125e-07.
+    let xyce_deck = leakage_alias_deck("1e3", "1e3");
+    let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+    config.convergence_config.gmin_target = 0.0;
+    for (branch, expected) in [
+        ("vb2", -5.864_223_417_760e-9),
+        ("vb3", -1.777_509_681_125e-7),
+    ] {
+        assert_rel_close(
+            &format!("Xyce i({branch})"),
+            branch_current_with_config(&xyce_deck, branch, config.clone()),
+            expected,
+            1.0e-6,
+        );
+    }
+}
+
 #[test]
 fn legacy_gummel_poon_does_not_stamp_vbic_parasitic_gmin_branches() {
     let deck = "* legacy GP BJT GMIN topology\n\

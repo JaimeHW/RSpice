@@ -683,6 +683,10 @@ struct LegacyJunctionParameters {
     // Authored degrees and nominal TF; temperature-scaled storage TF does
     // not change the GP excess-phase delay (ngspice bjttemp.c).
     excess_phase: Option<(Value, Value)>,
+    // C2 and C4 authored without ISE and ISC. ngspice aliases them to
+    // ISE/ISC (bjt.c:94,102); Xyce scales IS by them (N_DEV_BJT.C
+    // `Model::processParams`). The dialect is known only after parsing.
+    leakage_coefficients: [Option<Value>; 2],
 }
 
 /// BJT device using the Ebers-Moll model

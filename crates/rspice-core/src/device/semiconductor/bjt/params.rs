@@ -1594,6 +1594,30 @@ impl Bjt {
     /// temperature-scaled model quantities.
     pub(crate) fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_compatibility = enabled;
+        self.resolve_legacy_leakage_coefficients();
+    }
+
+    /// Resolve GP C2/C4 under the selected dialect: ngspice's ISE/ISC
+    /// aliases, or Xyce's SPICE2 multipliers of IS.
+    fn resolve_legacy_leakage_coefficients(&mut self) {
+        let Some([c2, c4]) = self
+            .legacy_junction_params
+            .as_ref()
+            .map(|junctions| junctions.leakage_coefficients)
+        else {
+            return;
+        };
+        let scale = if self.xyce_compatibility {
+            self.is_nominal
+        } else {
+            1.0
+        };
+        if let Some(c2) = c2 {
+            self.iben_nominal = (c2 * scale).max(0.0);
+        }
+        if let Some(c4) = c4 {
+            self.ibcn_nominal = (c4 * scale).max(0.0);
+        }
     }
 
     /// A subsequent temperature refresh applies ngspice's const.h thermal
@@ -1681,6 +1705,7 @@ impl Bjt {
         if let Some(junctions) = &mut self.legacy_junction_params {
             junctions.base_resistance = None;
             junctions.excess_phase = None;
+            junctions.leakage_coefficients = [None; 2];
         }
         if self.charge_model == BjtChargeModel::LegacyGummelPoon
             && let Some(v) = legacy_irb
@@ -2362,6 +2387,25 @@ impl Bjt {
         }
         if let Some(&v) = params.get("IBCN") {
             self.ibcn_nominal = v.max(0.0);
+        }
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            let coefficient = |authored: &[&str], name: &str| {
+                params
+                    .get(name)
+                    .copied()
+                    .filter(|v| v.is_finite())
+                    .filter(|_| !authored.iter().any(|key| params.contains_key(*key)))
+            };
+            let leakage = [
+                coefficient(&["ISE", "JLE", "IBEN"], "C2"),
+                coefficient(&["ISC", "JLC", "IBCN"], "C4"),
+            ];
+            if leakage.iter().any(Option::is_some) {
+                self.legacy_junction_params
+                    .get_or_insert_with(Default::default)
+                    .leakage_coefficients = leakage;
+                self.resolve_legacy_leakage_coefficients();
+            }
         }
         if let Some(&v) = params.get("IBEIP") {
             self.ibeip_nominal = v.max(0.0);
