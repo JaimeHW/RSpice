@@ -631,6 +631,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // AppState through its APIs. They do not depend on the application root;
     // application validation tests can use the same authored projects.
     "examples",
+    // The one name the user is known by. It reads the cloud session and the
+    // license, never the application.
+    "user_identity",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",

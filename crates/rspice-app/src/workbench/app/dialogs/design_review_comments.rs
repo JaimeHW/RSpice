@@ -19,8 +19,7 @@ use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 const TITLE: &str = "Design review comments";
-const PRIMARY: &str = "Publish review update";
-const CURRENT_ACTOR: &str = "Local project editor";
+const PRIMARY: &str = "Post reply";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum DesignReviewStatusFilter {
@@ -75,6 +74,9 @@ pub(crate) struct DesignReviewCommentsDialogState {
     pub(crate) selected_evidence: Option<usize>,
     pub(crate) error: Option<String>,
     pub(crate) body_scroll_offset: f32,
+    /// Who "My assignments" means: the user, by the one name the application
+    /// knows them by. Read from the identity every frame the dialog shows.
+    pub(crate) actor: String,
 }
 
 impl Default for DesignReviewCommentsDialogState {
@@ -93,6 +95,7 @@ impl Default for DesignReviewCommentsDialogState {
             selected_evidence: None,
             error: None,
             body_scroll_offset: 0.0,
+            actor: String::new(),
         }
     }
 }
@@ -168,6 +171,7 @@ impl RSpiceApp {
         if !self.state.dialogs.design_review_comments.open {
             return;
         }
+        self.state.dialogs.design_review_comments.actor = self.review_actor();
 
         let current_revision = current_revision_identity(&self.state);
         normalize_selected_thread(
@@ -255,6 +259,14 @@ impl RSpiceApp {
         }
     }
 
+    /// The name a reply, a resolution and "My assignments" use for the user.
+    fn review_actor(&self) -> String {
+        crate::workbench::user_identity::user_display_name(
+            self.cloud_account.snapshot(),
+            self.state.license.as_ref(),
+        )
+    }
+
     fn handle_design_review_action(&mut self, action: ReviewAction) {
         match action {
             ReviewAction::None => {}
@@ -307,7 +319,7 @@ impl RSpiceApp {
                     }
                 };
                 let body = self.state.dialogs.design_review_comments.reply.clone();
-                let author = CURRENT_ACTOR.to_owned();
+                let author = self.review_actor();
                 self.apply_review_mutation(if matches!(action, ReviewAction::Resolve) {
                     DesignReviewMutation::Resolve {
                         author,
@@ -450,7 +462,7 @@ fn note_visible(
         DesignReviewStatusFilter::Open => review.state == DesignReviewState::Open,
         DesignReviewStatusFilter::All => true,
         DesignReviewStatusFilter::MyAssignments => {
-            review.assignee.as_deref() == Some(CURRENT_ACTOR)
+            review.assignee.as_deref() == Some(dialog.actor.as_str())
         }
     };
     let revision_matches = match dialog.revision_scope {
@@ -1274,12 +1286,15 @@ mod tests {
     #[test]
     fn filters_use_durable_state_and_never_fixture_counts() {
         let mut open = review_note(1);
-        open.assign_review(Some(CURRENT_ACTOR)).unwrap();
+        open.assign_review(Some("Ada Lovelace")).unwrap();
         let mut resolved = review_note(2);
         resolved
-            .resolve_review(CURRENT_ACTOR, "Accepted.", checked_unix_time_ms().unwrap())
+            .resolve_review("Ada Lovelace", "Accepted.", checked_unix_time_ms().unwrap())
             .unwrap();
-        let mut dialog = DesignReviewCommentsDialogState::default();
+        let mut dialog = DesignReviewCommentsDialogState {
+            actor: "Ada Lovelace".to_owned(),
+            ..DesignReviewCommentsDialogState::default()
+        };
         assert!(note_visible(&open, &dialog, None));
         assert!(!note_visible(&resolved, &dialog, None));
 
@@ -1289,6 +1304,35 @@ mod tests {
 
         dialog.status_filter = DesignReviewStatusFilter::All;
         assert!(note_visible(&resolved, &dialog, None));
+    }
+
+    /// A reply is signed with the name the application knows the user by,
+    /// here the license holder, and never a placeholder role.
+    #[test]
+    fn a_posted_reply_is_signed_with_the_users_name() {
+        let mut app = RSpiceApp::test_instance();
+        let license =
+            crate::services::license::parse_and_verify(crate::services::license::SAMPLE_KEY)
+                .expect("signed sample license");
+        let holder = license.licensed_to.clone();
+        app.state.license = Some(license);
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(review_note(1));
+        open_design_review_comments(&mut app.state);
+        app.state.dialogs.design_review_comments.reply = "Bias point checked.".to_owned();
+
+        app.handle_design_review_action(ReviewAction::Reply);
+
+        let review = app.state.schematic.document().design_notes[0]
+            .review
+            .clone()
+            .expect("a review thread");
+        let author = &review.messages.last().expect("the posted reply").author;
+        assert_eq!(author, &holder);
+        assert_ne!(author, "Local project editor");
     }
 
     #[test]

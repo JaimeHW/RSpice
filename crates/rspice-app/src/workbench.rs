@@ -64,6 +64,7 @@ pub(crate) mod simulation_analysis_tabs;
 pub(crate) mod state;
 mod surfaces;
 pub(crate) mod tools;
+pub(crate) mod user_identity;
 pub(crate) mod workflows;
 
 pub use app::{
