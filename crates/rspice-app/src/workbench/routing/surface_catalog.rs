@@ -305,7 +305,7 @@ define_surface_catalog! {
     DesignManagement => { id: "design-management", label: "Sheets, variants and annotation", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=design-management" },
     AccountOrganization => { id: "account-organization", label: "Account and administration", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=account-organization" },
     CommandPalette => { id: "command-palette", label: "Command palette", archetype: Overlay, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=command-palette" },
-    JobsManager => { id: "jobs-manager", label: "Jobs, targets and run history", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=jobs-manager" },
+    JobsManager => { id: "jobs-manager", label: "Run history", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=jobs-manager" },
     WorkflowDialog => { id: "workflow-dialog", label: "Transactional workflow dialog", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=workflow-dialog" },
     NotificationCenter => { id: "notification-center", label: "Notifications", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=notification-center" },
     HelpCenter => { id: "help-center", label: "Help center", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=help-center" },

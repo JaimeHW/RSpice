@@ -1,9 +1,9 @@
-//! Jobs, targets, and retained run history manager.
+//! Run history: the running and retained runs, and their manifests.
 //!
 //! This is a truthful projection of the execution state that the Rust
-//! simulator actually owns. Mockup fixtures for remote schedulers, quotas,
-//! or checkpoints are never presented as live records; unavailable target
-//! classes are identified explicitly instead.
+//! simulator actually owns. Remote schedulers, quotas, checkpoints and the
+//! runtimes this build cannot execute on are not listed: none of them is a
+//! record the product holds.
 
 use egui::{
     Align, Align2, Color32, Frame, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui,
@@ -29,7 +29,9 @@ use crate::workbench::{
     RouteTransitionSource, SurfaceId, SurfaceRoute, commands::vocabulary::Command,
 };
 
-const DESCRIPTION: &str = "Review running and saved runs, how each run was prepared, qualified targets, and run-manifest exports.";
+const TITLE: &str = "Run history";
+const DESCRIPTION: &str =
+    "Review running and saved runs, how each run was prepared, and export run manifests.";
 const TABLE_MIN_WIDTH: f32 = 800.0;
 const QUEUE_COLUMN_FRACTIONS: [f32; 6] = [0.08, 0.24, 0.18, 0.18, 0.14, 0.18];
 
@@ -351,7 +353,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     } else {
         Command::RunSimulation.is_enabled(app)
     };
-    let dialog = Dialog::new("Jobs, targets & run history", run_label)
+    let dialog = Dialog::new(TITLE, run_label)
         .description(DESCRIPTION)
         .size(DialogSize::JobsManager)
         .primary_enabled(run_enabled)
@@ -527,9 +529,7 @@ fn close_to_source(state: &mut AppState) {
         .workbench
         .replace_route(fallback, RouteTransitionSource::User)
     {
-        state.prompt(format!(
-            "Could not close Jobs, targets & run history: {error}"
-        ));
+        state.prompt(format!("Could not close {TITLE}: {error}"));
     }
 }
 
@@ -836,79 +836,7 @@ fn render_inspector(
                     );
                 }
             });
-            crate::workbench::design_system::property_card(ui, "Execution targets", |ui| {
-                target_row(
-                    ui,
-                    snapshot.current_target.label(),
-                    "qualified for this build",
-                    true,
-                );
-                let unavailable = match snapshot.current_target {
-                    ExecutionTarget::LocalDesktop => "Browser worker",
-                    ExecutionTarget::NativeMobile => "Browser worker",
-                    ExecutionTarget::BrowserWorker => "Native application engine",
-                };
-                target_row(ui, unavailable, "not executable in this build", false);
-                target_row(ui, "Remote scheduler", "not configured", false);
-            });
         });
-}
-
-fn target_row(ui: &mut Ui, label: &str, status: &str, selected: bool) {
-    let t = Tokens::get(ui.ctx());
-    let height = if ui.ctx().input(|input| input.has_touch_screen()) {
-        44.0
-    } else {
-        31.0
-    };
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, format!("{label}: {status}")));
-    if selected {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_active);
-        ui.painter().rect_filled(
-            Rect::from_min_max(rect.min, pos2(rect.left() + 2.0, rect.bottom())),
-            0.0,
-            t.color.accent,
-        );
-    }
-    // The fill and the accent bar already say which target is the current
-    // one, so the row carries no dot.
-    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let status_desired = ui
-        .painter()
-        .layout_no_wrap(status.to_owned(), status_font.clone(), t.color.text)
-        .size()
-        .x;
-    let (label_rect, status_rect) = trailing_text_regions(rect, 10.0, 9.0, status_desired);
-    let visible_label =
-        crate::workbench::design_system::elide_text(ui, label, &label_font, label_rect.width());
-    let visible_status =
-        crate::workbench::design_system::elide_text(ui, status, &status_font, status_rect.width());
-    ui.painter().with_clip_rect(label_rect).text(
-        label_rect.left_center(),
-        Align2::LEFT_CENTER,
-        visible_label,
-        label_font,
-        if selected {
-            t.color.text
-        } else {
-            t.color.text_dim
-        },
-    );
-    ui.painter().with_clip_rect(status_rect).text(
-        status_rect.right_center(),
-        Align2::RIGHT_CENTER,
-        visible_status,
-        status_font,
-        if selected {
-            t.color.text_dim
-        } else {
-            t.color.text_faint
-        },
-    );
 }
 
 /// A section band: its title, and its count or state in secondary neutral ink
@@ -1933,8 +1861,26 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("Runtime"), "{text}");
-        for constant in ["Parallel slots", "Memory budget", "Failure policy"] {
+        // The targets list under it was literal copy too: the runtimes this
+        // build cannot execute on and a scheduler nothing configures.
+        for constant in [
+            "Parallel slots",
+            "Memory budget",
+            "Failure policy",
+            "Execution targets",
+            "Remote scheduler",
+            "not executable in this build",
+            "qualified for this build",
+        ] {
             assert!(!text.contains(constant), "{constant} came back:\n{text}");
         }
+    }
+
+    /// The dialog, its route and the error a failed close reports all call
+    /// it what the Simulate menu does.
+    #[test]
+    fn the_manager_is_titled_run_history_everywhere() {
+        assert_eq!(TITLE, "Run history");
+        assert_eq!(SurfaceId::JobsManager.label(), TITLE);
     }
 }
