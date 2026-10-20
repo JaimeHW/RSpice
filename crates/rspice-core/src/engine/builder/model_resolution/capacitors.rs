@@ -176,6 +176,7 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
             ))
         }
     })?;
+    let unscaled = resolved;
 
     if spice_dialect == SpiceDialect::Xyce {
         let age = instance_param(instance_params, &["AGE"]);
@@ -218,6 +219,22 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
         let temp_ctx = crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
         let coeffs = crate::analysis::temperature::CapacitorTempCoeffs { tc1, tc2 };
         resolved = coeffs.scale_capacitance(resolved, &temp_ctx);
+    }
+    // An authored negative capacitance is honored (below). A capacitor that
+    // its temperature or aging coefficients carry through zero is a model
+    // extrapolated past its range, not a design choice: refuse it here
+    // rather than let it put a right-half-plane pole into the circuit.
+    let authored = unscaled * xyce_model_multiplier;
+    if authored * resolved < 0.0 {
+        return Err(SimulationError::ParameterDomain(format!(
+            "Capacitor '{element_name}' resolved to {} capacitance {resolved:e} at {current_temp_c} C: \
+             its temperature or aging coefficients (TC1={tc1}, TC2={tc2}, TNOM={tnom_c} C) carry the authored {authored:e} through zero",
+            if resolved < 0.0 {
+                "negative"
+            } else {
+                "positive"
+            }
+        )));
     }
 
     if let Some(scale) = instance_param(instance_params, &["SCALE"]) {
@@ -266,6 +283,14 @@ mod tests {
         name: &str,
         spice_dialect: SpiceDialect,
     ) -> f64 {
+        try_resolve_capacitor_from_source(source, name, spice_dialect).expect("capacitor resolves")
+    }
+
+    fn try_resolve_capacitor_from_source(
+        source: &str,
+        name: &str,
+        spice_dialect: SpiceDialect,
+    ) -> Result<f64, SimulationError> {
         let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
         let element = netlist
             .elements
@@ -292,7 +317,31 @@ mod tests {
             crate::constants::TEMP_REFERENCE,
             spice_dialect,
         )
-        .expect("capacitor resolves")
+    }
+
+    /// An authored negative capacitance is honored, with or without
+    /// temperature coefficients that keep its sign; a positive one that
+    /// TC1 carries through zero at the run temperature is refused (1p with
+    /// TC1=-0.01 is -0.73p at 200 C).
+    #[test]
+    fn temperature_scaling_through_zero_is_refused_but_authored_negatives_are_kept() {
+        let error = try_resolve_capacitor_from_source(
+            "tc flip\nC1 a 0 cmod temp=200\n.model cmod C C=1p TC1=-0.01 TNOM=27\n.end\n",
+            "C1",
+            SpiceDialect::Ngspice,
+        )
+        .expect_err("a TC that flips the sign is refused");
+        let SimulationError::ParameterDomain(message) = &error else {
+            panic!("{error:?}");
+        };
+        assert!(message.contains("negative capacitance"), "{message}");
+        assert!(message.contains("TC1=-0.01"), "{message}");
+
+        let kept = resolve_capacitor_from_source(
+            "authored negative\nC1 a 0 cmod temp=127\n.model cmod C C=-1p TC1=1e-3 TNOM=27\n.end\n",
+            "C1",
+        );
+        assert!((kept - -1.1e-12).abs() < 1e-24, "resolved {kept}");
     }
 
     #[test]

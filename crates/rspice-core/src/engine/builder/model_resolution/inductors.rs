@@ -121,7 +121,22 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
     };
     if tc1 != 0.0 || tc2 != 0.0 {
         let dt = current_temp_c - tnom_c;
+        let authored = resolved;
         resolved *= 1.0 + tc1 * dt + tc2 * dt * dt;
+        // An authored negative inductance is honored; one its temperature
+        // coefficients carry through zero is a model extrapolated past its
+        // range and is refused, as for capacitors.
+        if authored * resolved < 0.0 {
+            return Err(SimulationError::ParameterDomain(format!(
+                "Inductor '{element_name}' resolved to {} inductance {resolved:e} at {current_temp_c} C: \
+                 its temperature coefficients (TC1={tc1}, TC2={tc2}, TNOM={tnom_c} C) carry the authored {authored:e} through zero",
+                if resolved < 0.0 {
+                    "negative"
+                } else {
+                    "positive"
+                }
+            )));
+        }
     }
 
     if let Some(scale) = instance_param(instance_params, &["SCALE"]) {
@@ -373,6 +388,29 @@ mod tests {
             crate::constants::TEMP_REFERENCE,
             spice_dialect,
         )
+    }
+
+    /// As for capacitors: an authored negative inductance is honored, and a
+    /// positive one that TC1 carries through zero (1m with TC1=-0.01 is
+    /// -0.73m at 200 C) is refused.
+    #[test]
+    fn temperature_scaling_through_zero_is_refused_but_authored_negatives_are_kept() {
+        let error = resolve_inductor_from_source_with_dialect(
+            "tc flip\nL1 a 0 lmod temp=200\n.model lmod L L=1m TC1=-0.01 TNOM=27\n.end\n",
+            "L1",
+            SpiceDialect::Ngspice,
+        )
+        .expect_err("a TC that flips the sign is refused");
+        let SimulationError::ParameterDomain(message) = &error else {
+            panic!("{error:?}");
+        };
+        assert!(message.contains("negative inductance"), "{message}");
+
+        let kept = resolve_inductor_from_source(
+            "authored negative\nL1 a 0 lmod temp=127\n.model lmod L L=-1m TC1=1e-3 TNOM=27\n.end\n",
+            "L1",
+        );
+        assert!((kept - -1.1e-3).abs() < 1e-15, "resolved {kept}");
     }
 
     #[test]
