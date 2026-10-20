@@ -21,6 +21,7 @@ use super::{
     poll_parse_text, read_file_with_encoding_limited_with_abort,
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::config::ExpressionDialect;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 
 /// One source-aware item in an include-expanded netlist.
@@ -315,6 +316,10 @@ pub struct IncludeProcessor {
     /// expanding the current source. This is an execution-derived audit trail,
     /// not a second dependency resolver.
     resolved_dependencies: Vec<ResolvedIncludeDependency>,
+    /// Dialect whose rule decides what a `.END` card in an included source
+    /// does: Xyce stops reading that source there, ngspice comments the card
+    /// out and reads on.
+    expression_dialect: ExpressionDialect,
 }
 
 #[derive(Debug, Default)]
@@ -734,12 +739,19 @@ impl IncludeProcessor {
             source_cache: Mutex::new(DependencySourceCache::default()),
             current_depth: 0,
             resolved_dependencies: Vec::new(),
+            expression_dialect: ExpressionDialect::default(),
         }
     }
 
     /// Apply an explicit resource policy to subsequent expansion work.
     pub fn with_resource_limits(mut self, resource_limits: ResourceLimits) -> Self {
         self.resource_limits = resource_limits;
+        self
+    }
+
+    /// Read included sources under `dialect`'s rules.
+    pub fn with_expression_dialect(mut self, dialect: ExpressionDialect) -> Self {
+        self.expression_dialect = dialect;
         self
     }
 
@@ -1509,11 +1521,27 @@ impl IncludeProcessor {
                 continue;
             }
 
-            if strip_end_cards && trimmed.eq_ignore_ascii_case(".end") {
-                result.items.push(ExpandedSourceItem::EndCard {
-                    origin: NetlistSourceLocation::in_file(current_path, line_number),
-                });
-                break;
+            if strip_end_cards && self.expression_dialect == ExpressionDialect::Xyce {
+                // Xyce stops reading a source at its `.END` and reports any
+                // subcircuit the card leaves open (N_IO_CircuitBlock.C).
+                if trimmed.eq_ignore_ascii_case(".end") {
+                    result.items.push(ExpandedSourceItem::EndCard {
+                        origin: NetlistSourceLocation::in_file(current_path, line_number),
+                    });
+                    break;
+                }
+            } else if strip_end_cards && super::is_spice_end_card(line, self.expression_dialect) {
+                // ngspice turns every `.end` card into a comment as it reads
+                // a file and reads on (inp_read in inpcom.c); only the root
+                // deck's `.end` closes the circuit.
+                result.push_limited(
+                    ExpandedSourceItem::Line {
+                        text: format!("*{trimmed}"),
+                        origin: NetlistSourceLocation::in_file(current_path, line_number),
+                    },
+                    self.resource_limits.max_expanded_source_bytes,
+                )?;
+                continue;
             }
 
             if split_directive(trimmed).is_some_and(|(directive, _)| {
@@ -2168,7 +2196,18 @@ mod tests {
         std::fs::write(&leaf_path, "Rleaf 2 0 2\n").expect("write leaf include");
         let deck = "mapped title\n.include nested/child.inc\nRtop 3 0 3\n.end\n";
 
-        let mut processor = IncludeProcessor::new(&deck_path);
+        // ngspice comments an included `.end` out and reads on.
+        let mapped = IncludeProcessor::new(&deck_path)
+            .expand_content_mapped_with_abort(deck, &deck_path, &NoAbort)
+            .expect("mapped expansion succeeds");
+        assert_eq!(
+            mapped.render(),
+            "mapped title\nRchild 1 0 1\nRleaf 2 0 2\n*.end\nRignored 9 0 9\nRtop 3 0 3\n.end\n"
+        );
+
+        // Xyce stops reading the included source at its `.END`.
+        let mut processor =
+            IncludeProcessor::new(&deck_path).with_expression_dialect(ExpressionDialect::Xyce);
         let mapped = processor
             .expand_content_mapped_with_abort(deck, &deck_path, &NoAbort)
             .expect("mapped expansion succeeds");

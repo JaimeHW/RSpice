@@ -1913,11 +1913,13 @@ impl Netlist {
         sources: NetlistSourceResolution,
     ) -> Result<Self, ParseWithAbortError> {
         let NetlistSourceResolution {
-            mut include_processor,
+            include_processor,
             initcond_source_provider,
             allow_filesystem_spef,
             replay_context,
         } = sources;
+        let mut include_processor =
+            include_processor.with_expression_dialect(options.expression_dialect);
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let expanded =
             include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
@@ -2322,7 +2324,8 @@ impl Netlist {
     ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let mut processor = IncludeProcessor::new_with_execution_dir(path, Some(execution_dir))
-            .with_resource_limits(options.resource_limits);
+            .with_resource_limits(options.resource_limits)
+            .with_expression_dialect(options.expression_dialect);
         for (index, dir) in search_paths.iter().enumerate() {
             poll_parse_abort(abort, index)?;
             processor.add_lib_path(dir.clone());
@@ -10446,6 +10449,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// ngspice comments an included `.end` out and reads the rest of the file
+    /// (inp_read in inpcom.c). ngspice 46 on audit deck inc1.cir: I(V1) =
+    /// -2 mA. The include used to stop at its `.end`, dropping R10: -1 mA.
+    #[test]
+    fn included_end_card_does_not_stop_an_ngspice_include() {
+        let dir = cancellation_fixture_path("included-end-reads-on");
+        std::fs::create_dir_all(&dir).expect("create included END fixture");
+        let deck = dir.join("deck.cir");
+        std::fs::write(
+            &deck,
+            "include first line element\nV1 1 0 1\n.include inc1.inc\n.op\n.end\n",
+        )
+        .expect("write include owner");
+        std::fs::write(dir.join("inc1.inc"), "R9 1 0 1k\n.end\nR10 1 0 1k\n")
+            .expect("write child with END");
+
+        let netlist = Netlist::parse_file(&deck).expect("included END is a comment");
+        let _ = std::fs::remove_dir_all(dir);
+        let result = crate::engine::Engine::default()
+            .run_dc_op(&netlist)
+            .expect("operating point");
+        let current = result.branch_current_named("V1").expect("V1 current");
+        assert!((current + 2.0e-3).abs() < 1.0e-12, "I(V1) = {current}");
+    }
+
     #[test]
     fn included_end_card_is_a_source_owned_missing_ends_boundary() {
         let dir = cancellation_fixture_path("missing-ends-child-end");
@@ -10460,7 +10488,16 @@ mod tests {
         )
         .expect("write child END fixture");
 
-        let error = Netlist::parse_file(&deck).expect_err("child .END cannot replace .ENDS");
+        // Xyce stops reading the child at its `.END`; ngspice comments the
+        // card out and reads to the end of the file, where the subcircuit is
+        // still open.
+        let xyce = NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..NetlistParseOptions::default()
+        };
+        let error = Netlist::parse_file_with_options(&deck, xyce)
+            .expect_err("child .END cannot replace .ENDS");
+        let error_ngspice = Netlist::parse_file(&deck).expect_err("child .END is a comment");
         let child = child.canonicalize().expect("canonical child");
         assert_missing_subcircuit_ends(
             error,
@@ -10476,6 +10513,21 @@ mod tests {
                 detected_line: 3,
             },
             MissingSubcircuitEndsBoundary::EndCard,
+        );
+        assert_missing_subcircuit_ends(
+            error_ngspice,
+            MissingEndsNames {
+                authored_name: "child",
+                canonical_name: "CHILD",
+                qualified_name: "CHILD",
+            },
+            MissingEndsSpans {
+                opened_path: Some(&child),
+                opened_line: 1,
+                detected_path: Some(&child),
+                detected_line: 5,
+            },
+            MissingSubcircuitEndsBoundary::EndOfSource,
         );
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -10759,25 +10811,40 @@ mod tests {
         )
         .expect("write balanced nested include");
 
-        let netlist = Netlist::parse_file(&deck).expect("balanced includes parse");
-        let outer = netlist
-            .subcircuits
-            .iter()
-            .find(|subckt| subckt.name.eq_ignore_ascii_case("OUTER"))
-            .expect("outer subcircuit retained");
-        assert!(outer.elements.iter().any(|element| element.name == "RBODY"));
-        assert!(
-            outer
-                .nested_subcircuits
+        // Xyce stops reading body.inc at its `.END`; ngspice comments the
+        // card out and reads RIGNORED into the subcircuit too (ngspice 46
+        // runs the same layout with both resistors in OUTER).
+        for (dialect, reads_past_end) in [
+            (ExpressionDialect::Xyce, false),
+            (ExpressionDialect::Ngspice, true),
+        ] {
+            let options = NetlistParseOptions {
+                expression_dialect: dialect,
+                ..NetlistParseOptions::default()
+            };
+            let netlist =
+                Netlist::parse_file_with_options(&deck, options).expect("balanced includes parse");
+            let outer = netlist
+                .subcircuits
                 .iter()
-                .any(|subckt| subckt.name.eq_ignore_ascii_case("OUTER.INNER"))
-        );
-        assert!(
-            !outer
-                .elements
-                .iter()
-                .any(|element| element.name == "RIGNORED")
-        );
+                .find(|subckt| subckt.name.eq_ignore_ascii_case("OUTER"))
+                .expect("outer subcircuit retained");
+            assert!(outer.elements.iter().any(|element| element.name == "RBODY"));
+            assert!(
+                outer
+                    .nested_subcircuits
+                    .iter()
+                    .any(|subckt| subckt.name.eq_ignore_ascii_case("OUTER.INNER"))
+            );
+            assert_eq!(
+                outer
+                    .elements
+                    .iter()
+                    .any(|element| element.name == "RIGNORED"),
+                reads_past_end,
+                "{dialect:?}"
+            );
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -10815,8 +10882,16 @@ mod tests {
         .expect("write continuation owner");
         std::fs::write(dir.join("child.inc"), "R1 1 0 1k\n.end\n").expect("write terminal child");
 
-        Netlist::parse_file(&deck)
+        let xyce = NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..NetlistParseOptions::default()
+        };
+        Netlist::parse_file_with_options(&deck, xyce)
             .expect_err("parent continuation cannot attach across an included .END boundary");
+        // ngspice reads the included `.end` as a comment, so the parent's
+        // continuation extends R1 as it would across any include (ngspice
+        // 46 accepts the same layout).
+        Netlist::parse_file(&deck).expect("an included ngspice .end is no boundary");
         let _ = std::fs::remove_dir_all(dir);
     }
 
