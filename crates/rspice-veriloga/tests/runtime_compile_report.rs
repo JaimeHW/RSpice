@@ -29,9 +29,19 @@ fn compiler() -> VerilogACompiler {
 
 #[test]
 fn expression_lowering_errors_retain_the_innermost_authored_span() {
-    for (expression, offending) in [
-        ("V(p,n) + missing", "missing"),
-        ("V(p,n) + $vt(1,2)", "$vt(1,2)"),
+    // Semantic analysis refuses an undeclared name; code generation, a
+    // call it cannot lower.
+    for (expression, offending, phase) in [
+        (
+            "V(p,n) + missing",
+            "missing",
+            CompileDiagnosticPhase::Semantic,
+        ),
+        (
+            "V(p,n) + $vt(1,2)",
+            "$vt(1,2)",
+            CompileDiagnosticPhase::CodeGeneration,
+        ),
     ] {
         let source = format!(
             "module bad(p,n);\ninout p,n; electrical p,n;\nanalog I(p,n) <+ {expression};\nendmodule\n"
@@ -45,7 +55,7 @@ fn expression_lowering_errors_retain_the_innermost_authored_span() {
             let diagnostics = compile_diagnostics(&source, &error);
             assert_eq!(diagnostics.len(), 1, "{error}");
             let diagnostic = &diagnostics[0];
-            assert_eq!(diagnostic.phase, CompileDiagnosticPhase::CodeGeneration);
+            assert_eq!(diagnostic.phase, phase);
             let span = diagnostic.span.as_ref().expect("authored expression span");
             assert_eq!(
                 &source[span.byte_start as usize..span.byte_end as usize],
@@ -1138,9 +1148,12 @@ fn in_memory_runtime_compile_never_reads_configured_include_paths() {
         .compile_runtime("`include \"Cargo.toml\"\nmodule x; endmodule\n", None)
         .expect_err("runtime source compilation must not read disk includes");
 
-    assert!(matches!(
-        error,
-        CompileError::IoError { message }
-            if message.contains("Include file not found: Cargo.toml")
-    ));
+    // A preprocessing refusal, stated as the preprocessor states it.
+    assert!(matches!(error, CompileError::Preprocess(_)), "{error:?}");
+    assert!(
+        error
+            .to_string()
+            .contains("Include file not found: Cargo.toml"),
+        "{error}"
+    );
 }

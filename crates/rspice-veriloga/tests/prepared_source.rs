@@ -274,9 +274,20 @@ fn filesystem_sources_still_follow_symlinks_to_regular_files() {
 fn post_preparation_errors_keep_frozen_include_locations() {
     use rspice_veriloga::{CompileDiagnosticPhase, VirtualCompileLimits, VirtualSourceBundle};
 
+    // An undeclared name is refused by semantic analysis, during preparation;
+    // a table that is neither inline data nor a readable file is refused by
+    // code generation, after it.
     for (body, line, token) in [
-        ("analog I(p,n) <+ V(p,n) + missing;", 4, "missing"),
-        ("`define BAD missing\r\nanalog I(p,n) <+ `BAD;", 5, "`BAD"),
+        (
+            "analog I(p,n) <+ $table_model(V(p,n), \"missing.tbl\", \"1L\");",
+            4,
+            "missing.tbl",
+        ),
+        (
+            "`define BAD $table_model(V(p,n), \"missing.tbl\", \"1L\")\r\nanalog I(p,n) <+ `BAD;",
+            5,
+            "`BAD",
+        ),
     ] {
         let files = Sources::new();
         let root = files.write("root.va", "`include \"child.va\"\n");
@@ -294,7 +305,12 @@ fn post_preparation_errors_keep_frozen_include_locations() {
         let diagnostic = &diagnostics[0];
         assert_eq!(diagnostic.phase, CompileDiagnosticPhase::CodeGeneration);
         assert_eq!(diagnostic.code, "VA-CODEGEN-INVALID-EXPRESSION");
-        assert_eq!(diagnostic.path.as_deref(), child.to_str());
+        assert_eq!(
+            PathBuf::from(diagnostic.path.as_ref().unwrap())
+                .canonicalize()
+                .unwrap(),
+            child
+        );
         assert_eq!(diagnostic.line, Some(line));
         assert!(
             source[diagnostic.byte_start.unwrap()..diagnostic.byte_end.unwrap()].contains(token)
@@ -407,8 +423,11 @@ fn runtime_preparation_retains_source_limits_and_original_compiler_locations() {
     };
     assert!(!diagnostics.is_empty());
     assert_eq!(diagnostics[0].line, Some(2));
+    // Shown without the Windows verbatim prefix; the same file.
     assert_eq!(
-        PathBuf::from(diagnostics[0].path.as_ref().unwrap()),
+        PathBuf::from(diagnostics[0].path.as_ref().unwrap())
+            .canonicalize()
+            .unwrap(),
         child.canonicalize().unwrap()
     );
 
@@ -493,8 +512,10 @@ fn file_and_provider_compilation_retain_warnings_in_original_includes() {
     assert_eq!(warning.severity, CompileDiagnosticSeverity::Warning);
     assert_eq!(warning.code, "VA-SEM-NO-EFFECT-SYSTEM-TASK");
     assert_eq!(
-        warning.path.as_deref(),
-        Some(child.canonicalize().unwrap().to_str().unwrap())
+        PathBuf::from(warning.path.as_ref().unwrap())
+            .canonicalize()
+            .unwrap(),
+        child.canonicalize().unwrap()
     );
     assert_eq!(warning.line, Some(4));
     assert_eq!(warning.column, Some(2));
