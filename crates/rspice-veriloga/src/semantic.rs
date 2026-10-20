@@ -491,8 +491,9 @@ pub struct SemanticAnalyzer {
     /// Authored constants for typed digital select validation in this module.
     digital_selector_constants: digital::DigitalConstants,
     array_bound_shadows: Vec<HashSet<SmolStr>>,
-    /// Current function inlining depth (recursion guard)
-    inline_depth: usize,
+    /// The analog functions being inlined, outermost first (recursion and
+    /// depth guard)
+    inline_stack: Vec<SmolStr>,
     /// Nesting depth of runtime-bounded loops (contributions inside them
     /// are not representable and must error)
     runtime_loop_depth: usize,
@@ -593,7 +594,7 @@ impl SemanticAnalyzer {
             invariant_consts: HashMap::new(),
             digital_selector_constants: Default::default(),
             array_bound_shadows: Vec::new(),
-            inline_depth: 0,
+            inline_stack: Vec::new(),
             runtime_loop_depth: 0,
             dynamic_analog_operator_guard_depth: 0,
             current_default_transition: Self::SIMULATOR_DEFAULT_TRANSITION,
@@ -769,7 +770,7 @@ impl SemanticAnalyzer {
                 self.invariant_consts.clear();
                 self.digital_selector_constants = Default::default();
                 self.array_bound_shadows.clear();
-                self.inline_depth = 0;
+                self.inline_stack.clear();
                 self.runtime_loop_depth = 0;
                 self.dynamic_analog_operator_guard_depth = 0;
                 self.current_default_transition = default_transition;
@@ -6379,15 +6380,7 @@ impl SemanticAnalyzer {
         if !self.function_should_materialize(&func) {
             return Ok(None);
         }
-        if self.inline_depth >= Self::MAX_INLINE_DEPTH {
-            return Err(CompileError::Semantic(SemanticError::new(
-                SemanticErrorKind::CircularDependency(format!(
-                    "analog function '{}' (recursive call chain?)",
-                    call.name
-                )),
-                call.span,
-            )));
-        }
+        self.check_inline_call(&call.name, call.span)?;
         if call.args.len() != func.params.len() {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::ArgumentCountMismatch {
@@ -6504,7 +6497,7 @@ impl SemanticAnalyzer {
         }
 
         self.subst_stack.push(frame);
-        self.inline_depth += 1;
+        self.inline_stack.push(call.name.clone());
         let body_result = (|| -> CompileResult<()> {
             for var_decl in &func.locals {
                 for item in &var_decl.items {
@@ -6532,7 +6525,7 @@ impl SemanticAnalyzer {
             }
             Ok(())
         })();
-        self.inline_depth -= 1;
+        self.inline_stack.pop();
         self.subst_stack.pop().expect("function frame");
         body_result?;
 
@@ -7941,7 +7934,7 @@ impl SemanticAnalyzer {
         span: Span,
     ) -> CompileResult<()> {
         let context = match (
-            self.inline_depth != 0,
+            !self.inline_stack.is_empty(),
             self.dynamic_analog_operator_guard_depth != 0,
         ) {
             (false, false) => return Ok(()),
@@ -8698,7 +8691,43 @@ impl SemanticAnalyzer {
         Ok(call)
     }
 
-    const MAX_INLINE_DEPTH: usize = 16;
+    /// How deep analog function calls may nest. Each level inlines one body
+    /// into its caller; a chain costs what its bodies cost, so the bound only
+    /// keeps the analyzer's recursion within its stack.
+    const MAX_INLINE_DEPTH: usize = 64;
+
+    /// Refuse to inline `name` when it is already being inlined (a recursive
+    /// call, named with its cycle) or when calls already nest
+    /// [`Self::MAX_INLINE_DEPTH`] deep.
+    fn check_inline_call(&self, name: &SmolStr, span: Span) -> CompileResult<()> {
+        if let Some(first) = self.inline_stack.iter().position(|open| open == name) {
+            let cycle: Vec<&str> = self.inline_stack[first..]
+                .iter()
+                .map(SmolStr::as_str)
+                .chain([name.as_str()])
+                .collect();
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::CircularDependency(format!(
+                    "analog function '{name}' ({}): an analog function cannot call itself, \
+                     directly or through another function",
+                    cycle.join(" -> ")
+                )),
+                span,
+            )));
+        }
+        if self.inline_stack.len() >= Self::MAX_INLINE_DEPTH {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "analog function '{name}' is called {} functions deep; this compiler \
+                     inlines analog function calls at most {} deep",
+                    self.inline_stack.len() + 1,
+                    Self::MAX_INLINE_DEPTH
+                )),
+                span,
+            )));
+        }
+        Ok(())
+    }
 
     /// Inline a call to a user-defined analog function by symbolically
     /// executing its body. The return value is the final expression bound
@@ -8733,15 +8762,7 @@ impl SemanticAnalyzer {
         args: &[Expression],
         span: Span,
     ) -> CompileResult<Expression> {
-        if self.inline_depth >= Self::MAX_INLINE_DEPTH {
-            return Err(CompileError::Semantic(SemanticError::new(
-                SemanticErrorKind::CircularDependency(format!(
-                    "analog function '{}' (recursive call chain?)",
-                    name
-                )),
-                span,
-            )));
-        }
+        self.check_inline_call(name, span)?;
 
         let func = self
             .user_functions
@@ -8820,7 +8841,7 @@ impl SemanticAnalyzer {
         );
 
         self.subst_stack.push(frame);
-        self.inline_depth += 1;
+        self.inline_stack.push(name.clone());
         let result = (|| {
             // Bind initializers once, in declaration order, after the formal
             // arguments are visible. Keeping raw initializer syntax in the
@@ -8847,7 +8868,7 @@ impl SemanticAnalyzer {
             }
             self.exec_function_body(&func.body.statements, None, &variable_types)
         })();
-        self.inline_depth -= 1;
+        self.inline_stack.pop();
         let frame = self.subst_stack.pop().expect("pushed above");
         result?;
 

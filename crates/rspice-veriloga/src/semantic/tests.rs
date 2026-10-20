@@ -3413,3 +3413,52 @@ fn system_names_are_unsupported_when_standard_and_unknown_otherwise() {
         assert!(diagnostic.contains(expected), "{body}: {diagnostic}");
     }
 }
+
+/// `g0 .. g{depth-1}`, each calling the previous one, and a contribution
+/// through the last.
+fn function_chain(depth: usize) -> String {
+    let mut body =
+        String::from("analog function real g0; input x; real x; g0 = x + 1; endfunction\n");
+    for level in 1..depth {
+        body.push_str(&format!(
+            "analog function real g{level}; input x; real x; g{level} = g{}(x) + 1; endfunction\n",
+            level - 1
+        ));
+    }
+    body.push_str(&format!("analog I(p, n) <+ g{}(V(p, n));", depth - 1));
+    module_src(&body)
+}
+
+/// A deep chain of distinct functions is not recursion: seventeen used to be
+/// refused as "Circular dependency in analog function 'g0' (recursive call
+/// chain?)". Analysis runs on the compiler's own stack, as every public entry
+/// point runs it.
+#[test]
+fn a_deep_chain_of_distinct_analog_functions_is_not_recursion() {
+    crate::compile_stack::run(|| analyze(&function_chain(64)))
+        .expect("sixty-four distinct nested functions inline");
+    let diagnostic = crate::compile_stack::run(|| analyze(&function_chain(80)))
+        .expect_err("eighty nested calls exceed the inlining depth")
+        .to_string();
+    assert!(
+        diagnostic.contains("this compiler inlines analog function calls at most 64 deep"),
+        "{diagnostic}"
+    );
+    assert!(!diagnostic.contains("ircular"), "{diagnostic}");
+}
+
+/// True recursion is named with its cycle.
+#[test]
+fn a_recursive_analog_function_is_named_with_its_cycle() {
+    let diagnostic = analyze(&module_src(
+        "analog function real f; input x; real x; f = x > 1 ? g(x - 1) : 1; endfunction\n\
+         analog function real g; input x; real x; g = f(x); endfunction\n\
+         analog I(p, n) <+ f(V(p, n));",
+    ))
+    .expect_err("f and g call each other")
+    .to_string();
+    assert!(
+        diagnostic.contains("Circular dependency in analog function 'f' (f -> g -> f)"),
+        "{diagnostic}"
+    );
+}
