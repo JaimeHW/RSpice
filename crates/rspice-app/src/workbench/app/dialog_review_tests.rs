@@ -573,7 +573,6 @@ fn render_every_menu_dialog_for_review() {
                         break;
                     };
                     let spec = command.spec();
-                    let started = Instant::now();
                     let (ran_in, what, renders) = match seed {
                         None => ("nowhere", refusal.clone(), Vec::new()),
                         Some(_) if SYSTEM_FILE_PICKERS.contains(command) => (
@@ -608,11 +607,6 @@ fn render_every_menu_dialog_for_review() {
                         spec.label,
                         what.replace('|', "\\|"),
                         renders.join("<br>")
-                    );
-                    eprintln!(
-                        "census: {}{suffix} in {:.1} s: {what}",
-                        spec.id,
-                        started.elapsed().as_secs_f32()
                     );
                     rows.lock().expect("census rows").push(Row {
                         order: *order,
@@ -656,11 +650,6 @@ fn render_every_menu_dialog_for_review() {
         writeln!(index, "{}", row.text).ok();
     }
     std::fs::write(directory.join("index.md"), index).expect("write the index");
-    eprintln!(
-        "census: {} commands, {rendered} opened something, {images} images in {}",
-        rows.len(),
-        directory.display()
-    );
 }
 
 /// How a Help dialog is opened for review.

@@ -913,7 +913,7 @@ mod tests {
                 .expect("the repository ships the file")
                 .replace("\r\n", "\n");
             assert!(
-                shown.iter().any(|text| *text == file),
+                shown.contains(&file),
                 "the legal page shows {name} as shipped"
             );
         }
@@ -942,7 +942,7 @@ mod tests {
                     .display()
                     .to_string();
                 assert!(
-                    shown.iter().any(|text| *text == log),
+                    shown.contains(&log),
                     "{command:?} names the session log file {log}"
                 );
             }
