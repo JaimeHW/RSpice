@@ -222,6 +222,48 @@ fn paint_dashed_hline(ui: &Ui, range: egui::Rangef, y: f32, stroke: Stroke) {
     }
 }
 
+/// Where a dialog's rows start: its title and footer sit this far in from
+/// the frame, and so does everything between them.
+pub(crate) const DIALOG_BODY_INSET: f32 = 12.0;
+
+/// A section's band across a flush dialog body or one pane of it: its title
+/// on the body's left edge, an optional count at its right. A dialog wears
+/// this one header style for every section it has.
+pub(crate) fn band_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(
+            ui.available_width(),
+            crate::workbench::design_system::PANEL_SECTION_H,
+        ),
+        Sense::hover(),
+    );
+    let spoken = meta.map_or_else(|| title.to_owned(), |meta| format!("{title}, {meta}"));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &spoken));
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        rect.left_center() + vec2(DIALOG_BODY_INSET, 0.0),
+        Align2::LEFT_CENTER,
+        title,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_dim,
+    );
+    if let Some(meta) = meta {
+        ui.painter().text(
+            rect.right_center() - vec2(DIALOG_BODY_INSET, 0.0),
+            Align2::RIGHT_CENTER,
+            meta,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -22,9 +22,8 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
-use crate::workbench::design_system::{
-    PANEL_SECTION_H, WorkbenchIcon, property_row, section_header,
-};
+use crate::workbench::app::dialogs::review_primitives::{DIALOG_BODY_INSET, band_header};
+use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::{SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind};
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
@@ -341,6 +340,9 @@ impl RSpiceApp {
             .size(DialogSize::SimulationWorkflow)
             .initial_height(640.0)
             .flush_body()
+            // The split's bands and rule reach the frame's right edge; a
+            // withheld scroll gutter left bare surface beside them.
+            .overlay_scrollbar()
             .ghost("Cancel")
             .primary_enabled(primary_enabled)
             .primary_on_enter(false)
@@ -616,65 +618,87 @@ fn selection_bulk_body(
 ) -> SelectionBulkBodyAction {
     let mut action = SelectionBulkBodyAction::None;
     let tokens = Tokens::get(ui.ctx());
+    // Nothing in this body may widen it. A value longer than its control is
+    // elided there: laid out whole, one such line grew the body past the
+    // surface's right edge, and every row under it took the new width.
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     egui::Frame::NONE
         .fill(tokens.color.bg_panel)
-        .inner_margin(egui::Margin::symmetric(10, 6))
+        .inner_margin(egui::Margin::symmetric(BODY_INSET_I8, 8))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let width = (ui.available_width() - 112.0).max(180.0);
-                let response = ui.add_sized(
-                    [width, tokens.metrics.ctl_h],
-                    TextEdit::singleline(&mut dialog.filter.query)
-                        .hint_text(
-                            "Find instance, property, model, net, expression or path\u{2026}",
-                        )
-                        .margin(egui::Margin {
-                            left: 29,
-                            right: 8,
-                            top: 5,
-                            bottom: 5,
-                        }),
-                );
-                WorkbenchIcon::Search.paint(
-                    ui.painter(),
-                    egui::Rect::from_center_size(
-                        egui::pos2(response.rect.left() + 15.0, response.rect.center().y),
-                        Vec2::splat(16.0),
-                    ),
-                    tokens.color.text_faint,
-                );
-                if response.changed() {
-                    action = SelectionBulkBodyAction::FilterChanged;
-                }
-                if Button::new("Save filter\u{2026}").show(ui).clicked() {
-                    dialog.save_filter_open = !dialog.save_filter_open;
-                }
-            });
+            let band_w = ui.available_width();
+            ui.set_width(band_w);
+            // The button keeps its own width at the band's end; the field
+            // takes the rest.
+            let row = Vec2::new(band_w, tokens.metrics.ctl_h);
+            ui.allocate_ui_with_layout(
+                row,
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    if Button::new("Save filter\u{2026}").show(ui).clicked() {
+                        dialog.save_filter_open = !dialog.save_filter_open;
+                    }
+                    let width = ui.available_width();
+                    let response = ui.add_sized(
+                        [width, tokens.metrics.ctl_h],
+                        TextEdit::singleline(&mut dialog.filter.query)
+                            .hint_text(
+                                "Find instance, property, model, net, expression or path\u{2026}",
+                            )
+                            .margin(egui::Margin {
+                                left: 29,
+                                right: 8,
+                                top: 5,
+                                bottom: 5,
+                            }),
+                    );
+                    WorkbenchIcon::Search.paint(
+                        ui.painter(),
+                        egui::Rect::from_center_size(
+                            egui::pos2(response.rect.left() + 15.0, response.rect.center().y),
+                            Vec2::splat(16.0),
+                        ),
+                        tokens.color.text_faint,
+                    );
+                    if response.changed() {
+                        action = SelectionBulkBodyAction::FilterChanged;
+                    }
+                },
+            );
             if dialog.save_filter_open {
                 saved_filter_controls(ui, dialog, saved_filters, &tokens, &mut action);
             }
         });
     ui.separator();
 
+    let filter_w = (ui.available_width() * FILTER_PANE_SHARE).round();
     let split = egui::Frame::NONE
         .fill(tokens.color.bg_inset)
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.columns(2, |columns| {
-                columns[0].spacing_mut().item_spacing.x = 8.0;
-                columns[1].spacing_mut().item_spacing.x = 8.0;
-                selection_filter_panel(&mut columns[0], dialog, rows, hierarchy_path, &mut action);
-                egui::Frame::NONE.inner_margin(egui::Margin::same(10)).show(
-                    &mut columns[1],
-                    |ui| {
-                        bulk_edit_panel(ui, dialog, impact, affected_analyses, &mut action);
-                    },
-                );
+            let top = ui.cursor().min;
+            let full_w = ui.available_width();
+            let filter = egui::Rect::from_min_size(top, Vec2::new(filter_w, f32::INFINITY));
+            let edit = egui::Rect::from_min_size(
+                top + Vec2::new(filter_w, 0.0),
+                Vec2::new(full_w - filter_w, f32::INFINITY),
+            );
+            let filter_bottom = pane(ui, "selection-bulk-filter-pane", filter, |ui| {
+                selection_filter_panel(ui, dialog, rows, hierarchy_path, &mut action);
             });
+            let edit_bottom = pane(ui, "selection-bulk-edit-pane", edit, |ui| {
+                bulk_edit_panel(ui, dialog, impact, affected_analyses, &mut action);
+            });
+            ui.allocate_rect(
+                egui::Rect::from_min_max(
+                    top,
+                    egui::pos2(top.x + full_w, filter_bottom.max(edit_bottom)),
+                ),
+                egui::Sense::hover(),
+            );
         });
     let split_rect = split.response.rect;
     ui.painter().vline(
-        split_rect.center().x,
+        split_rect.left() + filter_w,
         split_rect.y_range(),
         egui::Stroke::new(1.0, tokens.color.border_strong),
     );
@@ -684,6 +708,36 @@ fn selection_bulk_body(
         egui::Stroke::new(1.0, tokens.color.border),
     );
     action
+}
+
+/// [`DIALOG_BODY_INSET`] as a frame margin.
+const BODY_INSET_I8: i8 = DIALOG_BODY_INSET as i8;
+/// What the filter and its results take of the body's width. The table has
+/// four columns to fit; the edit pane beside it has two controls a row.
+const FILTER_PANE_SHARE: f32 = 0.58;
+
+/// One pane of the split, laid top down in `rect` and clipped to it, so the
+/// pane beside it starts where the split says whatever this one holds.
+/// Returns the pane's bottom edge.
+fn pane(ui: &mut Ui, id_salt: &str, rect: egui::Rect, add: impl FnOnce(&mut Ui)) -> f32 {
+    let mut pane = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(id_salt)
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    pane.set_clip_rect(rect.intersect(ui.clip_rect()));
+    pane.set_width(rect.width());
+    pane.spacing_mut().item_spacing.x = 8.0;
+    add(&mut pane);
+    pane.min_rect().bottom()
+}
+
+/// A pane's content, on the body's left edge and as far in from its right.
+fn pane_content(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(BODY_INSET_I8, 10))
+        .show(ui, add);
 }
 
 fn saved_filter_controls(
@@ -789,7 +843,7 @@ fn selection_filter_fields(
             .add(
                 TextEdit::singleline(&mut dialog.filter.model_cell)
                     .desired_width(columns[0].available_width())
-                    .hint_text("OPA189*"),
+                    .hint_text("Any"),
             )
             .changed()
         {
@@ -800,7 +854,7 @@ fn selection_filter_fields(
             .add(
                 TextEdit::singleline(&mut dialog.filter.current_property)
                     .desired_width(columns[1].available_width())
-                    .hint_text("section = default"),
+                    .hint_text("name = value"),
             )
             .changed()
         {
@@ -816,37 +870,54 @@ fn selection_filter_panel(
     hierarchy_path: &str,
     action: &mut SelectionBulkBodyAction,
 ) {
-    selection_filter_header(ui, rows.len());
-    egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(10, 10))
-        .show(ui, |ui| {
-            selection_filter_fields(ui, dialog, hierarchy_path, action);
-        });
-    let [object_w, path_w, value_w, lock_w] = result_columns(ui.available_width());
+    band_header(
+        ui,
+        "Selection filter",
+        Some(&format!("{} matched", rows.len())),
+    );
+    pane_content(ui, |ui| {
+        selection_filter_fields(ui, dialog, hierarchy_path, action);
+        ui.add_space(12.0);
+        selection_results(ui, dialog, rows);
+    });
+}
+
+fn selection_results(
+    ui: &mut Ui,
+    dialog: &mut SelectionBulkEditDialogState,
+    rows: &[SelectionBulkRow],
+) {
+    // A check box is never narrower than a control is tall, so its column
+    // is as wide as the box the rows actually lay out.
+    let check_w = RESULT_CHECK_W.max(ui.spacing().interact_size.y);
+    let [object_w, path_w, value_w, lock_w] = result_columns(
+        ui.available_width(),
+        check_w + ui.spacing().scroll.allocated_width(),
+    );
     Grid::new("selection-bulk-result-header")
         .num_columns(5)
         .striped(false)
         .min_col_width(0.0)
         .spacing(Vec2::new(RESULT_COLUMN_GAP, 4.0))
         .show(ui, |ui| {
-            ui.allocate_space(Vec2::new(RESULT_CHECK_W, 16.0));
+            ui.allocate_space(Vec2::new(check_w, 16.0));
             for (label, width) in [
                 ("Object", object_w),
                 ("Path", path_w),
                 ("Value", value_w),
                 ("Locked", lock_w),
             ] {
-                ui.add_sized(
-                    [width, 16.0],
-                    egui::Label::new(RichText::new(label).strong()),
-                );
+                result_cell(ui, width, RichText::new(label).strong());
             }
             ui.end_row();
         });
+    // A short result is as tall as its rows; a long one scrolls in place.
+    let rows_h = (rows.len().max(1) as f32 * 24.0).min(RESULTS_MAX_H);
     ScrollArea::vertical()
         .id_salt("selection-bulk-result-scroll")
-        .max_height(300.0)
-        .auto_shrink([false, false])
+        .max_height(RESULTS_MAX_H)
+        .min_scrolled_height(rows_h)
+        .auto_shrink([false, true])
         .show_rows(ui, 24.0, rows.len(), |ui, range| {
             Grid::new("selection-bulk-result-grid")
                 .num_columns(5)
@@ -856,12 +927,22 @@ fn selection_filter_panel(
                 .show(ui, |ui| {
                     for row in &rows[range] {
                         let mut selected = dialog.selected.contains(&row.key);
+                        // In a cell as wide as the header's, so the columns
+                        // after it start where their headings do.
                         let response = ui
-                            .add_enabled(
-                                row.editable(),
-                                egui::Checkbox::without_text(&mut selected),
+                            .allocate_ui_with_layout(
+                                Vec2::new(check_w, RESULT_ROW_H),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.set_width(check_w);
+                                    ui.add_enabled(
+                                        row.editable(),
+                                        egui::Checkbox::without_text(&mut selected),
+                                    )
+                                },
                             )
-                            .on_disabled_hover_text(row.lock.as_deref().unwrap_or("not editable"));
+                            .inner
+                            .on_disabled_hover_text(row.lock.as_deref().unwrap_or("Not editable"));
                         response.widget_info(|| {
                             egui::WidgetInfo::selected(
                                 egui::WidgetType::Checkbox,
@@ -877,41 +958,58 @@ fn selection_filter_panel(
                                 dialog.selected.remove(&row.key);
                             }
                         }
-                        ui.add_sized([object_w, 20.0], egui::Label::new(&row.object).truncate())
-                            .on_hover_text(&row.object);
-                        ui.add_sized(
-                            [path_w, 20.0],
-                            egui::Label::new(RichText::new(&row.path).monospace()).truncate(),
-                        )
-                        .on_hover_text(&row.path);
-                        ui.add_sized([value_w, 20.0], egui::Label::new(&row.value).truncate())
-                            .on_hover_text(&row.value);
+                        result_cell(ui, object_w, row.object.as_str()).on_hover_text(&row.object);
+                        result_cell(ui, path_w, RichText::new(&row.path).monospace())
+                            .on_hover_text(&row.path);
+                        result_cell(ui, value_w, row.value.as_str()).on_hover_text(&row.value);
                         // A cell only when something is in the way; an
                         // editable row says nothing, which is the whole
                         // column's news.
                         let lock = row.lock.as_deref().unwrap_or("");
-                        ui.add_sized([lock_w, 20.0], egui::Label::new(lock).truncate())
-                            .on_hover_text(lock);
+                        let cell = result_cell(ui, lock_w, lock);
+                        if !lock.is_empty() {
+                            cell.on_hover_text(lock);
+                        }
                         ui.end_row();
                     }
                 });
         });
 }
 
-/// A row's select box, and the air between two result columns.
+/// The narrowest a row's select box is, and the air between two result
+/// columns.
 const RESULT_CHECK_W: f32 = 20.0;
 const RESULT_COLUMN_GAP: f32 = 6.0;
-/// What a vertical scroll bar takes out of the pane the rows are laid in.
-const RESULT_SCROLLBAR_W: f32 = 12.0;
+const RESULT_ROW_H: f32 = 20.0;
+/// The tallest the result list grows before it scrolls.
+const RESULTS_MAX_H: f32 = 300.0;
 
 /// Object, Path, Value and Locked across whatever width this pane has.
 ///
 /// These were four fixed widths summing to more than half the dialog, so the
 /// Locked column painted over the impact panel beside it at every viewport
-/// the dialog actually opens at. A path is the long one and gets the room.
-fn result_columns(pane: f32) -> [f32; 4] {
-    let text = (pane - RESULT_CHECK_W - RESULT_COLUMN_GAP * 4.0 - RESULT_SCROLLBAR_W).max(140.0);
-    [text * 0.21, text * 0.40, text * 0.18, text * 0.21]
+/// the dialog actually opens at. A path is the long one; a lock is a short
+/// reason, which a column narrower than it would elide on every locked row.
+/// `fixed` is what the select box and the list's scroll bar take out of the
+/// pane: counted short, the rows were wider than the list, which grew to
+/// hold them.
+fn result_columns(pane: f32, fixed: f32) -> [f32; 4] {
+    let text = (pane - fixed - RESULT_COLUMN_GAP * 4.0).max(140.0);
+    let [object, path, value] = [text * 0.22, text * 0.30, text * 0.18];
+    [object, path, value, text - object - path - value]
+}
+
+/// One result cell: its text from the cell's left edge, elided at its right.
+fn result_cell(ui: &mut Ui, width: f32, text: impl Into<egui::WidgetText>) -> egui::Response {
+    ui.allocate_ui_with_layout(
+        Vec2::new(width, RESULT_ROW_H),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_width(width);
+            ui.add(egui::Label::new(text).truncate())
+        },
+    )
+    .inner
 }
 
 fn bulk_edit_panel(
@@ -921,8 +1019,20 @@ fn bulk_edit_panel(
     affected_analyses: usize,
     action: &mut SelectionBulkBodyAction,
 ) {
+    band_header(ui, "Bulk edit and impact", None);
+    pane_content(ui, |ui| {
+        bulk_edit_fields(ui, dialog, impact, affected_analyses, action);
+    });
+}
+
+fn bulk_edit_fields(
+    ui: &mut Ui,
+    dialog: &mut SelectionBulkEditDialogState,
+    impact: &SelectionBulkImpact,
+    affected_analyses: usize,
+    action: &mut SelectionBulkBodyAction,
+) {
     ui.spacing_mut().item_spacing.x = 12.0;
-    section_header(ui, "Bulk edit and impact", None);
     ui.columns(2, |columns| {
         columns[0].label("Property");
         let before = dialog.property;
@@ -948,35 +1058,33 @@ fn bulk_edit_panel(
         }
     });
     ui.add_space(9.0);
-    ui.columns(2, |columns| {
-        columns[0].label("Unset behavior");
-        ComboBox::from_id_salt("selection-bulk-unset")
-            .width(columns[0].available_width())
-            .selected_text(bulk_unset_label(dialog.unset_behavior))
-            .show_ui(&mut columns[0], |ui| {
-                for behavior in BULK_UNSET_BEHAVIORS {
-                    ui.selectable_value(
-                        &mut dialog.unset_behavior,
-                        behavior,
-                        bulk_unset_label(behavior),
-                    );
-                }
-            });
-    });
-    ui.add_space(8.0);
-    property_row(ui, "Objects changed", &impact.changed.to_string());
+    ui.label("Unset behavior");
+    ComboBox::from_id_salt("selection-bulk-unset")
+        .width(ui.available_width())
+        .selected_text(bulk_unset_label(dialog.unset_behavior))
+        .show_ui(ui, |ui| {
+            for behavior in BULK_UNSET_BEHAVIORS {
+                ui.selectable_value(
+                    &mut dialog.unset_behavior,
+                    behavior,
+                    bulk_unset_label(behavior),
+                );
+            }
+        });
+    ui.add_space(12.0);
+    impact_row(ui, "Objects changed", &impact.changed.to_string());
     // Only a non-zero count is news. A row reading "0" on every clean filter
     // is a row the reader learns to skip.
     if impact.locked_or_excluded > 0 {
-        property_row(
+        impact_row(
             ui,
             "Locked or excluded",
             &impact.locked_or_excluded.to_string(),
         );
     }
-    property_row(
+    impact_row(
         ui,
-        "Simulation tasks affected",
+        "Analyses affected",
         if impact.changed == 0 {
             "0".to_owned()
         } else {
@@ -986,12 +1094,42 @@ fn bulk_edit_panel(
     );
 }
 
+/// One count of the edit's impact: its words on the pane's left edge, the
+/// count at its right, where a column of counts lines up.
+fn impact_row(ui: &mut Ui, label: &str, value: &str) {
+    let tokens = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), IMPACT_ROW_H),
+        egui::Sense::hover(),
+    );
+    let spoken = format!("{label}: {value}");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &spoken));
+    ui.painter().text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        theme::sans(crate::ui::tokens::FS_0, FontWeight::Regular),
+        tokens.color.text_dim,
+    );
+    ui.painter().text(
+        rect.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        value,
+        theme::mono(crate::ui::tokens::FS_0, FontWeight::Regular),
+        tokens.color.text,
+    );
+}
+
+const IMPACT_ROW_H: f32 = 22.0;
+
 fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> bool {
     match dialog.property {
         SelectionBulkProperty::ModelSection => {
             let before = dialog.new_value.clone();
+            // The footer says why the list is empty; the control says only
+            // that it is.
             let shown = if dialog.bound_sections.is_empty() {
-                RichText::new(NO_BOUND_SECTIONS)
+                RichText::new("None defined")
             } else if dialog.new_value.is_empty() {
                 RichText::new("Choose a section").color(Tokens::get(ui.ctx()).color.text_faint)
             } else {
@@ -1037,43 +1175,6 @@ fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> 
             .add(TextEdit::singleline(&mut dialog.new_value).desired_width(ui.available_width()))
             .changed(),
     }
-}
-
-fn selection_filter_header(ui: &mut Ui, matched: usize) {
-    let tokens = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), PANEL_SECTION_H),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(
-        rect,
-        0.0,
-        egui::Color32::from_rgba_unmultiplied(
-            tokens.color.bg_panel_2.r(),
-            tokens.color.bg_panel_2.g(),
-            tokens.color.bg_panel_2.b(),
-            204,
-        ),
-    );
-    ui.painter().hline(
-        rect.x_range(),
-        rect.top(),
-        egui::Stroke::new(1.0, tokens.color.border),
-    );
-    ui.painter().text(
-        rect.left_center() + egui::vec2(10.0, 0.0),
-        egui::Align2::LEFT_CENTER,
-        "Selection filter",
-        theme::sans(crate::ui::tokens::FS_0, FontWeight::SemiBold),
-        tokens.color.text_dim,
-    );
-    ui.painter().text(
-        rect.right_center() - egui::vec2(10.0, 0.0),
-        egui::Align2::RIGHT_CENTER,
-        format!("{matched} matched"),
-        theme::mono(crate::ui::tokens::FS_0, FontWeight::Regular),
-        tokens.color.text_dim,
-    );
 }
 
 const NO_BOUND_SECTIONS: &str = "The bound library defines no model sections";
@@ -1311,7 +1412,7 @@ fn append_buffer_rows(
                                 "{terminal} {} {} terminal pin port",
                                 component.name, component.params
                             ),
-                            lock: Some("master-owned".to_owned()),
+                            lock: Some("Master-owned".to_owned()),
                         });
                     }
                 }
@@ -1440,11 +1541,11 @@ fn component_row(
         component.kind.display_name().to_owned()
     };
     let lock = if !active_owner {
-        Some("other owner".to_owned())
+        Some("Other owner".to_owned())
     } else if (kind == SelectionBulkRowKind::Port && property != SelectionBulkProperty::Display)
         || (property == SelectionBulkProperty::ModelSection && component.library_cell.is_none())
     {
-        Some("property not applicable".to_owned())
+        Some("Not applicable".to_owned())
     } else if parse_replacement_parameters_strict(&component.params).is_err()
         && matches!(
             property,
@@ -1453,7 +1554,7 @@ fn component_row(
                 | SelectionBulkProperty::ParameterOverride
         )
     {
-        Some("invalid parameters".to_owned())
+        Some("Invalid parameters".to_owned())
     } else {
         None
     };
@@ -1524,9 +1625,9 @@ fn non_editable_row(
         search_text: format!("{object} {value}"),
         value,
         lock: Some(if active_owner {
-            "property not applicable".to_owned()
+            "Not applicable".to_owned()
         } else {
-            "other owner".to_owned()
+            "Other owner".to_owned()
         }),
     }
 }
@@ -1647,14 +1748,13 @@ mod tests {
     /// painted over the impact panel beside it.
     #[test]
     fn the_result_columns_fit_inside_their_pane() {
+        // A 28 pt select box and a 14 pt scroll bar.
+        let fixed = 42.0;
         for pane in [240.0_f32, 300.0, 360.0, 520.0, 900.0] {
-            let columns = result_columns(pane);
-            let used = RESULT_CHECK_W
-                + RESULT_COLUMN_GAP * 4.0
-                + RESULT_SCROLLBAR_W
-                + columns.iter().sum::<f32>();
+            let columns = result_columns(pane, fixed);
+            let used = fixed + RESULT_COLUMN_GAP * 4.0 + columns.iter().sum::<f32>();
             assert!(
-                used <= pane.max(RESULT_CHECK_W + RESULT_COLUMN_GAP * 4.0 + 140.0),
+                used <= pane.max(fixed + RESULT_COLUMN_GAP * 4.0 + 140.0),
                 "{pane} pt pane lays out {used} pt of columns"
             );
         }
@@ -2048,7 +2148,7 @@ mod tests {
         assert_eq!(rows.iter().filter(|row| row.editable()).count(), 1);
         assert!(
             rows.iter()
-                .any(|row| row.lock.as_deref() == Some("other owner"))
+                .any(|row| row.lock.as_deref() == Some("Other owner"))
         );
     }
 
@@ -2064,10 +2164,7 @@ mod tests {
         };
 
         let temperature_rows = build_rows(&state, &filter, SelectionBulkProperty::Temperature);
-        assert_eq!(
-            temperature_rows[0].lock.as_deref(),
-            Some("property not applicable")
-        );
+        assert_eq!(temperature_rows[0].lock.as_deref(), Some("Not applicable"));
         let display_rows = build_rows(&state, &filter, SelectionBulkProperty::Display);
         assert!(display_rows[0].editable());
     }
@@ -2113,5 +2210,73 @@ mod tests {
                 && node.label() == Some("Select X1")
                 && node.toggled() == Some(egui::accesskit::Toggled::True)
         }));
+    }
+
+    /// Nothing in the body reaches past the footer's right edge. With no
+    /// section to offer, New value used to state why in a line wider than
+    /// its column; the body grew about 90 pt past the surface, every row
+    /// under it took the new width, and the split rule moved with it.
+    #[test]
+    fn the_body_stays_inside_the_dialog_when_no_section_is_defined() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.schematic.document_mut_for_test().components =
+            vec![component(1, "X1", Some("tt"))];
+        open_selection_bulk_edit_dialog(&mut app.state);
+        assert!(
+            app.state
+                .dialogs
+                .selection_bulk_edit
+                .bound_sections
+                .is_empty()
+        );
+
+        // Access updates are incremental: keep the latest of every node.
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..4 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| app.render_selection_bulk_edit_dialog(ctx),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        let apply = nodes
+            .values()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some(PRIMARY)
+            })
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("Apply has bounds");
+        let footer_right = apply.x1 + 12.0;
+        for node in nodes.values() {
+            let Some(bounds) = node.bounds() else {
+                continue;
+            };
+            if matches!(
+                node.role(),
+                egui::accesskit::Role::ComboBox
+                    | egui::accesskit::Role::TextInput
+                    | egui::accesskit::Role::CheckBox
+                    | egui::accesskit::Role::Button
+            ) {
+                assert!(
+                    bounds.x1 <= footer_right + 0.5,
+                    "{:?} {:?} ends at {} past the dialog's {footer_right}",
+                    node.role(),
+                    node.label(),
+                    bounds.x1,
+                );
+            }
+        }
     }
 }
