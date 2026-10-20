@@ -1297,9 +1297,10 @@ fn lower_continuous_assign(
 
     if let Some(delay) = &assignment.assignment.delay {
         lowerer.error(
-            "a delay on a continuous assignment has no lowered form yet: it is a \
-             transport delay on the driver, which needs the kernel's timing wheel \
-             rather than a suspension in the process",
+            "a delay on a continuous assignment or a gate has no lowered form yet: \
+             IEEE 1364-2005 sections 6.1.3 and 7.14 make it an inertial delay on the \
+             driver, which drops a pulse shorter than the delay, and this compiler \
+             does not model one",
             delay.span(),
         );
     }

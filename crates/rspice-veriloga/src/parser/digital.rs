@@ -412,6 +412,20 @@ impl Parser<'_> {
     pub(super) fn parse_continuous_assign(&mut self) -> Result<ContinuousAssign, ParseError> {
         let start = self.current_span();
         self.expect(TokenKind::Assign)?;
+        // `assign (strong1, weak0) y = a;` (section 6.1.2): refused as a gate's
+        // strength is, and for the same reason.
+        if self.check(TokenKind::LParen) && self.strength_specification_follows() {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "continuous assignment".to_string(),
+                    found: "a drive-strength specification; this compiler resolves nets at one \
+                            strength, so a strength that changes the resolution cannot be \
+                            honoured"
+                        .to_string(),
+                },
+                self.current_span(),
+            ));
+        }
         let delay = if self.match_token(TokenKind::Hash) {
             Some(self.parse_delay_value()?)
         } else {
@@ -499,6 +513,18 @@ impl Parser<'_> {
             // the terminal list of an unnamed instance.
             if !self.check(TokenKind::LParen) {
                 self.expect_identifier("gate instance name")?;
+            }
+            // An array of instances, `not n[3:0] (y, v);` (section 7.1.5).
+            if self.check(TokenKind::LBracket) {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: format!("`{}` gate", gate.keyword()),
+                        found: "an array of instances; gate instance arrays are not supported, \
+                                so write one instance per bit"
+                            .to_string(),
+                    },
+                    self.current_span(),
+                ));
             }
             let instance_start = self.current_span();
             self.expect(TokenKind::LParen)?;

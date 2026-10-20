@@ -1568,9 +1568,9 @@ mod canonical_ir_boundary {
         assert_eq!(driver.process, artifact.digital.processes[0].id);
     }
 
-    /// A delay on a driver is a transport delay, which needs the kernel's
-    /// timing wheel rather than a suspension in the process. It refuses by
-    /// name.
+    /// A delay on a driver is an inertial delay (IEEE 1364-2005 sections
+    /// 6.1.3 and 7.14), which this compiler does not model. It refuses by
+    /// name, and does not call it a transport delay, which it is not.
     #[test]
     fn canonical_ir_construction_refuses_a_delayed_continuous_assignment() {
         let source = digital_module(
@@ -1580,11 +1580,12 @@ mod canonical_ir_boundary {
         );
         let error = VerilogACompiler::new(CompilerOptions::default())
             .compile_canonical_ir(&source)
-            .expect_err("a delayed driver must be refused");
+            .expect_err("a delayed driver must be refused")
+            .to_string();
         assert!(
-            error
-                .to_string()
-                .contains("delay on a continuous assignment"),
+            error.contains("delay on a continuous assignment")
+                && error.contains("inertial")
+                && !error.contains("transport"),
             "{error}"
         );
     }
@@ -2773,7 +2774,7 @@ fn a_gate_declaration_may_be_unnamed_and_may_carry_several_instances() {
     assert_eq!(plan.drivers.len(), 2);
 }
 
-/// A gate delay is a transport delay on the driver, which is what an
+/// A gate delay is an inertial delay on the driver, which is what an
 /// `assign #2` is, and it is refused with the same words rather than dropped.
 #[cfg(feature = "native")]
 #[test]
@@ -2803,6 +2804,38 @@ fn a_gate_drive_strength_is_refused_by_name() {
          endmodule\n",
     );
     assert!(error.contains("strength"), "{error}");
+}
+
+/// `assign (strong1, weak0) y = a;` is refused for its strength, as a gate's
+/// is, not as "Expected assignment target, found LParen".
+#[test]
+fn a_continuous_assignment_drive_strength_is_refused_by_name() {
+    let error = parse_error(
+        "module g(a, y);\n\
+         \x20   input a;\n     output y;\n\
+         \x20   assign (strong1, weak0) y = a;\n\
+         endmodule\n",
+    );
+    assert!(
+        error.contains("drive-strength") && !error.contains("assignment target"),
+        "{error}"
+    );
+}
+
+/// An array of gate instances is refused as one, not as a token mismatch
+/// ("Expected LParen, found LBracket").
+#[test]
+fn a_gate_instance_array_is_refused_by_name() {
+    let error = parse_error(
+        "module g(v, y);\n\
+         \x20   input [3:0] v;\n     output [3:0] y;\n\
+         \x20   not n[3:0] (y, v);\n\
+         endmodule\n",
+    );
+    assert!(
+        error.contains("gate instance arrays are not supported") && !error.contains("LBracket"),
+        "{error}"
+    );
 }
 
 // ===========================================================================
