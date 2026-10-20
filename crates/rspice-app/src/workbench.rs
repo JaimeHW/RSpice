@@ -42,9 +42,8 @@ pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod docks;
 pub(crate) mod documents;
-// The bundled circuits are fixtures: every consumer is a test. The
-// application builds schematics from projects and from the library.
-#[cfg(test)]
+// The bundled circuits Help's Examples dialog opens as projects, which the
+// tests also build from.
 pub(crate) mod examples;
 pub(crate) mod frame;
 pub(crate) mod hardcopy_adapters;
