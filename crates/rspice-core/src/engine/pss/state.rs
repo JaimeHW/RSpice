@@ -661,6 +661,19 @@ impl PssCircuit {
         limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
+        // The periodic state carries every inductor's current, whose rate is
+        // its voltage over L; a zero inductor is a short with no such state.
+        if let Some(index) = circuit
+            .inductors
+            .inductances
+            .iter()
+            .position(|inductance| *inductance == 0.0)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "PSS cannot carry the zero inductor '{}' as a periodic state; give it a nonzero inductance or replace the short with a 0 V source",
+                circuit.inductors.names[index]
+            )));
+        }
         let capacitor_trial_currents = vec![0.0; circuit.capacitors.len()];
         let inductor_trial_offsets = vec![[0.0; 2]; circuit.inductors.len()];
         let basis = PssStateBasis::new(&circuit, limits, abort)?;

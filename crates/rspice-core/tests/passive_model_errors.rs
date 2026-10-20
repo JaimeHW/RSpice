@@ -21,16 +21,20 @@ fn negative_explicit_capacitance_cannot_select_a_model_default() {
 
 #[test]
 fn nonpositive_explicit_inductance_cannot_select_a_model_default() {
-    // Zero inductance stays outside the supported domain; a negative one is
-    // a valid element whose authored value is never replaced by the model's.
-    let source = "Zero inductance\nV1 in 0 1\nL1 in 0 0 LM\n.model LM L(L=1m)\n.end\n";
-    let error = Engine::default()
-        .build_circuit(&Netlist::parse(source).unwrap())
-        .expect_err("an explicit zero inductance must not select the model default");
-    assert!(
-        matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
-        "L=0: {error}"
-    );
+    // An authored zero is a short (ngspice 46 and Spectre) and a negative
+    // inductance a valid element: either way the authored value is the
+    // resolved one and never the model's default.
+    for element in ["L1 in 0 0 LM", "L1 in 0 LM L=0"] {
+        let source = format!("Zero inductance\nV1 in 0 1\n{element}\n.model LM L(L=1m)\n.end\n");
+        let circuit = Engine::default()
+            .build_circuit(&Netlist::parse(&source).unwrap())
+            .unwrap_or_else(|error| panic!("{element}: {error}"));
+        assert_eq!(
+            circuit.inductor_storage().inductances[0],
+            0.0,
+            "{element}: an explicit zero must not select the model's L=1m"
+        );
+    }
     for element in ["L1 out 0 -1m LM", "L1 out 0 LM L=-1m"] {
         let source = format!(
             "Negative inductance\nV1 in 0 1\nR1 in out 1\n{element}\n.model LM L(L=1m)\n.end\n"
@@ -44,6 +48,80 @@ fn nonpositive_explicit_inductance_cannot_select_a_model_default() {
             -1.0e-3,
             "{element}: the authored negative value must be the resolved one"
         );
+    }
+}
+
+#[test]
+fn a_zero_inductor_is_a_short_whose_current_is_computed() {
+    // ngspice 46 on this deck: I(L1) = 1 mA and V(b) = 0 at the operating
+    // point, at 1 kHz AC and through the transient, while the zero capacitor
+    // stays an open (V(c) = 0).
+    let source = "Zero inductor\nV1 a 0 dc 1 ac 1 sin(1 0.5 100k)\nR1 a b 1k\nL1 b 0 0\n\
+                  C1 a c 0\nR2 c 0 1k\n.end\n";
+    let netlist = Netlist::parse(source).unwrap();
+    let engine = Engine::default();
+    let close = |actual: f64, expected: f64, what: &str| {
+        assert!(
+            (actual - expected).abs() <= 1e-9 * expected.abs().max(1e-3),
+            "{what}: {actual:e} vs {expected:e}"
+        );
+    };
+
+    let op = engine
+        .run_dc_op(&netlist)
+        .expect("op through a zero inductor");
+    close(
+        op.branch_current_named("L1").expect("I(L1)"),
+        1e-3,
+        "OP I(L1)",
+    );
+    close(op.try_voltage_named("b").expect("V(b)"), 0.0, "OP V(b)");
+    close(op.try_voltage_named("c").expect("V(c)"), 0.0, "OP V(c)");
+
+    let point = engine.run_ac(&netlist, &[1e3]).expect("ac").pop().unwrap();
+    let branch = |name: &str| {
+        let index = point
+            .branch_names
+            .iter()
+            .position(|b| b.eq_ignore_ascii_case(name));
+        point.currents[index.unwrap_or_else(|| panic!("{name} in {:?}", point.branch_names))]
+    };
+    let node = |name: &str| {
+        let index = point
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name));
+        point.voltages[index.unwrap_or_else(|| panic!("{name} in {:?}", point.node_names))]
+    };
+    close(branch("L1").norm(), 1e-3, "AC |I(L1)|");
+    close(node("b").norm(), 0.0, "AC |V(b)|");
+    close(node("c").norm(), 0.0, "AC |V(c)|");
+
+    let tran = engine.run_tran(&netlist, 20e-6, 0.1e-6).expect("tran");
+    let l1 = tran
+        .branch_names
+        .iter()
+        .position(|b| b.eq_ignore_ascii_case("L1"))
+        .unwrap();
+    let a = tran
+        .node_names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case("a"))
+        .unwrap();
+    let b = tran
+        .node_names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case("b"))
+        .unwrap();
+    assert!(tran.time.len() > 20, "{} points", tran.time.len());
+    for (k, time) in tran.time.iter().enumerate() {
+        let what = format!("tran t={time:e}");
+        close(
+            tran.branch_currents[l1][k],
+            tran.voltages[a][k] / 1e3,
+            &what,
+        );
+        close(tran.voltages[b][k], 0.0, &what);
     }
 }
 

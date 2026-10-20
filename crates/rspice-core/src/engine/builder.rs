@@ -6523,6 +6523,13 @@ impl Engine {
                         self.config.temperature,
                         self.config.spice_dialect,
                     )?;
+                    if inductance == 0.0 {
+                        log::warn!(
+                            "Inductor '{}' has zero inductance: it is a short, a 0 V branch whose current I({}) is still computed",
+                            element.name,
+                            element.name
+                        );
+                    }
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);

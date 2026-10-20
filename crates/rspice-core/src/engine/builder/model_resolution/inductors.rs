@@ -153,15 +153,10 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
         )));
     }
     // A negative inductance is a valid circuit element, as in ngspice
-    // (indsetup.c/indtemp.c check no sign). Zero stays outside the
-    // supported domain.
-    if resolved == 0.0 {
-        return Err(SimulationError::ParameterDomain(format!(
-            "Inductor '{}' resolved to zero inductance",
-            element_name
-        )));
-    }
-
+    // (indsetup.c/indtemp.c check no sign). An authored zero is a short: the
+    // branch equation V = L dI/dt becomes V = 0 with its current still an
+    // unknown, which is what ngspice 46 computes in DC, AC and transient and
+    // what Spectre does with l=0. The builder says so when it adds one.
     Ok(resolved)
 }
 
