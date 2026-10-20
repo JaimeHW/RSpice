@@ -6,6 +6,29 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
+/// The name an export proposes before its extension: the schematic file's
+/// own name when it is one, otherwise the cell it exports, with the view
+/// where the cell has more than one kind ("amp_testbench"); `fallback` only
+/// when there is neither. Inside a project there is no schematic file, and
+/// every export used to propose the fallback.
+fn export_file_stem(state: &AppState, fallback: &str) -> String {
+    if let Some(stem) = state
+        .schematic
+        .session
+        .current_file
+        .as_ref()
+        .and_then(|path| path.file_stem())
+    {
+        return stem.to_string_lossy().into_owned();
+    }
+    let reference = state.workspace.content.active_schematic_reference();
+    match (reference.cell.trim(), reference.view.trim()) {
+        ("", _) => fallback.to_owned(),
+        (cell, "" | "schematic") => cell.to_owned(),
+        (cell, view) => format!("{cell}_{view}"),
+    }
+}
+
 pub(super) fn action_export_svg_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -36,14 +59,7 @@ pub(super) fn action_export_svg_with_io(
         },
     );
 
-    let default_name = state
-        .schematic
-        .session
-        .current_file
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .map(|s| format!("{}.svg", s.to_string_lossy()))
-        .unwrap_or_else(|| "schematic.svg".to_string());
+    let default_name = format!("{}.svg", export_file_stem(state, "schematic"));
 
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export SVG",
@@ -120,14 +136,11 @@ pub(crate) fn action_export_netlist_with_io(
             }
         };
 
-    let default_name = state
-        .schematic
-        .session
-        .current_file
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .map(|s| format!("{}.{}", s.to_string_lossy(), format.extension()))
-        .unwrap_or_else(|| format!("circuit.{}", format.extension()));
+    let default_name = format!(
+        "{}.{}",
+        export_file_stem(state, "circuit"),
+        format.extension()
+    );
 
     let filter_name = match format {
         crate::io::NetlistFormat::Spectre => "Spectre Netlist",
@@ -708,6 +721,26 @@ mod tests {
             last_log_message(&state),
             format!("Exported SVG: {}", writes[0].0.display())
         );
+    }
+
+    /// Inside a project there is no schematic file to take a name from; the
+    /// export proposes the cell's name, not "schematic.svg" for every cell.
+    #[test]
+    fn svg_export_without_a_file_is_named_after_the_cell() {
+        let mut state = AppState::default();
+        state.schematic.session.current_file = None;
+        let cell = state
+            .workspace
+            .content
+            .active_schematic_reference()
+            .cell
+            .clone();
+        assert!(!cell.is_empty() && cell != "schematic");
+        let io = MockExportWorkflowIo::returning_path(PathBuf::from("exports").join("out"));
+
+        action_export_svg_with_io(&mut state, &io);
+
+        assert_eq!(io.configs.borrow()[0].default_name, format!("{cell}.svg"));
     }
 
     #[test]
