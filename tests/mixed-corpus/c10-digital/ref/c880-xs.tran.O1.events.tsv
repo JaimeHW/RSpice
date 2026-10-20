@@ -1,7 +1,7 @@
 # RSPICE-EVENT-TRACE 1
 # ngspice: ngspice-46 : Circuit level simulation program
 # executable-sha256: 86c9ea5f645ca919e305639fa7bdb522355364c424d14e197f1ade617feb3453
-# input-blake3: 64b1830a937cfadb4950eab73a721ae58fcb8a4f4231d1fb161c4610d316521a
+# input-blake3: 09d6dd00b5a9a25bbeca7b127312fff3be587c73f29b3de41fe1008d25b4e855
 0.000000000000000e0	d_g855	1
 2.055000000000000e-10	d_g855	0
 0.000000000000000e0	d_g856	1
