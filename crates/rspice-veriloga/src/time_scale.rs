@@ -134,8 +134,9 @@ impl ModuleTimeScale {
     }
 
     /// Round at module precision, then rescale exactly. Negative procedural
-    /// delays convert to unsigned 64-bit time. Unsupported scheduling ranges
-    /// fail explicitly instead of saturating or wrapping the host clock.
+    /// delays convert to unsigned 64-bit time, IEEE 1364-2005 section 9.7.1.
+    /// A delay too long for a tick count, which that conversion makes of every
+    /// negative one, is [`DELAY_BEYOND_HORIZON`].
     pub(crate) fn delay_ticks(self, units: f64, design_precision: i8) -> Result<i64, &'static str> {
         self.ticks_per_unit(design_precision)?;
         if !units.is_finite() {
@@ -145,7 +146,7 @@ impl ModuleTimeScale {
         let local_ticks = (units * local_scale as f64).round();
         const TIME_MODULUS: f64 = 18_446_744_073_709_551_616.0;
         if !local_ticks.is_finite() || local_ticks >= TIME_MODULUS {
-            return Err("delay exceeds the representable tick range");
+            return Ok(DELAY_BEYOND_HORIZON);
         }
         let local_ticks = if local_ticks < 0.0 {
             ((-local_ticks % TIME_MODULUS) as u64).wrapping_neg()
@@ -153,7 +154,7 @@ impl ModuleTimeScale {
             local_ticks as u64
         };
         let design_scale = 10_u64.pow((self.precision_exponent - design_precision) as u32);
-        Self::checked_delay_product(local_ticks, design_scale)
+        Ok(Self::delay_product(local_ticks, design_scale))
     }
 
     pub(crate) fn integer_delay_ticks(
@@ -161,16 +162,25 @@ impl ModuleTimeScale {
         units: u64,
         design_precision: i8,
     ) -> Result<i64, &'static str> {
-        Self::checked_delay_product(units, self.ticks_per_unit(design_precision)?)
+        Ok(Self::delay_product(
+            units,
+            self.ticks_per_unit(design_precision)?,
+        ))
     }
 
-    fn checked_delay_product(ticks: u64, scale: u64) -> Result<i64, &'static str> {
+    fn delay_product(ticks: u64, scale: u64) -> i64 {
         ticks
             .checked_mul(scale)
             .and_then(|value| i64::try_from(value).ok())
-            .ok_or("delay exceeds the representable tick range")
+            .unwrap_or(DELAY_BEYOND_HORIZON)
     }
 }
+
+/// The design-tick count of every delay too long for one: a `#delay` whose
+/// end no run reaches. The host leaves the process it suspends waiting for the
+/// rest of the run rather than refusing the run, as a simulator with 64-bit
+/// time leaves it waiting past the end of any run it is given.
+pub(crate) const DELAY_BEYOND_HORIZON: i64 = i64::MAX;
 
 /// A compiled HDL design's root declaration and finest elaborated precision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

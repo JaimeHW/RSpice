@@ -4863,20 +4863,25 @@ fn digital_index_and_delay_boundary_values_execute_exactly() {
     assert_eq!(*suspension.wait(), DigitalWaitRequest::Delay(2147483647));
 }
 
+/// IEEE 1364-2005 section 9.7.1 makes a negative delay the unsigned 64-bit
+/// time of the same bits, so `#-1` waits 2^64 - 1 units. A delay too long for
+/// a tick count suspends the process for the longest one (`i64::MAX` ticks),
+/// whose end no run reaches, rather than failing the process; Icarus Verilog
+/// 13 likewise keeps simulating past such a delay.
 #[test]
-fn parameter_delays_outside_the_executable_range_are_never_clamped() {
+fn parameter_delays_past_the_tick_range_suspend_for_the_longest_one() {
     for delay in ["9223372036854775808.0", "1e30", "-2147483649", "-1"] {
         let section = format!("parameter real DELAY = {delay}; reg q; initial #DELAY q = 1'b1;");
         let mut harness = Harness::new(&section);
-        let error = start(
-            &harness.plan,
-            &harness.plan.processes[0],
-            &mut harness.store,
-        )
-        .expect_err("an unrepresentable delay must fail before scheduling");
-        assert!(
-            matches!(error, DigitalEvalError::InvalidDelay { .. }),
-            "{delay}: {error}"
+        assert_eq!(
+            *expect_suspended(harness.run()).wait(),
+            DigitalWaitRequest::Delay(i64::MAX),
+            "{delay}"
+        );
+        assert_eq!(
+            harness.get("q"),
+            "x",
+            "{delay}: the delayed write has not run"
         );
     }
 }
@@ -4983,6 +4988,8 @@ fn runtime_delays_convert_unknown_signed_and_wide_values_without_clamping() {
             "{expression}"
         );
     }
+    // Negative values become 64-bit time, and positive ones past it are the
+    // longest delay: either way too long for a tick count.
     for expression in [
         "8'shff",
         "-1",
@@ -4991,20 +4998,35 @@ fn runtime_delays_convert_unknown_signed_and_wide_values_without_clamping() {
         "64'h8000000000000000",
     ] {
         let mut h = Harness::new(&format!("reg q; initial #({expression}) q=1;"));
+        assert_eq!(
+            *expect_suspended(h.run()).wait(),
+            DigitalWaitRequest::Delay(i64::MAX),
+            "{expression}"
+        );
+        assert_eq!(
+            h.get("q"),
+            "x",
+            "{expression}: the delayed write has not run"
+        );
+    }
+    // A delay that is no time at all is refused, naming the value the process
+    // computed rather than an internal operand number.
+    for (value, spelled) in [
+        (f64::NAN, "NaN"),
+        (f64::INFINITY, "inf"),
+        (f64::NEG_INFINITY, "-inf"),
+    ] {
+        let mut h = Harness::new("wreal d; reg q; initial #d q=1;");
+        h.set_real("d", value);
         let error = start(&h.plan, &h.plan.processes[0], &mut h.store).unwrap_err();
         assert!(
             matches!(error, DigitalEvalError::InvalidDelay { .. }),
-            "{expression}: {error}"
+            "{error}"
         );
-        assert_eq!(h.get("q"), "x", "failed conversion must not resume");
-    }
-    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let mut h = Harness::new("wreal d; reg q; initial #d q=1;");
-        h.set_real("d", value);
-        assert!(matches!(
-            start(&h.plan, &h.plan.processes[0], &mut h.store),
-            Err(DigitalEvalError::InvalidDelay { .. })
-        ));
+        assert_eq!(
+            error.to_string(),
+            format!("delay {spelled}: a delay must be finite")
+        );
     }
 }
 

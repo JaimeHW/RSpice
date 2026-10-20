@@ -411,6 +411,10 @@ enum ProcessStatus {
     AwaitingJoin,
     /// Reached `Return`. An `initial` process ends here and never runs again.
     Finished,
+    /// Suspended on a `#delay` that ends past the last tick the run can
+    /// represent, so past the end of the run: it is still suspended, and a
+    /// `disable` or the run's end is all that reaches it.
+    Parked,
 }
 
 /// One thread's schedule state: a process's own thread, or a child a `fork`
@@ -1502,10 +1506,14 @@ impl DigitalHost {
                 process: self.describe(index),
                 delay,
             })?;
-            let due = tick
+            // An update due past the last representable tick lands after the
+            // run ends, as a delayed process does (section 9.7.1).
+            let Some(due) = tick
                 .checked_add(delay)
                 .filter(|tick| *tick <= TimeResolution::MAX_EXACT_TICKS)
-                .ok_or(DigitalRunError::TickOverflow)?;
+            else {
+                continue;
+            };
             if !self.delayed_updates.contains_key(&due) {
                 let at = self.instant_of(due)?;
                 self.scheduler.schedule_id_at(
@@ -1629,10 +1637,18 @@ impl DigitalHost {
                             self.inactive.push(index);
                             return Ok(());
                         }
-                        let target = tick
+                        // IEEE 1364-2005 section 9.7.1 makes a negative delay
+                        // 64-bit unsigned time, so `#-5` is legal and ends
+                        // 2^64 - 5 units on. A delay that ends past the last
+                        // tick the run can represent ends after the run does;
+                        // the rest of the design keeps running.
+                        let Some(target) = tick
                             .checked_add(delay as u64)
                             .filter(|tick| *tick <= TimeResolution::MAX_EXACT_TICKS)
-                            .ok_or(DigitalRunError::TickOverflow)?;
+                        else {
+                            self.slots[index].status = ProcessStatus::Parked;
+                            return Ok(());
+                        };
                         self.queue(index, target)
                     }
                 }

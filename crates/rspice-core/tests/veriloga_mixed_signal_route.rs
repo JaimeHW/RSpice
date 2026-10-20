@@ -5505,6 +5505,50 @@ fn a_zero_node_x_card_instantiates_a_portless_testbench_named_by_its_spice_path(
     }
 }
 
+/// IEEE 1364-2005 section 9.7.1: a negative delay is the unsigned 64-bit time
+/// of the same bits, so `#d` with `d = -5` waits 2^64 - 5 ns, and a delay that
+/// long ends after the run. The rest of the design keeps running: Icarus
+/// Verilog 13 prints `alive at 20` for this module too.
+#[test]
+fn a_delay_past_the_end_of_the_run_leaves_the_rest_of_the_design_running() {
+    use rspice_core::config::{HdlOutputCollector, HdlStream};
+    let model = ModelFile::new(
+        "negative_delay",
+        "`timescale 1ns/1ns\n\
+         module tb(o);\n\
+         output o; reg o; integer d;\n\
+         initial begin o = 0; d = -5; #d $display(\"neg fired at %0t\", $time); end\n\
+         initial begin #64'hFFFFFFFFFFFFFFFF $display(\"late\"); end\n\
+         initial begin #20 $display(\"alive at %0t\", $time); end\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* a negative delay\nx1 o tb\nr1 o 0 1k\n.hdl \"{}\" module=tb\n.end\n",
+        model.deck_path()
+    ))
+    .expect("the deck parses");
+    let collector = std::sync::Arc::new(HdlOutputCollector::new());
+    let mut config = SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    let result = Engine::new(config)
+        .run_tran(&netlist, 100e-9, 1e-9)
+        .expect("the run completes");
+    assert!(
+        result
+            .time
+            .last()
+            .is_some_and(|&end| (end - 100e-9).abs() < 1e-15),
+        "the run reaches its stop time"
+    );
+    let printed: Vec<String> = collector
+        .take()
+        .into_iter()
+        .filter(|record| record.stream == HdlStream::Stdout)
+        .map(|record| record.text.trim_end().to_owned())
+        .collect();
+    assert_eq!(printed, ["alive at 20"]);
+}
+
 /// IEEE 1364-2005 section 5.1.8: `==` and `!=` answer `x` only when unknown
 /// bits make the relation ambiguous. A known differing bit decides them, so
 /// it decides the `if`, `else if` and `while` conditions built on them. The

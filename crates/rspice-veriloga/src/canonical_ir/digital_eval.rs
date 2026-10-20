@@ -923,6 +923,8 @@ pub enum DigitalEvalError {
     /// Numeric conversion failed before the delay could be scheduled.
     InvalidDelay {
         value: ValueId,
+        /// The delay as the process evaluated it, for the message.
+        delay: String,
         detail: &'static str,
     },
     /// A typed numeric operator received a value from the wrong domain.
@@ -1086,9 +1088,7 @@ impl std::fmt::Display for DigitalEvalError {
             Self::InvalidEventExpression { value, detail } => {
                 write!(f, "event expression {}: {detail}", usize::from(*value))
             }
-            Self::InvalidDelay { value, detail } => {
-                write!(f, "delay value {}: {detail}", usize::from(*value))
-            }
+            Self::InvalidDelay { delay, detail, .. } => write!(f, "delay {delay}: {detail}"),
             Self::NonIntegerDelay(value) => write!(
                 f,
                 "value {} is a delay operand but is not an integer",
@@ -3048,6 +3048,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 if ticks < 0 {
                     return Err(DigitalEvalError::InvalidDelay {
                         value: *delay,
+                        delay: format!("of {ticks} design ticks"),
                         detail: "converted delay must be nonnegative",
                     });
                 }
@@ -3181,17 +3182,27 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             CfgValueKind::DigitalDelayTicks { input, signed } => {
                 let scale = self.time_scale;
                 let precision = self.plan.timing.precision_exponent;
-                let ticks = match self.scalar(*input)? {
+                let operand = self.scalar(*input)?;
+                let ticks = match operand {
                     ScalarRef::Real(value) => scale.delay_ticks(value, precision),
                     ScalarRef::Integer(value) => {
                         scale.integer_delay_ticks(value as i64 as u64, precision)
                     }
-                    ScalarRef::FourState(value) => value
-                        .delay_units(*signed)
-                        .and_then(|units| scale.integer_delay_ticks(units, precision)),
+                    ScalarRef::FourState(value) => {
+                        scale.integer_delay_ticks(value.delay_units(*signed), precision)
+                    }
                     ScalarRef::Effect => return Err(DigitalEvalError::EffectValueRead(*input)),
                 }
-                .map_err(|detail| DigitalEvalError::InvalidDelay { value: id, detail })?;
+                .map_err(|detail| DigitalEvalError::InvalidDelay {
+                    value: id,
+                    delay: match operand {
+                        ScalarRef::Real(value) => value.to_string(),
+                        ScalarRef::Integer(value) => value.to_string(),
+                        ScalarRef::FourState(value) => value.spelling(),
+                        ScalarRef::Effect => unreachable!("an effect is refused above"),
+                    },
+                    detail,
+                })?;
                 Ok(DigitalScalar::FourState(FourStateValue::from_u64(
                     64,
                     ticks as u64,

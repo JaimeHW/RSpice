@@ -496,22 +496,26 @@ fn delayed_nonblocking_updates_preserve_capture_order_and_nba_regions() {
             "tick {tick}"
         );
     }
-    // A completed process's only future work can be an NBA wakeup. Delay
-    // deadlines outside the host's exact physical range must fail explicitly.
-    let error = run_digital_verilog(
-        "module overflow(q); output q; reg q; initial q<=#2251799813685248 1; endmodule",
+    // A completed process's only future work can be an NBA wakeup. One due
+    // past the last tick the host can represent lands after any run ends, so
+    // the run goes on without it, as it does past a process delayed that far.
+    let report = run_digital_verilog(
+        "module overflow(q, r); output q, r; reg q, r;
+         initial begin r = 0; q <= #2251799813685248 1; end
+         initial begin #2251799813685248 r = 1; end
+         endmodule",
         &DigitalStimulus {
             module: None,
             inputs: vec![],
-            outputs: vec![port("q", 1)],
+            outputs: vec![port("q", 1), port("r", 1)],
             clock: None,
             step: 1,
             settle: 0,
-            vectors: vec![vec![]],
+            vectors: vec![vec![], vec![]],
         },
     )
-    .unwrap_err();
-    assert!(matches!(error, DigitalRunError::TickOverflow), "{error}");
+    .expect("a delay past the representable range ends after the run");
+    assert_eq!(rows(&report), ["q=x r=0", "q=x r=0"]);
 }
 
 #[test]

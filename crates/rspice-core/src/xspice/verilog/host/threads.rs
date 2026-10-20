@@ -110,7 +110,7 @@ impl DigitalHost {
                     self.withdrawn.insert(index);
                 }
             }
-            ProcessStatus::AwaitingJoin | ProcessStatus::Finished => {}
+            ProcessStatus::AwaitingJoin | ProcessStatus::Finished | ProcessStatus::Parked => {}
         }
         self.slots[index].status = ProcessStatus::Queued;
     }

@@ -145,6 +145,8 @@ enum StatusImage {
     Finished,
     /// At a `join`, waiting for the threads it forked.
     Join,
+    /// On a delay that ends after the run.
+    Parked,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -260,6 +262,7 @@ impl DigitalHost {
                     ProcessStatus::AwaitingExpression(token) => StatusImage::Expression(*token),
                     ProcessStatus::AwaitingJoin => StatusImage::Join,
                     ProcessStatus::Finished => StatusImage::Finished,
+                    ProcessStatus::Parked => StatusImage::Parked,
                     _ => unreachable!("checked drained boundary"),
                 },
                 frames: vec![FrameImage {
@@ -488,6 +491,7 @@ impl DigitalHost {
             let status = match &image.status {
                 StatusImage::Queued => ProcessStatus::Queued,
                 StatusImage::Finished => ProcessStatus::Finished,
+                StatusImage::Parked => ProcessStatus::Parked,
                 StatusImage::Event(image) => {
                     let DigitalWaitRequest::Event(terms) =
                         reader.restore_wait(image).map_err(|e| e.to_string())?
@@ -624,7 +628,7 @@ impl DigitalHost {
                     .ok_or_else(|| "suspended process has no continuation".to_string())
             };
             match &slot.status {
-                ProcessStatus::Queued => reader
+                ProcessStatus::Queued | ProcessStatus::Parked => reader
                     .validate_timed_resume(require_frame()?)
                     .map_err(|e| e.to_string())?,
                 ProcessStatus::AwaitingEvent(terms) => {
