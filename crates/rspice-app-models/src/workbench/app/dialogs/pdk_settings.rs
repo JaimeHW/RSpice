@@ -24,7 +24,6 @@ use crate::ui::widgets::{
 use crate::workbench::app_state::session::pdk_settings::{
     PdkSettingsDialogResult, PdkSettingsDialogState,
 };
-use crate::workbench::design_system::subsection_header;
 
 /// Height of the two-pane region.
 const PANE_HEIGHT: f32 = 340.0;
@@ -82,18 +81,37 @@ pub fn render_pdk_settings_dialog(
     let mut should_close = false;
     let mut should_rescan = false;
 
-    let choice = Dialog::new("Model library paths", "Close")
+    // The panes are the body, edge to edge: inside the standard inset they
+    // were a bordered box in the dialog's box.
+    let choice = Dialog::new("Model library paths", "Save")
         .description(
             "Manage model-library search paths and environment overrides, rescan sources, and inspect loaded models.",
         )
         .size(DialogSize::Manager)
+        .flush_body()
+        .overlay_scrollbar()
         .secondary("Rescan")
-        .hint("edits preview live · Close saves, Esc discards")
+        .secondary_leading()
+        .ghost("Cancel")
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut load: Option<PathBuf> = None;
             let mut import_browser_file = false;
-            two_pane(ui, PANE_RAIL_W, PANE_HEIGHT, |ui, side| match side {
+            // The panes' outer border lies on the card's edges and the
+            // footer's rule rather than a pixel inside them, where each
+            // would draw a second hairline beside the first.
+            // The body reserves a pixel less than the panes take, so the
+            // panes never widen the body that sizes them.
+            let (body, _) = ui.allocate_exact_size(
+                vec2(ui.available_width(), PANE_HEIGHT - 1.0),
+                Sense::hover(),
+            );
+            let panes = Rect::from_min_size(
+                egui::pos2(body.left() - 1.0, body.top()),
+                vec2(body.width() + 2.0, PANE_HEIGHT),
+            );
+            let mut pane_ui = ui.new_child(egui::UiBuilder::new().max_rect(panes));
+            two_pane(&mut pane_ui, PANE_RAIL_W, PANE_HEIGHT, |ui, side| match side {
                 PaneSide::Rail => import_browser_file = sources_rail(ui, state),
                 PaneSide::Detail => load = detail_pane(ui, state),
             });
@@ -184,7 +202,8 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
         ENV_ROW_H
     };
     let env_list_h = (env.len() as f32 * ENV_ROW_H + trailing_h).min(96.0);
-    let sources_h = PANE_HEIGHT - PANE_HEADER_H - 23.0 - env_list_h;
+    // Two pane headers (sources, environment) and the rule between the lists.
+    let sources_h = PANE_HEIGHT - 2.0 * PANE_HEADER_H - 1.0 - env_list_h;
 
     let mut action: Option<SourceAction> = None;
     egui::ScrollArea::vertical()
@@ -209,29 +228,20 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
                     }
                 }
             }
-            if state.adding_path {
-                if let Some(act) = source_add_row(ui, &mut state.new_path_input) {
-                    action = Some(act);
-                }
-            } else if count == 0 {
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new("No sources — Add a model directory")
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.text_faint),
-                    );
-                });
+            // With no source, the files pane states the one empty message.
+            if state.adding_path
+                && let Some(act) = source_add_row(ui, &mut state.new_path_input)
+            {
+                action = Some(act);
             }
         });
 
-    // Environment under a thin separator.
+    // Environment under a thin separator, headed as the sources are.
     let sep_y = ui.cursor().top() + 0.5;
     ui.painter()
         .hline(ui.max_rect().x_range(), sep_y, Stroke::new(1.0, c.border));
     ui.add_space(1.0);
-    subsection_header(ui, "Environment");
+    pane_header(ui, |ui| header_caption(ui, "Environment"));
 
     let mut env_action: Option<EnvAction> = None;
     egui::ScrollArea::vertical()
@@ -421,10 +431,11 @@ fn source_row(
             }
             ui.add_space(6.0);
 
+            // An excluded source is not scanned, so it has no count.
             let meta = if entry.enabled {
                 entry.file_count.to_string()
             } else {
-                "—".to_owned()
+                String::new()
             };
             let meta_galley = ui.fonts_mut(|f| {
                 f.layout_no_wrap(
@@ -693,8 +704,8 @@ fn env_add_prompt_row(ui: &mut Ui) -> bool {
     painter.text(
         egui::pos2(rect.left() + 10.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        "+ variable…",
-        theme::mono(tokens::FS_1, FontWeight::Regular),
+        "Add variable\u{2026}",
+        theme::sans(tokens::FS_0, FontWeight::Regular),
         mix(c.text_faint, c.text_dim, hover),
     );
     theme::paint_focus_ring(ui, &response, rect);
@@ -784,17 +795,23 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
     pane_header(ui, |ui| {
         let chip_reserve = if selected_entry.is_some() { 84.0 } else { 0.0 };
         let path_w = (ui.available_width() - chip_reserve - 196.0).max(40.0);
-        let (text, color) = match &selected_entry {
-            Some(entry) => (entry.path.clone(), c.text_dim),
-            None => ("all sources".to_owned(), c.text_faint),
+        // A path is set in mono; the words for every source are prose.
+        let (text, color, font) = match &selected_entry {
+            Some(entry) => (
+                entry.path.clone(),
+                c.text_dim,
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+            ),
+            None => (
+                "All sources".to_owned(),
+                c.text_faint,
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+            ),
         };
         let (path_rect, path_response) = ui.allocate_exact_size(vec2(path_w, 24.0), Sense::hover());
         let galley = ui.fonts_mut(|f| {
-            let mut job = egui::text::LayoutJob::simple_singleline(
-                text,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                egui::Color32::PLACEHOLDER,
-            );
+            let mut job =
+                egui::text::LayoutJob::simple_singleline(text, font, egui::Color32::PLACEHOLDER);
             job.wrap = egui::text::TextWrapping::truncate_at_width(path_w);
             f.layout_job(job)
         });
@@ -832,10 +849,10 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
         state.toggle_path_recursive(idx);
     }
 
-    table_header(ui);
-
-    let empty_message = if state.config.discovered_files().is_empty() {
-        "No model files discovered — add a source and Rescan"
+    let empty_message = if state.config.library_paths().is_empty() {
+        "Add a model directory to find its model files."
+    } else if state.config.discovered_files().is_empty() {
+        "No model files found. Check the sources, then Rescan."
     } else if !state.file_filter.is_empty() {
         "No file matches the filter"
     } else {
@@ -847,8 +864,13 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
         .filter(|file| in_scope(file))
         .collect();
 
+    // An empty list has no columns to head.
+    let mut scroll_h = PANE_HEIGHT - PANE_HEADER_H - PANE_FOOTER_H;
+    if !files.is_empty() {
+        table_header(ui);
+        scroll_h -= FILE_ROW_H;
+    }
     let mut load: Option<PathBuf> = None;
-    let scroll_h = PANE_HEIGHT - PANE_HEADER_H - FILE_ROW_H - PANE_FOOTER_H;
     egui::ScrollArea::vertical()
         .id_salt("rspice.pdk.files")
         .max_height(scroll_h)
@@ -856,15 +878,18 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             if files.is_empty() {
-                ui.add_space(24.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(empty_message)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.text_faint),
-                    );
-                });
+                // Centred in the space the list owns.
+                ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), scroll_h),
+                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(empty_message)
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(c.text_faint),
+                        );
+                    },
+                );
             }
             for file in &files {
                 if file_row(ui, file).clicked() {
@@ -887,18 +912,13 @@ fn table_header(ui: &mut Ui) {
         ("File", rect.left() + FILE_COL_X),
         ("Sections", rect.right() - SECTIONS_W),
     ] {
-        let mut job = egui::text::LayoutJob::default();
-        job.append(
-            &label.to_uppercase(),
-            0.0,
-            egui::TextFormat {
-                font_id: theme::mono(9.5, FontWeight::Medium),
-                color: c.text_faint,
-                extra_letter_spacing: 0.1 * 9.5,
-                ..Default::default()
-            },
-        );
-        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        let galley = ui.fonts_mut(|f| {
+            f.layout_no_wrap(
+                label.to_owned(),
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                c.text_faint,
+            )
+        });
         let y = rect.center().y - galley.size().y * 0.5;
         ui.painter().galley(egui::pos2(x, y), galley, c.text_faint);
     }
@@ -983,11 +1003,8 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
         mix(c.text_dim, c.text, hover),
     );
 
-    let sections = if file.sections.is_empty() {
-        "—".to_owned()
-    } else {
-        file.sections.join(" ")
-    };
+    // A file without sections leaves the cell blank.
+    let sections = file.sections.join(" ");
     let sections_w = SECTIONS_W - 10.0;
     let sections_galley = ui.fonts_mut(|f| {
         let mut job = egui::text::LayoutJob::simple_singleline(
@@ -1082,21 +1099,15 @@ fn scan_summary(state: &PdkSettingsDialogState) -> String {
 // pane captions (pane chrome lives in ui/widgets/pane.rs)
 // ---------------------------------------------------------------------------
 
-/// Mono uppercase caption used inside pane headers.
+/// The caption of a pane header, in the face of a section title: prose in
+/// sans, sentence case, never a mono caps kicker.
 fn header_caption(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &text.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-            color: t.color.text_faint,
-            extra_letter_spacing: 0.12 * tokens::FS_0,
-            ..Default::default()
-        },
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+            .color(t.color.text_faint),
     );
-    ui.label(job);
 }
 
 // ---------------------------------------------------------------------------
@@ -1113,4 +1124,81 @@ fn add_path_id() -> egui::Id {
 
 fn env_name_id() -> egui::Id {
     egui::Id::new("rspice.pdk.env_name")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every accessible node the dialog draws after a few frames: name,
+    /// value and bounds.
+    fn nodes(state: &mut PdkSettingsDialogState) -> Vec<(String, egui::Rect)> {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| {
+                    let _ = render_pdk_settings_dialog(ui.ctx(), state);
+                },
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        nodes
+            .values()
+            .filter_map(|node| {
+                let name = node.label().or(node.value())?.to_owned();
+                let bounds = node.bounds().map_or(egui::Rect::NOTHING, |b| {
+                    egui::Rect::from_min_max(
+                        egui::pos2(b.x0 as f32, b.y0 as f32),
+                        egui::pos2(b.x1 as f32, b.y1 as f32),
+                    )
+                });
+                Some((name, bounds))
+            })
+            .collect()
+    }
+
+    /// The footer says Save and Cancel, not "Close saves, Esc discards"; no
+    /// em dash stands in for a word or a blank; and the environment rows sit
+    /// inside the panes. The environment's header was measured as 23 points
+    /// tall and drew 31, so its list ran 8 points under the panes' bottom,
+    /// clipped.
+    #[test]
+    fn the_paths_dialog_saves_or_cancels_and_shows_the_environment_whole() {
+        let mut state = PdkSettingsDialogState::new();
+        state.open(crate::state::pdk_config::PdkConfig::default());
+        let nodes = nodes(&mut state);
+        let named = |text: &str| nodes.iter().find(|(name, _)| name == text);
+        assert!(named("Save").is_some(), "no Save");
+        assert!(named("Cancel").is_some(), "no Cancel");
+        assert!(named("Close").is_none(), "Close still commits");
+        assert!(
+            !nodes
+                .iter()
+                .any(|(name, _)| name.contains('\u{2014}') || name.contains("Close saves")),
+            "{nodes:?}"
+        );
+        let (_, sources) = named("Sources").expect("the sources header");
+        let (_, add) = named("Add environment variable").expect("the add-variable row");
+        // The panes start at the sources header's top, which its caption
+        // is centred in, and are PANE_HEIGHT tall.
+        let panes_bottom = sources.center().y - PANE_HEADER_H * 0.5 + PANE_HEIGHT;
+        assert!(
+            add.bottom() <= panes_bottom + 0.5,
+            "the environment list ends at {} under panes ending at {panes_bottom}",
+            add.bottom()
+        );
+    }
 }
