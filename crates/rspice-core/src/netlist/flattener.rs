@@ -5951,6 +5951,32 @@ mod tests {
         );
     }
 
+    /// O and Y lines read their Z0 and TD in each instance's scope too; both
+    /// used to take the subcircuit's defaults for every instance.
+    #[test]
+    fn o_and_y_line_fields_resolve_in_their_scope() {
+        let netlist = Netlist::parse(
+            "o and y scope\n\
+             .subckt line a b params: z=50 d=1n\n\
+             O1 a 0 b 0 Z0={z} TD={d}\n\
+             Y1 a 0 b 0 Z0={2*z} TD={d}\n\
+             .ends\n\
+             X1 a b line z=100 d=2n\n\
+             X2 c e line\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        assert_eq!(
+            transmission_line_fields(&netlist),
+            [
+                ("X1.O1".to_string(), Some(100.0), Some(2.0e-9)),
+                ("X1.Y1".to_string(), Some(200.0), Some(2.0e-9)),
+                ("X2.O1".to_string(), Some(50.0), Some(1.0e-9)),
+                ("X2.Y1".to_string(), Some(100.0), Some(1.0e-9)),
+            ]
+        );
+    }
+
 
     /// A root K card may cite a `.param` declared later in the file, as in
     /// ngspice; it used to fail as an undefined parameter.

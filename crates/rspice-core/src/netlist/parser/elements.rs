@@ -5245,12 +5245,14 @@ fn parse_area_device_instance_params(
     Ok((instance_params, deferred_params))
 }
 
-/// Parse lossless transmission line (O element)
+/// Parse lossless transmission line (O element). Its named fields defer in a
+/// subcircuit body, as a T line's do, so each instance reads its own scope.
 pub(super) fn parse_lossless_tline(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let port1_pos = expect_node(stream, line_num)?;
@@ -5258,7 +5260,7 @@ pub(super) fn parse_lossless_tline(
     let port2_pos = expect_node(stream, line_num)?;
     let port2_neg = expect_node(stream, line_num)?;
 
-    let parsed = parse_tline_params(stream, line_num, params, true, false)?;
+    let parsed = parse_tline_params(stream, line_num, params, true, defer_simple_param_refs)?;
     if parsed.model.is_none() && parsed.z0.is_none() {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -5309,7 +5311,14 @@ pub(super) fn parse_lossy_tline(
             defer_simple_param_refs,
         );
     }
-    parse_yline_transmission_line(name, stream, line_num, elements, params)
+    parse_yline_transmission_line(
+        name,
+        stream,
+        line_num,
+        elements,
+        params,
+        defer_simple_param_refs,
+    )
 }
 
 /// Parse the historical `Y<name> p1+ p1- p2+ p2- ...` lossy transmission line.
@@ -5323,6 +5332,7 @@ fn parse_yline_transmission_line(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let mut parse = || -> Result<(), ParseError> {
         let port1_pos = expect_node(stream, line_num)?;
@@ -5330,7 +5340,7 @@ fn parse_yline_transmission_line(
         let port2_pos = expect_node(stream, line_num)?;
         let port2_neg = expect_node(stream, line_num)?;
 
-        let parsed = parse_tline_params(stream, line_num, params, true, false)?;
+        let parsed = parse_tline_params(stream, line_num, params, true, defer_simple_param_refs)?;
         if parsed.model.is_none() && parsed.z0.is_none() {
             return Err(ParseError::Syntax {
                 line: line_num,

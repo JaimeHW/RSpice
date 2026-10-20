@@ -862,7 +862,13 @@ pub(super) fn parse_line(
             params,
             defer_simple_param_refs,
         ),
-        'O' => parse_lossless_tline(&mut stream, line_num, elements, params),
+        'O' => parse_lossless_tline(
+            &mut stream,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
+        ),
         'Y' => parse_lossy_tline(
             &mut stream,
             line_num,
