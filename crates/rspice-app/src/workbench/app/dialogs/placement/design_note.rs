@@ -50,22 +50,16 @@ pub(in crate::workbench) fn render_design_note_dialog(
         return;
     }
     let validation = validate_draft(dialog, model);
-    // An untouched form has nothing to answer for: the primary is off and
-    // the slot stays blank until the reader has typed something to refuse.
-    let refusal = if dialog.text.trim().is_empty() {
-        None
-    } else {
-        validation.as_ref().err().cloned()
-    };
+    let status = design_note_status(&dialog.text, &validation);
     let draft = &mut *dialog;
     let choice = CommandForm::new(TITLE, PRIMARY)
         .describe(DESCRIPTION)
         .primary_enabled(validation.is_ok())
         // Enter types a line of the note; the primary places it.
         .primary_on_enter(false)
-        .status(match refusal.as_deref() {
-            Some(message) => Err(message),
-            None => Ok(None),
+        .status(match &status {
+            Ok(fact) => Ok(*fact),
+            Err(refusal) => Err(refusal.as_str()),
         })
         .show(ctx, |rows| {
             note_placement::show(rows, &mut draft.kind, &mut draft.text)
@@ -83,6 +77,22 @@ pub(in crate::workbench) fn render_design_note_dialog(
             dialog.close();
         }
         DialogChoice::None | DialogChoice::Secondary => {}
+    }
+}
+
+/// What the footer says. An untouched form has refused nothing, so it says
+/// what Place waits for as a plain fact; once there is text, a refusal is
+/// stated as one.
+fn design_note_status(
+    text: &str,
+    validation: &Result<PendingDesignNotePlacement, String>,
+) -> Result<Option<&'static str>, String> {
+    if text.trim().is_empty() {
+        return Ok(Some("Type the text to place."));
+    }
+    match validation {
+        Ok(_) => Ok(None),
+        Err(refusal) => Err(refusal.clone()),
     }
 }
 
@@ -202,7 +212,13 @@ mod tests {
         let source = schematic_editor_request_source(&state);
         state.design.design_note.open(source);
         assert_eq!(state.design.design_note.text, "");
-        assert!(validate_draft(&state).is_err());
+        let validation = validate_draft(&state);
+        assert!(validation.is_err());
+        // It refused nothing, but it says why Place is off.
+        assert_eq!(
+            design_note_status("", &validation),
+            Ok(Some("Type the text to place."))
+        );
         assert!(state.model.schematic.document().design_notes.is_empty());
     }
 

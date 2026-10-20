@@ -32,12 +32,13 @@ pub fn show(
 ///
 /// It is a hint and never a value: the form used to open with `Bias network`
 /// written into the field, so an untouched form placed a note saying that.
+/// Nor is it a sample note, which reads as text someone wrote: prose takes no
+/// hint, and only the kinds with a syntax of their own show it.
 const fn sample(kind: DesignNoteKind) -> &'static str {
     match kind {
-        DesignNoteKind::PlainText => "Bias network",
-        DesignNoteKind::PropertyDisplay => "${component_count} components",
-        DesignNoteKind::RequirementLink => "REQ-19",
-        DesignNoteKind::ReviewNote => "Check the bias network",
+        DesignNoteKind::PlainText | DesignNoteKind::ReviewNote => "",
+        DesignNoteKind::PropertyDisplay => "${property} text",
+        DesignNoteKind::RequirementLink => "Requirement ID",
     }
 }
 
@@ -45,11 +46,21 @@ const fn sample(kind: DesignNoteKind) -> &'static str {
 mod tests {
     use super::*;
 
-    /// Every kind offers a shape to type over, and none of them is a value.
+    /// No hint is a sample note: prose takes none, and a kind with a syntax
+    /// of its own shows the syntax, not an instance of it someone could have
+    /// written.
     #[test]
-    fn every_kind_has_a_hint_and_none_of_them_is_a_default_value() {
+    fn no_hint_is_a_sample_note() {
+        assert_eq!(sample(DesignNoteKind::PlainText), "");
+        assert_eq!(sample(DesignNoteKind::ReviewNote), "");
         for kind in DesignNoteKind::ALL {
-            assert!(!sample(kind).is_empty(), "{kind:?}");
+            let hint = sample(kind);
+            assert!(!hint.contains("bias network"), "{kind:?}: {hint}");
+            assert!(!hint.contains("Bias network"), "{kind:?}: {hint}");
+            assert!(
+                !hint.chars().any(|c| c.is_ascii_digit()),
+                "{kind:?}: {hint}"
+            );
         }
     }
 }
