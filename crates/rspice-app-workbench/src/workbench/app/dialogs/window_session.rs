@@ -4,11 +4,11 @@
 //! documents, immutable results, jobs, undo history, and audit identities
 //! remain in their existing project-owned stores.
 
-use egui::{ComboBox, Context, Grid, RichText};
+use egui::{Context, Grid, RichText};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogSize};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::lifecycle::window_session::ApplicationWindowId;
@@ -277,84 +277,50 @@ fn commit_window_manager_action(
 }
 
 fn render_window_workflow(app: &mut impl WorkbenchHost, ctx: &Context, workflow: WindowWorkflow) {
-    let (title, primary) = workflow_copy(workflow);
     let source_window = app.workbench().window_session_dialog.source_window;
     let source_document = app
         .workbench()
         .window_session_dialog
         .source_document
         .clone();
-    let source_label = app.workbench().window_session_dialog.source_label.clone();
-    let mut initial_content = app.workbench().window_session_dialog.initial_content;
-    let mut destination = app.workbench().window_session_dialog.destination;
-    let mut layout_choice = app.workbench().window_session_dialog.layout_choice;
-    let mut restore_on_launch = app.workbench().window_session_dialog.restore_on_launch;
-    let mut synchronize_chrome = app.workbench().window_session_dialog.synchronize_chrome;
-    let mut reattach_at_end = app.workbench().window_session_dialog.reattach_at_end;
-    let mut recovery_selected = app
-        .workbench()
-        .window_session_dialog
-        .recovery_selected
-        .clone();
-    let mut recover_future = app
-        .workbench()
-        .window_session_dialog
-        .recover_all_future_windows;
-    let error = app.workbench().window_session_dialog.error.clone();
-
-    let choice = Dialog::new(title, primary)
-        .description(workflow_description(workflow))
-        .secondary("Cancel")
-        .size(DialogSize::Manager)
-        .show(ctx, |ui| {
-            match workflow {
-                WindowWorkflow::NewApplicationWindow => render_new_window_workflow(
-                    ui,
-                    &source_label,
-                    &mut initial_content,
-                    &mut layout_choice,
-                    &mut restore_on_launch,
-                ),
-                WindowWorkflow::DetachDocument => render_detach_workflow(
-                    ui,
-                    app,
-                    source_window,
-                    &source_label,
-                    &mut destination,
-                    &mut synchronize_chrome,
-                    &mut restore_on_launch,
-                ),
-                WindowWorkflow::MoveDocument => {
-                    render_move_workflow(ui, app, source_window, &source_label, &mut destination)
-                }
-                WindowWorkflow::ReattachDocument => {
-                    render_reattach_workflow(ui, &source_label, &mut reattach_at_end)
-                }
-                WindowWorkflow::ConsolidateWindows => render_consolidate_workflow(ui, app),
-                WindowWorkflow::MonitorRecovery => render_monitor_recovery_workflow(
-                    ui,
-                    app,
-                    &mut recovery_selected,
-                    &mut recover_future,
-                ),
-            }
-            if let Some(error) = &error {
-                ui.add_space(8.0);
-                ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-            }
-        });
-
-    {
-        let dialog = &mut app.workbench_mut().window_session_dialog;
-        dialog.initial_content = initial_content;
-        dialog.destination = destination;
-        dialog.layout_choice = layout_choice;
-        dialog.restore_on_launch = restore_on_launch;
-        dialog.synchronize_chrome = synchronize_chrome;
-        dialog.reattach_at_end = reattach_at_end;
-        dialog.recovery_selected = recovery_selected;
-        dialog.recover_all_future_windows = recover_future;
-    }
+    let choice = match workflow {
+        WindowWorkflow::ConsolidateWindows | WindowWorkflow::MonitorRecovery => {
+            let dialog = &app.workbench().window_session_dialog;
+            let mut selected = dialog.recovery_selected.clone();
+            let mut recover_future = dialog.recover_all_future_windows;
+            let error = dialog.error.clone();
+            let choice = show_window_list_workflow(
+                ctx,
+                workflow,
+                app,
+                &mut selected,
+                &mut recover_future,
+                error.as_deref(),
+            );
+            let dialog = &mut app.workbench_mut().window_session_dialog;
+            dialog.recovery_selected = selected;
+            dialog.recover_all_future_windows = recover_future;
+            choice
+        }
+        WindowWorkflow::NewApplicationWindow
+        | WindowWorkflow::DetachDocument
+        | WindowWorkflow::MoveDocument
+        | WindowWorkflow::ReattachDocument => {
+            let others = app
+                .workbench()
+                .window_session
+                .windows()
+                .filter(|(id, _)| *id != source_window)
+                .map(|(id, window)| (id, window.title.clone()))
+                .collect::<Vec<_>>();
+            show_window_form(
+                ctx,
+                workflow,
+                &others,
+                &mut app.workbench_mut().window_session_dialog,
+            )
+        }
+    };
     match choice {
         DialogChoice::Primary => {
             if let Err(error) =
@@ -365,10 +331,10 @@ fn render_window_workflow(app: &mut impl WorkbenchHost, ctx: &Context, workflow:
                 app.workbench_mut().window_session_dialog.close();
             }
         }
-        DialogChoice::Secondary | DialogChoice::Cancelled => {
+        DialogChoice::Secondary | DialogChoice::Ghost | DialogChoice::Cancelled => {
             app.workbench_mut().window_session_dialog.close();
         }
-        DialogChoice::None | DialogChoice::Ghost => {}
+        DialogChoice::None => {}
     }
 }
 
@@ -736,99 +702,229 @@ fn render_session_page(
     });
 }
 
-fn render_new_window_workflow(
-    ui: &mut egui::Ui,
-    active_name: &str,
-    initial: &mut NewWindowInitialContent,
-    layout: &mut WindowLayoutChoice,
-    restore: &mut bool,
-) {
-    ComboBox::from_label("Initial content")
-        .selected_text(match initial {
-            NewWindowInitialContent::EmptyProjectWorkspace => "Empty project workspace",
-            NewWindowInitialContent::CloneCurrentWorkspaceLayout => {
-                "Clone current workspace layout"
+/// What a window form refuses before anything is chosen, in the words the
+/// footer states it in. `None` when its primary can run.
+fn window_form_refusal(
+    workflow: WindowWorkflow,
+    document: bool,
+    source: ApplicationWindowId,
+    other_windows: bool,
+) -> Option<&'static str> {
+    match workflow {
+        WindowWorkflow::DetachDocument if !document => Some("No document is open to detach."),
+        WindowWorkflow::MoveDocument if !document => Some("No document is open to move."),
+        WindowWorkflow::MoveDocument if !other_windows => {
+            Some("No other window is open to move it to.")
+        }
+        WindowWorkflow::ReattachDocument if !document => Some("No detached document is active."),
+        WindowWorkflow::ReattachDocument if source.is_primary() => {
+            Some("The active document is already in the main window.")
+        }
+        _ => None,
+    }
+}
+
+const NEW_WINDOW_CONTENT: [&str; 3] = [
+    "Empty project workspace",
+    "Current workspace layout",
+    "Active document",
+];
+const NEW_WINDOW_LAYOUTS: [&str; 3] = ["Engineering", "Review", "Plot presentation"];
+const REATTACH_PLACES: [&str; 2] = ["After the active document", "At the end"];
+const NEW_WINDOW: &str = "New window";
+
+/// New window, detach, move and reattach: a command form over the active
+/// document, where it goes and how the window comes back.
+fn show_window_form(
+    ctx: &Context,
+    workflow: WindowWorkflow,
+    others: &[(ApplicationWindowId, String)],
+    draft: &mut WindowSessionDialogState,
+) -> DialogChoice {
+    let (title, primary) = workflow_copy(workflow);
+    let refusal = window_form_refusal(
+        workflow,
+        draft.source_document.is_some(),
+        draft.source_window,
+        !others.is_empty(),
+    );
+    let error = draft.error.clone();
+    let status = match (error.as_deref(), refusal) {
+        (Some(error), _) => Err(error),
+        (None, Some(refusal)) => Err(refusal),
+        (None, None) => Ok(None),
+    };
+    let document = draft.source_label.clone();
+    let before = (
+        draft.initial_content,
+        draft.destination,
+        draft.layout_choice,
+        draft.restore_on_launch,
+        draft.synchronize_chrome,
+        draft.reattach_at_end,
+    );
+    let choice = CommandForm::new(title, primary)
+        .describe(workflow_description(workflow))
+        .primary_enabled(refusal.is_none())
+        .status(status)
+        .show(ctx, |rows| {
+            if workflow != WindowWorkflow::NewApplicationWindow && !document.is_empty() {
+                rows.value("Document", &document);
             }
-            NewWindowInitialContent::MoveActiveDocument => "Move active document",
-        })
-        .show_ui(ui, |ui| {
-            ui.selectable_value(
-                initial,
-                NewWindowInitialContent::EmptyProjectWorkspace,
-                "Empty project workspace",
-            );
-            ui.selectable_value(
-                initial,
-                NewWindowInitialContent::CloneCurrentWorkspaceLayout,
-                "Clone current workspace layout",
-            );
-            ui.add_enabled_ui(!active_name.is_empty(), |ui| {
-                ui.selectable_value(
-                    initial,
-                    NewWindowInitialContent::MoveActiveDocument,
-                    format!("Move active document \u{00b7} {active_name}"),
-                );
-            });
+            match workflow {
+                WindowWorkflow::NewApplicationWindow => {
+                    // Only a document that is open can move into the window.
+                    let offered = if draft.source_document.is_some() {
+                        3
+                    } else {
+                        2
+                    };
+                    let contents = NEW_WINDOW_CONTENT[..offered]
+                        .iter()
+                        .map(|content| (*content).to_owned())
+                        .collect::<Vec<_>>();
+                    let current = match draft.initial_content {
+                        NewWindowInitialContent::EmptyProjectWorkspace => 0,
+                        NewWindowInitialContent::CloneCurrentWorkspaceLayout => 1,
+                        NewWindowInitialContent::MoveActiveDocument => 2,
+                    };
+                    if let Some(picked) = rows.select(
+                        "Content",
+                        "window-session.new-window.content",
+                        NEW_WINDOW_CONTENT[current],
+                        &contents,
+                    ) {
+                        draft.initial_content = match picked {
+                            1 => NewWindowInitialContent::CloneCurrentWorkspaceLayout,
+                            2 => NewWindowInitialContent::MoveActiveDocument,
+                            _ => NewWindowInitialContent::EmptyProjectWorkspace,
+                        };
+                    }
+                    if draft.initial_content == NewWindowInitialContent::MoveActiveDocument {
+                        rows.derived(&document);
+                    }
+                    // A copy of this workspace brings its own docks.
+                    if draft.initial_content != NewWindowInitialContent::CloneCurrentWorkspaceLayout
+                    {
+                        let layouts = NEW_WINDOW_LAYOUTS.map(str::to_owned);
+                        let current = match draft.layout_choice {
+                            WindowLayoutChoice::Engineering => 0,
+                            WindowLayoutChoice::Review => 1,
+                            WindowLayoutChoice::PlotPresentation => 2,
+                        };
+                        if let Some(picked) = rows.select(
+                            "Layout",
+                            "window-session.new-window.layout",
+                            NEW_WINDOW_LAYOUTS[current],
+                            &layouts,
+                        ) {
+                            draft.layout_choice = match picked {
+                                1 => WindowLayoutChoice::Review,
+                                2 => WindowLayoutChoice::PlotPresentation,
+                                _ => WindowLayoutChoice::Engineering,
+                            };
+                        }
+                    }
+                    rows.checks(
+                        "Options",
+                        &mut [("Restore on next launch", &mut draft.restore_on_launch)],
+                    );
+                }
+                WindowWorkflow::DetachDocument | WindowWorkflow::MoveDocument => {
+                    let detach = workflow == WindowWorkflow::DetachDocument;
+                    // Detaching may open a window of its own; moving goes to
+                    // one already open.
+                    let destinations = detach
+                        .then(|| (None, NEW_WINDOW.to_owned()))
+                        .into_iter()
+                        .chain(others.iter().map(|(id, title)| (Some(*id), title.clone())))
+                        .collect::<Vec<_>>();
+                    let selected = destinations
+                        .iter()
+                        .find(|(id, _)| *id == draft.destination)
+                        .or_else(|| destinations.first())
+                        .map_or_else(String::new, |(_, title)| title.clone());
+                    let labels = destinations
+                        .iter()
+                        .map(|(_, title)| title.clone())
+                        .collect::<Vec<_>>();
+                    if let Some(picked) = rows.select(
+                        "Destination",
+                        "window-session.destination",
+                        &selected,
+                        &labels,
+                    ) && let Some((id, _)) = destinations.get(picked)
+                    {
+                        draft.destination = *id;
+                    }
+                    if detach && draft.destination.is_none() {
+                        rows.checks(
+                            "Options",
+                            &mut [
+                                (
+                                    "Synchronize navigator and inspector",
+                                    &mut draft.synchronize_chrome,
+                                ),
+                                ("Restore on next launch", &mut draft.restore_on_launch),
+                            ],
+                        );
+                    }
+                }
+                WindowWorkflow::ReattachDocument => {
+                    let places = REATTACH_PLACES.map(str::to_owned);
+                    if let Some(picked) = rows.select(
+                        "Insert",
+                        "window-session.reattach.place",
+                        REATTACH_PLACES[usize::from(draft.reattach_at_end)],
+                        &places,
+                    ) {
+                        draft.reattach_at_end = picked == 1;
+                    }
+                }
+                WindowWorkflow::ConsolidateWindows | WindowWorkflow::MonitorRecovery => {}
+            }
+            None
         });
-    monitor_combo(ui);
-    layout_choice(ui, layout);
-    ui.checkbox(restore, "Restore this window on next launch");
+    let after = (
+        draft.initial_content,
+        draft.destination,
+        draft.layout_choice,
+        draft.restore_on_launch,
+        draft.synchronize_chrome,
+        draft.reattach_at_end,
+    );
+    if after != before {
+        // A refusal from the last attempt is about the draft it was made on.
+        draft.error = None;
+    }
+    choice
 }
 
-fn render_detach_workflow(
-    ui: &mut egui::Ui,
+/// Consolidate and monitor recovery act on a list of windows.
+fn show_window_list_workflow(
+    ctx: &Context,
+    workflow: WindowWorkflow,
     app: &impl WorkbenchHost,
-    source: ApplicationWindowId,
-    active_name: &str,
-    destination: &mut Option<ApplicationWindowId>,
-    synchronize: &mut bool,
-    restore: &mut bool,
-) {
-    document_summary(
-        ui,
-        active_name,
-        "Working state remains owned by this project.",
-    );
-    destination_combo(ui, app, source, destination, true);
-    monitor_combo(ui);
-    ui.checkbox(
-        synchronize,
-        "Keep source navigator and inspector synchronized",
-    );
-    ui.checkbox(restore, "Restore detached state on next launch");
-}
-
-fn render_move_workflow(
-    ui: &mut egui::Ui,
-    app: &impl WorkbenchHost,
-    source: ApplicationWindowId,
-    active_name: &str,
-    destination: &mut Option<ApplicationWindowId>,
-) {
-    document_summary(
-        ui,
-        active_name,
-        "Unsaved edits, view state, selection, and source-return history move with the document.",
-    );
-    destination_combo(ui, app, source, destination, false);
-}
-
-fn render_reattach_workflow(ui: &mut egui::Ui, active_name: &str, at_end: &mut bool) {
-    document_summary(
-        ui,
-        active_name,
-        "Return this document to the main application window without changing project or result data.",
-    );
-    ComboBox::from_label("Insertion")
-        .selected_text(if *at_end {
-            "End of owning workspace"
-        } else {
-            "After active document in owning workspace"
+    selected: &mut std::collections::BTreeSet<ApplicationWindowId>,
+    recover_future: &mut bool,
+    error: Option<&str>,
+) -> DialogChoice {
+    let (title, primary) = workflow_copy(workflow);
+    Dialog::new(title, primary)
+        .description(workflow_description(workflow))
+        .secondary("Cancel")
+        .size(DialogSize::Manager)
+        .show(ctx, |ui| {
+            if workflow == WindowWorkflow::MonitorRecovery {
+                render_monitor_recovery_workflow(ui, app, selected, recover_future);
+            } else {
+                render_consolidate_workflow(ui, app);
+            }
+            if let Some(error) = error {
+                ui.add_space(8.0);
+                ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+            }
         })
-        .show_ui(ui, |ui| {
-            ui.selectable_value(at_end, false, "After active document in owning workspace");
-            ui.selectable_value(at_end, true, "End of owning workspace");
-        });
 }
 
 fn render_consolidate_workflow(ui: &mut egui::Ui, app: &impl WorkbenchHost) {
@@ -911,61 +1007,6 @@ fn render_monitor_recovery_workflow(
     );
 }
 
-fn destination_combo(
-    ui: &mut egui::Ui,
-    app: &impl WorkbenchHost,
-    source: ApplicationWindowId,
-    destination: &mut Option<ApplicationWindowId>,
-    allow_new: bool,
-) {
-    let selected = destination
-        .and_then(|id| {
-            app.workbench()
-                .window_session
-                .state(id)
-                .map(|window| window.title.clone())
-        })
-        .unwrap_or_else(|| "New application window".to_owned());
-    ComboBox::from_label("Destination")
-        .selected_text(selected)
-        .show_ui(ui, |ui| {
-            if allow_new {
-                ui.selectable_value(destination, None, "New application window");
-            }
-            for (id, window) in app.workbench().window_session.windows() {
-                if id != source {
-                    ui.selectable_value(destination, Some(id), &window.title);
-                }
-            }
-        });
-}
-
-fn layout_choice(ui: &mut egui::Ui, layout: &mut WindowLayoutChoice) {
-    ComboBox::from_label("Workspace layout")
-        .selected_text(match layout {
-            WindowLayoutChoice::Engineering => "Engineering",
-            WindowLayoutChoice::Review => "Review",
-            WindowLayoutChoice::PlotPresentation => "Plot presentation",
-        })
-        .show_ui(ui, |ui| {
-            ui.selectable_value(layout, WindowLayoutChoice::Engineering, "Engineering");
-            ui.selectable_value(layout, WindowLayoutChoice::Review, "Review");
-            ui.selectable_value(
-                layout,
-                WindowLayoutChoice::PlotPresentation,
-                "Plot presentation",
-            );
-        });
-}
-
-fn monitor_combo(ui: &mut egui::Ui) {
-    ComboBox::from_label("Monitor")
-        .selected_text("Use operating-system default")
-        .show_ui(ui, |ui| {
-            let _selected = ui.selectable_label(true, "Use operating-system default");
-        });
-}
-
 fn layout_for_choice(choice: WindowLayoutChoice) -> WorkspaceLayoutState {
     match choice {
         WindowLayoutChoice::Engineering => {
@@ -987,17 +1028,6 @@ fn layout_for_choice(choice: WindowLayoutChoice) -> WorkspaceLayoutState {
             ..WorkspaceLayoutState::default()
         },
     }
-}
-
-fn document_summary(ui: &mut egui::Ui, name: &str, detail: &str) {
-    ui.group(|ui| {
-        ui.strong(if name.is_empty() {
-            "No active document"
-        } else {
-            name
-        });
-        ui.label(detail);
-    });
 }
 
 const fn workflow_copy(workflow: WindowWorkflow) -> (&'static str, &'static str) {
