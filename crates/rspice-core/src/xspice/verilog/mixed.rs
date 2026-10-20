@@ -498,8 +498,10 @@ impl CandidateLedger {
 struct BoundaryNetActivity {
     /// The module's own name for the net.
     signal: String,
-    /// Circuit node the deck attached it to; `0` is ground.
-    node: usize,
+    /// Circuit node the deck attached it to; `0` is ground. `None` for the
+    /// input of a deck converter whose threshold this module watches: the
+    /// name is the converter's own (`A1.in[0]`), and it has no node here.
+    node: Option<usize>,
     /// Whether the module reads this net across an A/D bridge, or drives it
     /// across a D/A one.
     read_by_module: bool,
@@ -518,11 +520,13 @@ impl fmt::Display for BoundaryNetActivity {
         } else {
             "driven by the module"
         };
+        match self.node {
+            Some(node) => write!(f, "net `{}` on circuit node {node}", self.signal)?,
+            None => write!(f, "converter input `{}`", self.signal)?,
+        }
         write!(
             f,
-            "net `{}` on circuit node {} ({side}) moved {} times and took {}",
-            self.signal,
-            self.node,
+            " ({side}) moved {} times and took {}",
             self.moves,
             self.recent.join(" ")
         )
@@ -788,6 +792,20 @@ struct AdcBridge {
 }
 
 impl AdcBridge {
+    /// Where a boundary report places this bridge's net: its circuit node,
+    /// `None` for a converter's input root, and no entry at all for the root
+    /// on a converter elaboration inserted, whose deck net the converted
+    /// port's own entry already names under the author's spelling.
+    fn reported_node(&self) -> Option<Option<usize>> {
+        if !self.root_only {
+            Some(Some(self.positive))
+        } else if crate::xspice::is_auto_bridge_name(&self.signal_name) {
+            None
+        } else {
+            Some(None)
+        }
+    }
+
     fn driven_signal(&self) -> DigitalSignalId {
         self.signal
             .expect("a root-only detector does not publish a digital drive")
@@ -2811,6 +2829,17 @@ impl MixedSignalHost {
                 bridge.bit,
                 BoundaryBitSource::Driven,
             );
+        }
+    }
+
+    /// The event endpoints of this module's converted port bits, each with
+    /// its deck net: the node elaboration moved the bit to, whose value
+    /// [`Self::boundary_trace_bindings`] also records on the deck net.
+    pub(crate) fn converter_event_endpoints(&self, mut sink: impl FnMut(usize, usize)) {
+        for port in &self.event_ports {
+            if let Some((_, deck)) = port.converted_bit() {
+                sink(deck, port.node);
+            }
         }
     }
 
@@ -4844,7 +4873,8 @@ impl MixedSignalHost {
         let mut elided = 0;
         // The participant is named only for a net that switched, so the
         // spelling of one that did not is never built.
-        let mut note = |entry: &BoundaryNetHistory, net: &dyn Fn() -> (String, usize, bool)| {
+        let mut note = |entry: &BoundaryNetHistory,
+                        net: &dyn Fn() -> (String, Option<usize>, bool)| {
             if entry.run < 3 {
                 return;
             }
@@ -4865,13 +4895,13 @@ impl MixedSignalHost {
             );
         };
         for (bridge, entry) in self.state.bridges.adc.iter().zip(&history.adc) {
-            note(entry, &|| {
-                (bridge.signal_name.clone(), bridge.positive, true)
-            });
+            if let Some(node) = bridge.reported_node() {
+                note(entry, &|| (bridge.signal_name.clone(), node, true));
+            }
         }
         for (bridge, entry) in self.state.bridges.dac.iter().zip(&history.dac) {
             note(entry, &|| {
-                (bridge.signal_name.clone(), bridge.positive, false)
+                (bridge.signal_name.clone(), Some(bridge.positive), false)
             });
         }
         for (port, entry) in self.event_ports.iter().zip(&history.ports) {
@@ -4879,7 +4909,7 @@ impl MixedSignalHost {
                 note(entry, &|| {
                     (
                         self.event_port_net_name(port, bit),
-                        node,
+                        Some(node),
                         port.direction
                             == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input,
                     )
@@ -5196,12 +5226,14 @@ impl MixedSignalHost {
             .adc
             .iter()
             .zip(&histories.adc)
-            .map(|(bridge, entry)| BoundaryNetActivity {
-                signal: bridge.signal_name.clone(),
-                node: bridge.positive,
-                read_by_module: true,
-                moves: entry.run,
-                recent: entry.values(),
+            .filter_map(|(bridge, entry)| {
+                Some(BoundaryNetActivity {
+                    signal: bridge.signal_name.clone(),
+                    node: bridge.reported_node()?,
+                    read_by_module: true,
+                    moves: entry.run,
+                    recent: entry.values(),
+                })
             })
             .chain(
                 bridges
@@ -5210,7 +5242,7 @@ impl MixedSignalHost {
                     .zip(&histories.dac)
                     .map(|(bridge, entry)| BoundaryNetActivity {
                         signal: bridge.signal_name.clone(),
-                        node: bridge.positive,
+                        node: Some(bridge.positive),
                         read_by_module: false,
                         moves: entry.run,
                         recent: entry.values(),
@@ -5224,7 +5256,7 @@ impl MixedSignalHost {
                         let (bit, node) = port.converted_bit()?;
                         Some(BoundaryNetActivity {
                             signal: self.event_port_net_name(port, bit),
-                            node,
+                            node: Some(node),
                             read_by_module: port.direction
                                 == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input,
                             moves: entry.run,
@@ -5267,18 +5299,20 @@ impl MixedSignalHost {
             .iter()
             .zip(&trial.vectors.adc_moved)
             .zip(&trial.vectors.adc_decisions)
-            .map(|((bridge, moved), decision)| BoundaryNetActivity {
-                signal: bridge.signal_name.clone(),
-                node: bridge.positive,
-                read_by_module: true,
-                moves: u32::from(*moved),
-                recent: vec![spelling(
-                    bridge
-                        .signal
-                        .map_or(decision.unwrap_or(FourStateBit::Unknown), |signal| {
-                            read(signal, bridge.bit)
-                        }),
-                )],
+            .filter_map(|((bridge, moved), decision)| {
+                Some(BoundaryNetActivity {
+                    signal: bridge.signal_name.clone(),
+                    node: bridge.reported_node()?,
+                    read_by_module: true,
+                    moves: u32::from(*moved),
+                    recent: vec![spelling(
+                        bridge
+                            .signal
+                            .map_or(decision.unwrap_or(FourStateBit::Unknown), |signal| {
+                                read(signal, bridge.bit)
+                            }),
+                    )],
+                })
             })
             .chain(
                 self.state
@@ -5288,7 +5322,7 @@ impl MixedSignalHost {
                     .zip(&trial.vectors.dac_moved)
                     .map(|(bridge, moved)| BoundaryNetActivity {
                         signal: bridge.signal_name.clone(),
-                        node: bridge.positive,
+                        node: Some(bridge.positive),
                         read_by_module: false,
                         moves: u32::from(*moved),
                         recent: vec![spelling(read(bridge.signal, bridge.bit))],
@@ -5303,7 +5337,7 @@ impl MixedSignalHost {
                     .map_or(FourStateBit::HighImpedance, |value| value.bit(bit));
                 Some(BoundaryNetActivity {
                     signal: self.event_port_net_name(port, bit),
-                    node,
+                    node: Some(node),
                     read_by_module: port.direction
                         == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input,
                     moves: u32::from(now != before),

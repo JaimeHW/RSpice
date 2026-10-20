@@ -1230,7 +1230,9 @@ fn an_unloaded_digital_only_module_drives_its_analog_boundary() {
 /// drives a resistor, so it is converted: it keeps its voltage and also
 /// carries the bit the module drove, under the deck's name. The converter's
 /// own endpoint, `x1.a__event_0`, exists only because the converter does —
-/// `q` has none, and a reader that looked for one would find nothing.
+/// `q` has none, and a reader that looked for one would find nothing. It
+/// carries the same bit as `a`, so it is recorded only when `.esave` names
+/// it: by default it was a second, internally named column beside `a`.
 ///
 /// `.esave` is the one selection over these traces, so a net the run
 /// records by default has to be one it can keep: refusing `a` as "not an
@@ -1285,17 +1287,20 @@ fn every_digital_net_is_recorded_and_esave_names_each_one() {
     };
 
     let all = run("").unwrap();
-    assert_eq!(traced(&all), ["a", "q", "x1.a__event_0"]);
+    assert_eq!(traced(&all), ["a", "q"]);
     let q = rises(&all, "q");
     assert!(q.len() >= 2, "q rises at 2 and 6 ns: {q:?}");
     for (rise, expected) in q.iter().zip([2e-9, 6e-9]) {
         assert!((rise - expected).abs() < 1e-15, "{q:?}");
     }
+    let both = run(".esave a x1.a__event_0").unwrap();
+    assert_eq!(traced(&both), ["a", "x1.a__event_0"]);
     assert_eq!(
-        rises(&all, "a"),
-        rises(&all, "x1.a__event_0"),
+        rises(&both, "a"),
+        rises(&both, "x1.a__event_0"),
         "the net and its converter endpoint carry the bit the module drove"
     );
+    assert_eq!(rises(&all, "a"), rises(&both, "a"));
     assert!(
         all.node_names
             .iter()
@@ -4540,6 +4545,19 @@ endmodule
             model.deck_path()
         );
         let result = run(&deck, 3e-9, 0.1e-9);
+        // The inserted real-to-voltage converter's output branch is plumbing
+        // the deck never named: it was published by default as
+        // `I(__rspice_auto_real_to_v_4#out)` beside the author's own currents.
+        let converter_branches: Vec<_> = result
+            .branch_names
+            .iter()
+            .zip(&result.branch_currents)
+            .filter(|(name, _)| name.to_ascii_lowercase().starts_with("__rspice_auto_"))
+            .collect();
+        assert!(!converter_branches.is_empty(), "{:?}", result.branch_names);
+        for (name, current) in converter_branches {
+            assert!(current.is_empty(), "{name} is published by default");
+        }
         let physical = waveform(&result, "physical");
         let observed = waveform(&result, "observed");
         assert_eq!(result.event_only_node_kind("physical"), None);

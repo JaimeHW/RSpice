@@ -1218,6 +1218,10 @@ struct TransientNodeNamespace<'a> {
     /// Aligned with `names`: the event domain that owns each of them outright,
     /// and `None` for a name the analog system resolves.
     event_only: &'a [Option<EventOnlyNetKind>],
+    /// Node ids of the private event endpoints converted boundary bits were
+    /// moved to (`X1.A__EVENT_0`): the deck net records the same bit under
+    /// the author's name, so these are kept only when `esave` lists them.
+    converter_endpoints: &'a std::collections::BTreeSet<usize>,
 }
 
 /// Resolve a run's bus declarations onto the node ids the sample hook keys by.
@@ -1455,6 +1459,7 @@ impl TransientCapturePlan {
         let TransientNodeNamespace {
             names: node_names,
             event_only: event_only_nodes,
+            converter_endpoints,
         } = nodes;
         // Measurement evaluation currently happens after integration. Until
         // measurements become online reducers, retain all analog operands for
@@ -1534,6 +1539,13 @@ impl TransientCapturePlan {
         let branch_currents = branch_names
             .iter()
             .map(|name| {
+                if crate::xspice::is_auto_bridge_name(name) {
+                    // An inserted converter's output branch is plumbing the
+                    // deck never named: a blanket selection leaves it out and
+                    // a `.save` naming it keeps it.
+                    return !netlist.saves.keeps_everything()
+                        && netlist.saves.selects(&format!("I({name})"));
+                }
                 let is_xyce_voltage_source = retain_xyce_voltage_source_currents
                     && voltage_source_names.iter().any(|source| {
                         Self::canonical_symbol(source) == Self::canonical_symbol(name)
@@ -1551,14 +1563,15 @@ impl TransientCapturePlan {
         // selects analog outputs only: every event net is kept unless
         // ngspice's `esave` limits them (`evtprint.c` `EVTsave`, ruling D-I).
         // `esave none` records no trace at all, so only a list narrows here;
-        // a listed bus keeps its members.
+        // a listed bus keeps its members. Without a list, a converter's
+        // private endpoint is left out: its bit is the deck net's own trace.
         let listed = Self::esave_listed_nets(netlist);
         let mut event_nodes: Vec<bool> = node_names
             .iter()
-            .map(|name| {
-                listed
-                    .as_ref()
-                    .is_none_or(|listed| listed.contains(&canonical_event_name(name)))
+            .enumerate()
+            .map(|(index, name)| match &listed {
+                Some(listed) => listed.contains(&canonical_event_name(name)),
+                None => !converter_endpoints.contains(&(index + 1)),
             })
             .collect();
         Self::retain_declared_buses(&mut event_nodes, node_names, digital_buses, |bus| {
@@ -5684,11 +5697,13 @@ impl Engine {
         // run publishes, and the live sample hook — and one producer is what
         // keeps them from drifting apart.
         let mut digital_buses = mixed_module_bus_declarations(&circuit, &node_names)?;
+        let converter_endpoints = circuit.mixed_converter_event_endpoints();
         TransientCapturePlan::validate_esave_list(
             netlist,
             TransientNodeNamespace {
                 names: &node_names,
                 event_only: &event_only_nodes,
+                converter_endpoints: &converter_endpoints,
             },
             &circuit.mixed_boundary_trace_nodes(),
             &digital_buses,
@@ -5698,6 +5713,7 @@ impl Engine {
             TransientNodeNamespace {
                 names: &node_names,
                 event_only: &event_only_nodes,
+                converter_endpoints: &converter_endpoints,
             },
             &branch_names,
             retain_xyce_voltage_source_currents,

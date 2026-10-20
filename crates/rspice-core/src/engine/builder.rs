@@ -10,7 +10,7 @@ use crate::circuit::{ResistorValues, SolutionDependentCapacitorSpec};
 use crate::device::DistributedRlgc;
 use crate::device::controlled::VoltageControlledNodes;
 use crate::device::passive::CoupledWinding;
-use crate::xspice::CodeModelVectorParams;
+use crate::xspice::{AUTO_BRIDGE_PREFIX, CodeModelVectorParams};
 use behavioral::{BehavioralResistorModel, BehavioralResistorPolicy};
 
 /// A model parameter the deck left as text: its name and the unresolved
@@ -5002,7 +5002,7 @@ fn add_planned_xspice_auto_bridge(
     {
         XspiceAutoBridgeKind::Adc => (
             "adc_bridge",
-            format!("__rspice_auto_adc_{event_node}"),
+            format!("{AUTO_BRIDGE_PREFIX}adc_{event_node}"),
             vec![
                 PortConnection::AnalogVector(vec![bridge.node]),
                 PortConnection::DigitalVector(vec![event_node]),
@@ -5015,7 +5015,7 @@ fn add_planned_xspice_auto_bridge(
         ),
         XspiceAutoBridgeKind::Dac => (
             "dac_bridge",
-            format!("__rspice_auto_dac_{event_node}"),
+            format!("{AUTO_BRIDGE_PREFIX}dac_{event_node}"),
             vec![
                 PortConnection::DigitalVector(vec![event_node]),
                 PortConnection::AnalogVector(vec![bridge.node]),
@@ -5028,7 +5028,7 @@ fn add_planned_xspice_auto_bridge(
         ),
         XspiceAutoBridgeKind::Bidi => (
             "bidi_bridge",
-            format!("__rspice_auto_bidi_{event_node}"),
+            format!("{AUTO_BRIDGE_PREFIX}bidi_{event_node}"),
             vec![
                 PortConnection::AnalogVector(vec![bridge.node]),
                 PortConnection::DigitalVector(vec![event_node]),
@@ -5043,7 +5043,7 @@ fn add_planned_xspice_auto_bridge(
         ),
         XspiceAutoBridgeKind::RealToV => (
             "real_to_v",
-            format!("__rspice_auto_real_to_v_{event_node}"),
+            format!("{AUTO_BRIDGE_PREFIX}real_to_v_{event_node}"),
             vec![
                 PortConnection::Real(event_node),
                 PortConnection::Analog(bridge.node),
@@ -5053,7 +5053,7 @@ fn add_planned_xspice_auto_bridge(
         ),
         XspiceAutoBridgeKind::VToReal => (
             "v_to_real",
-            format!("__rspice_auto_v_to_real_{event_node}"),
+            format!("{AUTO_BRIDGE_PREFIX}v_to_real_{event_node}"),
             vec![
                 PortConnection::Analog(bridge.node),
                 PortConnection::Real(event_node),

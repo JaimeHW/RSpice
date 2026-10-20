@@ -817,9 +817,9 @@ fn a_bus_reaches_a_table_as_one_column_per_bit_from_either_artifact() {
     );
 
     // The same run's dump expands the bus under its bit-select names, with no
-    // packed word. Electrical output conversion also retains each qualified
-    // driver endpoint beside the legacy deck-node bus. Those traces identify
-    // individual drivers when several outputs share one electrical net.
+    // packed word. A converted output's private event endpoint
+    // (`X1.COUNT__EVENT_1`) is kept by default only where several drivers
+    // share one electrical net; with one driver it repeats its bus bit.
     let dump = simulate(&dir, &deck, "vcd", "run.vcd");
     let from_dump = dir.join("from_dump.csv");
     convert(&dump, &from_dump, "csv", &[]);
@@ -834,13 +834,8 @@ fn a_bus_reaches_a_table_as_one_column_per_bit_from_either_artifact() {
         .collect();
     assert_eq!(
         digital,
-        vec![
-            "D(x1.count[1])",
-            "D(x1.count[0])",
-            "D(X1.COUNT__EVENT_1)",
-            "D(X1.COUNT__EVENT_0)",
-        ],
-        "bus bits followed by qualified converter endpoints: {header:?}"
+        vec!["D(x1.count[1])", "D(x1.count[0])"],
+        "the bus bits and nothing else: {header:?}"
     );
 
     let msb = header
@@ -861,13 +856,6 @@ fn a_bus_reaches_a_table_as_one_column_per_bit_from_either_artifact() {
         vec![0.0, 1.0, 0.0, 1.0],
         "and its low bit"
     );
-    for (endpoint, bit) in [("D(X1.COUNT__EVENT_1)", msb), ("D(X1.COUNT__EVENT_0)", lsb)] {
-        let source = header.iter().position(|name| name == endpoint).unwrap();
-        assert!(
-            rows.iter().all(|row| row[source] == row[bit]),
-            "the single driver's qualified endpoint must retain its bus bit's values"
-        );
-    }
 
     let _ = std::fs::remove_dir_all(&dir);
 }

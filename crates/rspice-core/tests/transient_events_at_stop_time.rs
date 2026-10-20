@@ -108,10 +108,12 @@ fn digital_trace(result: &TransientResult, node: &str) -> Vec<(f64, String)> {
         .collect()
 }
 
-/// The module's digital output, read on its own port (its built-in
-/// converter's event endpoint) rather than on the converted voltage.
+/// The module's digital output, read as the bit the module drove (the deck
+/// net's digital trace) rather than on the converted voltage. The built-in
+/// converter's own event endpoint carries the same bit and is recorded only
+/// when `.esave` names it.
 #[cfg(feature = "veriloga")]
-const Q_PORT: &str = "x1.q__event_0";
+const Q_PORT: &str = "q";
 
 /// The corpus probe P06b module: a 10 ns `always` clock, so the tenth tick is
 /// the stop time. `q` rises at the tick `c` reaches `rise`.

@@ -92,6 +92,18 @@ pub(crate) fn checkpoint_virtual_data_file_contents(path: &str) -> Option<std::s
         .map(|(contents, _)| contents)
 }
 
+/// How every converter instance elaboration inserts at an analog/event
+/// boundary is named (`__rspice_auto_dac_3`). The deck never names one, so a
+/// name with this prefix, or a branch or input of such an instance, is
+/// plumbing: default output and diagnostics speak of the author's nets.
+pub(crate) const AUTO_BRIDGE_PREFIX: &str = "__rspice_auto_";
+
+/// Whether `name` is an inserted converter or one of its branches or inputs.
+pub(crate) fn is_auto_bridge_name(name: &str) -> bool {
+    name.get(..AUTO_BRIDGE_PREFIX.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(AUTO_BRIDGE_PREFIX))
+}
+
 // Re-export primary types
 pub(crate) use context::CmContextCheckpoint;
 pub use context::{

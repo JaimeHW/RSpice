@@ -979,6 +979,43 @@ impl CircuitData {
         std::collections::BTreeSet::new()
     }
 
+    /// The private event endpoints a converted boundary bit was moved to.
+    ///
+    /// Elaboration gives a port bit that meets an analog net its own event
+    /// node (`X1.A__EVENT_0`) for the converter to drive or read, and the
+    /// deck net records the same bit under the author's name
+    /// ([`Self::mixed_boundary_trace_nodes`]), so the endpoint is a second
+    /// copy. Not when several converted bits share one deck net: each
+    /// endpoint is then the only record of its own driver. Nor when a
+    /// declared bus names it: an inout bit or tied vector bits have no deck
+    /// spelling of their own.
+    pub(crate) fn mixed_converter_event_endpoints(&self) -> std::collections::BTreeSet<NodeId> {
+        #[cfg(feature = "veriloga")]
+        {
+            let mut by_deck_net: BTreeMap<NodeId, Vec<NodeId>> = BTreeMap::new();
+            for host in &self.mixed_signal_hosts {
+                host.converter_event_endpoints(|deck, endpoint| {
+                    by_deck_net.entry(deck).or_default().push(endpoint);
+                });
+            }
+            let mut nodes: std::collections::BTreeSet<NodeId> = by_deck_net
+                .into_values()
+                .filter_map(|endpoints| match endpoints[..] {
+                    [only] => Some(only),
+                    _ => None,
+                })
+                .collect();
+            for bus in self.mixed_signal_boundary_buses() {
+                for node in &bus.members {
+                    nodes.remove(node);
+                }
+            }
+            nodes
+        }
+        #[cfg(not(feature = "veriloga"))]
+        std::collections::BTreeSet::new()
+    }
+
     /// Record the analog-touch classification the netlist build computed.
     ///
     /// One producer, one answer: the mixed-boundary classifier and the result

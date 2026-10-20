@@ -1680,6 +1680,13 @@ endmodule
          was accepted at: {error}"
     );
     assert!(error.contains("1 0 1 0"), "{error}");
+    // The inserted A/D converter's own input root watches the same net as
+    // `c`; it was listed again as `__rspice_auto_adc_5.in[0]` "on circuit
+    // node 0".
+    assert!(
+        !lowered.contains("__rspice_auto") && !lowered.contains("circuit node 0 "),
+        "the diagnostic names the author's nets, not inserted converters: {error}"
+    );
 }
 
 /// **Cross-domain feedback, vacuity guard.** A boundary a resolved waveform
