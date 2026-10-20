@@ -84,9 +84,11 @@ fn every_small_signal_card_round_trips_its_state_keyword() {
                 SmallSignalStateSource::TransientTimes(vec![1.0e-6, 2.0e-6, 4.0e-6]),
             ),
             (
-                // A scaled literal is its mantissa times the suffix's scale.
+                // A scaled literal is the double nearest the decimal it
+                // writes, not the mantissa times the suffix's scale (2.5 *
+                // 1e-6 is 2.4999999999999998e-6).
                 " ACTIMES=2.5u",
-                SmallSignalStateSource::TransientTimes(vec![2.5 * 1.0e-6]),
+                SmallSignalStateSource::TransientTimes(vec![2.5e-6]),
             ),
             (
                 " CHECKPOINT=\"state at 3u.chk\"",
