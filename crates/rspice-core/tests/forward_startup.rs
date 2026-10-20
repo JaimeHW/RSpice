@@ -109,10 +109,13 @@ fn nested_forward_parent_bindings_preserve_instance_overrides() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn instance_only_startup_parameters_remain_valid() {
+fn instance_set_startup_parameters_reach_the_hint() {
+    // The subcircuit declares the parameter: ngspice ("Mismatch: 0 formal but
+    // 1 actual params") and Spectre refuse an instance value for one it does
+    // not declare.
     for directive in [".IC", ".NODESET"] {
         let source = format!(
-            "Instance-only hint\n.subckt cell p\n{directive} V(p)={{level}}\nR1 p 0 1k\nC1 p 0 1u\n.ends\nX1 out cell level=2\n.tran 1u 2u uic\n.end\n"
+            "Instance-set hint\n.subckt cell p params: level=0\n{directive} V(p)={{level}}\nR1 p 0 1k\nC1 p 0 1u\n.ends\nX1 out cell level=2\n.tran 1u 2u uic\n.end\n"
         );
         let netlist = parse(&source, ExpressionDialect::Ngspice);
         let flat = flatten_netlist_with_models(&netlist).unwrap();
@@ -330,7 +333,7 @@ fn included_forward_cards_keep_continuation_origins_and_selected_temperature() {
 fn queued_scoped_cards_update_the_registry_and_nested_definition_copies() {
     for directive in [".IC", ".NODESET"] {
         let source = format!(
-            "Queued scoped hints\nRtop top 0 1k\nCtop top 0 1u\n{directive} V(top)={{level}}\n.subckt parent p\n.subckt child q\n{directive} V(q)={{gain}}\nR1 q 0 1k\nC1 q 0 1u\n.ends\nXinner p child gain=2\n.ends\nX1 out parent\n.param level=1\n.tran 1u 2u uic\n.end\n"
+            "Queued scoped hints\nRtop top 0 1k\nCtop top 0 1u\n{directive} V(top)={{level}}\n.subckt parent p\n.subckt child q params: gain=0\n{directive} V(q)={{gain}}\nR1 q 0 1k\nC1 q 0 1u\n.ends\nXinner p child gain=2\n.ends\nX1 out parent\n.param level=1\n.tran 1u 2u uic\n.end\n"
         );
         let netlist = parse(&source, ExpressionDialect::Ngspice);
         let parent = netlist
