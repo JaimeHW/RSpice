@@ -4668,6 +4668,72 @@ endmodule
     );
 }
 
+/// An HDL `inout` bit on a node an analog pull-up holds at the rail. Released,
+/// the HDL reads the node's level from the time-zero solution and the instant
+/// it lets go, as an input port does. Driving the level the node already holds
+/// leaves the node where it is: the drive starts from the node's level, not
+/// from mid-rail. ngspice-46's `bidi_bridge` given the same `Uz` then `1s`
+/// sequence holds the node at 3.3 V too.
+#[test]
+fn an_inout_driving_the_level_its_node_holds_does_not_disturb_it() {
+    use rspice_core::config::{HdlOutputCollector, HdlStream};
+    let model = ModelFile::new(
+        "held_inout",
+        "`timescale 1ns/1ps\n\
+         module od(io);\n\
+         inout io; reg en, d;\n\
+         assign io = en ? d : 1'bz;\n\
+         initial begin en = 0; d = 1; #1 $display(\"t=1 io=%b\", io);\n\
+         #0.5 $display(\"t=1.5 io=%b\", io);\n\
+         #8.5 en = 1; #0.5 $display(\"drive1 t=10.5 io=%b\", io);\n\
+         #9.5 en = 0; #0.2 $display(\"released t=20.2 io=%b\", io);\n\
+         #0.6 $display(\"t=20.8 io=%b\", io); end\n\
+         initial begin #0.3 $display(\"t=0.3 io=%b\", io); end\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* an inout on a pulled-up node\n.param vcc=3.3\nvdd vdd 0 3.3\nrpu vdd io 1k\n\
+         x1 io od\n.hdl \"{}\" module=od\n.end\n",
+        model.deck_path()
+    ))
+    .expect("the deck parses");
+    let collector = std::sync::Arc::new(HdlOutputCollector::new());
+    let mut config = SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    let result = Engine::new(config)
+        .run_tran(&netlist, 30e-9, 0.01e-9)
+        .expect("the run completes");
+    let io = waveform(&result, "io");
+    let lowest = result
+        .time
+        .iter()
+        .zip(&io)
+        .filter(|(time, _)| (9e-9..=30e-9).contains(*time))
+        .map(|(_, &voltage)| voltage)
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        (lowest - 3.3).abs() < 1e-6,
+        "the enabled drive must not pull the held node away from 3.3 V: min {lowest}"
+    );
+    let printed: Vec<String> = collector
+        .take()
+        .into_iter()
+        .filter(|record| record.stream == HdlStream::Stdout)
+        .map(|record| record.text.trim_end().to_owned())
+        .collect();
+    assert_eq!(
+        printed,
+        [
+            "t=0.3 io=1",
+            "t=1 io=1",
+            "t=1.5 io=1",
+            "drive1 t=10.5 io=1",
+            "released t=20.2 io=1",
+            "t=20.8 io=1",
+        ]
+    );
+}
+
 #[test]
 fn typed_event_boundaries_bidirectional_vector_takes_over_identical_analog_observations() {
     let model = ModelFile::new(

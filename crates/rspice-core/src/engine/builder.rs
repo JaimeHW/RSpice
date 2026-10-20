@@ -5061,6 +5061,10 @@ fn add_planned_xspice_auto_bridge(
                 }),
                 None,
             ),
+            (Some(_), XspiceAutoBridgeKind::Bidi) => (
+                std::sync::Arc::new(crate::xspice::models::MixedBidiBridge),
+                None,
+            ),
             _ => (code_model, output_branch),
         };
     let (code_model, connections) =

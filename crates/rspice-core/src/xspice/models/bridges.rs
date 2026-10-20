@@ -736,6 +736,9 @@ struct BidiParams {
     t_fall: Value,
     rise_delay: Value,
     fall_delay: Value,
+    /// Whether a released bit holds its drive ramp at the node's own level
+    /// ([`MixedBidiBridge`]) rather than at the midpoint (`bidi_bridge`).
+    tracks_released_level: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -989,6 +992,20 @@ fn bidi_params(ctx: &CmContext) -> CmResult<BidiParams> {
         t_fall: bridge_timing_param(ctx, "bidi_bridge", "t_fall")?,
         rise_delay: bridge_timing_param(ctx, "bidi_bridge", "rise_delay")?,
         fall_delay: bridge_timing_param(ctx, "bidi_bridge", "fall_delay")?,
+        tracks_released_level: false,
+    })
+}
+
+/// The built-in HDL inout converter's law: `bidi_bridge`'s, except that its
+/// A/D delays may be zero (the default, as for the built-in input converter)
+/// and a released bit tracks the node's level.
+#[cfg(feature = "veriloga")]
+fn mixed_bidi_params(ctx: &CmContext) -> CmResult<BidiParams> {
+    Ok(BidiParams {
+        rise_delay: mixed_bridge_timing(ctx, "rise_delay")?,
+        fall_delay: mixed_bridge_timing(ctx, "fall_delay")?,
+        tracks_released_level: true,
+        ..bidi_params(ctx)?
     })
 }
 
@@ -1146,9 +1163,29 @@ fn bidi_target_svoc(drive: DigitalValue, params: BidiParams) -> Value {
     }
 }
 
+/// Where a released bit's drive ramp rests: the node's own level as a fraction
+/// of the output swing, so a drive that seizes the node ramps from the level
+/// the node is at. `bidi_bridge` itself rests at the midpoint instead.
+fn bidi_released_svoc(voltage: Value, params: BidiParams) -> Value {
+    let span = params.out_high - params.out_low;
+    let level = (voltage - params.out_low) / span;
+    if level.is_finite() {
+        level.clamp(0.0, 1.0)
+    } else {
+        0.5
+    }
+}
+
 fn bidi_advance_svoc(prev: Value, drive: DigitalValue, dt: Value, params: BidiParams) -> Value {
     if drive.strength == DigitalStrength::HighZ {
-        return 0.5;
+        // A tracking bridge holds the level its last accepted point left
+        // across a released segment; `bidi_drive_current` re-reads the node
+        // when the bit ends the step released.
+        return if params.tracks_released_level {
+            prev
+        } else {
+            0.5
+        };
     }
 
     let target = bidi_target_svoc(drive, params);
@@ -1433,8 +1470,13 @@ fn bidi_drive_current(
     // The initial transient point must solve the initialized digital state.
     // There is no elapsed interval over which to slew the allocator's default
     // midpoint/current. Acceptance then seeds the history used by later steps.
+    let released = params.tracks_released_level && drive.strength == DigitalStrength::HighZ;
     if !ctx.is_transient() || ctx.time == 0.0 {
-        let svoc = bidi_target_svoc(drive, params);
+        let svoc = if released {
+            bidi_released_svoc(voltage, params)
+        } else {
+            bidi_target_svoc(drive, params)
+        };
         let (current, partial, _) = bidi_current_target(voltage, drive, svoc, params);
         return BidiAnalogDrive {
             current,
@@ -1463,6 +1505,9 @@ fn bidi_drive_current(
             range,
             params,
         );
+    }
+    if released {
+        svoc = bidi_released_svoc(voltage, params);
     }
 
     BidiAnalogDrive {
@@ -2151,6 +2196,16 @@ impl CodeModel for BidiBridge {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        Self::evaluate_with(ctx, bidi_params)
+    }
+}
+
+impl BidiBridge {
+    /// One evaluation under the law `read_params` reads.
+    fn evaluate_with(
+        ctx: &mut CmContext,
+        read_params: fn(&CmContext) -> CmResult<BidiParams>,
+    ) -> CmResult<()> {
         let width = ctx.port_width("a");
         if ctx.port_width("d") != width {
             return Err(CmError::InvalidPortConnection(format!(
@@ -2160,7 +2215,7 @@ impl CodeModel for BidiBridge {
             )));
         }
 
-        let params = bidi_params(ctx)?;
+        let params = read_params(ctx)?;
         let output_strength = digital_strength_from_param(params.strength);
         let layout = bidi_state_layout(width)?;
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
@@ -2292,6 +2347,61 @@ impl CodeModel for BidiBridge {
         }
 
         Ok(())
+    }
+}
+
+/// The built-in converter for an HDL `inout` bit on an electrical node.
+///
+/// `bidi_bridge`'s law with the built-in converters' policy: the A/D side
+/// publishes the node's level without delay unless one is configured, as
+/// [`MixedAdcBridge`] does, so the HDL reads the solved level at time zero and
+/// again the instant it releases the node. A released bit's drive ramp rests
+/// at the node's level rather than the midpoint, so an HDL drive that seizes
+/// the node starts from where the node is: driving the level already present
+/// does not pull the node through mid-rail. Explicit `bidi_bridge` cards keep
+/// the stock model.
+#[cfg(feature = "veriloga")]
+pub(crate) struct MixedBidiBridge;
+
+#[cfg(feature = "veriloga")]
+impl CodeModel for MixedBidiBridge {
+    fn checkpoint_support(&self, ctx: &CmContext) -> XspiceCheckpointSupport {
+        BidiBridge.checkpoint_support(ctx)
+    }
+
+    fn small_signal_descriptor(&self, ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        BidiBridge.small_signal_descriptor(ctx)
+    }
+
+    fn name(&self) -> &str {
+        "__rspice_mixed_bidi"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        bidi_ports()
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        static PARAMS: std::sync::OnceLock<Vec<ParamSpec>> = std::sync::OnceLock::new();
+        PARAMS.get_or_init(|| {
+            let mut params = bidi_parameters().to_vec();
+            for param in &mut params {
+                if matches!(param.name.as_str(), "rise_delay" | "fall_delay") {
+                    param.default = 0.0;
+                    param.description = "Nonnegative propagation delay; zero is immediate".into();
+                }
+            }
+            params
+        })
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        mixed_bidi_params(ctx)?;
+        BidiBridge.init(ctx)
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        BidiBridge::evaluate_with(ctx, mixed_bidi_params)
     }
 }
 
