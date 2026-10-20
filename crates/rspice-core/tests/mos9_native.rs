@@ -283,3 +283,33 @@ fn mos9_without_kp_derives_it_from_uo_and_tox_like_ngspice46() {
         );
     }
 }
+
+#[test]
+fn mos9_model_delvto_shifts_threshold_like_ngspice46() {
+    // ngspice 46 (`set numdgt=12`): mos9temp.c:225-230 adds the model
+    // DELVTO (alias DELVT0) to tVbi, moving the drain current from
+    // -1.53473059774e-04 to -8.79574384172e-05.
+    let deck = "* MOS9 model DELVTO\n\
+                vd2 d2 0 dc 2\n\
+                vd3 d3 0 dc 2\n\
+                vg g 0 dc 1.5\n\
+                m2 d2 g 0 0 n9d w=10u l=2u\n\
+                m3 d3 g 0 0 n9z w=10u l=2u\n\
+                .model n9d nmos level=9 vto=0.7 tox=20n uo=600 kappa=0.5 theta=0.1 delvto=0.2\n\
+                .model n9z nmos level=9 vto=0.7 tox=20n uo=600 kappa=0.5 theta=0.1 delvt0=0.2\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("MOS9 DELVTO deck parses");
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let result = engine_with_dialect(dialect)
+            .run_dc_op(&netlist)
+            .expect("MOS9 DELVTO op converges");
+        for branch in ["vd2", "vd3"] {
+            assert_rel(
+                &format!("{dialect:?} i({branch})"),
+                branch_current(&result, branch),
+                -8.795_743_841_72e-5,
+                1.0e-6,
+            );
+        }
+    }
+}
