@@ -15,15 +15,16 @@ use egui::{Context, RichText, Ui};
 use crate::state::AnalysisResult;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Problem, paint_problem_mark, problem_line};
+use crate::ui::widgets::{
+    Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark, problem_line,
+};
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsReads, analysis_default_unit, browser_signal_unit,
 };
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::results::ResultsFeature;
 
-const TOOL_WIDTH: f32 = 620.0;
-const TOOL_DEFAULT_HEIGHT: f32 = 400.0;
+const TITLE: &str = "Expression and unit diagnostics";
 
 /// One expression's standing, as the workspace would evaluate it now.
 struct ExpressionRow {
@@ -42,53 +43,44 @@ struct ExpressionRow {
     evaluated: bool,
 }
 
-/// Show the tool when it is open.
+/// Show the report when it is open: the kit's dialog, placed like every
+/// other one, with Close.
+///
+/// It was an egui window with egui's own centred title and resize grip,
+/// opened at the top left over the title and menu bar, under a monospace
+/// kicker line.
 pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
     if !cx.state.expression_diagnostics_dialog {
         return;
     }
-    let t = Tokens::get(ctx);
-    let mut open = true;
-    egui::Window::new("Expression and unit diagnostics")
-        .id(egui::Id::new("workbench.expression-diagnostics"))
-        .open(&mut open)
-        .default_width(TOOL_WIDTH)
-        .default_height(TOOL_DEFAULT_HEIGHT)
-        .min_width(TOOL_WIDTH * 0.6)
-        .resizable(true)
-        .collapsible(false)
-        .frame(
-            egui::Frame::new()
-                .fill(t.color.bg_panel)
-                .stroke(egui::Stroke::new(1.0, t.color.border_strong))
-                .corner_radius(t.radius_lg)
-                .inner_margin(egui::Margin::symmetric(14, 12))
-                .shadow(t.shadow()),
-        )
-        .show(ctx, |ui| body(ui, cx.state.reads(cx.model, cx.wb)));
-    if !open {
+    let rows = collect_rows(cx.state.reads(cx.model, cx.wb));
+    // A report with nothing in it is one sentence, not a manager.
+    let size = if rows.is_empty() {
+        DialogSize::Confirmation
+    } else {
+        DialogSize::Manager
+    };
+    let choice = Dialog::new(TITLE, "Close")
+        .size(size)
+        .show(ctx, |ui| body(ui, &rows));
+    if matches!(
+        choice,
+        DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
+    ) {
         cx.state.expression_diagnostics_dialog = false;
     }
 }
 
-fn body(ui: &mut Ui, state: ResultsReads<'_>) {
+fn body(ui: &mut Ui, rows: &[ExpressionRow]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    ui.label(
-        RichText::new("RESULTS · TYPED EXPRESSIONS · NO SILENT COERCION")
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(c.text_dim),
-    );
-    ui.add_space(8.0);
-
-    let rows = collect_rows(state);
     if rows.is_empty() {
         ui.label(
             RichText::new(
                 "No saved expressions in the active dataset. Add one from a waveform sheet's expression field.",
             )
             .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-            .color(c.text_faint),
+            .color(c.text_dim),
         );
         return;
     }
@@ -107,11 +99,9 @@ fn body(ui: &mut Ui, state: ResultsReads<'_>) {
     }
     ui.add_space(8.0);
 
-    egui::ScrollArea::vertical()
-        .id_salt("workbench.expression-diagnostics.rows")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            egui::Grid::new("workbench.expression-diagnostics.grid")
+    // The dialog's body scrolls past its cap; the table needs no scroll of
+    // its own.
+    egui::Grid::new("workbench.expression-diagnostics.grid")
                 .num_columns(5)
                 .striped(true)
                 .spacing(egui::vec2(12.0, 5.0))
@@ -124,7 +114,7 @@ fn body(ui: &mut Ui, state: ResultsReads<'_>) {
                         );
                     }
                     ui.end_row();
-                    for row in &rows {
+                    for row in rows {
                         ui.label(
                             RichText::new(&row.text)
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
@@ -181,7 +171,6 @@ fn body(ui: &mut Ui, state: ResultsReads<'_>) {
                         ui.end_row();
                     }
                 });
-        });
 }
 
 /// Every saved expression of the active dataset, with the verdict the

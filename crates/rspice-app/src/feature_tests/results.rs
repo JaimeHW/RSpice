@@ -7,6 +7,7 @@ mod calculator;
 mod commands;
 mod create_document;
 mod document_edit;
+mod expression_diagnostics;
 pub(super) mod histogram_publication;
 mod inspector;
 mod navigation;
