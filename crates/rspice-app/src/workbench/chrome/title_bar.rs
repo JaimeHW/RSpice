@@ -111,7 +111,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     ui.add_space(if viewport_width <= 820.0 { 5.0 } else { 7.0 });
                     if viewport_width > 560.0 {
-                        if account_action(ui, &account_initials, large_targets) {
+                        if account_action(ui, account_initials.as_deref(), large_targets) {
                             Command::AccountOrganization.execute(app);
                         }
                         if notification_action(
@@ -1033,7 +1033,10 @@ fn icon_action(ui: &mut Ui, icon: WorkbenchIcon, label: &str, large_target: bool
     response.on_hover_text(label).clicked()
 }
 
-fn account_initials(app: &RSpiceApp) -> String {
+/// The initials the account button shows, or `None` when no one is signed
+/// in and no license names a holder: the button then shows a generic
+/// person, not letters that name no one.
+fn account_initials(app: &RSpiceApp) -> Option<String> {
     // The signed-in cloud identity names the account; the local license
     // holder is the fallback identity for offline installations.
     let cloud = app.cloud_account.snapshot();
@@ -1050,26 +1053,22 @@ fn account_initials(app: &RSpiceApp) -> String {
         .license
         .as_ref()
         .map(|license| license.licensed_to.trim().to_owned());
-    let Some(name) = cloud_identity
+    let name = cloud_identity
         .flatten()
         .or(license_identity)
-        .filter(|name| !name.is_empty())
-    else {
-        return "RS".to_owned();
-    };
-    let name = name.as_str();
+        .filter(|name| !name.is_empty())?;
     let words = name
         .split_whitespace()
         .filter_map(|word| word.chars().next())
         .collect::<Vec<_>>();
     match words.as_slice() {
-        [] => "RS".to_owned(),
-        [first] => first.to_uppercase().collect(),
-        [first, .., last] => format!("{}{}", first.to_uppercase(), last.to_uppercase()),
+        [] => None,
+        [first] => Some(first.to_uppercase().collect()),
+        [first, .., last] => Some(format!("{}{}", first.to_uppercase(), last.to_uppercase())),
     }
 }
 
-fn account_action(ui: &mut Ui, initials: &str, large_target: bool) -> bool {
+fn account_action(ui: &mut Ui, initials: Option<&str>, large_target: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let target_size = if large_target {
         Vec2::splat(44.0)
@@ -1099,17 +1098,29 @@ fn account_action(ui: &mut Ui, initials: &str, large_target: bool) -> bool {
         avatar_rect.width() * 0.5,
         egui::Stroke::new(1.0, t.color.border_strong),
     );
-    ui.painter().text(
-        avatar_rect.center(),
-        Align2::CENTER_CENTER,
-        initials,
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        if response.hovered() || response.has_focus() {
-            t.color.text
-        } else {
-            t.color.text_dim
-        },
-    );
+    let ink = if response.hovered() || response.has_focus() {
+        t.color.text
+    } else {
+        t.color.text_dim
+    };
+    match initials {
+        Some(initials) => {
+            ui.painter().text(
+                avatar_rect.center(),
+                Align2::CENTER_CENTER,
+                initials,
+                theme::sans(tokens::FS_0, FontWeight::SemiBold),
+                ink,
+            );
+        }
+        // Painted as a vector, inset so the head and shoulders sit inside
+        // the ring.
+        None => WorkbenchIcon::User.paint(
+            ui.painter(),
+            Rect::from_center_size(avatar_rect.center(), avatar_rect.size() * 0.65),
+            ink,
+        ),
+    }
     theme::paint_focus_ring_outset(ui, &response, target_rect);
     response.on_hover_text(label).clicked()
 }

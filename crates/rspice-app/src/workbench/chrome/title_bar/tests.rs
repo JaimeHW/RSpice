@@ -1377,6 +1377,55 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
     assert_eq!(read("Reset workspace layout…"), (Role::MenuItem, None));
 }
 
+/// With no one signed in and no license, the account button shows a
+/// generic person instead of "RS", initials that named no one; a license
+/// holder's initials still show.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_account_button_shows_a_person_until_an_identity_names_someone() {
+    fn painted(initials: Option<&str>) -> (Vec<String>, usize) {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(Frame::NONE)
+                .show(ctx, |ui| {
+                    let _ = account_action(ui, initials, false);
+                });
+        });
+        let mut texts = Vec::new();
+        let mut marks = 0;
+        for shape in &output.shapes {
+            match &shape.shape {
+                egui::epaint::Shape::Text(text) => texts.push(text.galley.job.text.clone()),
+                _ => marks += 1,
+            }
+        }
+        (texts, marks)
+    }
+
+    let mut app = title_test_app();
+    assert_eq!(account_initials(&app), None);
+    let (texts, person_marks) = painted(None);
+    assert!(texts.is_empty(), "no initials without an identity: {texts:?}");
+
+    app.state.license = Some(crate::services::license::LicenseInfo {
+        licensed_to: "Ada Lovelace".to_owned(),
+        tier: String::new(),
+        updates_until: String::new(),
+        license_id: String::new(),
+        features: Vec::new(),
+        updates_expired: false,
+    });
+    assert_eq!(account_initials(&app).as_deref(), Some("AL"));
+    let (texts, lettered_marks) = painted(Some("AL"));
+    assert_eq!(texts, ["AL"]);
+    assert!(
+        person_marks > lettered_marks,
+        "the person glyph is painted in place of the letters"
+    );
+}
+
 /// The labels of the command and submenu rows `menu` shows for `app`, in
 /// order, and whether each one can be chosen.
 #[cfg(not(target_arch = "wasm32"))]
