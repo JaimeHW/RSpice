@@ -943,9 +943,14 @@ fn utf8_diagnostic_preserves_bytes_and_reports_character_column() {
 #[test]
 fn discarded_system_tasks_warn_on_a_compile_that_still_succeeds() {
     let source = "module chatty(p, n);\n  inout p, n; electrical p, n;\n  analog begin\n    $display(\"one\");\n    $strobe(\"two\");\n    I(p, n) <+ V(p, n);\n  end\nendmodule\n";
-    let report = compiler()
-        .compile_runtime(source, Some("chatty"))
-        .expect("a discarded system task must not fail the compile");
+    // Output tasks print by default; a compile that discards them (the
+    // built-in generator's option) warns once per dropped call.
+    let report = VerilogACompiler::new(CompilerOptions {
+        discard_output_tasks: true,
+        ..CompilerOptions::default()
+    })
+    .compile_runtime(source, Some("chatty"))
+    .expect("a discarded system task must not fail the compile");
 
     report
         .validate_integrity()

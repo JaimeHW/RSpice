@@ -8767,7 +8767,7 @@ fn multidimensional_arrays_diagnose_rank_shape_and_storage_errors() {
             "initial begin : b real m[0:1][0:1]='{'{1.0,2.0},3.0}; end",
             "dimension 2 requires an array literal",
         ),
-        ("reg m[0:256][0:256];", "65536 elements"),
+        ("reg m[0:256][0:256];", "at most 65536 entries per array"),
         (
             "real m[0:1][0:1]; reg q; analog m[0][0]=1; initial @(m[0][0]) q=1;",
             "not assigned exclusively",

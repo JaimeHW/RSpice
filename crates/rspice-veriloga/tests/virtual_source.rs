@@ -1,6 +1,6 @@
 use rspice_veriloga::{
-    CompileError, Preprocessor, SourceDocumentOrigin, VerilogACompiler, VirtualCompileLimits,
-    VirtualSourceBundle, VirtualSourceError, VirtualSourceFile,
+    CompileError, CompilerOptions, Preprocessor, SourceDocumentOrigin, VerilogACompiler,
+    VirtualCompileLimits, VirtualSourceBundle, VirtualSourceError, VirtualSourceFile,
 };
 
 const TOP: &str = r#"`include "disciplines.vams"
@@ -200,9 +200,13 @@ fn prepared_virtual_warnings_identify_original_includes() {
         [("root.va", "`include \"child.va\"\n"), ("child.va", child)],
     )
     .unwrap();
-    let prepared = VerilogACompiler::default()
-        .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
-        .unwrap();
+    // Discarding output tasks makes the included `$display` a warning.
+    let prepared = VerilogACompiler::new(CompilerOptions {
+        discard_output_tasks: true,
+        ..CompilerOptions::default()
+    })
+    .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
+    .unwrap();
     let [warning] = prepared.diagnostics() else {
         panic!("expected one compiler warning")
     };

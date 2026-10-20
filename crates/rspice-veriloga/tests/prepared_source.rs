@@ -492,7 +492,11 @@ fn file_and_provider_compilation_retain_warnings_in_original_includes() {
     let root = files.write("root.va", "`include \"child.va\"\n");
     let source = "module chatty(p,n);\ninout p,n; electrical p,n;\nanalog begin\n $display(\"hello\");\n I(p,n) <+ V(p,n);\nend\nendmodule\n";
     let child = files.write("child.va", source);
-    let compiler = VerilogACompiler::default();
+    // Discarding output tasks makes the included `$display` a warning.
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        discard_output_tasks: true,
+        ..CompilerOptions::default()
+    });
     let from_file = compiler.compile_file_with_metadata(&root).unwrap();
     let from_provider = compiler
         .compile_provider_module_with_metadata_and_control(
