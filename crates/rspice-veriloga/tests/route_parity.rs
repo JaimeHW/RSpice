@@ -811,6 +811,173 @@ endmodule
     );
 }
 
+/// ngspice `DEVpnjlim` (spicelib/devices/devsup.c), the oracle for the
+/// built-in `"pnjlim"` selector.
+fn dev_pnjlim(vnew: f64, vold: f64, vt: f64, vcrit: f64) -> f64 {
+    if vnew > vcrit && (vnew - vold).abs() > vt + vt {
+        if vold > 0.0 {
+            let arg = (vnew - vold) / vt;
+            if arg > 0.0 {
+                vold + vt * (2.0 + (arg - 2.0).ln())
+            } else {
+                vold - vt * (2.0 + (2.0 - arg).ln())
+            }
+        } else {
+            vt * (vnew / vt).ln()
+        }
+    } else if vnew < 0.0 {
+        let arg = if vold > 0.0 {
+            -vold - 1.0
+        } else {
+            2.0 * vold - 1.0
+        };
+        if vnew < arg { arg } else { vnew }
+    } else {
+        vnew
+    }
+}
+
+/// ngspice `DEVfetlim` (spicelib/devices/devsup.c), the oracle for
+/// `"fetlim"`.
+fn dev_fetlim(vnew: f64, vold: f64, vto: f64) -> f64 {
+    let vtsthi = (2.0 * (vold - vto)).abs() + 2.0;
+    let vtstlo = (vold - vto).abs() + 1.0;
+    let vtox = vto + 3.5;
+    let delv = vnew - vold;
+    let max = |a: f64, b: f64| if a > b { a } else { b };
+    let min = |a: f64, b: f64| if a < b { a } else { b };
+    if vold >= vto {
+        if vold >= vtox {
+            if delv <= 0.0 {
+                if vnew >= vtox {
+                    if -delv > vtstlo { vold - vtstlo } else { vnew }
+                } else {
+                    max(vnew, vto + 2.0)
+                }
+            } else if delv >= vtsthi {
+                vold + vtsthi
+            } else {
+                vnew
+            }
+        } else if delv <= 0.0 {
+            max(vnew, vto - 0.5)
+        } else {
+            min(vnew, vto + 4.0)
+        }
+    } else if delv <= 0.0 {
+        if -delv > vtsthi { vold - vtsthi } else { vnew }
+    } else {
+        let vtemp = vto + 0.5;
+        if vnew <= vtemp {
+            if delv > vtstlo { vold + vtstlo } else { vnew }
+        } else {
+            vtemp
+        }
+    }
+}
+
+/// ngspice `DEVlimvds`, the oracle for `"limvds"`.
+fn dev_limvds(vnew: f64, vold: f64) -> f64 {
+    if vold >= 3.5 {
+        if vnew > vold {
+            vnew.min(3.0 * vold + 2.0)
+        } else if vnew < 3.5 {
+            vnew.max(2.0)
+        } else {
+            vnew
+        }
+    } else if vnew > vold {
+        vnew.min(4.0)
+    } else {
+        vnew.max(-0.5)
+    }
+}
+
+/// ngspice `DEVlimitlog` away from NaN, the oracle for `"limitlog"`.
+fn dev_limitlog(new: f64, old: f64, tolerance: f64) -> f64 {
+    if new > old + tolerance {
+        old + tolerance + ((new - old) / tolerance).log10()
+    } else if new < old - tolerance {
+        old - tolerance - ((old - new) / tolerance).log10()
+    } else {
+        new
+    }
+}
+
+/// The built-in selectors are ngspice's `devsup.c` limiters, iterate for
+/// iterate, on both lowerings. A junction proposed at 1 V from a cold start
+/// climbs the logarithmic ramp (vt ln(vnew/vt) from zero, then
+/// vold + vt (2 + ln(arg - 2))); the reverse proposal is floored at
+/// -vold - 1 and then 2 vold - 1. Every point evaluates twice (value pass and
+/// stamp pass), so each `dc` applies a limiter twice.
+#[test]
+fn builtin_limiters_match_ngspice_across_lowerings() {
+    let biases = [1.0, 1.0, 1.0, 1.0, -5.0, -5.0, 8.0, 8.0, 3.0];
+    let names = ["vd", "vg", "vs", "vl"];
+    let trace = compare_routes_traced(
+        r#"
+`include "disciplines.vams"
+module route_builtin_limit(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real vt = 0.025;
+    parameter real vcrit = 0.6;
+    parameter real vto = 0.7;
+    real vd, vg, vs, vl;
+    analog begin
+        vd = $limit(V(p, n), "pnjlim", vt, vcrit);
+        vg = $limit(V(p, n), "fetlim", vto);
+        vs = $limit(V(p, n), "limvds");
+        vl = $limit(V(p, n), "limitlog", 0.5);
+        I(p, n) <+ 1.0e-14 * (exp(vd / vt) - 1.0) + 1.0e-6 * (vg + vs + vl);
+    end
+endmodule
+"#,
+        &[1, 0],
+        0,
+        |probe: &mut Probe| {
+            probe.dc("seed", &[0.0]);
+            probe.observe("seed", &names);
+            for (index, bias) in biases.into_iter().enumerate() {
+                probe.dc(&format!("dc{index}"), &[bias]);
+                probe.observe(&format!("dc{index}"), &names);
+            }
+        },
+    );
+    let oracles: [&dyn Fn(f64, f64) -> f64; 4] = [
+        &|vnew, vold| dev_pnjlim(vnew, vold, 0.025, 0.6),
+        &|vnew, vold| dev_fetlim(vnew, vold, 0.7),
+        &dev_limvds,
+        &|vnew, vold| dev_limitlog(vnew, vold, 0.5),
+    ];
+    for (name, oracle) in names.into_iter().zip(oracles) {
+        let observed = trace
+            .iter()
+            .filter(|entry| entry.key.ends_with(&format!(".var.{name}")))
+            .map(|entry| {
+                assert!(entry.text.is_none(), "{}: {:?}", entry.key, entry.text);
+                entry.value
+            })
+            .collect::<Vec<_>>();
+        let mut iterate = 0.0;
+        let mut expected = vec![iterate];
+        for bias in biases {
+            for _ in 0..2 {
+                iterate = oracle(bias, iterate);
+            }
+            expected.push(iterate);
+        }
+        assert_eq!(observed, expected, "{name} iterates");
+        assert!(
+            expected
+                .iter()
+                .zip([0.0].iter().chain(&biases))
+                .any(|(x, b)| x != b),
+            "{name}: the row must exercise limiting, not pass-through: {expected:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Environment and analysis queries
 // ---------------------------------------------------------------------------

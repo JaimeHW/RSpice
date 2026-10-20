@@ -498,25 +498,22 @@ endmodule
 }
 
 #[test]
-fn unknown_limit_string_selectors_use_the_default_algorithm() {
+fn unknown_limit_string_selectors_are_refused_by_name() {
     let source = r#"
 module fallback_limit(p,n);
  inout p,n; electrical p,n;
  analog I(p,n)<+$limit(V(p,n),"unavailable_vendor_algorithm",0.1);
 endmodule
 "#;
-    let plain = source.replace(",\"unavailable_vendor_algorithm\",0.1", "");
-    let mut fallback = compile_device("FALLBACK", source);
-    let mut reference = compile_device("DEFAULT", &plain);
-    for voltage in [0.0, 2.0, 2.0, -2.0, -2.0] {
-        fallback.update_voltages(&[voltage]);
-        reference.update_voltages(&[voltage]);
-        assert_eq!(
-            fallback.try_evaluate().unwrap(),
-            reference.try_evaluate().unwrap()
-        );
-        assert_eq!(fallback.limiter_converged(), reference.limiter_converged());
-    }
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_runtime(source, None)
+        .err()
+        .expect("a misspelled or vendor-only limiter must not compile as some other one")
+        .to_string();
+    assert!(
+        error.contains("$limit selector \"unavailable_vendor_algorithm\" names no built-in"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -707,9 +704,9 @@ fn default_limit_recovers_after_an_invalid_step_without_changing_history() {
 }
 
 #[test]
-fn default_limit_recommendations_preserve_argument_effects_and_guards() {
+fn builtin_limiter_arguments_keep_their_effects_and_guards() {
     let source = r#"
-module fallback_effect(p,n);
+module builtin_effect(p,n);
  inout p,n; electrical p,n;
  real observed,value;
  analog function real touch;
@@ -719,7 +716,7 @@ module fallback_effect(p,n);
  endfunction
  analog begin
   observed=0;
-  value=V(p,n)>0?$limit(V(p,n),"unavailable",touch(2,observed)):0;
+  value=V(p,n)>0?$limit(V(p,n),"fetlim",touch(2,observed)):0;
   I(p,n)<+observed;
  end
 endmodule

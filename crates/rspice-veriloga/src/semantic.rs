@@ -388,6 +388,8 @@ mod analyzed;
 pub use analog_events::AnalogEventBinding;
 mod array_coordinates;
 mod bounded_loop;
+mod builtin_limiters;
+use builtin_limiters::{BUILTIN_LIMITER_NAMES, BuiltinLimiter};
 mod constant_dependencies;
 pub(crate) mod defparam;
 mod digital;
@@ -6504,7 +6506,7 @@ impl SemanticAnalyzer {
                 if let Some(resolved) = self.lower_module_query_function(function)? {
                     return Ok(resolved);
                 }
-                let mut function = SystemFunction {
+                let function = SystemFunction {
                     name: function.name.clone(),
                     args: function
                         .args
@@ -6513,43 +6515,6 @@ impl SemanticAnalyzer {
                         .collect::<CompileResult<Vec<_>>>()?,
                     span: function.span,
                 };
-                if self.uses_default_limit_recommendation(&function) {
-                    // Preserve evaluation and name checking of recommendation
-                    // operands even though the chosen default does not use
-                    // their values. Literal metadata needs no runtime storage.
-                    for argument in &function.args[2..] {
-                        if matches!(argument, Expression::Number(_) | Expression::StringLit(_)) {
-                            continue;
-                        }
-                        self.local_counter += 1;
-                        let name: SmolStr =
-                            format!("__limit_argument{}", self.local_counter).into();
-                        let var_type = if self.infer_type(argument)? == ValueType::Integer {
-                            VarType::Integer
-                        } else {
-                            VarType::Real
-                        };
-                        self.register_function_temp(
-                            module,
-                            name.clone(),
-                            var_type,
-                            argument.span(),
-                        )?;
-                        self.analyze_assignment(
-                            &AssignmentStmt {
-                                target: LValue::Variable {
-                                    name,
-                                    span: argument.span(),
-                                },
-                                value: argument.clone(),
-                                span: argument.span(),
-                            },
-                            module,
-                            sink,
-                        )?;
-                    }
-                    function.args.truncate(1);
-                }
                 Expression::SystemFunction(function)
             }
             Expression::Binary(_) | Expression::Unary(_) => {
@@ -6894,13 +6859,10 @@ impl SemanticAnalyzer {
                         .iter()
                         .any(|arg| self.expression_contains_output_function_call(arg))
             }
-            Expression::SystemFunction(function) => {
-                self.uses_default_limit_recommendation(function)
-                    || function
-                        .args
-                        .iter()
-                        .any(|arg| self.expression_contains_output_function_call(arg))
-            }
+            Expression::SystemFunction(function) => function
+                .args
+                .iter()
+                .any(|arg| self.expression_contains_output_function_call(arg)),
             Expression::Binary(binary) => {
                 self.expression_contains_output_function_call(&binary.left)
                     || self.expression_contains_output_function_call(&binary.right)
@@ -7462,23 +7424,6 @@ impl SemanticAnalyzer {
                 self.validate_limit_call(f)?;
                 if let Some(limit) = self.lower_custom_limit_call(f)? {
                     return Ok(limit);
-                }
-                if f.name == "$limit"
-                    && let Some(Expression::StringLit(selector)) = f.args.get(1)
-                    && Self::builtin_limit_arity(&selector.value).is_none()
-                {
-                    // Validate the expressions in an unsupported recommendation
-                    // before lowering the documented default algorithm.
-                    let lowered = f
-                        .args
-                        .iter()
-                        .map(|arg| self.lower_expression(arg))
-                        .collect::<CompileResult<Vec<_>>>()?;
-                    return Ok(Expression::SystemFunction(SystemFunction {
-                        name: f.name.clone(),
-                        args: lowered.into_iter().take(1).collect(),
-                        span: f.span,
-                    }));
                 }
                 let args = f
                     .args
@@ -8074,7 +8019,10 @@ impl SemanticAnalyzer {
         // Typed built-ins carry one additional type/polarity argument; dummy
         // selectors retain the same shape for initialization bookkeeping even
         // though they intentionally leave the proposed value unchanged.
-        if let Some(expected) = Self::builtin_limit_arity(selector).filter(|_| !named_function) {
+        if let Some(expected) = BuiltinLimiter::named(selector)
+            .filter(|_| !named_function)
+            .map(BuiltinLimiter::arity)
+        {
             if function.args.len() != expected {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::ArgumentCountMismatch {
@@ -8089,10 +8037,16 @@ impl SemanticAnalyzer {
         }
 
         let Some(limiter) = self.user_functions.get(selector) else {
-            // Unknown string recommendations use the simulator's default
-            // algorithm (VAMS-2023 9.17.3). An identifier must name a function.
+            // A string names a built-in limiter or an analog function; one
+            // naming neither is a mistake, not a request for some default.
             if matches!(function.args.get(1), Some(Expression::StringLit(_))) {
-                return Ok(());
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(format!(
+                        "$limit selector \"{selector}\" names no built-in limiter \
+                         ({BUILTIN_LIMITER_NAMES}) and no analog function"
+                    )),
+                    function.span,
+                )));
             }
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UnknownFunction(selector.to_string()),
@@ -8178,25 +8132,11 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn uses_default_limit_recommendation(&self, function: &SystemFunction) -> bool {
-        function.name == "$limit"
-            && matches!(function.args.get(1), Some(Expression::StringLit(selector))
-                if Self::builtin_limit_arity(&selector.value).is_none()
-                    && !self.user_functions.contains_key(&selector.value))
-    }
-
-    /// Built-in string recommendations retained for Xyce model compatibility.
-    fn builtin_limit_arity(selector: &str) -> Option<usize> {
-        match selector {
-            "pnjlim" | "pnjlim_new" | "dummy" => Some(4),
-            "typedpnjlim" | "typedpnjlim_new" | "typeddummy" => Some(5),
-            _ => None,
-        }
-    }
-
     /// Lower a callback into a stateful operator with implicit proposed and
     /// previous values. Quoted custom selectors additionally accept Xyce's
-    /// `"typed"` marker and polarity expression as metadata, not formals.
+    /// `"typed"` marker and polarity expression as metadata, not formals. A
+    /// quoted built-in selector lowers to the same operator with the
+    /// built-in algorithm as its body.
     fn lower_custom_limit_call(
         &mut self,
         function: &SystemFunction,
@@ -8211,11 +8151,13 @@ impl SemanticAnalyzer {
             }
             _ => return Ok(None),
         };
-        if !named_function && Self::builtin_limit_arity(&selector).is_some() {
-            return Ok(None);
+        if !named_function && let Some(limiter) = BuiltinLimiter::named(&selector) {
+            return self
+                .lower_builtin_limit_call(function, &selector, limiter)
+                .map(Some);
         }
         if !self.user_functions.contains_key(&selector) {
-            // An unknown string recommendation selects the default algorithm.
+            // `validate_limit_call` has refused an unknown selector.
             return Ok(None);
         }
 

@@ -2366,6 +2366,8 @@ fn limit_accepts_numeric_and_supported_named_forms() {
                 x = $limit(V(p, n), "typedpnjlim_new", 0.026, 0.8, 1.0);
                 x = $limit(V(p, n), "dummy", 0.026, 0.8);
                 x = $limit(V(p, n), "typeddummy", 0.026, 0.8, 1.0);
+                x = $limit(V(p, n), "fetlim", 0.7);
+                x = $limit(V(p, n), "limvds");
                 I(p, n) <+ x;
             end
             "#,
@@ -2580,27 +2582,65 @@ fn source_defined_typed_limit_requires_type_metadata_and_forwarded_signature() {
 }
 
 #[test]
-fn named_limit_unknown_string_selectors_use_default_without_hiding_errors() {
+fn named_limit_unknown_string_selectors_are_refused_by_name() {
     for call in [
         "$limit(V(p,n), \"missing_limiter\")",
         "$limit(V(p,n), \"missing_limiter\", 0.5)",
+        "$limit(V(p,n), \"unknownlim\", 0.026, 0.8)",
     ] {
-        let module = analyze_one(&module_src(&format!("real x; analog x = {call};")));
+        let error = analyze(&module_src(&format!("real x; analog x = {call};")))
+            .expect_err("an unknown $limit selector is a mistake, not a default")
+            .to_string();
+        let selector = call.split('"').nth(1).unwrap();
+        assert!(
+            error.contains(&format!(
+                "$limit selector \"{selector}\" names no built-in limiter"
+            )) && error.contains("pnjlim"),
+            "{call}: {error}"
+        );
+    }
+}
+
+#[test]
+fn builtin_limiters_lower_to_the_named_limiter_operator() {
+    let module = analyze_one(&module_src(
+        r#"
+            real a, b, c, d;
+            analog begin
+                a = $limit(V(p, n), "pnjlim", 0.026, 0.8);
+                b = $limit(V(p, n), "fetlim", 0.7);
+                c = $limit(V(p, n), "limvds");
+                d = $limit(V(p, n), "typedpnjlim", 0.026, 0.8, -1);
+                I(p, n) <+ a + b + c + d;
+            end
+            "#,
+    ));
+    for (target, selector, typed) in [
+        ("a", "pnjlim", false),
+        ("b", "fetlim", false),
+        ("c", "limvds", false),
+        ("d", "typedpnjlim", true),
+    ] {
         let assignment = flat_assignments(&module)
             .into_iter()
-            .find(|assignment| assignment.target == "x")
+            .find(|assignment| assignment.target == target)
             .unwrap();
-        let Expression::SystemFunction(function) = &assignment.expression else {
-            panic!("default limiter must remain stateful");
+        let Expression::AnalogOperator(AnalogOperator::Limit {
+            selector: lowered,
+            type_metadata,
+            ..
+        }) = &assignment.expression
+        else {
+            panic!(
+                "{selector} must lower to the named limiter: {:?}",
+                assignment.expression
+            );
         };
-        assert_eq!(function.name, "$limit");
-        assert_eq!(function.args.len(), 1);
+        assert_eq!(
+            (lowered.as_str(), type_metadata.is_some()),
+            (selector, typed)
+        );
     }
-    crate::VerilogACompiler::default()
-        .compile(&module_src(
-            "real x; analog x = $limit(V(p,n), \"missing_limiter\", unknown_function(1));",
-        ))
-        .expect_err("unused recommendation arguments still require valid expressions");
 }
 
 #[test]

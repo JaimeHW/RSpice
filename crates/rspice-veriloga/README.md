@@ -119,6 +119,13 @@ which a compile runs on a thread of its own sized for those bounds.
   resolve. The integration rule for `ddt`/`idt` is not a compile-time choice:
   the engine supplies companion coefficients per timestep, so one compiled
   model runs under backward Euler or Gear-2/trapezoidal.
+- **Limiting**: `$limit(probe, selector, args)` takes an analog function or a
+  built-in limiter by name: ngspice's `"pnjlim"`, `"fetlim"`, `"limvds"` and
+  `"limitlog"` (the `devsup.c` functions iterate for iterate, except that
+  `limitlog` leaves a NaN temperature NaN), and Xyce's `"pnjlim_new"`,
+  `"dummy"` and their `typed` forms with a trailing polarity. Any other
+  selector is refused by name. `$limit(probe)` and `$limit(probe, step)` use
+  RSpice's own per-iteration step limiter.
 - **Tables**: `$table_model(x, data, control)` reads a table file, an inline
   string table (rows of numbers; `#` or `!` starts a comment) or inline x/y
   number pairs. The optional control string follows Verilog-AMS LRM 2.4
