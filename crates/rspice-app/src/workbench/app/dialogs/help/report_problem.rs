@@ -20,10 +20,14 @@ pub(crate) const SUPPORT_ADDRESS: &str = "hello@rspice.app";
 /// The adapter the window renders with, recorded once when it is created.
 static GRAPHICS_ADAPTER: OnceLock<String> = OnceLock::new();
 
-/// Record the graphics adapter for the dialog to report. The first record
-/// wins: the window keeps one adapter for its lifetime.
-pub(crate) fn record_graphics_adapter(info: &eframe::egui_wgpu::wgpu::AdapterInfo) {
-    let _ = GRAPHICS_ADAPTER.set(graphics_summary(&info.name, info.backend, info.device_type));
+/// Record the graphics adapter the window renders with, when it renders
+/// through wgpu, for the dialog to report. The first record wins: the window
+/// keeps one adapter for its lifetime.
+pub(crate) fn record_graphics_adapter(render_state: Option<&eframe::egui_wgpu::RenderState>) {
+    if let Some(render_state) = render_state {
+        let info = render_state.adapter.get_info();
+        let _ = GRAPHICS_ADAPTER.set(graphics_summary(&info.name, info.backend, info.device_type));
+    }
 }
 
 fn graphics_summary(
