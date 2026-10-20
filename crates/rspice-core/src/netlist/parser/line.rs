@@ -5,15 +5,22 @@ use super::*;
 
 /// Strip inline comments using the selected SPICE dialect's comment rules.
 ///
-/// Ngspice accepts token-leading `$` and `//` as inline comment markers.
-/// Xyce's field scanner does not: both spellings are legal in a standalone
-/// DEV/NODE field, so only semicolon comments are removed in Xyce mode.  The
-/// caller supplies the dialect policy explicitly so preprocessing and parsing
-/// use the same lexical contract.
+/// Ngspice accepts token-leading `$` and `//` as inline comment markers, and
+/// reads a line that opens with `#` as a comment. Xyce's field scanner does
+/// not: both spellings are legal in a standalone DEV/NODE field, so only
+/// semicolon comments are removed in Xyce mode.  The caller supplies the
+/// dialect policy explicitly so preprocessing and parsing use the same
+/// lexical contract.
 pub(super) fn strip_inline_semicolon_comment_with_non_semicolon_comments(
     line: &str,
     allow_non_semicolon_comments: bool,
 ) -> &str {
+    // ngspice rewrites a leading `#` to `*` (inp_stripcomments_line in
+    // inpcom.c), and reads an indented one the same way.
+    if allow_non_semicolon_comments && line.trim_start().starts_with('#') {
+        return &line[..0];
+    }
+
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escaped = false;
@@ -41,13 +48,18 @@ pub(super) fn strip_inline_semicolon_comment_with_non_semicolon_comments(
                 return &line[..idx];
             }
             '$' if allow_non_semicolon_comments && !in_single_quote && !in_double_quote => {
-                // Xyce permits `$` inside a DEV/NODE name (for example
-                // `V1$`).  A dollar starts an inline comment only when it is
-                // itself the beginning of a token; a contiguous `$` belongs
-                // to the preceding field and must remain available to the
-                // lexer/parser.
-                if prev_char.is_none_or(char::is_whitespace)
-                    && chars.peek().is_none_or(|(_, next)| next.is_whitespace())
+                // ngspice starts a comment at a `$` that opens the line or
+                // follows a space, comma or tab, whatever comes after it
+                // (inp_stripcomments_line in inpcom.c): `1k $load` is a
+                // comment. Xyce permits `$` inside a DEV/NODE name (for
+                // example `V1$`), so a `$` contiguous with the preceding
+                // field still belongs to it. PSpice reserves `$<letter>_`
+                // names for global and digital nodes (`$G_DPWR`, `$D_HI`,
+                // `$N_0001`); ngspice reads those only in its PSpice mode,
+                // and since the digital primitives that use them parse here
+                // in the same deck, they remain names.
+                if prev_char.is_none_or(|prev| prev.is_whitespace() || prev == ',')
+                    && !is_pspice_reserved_node_name(&line[idx + ch.len_utf8()..])
                 {
                     return &line[..idx];
                 }
@@ -64,6 +76,13 @@ pub(super) fn strip_inline_semicolon_comment_with_non_semicolon_comments(
         prev_char = Some(ch);
     }
     line
+}
+
+/// Whether the text after a `$` spells a PSpice reserved node name: a letter
+/// and an underscore, as in `$G_DPWR`, `$D_NC` and Capture's `$N_0001`.
+fn is_pspice_reserved_node_name(after_dollar: &str) -> bool {
+    let mut chars = after_dollar.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic()) && chars.next() == Some('_')
 }
 
 /// Every directive spelling that compiles a Verilog-A source into a deck.
@@ -1136,6 +1155,55 @@ mod tests {
                 .trim_end(),
             "V// // 0 1"
         );
+    }
+
+    /// ngspice ends a card at a `$` that follows a space, comma or tab, or
+    /// opens the line, whatever comes after it, and reads a `#` line as a
+    /// comment (inp_stripcomments_line in inpcom.c). Only `$ ` with a space
+    /// after it used to count, so `1k $load` failed on a stray `$` field.
+    #[test]
+    fn dollar_comments_need_only_a_separator_before_them() {
+        for (line, kept) in [
+            ("R1 1 0 1k $load", "R1 1 0 1k"),
+            ("C1 1 0 1p $Cload", "C1 1 0 1p"),
+            ("R1 1 0 1k,$x", "R1 1 0 1k,"),
+            ("R2 1 0 2k\t$1.5", "R2 1 0 2k"),
+            ("$comment at line start", ""),
+            ("  $indented comment", ""),
+            ("#hash comment", ""),
+            ("  #indented hash", ""),
+            ("R4 1 0 8k$x", "R4 1 0 8k$x"),
+            ("V1 1 0 \"a $b\"", "V1 1 0 \"a $b\""),
+            (
+                "U1 DFF(1) $G_DPWR $G_DGND $D_HI c k d q $D_NC dly",
+                "U1 DFF(1) $G_DPWR $G_DGND $D_HI c k d q $D_NC dly",
+            ),
+            ("R5 $N_0001 0 1k $capture net", "R5 $N_0001 0 1k"),
+        ] {
+            assert_eq!(
+                strip_inline_semicolon_comment_with_non_semicolon_comments(line, true).trim_end(),
+                kept,
+                "{line}"
+            );
+        }
+        for line in ["R1 1 0 1k $load", "#node 1 0 1"] {
+            assert_eq!(
+                strip_inline_semicolon_comment_with_non_semicolon_comments(line, false),
+                line,
+                "Xyce keeps {line}"
+            );
+        }
+
+        // ngspice 46 on audit decks e2.cir and cm3.cir: I(V1) = -1 mA.
+        let netlist = crate::Netlist::parse(
+            "dollar comment\nV1 1 0 1\nR1 1 0 1k $load\nC1 1 0 1p $Cload\n#comment\n.op\n.end\n",
+        )
+        .unwrap();
+        let result = crate::engine::Engine::default()
+            .run_dc_op(&netlist)
+            .unwrap();
+        let current = result.branch_current_named("V1").unwrap();
+        assert!((current + 1.0e-3).abs() < 1.0e-12, "I(V1) = {current}");
     }
 
     #[test]
