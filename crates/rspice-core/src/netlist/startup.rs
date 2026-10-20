@@ -426,6 +426,55 @@ fn compiled_module_instances(elements: &[super::Element]) -> HashSet<String> {
         .collect()
 }
 
+/// The "ignored undefined node(s)" warnings parse time could not give: a
+/// startup node kept as the internal node of a compiled-module instance (see
+/// [`startup_node_may_exist`]) that the built circuit, which has compiled the
+/// module, does not have (`resolves` is false), one warning per directive.
+pub(crate) fn unresolved_module_startup_warnings(
+    netlist: &Netlist,
+    elements: &[super::Element],
+    resolves: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let module_instances = compiled_module_instances(elements);
+    if module_instances.is_empty() {
+        return Vec::new();
+    }
+    let mut warnings = Vec::new();
+    for record in &netlist.startup_directives {
+        if matches!(record.disposition, StartupDirectiveDisposition::Ignored(_)) {
+            continue;
+        }
+        let mut undefined = record
+            .entries
+            .iter()
+            .filter(|entry| !matches!(entry.disposition, StartupDirectiveDisposition::Ignored(_)))
+            .flat_map(|entry| {
+                entry
+                    .qualified_nodes
+                    .iter()
+                    .chain(entry.qualified_references.iter().flatten())
+            })
+            .filter(|node| {
+                canonical_symbol(node)
+                    .rsplit_once('.')
+                    .is_some_and(|(instance, _)| module_instances.contains(instance))
+                    && !resolves(node)
+            })
+            .map(|node| canonical_symbol(node))
+            .collect::<Vec<_>>();
+        if undefined.is_empty() {
+            continue;
+        }
+        sort_dedup_case_insensitive(&mut undefined);
+        warnings.push(format!(
+            "{} ignored undefined node(s): {}",
+            record.kind.as_spice_directive(),
+            undefined.join(", ")
+        ));
+    }
+    warnings
+}
+
 /// Whether `node` is in the parsed namespace, or may be an internal node of a
 /// compiled module instance. A Verilog-A module's internal nodes exist only
 /// once it is compiled, and the output publishes them as `x1.x` (and accepts

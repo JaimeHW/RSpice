@@ -106,6 +106,7 @@ pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
 pub use spectre_statistics::*;
+pub(crate) use startup::unresolved_module_startup_warnings;
 pub use startup::{validate_startup_directives, validate_startup_directives_with_abort};
 pub use topology::{
     CapacitorIcDcMode, ConnectivityAnalysisError, ConnectivityDiagnostics, DcGroundPathDiagnostics,

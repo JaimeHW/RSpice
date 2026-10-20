@@ -10378,6 +10378,20 @@ impl Engine {
             log::debug!("deferring voltage-source topology error to analysis: {error}");
         }
 
+        // A startup card on a compiled module's internal node passed parse
+        // time unchecked; the module's nodes exist now.
+        for warning in crate::netlist::unresolved_module_startup_warnings(
+            netlist,
+            &flat_elements,
+            |node| {
+                Self::node_lookup_candidates(netlist, node)
+                    .iter()
+                    .any(|candidate| circuit.get_node_by_name(candidate).is_some())
+            },
+        ) {
+            log::warn!("{warning}");
+        }
+
         check_build_abort(abort)?;
         if let Some(capture) = &mut circuit.parameter_direction {
             capture.owners = flat_elements;

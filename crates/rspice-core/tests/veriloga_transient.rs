@@ -33,6 +33,44 @@ fn deck_path(path: &std::path::Path) -> String {
     path.display().to_string().replace('\\', "/")
 }
 
+static WARNINGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+struct WarningCapture;
+
+impl log::Log for WarningCapture {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            WARNINGS
+                .lock()
+                .expect("warning capture")
+                .push(record.args().to_string());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// The warnings logged so far that mention `needle` (tests run in parallel,
+/// so each names something only it uses).
+fn warnings_mentioning(needle: &str) -> Vec<String> {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        log::set_logger(&WarningCapture).expect("the warning capture installs");
+        log::set_max_level(log::LevelFilter::Warn);
+    });
+    WARNINGS
+        .lock()
+        .expect("warning capture")
+        .iter()
+        .filter(|warning| warning.contains(needle))
+        .cloned()
+        .collect()
+}
+
 #[cfg(all(
     feature = "veriloga-native",
     any(target_arch = "x86_64", target_arch = "aarch64")
@@ -2431,5 +2469,62 @@ fn startup_cards_reach_a_verilog_a_internal_node_under_both_spellings() {
             );
         }
     }
+    let _ = std::fs::remove_file(model);
+}
+
+/// A startup card naming a node a compiled module does not have still warns.
+///
+/// Parse time keeps `.ic v(xmis.y)` because `xmis` is a Verilog-A instance
+/// whose internal nodes exist only once the module is compiled; the module
+/// has `x`, not `y`. The build, which has compiled it, warns that the card
+/// was ignored, as parse time does for any other undefined node, while the
+/// card on `x` applies without a warning.
+#[test]
+fn a_startup_card_on_a_missing_verilog_a_internal_node_warns() {
+    let model = write_model(
+        "internal_ic_missing",
+        "`include \"disciplines.vams\"\n\
+         module icmis(p, o); inout p; output o; electrical p, o, x;\n\
+         analog begin\n\
+         \x20 I(x) <+ V(x) / 1k + ddt(1n * V(x));\n\
+         \x20 I(p) <+ V(p) / 1k;\n\
+         \x20 V(o) <+ V(x);\n\
+         end\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* misspelled internal-node startup cards\n\
+         xmis p o icmis\n\
+         .va \"{}\" icmis\n\
+         .ic v(xmis.x)=0.5 v(xmis.y)=0.5\n\
+         .nodeset v(xmis:y)=0.25\n\
+         .end\n",
+        deck_path(&model)
+    ))
+    .expect("parse");
+    let before = warnings_mentioning("XMIS.");
+    let result = Engine::default()
+        .run_tran(&netlist, 1e-6, 10e-9)
+        .expect("transient");
+    let warnings = warnings_mentioning("XMIS.")
+        .into_iter()
+        .skip(before.len())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        warnings,
+        [
+            ".IC ignored undefined node(s): XMIS.Y",
+            ".NODESET ignored undefined node(s): XMIS.Y"
+        ],
+        "the cards on the missing node warn, once each"
+    );
+    let x = result
+        .try_voltage_waveform_named("xmis.x")
+        .expect("v(xmis.x) is published");
+    assert!(
+        (x[0] - 0.5).abs() <= 1e-9,
+        "the card on the existing node applies: v(xmis.x) starts at {}",
+        x[0]
+    );
     let _ = std::fs::remove_file(model);
 }
