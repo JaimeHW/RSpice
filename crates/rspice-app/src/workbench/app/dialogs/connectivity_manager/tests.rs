@@ -163,7 +163,7 @@ fn the_declaration_line_reads_off_the_declaration() {
 
 /// Every node the manager publishes, after enough passes for the surface to
 /// settle. Access updates are incremental, so the latest of each is kept.
-fn rendered_nodes(app: &mut RSpiceApp) -> HashMap<egui::accesskit::NodeId, egui::accesskit::Node> {
+fn rendered_nodes(mut app: RSpiceApp) -> HashMap<egui::accesskit::NodeId, egui::accesskit::Node> {
     let ctx = Context::default();
     ctx.enable_accesskit();
     crate::ui::Theme::default().apply(&ctx);
@@ -218,7 +218,7 @@ fn surface_edges(
 fn the_manager_rows_start_on_the_dialog_edge_without_kickers() {
     let mut app = RSpiceApp::test_instance();
     open_connectivity_manager(&mut app.state);
-    let nodes = rendered_nodes(&mut app);
+    let nodes = rendered_nodes(app);
     let (left, _) = surface_edges(&nodes, PRIMARY);
     let signal = nodes
         .values()
@@ -245,7 +245,7 @@ fn creating_a_bus_is_a_command_form_without_constant_rows() {
     let mut app = RSpiceApp::test_instance();
     open_connectivity_manager(&mut app.state);
     app.state.dialogs.connectivity_manager.page = ConnectivityManagerPage::CreateBus;
-    let nodes = rendered_nodes(&mut app);
+    let nodes = rendered_nodes(app);
     let (left, right) = surface_edges(&nodes, CREATE_BUS_PRIMARY);
     assert!(
         right - left <= 424.0,
