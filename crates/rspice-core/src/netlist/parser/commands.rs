@@ -8743,4 +8743,42 @@ mod tests {
             save.dependencies
         );
     }
+
+    /// `X` is HSPICE's mega and RSpice's. ngspice 46 knows no `x`: on
+    /// `R1 a 0 1x`, `.param p={2x}` and a subckt default `q=4x` it draws
+    /// 1 A, 0.5 A and 0.25 A from 1 V sources. The ngspice dialect reads
+    /// them so; the others keep mega.
+    #[test]
+    fn the_x_suffix_is_mega_except_in_the_ngspice_dialect() {
+        let deck = "x suffix\n.param p={2x}\nV1 a 0 1\nR1 a 0 1x\nX1 c s\n\
+                    .subckt s n q=4x\nR3 n 0 {q}\n.ends\n.end\n";
+        for (dialect, unit) in [
+            (None, 1e6),
+            (Some(crate::config::SpiceDialect::BestAvailable), 1e6),
+            (Some(crate::config::SpiceDialect::Ngspice), 1.0),
+        ] {
+            let netlist = Netlist::parse_with_options(
+                deck,
+                crate::netlist::NetlistParseOptions {
+                    spice_dialect: dialect,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(netlist.params.get("p"), Some(2.0 * unit), "{dialect:?}");
+            let resistance = |elements: &[crate::netlist::Element], name: &str| {
+                elements
+                    .iter()
+                    .find(|element| element.name.eq_ignore_ascii_case(name))
+                    .and_then(|element| match &element.kind {
+                        crate::netlist::ElementKind::Resistor { value, .. } => Some(*value),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("{dialect:?}: no resistor {name}"))
+            };
+            assert_eq!(resistance(&netlist.elements, "R1"), unit, "{dialect:?}");
+            let flattened = crate::netlist::flattener::flatten_netlist(&netlist).unwrap();
+            assert_eq!(resistance(&flattened, "X1.R3"), 4.0 * unit, "{dialect:?}");
+        }
+    }
 }

@@ -5564,6 +5564,10 @@ impl Engine {
         transient_stop_time: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<BuiltRfCircuit, SimulationError> {
+        // Expressions elaborated here are read in the deck's dialect.
+        let _suffixes = crate::spice_number::read_suffixes_as_ngspice(
+            netlist.parse_dialect == crate::config::SpiceDialect::Ngspice,
+        );
         // An engine holding a transient state elaborates the transient's own
         // topology, so the circuit a small-signal analysis builds and the
         // state it linearizes around are one elaboration.

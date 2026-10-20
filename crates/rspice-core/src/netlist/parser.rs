@@ -901,6 +901,9 @@ fn parse_netlist_impl(
         )?
         .unwrap_or_default(),
     };
+    let _suffixes = crate::spice_number::read_suffixes_as_ngspice(
+        state.spice_dialect == crate::config::SpiceDialect::Ngspice,
+    );
     let mut temperatures = match replay.temperatures {
         Some(temperatures) => temperatures,
         None => prescan_temperature_options_with_abort(

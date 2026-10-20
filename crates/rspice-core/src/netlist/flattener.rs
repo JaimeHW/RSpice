@@ -585,6 +585,10 @@ impl<'a> Flattener<'a> {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Element>, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
+        // Deferred subcircuit expressions are read in the deck's dialect.
+        let _suffixes = crate::spice_number::read_suffixes_as_ngspice(
+            netlist.parse_dialect == crate::config::SpiceDialect::Ngspice,
+        );
         if let Err(error) = validate_mutual_inductor_references(netlist) {
             self.handle_branch_error(error.into(), "mutual-inductor validation")?;
         }
@@ -5946,6 +5950,7 @@ mod tests {
             ]
         );
     }
+
 
     /// A root K card may cite a `.param` declared later in the file, as in
     /// ngspice; it used to fail as an undefined parameter.

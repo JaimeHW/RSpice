@@ -5,6 +5,30 @@
 
 use crate::Value;
 
+thread_local! {
+    /// Set while a deck is read in the ngspice dialect (see
+    /// [`read_suffixes_as_ngspice`]).
+    static NGSPICE_SUFFIXES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Restores the suffix reading in force before [`read_suffixes_as_ngspice`].
+pub(crate) struct SuffixReading(bool);
+
+impl Drop for SuffixReading {
+    fn drop(&mut self) {
+        NGSPICE_SUFFIXES.with(|cell| cell.set(self.0));
+    }
+}
+
+/// Read engineering suffixes as ngspice does on this thread for as long as
+/// the returned guard lives. The only difference is `X`: HSPICE (and so
+/// RSpice's own reading) takes it as mega, while ngspice's number readers,
+/// INPevaluate (inpeval.c) and numparam's parseunit (xpressn.c), know no `x`
+/// and ignore it with the rest of the unit word, so `1x` is 1.
+pub(crate) fn read_suffixes_as_ngspice(ngspice: bool) -> SuffixReading {
+    SuffixReading(NGSPICE_SUFFIXES.with(|cell| cell.replace(ngspice)))
+}
+
 /// Resolve the SPICE engineering suffix at the head of `text`.
 ///
 /// Returns the multiplier the suffix names together with how many characters
@@ -114,7 +138,13 @@ fn parse_suffix(chars: &[char]) -> (SuffixScale, usize) {
         'N' => (SuffixScale::Nano, 1),
         'P' => (SuffixScale::Pico, 1),
         'F' => (SuffixScale::Femto, 1),
-        'X' if chars.len() == 1 || !chars[1].is_ascii_alphabetic() => (SuffixScale::Mega, 1),
+        // HSPICE's mega, which RSpice keeps; the ngspice dialect reads it as
+        // the unit word ngspice takes it for.
+        'X' if (chars.len() == 1 || !chars[1].is_ascii_alphabetic())
+            && !NGSPICE_SUFFIXES.with(std::cell::Cell::get) =>
+        {
+            (SuffixScale::Mega, 1)
+        }
         'V' | 'A' | 'S' => (SuffixScale::Unit, 1),
         _ => (SuffixScale::Unit, 0),
     }
