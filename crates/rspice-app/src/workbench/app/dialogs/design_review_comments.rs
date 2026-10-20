@@ -20,6 +20,12 @@ use crate::workbench::app_state::AppState;
 
 const TITLE: &str = "Design review comments";
 const PRIMARY: &str = "Post reply";
+/// Why "Post reply" is disabled: there is no thread to reply to.
+const NO_THREAD_SELECTED: &str = "Select a review thread to reply to";
+/// Why "Post reply" is disabled: the reply is empty.
+const NO_REPLY_WRITTEN: &str = "Write a reply to post it";
+/// Where every row of the body starts, as the title and footer do.
+const BODY_INSET: i8 = 12;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum DesignReviewStatusFilter {
@@ -205,6 +211,9 @@ impl RSpiceApp {
             .size(DialogSize::SimulationWorkflow)
             .initial_height(610.0)
             .flush_body()
+            // The filter band reaches the frame's right edge; a withheld
+            // scroll gutter left bare surface beside it.
+            .overlay_scrollbar()
             .ghost("Close")
             .primary_enabled(primary_enabled)
             .primary_on_enter(false)
@@ -229,6 +238,10 @@ impl RSpiceApp {
                 "Review update cannot continue",
                 error,
             );
+        } else if selected.is_none() {
+            dialog = dialog.hint(NO_THREAD_SELECTED);
+        } else if !primary_enabled {
+            dialog = dialog.hint(NO_REPLY_WRITTEN);
         }
 
         let notes = self.state.schematic.document().design_notes.clone();
@@ -487,8 +500,9 @@ fn review_body(
     let mut action = ReviewAction::None;
     Frame::new()
         .fill(t.color.bg_panel)
-        .inner_margin(egui::Margin::symmetric(10, 7))
+        .inner_margin(egui::Margin::symmetric(BODY_INSET, 8))
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 let open_count = notes
                     .iter()
@@ -544,98 +558,108 @@ fn review_body(
             });
         });
 
-    let available = ui.available_size();
-    let left_width = (available.x * 0.38).clamp(250.0, 360.0);
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(left_width, available.y.max(360.0)),
-            Layout::top_down(Align::Min),
-            |ui| {
-                Frame::new()
-                    .fill(t.color.bg_inset)
-                    .stroke(Stroke::new(1.0, t.color.border))
-                    .show(ui, |ui| {
-                        ScrollArea::vertical()
-                            .id_salt("design-review-thread-list")
-                            .auto_shrink([false, false])
+    // With nothing to list, the body says so in one block on its left edge:
+    // a list pane and a detail pane, both empty, were 460 pt of bare shell.
+    if !notes
+        .iter()
+        .any(|note| note_visible(note, dialog, current_revision))
+    {
+        Frame::NONE
+            .inner_margin(egui::Margin::same(BODY_INSET))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(NO_THREADS)
+                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                        .color(t.color.text),
+                );
+                ui.add_space(2.0);
+                ui.label(
+                    RichText::new(
+                        "Change the status or revision scope, or create an anchored review comment.",
+                    )
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                );
+            });
+        return action;
+    }
+    // The thread list beside the selected thread, inside the body's inset.
+    Frame::NONE
+        .inner_margin(egui::Margin::same(BODY_INSET))
+        .show(ui, |ui| {
+            let available = ui.available_size();
+            let left_width = (available.x * 0.38).clamp(250.0, 360.0);
+            ui.horizontal(|ui| {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(left_width, available.y.max(360.0)),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        Frame::new()
+                            .fill(t.color.bg_inset)
+                            .stroke(Stroke::new(1.0, t.color.border))
                             .show(ui, |ui| {
-                                let mut visible = 0;
-                                for note in notes.iter().filter(|note| {
-                                    note_visible(note, dialog, current_revision)
-                                }) {
-                                    visible += 1;
-                                    if review_thread_row(
+                                ScrollArea::vertical()
+                                    .id_salt("design-review-thread-list")
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        for note in notes.iter().filter(|note| {
+                                            note_visible(note, dialog, current_revision)
+                                        }) {
+                                            if review_thread_row(
+                                                ui,
+                                                note,
+                                                dialog.selected_note_id == Some(note.id),
+                                            )
+                                            .clicked()
+                                            {
+                                                action = ReviewAction::Select(note.id);
+                                            }
+                                        }
+                                    });
+                            });
+                    },
+                );
+                ui.allocate_ui_with_layout(
+                    Vec2::new(
+                        (available.x - left_width - 8.0).max(320.0),
+                        available.y.max(360.0),
+                    ),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        Frame::new()
+                            .fill(t.color.bg_panel)
+                            .stroke(Stroke::new(1.0, t.color.border))
+                            .inner_margin(egui::Margin::same(10))
+                            .show(ui, |ui| {
+                                if let Some(note) = selected {
+                                    action = review_thread_detail(
                                         ui,
                                         note,
-                                        dialog.selected_note_id == Some(note.id),
-                                    )
-                                    .clicked()
-                                    {
-                                        action = ReviewAction::Select(note.id);
-                                    }
-                                }
-                                if visible == 0 {
-                                    ui.add_space(18.0);
-                                    ui.vertical_centered(|ui| {
+                                        evidence,
+                                        write_allowed,
+                                        dialog,
+                                    );
+                                } else {
+                                    ui.centered_and_justified(|ui| {
                                         ui.label(
-                                            RichText::new("No review threads match this filter")
+                                            RichText::new("Select a review thread")
                                                 .font(theme::sans(
                                                     tokens::FS_0,
                                                     FontWeight::SemiBold,
                                                 ))
-                                                .color(t.color.text),
-                                        );
-                                        ui.label(
-                                            RichText::new(
-                                                "Change status or revision scope, or create an anchored review comment.",
-                                            )
-                                            .font(theme::sans(
-                                                tokens::FS_0,
-                                                FontWeight::Regular,
-                                            ))
-                                            .color(t.color.text_dim),
+                                                .color(t.color.text_dim),
                                         );
                                     });
                                 }
                             });
-                    });
-            },
-        );
-        ui.allocate_ui_with_layout(
-            Vec2::new((available.x - left_width - 8.0).max(320.0), available.y.max(360.0)),
-            Layout::top_down(Align::Min),
-            |ui| {
-                Frame::new()
-                    .fill(t.color.bg_panel)
-                    .stroke(Stroke::new(1.0, t.color.border))
-                    .inner_margin(egui::Margin::same(10))
-                    .show(ui, |ui| {
-                        if let Some(note) = selected {
-                            action = review_thread_detail(
-                                ui,
-                                note,
-                                evidence,
-                                write_allowed,
-                                dialog,
-                            );
-                        } else {
-                            ui.centered_and_justified(|ui| {
-                                ui.label(
-                                    RichText::new("Select a review thread")
-                                        .font(theme::sans(
-                                            tokens::FS_0,
-                                            FontWeight::SemiBold,
-                                        ))
-                                        .color(t.color.text_dim),
-                                );
-                            });
-                        }
-                    });
-            },
-        );
-    });
+                    },
+                );
+            });
+        });
     action
 }
+
+const NO_THREADS: &str = "No review threads match this filter";
 
 fn review_thread_row(ui: &mut Ui, note: &DesignNote, selected: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -1347,5 +1371,56 @@ mod tests {
         assert!(!note_visible(&note, &dialog, None));
         assert!(!note_visible(&note, &dialog, Some("different")));
         assert!(note_visible(&note, &dialog, Some("abcdef012345")));
+    }
+
+    /// With no thread to show, the body says so in one block and the dialog
+    /// is as tall as that block, not a list pane and a detail pane both
+    /// empty; and the disabled Post reply says why.
+    #[test]
+    fn an_empty_review_is_one_block_and_post_reply_says_why() {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        open_design_review_comments(&mut app.state);
+        // Access updates are incremental: keep the latest of every node.
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..4 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| app.render_design_review_comments_dialog(ctx),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        // The modal's own node is the whole screen. The surface is centred
+        // on it, so twice its footer's distance below the centre bounds it.
+        // The header's close button shares the footer button's name; the
+        // footer's is the lower.
+        let footer = nodes
+            .values()
+            .filter(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Close")
+            })
+            .filter_map(egui::accesskit::Node::bounds)
+            .map(|bounds| bounds.y1)
+            .fold(f64::MIN, f64::max);
+        let height = 2.0 * (footer - 450.0);
+        assert!(height < 320.0, "an empty review is about {height} pt tall");
+        let says = |text: &str| {
+            nodes.values().any(|node| {
+                node.label().is_some_and(|label| label.contains(text))
+                    || node.value().is_some_and(|value| value.contains(text))
+            })
+        };
+        assert!(says(NO_THREADS));
+        assert!(says(NO_THREAD_SELECTED), "Post reply does not say why");
     }
 }
