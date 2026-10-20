@@ -6,8 +6,9 @@
 //! `write` then `parse` is the identity.
 //!
 //! The second half is the other end of the same claim — that the projection
-//! from an event history chooses a `$timescale` at which every event time is
-//! an exact tick, and refuses rather than quantising when there is none.
+//! from an event history rounds each event time to the nearest femtosecond,
+//! chooses the coarsest `$timescale` at which every rounded time is a tick,
+//! and refuses only two values of one signal that would share a tick.
 
 use proptest::prelude::*;
 
@@ -239,23 +240,26 @@ fn the_timescale_makes_every_event_time_an_exact_tick() {
     }
 }
 
+/// An analog solution dates an A/D crossing between two femtoseconds nearly
+/// always; the dump writes it at the nearest one rather than refusing the run.
 #[test]
-fn a_time_between_two_femtoseconds_is_refused_rather_than_quantised() {
-    let error = event_vcd_document("tran", &[digital_trace("clk", &[0.0, 1.5e-15])], &[], &[])
-        .expect_err("half a femtosecond has no exact tick at any VCD timescale");
-    assert_eq!(
-        error,
-        EventProjectionError::InexactTime {
-            node: "clk".to_string(),
-            time: 1.5e-15,
-        }
-    );
-
-    // A tenth of a femtosecond is the same refusal, not a rounding.
-    assert!(matches!(
-        event_vcd_document("tran", &[digital_trace("clk", &[0.0, 1.1e-15])], &[], &[]),
-        Err(EventProjectionError::InexactTime { .. })
-    ));
+fn a_time_between_two_femtoseconds_is_written_at_the_nearest_one() {
+    for (time, tick) in [
+        (1.4e-15, 1),
+        (1.6e-15, 2),
+        (1.885_714_285_714_285_7e-7, 188_571_429),
+    ] {
+        let document = event_vcd_document("tran", &[digital_trace("clk", &[0.0, time])], &[], &[])
+            .expect("every time has a nearest femtosecond");
+        assert_eq!(document.timescale.to_string(), "1 fs", "{time}");
+        let ticks: Vec<u64> = document.signals[0]
+            .changes
+            .iter()
+            .map(|change| change.tick)
+            .collect();
+        assert_eq!(ticks, [0, tick], "{time}");
+        assert_eq!(round_trip(&document), document);
+    }
 }
 
 #[test]
@@ -393,8 +397,12 @@ proptest! {
     }
 }
 
+/// Rounding may not put two values one signal held at different recorded
+/// times on one tick, where the dump could not order them: a scalar, and a
+/// bus whose members change at the two times. Different signals changing at
+/// two times that share a tick are simply simultaneous there.
 #[test]
-fn distinct_recorded_times_cannot_become_simultaneous() {
+fn one_signal_cannot_hold_two_values_on_one_tick() {
     let first = 1e-9_f64;
     let next = first.next_up();
     let bus = DigitalBusDeclaration::new(
@@ -405,19 +413,28 @@ fn distinct_recorded_times_cannot_become_simultaneous() {
         DigitalBusSource::Import,
     )
     .unwrap();
-    let cases = [
+    let collisions = [
         event_vcd_document("tran", &[digital_trace("a", &[first, next])], &[], &[]),
         event_vcd_document(
             "tran",
             &[digital_trace("a", &[first]), digital_trace("b", &[next])],
             &[],
-            &[],
+            &[bus],
         ),
+    ];
+    for result in collisions {
+        assert!(
+            matches!(result, Err(EventProjectionError::TimeCollision { .. })),
+            "{result:?}"
+        );
+    }
+
+    let separate = [
         event_vcd_document(
             "tran",
             &[digital_trace("a", &[first]), digital_trace("b", &[next])],
             &[],
-            &[bus],
+            &[],
         ),
         event_vcd_document(
             "tran",
@@ -432,11 +449,12 @@ fn distinct_recorded_times_cannot_become_simultaneous() {
             &[],
         ),
     ];
-    for result in cases {
-        assert!(
-            matches!(result, Err(EventProjectionError::TimeCollision { .. })),
-            "{result:?}"
-        );
+    for result in separate {
+        let document = result.expect("two signals may share a tick");
+        assert_eq!(document.timescale.to_string(), "1 ns");
+        for signal in &document.signals {
+            assert_eq!(signal.changes[0].tick, 1);
+        }
     }
 }
 

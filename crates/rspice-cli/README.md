@@ -430,13 +430,16 @@ column's quantity type.
 
 A Value Change Dump of the transient's event timelines: one `wire` per XSPICE
 digital node and one `real` per real event node under `$scope module events`,
-at the times the events happened rather than on the analysis grid. The
-`$timescale` is the coarsest period that keeps every event time an exact
-integer tick, so a run whose edges land on nanoseconds is written `1 ns`. A
-time that is not a whole number of femtoseconds, event times that would merge
-on the tick grid, and a duration that no exact timescale can span are refused
-rather than quantised. VCD has four bit states and no drive strength, so the
-level survives and the XSPICE strength band does not.
+at the times the events happened rather than on the analysis grid. Each event
+time is rounded to the nearest femtosecond, VCD's finest tick, so an A/D
+crossing the analog solution dated between two femtoseconds moves by less
+than half of one. The `$timescale` is the coarsest period that keeps every
+rounded time an integer tick, so a run whose edges land on nanoseconds is
+written `1 ns`. Two values of one signal at different times that would share
+one tick, and a duration that no timescale can span, are refused rather than
+merged. VCD has
+four bit states and no drive strength, so the level survives and the XSPICE
+strength band does not.
 
 A declared digital bus, such as a vector discrete port of a mixed Verilog-AMS
 module, is written as one `$var wire N` named `bus [msb:lsb]`, bits most

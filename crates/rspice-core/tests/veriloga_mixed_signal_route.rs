@@ -6874,3 +6874,71 @@ fn a_mixed_checkpoint_round_trips_an_assign_fed_by_an_a_d_input() {
     );
     assert_eq!(after(levels(&resumed, "ys")), expected);
 }
+
+/// The analog solution dates an A/D crossing between two femtoseconds nearly
+/// always, and the input net's trace keeps that instant. The VCD export
+/// refused the whole run over it, after simulating, because no timescale
+/// held the instant exactly; it writes each edge at the nearest femtosecond.
+#[test]
+fn a_mixed_run_dumps_crossings_dated_between_two_femtoseconds() {
+    let model = ModelFile::new(
+        "crossing_reader",
+        "`timescale 1ns/1ps\n\
+         module rx(in, o);\n\
+         input in; output o; reg o;\n\
+         initial o = 0;\n\
+         always @(in) o = in;\n\
+         endmodule\n",
+    );
+    let result = run(
+        &format!(
+            "* A/D crossings between two femtoseconds\n\
+             v1 in 0 pwl(0 0 10n 0 17n 2.9 20n 2.9 27n 0)\nx1 in o rx\nr1 o 0 1k\n\
+             .hdl \"{}\" module=rx\n.end\n",
+            model.deck_path()
+        ),
+        30e-9,
+        1e-9,
+    );
+    let changes: Vec<f64> = result
+        .digital_trace_named("in")
+        .expect("the input net is traced")
+        .iter()
+        .skip(1)
+        .map(|point| point.time)
+        .collect();
+    assert_eq!(changes.len(), 2, "one rise and one fall: {changes:?}");
+    assert!(
+        changes
+            .iter()
+            .any(|time| (time * 1e15 - (time * 1e15).round()).abs() > 1e-3),
+        "a crossing between two femtoseconds: {changes:?}"
+    );
+
+    let document = rspice_core::execution::event_vcd_document(
+        "tran",
+        &result.digital_traces,
+        &result.real_traces,
+        &result.digital_buses,
+    )
+    .expect("the run dumps");
+    assert_eq!(document.timescale.to_string(), "1 fs");
+    let input = document
+        .signals
+        .iter()
+        .find(|signal| {
+            signal
+                .variables
+                .iter()
+                .any(|variable| variable.name.eq_ignore_ascii_case("in"))
+        })
+        .expect("the input net is dumped");
+    let ticks: Vec<u64> = input.changes.iter().skip(1).map(|change| change.tick).collect();
+    assert_eq!(
+        ticks,
+        changes
+            .iter()
+            .map(|time| (time * 1e15).round() as u64)
+            .collect::<Vec<_>>()
+    );
+}

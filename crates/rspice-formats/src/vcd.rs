@@ -266,12 +266,12 @@ mod tests {
     }
 
     #[test]
-    fn an_event_time_no_timescale_carries_is_refused_rather_than_quantised() {
+    fn a_change_rounded_onto_another_value_is_refused_rather_than_moved() {
         let error = encode_result_vcd(&analysis(Some(events(
             vec![digital("d", &[(0.0, 0), (1.5e-16, 1)])],
             Vec::new(),
         ))))
-        .expect_err("half a femtosecond has no tick");
+        .expect_err("both values round to tick zero");
         assert!(matches!(&error, VcdWriteError::Projection(_)));
         assert!(
             std::error::Error::source(&error)

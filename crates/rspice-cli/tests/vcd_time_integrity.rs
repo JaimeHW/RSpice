@@ -127,8 +127,11 @@ fn positive_sub_femtosecond_events_are_never_moved_to_zero() {
         std::fs::write(&output, "predecessor").unwrap();
         let converted = convert(&input, &output, "vcd", &[]);
         assert_eq!(converted.status.code(), Some(1), "{time}: {converted:?}");
+        // Rounded to the nearest femtosecond, the change lands on the tick
+        // zero already holds a different value at, and is refused there
+        // rather than moved.
         assert!(
-            String::from_utf8_lossy(&converted.stderr).contains("femtoseconds"),
+            String::from_utf8_lossy(&converted.stderr).contains("share femtosecond tick 0"),
             "{converted:?}"
         );
         assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
@@ -208,22 +211,17 @@ fn incompatible_timeline_range_and_resolution_preserve_the_destination() {
     assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
 }
 
+/// Two values one signal held at different times that round onto one tick
+/// have no order in a dump and are refused; two signals changing at those
+/// times are simultaneous on that tick.
 #[test]
-fn distinct_event_times_must_not_merge_even_across_signals() {
+fn one_signal_cannot_hold_two_values_on_one_tick() {
     let dir = test_dir("vcd_distinct_time_collision");
     let input = dir.join("source.json");
     let output = dir.join("events.vcd");
     let first = 1e-9_f64;
     let next = first.next_up();
-    for signals in [
-        serde_json::json!([
-            {"name": "D(a)", "type": "digital", "values": [0.0, 1.0, 0.0]}
-        ]),
-        serde_json::json!([
-            {"name": "D(a)", "type": "digital", "values": [0.0, 1.0, 1.0]},
-            {"name": "D(b)", "type": "digital", "values": [0.0, 0.0, 1.0]}
-        ]),
-    ] {
+    let write = |signals: serde_json::Value| {
         std::fs::write(
             &input,
             serde_json::json!({
@@ -233,14 +231,31 @@ fn distinct_event_times_must_not_merge_even_across_signals() {
             .to_string(),
         )
         .unwrap();
-        std::fs::write(&output, "predecessor").unwrap();
-        let converted = convert(&input, &output, "vcd", &[]);
-        assert_eq!(converted.status.code(), Some(1), "{converted:?}");
-        assert!(
-            String::from_utf8_lossy(&converted.stderr).contains("distinct event times"),
-            "{converted:?}"
-        );
-        assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+    };
+
+    write(serde_json::json!([
+        {"name": "D(a)", "type": "digital", "values": [0.0, 1.0, 0.0]}
+    ]));
+    std::fs::write(&output, "predecessor").unwrap();
+    let converted = convert(&input, &output, "vcd", &[]);
+    assert_eq!(converted.status.code(), Some(1), "{converted:?}");
+    assert!(
+        String::from_utf8_lossy(&converted.stderr).contains("cannot order the two values"),
+        "{converted:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+
+    write(serde_json::json!([
+        {"name": "D(a)", "type": "digital", "values": [0.0, 1.0, 1.0]},
+        {"name": "D(b)", "type": "digital", "values": [0.0, 0.0, 1.0]}
+    ]));
+    let converted = convert(&input, &output, "vcd", &[]);
+    assert!(converted.status.success(), "{converted:?}");
+    let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+    assert_eq!(document.timescale.to_string(), "1 ns");
+    for signal in &document.signals {
+        let ticks: Vec<u64> = signal.changes.iter().map(|change| change.tick).collect();
+        assert_eq!(ticks, [0, 1], "{signal:?}");
     }
 }
 

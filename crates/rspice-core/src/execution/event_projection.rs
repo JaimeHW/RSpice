@@ -8,8 +8,8 @@
 //!
 //! Two things are decided here rather than in [`crate::io::vcd`], because a
 //! format module never names a result type: how a twelve-state
-//! [`DigitalValue`] becomes one VCD bit, and which `$timescale` the times can
-//! be written at without being quantised.
+//! [`DigitalValue`] becomes one VCD bit, and which `$timescale` the times are
+//! written at once each is rounded to the femtosecond.
 //!
 //! # Buses
 //!
@@ -38,7 +38,7 @@ use crate::io::vcd::{
     is_writable_variable_name,
 };
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 /// Femtoseconds in one second: the finest tick VCD's `$timescale` can name.
 const FEMTOSECONDS_PER_SECOND: f64 = 1e15;
@@ -67,23 +67,11 @@ pub enum EventProjectionError {
         node: String,
     },
 
-    /// The time is not a whole number of femtoseconds, so no `$timescale`
-    /// carries it exactly.
+    /// Two values one signal held at different recorded times would land on
+    /// one femtosecond tick, where the dump could not say which came first.
     #[error(
-        "node '{node}' has an event at {time} s, which is not a whole number of femtoseconds; \
-         no VCD timescale carries it without quantising"
-    )]
-    InexactTime {
-        /// The node whose event time was rejected.
-        node: String,
-        /// The rejected time, in seconds.
-        time: Value,
-    },
-
-    /// Distinct recorded times would become simultaneous on the tick grid.
-    #[error(
-        "node '{node}' has an event at {time} s that shares femtosecond tick {tick} with \
-         an event at {other_time} s; VCD export would merge distinct event times"
+        "node '{node}' changes at {time} s and at {other_time} s, which share femtosecond tick \
+         {tick}; a VCD dump cannot order the two values"
     )]
     TimeCollision {
         /// The node whose event time was rejected.
@@ -296,15 +284,18 @@ pub fn digital_value_from_vcd_bit(bit: VcdBit) -> DigitalValue {
 /// # Timescale
 ///
 /// Times are seconds; VCD counts integer ticks. Each event time is rounded to
-/// the nearest femtosecond, and the `$timescale` chosen is the coarsest whose
-/// period divides every one of them — so a run whose events all land on
-/// nanoseconds is written `1 ns` with small tick numbers rather than `1 fs`
-/// with large ones. A time that is not a whole number of femtoseconds has no
-/// exact tick at any scale and is refused as
-/// [`EventProjectionError::InexactTime`]: quantising it silently would move an
-/// edge, and an event dump that moves edges is worse than no dump.
-/// Relative floating-point roundoff is tolerated only when it does not merge
-/// distinct recorded times, including times belonging to different signals.
+/// the nearest femtosecond, VCD's finest tick, and the `$timescale` chosen is
+/// the coarsest whose period divides every one of them — so a run whose events
+/// all land on nanoseconds is written `1 ns` with small tick numbers rather
+/// than `1 fs` with large ones. An event an analog solution dated between two
+/// femtoseconds (an A/D threshold crossing, nearly always) moves by less than
+/// half of one. An HDL net's trace is already on the design's own tick, the
+/// instant the HDL saw each change at. What rounding must not do is merge two
+/// different values one signal held at different recorded times onto one tick,
+/// where the dump could not say which came first: that is refused as
+/// [`EventProjectionError::TimeCollision`]. Values recorded at one identical
+/// time are delta changes and are kept in order, and different signals may
+/// share a tick.
 /// The chosen period must also keep every tick within `u64`; otherwise the
 /// combination of duration and event spacing is refused as
 /// [`EventProjectionError::TimescaleRange`]. Intermediate femtoseconds use
@@ -329,10 +320,9 @@ pub fn event_vcd_document(
     )?;
 
     let mut pending: Vec<PendingSignal> = Vec::new();
-    let mut event_times = HashMap::new();
     let mut claimed: BTreeSet<String> = BTreeSet::new();
     for bus in digital_buses {
-        pending.push(bus_signal(bus, digital_traces, &mut event_times)?);
+        pending.push(bus_signal(bus, digital_traces)?);
         claimed.extend(
             bus.members
                 .iter()
@@ -346,18 +336,16 @@ pub fn event_vcd_document(
             continue;
         }
         let mut points = Vec::new();
-        let mut previous: Option<Value> = None;
+        let mut times = SignalTimes::default();
         for point in &trace.points {
-            let femtoseconds = event_femtoseconds(
+            let placed = times.place(&trace.node_name, point.time)?;
+            push_change(
+                &mut points,
                 &trace.node_name,
                 point.time,
-                &mut previous,
-                &mut event_times,
-            )?;
-            points.push((
-                femtoseconds,
+                placed,
                 VcdValue::Logic(vec![digital_value_to_vcd_bit(point.value)]),
-            ));
+            )?;
         }
         pending.push(PendingSignal {
             name: checked_node_name(&trace.node_name)?,
@@ -368,21 +356,22 @@ pub fn event_vcd_document(
     }
     for trace in real_traces {
         let mut points = Vec::new();
-        let mut previous: Option<Value> = None;
+        let mut times = SignalTimes::default();
         for point in &trace.points {
-            let femtoseconds = event_femtoseconds(
-                &trace.node_name,
-                point.time,
-                &mut previous,
-                &mut event_times,
-            )?;
+            let placed = times.place(&trace.node_name, point.time)?;
             if !point.value.is_finite() {
                 return Err(EventProjectionError::NonFiniteValue {
                     node: trace.node_name.clone(),
                     time: point.time,
                 });
             }
-            points.push((femtoseconds, VcdValue::Real(point.value)));
+            push_change(
+                &mut points,
+                &trace.node_name,
+                point.time,
+                placed,
+                VcdValue::Real(point.value),
+            )?;
         }
         pending.push(PendingSignal {
             name: checked_node_name(&trace.node_name)?,
@@ -392,7 +381,6 @@ pub fn event_vcd_document(
         });
     }
 
-    drop(event_times);
     let timescale = choose_timescale(pending.iter().flat_map(|signal| &signal.points))?;
     let period = u128::from(timescale.femtoseconds());
     let mut document = VcdDocument::new(timescale);
@@ -444,13 +432,12 @@ fn bus_reference(bus: &DigitalBusDeclaration) -> String {
 fn bus_signal(
     bus: &DigitalBusDeclaration,
     digital_traces: &[DigitalTrace],
-    event_times: &mut HashMap<u128, Value>,
 ) -> Result<PendingSignal, EventProjectionError> {
     let reference = bus_reference(bus);
     let name = checked_node_name(&reference)?;
 
     // Each member's own times are validated under the member's own name, so a
-    // time that no timescale carries exactly is reported against the node that
+    // time out of order or out of range is reported against the node that
     // recorded it rather than against the bus it was folded into.
     let mut histories: Vec<Vec<(Value, u8)>> = Vec::with_capacity(bus.members.len());
     for member in &bus.members {
@@ -462,9 +449,9 @@ fn bus_signal(
                 bus: bus.name.clone(),
                 member: member.clone(),
             })?;
-        let mut previous: Option<Value> = None;
+        let mut times = SignalTimes::default();
         for point in &trace.points {
-            event_femtoseconds(&trace.node_name, point.time, &mut previous, event_times)?;
+            times.place(&trace.node_name, point.time)?;
         }
         histories.push(
             trace
@@ -480,13 +467,13 @@ fn bus_signal(
         .map(|points| BusMemberHistory { points })
         .collect();
     let mut points = Vec::new();
-    let mut previous: Option<Value> = None;
+    let mut times = SignalTimes::default();
     let events = bus_events(&members).map_err(|source| EventProjectionError::BusTooLarge {
         bus: bus.name.clone(),
         source,
     })?;
     for (time, codes) in events {
-        let femtoseconds = event_femtoseconds(&reference, time, &mut previous, event_times)?;
+        let placed = times.place(&reference, time)?;
         let bits = codes
             .into_iter()
             // Every code here is `event_code` of a value read two statements
@@ -495,7 +482,7 @@ fn bus_signal(
             // run has said about it.
             .map(|code| event_code_to_vcd_bit(code).unwrap_or(VcdBit::Unknown))
             .collect();
-        points.push((femtoseconds, VcdValue::Logic(bits)));
+        push_change(&mut points, &reference, time, placed, VcdValue::Logic(bits))?;
     }
 
     Ok(PendingSignal {
@@ -776,26 +763,70 @@ fn checked_node_name(node: &str) -> Result<String, EventProjectionError> {
     }
 }
 
-/// Round one event time to whole femtoseconds, refusing anything that is not
-/// already one.
-///
-/// Permit the relative rounding error of binary64 event times, but retain
-/// the low integer bits when scaling them. Above 2^53 femtoseconds, the
-/// product alone can move an edge by whole ticks or merge distinct times.
-fn event_femtoseconds(
+/// One signal's event times, placed on the femtosecond grid in order.
+#[derive(Default)]
+struct SignalTimes {
+    /// The previous point's recorded time and tick.
+    last: Option<(Value, u128)>,
+}
+
+impl SignalTimes {
+    /// Place `time` on the grid: its tick, and the previous point's time when
+    /// that point is a different recorded time on the same tick.
+    fn place(
+        &mut self,
+        node: &str,
+        time: Value,
+    ) -> Result<(u128, Option<Value>), EventProjectionError> {
+        if self.last.is_some_and(|(earlier, _)| time < earlier) {
+            return Err(EventProjectionError::UnorderedTime {
+                node: node.to_string(),
+                time,
+            });
+        }
+        let tick = event_femtoseconds(node, time)?;
+        let merged = self
+            .last
+            .filter(|&(earlier, earlier_tick)| earlier_tick == tick && earlier != time)
+            .map(|(earlier, _)| earlier);
+        self.last = Some((time, tick));
+        Ok((tick, merged))
+    }
+}
+
+/// Append one change to a signal's points. A change merged onto the tick of a
+/// different value recorded at another time is refused; one that repeats the
+/// value already there carries nothing and is dropped.
+fn push_change(
+    points: &mut Vec<(u128, VcdValue)>,
     node: &str,
     time: Value,
-    previous: &mut Option<Value>,
-    event_times: &mut HashMap<u128, Value>,
-) -> Result<u128, EventProjectionError> {
-    if previous.is_some_and(|earlier| time < earlier) {
-        return Err(EventProjectionError::UnorderedTime {
+    (tick, merged): (u128, Option<Value>),
+    value: VcdValue,
+) -> Result<(), EventProjectionError> {
+    if let Some(other_time) = merged
+        && let Some((_, last)) = points.last()
+    {
+        if *last == value {
+            return Ok(());
+        }
+        return Err(EventProjectionError::TimeCollision {
             node: node.to_string(),
             time,
+            other_time,
+            tick,
         });
     }
-    *previous = Some(time);
+    points.push((tick, value));
+    Ok(())
+}
 
+/// Round one event time to the nearest whole femtosecond.
+///
+/// Retain the low integer bits when scaling: above 2^53 femtoseconds the
+/// binary64 product alone can move an edge by whole ticks, so the exact
+/// multiplication residual is folded back in integer arithmetic.
+fn event_femtoseconds(node: &str, time: Value) -> Result<u128, EventProjectionError> {
     if !time.is_finite() || time < 0.0 {
         return Err(EventProjectionError::UnrepresentableTime {
             node: node.to_string(),
@@ -815,15 +846,6 @@ fn event_femtoseconds(
     // so it is not lost again when added to a large binary64 timestamp.
     let residual = time.mul_add(FEMTOSECONDS_PER_SECOND, -integral);
     let correction = residual.round_ties_even();
-    // An absolute tolerance would admit positive sub-femtosecond events as
-    // zero. Only allow error proportional to the timestamp's arithmetic.
-    let tolerance = scaled * 8.0 * f64::EPSILON;
-    if (residual - correction).abs() > tolerance {
-        return Err(EventProjectionError::InexactTime {
-            node: node.to_string(),
-            time,
-        });
-    }
     let tick = u128::try_from(integral as i128 + correction as i128).map_err(|_| {
         EventProjectionError::UnrepresentableTime {
             node: node.to_string(),
@@ -834,16 +856,6 @@ fn event_femtoseconds(
         return Err(EventProjectionError::UnrepresentableTime {
             node: node.to_string(),
             time,
-        });
-    }
-    if let Some(other_time) = event_times.insert(tick, time)
-        && other_time != time
-    {
-        return Err(EventProjectionError::TimeCollision {
-            node: node.to_string(),
-            time,
-            other_time,
-            tick,
         });
     }
     Ok(tick)
@@ -1097,52 +1109,96 @@ mod tests {
         }
     }
 
+    /// An A/D crossing is dated wherever the analog solution put it, nearly
+    /// never on a whole femtosecond; it is written at the nearest one.
     #[test]
-    fn a_sub_femtosecond_time_is_refused_by_name() {
-        let error = event_vcd_document(
+    fn a_time_between_femtoseconds_takes_the_nearest_one() {
+        let document = event_vcd_document(
             "tran",
             &[digital_trace(
                 "clk",
-                &[(0.0, DigitalValue::zero()), (1.5e-15, DigitalValue::one())],
+                &[
+                    (0.0, DigitalValue::zero()),
+                    (1.4e-15, DigitalValue::one()),
+                    (2.6e-15, DigitalValue::zero()),
+                    (1.885_714_285_714_285_7e-7, DigitalValue::one()),
+                ],
             )],
             &[],
             &[],
         )
-        .expect_err("half a femtosecond has no exact tick");
-        assert_eq!(
-            error,
-            EventProjectionError::InexactTime {
-                node: "clk".to_string(),
-                time: 1.5e-15
-            }
-        );
-        assert!(error.to_string().contains("clk"), "{error}");
-        assert!(error.to_string().contains("femtoseconds"), "{error}");
+        .expect("every time has a nearest femtosecond");
+        assert_eq!(document.timescale.to_string(), "1 fs");
+        let ticks: Vec<u64> = document.signals[0]
+            .changes
+            .iter()
+            .map(|change| change.tick)
+            .collect();
+        assert_eq!(ticks, [0, 1, 3, 188_571_429]);
     }
 
+    /// Rounding may not merge two different values one signal held at
+    /// different times onto one tick, where the dump could not order them; a
+    /// repeat of the value already there is no change. Other signals may share
+    /// the tick.
     #[test]
-    fn positive_times_below_one_femtosecond_are_never_rounded_to_zero() {
+    fn a_change_rounded_onto_a_different_value_is_refused_by_name() {
         for time in [Value::from_bits(1), 1e-30, 1e-25, 0.25e-15] {
             for real in [false, true] {
-                let result = if real {
-                    event_vcd_document("tran", &[], &[real_trace("out", &[(time, 1.0)])], &[])
+                let collided = if real {
+                    event_vcd_document(
+                        "tran",
+                        &[],
+                        &[real_trace("out", &[(0.0, 0.0), (time, 1.0)])],
+                        &[],
+                    )
                 } else {
                     event_vcd_document(
                         "tran",
-                        &[digital_trace("out", &[(time, DigitalValue::one())])],
+                        &[digital_trace(
+                            "out",
+                            &[(0.0, DigitalValue::zero()), (time, DigitalValue::one())],
+                        )],
                         &[],
                         &[],
                     )
                 };
+                let error = collided.expect_err("two values on one tick have no order");
                 assert_eq!(
-                    result.expect_err("a positive time must not become tick zero"),
-                    EventProjectionError::InexactTime {
+                    error,
+                    EventProjectionError::TimeCollision {
                         node: "out".to_owned(),
                         time,
+                        other_time: 0.0,
+                        tick: 0,
                     }
                 );
+                assert!(error.to_string().contains("out"), "{error}");
             }
+            let repeated = event_vcd_document(
+                "tran",
+                &[
+                    digital_trace(
+                        "out",
+                        &[(0.0, DigitalValue::one()), (time, DigitalValue::one())],
+                    ),
+                    digital_trace("other", &[(time, DigitalValue::one())]),
+                ],
+                &[],
+                &[],
+            )
+            .expect("a repeated value and another signal's change both fit");
+            assert_eq!(document_ticks(&repeated, 0), [0]);
+            assert_eq!(document_ticks(&repeated, 1), [0]);
         }
+    }
+
+    fn document_ticks(document: &VcdDocument, signal: usize) -> Vec<u64> {
+        document.signals[signal]
+            .changes
+            .iter()
+            .map(|change| change.tick)
+            .collect()
     }
 
     #[test]

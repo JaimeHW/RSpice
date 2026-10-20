@@ -437,21 +437,25 @@ mod tests {
         assert!(text.contains("b11 !"), "{text}");
     }
 
-    /// An event time no timescale carries is refused rather than quantised,
-    /// and the refusal reaches this surface as the core's own words.
+    /// A change that rounds onto the femtosecond tick another value already
+    /// holds is refused rather than moved, and the refusal reaches this
+    /// surface as the core's own words.
     #[test]
-    fn an_inexact_event_time_is_refused_rather_than_moved() {
+    fn a_change_rounded_onto_another_value_is_refused_rather_than_moved() {
         let error = event_document_bytes(
             &[digital(
                 "d",
-                &[(1.5e-16, DigitalState::One, DigitalStrength::Strong)],
+                &[
+                    (0.0, DigitalState::Zero, DigitalStrength::Strong),
+                    (1.5e-16, DigitalState::One, DigitalStrength::Strong),
+                ],
             )],
             &[],
             &[],
         )
-        .expect_err("half a femtosecond has no tick at any scale");
+        .expect_err("both values round to tick zero");
         assert!(error.contains("cannot be dumped exactly"), "{error}");
-        assert!(error.contains("femtoseconds"), "{error}");
+        assert!(error.contains("share femtosecond tick 0"), "{error}");
     }
 
     /// The Python accessor the event-only refusal recommends is one this

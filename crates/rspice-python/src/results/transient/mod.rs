@@ -619,9 +619,9 @@ impl PyTransientResult {
     ///     str: The complete dump
     ///
     /// Raises:
-    ///     ValueError: If the transient captured no event node, or an event
-    ///         time is not a whole number of femtoseconds and no timescale
-    ///         carries it without moving an edge
+    ///     ValueError: If the transient captured no event node, or two
+    ///         values of one node at different times round to the same
+    ///         femtosecond tick
     fn to_vcd(&self, py: Python<'_>) -> PyResult<String> {
         events::vcd_text(py, &self.inner)
     }
