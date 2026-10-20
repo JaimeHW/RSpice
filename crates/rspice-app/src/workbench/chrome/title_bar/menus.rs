@@ -4,9 +4,7 @@
 
 use super::*;
 use menu_entries::MenuEntry::Separator;
-use menu_entries::{
-    MenuContext, MenuEntry, MenuRow, command, command_as, palette_scope,
-};
+use menu_entries::{MenuContext, MenuEntry, MenuRow, command, command_as, palette_scope};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum ApplicationMenu {
@@ -466,9 +464,9 @@ pub(super) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
         Command::PlacePin => WorkbenchIcon::Pin,
         Command::PlaceProbe => WorkbenchIcon::Probe,
         Command::PlaceText => WorkbenchIcon::Text,
-        Command::ProjectLauncher
-        | Command::ImportResultDataset
-        | Command::ManageSourceDocument => WorkbenchIcon::Folder,
+        Command::ProjectLauncher | Command::ImportResultDataset | Command::ManageSourceDocument => {
+            WorkbenchIcon::Folder
+        }
         Command::NewProject | Command::NewCell | Command::AddReportPage => WorkbenchIcon::Add,
         Command::Save
         | Command::SymbolSave

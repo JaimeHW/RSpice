@@ -186,7 +186,11 @@ pub(super) fn step_menu_row_focus(
 }
 
 /// Typing a row's first letters moves the focus to it.
-pub(super) fn typeahead_menu_row_focus(ctx: &Context, rows: &[MenuRowRecord], focused_index: usize) {
+pub(super) fn typeahead_menu_row_focus(
+    ctx: &Context,
+    rows: &[MenuRowRecord],
+    focused_index: usize,
+) {
     let Some(query) = menu_typeahead_query(ctx) else {
         return;
     };

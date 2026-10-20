@@ -771,9 +771,9 @@ impl Command {
             Self::ToggleResultsSplit => Some(workbench.split_with_results),
             Self::ToggleFocusMode => Some(workbench.focus_mode),
             Self::ToggleFullScreen => Some(workbench.full_screen_presentation),
-            Self::ToggleLinkedCursors => Some(
-                crate::workbench::documents::result_document::linked_cursors(&app.state),
-            ),
+            Self::ToggleLinkedCursors => {
+                Some(crate::workbench::documents::result_document::linked_cursors(&app.state))
+            }
             _ => None,
         }
     }

@@ -1199,7 +1199,10 @@ fn switching_rows_are_checked_while_their_state_is_on() {
         Command::ToggleLinkedCursors,
     ];
     for command in switches {
-        assert!(command.checked(&app).is_some(), "{command:?} reads no state");
+        assert!(
+            command.checked(&app).is_some(),
+            "{command:?} reads no state"
+        );
     }
     assert_eq!(Command::Save.checked(&app), None);
     assert_eq!(Command::ResetLayout.checked(&app), None);
@@ -1329,7 +1332,10 @@ fn the_account_button_shows_a_person_until_an_identity_names_someone() {
     let mut app = title_test_app();
     assert_eq!(account_initials(&app), None);
     let (texts, person_marks) = painted(None);
-    assert!(texts.is_empty(), "no initials without an identity: {texts:?}");
+    assert!(
+        texts.is_empty(),
+        "no initials without an identity: {texts:?}"
+    );
 
     app.state.license = Some(crate::services::license::LicenseInfo {
         licensed_to: "Ada Lovelace".to_owned(),
@@ -1407,7 +1413,10 @@ fn the_keyboard_walks_greyed_rows_and_enter_on_one_does_nothing() {
     }
     assert_eq!(
         walked,
-        shown.iter().map(|(label, _)| label.clone()).collect::<Vec<_>>()
+        shown
+            .iter()
+            .map(|(label, _)| label.clone())
+            .collect::<Vec<_>>()
     );
 
     let _ = frame(vec![title_key_event(Key::Home)]);
@@ -1465,22 +1474,10 @@ fn a_menu_of_greyed_rows_still_answers_its_keys() {
 
     Popup::open_id(&ctx, popup);
     let _ = press(Vec::new());
-    assert_eq!(
-        press(key(Key::ArrowDown)).as_deref(),
-        Some(labels[0])
-    );
-    assert_eq!(
-        press(key(Key::ArrowDown)).as_deref(),
-        Some(labels[1])
-    );
-    assert_eq!(
-        press(key(Key::End)).as_deref(),
-        labels.last().copied()
-    );
-    assert_eq!(
-        press(key(Key::Home)).as_deref(),
-        Some(labels[0])
-    );
+    assert_eq!(press(key(Key::ArrowDown)).as_deref(), Some(labels[0]));
+    assert_eq!(press(key(Key::ArrowDown)).as_deref(), Some(labels[1]));
+    assert_eq!(press(key(Key::End)).as_deref(), labels.last().copied());
+    assert_eq!(press(key(Key::Home)).as_deref(), Some(labels[0]));
     let letter = labels[1]
         .chars()
         .next()
@@ -1499,10 +1496,7 @@ fn a_menu_of_greyed_rows_still_answers_its_keys() {
         found,
         "typing {letter:?} in {labels:?}"
     );
-    assert_eq!(
-        press(key(Key::Escape)).as_deref(),
-        Some(menu.label())
-    );
+    assert_eq!(press(key(Key::Escape)).as_deref(), Some(menu.label()));
     assert!(!Popup::is_id_open(&ctx, popup), "Escape closes {menu:?}");
 }
 
@@ -1615,9 +1609,15 @@ fn every_menu_is_reachable_on_the_bar_at_every_desktop_width() {
             })
             .map(|(_, _, rect)| rect.left())
             .fold(f32::INFINITY, f32::min);
-        assert!(cluster_left.is_finite(), "{width} pt: no right-hand buttons");
+        assert!(
+            cluster_left.is_finite(),
+            "{width} pt: no right-hand buttons"
+        );
         for pair in triggers.windows(2) {
-            assert!(pair[0].right() <= pair[1].left() + 0.5, "{width} pt: {pair:?}");
+            assert!(
+                pair[0].right() <= pair[1].left() + 0.5,
+                "{width} pt: {pair:?}"
+            );
         }
         let last = triggers.last().expect("eleven menus");
         assert!(
@@ -1681,7 +1681,10 @@ fn the_compact_menu_button_reaches_every_menu_on_touch_rows() {
                     label == menu.label() && is_menu_row(*role) && rect.top() > 30.0
                 })
                 .unwrap_or_else(|| panic!("{size:?}: the Menu button has no {menu:?} row"));
-            assert!((row.2.height() - MENU_TOUCH_ROW_HEIGHT).abs() < 0.01, "{row:?}");
+            assert!(
+                (row.2.height() - MENU_TOUCH_ROW_HEIGHT).abs() < 0.01,
+                "{row:?}"
+            );
         }
 
         for menu in ALL_MENUS {
@@ -1739,7 +1742,8 @@ fn render_the_menu_bar_and_its_menus_for_review() {
     std::fs::create_dir_all(&directory).expect("raster output directory");
     let stderr = std::io::stderr();
     let mut report = stderr.lock();
-    let popup_of = |key: MenuTriggerKey| Id::new(("workbench.title_menu.trigger", key)).with("popup");
+    let popup_of =
+        |key: MenuTriggerKey| Id::new(("workbench.title_menu.trigger", key)).with("popup");
     for (mode, mode_name) in [
         (crate::ui::tokens::Mode::Light, "light"),
         (crate::ui::tokens::Mode::Dark, "dark"),
@@ -1750,40 +1754,46 @@ fn render_the_menu_bar_and_its_menus_for_review() {
         };
         // Drives the title bar through its frames, `input` giving each
         // frame's events after any setup it does on the context.
-        let mut write = |name: &str,
-                         size: egui::Vec2,
-                         rows: usize,
-                         input: &dyn Fn(&Context, usize) -> Vec<egui::Event>| {
-            let ctx = Context::default();
-            ctx.set_os(egui::os::OperatingSystem::Nix);
-            theme.apply(&ctx);
-            // No fade: a popup mid-fade is not what a reader sees.
-            ctx.all_styles_mut(|style| style.animation_time = 0.0);
-            let mut app = title_test_app();
-            let mut output = None;
-            for pass in 0..8 {
-                let events = input(&ctx, pass);
-                output = Some(ctx.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| {
-                        let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
-                        show(ui, &mut app, layout);
-                    },
-                ));
-            }
-            let canvas =
-                crate::ui::raster::rasterize(&ctx, size, &output.expect("eight passes ran"));
-            let path = directory.join(format!("{name}-{mode_name}.png"));
-            std::fs::write(&path, canvas.png(rows)).expect("write the render");
-            writeln!(report, "{}", path.display()).ok();
-        };
+        let mut write =
+            |name: &str,
+             size: egui::Vec2,
+             rows: usize,
+             input: &dyn Fn(&Context, usize) -> Vec<egui::Event>| {
+                let ctx = Context::default();
+                ctx.set_os(egui::os::OperatingSystem::Nix);
+                theme.apply(&ctx);
+                // No fade: a popup mid-fade is not what a reader sees.
+                ctx.all_styles_mut(|style| style.animation_time = 0.0);
+                let mut app = title_test_app();
+                let mut output = None;
+                for pass in 0..8 {
+                    let events = input(&ctx, pass);
+                    output = Some(ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
+                            show(ui, &mut app, layout);
+                        },
+                    ));
+                }
+                let canvas =
+                    crate::ui::raster::rasterize(&ctx, size, &output.expect("eight passes ran"));
+                let path = directory.join(format!("{name}-{mode_name}.png"));
+                std::fs::write(&path, canvas.png(rows)).expect("write the render");
+                writeln!(report, "{}", path.display()).ok();
+            };
         let nothing = |_: &Context, _: usize| Vec::new();
         for width in [821.0, 1_021.0, 1_280.0, 1_440.0] {
-            write(&format!("bar-{width}"), egui::vec2(width, 900.0), 48, &nothing);
+            write(
+                &format!("bar-{width}"),
+                egui::vec2(width, 900.0),
+                48,
+                &nothing,
+            );
         }
         write("bar-compact-390", egui::vec2(390.0, 844.0), 60, &nothing);
         write("bar-compact-768", egui::vec2(768.0, 1_024.0), 60, &nothing);
@@ -1815,14 +1825,24 @@ fn render_the_menu_bar_and_its_menus_for_review() {
             4 => vec![title_key_event(Key::ArrowRight)],
             _ => Vec::new(),
         };
-        write("menu-compact-390-file", egui::vec2(390.0, 844.0), 844, &compact);
+        write(
+            "menu-compact-390-file",
+            egui::vec2(390.0, 844.0),
+            844,
+            &compact,
+        );
         let compact_closed = |ctx: &Context, pass: usize| {
             if pass == 0 {
                 Popup::open_id(ctx, popup_of(MenuTriggerKey::Compact));
             }
             Vec::new()
         };
-        write("menu-compact-768", egui::vec2(768.0, 1_024.0), 1_024, &compact_closed);
+        write(
+            "menu-compact-768",
+            egui::vec2(768.0, 1_024.0),
+            1_024,
+            &compact_closed,
+        );
     }
 }
 

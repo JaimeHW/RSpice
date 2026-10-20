@@ -68,11 +68,7 @@ pub(super) fn paint_menu_row(
         MenuRowLead::Check(true) => WorkbenchIcon::Check.paint(
             ui.painter(),
             icon_rect,
-            if enabled {
-                t.color.text
-            } else {
-                ink
-            },
+            if enabled { t.color.text } else { ink },
         ),
     }
     let label_left = rect.left() + 31.0;
