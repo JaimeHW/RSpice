@@ -315,10 +315,18 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // and 0.1189 -> 6.60e-3 V (clock only), OUT's worst 5.76e-3 ->
         // 4.70e-4 V and its mean 1.39e-3 -> 2.13e-4 V. Every event stays
         // bit-identical.
+        //
+        // Re-measured when an HDL tick's seconds became the double nearest its
+        // decimal (`ticks / 1e9` where it was `ticks * 1e-9`), with the run
+        // stopping at the tick's own 1 us rather than at `1000 * 1e-9`: the
+        // same 1760 points, all 101 QDIV transitions at the same values with
+        // 42 of them one ulp earlier or later, every grid point within
+        // 6.5e-21 s of where it was, and QDIV and OUT within 1.6e-14 V and
+        // 8.1e-13 V point for point.
         Fingerprint {
             points: 1760,
-            grid_hash: 0x107f_6aab_fafa_bd04,
-            volt_hash: 0xbcfc_74cd_c2e2_7329,
+            grid_hash: 0x1b27_94c5_580c_3f52,
+            volt_hash: 0xda44_3766_4b2b_a734,
         },
     ),
     (
@@ -330,9 +338,14 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // restart after each edge here was already shorter than the
         // picosecond, so QD crosses half its level 0.01 ps after each edge
         // in both runs.
+        //
+        // The grid hash was re-measured when an HDL tick's seconds became the
+        // double nearest its decimal: the same 353 points, QD's 20 values
+        // unchanged with 10 of their instants one ulp away, 180 grid points
+        // one ulp away, and the voltage hash unchanged.
         Fingerprint {
             points: 353,
-            grid_hash: 0xfbaa_4f10_e466_f6e5,
+            grid_hash: 0xf183_6a01_1734_ed29,
             volt_hash: 0xd37d_277c_dc23_aa1c,
         },
     ),
@@ -356,13 +369,18 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     // took, is landed one solver floor past the crossing (10.6 ns + 1e-20 s)
     // as a crossing a D/A step caused is: that landing is the added point.
     // YA and YB still rise together, once, at 12 ns.
+    //
+    // And together again when an HDL tick's seconds became the double nearest
+    // its decimal (`ticks / 1e9` where it was `ticks * 1e-9`): the same 38
+    // points, YA and YB's 12 ns rise one ulp earlier (1.2e-8 where it was
+    // 1.2000000000000002e-8), and the 11 grid points after it moved with it.
     (
         "the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing",
         "hardening_feedback",
         Fingerprint {
             points: 38,
-            grid_hash: 0x1ee9_2097_1999_277d,
-            volt_hash: 0x7405_6288_fe3a_5a5d,
+            grid_hash: 0xc6f5_1ce4_875a_777c,
+            volt_hash: 0x3751_9570_bc10_f5e8,
         },
     ),
     (
@@ -370,8 +388,8 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         "hardening_feedback_split",
         Fingerprint {
             points: 38,
-            grid_hash: 0x1ee9_2097_1999_277d,
-            volt_hash: 0x1da7_e029_ee0d_5667,
+            grid_hash: 0xc6f5_1ce4_875a_777c,
+            volt_hash: 0xd96b_5f7e_236e_6672,
         },
     ),
     (
@@ -379,8 +397,8 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         "hardening_feedback_order",
         Fingerprint {
             points: 38,
-            grid_hash: 0x1ee9_2097_1999_277d,
-            volt_hash: 0x7405_6288_fe3a_5a5d,
+            grid_hash: 0xc6f5_1ce4_875a_777c,
+            volt_hash: 0x3751_9570_bc10_f5e8,
         },
     ),
     (
@@ -449,19 +467,29 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // its 10k-loaded drive worst 3.2934 V -> 6.6e-14 V (means 1.77 V and
         // 8.1e-3 V -> 3.2e-14 V; the two-minimum clock moves at every point,
         // so before the change nearly every sample held the next level).
+        //
+        // Both re-measured again when an HDL tick's seconds became the double
+        // nearest its decimal (`ticks / 1e9` where it was `ticks * 1e-9`).
+        // Each clock's last toggle is on the stop time and is now recorded
+        // there, where one ulp past the stop dropped it: 250 -> 251 and
+        // 400 -> 401 transitions, every earlier one at the same value and at
+        // most one ulp away. The grids keep their steps within 64 ulp up to
+        // the last few toggles (index 245 of 252, 405 of 407), where the
+        // steps around the recorded stop-time toggle rearrange: 253 -> 252
+        // and 407 -> 408 points.
         Fingerprint {
-            points: 253,
-            grid_hash: 0xafa3_0bb3_a9bd_6ed8,
-            volt_hash: 0x97ab_7459_2a54_2098,
+            points: 252,
+            grid_hash: 0x8fb8_9469_2f68_4df3,
+            volt_hash: 0x1de0_ca73_d008_84d1,
         },
     ),
     (
         "a_clock_five_minimum_steps_wide_is_refused_by_neither_guard",
         "hardening_toggling_five_minimums",
         Fingerprint {
-            points: 407,
-            grid_hash: 0x0938_e26a_18bd_cc5f,
-            volt_hash: 0x0772_361c_591a_51ab,
+            points: 408,
+            grid_hash: 0xec1a_8a54_8dae_13a9,
+            volt_hash: 0xed98_c6c2_6ef5_f1ae,
         },
     ),
 ];
@@ -2093,7 +2121,7 @@ fn every_digital_activation_becomes_a_bit_exact_accepted_timepoint() {
     let model = ModelFile::new("breakpoint_chain", CLOCK_DIVIDER);
     let result = run(
         &divider_deck(&model, TSTOP_NS),
-        f64::from(TSTOP_NS) * 1.0e-9,
+        tick_to_seconds(u64::from(TSTOP_NS)),
         1.0e-9,
     );
     pin_fixture("hardening_clock_divider", &result);

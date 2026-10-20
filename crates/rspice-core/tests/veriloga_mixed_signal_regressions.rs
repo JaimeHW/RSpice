@@ -1061,7 +1061,9 @@ fn a_zero_duration_d_a_edge_into_a_transistor_is_crossed_in_one_step() {
         .map(|point| point.time)
         .filter(|time| *time > 0.0)
         .collect();
-    let ticks: Vec<f64> = (1..=4).map(|k| f64::from(k) * 1.0e7 * 1.0e-12).collect();
+    // Each tick's seconds are the double nearest its decimal, as a deck's
+    // `10u` is; `k * 1e7 * 1e-12` rounds twice and misses three of them.
+    let ticks = [1.0e-5, 2.0e-5, 3.0e-5, 4.0e-5];
     assert_eq!(edges, ticks, "each edge is recorded at its tick");
 
     let collector = tran.try_voltage_waveform_named("c").expect("v(c)");

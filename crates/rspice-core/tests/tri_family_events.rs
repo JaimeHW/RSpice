@@ -94,10 +94,15 @@ const DECK_E_OUT_LATE: f64 = 1.827762;
 /// described above: the late sample (1.827762 -> 1.828458) erred -5.15e-4 V
 /// against the analytic response and now +1.61e-4 V; the early one is
 /// unchanged at +1.34e-4 V. `out`'s worst error over the run is 1.94e-4 V.
+///
+/// Re-measured a sixth time when an HDL tick's seconds became the double
+/// nearest its decimal (`ticks / 1e9` where it was `ticks * 1e-9`), which
+/// moves each HDL activation by at most one ulp: the same 278 points and both
+/// samples unchanged to six places.
 const DECK_E_FINGERPRINT: Fingerprint = Fingerprint {
     points: 278,
-    grid_hash: 0xb6b1_3459_6364_c0d9,
-    volt_hash: 0x60f8_4df0_68e3_cd88,
+    grid_hash: 0x91d2_ee76_8b95_434c,
+    volt_hash: 0x6460_3dd5_e0ab_5431,
 };
 
 /// First transition of the flop output in deck E3, and the delay every one of

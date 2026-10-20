@@ -150,9 +150,15 @@ const DECK_C2_POINTS: usize = 275;
 /// Re-measured, 265 -> 275, when zero-time D/A edges began completing at a
 /// breakpoint one picosecond past their instant: `c`'s ten edges each add
 /// that completion.
+///
+/// The grid hash was re-measured when an HDL tick's seconds became the double
+/// nearest its decimal (`ticks / 1e9` where it was `ticks * 1e-9`): the same
+/// 275 points, each event and grid point at most one ulp from before, and the
+/// voltage hash unchanged. The 100 ns toggle now lands on the 100 ns stop and
+/// is recorded, where one ulp past it was dropped.
 const DECK_C2_FINGERPRINT: Fingerprint = Fingerprint {
     points: DECK_C2_POINTS,
-    grid_hash: 0x7cf9_3421_56ca_b11f,
+    grid_hash: 0x82bb_8a6e_41ad_1f88,
     volt_hash: 0x21c4_5bce_11ea_c82e,
 };
 
@@ -1066,9 +1072,11 @@ fn run_deck_c(load_dq: bool) -> TransientResult {
 fn deck_c2_unloaded_digital_to_digital_net_carries_the_driver_period() {
     let result = run_deck_c(false);
     let points = trace_points(&result, "dq");
+    // 0 ns through 100 ns: the toggle on the stop time is recorded, as every
+    // event on the stop time is.
     assert_eq!(
         points.len(),
-        20,
+        21,
         "the driver toggles every 5 ns over 100 ns, got {points:?}"
     );
     for (time, _) in &points {
