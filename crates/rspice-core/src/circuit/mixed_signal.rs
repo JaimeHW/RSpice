@@ -276,6 +276,7 @@ impl CircuitData {
     ) -> Result<(), SimulationError> {
         if !self.mixed_signal_hosts.is_empty() && self.scheduler.mixed_digital_coordinator.is_none()
         {
+            self.refuse_overdriven_real_nets(event_nodes)?;
             // Elaboration can refuse a connection after creating the linked
             // runtime. Preserve the previous owners until every attachment has
             // validated; a partial link must not leave standalone models as views.
@@ -315,6 +316,51 @@ impl CircuitData {
             }
             self.scheduler.mixed_digital_coordinator = Some(coordinator);
             self.scheduler.mixed_xspice_bindings = bindings.map(std::sync::Arc::new);
+        }
+        Ok(())
+    }
+
+    /// Refuse an event net that two instances drive through plain `wreal`
+    /// ports.
+    ///
+    /// Verilog-AMS LRM 2.4 section 6.5.3 permits a maximum of one driver of a
+    /// real-valued net. The front end refuses a second inside one module; two
+    /// instances meet only on a deck net the linker joins them on, which is
+    /// one of `event_nodes`, where the linked design would otherwise fail its
+    /// own validation in words about driver indices.
+    fn refuse_overdriven_real_nets(
+        &self,
+        event_nodes: &std::collections::BTreeSet<usize>,
+    ) -> Result<(), SimulationError> {
+        let mut first_driver: std::collections::BTreeMap<usize, (&str, &str)> =
+            std::collections::BTreeMap::new();
+        for host in &self.mixed_signal_hosts {
+            for (node, port) in host.single_driver_real_outputs() {
+                if !event_nodes.contains(&node) {
+                    continue;
+                }
+                let Some(&(instance, first_port)) = first_driver.get(&node) else {
+                    first_driver.insert(node, (host.instance_name(), port));
+                    continue;
+                };
+                let node_names = self.node_names_sorted();
+                let node_name = node_names
+                    .get(node - 1)
+                    .map(String::as_str)
+                    .unwrap_or("<unnamed>");
+                return Err(crate::ElaborationError::new(
+                    crate::ElaborationErrorKind::PortDiscipline,
+                    format!(
+                        "its port '{port}' drives the wreal net '{node_name}', which port \
+                         '{first_port}' of instance '{instance}' drives as well; Verilog-AMS LRM \
+                         2.4 section 6.5.3 permits one driver of a real-valued net, so give \
+                         '{node_name}' one driver, or give both ports the resolution that \
+                         combines them: `wrealsum`, `wrealavg`, `wrealmin` or `wrealmax`"
+                    ),
+                )
+                .instance(host.instance_name())
+                .into());
+            }
         }
         Ok(())
     }

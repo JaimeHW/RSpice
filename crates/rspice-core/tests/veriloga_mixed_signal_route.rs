@@ -4135,19 +4135,39 @@ endmodule
             );
         }
     }
+    // Two instances driving one deck net through plain `wreal` ports, of one
+    // module and of two: the LRM permits one driver of a real-valued net, and
+    // the refusal names the net and both instances and ports, not the linked
+    // design's "inconsistent target, index, process, or resolution".
     let single = ModelFile::new(
         "single_real_ports",
         "module real_source(q); output q; wreal q; assign q=1.0; endmodule",
     );
-    let deck = format!(
-        "* conflicting single-driver real nets\nXa data real_source\nXb data real_source\nR1 out 0 1k\n.va \"{}\" real_source\n.end\n",
-        single.deck_path()
+    let other = ModelFile::new(
+        "other_real_ports",
+        "module other_source(r); output r; wreal r; assign r=2.0; endmodule",
     );
-    let error = error_for(&deck, 1e-9, 0.1e-9);
-    assert!(
-        error.contains("driver") && error.contains("resolution"),
-        "{error}"
-    );
+    for (second, port) in [("real_source", "q"), ("other_source", "r")] {
+        let deck = format!(
+            "* conflicting single-driver real nets\nXa data real_source\nXb data {second}\n\
+             R1 out 0 1k\n.va \"{}\" real_source\n.va \"{}\" other_source\n.end\n",
+            single.deck_path(),
+            other.deck_path()
+        );
+        let error = error_for(&deck, 1e-9, 0.1e-9);
+        for expected in [
+            "instance 'xb'".to_owned(),
+            format!("port '{port}' drives the wreal net 'data'"),
+            "port 'q' of instance 'xa'".to_owned(),
+            "one driver of a real-valued net".to_owned(),
+        ] {
+            assert!(
+                error.to_ascii_lowercase().contains(&expected),
+                "{expected}: {error}"
+            );
+        }
+        assert!(!error.contains("inconsistent target"), "{error}");
+    }
 }
 
 #[test]

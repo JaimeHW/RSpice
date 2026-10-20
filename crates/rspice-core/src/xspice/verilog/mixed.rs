@@ -2586,6 +2586,33 @@ impl MixedSignalHost {
         Ok(())
     }
 
+    /// The deck nodes this instance drives through a plain `wreal` port, each
+    /// with the port's name: a single-driver real net the module drives by a
+    /// continuous assignment, or a real variable output.
+    pub(crate) fn single_driver_real_outputs(&self) -> Vec<(usize, &str)> {
+        use rspice_veriloga::canonical_ir::digital::{DigitalRealResolution, DigitalSignalKind};
+        use rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection;
+        let plan = self.state.digital.plan();
+        let mut driven: Vec<(usize, &str)> = self
+            .event_ports
+            .iter()
+            .filter(|port| port.bit.is_none() && port.direction != DigitalLinkDirection::Input)
+            .filter_map(|port| {
+                let signal = plan.signal(port.signal)?;
+                let drives = signal.procedurally_assignable
+                    || plan
+                        .drivers
+                        .iter()
+                        .any(|driver| driver.target.signal == port.signal);
+                (signal.kind == DigitalSignalKind::Real(DigitalRealResolution::Single) && drives)
+                    .then_some((port.node, signal.name.as_str()))
+            })
+            .collect();
+        driven.sort_unstable();
+        driven.dedup_by_key(|&mut (node, _)| node);
+        driven
+    }
+
     pub(crate) fn direct_real_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.event_ports
             .iter()
