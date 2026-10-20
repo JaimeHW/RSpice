@@ -3462,3 +3462,23 @@ fn a_recursive_analog_function_is_named_with_its_cycle() {
         "{diagnostic}"
     );
 }
+
+/// An undeclared name in a parameter default is a semantic error at the
+/// name (the audit's d25 reached code generation); names a default may
+/// legitimately read still resolve.
+#[test]
+fn an_undeclared_name_in_a_parameter_default_is_reported_at_the_name() {
+    let source = module_src("parameter real q = zz * 2;\nanalog I(p, n) <+ V(p, n);");
+    let errors = semantic_errors(analyze(&source).expect_err("zz is undeclared"));
+    assert!(
+        matches!(&errors[..], [error] if matches!(&error.kind,
+            SemanticErrorKind::UndeclaredSymbol { name } if name == "zz")),
+        "{errors:?}"
+    );
+    assert_eq!(spanned(&source, errors[0].span), "zz");
+    analyze(&module_src(
+        "parameter real a = 2;\nparameter real b = a * M_PI + $port_connected(p);\n\
+         analog I(p, n) <+ V(p, n) * b;",
+    ))
+    .expect("parameters, constants and ports resolve in a default");
+}

@@ -11042,6 +11042,31 @@ impl SemanticAnalyzer {
             let Some(default) = &parameter.default else {
                 continue;
             };
+            // A name that is no parameter, net or other declaration used to
+            // reach code generation ("Unknown identifier: zz").
+            // A system function's name arguments (`$param_given(ALIAS)`,
+            // `$port_connected(p)`) are resolved by that function.
+            let mut named_arguments = HashSet::new();
+            visit_expression(default, &mut |expression| {
+                if let Expression::SystemFunction(function) = expression {
+                    named_arguments.extend(function.args.iter().filter_map(|argument| {
+                        matches!(argument, Expression::Identifier(_)).then(|| argument.span())
+                    }));
+                }
+            });
+            let mut undeclared = Vec::new();
+            visit_expression(default, &mut |expression| {
+                if let Expression::Identifier(identifier) = expression
+                    && !named_arguments.contains(&identifier.span)
+                    && !indices.contains_key(&identifier.name)
+                    && !self.identifier_resolves(&identifier.name)
+                {
+                    undeclared.push((identifier.name.clone(), identifier.span));
+                }
+            });
+            for (name, span) in undeclared {
+                self.record_unresolved_name(SemanticErrorKind::UndeclaredSymbol { name }, span);
+            }
             let mut references = Vec::new();
             Self::collect_parameter_identifier_references(
                 default,
