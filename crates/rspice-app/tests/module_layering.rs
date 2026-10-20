@@ -675,6 +675,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "browser/navigation",
     "browser/download",
     "browser/accessibility",
+    // Opening an example replaces the session with a new project and saves
+    // it, through the project workflow; its test runs the plan through the
+    // preflight the frame runs.
+    "tools/examples_browser",
     // The frame is painted last and may reach anything below it.
     "frame",
 ];

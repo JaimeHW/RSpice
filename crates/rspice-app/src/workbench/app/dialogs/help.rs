@@ -21,6 +21,8 @@ const THIRD_PARTY_NOTICES: &str =
 #[derive(Debug, Clone, Copy)]
 enum HelpAction {
     Command(Command),
+    /// The Examples dialog, until the menus offer it.
+    Examples,
 }
 
 fn shortcut_help_row(
@@ -112,9 +114,16 @@ impl RSpiceApp {
             return;
         }
 
-        if let Some(HelpAction::Command(command)) = action {
-            self.close_help_center_route();
-            command.execute(self);
+        match action {
+            Some(HelpAction::Command(command)) => {
+                self.close_help_center_route();
+                command.execute(self);
+            }
+            Some(HelpAction::Examples) => {
+                self.close_help_center_route();
+                self.state.workbench.open_examples();
+            }
+            None => {}
         }
     }
 
@@ -376,9 +385,14 @@ fn render_help_page(ui: &mut egui::Ui, query: &mut String, action: &mut Option<H
         });
     }
     ui.add_space(10.0);
-    if ui.button("Command reference").clicked() {
-        *action = Some(HelpAction::Command(Command::KeyboardShortcuts));
-    }
+    ui.horizontal(|ui| {
+        if ui.button("Command reference").clicked() {
+            *action = Some(HelpAction::Command(Command::KeyboardShortcuts));
+        }
+        if ui.button("Examples\u{2026}").clicked() {
+            *action = Some(HelpAction::Examples);
+        }
+    });
 }
 
 fn render_release_notes(ui: &mut egui::Ui) {

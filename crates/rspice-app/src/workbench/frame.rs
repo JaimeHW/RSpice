@@ -149,6 +149,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.workbench.project_launcher_open = false;
     }
     tools::project_launcher::show(ctx, app);
+    tools::examples_browser::show(ctx, &mut app.state);
     // Shortcuts and dialogs record the intent to run; the pass itself belongs
     // to the frame loop, so a caller never has to name the workflow to ask
     // for it. Consumed before the dialog so a blocked report opens this frame.

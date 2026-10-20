@@ -1020,6 +1020,9 @@ pub struct WorkbenchState {
     pub project_launcher_page: ProjectLauncherPage,
     #[serde(skip)]
     pub(crate) project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog,
+    /// The Examples dialog, while it is open: the example chosen in it.
+    #[serde(skip)]
+    pub(crate) examples_selection: Option<usize>,
     /// Safe mode applies only to this process. The prior session remains the
     /// persisted source of truth for the next ordinary launch.
     #[serde(skip)]
@@ -1397,6 +1400,7 @@ impl Default for WorkbenchState {
             project_launcher_filter: ProjectLauncherFilter::All,
             project_launcher_page: ProjectLauncherPage::Projects,
             project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog::default(),
+            examples_selection: None,
             safe_mode: LocalSafeModeState::default(),
             live_write_locks: LiveWriteLocks::default(),
             project_close_destination: ProjectCloseDestination::EmptyWorkbench,
@@ -1522,6 +1526,7 @@ impl WorkbenchState {
     /// these surfaces.
     pub fn application_modal_open(&self) -> bool {
         self.project_launcher_open
+            || self.examples_selection.is_some()
             || self.notification_center_open
             || self.model_correlation.dialog_open()
             || self.create_result_document.open
@@ -1589,6 +1594,11 @@ impl WorkbenchState {
         self.project_launcher_page = ProjectLauncherPage::Projects;
         self.project_launcher_recovery.request_refresh();
         self.focus_project_launcher_search = true;
+    }
+
+    /// Open the Examples dialog on its first circuit.
+    pub(crate) fn open_examples(&mut self) {
+        self.examples_selection = Some(0);
     }
 
     pub(crate) fn begin_project_close(&mut self, destination: ProjectCloseDestination) {

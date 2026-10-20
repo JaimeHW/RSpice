@@ -11,7 +11,9 @@
 //! - **CMOS Inverter**: Basic digital gate
 //! - **Differential Pair**: Op-amp input stage
 //! - **Opamp Inverting Amplifier**: VCVS-based inverting stage
-//! - **Hierarchical RC Filter**: Testbench instantiating an authored cell symbol
+//!
+//! [`EXAMPLES`] lists them with the line Help's Examples dialog shows for
+//! each; [`load_example`] draws one by its name.
 //!
 //! # Geometry rules
 //!
@@ -47,6 +49,42 @@ use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wi
 // =============================================================================
 // Example Circuit Definitions
 // =============================================================================
+
+/// One demonstration circuit: the name [`load_example`] draws it by, and
+/// what it is, in a line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Example {
+    pub(crate) name: &'static str,
+    pub(crate) summary: &'static str,
+}
+
+/// Every demonstration circuit, in the order the Examples dialog lists them.
+pub(crate) const EXAMPLES: [Example; 6] = [
+    Example {
+        name: "RC Lowpass Filter",
+        summary: "R1 1k into C1 159n: a first-order low-pass with its corner at 1 kHz.",
+    },
+    Example {
+        name: "Voltage Divider",
+        summary: "Two 10k resistors halving a 5 V supply.",
+    },
+    Example {
+        name: "Common Emitter Amplifier",
+        summary: "An NPN stage on 12 V: RB 100k bias, RC 1k load, RE 100 degeneration.",
+    },
+    Example {
+        name: "CMOS Inverter",
+        summary: "A PMOS and NMOS pair on 3.3 V, switched by a pulse input.",
+    },
+    Example {
+        name: "Differential Pair",
+        summary: "Two NPN transistors sharing a 1 mA tail: an op-amp input stage.",
+    },
+    Example {
+        name: "Opamp Inverting Amplifier",
+        summary: "A gain of -10 from RF 10k over RIN 1k around a high-gain op-amp.",
+    },
+];
 
 // =============================================================================
 // Circuit Builders
@@ -222,9 +260,10 @@ fn build_voltage_divider(state: &mut SchematicState) {
 fn build_common_emitter(state: &mut SchematicState) {
     let mut id = 1u64;
 
-    // Q1 — C (280,140), B (240,180), E (280,220).
+    // Q1 — C (280,140), B (240,180), E (280,220). The foundation NPN card,
+    // which every project resolves; no project defines a 2N2222.
     let q1 = Component::new(id, ComponentType::NpnBjt, Point::new(260, 180))
-        .with_name_value("Q1", "2N2222");
+        .with_name_value("Q1", "RSPICE_NPN");
     id += 1;
     state.document_mut_for_test().components.push(q1);
 
@@ -433,16 +472,17 @@ fn build_cmos_inverter(state: &mut SchematicState) {
 fn build_differential_pair(state: &mut SchematicState) {
     let mut id = 1u64;
 
-    // Q1 — C (180,160), B (140,200), E (180,240).
+    // Q1 — C (180,160), B (140,200), E (180,240). Both transistors take the
+    // foundation NPN card, which every project resolves.
     let q1 = Component::new(id, ComponentType::NpnBjt, Point::new(160, 200))
-        .with_name_value("Q1", "2N2222");
+        .with_name_value("Q1", "RSPICE_NPN");
     id += 1;
     state.document_mut_for_test().components.push(q1);
 
     // Q2 mirrored — C (300,160), B (340,200), E (300,240).
     let q2 = Component::new(id, ComponentType::NpnBjt, Point::new(320, 200))
         .with_mirror_h(true)
-        .with_name_value("Q2", "2N2222");
+        .with_name_value("Q2", "RSPICE_NPN");
     id += 1;
     state.document_mut_for_test().components.push(q2);
 
