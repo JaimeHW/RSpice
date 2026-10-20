@@ -235,10 +235,64 @@ impl NetlistSourceLocation {
 }
 
 impl std::fmt::Display for NetlistSourceLocation {
+    /// The `path:line` prefix a diagnostic shows. The path is kept canonical
+    /// for comparison, so it is shown through [`display_source_path`].
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.path {
-            Some(path) => write!(formatter, "{}:{}", path.display(), self.line),
+            Some(path) => write!(formatter, "{}:{}", display_source_path(path), self.line),
             None => write!(formatter, "line {}", self.line),
+        }
+    }
+}
+
+/// A path as a diagnostic shows it. A canonical Windows path carries the
+/// verbatim `\\?\` prefix, which is not what anyone wrote; a drive or UNC
+/// path reads the same without it. Device paths reached through `\\?\` have
+/// no plain spelling and keep it. Comparisons keep using the canonical path.
+pub(crate) fn display_source_path(path: &std::path::Path) -> String {
+    let text = path.display().to_string();
+    // A resolved include path can also arrive with its separators turned to
+    // `/` (`//?/C:/...`); it reads the same way.
+    for (verbatim, unc, separator) in [(r"\\?\", r"\\?\UNC\", '\\'), ("//?/", "//?/UNC/", '/')] {
+        if let Some(share) = text.strip_prefix(unc) {
+            return format!("{separator}{separator}{share}");
+        }
+        if let Some(drive) = text.strip_prefix(verbatim)
+            && drive
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphabetic)
+            && drive.get(1..2) == Some(":")
+            && drive[2..].starts_with(separator)
+        {
+            return drive.to_owned();
+        }
+    }
+    text
+}
+
+#[cfg(test)]
+mod display_source_path_tests {
+    use super::{NetlistSourceLocation, display_source_path};
+    use std::path::Path;
+
+    /// The `path:line:` prefix of a diagnostic inside an included file showed
+    /// the canonical verbatim form (`\\?\C:\...\bad.inc:2:`); it shows the
+    /// path as it would be written, and the stored path stays canonical.
+    #[test]
+    fn diagnostics_show_a_canonical_path_without_the_verbatim_prefix() {
+        for (path, shown) in [
+            (r"\\?\C:\decks\bad.inc", r"C:\decks\bad.inc"),
+            (r"\\?\UNC\server\share\bad.inc", r"\\server\share\bad.inc"),
+            ("//?/C:/decks/bad.inc", "C:/decks/bad.inc"),
+            ("//?/UNC/server/share/bad.inc", "//server/share/bad.inc"),
+            (r"\\?\Volume{0}\bad.inc", r"\\?\Volume{0}\bad.inc"),
+            ("decks/bad.inc", "decks/bad.inc"),
+        ] {
+            assert_eq!(display_source_path(Path::new(path)), shown, "{path}");
+            let location = NetlistSourceLocation::in_file(path, 2);
+            assert_eq!(location.to_string(), format!("{shown}:2"), "{path}");
+            assert_eq!(location.path.as_deref(), Some(Path::new(path)));
         }
     }
 }
@@ -2088,7 +2142,10 @@ impl Netlist {
                     error @ ParseError::ResourceLimit(_) => error,
                     error => ParseError::Syntax {
                         line: 0,
-                        message: format!("failed to read SPEF file `{}`: {error}", path.display()),
+                        message: format!(
+                            "failed to read SPEF file `{}`: {error}",
+                            display_source_path(&path)
+                        ),
                     },
                 })
             })?;
@@ -2101,13 +2158,13 @@ impl Netlist {
                 ParseWithAbortError::Parse(ParseError::Syntax { line, message }) => {
                     ParseError::Syntax {
                         line,
-                        message: format!("SPEF `{}`: {message}", path.display()),
+                        message: format!("SPEF `{}`: {message}", display_source_path(&path)),
                     }
                     .into()
                 }
                 ParseWithAbortError::Parse(error) => ParseError::Syntax {
                     line: 0,
-                    message: format!("SPEF `{}`: {error}", path.display()),
+                    message: format!("SPEF `{}`: {error}", display_source_path(&path)),
                 }
                 .into(),
             };

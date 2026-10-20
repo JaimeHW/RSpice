@@ -38,8 +38,9 @@ use super::{
     StartupDirectiveEntry, StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope,
     StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
     TransientNoiseConfig, VerilogAInclude, XyceAddResistorMode, XyceAddResistorSpec,
-    XyceAddResistorsPolicy, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
-    poll_parse_text, validate_startup_directives_with_abort,
+    XyceAddResistorsPolicy, display_source_path, ensure_parse_not_aborted,
+    finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
+    validate_startup_directives_with_abort,
 };
 use super::{ElementParameterDirection, ParameterDirectionCapture};
 use super::{UnreadSourceReason, UnreadSourceRegion};
@@ -2841,7 +2842,7 @@ fn apply_deferred_source_boundaries(
                         line: eof_line,
                         message: format!(
                             "{}:{}: source exit has no matching source entry",
-                            path.display(),
+                            display_source_path(&path),
                             eof_line
                         ),
                     }
@@ -2852,8 +2853,8 @@ fn apply_deferred_source_boundaries(
                         line: eof_line,
                         message: format!(
                             "source expansion boundary mismatch: entered '{}', exited '{}'",
-                            source.path.display(),
-                            path.display()
+                            display_source_path(&source.path),
+                            display_source_path(&path)
                         ),
                     }
                     .into());
@@ -3058,13 +3059,18 @@ mod source_mapping_tests {
         let canonical_child = child.canonicalize().expect("canonicalize included source");
         let _ = std::fs::remove_dir_all(&directory);
 
+        // The prefix shows the canonical path the way it would be written:
+        // without the Windows verbatim `\\?\` prefix canonicalize() adds.
+        let shown_child = canonical_child.display().to_string();
+        let shown_child = shown_child.strip_prefix(r"\\?\").unwrap_or(&shown_child);
         match error {
             ParseError::Syntax { line, message } => {
                 assert_eq!(line, 1, "source-local line must be retained: {message}");
                 assert!(
-                    message.starts_with(&format!("{}:1: ", canonical_child.display())),
+                    message.starts_with(&format!("{shown_child}:1: ")),
                     "included source identity was not retained: {message}"
                 );
+                assert!(!message.contains(r"\\?\"), "{message}");
                 assert!(
                     message.contains("Unexpected trailing token"),
                     "unexpected syntax detail: {message}"

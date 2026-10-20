@@ -17,8 +17,9 @@ use std::sync::{Arc, Mutex};
 
 use super::{
     NetlistSourceLocation, ParseError, ParseWithAbortError, UnreadSourceReason, UnreadSourceRegion,
-    ensure_parse_not_aborted, finish_non_aborting_parse, map_abort_parse_error, poll_parse_abort,
-    poll_parse_text, read_file_with_encoding_limited_with_abort,
+    display_source_path, ensure_parse_not_aborted, finish_non_aborting_parse,
+    map_abort_parse_error, poll_parse_abort, poll_parse_text,
+    read_file_with_encoding_limited_with_abort,
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::config::ExpressionDialect;
@@ -949,7 +950,7 @@ impl IncludeProcessor {
                         line: line_index + 1,
                         message: format!(
                             "{}: sealed model materialization left an unresolved include/library directive: {}",
-                            canonical.display(),
+                            display_source_path(&canonical),
                             line.trim()
                         ),
                     }));
@@ -1251,7 +1252,7 @@ impl IncludeProcessor {
                     line: 0,
                     message: format!(
                         "Dependency is not present in the verified sealed source bundle: '{}'",
-                        path.display()
+                        display_source_path(path)
                     ),
                 })
                 .map_err(ParseWithAbortError::from)?;
@@ -2037,29 +2038,6 @@ pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
 /// (expand_section_ref in inpcom.c), so `.lib models.lib 'tt'` selects `tt`.
 fn unquote_section_name(name: &str) -> &str {
     name.trim_matches(|character| matches!(character, '\'' | '"'))
-}
-
-/// A path as a diagnostic shows it. A canonical Windows path carries the
-/// verbatim `\\?\` prefix, which is not what anyone wrote; a drive or UNC
-/// path reads the same without it. Device paths reached through `\\?\` have
-/// no plain spelling and keep it.
-fn display_source_path(path: &Path) -> String {
-    let text = path.display().to_string();
-    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
-        return format!(r"\\{share}");
-    }
-    match text.strip_prefix(r"\\?\") {
-        Some(drive)
-            if drive
-                .as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_alphabetic)
-                && drive.get(1..3) == Some(":\\") =>
-        {
-            drive.to_owned()
-        }
-        _ => text,
-    }
 }
 
 fn parse_endl_directive(

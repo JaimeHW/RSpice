@@ -810,7 +810,11 @@ fn describe_master_claim(claim: &MasterClaim, source: &str) -> (String, usize) {
                     _ => ".VERILOGA file stem".to_owned(),
                 };
                 (
-                    format!("the {spelling} of '{}'{}", path.display(), at(origin.line)),
+                    format!(
+                        "the {spelling} of '{}'{}",
+                        display_source_path(path),
+                        at(origin.line)
+                    ),
                     origin.line,
                 )
             }
