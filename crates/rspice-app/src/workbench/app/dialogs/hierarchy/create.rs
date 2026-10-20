@@ -710,7 +710,7 @@ mod tests {
             .library_manager
             .get_library_mut(&parent.library)
             .expect("the parent's library")
-            .add_cell(Cell::new(&format!("{}_sub", parent.cell)));
+            .add_cell(Cell::new(format!("{}_sub", parent.cell)));
         open_create_hierarchy_dialog(&mut state);
         assert_eq!(
             state.design.create_hierarchy.cell_name,
