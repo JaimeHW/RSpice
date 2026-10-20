@@ -565,20 +565,20 @@ impl XyceTestRunner {
             "x1.mn1",
             &["out1", "in1", "vss1", "0", "nbulk1"],
             "mn",
-            0.35 * 1.0e-6,
-            2.0 * 1.0e-6,
-            (0.95 * 1.0e-6) * (2.0 * 1.0e-6),
-            2.0 * ((0.95 * 1.0e-6) + (2.0 * 1.0e-6)),
+            0.35e-6,
+            2.0e-6,
+            0.95e-6 * 2.0e-6,
+            2.0 * (0.95e-6 + 2.0e-6),
         )?;
         expect(
             &geometry[1],
             "x1.mp1",
             &["out1", "in1", "vdd1", "0", "pbulk1"],
             "mp",
-            0.45 * 1.0e-6,
-            4.0 * 1.0e-6,
-            (0.95 * 1.0e-6) * (4.0 * 1.0e-6),
-            2.0 * ((0.95 * 1.0e-6) + (4.0 * 1.0e-6)),
+            0.45e-6,
+            4.0e-6,
+            0.95e-6 * 4.0e-6,
+            2.0 * (0.95e-6 + 4.0e-6),
         )
     }
 
@@ -613,8 +613,8 @@ impl XyceTestRunner {
             || plan.timeint_conststep
             || !plan.steps.is_empty()
             || plan.wrapper_tolerance.is_some()
-            || plan.tran.step.to_bits() != (20.0f64 * 1.0e-9).to_bits()
-            || plan.tran.stop.to_bits() != (30.0f64 * 1.0e-6).to_bits()
+            || plan.tran.step.to_bits() != 20.0e-9f64.to_bits()
+            || plan.tran.stop.to_bits() != 30.0e-6f64.to_bits()
             || plan.tran.start.is_some()
             || plan.tran.max_step.is_some()
             || plan.tran.uic
@@ -649,8 +649,8 @@ impl XyceTestRunner {
             || !netlist.global_nodes.is_empty()
             || !matches!(&netlist.analyses[0], AnalysisCommand::Tran {
                 step, stop, start: None, max_step: None, uic: false,
-            } if step.to_bits() == (20.0f64 * 1.0e-9).to_bits()
-                && stop.to_bits() == (30.0f64 * 1.0e-6).to_bits())
+            } if step.to_bits() == 20.0e-9f64.to_bits()
+                && stop.to_bits() == 30.0e-6f64.to_bits())
         {
             return Err(format!(
                 "{LABEL} {} typed envelope changed",
