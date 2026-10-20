@@ -20,7 +20,6 @@ pub(super) enum MenuEntry {
     /// A row that opens a menu of its own entries beside it.
     Submenu {
         label: &'static str,
-        icon: WorkbenchIcon,
         entries: &'static [MenuEntry],
     },
     /// A rule between two groups of rows.
@@ -123,7 +122,6 @@ pub(super) enum MenuRow {
     Separator,
     Submenu {
         label: &'static str,
-        icon: WorkbenchIcon,
         rows: Vec<MenuRow>,
     },
 }
@@ -190,13 +188,8 @@ fn push_menu_rows(
                 checked: item.command.checked(app),
                 palette_scope: item.palette_scope,
             })),
-            MenuEntry::Submenu {
+            MenuEntry::Submenu { label, entries } => rows.push(MenuRow::Submenu {
                 label,
-                icon,
-                entries,
-            } => rows.push(MenuRow::Submenu {
-                label,
-                icon,
                 rows: resolve_menu_rows(entries, app, platform, os),
             }),
             MenuEntry::Separator => rows.push(MenuRow::Separator),
@@ -263,7 +256,7 @@ pub(super) fn show_menu_rows(ui: &mut Ui, rows: &[MenuRow]) -> Option<MenuChoice
                 menu_separator(ui);
                 None
             }
-            MenuRow::Submenu { label, icon, rows } => submenu_row(ui, label, *icon, rows),
+            MenuRow::Submenu { label, rows } => submenu_row(ui, label, rows),
         };
         choice = choice.or(chosen);
     }
@@ -315,8 +308,10 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
         rect,
         highlighted,
         enabled,
-        row.checked
-            .map_or(MenuRowLead::Icon(command_icon(row.command)), MenuRowLead::Check),
+        row.checked.map_or_else(
+            || command_icon(row.command).map_or(MenuRowLead::Blank, MenuRowLead::Icon),
+            MenuRowLead::Check,
+        ),
         label,
         MenuRowTrailing::Shortcut(&row.shortcut),
     );
@@ -370,12 +365,7 @@ pub(super) fn submenu_row_id(label: &str) -> Id {
 /// menu's arrow keys step over the row rather than into its children. Right
 /// arrow, Enter or Space opens it with its first row focused; Left
 /// arrow or Escape closes it back onto the row.
-fn submenu_row(
-    ui: &mut Ui,
-    label: &'static str,
-    icon: WorkbenchIcon,
-    rows: &[MenuRow],
-) -> Option<MenuChoice> {
+fn submenu_row(ui: &mut Ui, label: &'static str, rows: &[MenuRow]) -> Option<MenuChoice> {
     let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
     let large_targets = row_height >= MENU_TOUCH_ROW_HEIGHT;
     let (_, rect) = ui.allocate_space(Vec2::new(ui.available_width(), row_height));
@@ -412,7 +402,7 @@ fn submenu_row(
         rect,
         is_open || response.hovered() || response.has_focus(),
         true,
-        MenuRowLead::Icon(icon),
+        MenuRowLead::Blank,
         label,
         MenuRowTrailing::Submenu,
     );

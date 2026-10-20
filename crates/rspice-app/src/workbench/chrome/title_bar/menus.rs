@@ -208,7 +208,6 @@ const DESIGN_MENU: &[MenuEntry] = &[
     command(Command::ReplaceInstance),
     MenuEntry::Submenu {
         label: "Arrange",
-        icon: WorkbenchIcon::Grid,
         entries: ARRANGE_MENU,
     },
     command(Command::JoinCollinearWires),
@@ -479,177 +478,72 @@ pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool, rows: &[Men
     };
 }
 
-pub(super) fn command_icon(command: Command) -> WorkbenchIcon {
-    match command {
-        Command::OpenWorkspace(Workspace::Project) | Command::ProjectLauncher => {
-            WorkbenchIcon::Project
-        }
-        Command::OpenWorkspace(Workspace::Design) => WorkbenchIcon::Design,
-        Command::OpenWorkspace(Workspace::Simulate) => WorkbenchIcon::Simulate,
-        Command::OpenWorkspace(Workspace::Results)
-        | Command::ResultViewer(_)
-        | Command::WaveformCalculator
-        | Command::CompareResultDatasets
-        | Command::MeasurementLibrary
-        | Command::FamilySlicing => WorkbenchIcon::Results,
-        // The diagnostics tool exists to surface broken expressions, so it
-        // wears the mark of the thing it reports rather than the workspace.
-        Command::ExpressionDiagnostics => WorkbenchIcon::Warning,
-        Command::OpenWorkspace(Workspace::Verify)
-        | Command::VerificationPage(_)
-        | Command::EditSpecifications
-        | Command::PublishToWeb => WorkbenchIcon::Verify,
-        Command::LiveSession => WorkbenchIcon::User,
-        Command::OpenWorkspace(Workspace::Models)
-        | Command::ModelsPage(_)
-        | Command::ModelBrowser
-        | Command::ModelEditor
-        | Command::PdkSettings => WorkbenchIcon::Models,
-        Command::OpenWorkspace(Workspace::Stimulus) => WorkbenchIcon::Source,
-        Command::OpenWorkspace(Workspace::Netlist) => WorkbenchIcon::Netlist,
-        Command::AutomationConsole => WorkbenchIcon::Terminal,
-        Command::NewProject => WorkbenchIcon::File,
-        Command::NewCell
-        | Command::NewView
-        | Command::NewVerilogADevice
-        | Command::CreateResultDocument => WorkbenchIcon::Add,
-        Command::OpenProject
-        | Command::OpenDocument
+/// The icon a menu row shows: the one the command's toolbar button wears
+/// (`chrome/toolbar.rs`), for a command that has a button. A command with
+/// no button shows none, so an icon in a menu always marks the toolbar's
+/// twin. The column stays for the rows that carry a check mark.
+pub(super) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
+    let icon = match command {
+        Command::SelectTool => WorkbenchIcon::Select,
+        Command::PlaceInstance => WorkbenchIcon::Instance,
+        Command::PlaceWire => WorkbenchIcon::Wire,
+        Command::PlaceBus => WorkbenchIcon::Bus,
+        Command::PlaceBusTap => WorkbenchIcon::BusTap,
+        Command::PlaceJunction => WorkbenchIcon::Junction,
+        Command::PlaceLabel => WorkbenchIcon::Label,
+        Command::PlaceOffSheetConnector => WorkbenchIcon::ArrowRight,
+        Command::PlacePin => WorkbenchIcon::Pin,
+        Command::PlaceProbe => WorkbenchIcon::Probe,
+        Command::PlaceText => WorkbenchIcon::Text,
+        Command::ProjectLauncher
         | Command::ImportResultDataset
-        | Command::DatasetManifestBrowser => WorkbenchIcon::Folder,
-        Command::OpenNetlist => WorkbenchIcon::Netlist,
-        Command::RecentProjects => WorkbenchIcon::History,
-        Command::Save | Command::SaveAs | Command::SaveAll | Command::ModelSaveRevision => {
-            WorkbenchIcon::Save
-        }
-        Command::RevertActiveDocument
-        | Command::ResetActiveView
-        | Command::ResetLayout
-        | Command::WorkspaceLayouts => WorkbenchIcon::Refresh,
-        Command::ImportNetlist
-        | Command::ImportVerilogA
-        | Command::ExportSchematicSvg
-        | Command::ExportWaveformsCsv
-        | Command::ExportPublicationSnapshot
-        | Command::ExportNetlist(_)
-        | Command::PrintHardcopy
-        | Command::ExportActiveView => WorkbenchIcon::Export,
-        Command::SheetProperties => WorkbenchIcon::File,
-        Command::SheetFormatManager => WorkbenchIcon::Grid,
-        Command::CustomSheetSizes => WorkbenchIcon::Models,
-        Command::SheetDefaults => WorkbenchIcon::File,
+        | Command::ManageSourceDocument => WorkbenchIcon::Folder,
+        Command::NewProject | Command::NewCell | Command::AddReportPage => WorkbenchIcon::Add,
+        Command::Save
+        | Command::SymbolSave
+        | Command::ModelSaveRevision
+        | Command::SaveReportDocument => WorkbenchIcon::Save,
+        Command::RescanModelLibraries => WorkbenchIcon::Refresh,
+        // The Models toolbar's button; the Verilog-A view's wears Run.
+        Command::CompileVerilogA => WorkbenchIcon::Netlist,
+        Command::RotateSelection => WorkbenchIcon::Rotate,
+        Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
+        Command::MirrorSelectionVertical => WorkbenchIcon::MirrorVertical,
+        Command::Duplicate => WorkbenchIcon::Copy,
+        Command::Delete => WorkbenchIcon::Trash,
         Command::Undo => WorkbenchIcon::Undo,
         Command::Redo => WorkbenchIcon::Redo,
-        Command::Cut | Command::Copy | Command::Paste | Command::Duplicate => WorkbenchIcon::Copy,
-        Command::Delete | Command::ClearConsole => WorkbenchIcon::Trash,
-        Command::SelectAll => WorkbenchIcon::Grid,
-        Command::RenameSelection => WorkbenchIcon::Label,
-        Command::ObjectProperties | Command::SimulationOptions => WorkbenchIcon::Sliders,
-        Command::FindInDesign
-        | Command::FindReplace
-        | Command::FindCodeDocument
-        | Command::CommandPalette => WorkbenchIcon::Search,
-        Command::Preferences => WorkbenchIcon::Settings,
+        Command::DescendHierarchyDirect => WorkbenchIcon::Layers,
+        Command::AscendHierarchy | Command::ExitSymbolInPlace => WorkbenchIcon::ArrowUp,
         Command::ZoomIn => WorkbenchIcon::ZoomIn,
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
-        Command::FitSchematicContent => WorkbenchIcon::ZoomFit,
+        Command::VisibilityOptions => WorkbenchIcon::Visibility,
         Command::CycleGrid => WorkbenchIcon::Grid,
-        Command::GridSnapRouting => WorkbenchIcon::Sliders,
-        Command::DrawingSheetLayers => WorkbenchIcon::Layers,
-        Command::VisibilityOptions => WorkbenchIcon::Layers,
-        Command::ToggleNavigator => WorkbenchIcon::Navigator,
-        Command::ToggleInspector => WorkbenchIcon::Inspector,
-        Command::ToggleConsole => WorkbenchIcon::Console,
-        Command::ToggleResultsSplit => WorkbenchIcon::Compare,
-        Command::ToggleFocusMode | Command::ToggleFullScreen => WorkbenchIcon::Focus,
-        Command::PlaceInstance => WorkbenchIcon::Component,
-        Command::Place(_) => WorkbenchIcon::Add,
-        Command::PlaceWire | Command::JoinCollinearWires => WorkbenchIcon::Wire,
-        Command::PlaceBus => WorkbenchIcon::Bus,
-        Command::PlaceBusTap => WorkbenchIcon::Bus,
-        Command::PlaceJunction => WorkbenchIcon::Grid,
-        Command::PlaceLabel => WorkbenchIcon::Label,
-        Command::PlaceProbe => WorkbenchIcon::Probe,
-        Command::PlacePin => WorkbenchIcon::Component,
-        Command::PlaceText => WorkbenchIcon::Label,
-        Command::PlaceShape => WorkbenchIcon::Grid,
-        Command::MoveSelection | Command::StretchSelection => WorkbenchIcon::Select,
-        Command::ArraySelection => WorkbenchIcon::Grid,
-        Command::RotateSelection | Command::RotateSelectionCounterClockwise => {
-            WorkbenchIcon::Rotate
+        Command::CheckCellview
+        | Command::CheckDesign
+        | Command::PreflightChecks
+        | Command::ModelValidate
+        | Command::ValidateCodeDocument => WorkbenchIcon::Check,
+        Command::VerilogABuildSettings
+        | Command::SimulationOptions
+        | Command::WaveformCalculator
+        | Command::ReportPageProperties => WorkbenchIcon::Sliders,
+        Command::FindCodeDocument => WorkbenchIcon::Search,
+        Command::SourceLanguageTools | Command::EditSpecifications => WorkbenchIcon::Target,
+        Command::CompareResultDatasets
+        | Command::ModelCompareRelease
+        | Command::CompareGeneratedRevisions => WorkbenchIcon::Compare,
+        Command::ExportWaveformsCsv | Command::ExportNetlist(crate::io::NetlistFormat::Spice) => {
+            WorkbenchIcon::Export
         }
-        Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
-        Command::MirrorSelectionVertical => WorkbenchIcon::MirrorVertical,
-        Command::AlignSelectionLeft
-        | Command::AlignSelectionCenter
-        | Command::AlignSelectionRight
-        | Command::AlignSelectionTop
-        | Command::AlignSelectionMiddle
-        | Command::AlignSelectionBottom
-        | Command::DistributeSelectionHorizontal
-        | Command::DistributeSelectionVertical
-        | Command::SnapSelectionToGrid => WorkbenchIcon::Grid,
-        Command::ReplaceInstance => WorkbenchIcon::Refresh,
-        Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
-        Command::ConnectivityManager => WorkbenchIcon::Bus,
-        Command::SelectionBulkEdit | Command::RuleSetup => WorkbenchIcon::Sliders,
-        Command::ReviewComments => WorkbenchIcon::Info,
-        Command::RevisionHistory => WorkbenchIcon::History,
-        Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
-        Command::DescendHierarchy | Command::DescendHierarchyDirect => WorkbenchIcon::Folder,
+        Command::PrintHardcopy => WorkbenchIcon::File,
         Command::RunSimulation | Command::ModelRunQualificationTests => WorkbenchIcon::Run,
         Command::StopSimulation => WorkbenchIcon::Stop,
-        Command::PreflightChecks
-        | Command::CheckCellview
-        | Command::CheckDesign
-        | Command::CheckAndSave
-        | Command::ModelValidate => WorkbenchIcon::Check,
-        Command::CompileVerilogA => WorkbenchIcon::Code,
-        Command::VerilogABuildSettings => WorkbenchIcon::Sliders,
-        Command::AccountOrganization | Command::License => WorkbenchIcon::User,
-        Command::KeyboardShortcuts => WorkbenchIcon::Search,
-        Command::HelpCenter => WorkbenchIcon::Info,
-        Command::ReleaseNotes => WorkbenchIcon::History,
-        Command::MigrationGuide => WorkbenchIcon::Compare,
-        Command::SystemDiagnostics | Command::SupportBundle => WorkbenchIcon::Terminal,
-        Command::LegalPrivacy => WorkbenchIcon::Check,
-        Command::ModelCompareRelease => WorkbenchIcon::Compare,
-        Command::DesignSpecialistWorkspaces | Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
-        Command::AddVisualizationPane => WorkbenchIcon::Add,
-        Command::ToggleLinkedCursors => WorkbenchIcon::Target,
-        Command::VisualizationDocumentProperties => WorkbenchIcon::Settings,
-        Command::About => WorkbenchIcon::Info,
-        Command::PreviousDocument | Command::PreviousWorkspace => WorkbenchIcon::ArrowLeft,
-        Command::NextDocument | Command::NextWorkspace => WorkbenchIcon::ArrowRight,
-        Command::CloseOtherDocuments | Command::CloseAllDocuments => WorkbenchIcon::File,
-        Command::NewApplicationWindow => WorkbenchIcon::Add,
-        Command::DetachDocument => WorkbenchIcon::File,
-        Command::MoveDocumentToWindow => WorkbenchIcon::ArrowRight,
-        Command::ReattachDocument => WorkbenchIcon::ArrowLeft,
-        Command::ConsolidateWindows => WorkbenchIcon::Grid,
-        Command::MonitorRecovery => WorkbenchIcon::Refresh,
-        Command::WindowManager => WorkbenchIcon::Folder,
-        Command::Exit => WorkbenchIcon::Stop,
-        Command::CloseActiveDocument => WorkbenchIcon::File,
-        Command::CloseProject => WorkbenchIcon::Folder,
-        Command::Cancel => WorkbenchIcon::Close,
-        Command::ToggleLineComment | Command::GoToMatchingBracket => WorkbenchIcon::Code,
-        Command::IndentLines => WorkbenchIcon::ArrowRight,
-        Command::OutdentLines => WorkbenchIcon::ArrowLeft,
-        Command::DuplicateLine => WorkbenchIcon::Copy,
-        Command::DeleteLine => WorkbenchIcon::Trash,
-        Command::MoveLineUp => WorkbenchIcon::ArrowUp,
-        Command::MoveLineDown => WorkbenchIcon::ChevronDown,
-        Command::GoToLine => WorkbenchIcon::Target,
-        Command::FormatDocument => WorkbenchIcon::Format,
-        Command::FoldSelection | Command::FoldAll => WorkbenchIcon::ChevronRight,
-        Command::UnfoldAtCaret | Command::UnfoldAll => WorkbenchIcon::ChevronDown,
-        Command::GoToDefinition => WorkbenchIcon::ArrowRight,
-        Command::FindReferences => WorkbenchIcon::Search,
-        Command::RenameSymbol => WorkbenchIcon::Label,
-        _ => WorkbenchIcon::File,
-    }
+        Command::AutomationConsole => WorkbenchIcon::Terminal,
+        _ => return None,
+    };
+    Some(icon)
 }
 
 /// The source editor's right-click menu, drawn with the menu bar's own rows

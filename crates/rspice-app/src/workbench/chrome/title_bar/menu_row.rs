@@ -18,7 +18,9 @@ pub(super) enum MenuRowTrailing<'a> {
 /// What a menu row shows in its leading column, before the label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MenuRowLead {
-    /// The command's icon.
+    /// Nothing: the label keeps its column.
+    Blank,
+    /// The icon of the command's toolbar button.
     Icon(WorkbenchIcon),
     /// The row switches a state: a check mark while it is on, nothing while
     /// it is off.
@@ -59,7 +61,7 @@ pub(super) fn paint_menu_row(
         Vec2::splat(17.0),
     );
     match lead {
-        MenuRowLead::Check(false) => {}
+        MenuRowLead::Blank | MenuRowLead::Check(false) => {}
         MenuRowLead::Icon(icon) => icon.paint(ui.painter(), icon_rect, ink),
         // Painted as a vector: the bundled faces have no check glyph. Full
         // ink even at rest, so the state reads before the row is hovered.

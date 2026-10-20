@@ -972,10 +972,6 @@ fn design_specialist_row_uses_the_mockup_scoped_command_identity() {
         Command::DesignSpecialistWorkspaces.spec().label,
         "Specialist workspaces…"
     );
-    assert_eq!(
-        command_icon(Command::DesignSpecialistWorkspaces),
-        WorkbenchIcon::Grid
-    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1075,29 +1071,44 @@ fn simulate_menu_plan_manager_row_reports_the_commands_truthful_unavailable_reas
     );
 }
 
+/// A menu row wears an icon only where the command has a toolbar button,
+/// and then the button's own icon, so the two read as one command. Every
+/// row used to carry one, most of them stand-ins (a check for Legal, a
+/// folder for Close project) that matched nothing on screen.
 #[test]
-fn canonical_menu_icons_do_not_fall_back_to_generic_file_glyphs() {
+fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
     for (command, icon) in [
-        (Command::NewProject, WorkbenchIcon::File),
-        (Command::RevertActiveDocument, WorkbenchIcon::Refresh),
-        (Command::CloseActiveDocument, WorkbenchIcon::File),
-        (Command::CloseProject, WorkbenchIcon::Folder),
-        (Command::Exit, WorkbenchIcon::Stop),
-        (Command::Copy, WorkbenchIcon::Copy),
+        (Command::PlaceInstance, WorkbenchIcon::Instance),
+        (Command::PlaceJunction, WorkbenchIcon::Junction),
+        (Command::PlacePin, WorkbenchIcon::Pin),
+        (Command::PlaceText, WorkbenchIcon::Text),
+        (Command::NewProject, WorkbenchIcon::Add),
+        (Command::Save, WorkbenchIcon::Save),
         (Command::Delete, WorkbenchIcon::Trash),
-        (Command::SelectAll, WorkbenchIcon::Grid),
-        (Command::RenameSelection, WorkbenchIcon::Label),
-        (Command::ObjectProperties, WorkbenchIcon::Sliders),
-        (Command::ResetActiveView, WorkbenchIcon::Refresh),
-        (Command::AscendHierarchy, WorkbenchIcon::ArrowLeft),
-        (Command::DescendHierarchy, WorkbenchIcon::Folder),
-        (Command::PlaceInstance, WorkbenchIcon::Component),
-        (Command::CompileVerilogA, WorkbenchIcon::Code),
+        (Command::AscendHierarchy, WorkbenchIcon::ArrowUp),
+        (Command::DescendHierarchyDirect, WorkbenchIcon::Layers),
+        (Command::VisibilityOptions, WorkbenchIcon::Visibility),
+        (Command::CompileVerilogA, WorkbenchIcon::Netlist),
+        (Command::RunSimulation, WorkbenchIcon::Run),
         (Command::AutomationConsole, WorkbenchIcon::Terminal),
-        (Command::KeyboardShortcuts, WorkbenchIcon::Search),
         (Command::ModelCompareRelease, WorkbenchIcon::Compare),
+        (Command::PrintHardcopy, WorkbenchIcon::File),
     ] {
-        assert_eq!(command_icon(command), icon, "{}", command.spec().id);
+        assert_eq!(command_icon(command), Some(icon), "{}", command.spec().id);
+    }
+    for command in [
+        Command::LegalPrivacy,
+        Command::About,
+        Command::HelpCenter,
+        Command::CloseProject,
+        Command::Exit,
+        Command::SelectAll,
+        Command::RenameSelection,
+        Command::DescendHierarchy,
+        Command::DesignSpecialistWorkspaces,
+        Command::KeyboardShortcuts,
+    ] {
+        assert_eq!(command_icon(command), None, "{}", command.spec().id);
     }
 }
 
