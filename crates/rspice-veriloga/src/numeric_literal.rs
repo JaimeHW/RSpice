@@ -90,22 +90,30 @@ pub(crate) fn exact_integer_as_f64(value: i64) -> Option<f64> {
     }
 }
 
+/// A scale factor moves the decimal exponent of the written number, which is
+/// then parsed once: `10u` is the double nearest 10e-6, not the double nearest
+/// 10 times the double nearest 1e-6.
 fn parse_real_literal(compact: &str) -> Result<f64, String> {
-    let (number, scale) = match scale_suffix(compact) {
-        Some((suffix_start, scale)) => (&compact[..suffix_start], scale),
-        None => (compact, 1.0),
+    let invalid = || format!("'{compact}' is not a valid real number");
+    let value = match scale_suffix(compact) {
+        Some((suffix_start, decade)) => {
+            rspice_veriloga_runtime::arithmetic::scaled_decimal(
+                &compact[..suffix_start],
+                1,
+                decade,
+            )
+            .ok_or_else(invalid)?
+        }
+        None => compact.parse::<f64>().map_err(|_| invalid())?,
     };
-    let value = number
-        .parse::<f64>()
-        .map_err(|_| format!("'{compact}' is not a valid real number"))?
-        * scale;
     if !value.is_finite() {
         return Err(format!("'{compact}' is outside the finite real range"));
     }
     Ok(value)
 }
 
-fn scale_suffix(compact: &str) -> Option<(usize, f64)> {
+/// Where the scale factor starts and the power of ten it names.
+fn scale_suffix(compact: &str) -> Option<(usize, i32)> {
     let (index, _) = compact.char_indices().find(|(_, character)| {
         matches!(
             character,
@@ -113,24 +121,24 @@ fn scale_suffix(compact: &str) -> Option<(usize, f64)> {
         )
     })?;
     let suffix = &compact[index..];
-    let scale = if suffix.eq_ignore_ascii_case("meg") {
-        1.0e6
+    let decade = if suffix.eq_ignore_ascii_case("meg") {
+        6
     } else {
         match suffix {
-            "T" => 1.0e12,
-            "G" => 1.0e9,
-            "M" => 1.0e6,
-            "k" | "K" => 1.0e3,
-            "m" => 1.0e-3,
-            "u" => 1.0e-6,
-            "n" => 1.0e-9,
-            "p" => 1.0e-12,
-            "f" => 1.0e-15,
-            "a" => 1.0e-18,
+            "T" => 12,
+            "G" => 9,
+            "M" => 6,
+            "k" | "K" => 3,
+            "m" => -3,
+            "u" => -6,
+            "n" => -9,
+            "p" => -12,
+            "f" => -15,
+            "a" => -18,
             _ => return None,
         }
     };
-    Some((index, scale))
+    Some((index, decade))
 }
 
 fn parse_based_integer(raw: &str) -> Result<i64, String> {
@@ -329,6 +337,47 @@ mod tests {
             NumericLiteralValue::Integer((1_i64 << 53) + 1)
                 .as_exact_f64("9007199254740993")
                 .is_err()
+        );
+    }
+
+    /// A scale factor names the decimal it writes: `10u` is the double
+    /// nearest 10e-6. Multiplying the double nearest 10 by the double nearest
+    /// 1e-6 rounds twice and gave 9.999999999999999e-6, so
+    /// `(10u - 10e-6)*1e21` read -1.694 and `timer(0, 10u)` fired a unit in the
+    /// last place early. These mantissas each missed for at least one factor.
+    #[test]
+    fn a_scale_factor_reads_as_the_double_nearest_its_decimal() {
+        let mut misses = Vec::new();
+        for (factor, decade) in [
+            ("T", 12),
+            ("G", 9),
+            ("M", 6),
+            ("meg", 6),
+            ("MEG", 6),
+            ("K", 3),
+            ("k", 3),
+            ("m", -3),
+            ("u", -6),
+            ("n", -9),
+            ("p", -12),
+            ("f", -15),
+            ("a", -18),
+        ] {
+            for mantissa in ["1.1", "1.3", "3.3", "4.1", "8.2", "10", "0.13", "1_0.5"] {
+                let written: f64 = format!("{}e{decade}", mantissa.replace('_', ""))
+                    .parse()
+                    .expect("a decimal");
+                let raw = format!("{mantissa}{factor}");
+                match parse_numeric_literal(&raw) {
+                    Ok(NumericLiteralValue::Real(value)) if value.to_bits() == written.to_bits() => {}
+                    other => misses.push(format!("{raw} read as {other:?}, not {written:e}")),
+                }
+            }
+        }
+        assert!(misses.is_empty(), "{} misses: {misses:#?}", misses.len());
+        assert_eq!(
+            parse_numeric_literal("10u"),
+            Ok(NumericLiteralValue::Real(10e-6))
         );
     }
 }

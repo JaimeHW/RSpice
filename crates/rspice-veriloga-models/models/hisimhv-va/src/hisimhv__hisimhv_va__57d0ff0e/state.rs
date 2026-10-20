@@ -2565,7 +2565,7 @@ impl Instance {
 		}
 		if (if model_storage { PARAMETER_MODEL_FLAGS[343] || PARAMETER_DUAL_SCOPE_FLAGS[343] } else { !PARAMETER_MODEL_FLAGS[343] }) && !param_given[343] {
 			let value = {
-				if (params[42] < 3.0) { 2.0000000000000002e-7 } else { 3.0000000000000004e-7 }
+				if (params[42] < 3.0) { 2e-7 } else { 3e-7 }
 			};
 			validate_parameter_scalar_metadata(343, value)?;
 			params.values[343] = value;
