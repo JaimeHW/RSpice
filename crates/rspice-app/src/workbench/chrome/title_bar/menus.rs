@@ -5,8 +5,7 @@
 use super::*;
 use menu_entries::MenuEntry::Separator;
 use menu_entries::{
-    MenuContext, MenuEntry, command, command_as, command_by_state, command_without_key,
-    palette_scope,
+    MenuContext, MenuEntry, command, command_as, command_without_key, palette_scope,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -178,20 +177,11 @@ const VIEW_MENU: &[MenuEntry] = &[
         ],
     ),
     Separator,
-    command_by_state(
-        Command::ToggleFullScreen,
-        "Exit full screen",
-        "Enter full screen",
-        full_screen_shown,
-    ),
+    command_as(Command::ToggleFullScreen, "Full screen"),
     command(Command::ResetActiveView),
     Separator,
     command(Command::EngineeringTableView),
 ];
-
-fn full_screen_shown(app: &RSpiceApp) -> bool {
-    app.state.workbench.full_screen_presentation
-}
 
 const DESIGN_MENU: &[MenuEntry] = &[
     command_as(
@@ -312,7 +302,7 @@ const RESULTS_MENU: &[MenuEntry] = &[
     command(Command::CompareResultDatasets),
     command(Command::ReportAuthoring),
     Separator,
-    command(Command::ToggleLinkedCursors),
+    command_as(Command::ToggleLinkedCursors, "Link A/B cursors"),
     command(Command::WaveformCalculator),
     command(Command::ExpressionDiagnostics),
     command(Command::MeasurementLibrary),
@@ -363,11 +353,11 @@ const AUTOMATION_MENU: &[MenuEntry] = &[command_as(
 )];
 
 const WINDOW_MENU: &[MenuEntry] = &[
-    command(Command::ToggleNavigator),
-    command(Command::ToggleInspector),
-    command(Command::ToggleConsole),
+    command_as(Command::ToggleNavigator, "Navigator"),
+    command_as(Command::ToggleInspector, "Inspector"),
+    command_as(Command::ToggleConsole, "Console"),
     command(Command::ToggleResultsSplit),
-    command(Command::ToggleFocusMode),
+    command_as(Command::ToggleFocusMode, "Focus mode"),
     Separator,
     command(Command::NewApplicationWindow),
     command(Command::DetachDocument),
@@ -431,8 +421,8 @@ const OVERFLOW_THROUGH_SIMULATE_MENU: &[MenuEntry] = &[
     command(Command::WorkspaceLayouts),
     command(Command::WindowManager),
     command_without_key(Command::JobsManager, "Jobs & targets"),
-    command(Command::ToggleFocusMode),
-    command(Command::ToggleConsole),
+    command_as(Command::ToggleFocusMode, "Focus mode"),
+    command_as(Command::ToggleConsole, "Console"),
     Separator,
     command(Command::HelpCenter),
 ];
@@ -447,8 +437,8 @@ const OVERFLOW_MENU: &[MenuEntry] = &[
     command(Command::WorkspaceLayouts),
     command(Command::WindowManager),
     command_without_key(Command::JobsManager, "Jobs & targets"),
-    command(Command::ToggleFocusMode),
-    command(Command::ToggleConsole),
+    command_as(Command::ToggleFocusMode, "Focus mode"),
+    command_as(Command::ToggleConsole, "Console"),
     Separator,
     command(Command::HelpCenter),
 ];

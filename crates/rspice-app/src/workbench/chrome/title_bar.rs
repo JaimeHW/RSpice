@@ -24,7 +24,7 @@ use keyboard::{
     step_menu_row_focus, typeahead_menu_row_focus,
 };
 use menu_entries::{MenuEntry, menu_rows, show_menu_rows};
-use menu_row::{MenuRowTrailing, paint_menu_row};
+use menu_row::{MenuRowLead, MenuRowTrailing, paint_menu_row};
 #[cfg(test)]
 use menus::menu_popup_height_for_viewport;
 pub(in crate::workbench) use menus::source_editor_context_menu;

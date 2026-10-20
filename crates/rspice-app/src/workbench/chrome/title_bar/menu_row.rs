@@ -15,13 +15,24 @@ pub(super) enum MenuRowTrailing<'a> {
     Submenu,
 }
 
-/// One menu row's paint: its hover fill, icon, label and trailing mark.
+/// What a menu row shows in its leading column, before the label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MenuRowLead {
+    /// The command's icon.
+    Icon(WorkbenchIcon),
+    /// The row switches a state: a check mark while it is on, nothing while
+    /// it is off.
+    Check(bool),
+}
+
+/// One menu row's paint: its hover fill, leading mark, label and trailing
+/// mark.
 pub(super) fn paint_menu_row(
     ui: &Ui,
     rect: Rect,
     highlighted: bool,
     enabled: bool,
-    icon: WorkbenchIcon,
+    lead: MenuRowLead,
     label: &str,
     trailing: MenuRowTrailing<'_>,
 ) {
@@ -47,7 +58,21 @@ pub(super) fn paint_menu_row(
         egui::Pos2::new(rect.left() + 7.0, rect.center().y - 8.5),
         Vec2::splat(17.0),
     );
-    icon.paint(ui.painter(), icon_rect, ink);
+    match lead {
+        MenuRowLead::Check(false) => {}
+        MenuRowLead::Icon(icon) => icon.paint(ui.painter(), icon_rect, ink),
+        // Painted as a vector: the bundled faces have no check glyph. Full
+        // ink even at rest, so the state reads before the row is hovered.
+        MenuRowLead::Check(true) => WorkbenchIcon::Check.paint(
+            ui.painter(),
+            icon_rect,
+            if enabled {
+                t.color.text
+            } else {
+                ink
+            },
+        ),
+    }
     let label_left = rect.left() + 31.0;
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let shortcut_font = theme::mono(tokens::FS_0, FontWeight::Regular);

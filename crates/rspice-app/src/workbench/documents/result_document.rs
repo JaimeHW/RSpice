@@ -225,8 +225,9 @@ pub(crate) fn add_selected_result_as_pane(app: &mut RSpiceApp) {
 }
 
 pub(crate) use document_edit::{
-    add_pane_available, compare_available, family_available, open_add_pane, open_compare,
-    open_family, open_measurement, open_properties, set_family_filter, toggle_linked_cursors,
+    add_pane_available, compare_available, family_available, linked_cursors, open_add_pane,
+    open_compare, open_family, open_measurement, open_properties, set_family_filter,
+    toggle_linked_cursors,
 };
 
 #[cfg(test)]

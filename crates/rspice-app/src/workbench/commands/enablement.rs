@@ -755,4 +755,26 @@ impl Command {
             _ => true,
         }
     }
+
+    /// Whether the state this command switches is on right now, for a
+    /// command that switches one; `None` for a command that acts once.
+    ///
+    /// Each reading is the one the command flips, so choosing the row always
+    /// turns its mark over. The console reads off in focus mode because
+    /// focus mode hides it and the command leaves focus mode to show it.
+    pub fn checked(self, app: &RSpiceApp) -> Option<bool> {
+        let workbench = &app.state.workbench;
+        match self {
+            Self::ToggleNavigator => Some(workbench.navigator_visible),
+            Self::ToggleInspector => Some(workbench.inspector_visible),
+            Self::ToggleConsole => Some(workbench.console_visible && !workbench.focus_mode),
+            Self::ToggleResultsSplit => Some(workbench.split_with_results),
+            Self::ToggleFocusMode => Some(workbench.focus_mode),
+            Self::ToggleFullScreen => Some(workbench.full_screen_presentation),
+            Self::ToggleLinkedCursors => Some(
+                crate::workbench::documents::result_document::linked_cursors(&app.state),
+            ),
+            _ => None,
+        }
+    }
 }

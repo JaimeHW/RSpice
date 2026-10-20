@@ -47,12 +47,6 @@ enum MenuLabel {
     /// The label the command vocabulary gives the command.
     Command,
     Fixed(&'static str),
-    /// `on` while `state` holds for the application, `off` otherwise.
-    State {
-        on: &'static str,
-        off: &'static str,
-        state: fn(&RSpiceApp) -> bool,
-    },
 }
 
 /// Where a block of entries is shown.
@@ -112,21 +106,6 @@ pub(super) const fn command_without_key(command: Command, label: &'static str) -
     })
 }
 
-/// The command's row, labelled `on` while `state` holds and `off` otherwise.
-pub(super) const fn command_by_state(
-    command: Command,
-    on: &'static str,
-    off: &'static str,
-    state: fn(&RSpiceApp) -> bool,
-) -> MenuEntry {
-    MenuEntry::Command(MenuCommand {
-        command,
-        label: MenuLabel::State { on, off, state },
-        shortcut: None,
-        palette_scope: None,
-    })
-}
-
 /// A row that opens the command palette narrowed to `scope`.
 pub(super) const fn palette_scope(label: &'static str, scope: &'static str) -> MenuEntry {
     MenuEntry::Command(MenuCommand {
@@ -156,6 +135,9 @@ pub(super) struct CommandRow {
     /// The key painted at the row's right edge, empty for none.
     pub(super) shortcut: String,
     pub(super) availability: CommandAvailability,
+    /// Whether the state the command switches is on, for a command that
+    /// switches one: the row shows a check mark while it is.
+    pub(super) checked: Option<bool>,
     palette_scope: Option<&'static str>,
 }
 
@@ -196,13 +178,6 @@ fn push_menu_rows(
                 label: match item.label {
                     MenuLabel::Command => item.command.spec().label,
                     MenuLabel::Fixed(label) => label,
-                    MenuLabel::State { on, off, state } => {
-                        if state(app) {
-                            on
-                        } else {
-                            off
-                        }
-                    }
                 },
                 shortcut: shortcut_for_occurrence(
                     app.state.ui.preferences.shortcuts(),
@@ -212,6 +187,7 @@ fn push_menu_rows(
                     item.shortcut,
                 ),
                 availability: item.command.availability(app),
+                checked: item.command.checked(app),
                 palette_scope: item.palette_scope,
             })),
             MenuEntry::Submenu {
@@ -313,9 +289,20 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
         }
         CommandAvailability::Available | CommandAvailability::Hidden => response,
     };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    response.widget_info(|| match row.checked {
+        Some(checked) => {
+            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, checked, label)
+        }
+        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label),
+    });
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::MenuItem);
+        match row.checked {
+            Some(checked) => {
+                node.set_role(egui::accesskit::Role::MenuItemCheckBox);
+                node.set_toggled(checked.into());
+            }
+            None => node.set_role(egui::accesskit::Role::MenuItem),
+        }
         node.set_label(label);
         if let CommandAvailability::Disabled(reason) = availability {
             node.set_description(reason);
@@ -332,7 +319,8 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
         rect,
         highlighted,
         enabled,
-        command_icon(row.command),
+        row.checked
+            .map_or(MenuRowLead::Icon(command_icon(row.command)), MenuRowLead::Check),
         label,
         MenuRowTrailing::Shortcut(&row.shortcut),
     );
@@ -415,7 +403,7 @@ fn submenu_row(
         rect,
         is_open || response.hovered() || response.has_focus(),
         true,
-        icon,
+        MenuRowLead::Icon(icon),
         label,
         MenuRowTrailing::Submenu,
     );

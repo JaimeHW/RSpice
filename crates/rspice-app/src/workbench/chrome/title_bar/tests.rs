@@ -213,7 +213,10 @@ fn rendered_results_menu_labels() -> Vec<String> {
         .nodes
         .into_iter()
         .filter_map(|(_, node)| {
-            if node.role() == egui::accesskit::Role::MenuItem {
+            if matches!(
+                node.role(),
+                egui::accesskit::Role::MenuItem | egui::accesskit::Role::MenuItemCheckBox
+            ) {
                 node.label()
                     .zip(node.bounds())
                     .map(|(label, bounds)| (bounds.y0, bounds.x0, label.to_owned()))
@@ -346,7 +349,10 @@ fn rendered_overflow_menu_labels() -> Vec<String> {
         .nodes
         .into_iter()
         .filter_map(|(_, node)| {
-            if node.role() == egui::accesskit::Role::MenuItem {
+            if matches!(
+                node.role(),
+                egui::accesskit::Role::MenuItem | egui::accesskit::Role::MenuItemCheckBox
+            ) {
                 node.label().map(str::to_owned)
             } else {
                 None
@@ -459,8 +465,8 @@ fn overflow_keeps_mockup_specialist_and_jobs_routes_without_dropping_useful_extr
         "Workspace layouts\u{2026}",
         "Windows, documents and session\u{2026}",
         "Jobs & targets",
-        "Focus workspace",
-        "Toggle console",
+        "Focus mode",
+        "Console",
         "RSpice Help",
     ] {
         assert!(
@@ -984,7 +990,7 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
             "Create result document…",
             "Add result comparison…",
             "Report page and datasheet editor…",
-            "Linked A/B cursors",
+            "Link A/B cursors",
             "Calculator…",
             "Expression and unit diagnostics…",
             "Measurement library…",
@@ -1096,8 +1102,9 @@ fn canonical_menu_icons_do_not_fall_back_to_generic_file_glyphs() {
 }
 
 /// Every row `entries` show for `app`, hidden ones included, as
-/// `label | command id | key | state`; separators read `---` and a submenu
-/// row `label >`. Keys are the Windows desktop ones.
+/// `label | command id | key | state`, then `| checked` or `| unchecked` for
+/// a row that switches a state; separators read `---` and a submenu row
+/// `label >`. Keys are the Windows desktop ones.
 #[cfg(not(target_arch = "wasm32"))]
 fn menu_pin(entries: &[MenuEntry], app: &RSpiceApp) -> Vec<String> {
     menu_entries::resolve_menu_rows(
@@ -1114,8 +1121,13 @@ fn menu_pin(entries: &[MenuEntry], app: &RSpiceApp) -> Vec<String> {
                 CommandAvailability::Disabled(reason) => format!("off: {reason}"),
                 CommandAvailability::Hidden => "hidden".to_owned(),
             };
+            let mark = match row.checked {
+                Some(true) => " | checked",
+                Some(false) => " | unchecked",
+                None => "",
+            };
             format!(
-                "{} | {} | {} | {state}",
+                "{} | {} | {} | {state}{mark}",
                 row.label,
                 row.command.stable_id(),
                 row.shortcut
@@ -1235,6 +1247,123 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
         ["---", "Close active document"],
         "{shown:?}"
     );
+}
+
+/// The rows that switch a state carry its mark, and the mark reads the
+/// state the row flips: choosing a row always turns its mark over. The
+/// console reads off in focus mode, which hides it, and choosing it there
+/// leaves focus mode and shows it.
+#[test]
+fn switching_rows_are_checked_while_their_state_is_on() {
+    let mut app = title_test_app();
+    let switches = [
+        Command::ToggleNavigator,
+        Command::ToggleInspector,
+        Command::ToggleConsole,
+        Command::ToggleResultsSplit,
+        Command::ToggleFocusMode,
+        Command::ToggleFullScreen,
+        Command::ToggleLinkedCursors,
+    ];
+    for command in switches {
+        assert!(command.checked(&app).is_some(), "{command:?} reads no state");
+    }
+    assert_eq!(Command::Save.checked(&app), None);
+    assert_eq!(Command::ResetLayout.checked(&app), None);
+
+    for command in [
+        Command::ToggleNavigator,
+        Command::ToggleInspector,
+        Command::ToggleConsole,
+        Command::ToggleFocusMode,
+        Command::ToggleConsole,
+    ] {
+        let before = command.checked(&app).expect("a switch");
+        command.execute(&mut app);
+        assert_eq!(
+            command.checked(&app),
+            Some(!before),
+            "choosing {command:?} did not turn its mark over"
+        );
+    }
+
+    app.state.workbench.focus_mode = false;
+    app.state.workbench.console_visible = true;
+    Command::ToggleFocusMode.execute(&mut app);
+    assert_eq!(Command::ToggleConsole.checked(&app), Some(false));
+    Command::ToggleConsole.execute(&mut app);
+    assert_eq!(Command::ToggleConsole.checked(&app), Some(true));
+    assert_eq!(Command::ToggleFocusMode.checked(&app), Some(false));
+
+    for on in [true, false] {
+        app.state.workbench.split_with_results = on;
+        app.state.workbench.full_screen_presentation = on;
+        app.state.ui.results.session.linked_cursors = on;
+        for command in [
+            Command::ToggleResultsSplit,
+            Command::ToggleFullScreen,
+            Command::ToggleLinkedCursors,
+        ] {
+            assert_eq!(command.checked(&app), Some(on), "{command:?}");
+        }
+    }
+}
+
+/// A switching row reads to a screen reader as a checkable menu item with
+/// its state, and the check is painted where the icon would be; any other
+/// row stays a plain menu item.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn switching_rows_read_as_checkable_menu_items_with_their_state() {
+    use egui::accesskit::{Role, Toggled};
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = title_test_app();
+    app.state.workbench.navigator_visible = true;
+    app.state.workbench.inspector_visible = false;
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(MENU_OUTER_WIDTH, 720.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(Frame::NONE)
+                .show(ctx, |ui| {
+                    draw_menu_entries(ui, &app, ApplicationMenu::Window.entries())
+                });
+        },
+    );
+    let nodes = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit Window-menu tree")
+        .nodes;
+    let read = |label: &str| {
+        nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .map(|(_, node)| (node.role(), node.toggled()))
+            .unwrap_or_else(|| panic!("the Window menu has no {label:?} row"))
+    };
+    assert_eq!(
+        read("Navigator"),
+        (Role::MenuItemCheckBox, Some(Toggled::True))
+    );
+    assert_eq!(
+        read("Inspector"),
+        (Role::MenuItemCheckBox, Some(Toggled::False))
+    );
+    assert_eq!(
+        read("Split with results"),
+        (Role::MenuItemCheckBox, Some(Toggled::False))
+    );
+    assert_eq!(read("Reset workspace layout…"), (Role::MenuItem, None));
 }
 
 /// What a reader sees of `rows`: each row's label, `---` for a rule.
@@ -1359,7 +1488,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Drawing-sheet layers… | sheet-layer-visibility |  | on",
             "Schematic visibility… | visibility-options |  | on",
             "---",
-            "Enter full screen | full-screen | F11 | on",
+            "Full screen | full-screen | F11 | on | unchecked",
             "Reset active view | reset-active-view |  | on",
             "---",
             "Engineering table view… | engineering-table-manager | Ctrl+Shift+T | on",
@@ -1439,7 +1568,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Add result comparison… | compare-datasets |  | off: open an active result document",
             "Report page and datasheet editor… | report-page-editor |  | on",
             "---",
-            "Linked A/B cursors | toggle-linked-cursors | Shift+C | off: open a result in Results",
+            "Link A/B cursors | toggle-linked-cursors | Shift+C | off: open a result in Results | unchecked",
             "Calculator… | calculator |  | on",
             "Expression and unit diagnostics… | expression-diagnostics |  | off: no result dataset is available",
             "Measurement library… | measurement-library |  | off: open a result in Results",
@@ -1477,11 +1606,11 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
     (
         ApplicationMenu::Window,
         &[
-            "Toggle navigator | toggle-navigator | Ctrl+B | on",
-            "Toggle inspector | toggle-inspector | Ctrl+I | on",
-            "Toggle console | console | Ctrl+J | on",
-            "Split with results | toggle-split-view | Ctrl+\\ | off: no retained result dataset is available",
-            "Focus workspace | toggle-focus-mode | Ctrl+Shift+F | on",
+            "Navigator | toggle-navigator | Ctrl+B | on | checked",
+            "Inspector | toggle-inspector | Ctrl+I | on | checked",
+            "Console | console | Ctrl+J | on | unchecked",
+            "Split with results | toggle-split-view | Ctrl+\\ | off: no retained result dataset is available | unchecked",
+            "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
             "---",
             "New application window… | new-application-window | Ctrl+Alt+Shift+N | on",
             "Detach active document… | detach-document |  | on",
@@ -1562,7 +1691,7 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
             "Fold all | fold-all |  | on",
             "Unfold all | unfold-all |  | on",
             "---",
-            "Enter full screen | full-screen | F11 | on",
+            "Full screen | full-screen | F11 | on | unchecked",
             "Reset active view | reset-active-view |  | on",
             "---",
             "Engineering table view… | engineering-table-manager | Ctrl+Shift+T | on",
@@ -1584,8 +1713,8 @@ const PINNED_OVERFLOW_MENUS: [(MenuProjection, &[&str]); 2] = [
             "Workspace layouts… | workspace-layouts |  | on",
             "Windows, documents and session… | window-manager |  | on",
             "Jobs & targets | jobs-manager |  | on",
-            "Focus workspace | toggle-focus-mode | Ctrl+Shift+F | on",
-            "Toggle console | console | Ctrl+J | on",
+            "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
+            "Console | console | Ctrl+J | on | unchecked",
             "---",
             "RSpice Help | help-center | F1 | on",
         ],
@@ -1599,8 +1728,8 @@ const PINNED_OVERFLOW_MENUS: [(MenuProjection, &[&str]); 2] = [
             "Workspace layouts… | workspace-layouts |  | on",
             "Windows, documents and session… | window-manager |  | on",
             "Jobs & targets | jobs-manager |  | on",
-            "Focus workspace | toggle-focus-mode | Ctrl+Shift+F | on",
-            "Toggle console | console | Ctrl+J | on",
+            "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
+            "Console | console | Ctrl+J | on | unchecked",
             "---",
             "RSpice Help | help-center | F1 | on",
         ],

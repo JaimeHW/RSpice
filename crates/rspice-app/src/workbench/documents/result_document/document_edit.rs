@@ -406,6 +406,16 @@ pub(crate) fn toggle_linked_cursors(state: &mut AppState) {
     report(state, result);
 }
 
+/// Whether A/B cursors are linked where [`toggle_linked_cursors`] would
+/// switch them: the document's links over a project result document, the
+/// session's toggle over a quick view.
+pub(crate) fn linked_cursors(state: &AppState) -> bool {
+    match active_document_id(state) {
+        None => state.ui.results.session.linked_cursors,
+        Some(document_id) => project_document(state, document_id).is_ok_and(links::cursors_linked),
+    }
+}
+
 /// The pane's place in its page's reading order, with that order.
 fn page_order(document: &VisualizationDocument, pane_id: PaneId) -> Option<(usize, Vec<PaneId>)> {
     let pane = document.panes().iter().find(|pane| pane.id == pane_id)?;
