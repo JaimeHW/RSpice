@@ -1078,7 +1078,7 @@ fn first_unresolved_behavioral_identifier(expression: &NetExpr) -> Option<&str> 
 
 pub(super) fn contains_runtime_identifier(expression: &str) -> bool {
     expression
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
         .any(|token| runtime_special_quantity(token).is_some())
 }
 
@@ -1821,7 +1821,7 @@ fn split_probe_args(inner: &str) -> Option<Vec<&str>> {
 fn is_simple_probe_reference(raw: &str) -> bool {
     !raw.is_empty()
         && raw.chars().all(|c| {
-            c.is_ascii_alphanumeric()
+            c.is_alphanumeric()
                 || matches!(
                     c,
                     '_' | '.' | '#' | ':' | '$' | '@' | '/' | '\\' | '|' | '+' | '-' | '!'
@@ -1951,12 +1951,13 @@ fn merge_sign_tokens(items: Vec<String>) -> Vec<String> {
     merged
 }
 
+/// The expression parser's identifier alphabet, non-ASCII letters included.
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || matches!(c, '_' | '`' | '@' | '#' | '$')
+    c.is_alphabetic() || matches!(c, '_' | '`' | '@' | '#' | '$')
 }
 
 fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '`' | '@' | '#' | '$')
+    c.is_alphanumeric() || matches!(c, '_' | '.' | ':' | '`' | '@' | '#' | '$')
 }
 
 /// Check the resulting tree before substitution clones repeated arguments.

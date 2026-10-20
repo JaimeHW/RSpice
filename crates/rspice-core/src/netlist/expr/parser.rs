@@ -520,11 +520,13 @@ impl<'a> ExprParser<'a> {
         // than numparam's atto, and `1mil` is 25.4e-6 rather than milli.
         // Xyce's engineering-expression imaginary suffix (`2.0J`) is the one
         // suffix a value position has no use for.
+        // The micro sign and other non-ASCII unit letters (`5µ`, `1kΩ`) belong
+        // to the suffix as they do in a value position.
         let mut multiplier = 1.0;
         let mut imaginary_literal = false;
-        if self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
+        if self.peek().is_some_and(char::is_alphabetic) {
             let suffix_start = self.pos;
-            while self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
+            while self.peek().is_some_and(char::is_alphabetic) {
                 if self.advance().is_none() {
                     return Err(ExprError::UnexpectedChar('\0'));
                 }
@@ -651,7 +653,8 @@ impl<'a> ExprParser<'a> {
             }
         }
 
-        let name = self.input[start..self.pos].to_uppercase();
+        // ASCII case folding, as the parameter tables key their names.
+        let name = self.input[start..self.pos].to_ascii_uppercase();
 
         self.skip_ws();
 
@@ -768,12 +771,13 @@ impl BinaryLevel {
     }
 }
 
+/// Letters outside ASCII count, as in deck names (`.param α=1`, `{α*2}`).
 fn is_expr_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || matches!(c, '_' | '`' | '@' | '#' | '$')
+    c.is_alphabetic() || matches!(c, '_' | '`' | '@' | '#' | '$')
 }
 
 fn is_expr_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '_' | '`' | '@' | '#' | '.' | '$')
+    c.is_alphanumeric() || matches!(c, '_' | '`' | '@' | '#' | '.' | '$')
 }
 
 fn is_raw_probe_accessor(name: &str) -> bool {

@@ -50,6 +50,14 @@ fn parse_suffix(chars: &[char]) -> (SuffixScale, usize) {
         return (SuffixScale::Unit, 0);
     }
 
+    // ngspice rewrites the micro sign to `u` as it reads a deck (utf8_check
+    // in inpcom.c); the Greek small mu, its look-alike, reads the same.
+    if matches!(chars[0], '\u{b5}' | '\u{3bc}') {
+        let mut ascii = chars.to_vec();
+        ascii[0] = 'u';
+        return parse_suffix(&ascii);
+    }
+
     if chars.len() >= 3 {
         let three = chars[..3].iter().collect::<String>().to_ascii_uppercase();
         match three.as_str() {

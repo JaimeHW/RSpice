@@ -266,7 +266,9 @@ impl<'a> Lexer<'a> {
         }
 
         let ident = &input[..end];
-        Ok((TokenKind::Ident(ident.to_uppercase()), end))
+        // Case folds ASCII only, like ngspice and like every parameter and
+        // node table downstream: `é` and `É` remain distinct names.
+        Ok((TokenKind::Ident(ident.to_ascii_uppercase()), end))
     }
 
     /// Try to parse a number, but keep digit-leading alphanumeric tokens as
@@ -423,7 +425,7 @@ impl<'a> Lexer<'a> {
         let (kind, consumed) = self.parse_number(input)?;
         let unit_word: usize = input[consumed..]
             .chars()
-            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
             .map(char::len_utf8)
             .sum();
         Ok((kind, consumed + unit_word))
@@ -607,14 +609,15 @@ fn sign_token(sign: char) -> TokenKind {
     }
 }
 
-/// Check if character can start an identifier
+/// Check if character can start an identifier. Letters outside ASCII count:
+/// ngspice reads UTF-8 names (`nΩ`, `Vé`, `.param α=1`).
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_' || c == '%'
+    c.is_alphabetic() || c == '_' || c == '%'
 }
 
 /// Check if character can be part of an identifier
 fn is_ident_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '%')
+    c.is_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '%')
 }
 
 /// Check if an otherwise-special character should remain available to parsers.
@@ -629,7 +632,7 @@ fn is_other_token_char(c: char) -> bool {
 /// The element-head parser and noise contribution probes share this exact
 /// whitelist so a device identity remains stable across parsing and analysis.
 pub fn is_xyce_device_name_char(character: char) -> bool {
-    character.is_ascii_alphanumeric()
+    character.is_alphanumeric()
         || matches!(
             character,
             '_' | ':'
@@ -1218,6 +1221,50 @@ mod tests {
         let tokens = tokenize("PULSE(0 1.5V,2.5ms)").expect("tokenize");
         assert!(tokens.iter().any(|token| token.lexeme == "1.5V"));
         assert!(tokens.iter().any(|token| token.kind == TokenKind::RParen));
+    }
+
+    /// ngspice rewrites the micro sign to `u` (utf8_check in inpcom.c) and
+    /// reads UTF-8 names. `10µ` used to stop at the `µ`, and `nΩ`, `α` and
+    /// `Vé` were not names at all.
+    #[test]
+    fn micro_signs_and_non_ascii_letters_read_as_ngspice_reads_them() {
+        for (literal, expected) in [
+            ("10µ", 10.0e-6),
+            ("4.7µF", 4.7e-6),
+            ("2μ", 2.0e-6),
+            ("1.5kΩ", 1.5e3),
+            ("1Ω", 1.0),
+        ] {
+            let tokens = tokenize(literal).unwrap_or_else(|error| panic!("{literal}: {error}"));
+            assert_eq!(tokens.len(), 2, "{literal} left a stray token: {tokens:?}");
+            let TokenKind::Number(value) = tokens[0].kind else {
+                panic!("{literal} is not a number: {tokens:?}");
+            };
+            assert!(
+                (value - expected).abs() <= expected * 1.0e-15,
+                "{literal} lexed as {value:e}, expected {expected:e}"
+            );
+        }
+        assert_eq!(parse_spice_value("1kΩ").expect("1kΩ parses"), 1.0e3);
+        let micro = parse_spice_value_complete("10µ").expect("10µ is one complete value");
+        assert!(
+            (micro - 10.0e-6).abs() <= 10.0e-6 * 1.0e-15,
+            "10µ = {micro:e}"
+        );
+
+        let tokens = tokenize("Vé nΩ α 1kΩ\n").expect("tokenize names");
+        let kinds: Vec<_> = tokens.iter().map(|token| token.kind.clone()).collect();
+        assert_eq!(
+            kinds,
+            [
+                TokenKind::Ident("Vé".to_string()),
+                TokenKind::Ident("NΩ".to_string()),
+                TokenKind::Ident("α".to_string()),
+                TokenKind::Ident("1KΩ".to_string()),
+                TokenKind::Newline,
+                TokenKind::Eof,
+            ]
+        );
     }
 
     #[test]

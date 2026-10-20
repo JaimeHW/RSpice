@@ -2713,6 +2713,41 @@ mod tests {
         ));
     }
 
+    /// ngspice 46 runs audit decks u1.cir and uni/u1-u5: `10µ` and `{5µ}`
+    /// are 10 uV and 5 uV, `1kΩ` is 1k, and `nΩ`, `α` and `Vé` are names.
+    #[test]
+    fn micro_signs_and_non_ascii_names_reach_the_circuit() {
+        use crate::netlist::{ElementKind, SourceSpec};
+        let netlist = Netlist::parse(
+            "unicode\n.param α=2\nV1 1 0 10µ\nV2 2 0 {5µ}\nR1 1 nΩ 1kΩ\nVé nΩ 0 {α}\n\
+             R2 2 0 1k\n.op\n.end\n",
+        )
+        .unwrap();
+        let kind = |name: &str| {
+            &netlist
+                .elements
+                .iter()
+                .find(|element| element.name == name)
+                .unwrap_or_else(|| panic!("{name} parsed"))
+                .kind
+        };
+        let close = |actual: f64, expected: f64| (actual - expected).abs() <= expected * 1.0e-15;
+        assert!(
+            matches!(kind("V1"), ElementKind::VoltageSource(SourceSpec::Dc(v)) if close(*v, 10.0e-6))
+        );
+        assert!(
+            matches!(kind("V2"), ElementKind::VoltageSource(SourceSpec::Dc(v)) if close(*v, 5.0e-6))
+        );
+        assert!(matches!(kind("R1"), ElementKind::Resistor { value, .. } if *value == 1.0e3));
+        assert!(matches!(kind("Vé"), ElementKind::VoltageSource(SourceSpec::Dc(v)) if *v == 2.0));
+        let r1 = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "R1")
+            .unwrap();
+        assert_eq!(r1.nodes, ["1", "NΩ"]);
+    }
+
     #[test]
     fn instance_value_expressions_consume_each_authored_random_draw_once() {
         use crate::config::ExpressionDialect;

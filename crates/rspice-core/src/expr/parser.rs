@@ -178,8 +178,8 @@ impl<'a> Lexer<'a> {
         // INPevaluate's atto, and `1MHz` is 1e6 rather than milli.
         let mut multiplier = 1.0;
         let mut tail = String::new();
-        if matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
-            while matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
+        if matches!(self.chars.peek(), Some(c) if c.is_alphabetic()) {
+            while matches!(self.chars.peek(), Some(c) if c.is_alphabetic()) {
                 if let Some(character) = self.next_char() {
                     tail.push(character);
                 } else {
