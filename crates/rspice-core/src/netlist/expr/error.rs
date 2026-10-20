@@ -26,6 +26,9 @@ impl std::fmt::Display for ExprError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExprError::InvalidNumber(s) => write!(f, "Invalid number: {}", s),
+            // The parser reports running out of input as a NUL character;
+            // printing it put a raw control byte in the diagnostic (`{}`).
+            ExprError::UnexpectedChar('\0') => write!(f, "Unexpected end of expression"),
             ExprError::UnexpectedChar(c) => write!(f, "Unexpected character: '{}'", c),
             ExprError::MissingCloseParen => write!(f, "Missing closing parenthesis"),
             ExprError::MissingCloseQuote => write!(f, "Missing closing single quote"),

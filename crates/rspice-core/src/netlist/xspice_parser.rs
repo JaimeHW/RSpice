@@ -1847,7 +1847,7 @@ fn parse_vector_literal(
 ) -> Result<XspiceParamValue, ParseError> {
     let tokens = tokenize(value).map_err(|err| ParseError::Syntax {
         line: line_num,
-        message: format!("Invalid XSPICE vector parameter literal: {err}"),
+        message: format!("Invalid XSPICE vector parameter literal: {}", err.message()),
     })?;
     let mut stream = TokenStream::new(tokens);
     let parsed = parse_vector_param_value(

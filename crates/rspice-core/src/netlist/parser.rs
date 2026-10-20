@@ -140,7 +140,7 @@ fn options_overlay(
     ensure_parse_not_aborted(abort)?;
     let mut stream = TokenStream::new(tokenize(arguments).map_err(|error| ParseError::Syntax {
         line,
-        message: error.to_string(),
+        message: error.message(),
     })?)
     .with_abort(abort);
     let mut candidate = current.clone();
@@ -2941,6 +2941,24 @@ fn source_map_logical_line_error(
             return ParseError::AnalysisCard(error);
         }
         ParseError::Syntax { line, message } => (line, message),
+        // A value error raised while reading this card has no position of
+        // its own (`Undefined parameter: Z`, `Missing closing parenthesis`);
+        // name the card, as the command parsers' `line N:` prefix does.
+        ParseError::InvalidValue(message) => {
+            let location = if source_is_included && origin.path.is_some() {
+                origin.to_string()
+            } else {
+                format!("line {expanded_line}")
+            };
+            let located = message.starts_with("line ")
+                || message.starts_with(&location)
+                || message.starts_with(&origin.to_string());
+            return ParseError::InvalidValue(if located {
+                message
+            } else {
+                format!("{location}: {message}")
+            });
+        }
         other => return other,
     };
     if !source_is_included || line != expanded_line || origin.path.is_none() {
@@ -2960,6 +2978,29 @@ fn source_map_logical_line_error(
 #[cfg(test)]
 mod source_mapping_tests {
     use super::*;
+
+    /// A card's diagnostics name the card's own line: value errors used to
+    /// carry no line at all, an error from re-lexing a field reported the
+    /// field's `line 1` inside the card's line, and an empty expression
+    /// printed a raw NUL character.
+    #[test]
+    fn card_diagnostics_name_the_card_line_once() {
+        for (card, detail) in [
+            ("V1 1 0 {1+(2}", "Missing closing parenthesis"),
+            ("V1 1 0 {zz}", "Undefined parameter: ZZ"),
+            ("V1 1 0 {}", "Unexpected end of expression"),
+            (".param x='2", "Unterminated expression"),
+        ] {
+            let error = Netlist::parse(&format!("located\nR1 1 0 1k\n{card}\n.op\n.end\n"))
+                .expect_err("the card is invalid");
+            let message = error.to_string();
+            assert!(message.contains(detail), "{card}: {message}");
+            assert!(message.contains("line 3"), "{card}: {message}");
+            assert!(!message.contains("line 1"), "{card}: {message}");
+            assert!(!message.contains("line 0"), "{card}: {message}");
+            assert!(!message.contains('\0'), "{card}: {message}");
+        }
+    }
 
     #[test]
     fn typed_analysis_origin_is_attached_once_without_changing_the_issue() {
@@ -3573,8 +3614,14 @@ fn top_level_source_resolution_error(
     raw_spec: &str,
     error: ParseError,
 ) -> ParseError {
+    // The specification is re-read on its own, so a syntax error's line is
+    // that text's, not the card's; the caller locates the card.
+    let detail = match error {
+        ParseError::Syntax { message, .. } => message,
+        other => other.to_string(),
+    };
     ParseError::InvalidValue(format!(
-        "source {element_name} specification '{}' could not be resolved after .PARAM processing: {error}",
+        "source {element_name} specification '{}' could not be resolved after .PARAM processing: {detail}",
         raw_spec.trim()
     ))
 }

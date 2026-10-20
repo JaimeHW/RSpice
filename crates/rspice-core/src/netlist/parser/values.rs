@@ -2580,10 +2580,13 @@ pub(super) fn skip_commas(stream: &mut TokenStream) {
     while stream.consume(&TokenKind::Comma) {}
 }
 
+/// The lexer counts lines from the start of the text it was handed, which
+/// for a card or a re-lexed field is line 1; the card's own source line is
+/// the one to report.
 pub(super) fn lex_to_parse_error(e: LexError, line_num: usize) -> ParseError {
     ParseError::Syntax {
         line: line_num,
-        message: e.to_string(),
+        message: e.message(),
     }
 }
 

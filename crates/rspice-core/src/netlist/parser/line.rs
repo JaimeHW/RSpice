@@ -496,6 +496,12 @@ pub(super) fn process_line_with_abort(
                 &scope,
                 line_num,
             )?;
+            for element in &subckt_elements {
+                state.element_origins.insert(
+                    crate::netlist::element_origin_key(Some(&frame.qualified_name), &element.name),
+                    origin.clone(),
+                );
+            }
             MutualInductorSemanticRecord::append_parsed_elements(
                 &mut state.mutual_inductor_records,
                 &subckt_elements,
@@ -568,6 +574,10 @@ pub(super) fn process_line_with_abort(
         line_num,
     )?;
     for element in &state.elements[first_new_element..] {
+        state.element_origins.insert(
+            crate::netlist::element_origin_key(None, &element.name),
+            origin.clone(),
+        );
         if matches!(
             element.kind,
             ElementKind::VoltageSourceDeferred(_)

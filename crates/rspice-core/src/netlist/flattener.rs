@@ -33,7 +33,7 @@ use super::{
     UndefinedSubcircuitError, ensure_parse_not_aborted, finish_non_aborting_parse,
     poll_parse_abort, validate_mutual_inductor_references,
 };
-use super::{ElementParameterDirection, ParameterDirectionCapture};
+use super::{ElementParameterDirection, NetlistSourceLocation, ParameterDirectionCapture};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::config::ExpressionDialect;
@@ -391,6 +391,9 @@ pub struct Flattener<'a> {
     /// node names. See [`Self::canonicalize_node_spellings`].
     expanded_instance_paths: HashSet<String>,
     parameter_direction: Option<Box<ParameterDirectionCapture>>,
+    /// The flattened netlist's card origins, which locate an expansion
+    /// error at the card that raised it.
+    element_origins: HashMap<String, NetlistSourceLocation>,
 }
 
 impl<'a> Flattener<'a> {
@@ -458,6 +461,32 @@ impl<'a> Flattener<'a> {
             flattened_element_names: HashSet::new(),
             expanded_instance_paths: HashSet::new(),
             parameter_direction: None,
+            element_origins: HashMap::new(),
+        }
+    }
+
+    /// Give an expansion error that names no line the line of the card it
+    /// came from: `subcircuit` holds the card, or none for the root deck.
+    /// An error already located deeper in the hierarchy keeps its card.
+    fn locate_expansion_error(
+        &self,
+        error: ParseWithAbortError,
+        subcircuit: Option<&str>,
+        name: &str,
+    ) -> ParseWithAbortError {
+        let ParseWithAbortError::Parse(ParseError::Syntax { line: 0, message }) = error else {
+            return error;
+        };
+        match self
+            .element_origins
+            .get(&super::element_origin_key(subcircuit, name))
+        {
+            Some(origin) => ParseError::Syntax {
+                line: origin.line,
+                message: format!("{origin}: {message}"),
+            }
+            .into(),
+            None => ParseError::Syntax { line: 0, message }.into(),
         }
     }
 
@@ -573,6 +602,7 @@ impl<'a> Flattener<'a> {
         self.xspice_auto_bridge_node_hints.clear();
         self.flattened_element_names.clear();
         self.expanded_instance_paths.clear();
+        self.element_origins = netlist.element_origins.clone();
         self.xspice_auto_bridge_digital_param_name = netlist
             .options
             .auto_bridge_param_name("d")
@@ -626,6 +656,7 @@ impl<'a> Flattener<'a> {
                 abort,
             ) {
                 self.expansion_stack.truncate(stack_len);
+                let error = self.locate_expansion_error(error, None, &element.name);
                 self.handle_branch_error(error, &format!("top-level element {}", element.name))?;
             }
         }
@@ -1456,6 +1487,8 @@ impl<'a> Flattener<'a> {
             })();
             if let Err(error) = branch_result {
                 self.expansion_stack.truncate(stack_len);
+                let error =
+                    self.locate_expansion_error(error, Some(&subckt.name), &sub_element.name);
                 self.handle_branch_error(
                     error,
                     &format!(
@@ -5560,6 +5593,47 @@ mod tests {
                 .contains("Invalid coupling coefficient 1.5"),
             "{error}"
         );
+    }
+
+    /// Errors found while expanding the hierarchy used to say `line 0`; they
+    /// name the card that raised them, the innermost one for a nested cause.
+    #[test]
+    fn expansion_errors_name_the_card_behind_them() {
+        for (deck, line, detail) in [
+            (
+                "recursive subckt\n.subckt a n1 n2\nX1 n1 n2 b\n.ends\n.subckt b n1 n2\n\
+                 X1 n1 n2 a\n.ends\nV1 1 0 1\nX1 1 0 a\n.op\n.end\n",
+                6,
+                "Recursive subcircuit instantiation",
+            ),
+            (
+                "self recursive subckt\n.subckt a n1 n2\nX1 n1 n2 a\n.ends\nV1 1 0 1\n\
+                 X1 1 0 a\n.op\n.end\n",
+                3,
+                "Recursive subcircuit instantiation",
+            ),
+            (
+                "wrong pin count\n.subckt rr a b\nR1 a b 1k\n.ends\nV1 1 0 1\nX1 1 0 2 rr\n\
+                 R2 2 0 1k\n.op\n.end\n",
+                6,
+                "connects 3 node(s)",
+            ),
+        ] {
+            let netlist = Netlist::parse(deck).expect("deck parses");
+            let error = flatten_netlist(&netlist).expect_err("expansion fails");
+            let ParseError::Syntax {
+                line: reported,
+                message,
+            } = &error
+            else {
+                panic!("expansion error is a located syntax error: {error:?}");
+            };
+            assert_eq!(*reported, line, "{message}");
+            assert!(
+                message.starts_with(&format!("line {line}: ")) && message.contains(detail),
+                "{message}"
+            );
+        }
     }
 
     fn transmission_line_fields(netlist: &Netlist) -> Vec<(String, Option<Value>, Option<Value>)> {

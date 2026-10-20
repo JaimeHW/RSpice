@@ -6250,7 +6250,7 @@ pub(in crate::netlist) fn lower_deferred_rf_port(
     let abort = NumericParseAbort::new(abort);
     let mut stream = TokenStream::new(tokenize(source).map_err(|error| ParseError::Syntax {
         line,
-        message: error.to_string(),
+        message: error.message(),
     })?)
     .with_abort(&abort);
     let mut elements = Vec::with_capacity(2);

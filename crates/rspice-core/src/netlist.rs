@@ -243,6 +243,17 @@ impl std::fmt::Display for NetlistSourceLocation {
     }
 }
 
+/// The key `Netlist::element_origins` files a card under: the qualified
+/// subcircuit that holds it (none for the root deck) and its name, both
+/// case-folded.
+pub(crate) fn element_origin_key(subcircuit: Option<&str>, name: &str) -> String {
+    format!(
+        "{}/{}",
+        subcircuit.unwrap_or_default().to_ascii_uppercase(),
+        name.to_ascii_uppercase()
+    )
+}
+
 /// Boundary that exposed an unterminated `.SUBCKT` definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissingSubcircuitEndsBoundary {
@@ -1133,6 +1144,10 @@ pub struct Netlist {
     /// conditional branch, an unselected inline library section. Read-only
     /// provenance for source readers; not part of electrical identity.
     pub(crate) unread_source: Vec<UnreadSourceRegion>,
+    /// Where each authored card was read, keyed by
+    /// [`element_origin_key`], so an error found while expanding the
+    /// hierarchy can name the card behind it. Not part of electrical identity.
+    pub(crate) element_origins: HashMap<String, NetlistSourceLocation>,
     /// Authored PSpice E/G CHEBYSHEV card count retained independently from
     /// the variable-size synthesized element realization.
     pub(crate) pspice_chebyshev_source_count: usize,
@@ -3786,6 +3801,7 @@ impl Default for Netlist {
             control_dispositions: Vec::new(),
             control_script: None,
             unread_source: Vec::new(),
+            element_origins: HashMap::new(),
             pspice_chebyshev_source_count: 0,
             source_text: None,
             monte_carlo_source_cards: Vec::new(),
