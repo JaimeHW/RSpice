@@ -327,6 +327,50 @@ fn connect_refusals_point_at_the_line_the_author_wrote() {
     );
 }
 
+/// A design that instantiates a `connectmodule` by name is refused as that,
+/// not as "Undefined module: 'd2a_s'" about a module the file declares.
+#[test]
+fn a_connectmodule_instantiated_by_name_is_refused_as_one() {
+    let directory = TempDirectory::new("by-name");
+    let path = directory.path().join("by_name.vams");
+    std::fs::write(
+        &path,
+        "\
+`include \"disciplines.vams\"
+`timescale 1ns/1ps
+module top(o);
+  output o; electrical o;
+  reg d; logic d;
+  initial begin d = 0; #5 d = 1; end
+  d2a_s c1(d, o);
+endmodule
+connectmodule d2a_s(d, a);
+  input d; output a; logic d; electrical a;
+  analog V(a) <+ transition(d ? 2.0 : 0.0, 0, 1n);
+endmodule
+",
+    )
+    .expect("write the design");
+    let deck = format!(
+        "connect module by name\n\
+         .hdl \"{}\" module=top\n\
+         x1 o top\n\
+         r1 o 0 1k\n\
+         .tran 1n 20n\n\
+         .end\n",
+        path.display().to_string().replace('\\', "/")
+    );
+    let netlist = Netlist::parse(&deck).unwrap_or_else(|error| panic!("deck parses: {error}"));
+    let error = Engine::default()
+        .run_tran(&netlist, 20.0e-9, 1.0e-9)
+        .expect_err("the deck is refused")
+        .to_string();
+    assert!(
+        error.contains("`d2a_s` is a connectmodule") && !error.contains("Undefined module"),
+        "{error}"
+    );
+}
+
 /// An empty authored body leaves its output undriven, even with a built-in name.
 #[test]
 fn an_empty_authored_connect_body_is_not_replaced_by_a_builtin() {

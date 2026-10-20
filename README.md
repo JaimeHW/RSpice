@@ -376,7 +376,8 @@ inside one HDL design, a net joining a discrete port and an analog port of
 two instances in the hierarchy, gets no automatic connect module: it is
 refused by name, and works once the net is brought out to a deck node or an
 instance of an ordinary converter module (one discrete and one electrical
-port) joins the two.
+port) joins the two. A `connectmodule` itself is inserted only by the
+`connectrules`; instantiating one by name in a design is refused.
 
 Digital and mixed runs export to VCD with `rspice run --format vcd`, one wire
 per digital node and one N-bit vector per declared bus (`--expand-buses` writes

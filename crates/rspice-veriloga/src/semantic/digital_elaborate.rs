@@ -485,7 +485,12 @@ impl DigitalElaborator<'_> {
                 .map(|module| &module.analyzed)
                 .or_else(|| bound.as_deref().map(|module| &module.analyzed))
                 .or_else(|| self.analyzed.modules.get(&instance.module))
-                .ok_or_else(|| semantic_error(undefined_module(&instance.module), instance.span))?;
+                .ok_or_else(|| {
+                    semantic_error(
+                        undefined_module(&instance.module, self.analyzed),
+                        instance.span,
+                    )
+                })?;
             stack.push(frame);
             if connection.is_none() && bound.is_none() && !self.required.contains(&instance.module)
             {
@@ -1477,13 +1482,21 @@ fn semantic_error(kind: SemanticErrorKind, span: Span) -> CompileError {
 
 /// An instance of a module nothing defines. A switch, pull or three-state
 /// gate primitive (IEEE 1364-2005 sections 7.1 and 7.6-7.8) is named as the
-/// unsupported construct it is rather than as a missing module.
-pub(super) fn undefined_module(module: &str) -> SemanticErrorKind {
+/// unsupported construct it is rather than as a missing module, and so is a
+/// `connectmodule` the source declares: Verilog-AMS lets a design
+/// instantiate one by name, and this compiler does not.
+pub(super) fn undefined_module(module: &str, analyzed: &AnalyzedFile) -> SemanticErrorKind {
     const PRIMITIVES: [&str; 18] = [
         "cmos", "rcmos", "nmos", "pmos", "rnmos", "rpmos", "tran", "tranif0", "tranif1", "rtran",
         "rtranif0", "rtranif1", "pullup", "pulldown", "bufif0", "bufif1", "notif0", "notif1",
     ];
-    if PRIMITIVES.contains(&module) {
+    if analyzed.connect_rules.declares_connect_module(module) {
+        SemanticErrorKind::UnsupportedFeature(format!(
+            "`{module}` is a connectmodule, and instantiating a connect module by name inside \
+             a design is not supported; connect modules are inserted at the deck's discipline \
+             boundaries by the selected `connectrules`"
+        ))
+    } else if PRIMITIVES.contains(&module) {
         SemanticErrorKind::UnsupportedFeature(format!(
             "the gate primitive `{module}` (IEEE 1364-2005 section 7) has no executable form yet"
         ))

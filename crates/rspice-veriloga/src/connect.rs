@@ -282,6 +282,11 @@ impl ConnectRuleTable {
         !self.modules.is_empty() || !self.blocks.is_empty()
     }
 
+    /// Whether the source declares a `connectmodule` of this name.
+    pub fn declares_connect_module(&self, name: &str) -> bool {
+        self.modules.contains_key(name)
+    }
+
     pub fn blocks(&self) -> &[ConnectRuleBlock] {
         &self.blocks
     }
