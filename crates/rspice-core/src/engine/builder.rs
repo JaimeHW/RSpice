@@ -11063,33 +11063,39 @@ mod tests {
             .expect("default limiter policy remains buildable");
     }
 
-    /// A geometry sitting exactly on a shared bin edge takes the *lower* bin.
+    /// A geometry sitting exactly on a shared bin edge takes the bin it
+    /// starts, whatever order the cards are declared in.
     ///
-    /// ngspice's ranges are inclusive at both ends and it returns the first
-    /// match while walking the model table, so with foundry tables written in
-    /// ascending order the lower bin wins. Selecting by "most specific bin"
-    /// instead quietly picks the upper one and swaps in a different parameter
-    /// set — visible as a few percent of drain current, not as an error.
+    /// HSPICE and Spectre bin half-open, `min <= x < max`. ngspice's ranges
+    /// are inclusive at both ends, but it prepends every model to its table
+    /// (`inpmkmod.c`) and returns the first match, so the last-declared card
+    /// wins: for a foundry table written in ascending order, the upper bin.
+    /// ngspice 46 measured on two BSIM4 bins meeting at L=1u: the device at
+    /// L=1u takes the `lmin=1u` card. The wrong bin swaps in a different
+    /// parameter set, visible as drain current, not as an error.
     #[test]
-    fn a_geometry_on_a_bin_boundary_takes_the_lower_bin() {
-        let deck = "binned mosfet\n\
-             V1 d 0 1\n\
-             M1 d d 0 0 NCH W=1u L=0.5u\n\
-             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n\
-             .model NCH.1 NMOS LEVEL=1 LMIN=0.5u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
-             .end\n";
-        let netlist = Netlist::parse(deck).expect("binned deck parses");
-        let circuit = Engine::new(SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("binned deck builds");
-        let [mosfet] = circuit.mosfets.devices.as_slice() else {
-            panic!("expected one mosfet");
-        };
-        assert!(
-            (mosfet.vto - 0.4).abs() < 1e-9,
-            "L on the shared edge must take the lower bin, got VTO={}",
-            mosfet.vto
-        );
+    fn a_geometry_on_a_bin_boundary_takes_the_bin_it_starts() {
+        let cards = [
+            ".model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n",
+            ".model NCH.1 NMOS LEVEL=1 LMIN=0.5u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n",
+        ];
+        for (first, second) in [(cards[0], cards[1]), (cards[1], cards[0])] {
+            let deck = format!(
+                "binned mosfet\nV1 d 0 1\nM1 d d 0 0 NCH W=1u L=0.5u\n{first}{second}.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("binned deck parses");
+            let circuit = Engine::new(SimulationConfig::default())
+                .build_circuit(&netlist)
+                .expect("binned deck builds");
+            let [mosfet] = circuit.mosfets.devices.as_slice() else {
+                panic!("expected one mosfet");
+            };
+            assert!(
+                (mosfet.vto - 0.9).abs() < 1e-9,
+                "L on the shared edge must take the bin starting there, got VTO={}",
+                mosfet.vto
+            );
+        }
     }
 
     #[test]
@@ -11108,7 +11114,7 @@ mod tests {
             panic!("expected one inspected MOS instance");
         };
         assert_eq!(instance.nfin, Some(4.0));
-        assert_eq!(instance.selected_model, "NCH.0");
+        assert_eq!(instance.selected_model, "NCH.1");
         assert_eq!(instance.selection, ModelBinSelectionKind::SharedBoundary);
         assert_eq!(inspection.cards[0].geometry.nfin.min, Some(1.0));
         assert_eq!(inspection.cards[0].geometry.nfin.max, Some(4.0));
@@ -11120,8 +11126,8 @@ mod tests {
             panic!("expected one mosfet");
         };
         assert!(
-            (mosfet.vto - 0.4).abs() < 1e-9,
-            "NFIN shared edge must take the lower bin, got VTO={}",
+            (mosfet.vto - 0.9).abs() < 1e-9,
+            "NFIN shared edge must take the bin starting there, got VTO={}",
             mosfet.vto
         );
     }
@@ -11150,7 +11156,7 @@ mod tests {
         };
         assert_eq!(instance.element, "M1");
         assert_eq!(instance.requested_model, "NCH");
-        assert_eq!(instance.selected_model, "NCH.0");
+        assert_eq!(instance.selected_model, "NCH.1");
         assert_eq!(instance.selection, ModelBinSelectionKind::SharedBoundary);
         assert_eq!(instance.match_count, 2);
         assert_eq!(instance.length, Some(0.5e-6));

@@ -529,8 +529,8 @@ pub enum ModelBinSelectionKind {
     ExactCard,
     /// Exactly one family card contained the instance geometry.
     FamilyMatch,
-    /// Multiple inclusive cards met only on a shared boundary; source order
-    /// selected the first declaration.
+    /// Multiple inclusive cards met only on a shared boundary; the card the
+    /// geometry sits at the lower edge of was selected (`min <= x < max`).
     SharedBoundary,
 }
 
@@ -647,6 +647,24 @@ impl ModelBinCardGeometry {
         bin_range_contains(length, self.length.min, self.length.max)
             && bin_range_contains(width, self.width.min, self.width.max)
             && bin_range_contains(nfin, self.nfin.min, self.nfin.max)
+    }
+
+    /// Whether the instance sits strictly below this card's upper bound on
+    /// every bounded axis: the half-open `min <= x < max` of HSPICE and
+    /// Spectre, which decides a geometry on the edge two cards share.
+    fn holds_below_upper_edges(self, instance_params: &[(String, f64)]) -> bool {
+        let below = |value: Option<f64>, max: Option<f64>| {
+            value
+                .zip(max)
+                .is_none_or(|(value, max)| !bin_bound_equal(value, max))
+        };
+        below(
+            instance_param(instance_params, &["L", "LENGTH"]),
+            self.length.max,
+        ) && below(
+            instance_param(instance_params, &["W", "WIDTH"]),
+            self.width.max,
+        ) && below(instance_param(instance_params, &["NFIN"]), self.nfin.max)
     }
 
     /// Whether two cards overlap over a positive region on every active
@@ -878,8 +896,11 @@ pub(super) fn resolve_binned_model_def<'a>(
 
     let prefix = format!("{model_name}.");
 
-    // Preserve declaration order. Inclusive bounds legitimately produce two
-    // matches when adjacent bins touch on an edge; the first card wins there.
+    // Inclusive bounds legitimately produce two matches when adjacent bins
+    // touch on an edge; the card the geometry sits at the lower edge of wins
+    // there, whatever the declaration order (HSPICE and Spectre bin half-open;
+    // ngspice prepends each model, `inpmkmod.c`, so its last-declared match
+    // wins, which is the same card for a table written in ascending order).
     // A positive-area overlap is materially different: more than one model is
     // valid throughout a finite region, so selecting one silently would make
     // the simulated device depend on source order instead of geometry.
@@ -901,7 +922,12 @@ pub(super) fn resolve_binned_model_def<'a>(
         }
     }
 
-    let Some((winner, _)) = matches.first().copied() else {
+    let preferred = matches
+        .iter()
+        .find(|(_, geometry)| geometry.holds_below_upper_edges(instance_params))
+        .or(matches.first())
+        .copied();
+    let Some((winner, _)) = preferred else {
         if saw_binned_candidate {
             return Err(SimulationError::Circuit(format!(
                 "MOSFET '{element_name}' geometry is uncovered by model family '{model_name}'; no declared bin card matches every required L, W, and NFIN bound",

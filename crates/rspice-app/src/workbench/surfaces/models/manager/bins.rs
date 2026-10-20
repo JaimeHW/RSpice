@@ -393,8 +393,8 @@ struct FamilyTally {
     /// Card pairs whose inclusive edges touch without enclosing area.
     boundaries: usize,
     instances: usize,
-    /// Instances the engine settled by declaration order because more than one
-    /// inclusive card met on the boundary they sit on.
+    /// Instances the engine settled by the half-open rule because more than
+    /// one inclusive card met on the boundary they sit on.
     shared: usize,
 }
 
@@ -564,7 +564,7 @@ fn axis_meeting(
 ///
 /// This is the normal shape of a tiled family — `lmax=5e-7` beside
 /// `lmin=5e-7` — and it is deterministic: `resolve_binned_model_def` takes the
-/// first declared card. It is counted because it is the population the
+/// card that starts on the edge. It is counted because it is the population the
 /// "resolving to one card" ratio is measured against, not because it is wrong.
 fn shares_a_boundary(
     left: rspice_core::engine::ModelBinCardGeometry,
@@ -1259,7 +1259,7 @@ fn geometry_instance_table(
                             ("family match", t.color.text_dim)
                         }
                         rspice_core::engine::ModelBinSelectionKind::SharedBoundary => {
-                            ("boundary · first card", t.color.warn)
+                            ("shared edge", t.color.warn)
                         }
                     };
                     let length = optional_bin_length(instance.length);
@@ -1312,9 +1312,9 @@ fn geometry_instance_table(
             });
         ui.label(
             RichText::new(
-                "Resolution is the netlister's own lookup: inclusive on both edges, first declared \
-                 card wins. An ambiguous or uncovered instance refuses the netlist rather than \
-                 picking a card.",
+                "Resolution is the netlister's own lookup: inclusive on both edges, and a geometry \
+                 on an edge two cards share takes the card that starts there. An ambiguous or \
+                 uncovered instance refuses the netlist rather than picking a card.",
             )
             .small()
             .color(Tokens::get(ui.ctx()).color.text_faint),
