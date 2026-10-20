@@ -860,7 +860,8 @@ fn result_registry_name(name: Option<&String>, fallback_index: usize) -> String 
 /// The signals one transient result materializes, in result order.
 ///
 /// This is the inventory every surface projects against: node voltages,
-/// branch currents, and digital traces sampled onto the analysis time grid.
+/// branch currents, and digital (`D(node)`) and real (`E(node)`) event traces
+/// sampled onto the analysis time grid.
 /// Device observables stay out of it deliberately — they are resolvable
 /// spellings through [`crate::analysis::measure_signals::transient_signal_map`],
 /// not columns an unrestricted export should grow.
@@ -904,7 +905,47 @@ pub fn transient_projection_signals(
             ProjectionValues::Real(Cow::Owned(sampled)),
         )?);
     }
+    for trace in &result.real_traces {
+        let sampled = sampled_real_trace(
+            &result.time,
+            trace.points.iter().map(|point| (point.time, point.value)),
+        );
+        signals.push(ProjectionSourceSignal::new(
+            format!("E({})", trace.node_name),
+            &trace.node_name,
+            SignalKind::Scalar,
+            ProjectionValues::Real(Cow::Owned(sampled)),
+        )?);
+    }
     Ok(signals)
+}
+
+/// Sample one real event trace onto the analysis time grid, as the `E(node)`
+/// column its rawfile event plot is named by.
+///
+/// Each value holds until the next recorded event, as [`sampled_digital_trace`]
+/// holds a level. Before the first event the column reads `0.0`, the value
+/// XSPICE's real node type initializes an event node to; a table cannot carry
+/// an absent sample, and a NaN would fail every export's finiteness check.
+fn sampled_real_trace(
+    times: &[Value],
+    events: impl IntoIterator<Item = (Value, Value)>,
+) -> Vec<Value> {
+    // The same last-bit allowance `sampled_digital_trace` makes.
+    const TIME_EPSILON: Value = 1.0e-18;
+
+    let mut events = events.into_iter().peekable();
+    let mut values = Vec::with_capacity(times.len());
+    let mut current = 0.0;
+    for &time in times {
+        while let Some((_, value)) =
+            events.next_if(|(event_time, _)| *event_time <= time + TIME_EPSILON)
+        {
+            current = value;
+        }
+        values.push(current);
+    }
+    values
 }
 
 /// Sample one event-driven digital trace onto the analysis time grid.

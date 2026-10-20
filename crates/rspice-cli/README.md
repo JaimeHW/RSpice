@@ -397,7 +397,7 @@ coordinate-set manifest below carries missingness for them.
 | Mode | Contents |
 | :--- | :--- |
 | `.OP` | `signal,value` rows |
-| `.DC`, `.TRAN`, `.AC`, `.NOISE` | Node and branch columns over the family's own scale |
+| `.DC`, `.TRAN`, `.AC`, `.NOISE` | Node and branch columns over the family's own scale; `.TRAN` adds a `D(node)` column per digital event net and an `E(node)` column per real event net, each holding its value until the next event |
 | Aggregated axis sweep | One row per coordinate, node voltages as columns |
 | `.FOUR` | One row per harmonic: frequency, magnitude, phase, DC component, THD |
 | `.MC`, `--monte-carlo` | Per-trial samples over `trial_index`, statistics, histograms, confidence states and campaign context |

@@ -22,9 +22,9 @@ pub enum SignalKind {
     /// resolves reach a table as three numbers, the drive strength is gone,
     /// and `x` and `z` are indistinguishable once written.
     ///
-    /// Real-valued event nets have no counterpart here at all: the projection
-    /// walks the digital histories only, so nothing carrying
-    /// `SignalKind::Digital` ever stands for one.
+    /// A real-valued event net is not one of these: the projection writes it
+    /// as an `E(node)` column of kind [`SignalKind::Scalar`], each value held
+    /// until the next event and `0.0` before the first.
     ///
     /// The lossless routes past this flattening are the typed result document
     /// (`payload.digitalTraces` / `payload.realTraces`, which keep state,

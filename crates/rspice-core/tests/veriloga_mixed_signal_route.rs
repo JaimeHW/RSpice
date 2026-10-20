@@ -6953,7 +6953,12 @@ fn a_mixed_run_dumps_crossings_dated_between_two_femtoseconds() {
                 .any(|variable| variable.name.eq_ignore_ascii_case("in"))
         })
         .expect("the input net is dumped");
-    let ticks: Vec<u64> = input.changes.iter().skip(1).map(|change| change.tick).collect();
+    let ticks: Vec<u64> = input
+        .changes
+        .iter()
+        .skip(1)
+        .map(|change| change.tick)
+        .collect();
     assert_eq!(
         ticks,
         changes
@@ -6961,4 +6966,71 @@ fn a_mixed_run_dumps_crossings_dated_between_two_femtoseconds() {
             .map(|time| (time * 1e15).round() as u64)
             .collect::<Vec<_>>()
     );
+}
+
+/// A real event net between two HDL instances is an `E(node)` column of the
+/// table projection: `.save E(n)` selects it, where it was "unavailable for
+/// TRAN analysis", and an unrestricted export carries it beside the `D(node)`
+/// columns, where it was left out without a word. Each value holds until the
+/// next event, as a `D(node)` level does.
+#[test]
+fn a_real_event_net_is_a_held_e_column_a_save_can_select() {
+    use rspice_core::execution::{
+        AnalysisResultKind, ProjectionSource, SignalProjection, transient_projection_signals,
+    };
+    let model = ModelFile::new(
+        "real_event_column",
+        "`timescale 1ns/1ps\n\
+         module src(o);\n output o; wreal o; real r;\n initial r = 0.1;\n assign o = r;\n \
+         always #5 r = r * 2.0;\nendmodule\n\
+         module snk(i, d);\n input i; wreal i; output d; reg d;\n initial d = 0;\n \
+         always @(i) d = (i > 1.0);\nendmodule\n",
+    );
+    for save in ["", ".save E(n) D(d)\n", ".save e(n)\n"] {
+        let netlist = Netlist::parse(&format!(
+            "* a real event net\nx1 n src\nx2 n d snk\n{save}\
+             .hdl \"{path}\" module=src\n.hdl \"{path}\" module=snk\n.end\n",
+            path = model.deck_path()
+        ))
+        .expect("the deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 27e-9, 1e-9)
+            .expect("the run completes");
+        let source = ProjectionSource::new(AnalysisResultKind::Transient, "TRAN")
+            .with_axis(result.time.as_slice())
+            .with_signals(transient_projection_signals(&result).expect("the inventory"));
+        let projected = SignalProjection::from_netlist(&netlist)
+            .expect("the projection builds")
+            .project(&netlist.params, &source, &rspice_core::NoAbort)
+            .unwrap_or_else(|error| panic!("{save:?}: {error}"));
+        let names: Vec<&str> = projected
+            .signals()
+            .iter()
+            .map(|signal| signal.descriptor().display_name())
+            .collect();
+        let column = projected
+            .signals()
+            .iter()
+            .find(|signal| {
+                signal
+                    .descriptor()
+                    .display_name()
+                    .eq_ignore_ascii_case("E(n)")
+            })
+            .unwrap_or_else(|| panic!("{save:?}: no E(n) among {names:?}"));
+        if save.contains("D(d)") {
+            assert_eq!(names.len(), 2, "{names:?}");
+        }
+        assert!(column.validity().iter().all(|&valid| valid));
+        let values = column.real().expect("a real column");
+        assert_eq!(values.len(), result.time.len());
+        for (time, value) in result.time.iter().zip(values) {
+            let doublings = ((time + 1e-15) / 5e-9).floor() as i32;
+            let expected = 0.1 * 2f64.powi(doublings);
+            assert!(
+                (value - expected).abs() <= 1e-12 * expected,
+                "{save:?}: E(n) at {time:e} s is {value}, not {expected}"
+            );
+        }
+    }
 }

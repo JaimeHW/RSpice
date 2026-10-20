@@ -749,8 +749,8 @@ fn transient_rawfile_appends_lossless_event_plots() {
             "{format}: a driven bridge output carries strong drive: {digital:?}"
         );
 
-        // Real event nodes reach no table at all; the rawfile is the first
-        // flat artifact that carries them.
+        // A real event node is a held `E(node)` column of the analysis plot,
+        // as of every table, and the event plot carries its own timeline.
         let real = traces
             .real_traces
             .iter()
@@ -761,11 +761,11 @@ fn transient_rawfile_appends_lossless_event_plots() {
             "{format}: real event values are carried as themselves: {real:?}"
         );
         assert!(
-            !analysis
+            analysis
                 .variables
                 .iter()
                 .any(|variable| variable.name.eq_ignore_ascii_case("E(rnode)")),
-            "{format}: real event nodes are not columns of the analysis plot"
+            "{format}: a real event node is a column of the analysis plot"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
