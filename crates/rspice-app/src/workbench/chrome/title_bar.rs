@@ -35,10 +35,14 @@ use menus::{
 
 #[cfg(test)]
 const COMMAND_REFERENCE_MENU_LABEL: &str = "Command reference";
+/// The narrowest a menu popup is; it widens to fit its longest row up to
+/// [`MENU_MAX_OUTER_WIDTH`].
 const MENU_OUTER_WIDTH: f32 = 244.0;
+const MENU_MAX_OUTER_WIDTH: f32 = 360.0;
 const MENU_MARGIN: f32 = 5.0;
 const MENU_BORDER_WIDTH: f32 = 1.0;
 const MENU_CONTENT_WIDTH: f32 = MENU_OUTER_WIDTH - 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
+const MENU_MAX_CONTENT_WIDTH: f32 = MENU_MAX_OUTER_WIDTH - 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
 const MENU_ROW_HEIGHT: f32 = 27.0;
 const MENU_TOUCH_ROW_HEIGHT: f32 = 44.0;
 pub(super) const MENU_POPUP_GAP: f32 = 2.0;
@@ -590,16 +594,31 @@ fn menu_trigger(
     theme::paint_focus_ring_outset(ui, &response, rect);
 
     let popup = Popup::menu(&response).gap(MENU_POPUP_GAP).show(|ui| {
-        configure_menu_popup(ui, large_targets);
+        let rows = menu_rows(entries, app, ui.ctx());
+        configure_menu_popup(ui, large_targets, &rows);
+        // A menu scrolls only when it is taller than the window allows, and
+        // then the scroll bar takes its width from the rows: the menu widens
+        // by it instead, so no row is cut short.
+        let rows_height = menu_entries::menu_rows_height(ui, &rows);
+        let max_height = menu_popup_max_height(ui);
+        if rows_height > max_height {
+            let width =
+                menu_entries::menu_rows_width(ui, &rows) + ui.spacing().scroll.allocated_width();
+            ui.set_min_width(width);
+            ui.set_max_width(width);
+        }
         ui.ctx().accesskit_node_builder(popup_id, |node| {
             node.set_role(egui::accesskit::Role::Menu);
             node.set_label(format!("{} menu", key.label()));
         });
         begin_menu_render(ui.ctx(), popup_id);
-        let rows = menu_rows(entries, app, ui.ctx());
+        // The popup is first laid out in egui's default 400 pt area and
+        // keeps the height it took, so without a floor here every menu
+        // over 388 pt of rows scrolled at that height for good.
         let choice = egui::ScrollArea::vertical()
             .id_salt(("workbench.title_menu.scroll", key))
-            .max_height(menu_popup_max_height(ui))
+            .max_height(max_height)
+            .min_scrolled_height(rows_height.min(max_height))
             .auto_shrink([false, true])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
             .show(ui, |ui| show_menu_rows(ui, &rows))

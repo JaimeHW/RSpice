@@ -344,9 +344,14 @@ fn sentence(reason: &str) -> String {
     })
 }
 
+const MENU_SEPARATOR_HEIGHT: f32 = 9.0;
+
 fn menu_separator(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 9.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), MENU_SEPARATOR_HEIGHT),
+        Sense::hover(),
+    );
     ui.painter().hline(
         (rect.left() + 5.0)..=(rect.right() - 5.0),
         rect.top() + 4.5,
@@ -414,10 +419,7 @@ fn submenu_row(
     theme::paint_focus_ring_outset(ui, &response, rect);
 
     let shown = SubMenu::new().show(ui, &response, |ui| {
-        configure_menu_popup(ui, large_targets);
-        let width = menu_rows_width(ui, rows);
-        ui.set_max_width(width);
-        ui.set_min_width(width);
+        configure_menu_popup(ui, large_targets, rows);
         let focus_first = ui.data_mut(|data| data.remove_temp::<bool>(focus_first_id));
         let ctx = ui.ctx().clone();
         let mut choice = None;
@@ -441,9 +443,27 @@ fn submenu_row(
     shown.and_then(|shown| shown.inner)
 }
 
-/// A submenu's width: wide enough that no row's label is cut short by its
-/// key.
-fn menu_rows_width(ui: &Ui, rows: &[MenuRow]) -> f32 {
+/// The height `rows` take in an open menu whose rows `ui` sizes.
+pub(super) fn menu_rows_height(ui: &Ui, rows: &[MenuRow]) -> f32 {
+    let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
+    visible_rows(rows)
+        .into_iter()
+        .map(|row| match row {
+            MenuRow::Separator => MENU_SEPARATOR_HEIGHT,
+            MenuRow::Command(_) | MenuRow::Submenu { .. } => row_height,
+        })
+        .sum()
+}
+
+/// A menu's content width: as wide as its longest row needs, within the
+/// narrowest and widest a menu is.
+pub(super) fn menu_rows_width(ui: &Ui, rows: &[MenuRow]) -> f32 {
+    menu_rows_fit(ui, rows).clamp(MENU_CONTENT_WIDTH, MENU_MAX_CONTENT_WIDTH)
+}
+
+/// The content width the longest of `rows` needs for its label, with its
+/// key or chevron, to be painted whole.
+pub(super) fn menu_rows_fit(ui: &Ui, rows: &[MenuRow]) -> f32 {
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let shortcut_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let measure = |text: &str, font: &egui::FontId| {
@@ -466,7 +486,7 @@ fn menu_rows_width(ui: &Ui, rows: &[MenuRow]) -> f32 {
             MenuRow::Command(_) | MenuRow::Separator => None,
         })
         .map(|content| (31.0 + content + 7.0 + 1.0).ceil())
-        .fold(MENU_CONTENT_WIDTH, f32::max)
+        .fold(0.0, f32::max)
 }
 
 /// Render `rows` as a menu of their own: what they record is kept apart from

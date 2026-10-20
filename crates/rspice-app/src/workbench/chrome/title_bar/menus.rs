@@ -5,7 +5,7 @@
 use super::*;
 use menu_entries::MenuEntry::Separator;
 use menu_entries::{
-    MenuContext, MenuEntry, command, command_as, command_without_key, palette_scope,
+    MenuContext, MenuEntry, MenuRow, command, command_as, command_without_key, palette_scope,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -465,9 +465,12 @@ const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     command(Command::FormatDocument),
 ];
 
-pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool) {
-    ui.set_min_width(MENU_CONTENT_WIDTH);
-    ui.set_max_width(MENU_CONTENT_WIDTH);
+/// Size an open menu for `rows` (as wide as its longest row needs, within
+/// the menu's bounds) and give its rows their height.
+pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool, rows: &[MenuRow]) {
+    let width = menu_entries::menu_rows_width(ui, rows);
+    ui.set_min_width(width);
+    ui.set_max_width(width);
     ui.spacing_mut().item_spacing.y = 0.0;
     ui.spacing_mut().interact_size.y = if large_targets {
         MENU_TOUCH_ROW_HEIGHT
@@ -658,13 +661,13 @@ pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app:
         || Tokens::get(&ctx).metrics.ctl_h >= MENU_TOUCH_ROW_HEIGHT;
     let popup_id = Popup::default_response_id(response);
     let shown = Popup::context_menu(response).show(|ui| {
-        configure_menu_popup(ui, large_targets);
+        let rows = menu_rows(SOURCE_EDITOR_MENU, app, ui.ctx());
+        configure_menu_popup(ui, large_targets, &rows);
         ui.ctx().accesskit_node_builder(popup_id, |node| {
             node.set_role(egui::accesskit::Role::Menu);
             node.set_label("Source editor menu");
         });
         begin_menu_render(ui.ctx(), popup_id);
-        let rows = menu_rows(SOURCE_EDITOR_MENU, app, ui.ctx());
         let choice = show_menu_rows(ui, &rows);
         let render_state = finish_menu_render(ui.ctx());
         handle_popup_keyboard(ui.ctx(), popup_id, response, &render_state.rows);

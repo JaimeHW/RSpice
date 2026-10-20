@@ -1524,6 +1524,149 @@ fn a_menu_of_greyed_rows_still_answers_its_keys() {
     assert!(!Popup::is_id_open(&ctx, popup), "Escape closes {menu:?}");
 }
 
+/// Every menu and submenu is as wide as its longest row needs, so no label
+/// is cut short, within the 244 to 360 pt a menu may be. At the old fixed
+/// 244 pt some rows were cut. Measured on the rows each open menu draws, at
+/// desktop and touch row heights, with the popup as tall as its rows up to
+/// the window's bound: it used to stop at 400 pt and scroll, whose bar cut
+/// the rows narrower still.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_menu_is_wide_enough_for_its_longest_row() {
+    fn fits(ui: &Ui, name: &str, rows: &[menu_entries::MenuRow], out: &mut Vec<(String, f32)>) {
+        out.push((name.to_owned(), menu_entries::menu_rows_fit(ui, rows)));
+        for row in rows {
+            if let menu_entries::MenuRow::Submenu { label, rows, .. } = row {
+                fits(ui, label, rows, out);
+            }
+        }
+    }
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut needed = Vec::new();
+    for app in [title_test_app(), source_editor_app()] {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                for menu in ALL_MENUS {
+                    let rows = menu_rows(menu.entries(), &app, ui.ctx());
+                    fits(ui, menu.label(), &rows, &mut needed);
+                }
+            });
+        });
+    }
+    for (name, fit) in &needed {
+        assert!(
+            *fit <= MENU_MAX_CONTENT_WIDTH,
+            "{name} needs {fit} pt, more than a menu may be"
+        );
+    }
+    assert!(
+        needed.iter().any(|(_, fit)| *fit > MENU_CONTENT_WIDTH),
+        "no menu needs more than the narrowest width: {needed:?}"
+    );
+
+    for large_targets in [false, true] {
+        let row_height = if large_targets {
+            MENU_TOUCH_ROW_HEIGHT
+        } else {
+            MENU_ROW_HEIGHT
+        };
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = title_test_app();
+        for menu in ALL_MENUS {
+            let popup = Id::new((
+                "workbench.title_menu.trigger",
+                MenuTriggerKey::Application(menu),
+            ))
+            .with("popup");
+            Popup::open_id(&ctx, popup);
+            let mut fit = 0.0;
+            let mut rows_height = 0.0;
+            let mut drawn = Vec::new();
+            for _ in 0..3 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1_440.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            let rows = menu_rows(menu.entries(), &app, ui.ctx());
+                            fit = menu_entries::menu_rows_fit(ui, &rows);
+                            rows_height = menu_entries::visible_rows(&rows)
+                                .into_iter()
+                                .map(|row| match row {
+                                    menu_entries::MenuRow::Separator => 9.0,
+                                    _ => row_height,
+                                })
+                                .sum::<f32>();
+                            menus(ui, &mut app, MenuProjection::All, large_targets, 35.0);
+                        });
+                    },
+                );
+                drawn = output
+                    .platform_output
+                    .accesskit_update
+                    .expect("AccessKit menu tree")
+                    .nodes
+                    .into_iter()
+                    .filter(|(_, node)| {
+                        matches!(
+                            node.role(),
+                            egui::accesskit::Role::MenuItem
+                                | egui::accesskit::Role::MenuItemCheckBox
+                        )
+                    })
+                    .filter_map(|(_, node)| {
+                        let bounds = node.bounds()?;
+                        (bounds.y0 > 35.0).then(|| {
+                            (
+                                node.label().unwrap_or_default().to_owned(),
+                                bounds.width() as f32,
+                                bounds.height() as f32,
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>();
+            }
+            assert!(!drawn.is_empty(), "{} drew no rows", menu.label());
+            // The popup is as tall as its rows up to the window's bound,
+            // so a menu that fits never scrolls.
+            let outer_height = ctx
+                .memory(|memory| memory.area_rect(popup))
+                .expect("the menu is open")
+                .height();
+            let frame = 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
+            let expected = rows_height.min(menu_popup_height_for_viewport(900.0)) + frame;
+            assert!(
+                (outer_height - expected).abs() < 1.0,
+                "{} is {outer_height} pt tall for {rows_height} pt of rows \
+                 (touch rows: {large_targets})",
+                menu.label()
+            );
+            for (label, width, height) in &drawn {
+                assert!(
+                    *width >= fit.min(MENU_MAX_CONTENT_WIDTH) - 0.5
+                        && *width <= MENU_MAX_CONTENT_WIDTH + 0.5,
+                    "{} row {label:?} is {width} pt wide; its longest row needs {fit} \
+                     (touch rows: {large_targets})",
+                    menu.label()
+                );
+                assert!(
+                    (*height - row_height).abs() < 0.01,
+                    "{} row {label:?} is {height} pt tall",
+                    menu.label()
+                );
+            }
+        }
+    }
+}
+
 /// What a reader sees of `rows`: each row's label, `---` for a rule.
 #[cfg(not(target_arch = "wasm32"))]
 fn visible_row_names(rows: &[menu_entries::MenuRow]) -> Vec<String> {
