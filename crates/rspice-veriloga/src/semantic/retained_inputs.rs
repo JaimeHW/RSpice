@@ -340,24 +340,34 @@ mod tests {
             .collect_tokens()
             .unwrap();
         let file = crate::parser::Parser::new(&tokens).parse().unwrap();
-        super::super::SemanticAnalyzer::new()
+        let warnings = super::super::SemanticAnalyzer::new()
             .analyze(&file)
             .unwrap()
-            .warnings
-            .into_iter()
-            .filter(|warning| warning.code == super::super::RETAINED_VARIABLE_CODE)
-            .map(|warning| {
-                let line = source[..warning.span.start as usize].lines().count();
-                let text = &source[warning.span.start as usize..warning.span.end as usize];
-                (warning.message, format!("{line}: {text}"))
-            })
-            .collect()
+            .warnings;
+        crate::runtime_report::semantic_warning_diagnostics(
+            source,
+            &warnings,
+            &crate::runtime_report::ExpandedLines(source),
+        )
+        .into_iter()
+        .filter(|warning| warning.code == super::super::RETAINED_VARIABLE_CODE)
+        .map(|warning| {
+            let span = warning.span.unwrap();
+            let text = &source[span.byte_start as usize..span.byte_end as usize];
+            (
+                warning.message,
+                format!("{}: {text}", span.start.unwrap().line),
+            )
+        })
+        .collect()
     }
 
-    /// Each retained variable is reported once, an array by its own name, at
-    /// the first read no assignment reaches, in the order those reads run.
+    /// A module's retained variables are one finding, at the first read no
+    /// assignment reaches, listing each variable once (an array by its own
+    /// name) with the line of its own first such read, in the order those
+    /// reads run.
     #[test]
-    fn each_retained_variable_is_reported_once_at_its_first_unassigned_read() {
+    fn each_module_lists_its_retained_variables_in_one_finding() {
         let source = "module m(p,n); inout p,n; electrical p,n;\n\
                       real count, a[0:2], seen, x;\n\
                       analog begin\n\
@@ -366,21 +376,25 @@ mod tests {
                       seen = a[1] + count + a[2];\n\
                       a[1] = x; a[2] = seen;\n\
                       I(p,n) <+ count + seen + x;\n\
-                      end endmodule";
+                      end endmodule\n\
+                      module h(p,n); inout p,n; electrical p,n; real held;\n\
+                      analog begin if (V(p,n) > 0.5) held = V(p,n);\n\
+                      I(p,n) <+ held; end endmodule";
         assert_eq!(
             warnings(source),
             [
                 (
-                    "`count` is read before it is assigned, so it keeps its value from the last \
-                     accepted time point"
+                    "Module `m` has 2 variables read before they are assigned, so they keep \
+                     their values from the last accepted time point: `count` (line 5), `a` \
+                     (line 6)"
                         .to_string(),
                     "5: count".to_string()
                 ),
                 (
-                    "`a` is read before it is assigned, so it keeps its value from the last \
-                     accepted time point"
+                    "Module `h` has 1 variable read before it is assigned, so it keeps its \
+                     value from the last accepted time point: `held` (line 12)"
                         .to_string(),
-                    "6: a[1]".to_string()
+                    "12: held".to_string()
                 ),
             ]
         );

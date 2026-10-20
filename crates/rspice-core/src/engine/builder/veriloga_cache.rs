@@ -444,7 +444,11 @@ use super::*;
 // carries procedural continuous assignments. A version-152 record refused
 // every module that wrote one; rebuilding keeps the record and the schema in
 // step.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 153;
+//
+// Version 154 carries VA-SEM-RETAINED-VARIABLE, the finding that names a
+// module's variables read before they are assigned. A version-153 record of
+// such a module was compiled without it and would replay a clean report.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 154;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

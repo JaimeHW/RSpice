@@ -970,8 +970,16 @@ impl Preprocessor {
 
     /// Preprocess source string
     pub fn preprocess_source(&mut self, source: &str) -> Result<String, PreprocessorError> {
-        self.preprocess_source_with_provider(source, &FileSystemSourceProvider, 0)
+        self.preprocess_source_mapped(source)
             .map(|preprocessed| preprocessed.source)
+    }
+
+    /// [`Self::preprocess_source`], keeping each expanded line's origin.
+    pub(crate) fn preprocess_source_mapped(
+        &mut self,
+        source: &str,
+    ) -> Result<PreprocessedSource, PreprocessorError> {
+        self.preprocess_source_with_provider(source, &FileSystemSourceProvider, 0)
     }
 
     fn preprocess_source_with_provider(

@@ -244,6 +244,7 @@ pub(crate) fn unit_layout(
                 crate::time_scale::ModuleTimeScale::exponent_spelling(precision),
             ),
             span,
+            sites: Vec::new(),
         });
     }
     (files, warnings)

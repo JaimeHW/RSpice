@@ -222,6 +222,7 @@ impl PreparedVirtualSource {
             .compile_runtime_analyzed_measured(
                 &self.prepared.source_package,
                 &self.prepared.source,
+                &self.prepared.source_map,
                 analyzed,
                 Some(module_name),
                 qualifications,
@@ -345,6 +346,7 @@ impl VerilogACompiler {
             crate::runtime_report::semantic_warning_diagnostics(
                 &preprocessed.source,
                 &analyzed.warnings,
+                &preprocessed,
             ),
             &preprocessed,
             |path| {

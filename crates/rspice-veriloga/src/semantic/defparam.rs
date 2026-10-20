@@ -261,6 +261,7 @@ pub(crate) fn instance_value_replaced(root: &RootDefparam, given: &str) -> Seman
             root.target, root.writer, root.module
         ),
         span: root.span,
+        sites: Vec::new(),
     }
 }
 
@@ -543,5 +544,6 @@ fn replaced(
              1364-2005 section 12.2.1 keeps the last one in source order"
         ),
         span,
+        sites: Vec::new(),
     }
 }

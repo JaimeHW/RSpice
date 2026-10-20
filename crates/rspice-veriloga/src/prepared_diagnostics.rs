@@ -26,6 +26,16 @@ struct SourceSegment {
     exact: bool,
 }
 
+impl crate::runtime_report::SiteLines for PreparedSourceMap {
+    fn site_line(&self, span: crate::source::Span) -> Option<(Option<&Path>, usize)> {
+        if span.source.raw() != 0 {
+            return None;
+        }
+        let (path, line) = self.locate(usize::try_from(span.start).ok()?)?;
+        Some((Some(path), line))
+    }
+}
+
 impl PreparedSourceMap {
     /// A replay artifact retains expanded text, not the original include map.
     pub(crate) fn from_preprocessed(path: &str, source: &str) -> Self {
@@ -71,7 +81,7 @@ impl PreparedSourceMap {
     ) -> Vec<SourceCompileDiagnostic> {
         self.map_diagnostics(
             source,
-            crate::runtime_report::semantic_warning_diagnostics(source, warnings),
+            crate::runtime_report::semantic_warning_diagnostics(source, warnings, self),
         )
     }
 

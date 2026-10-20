@@ -212,6 +212,66 @@ fn prepared_virtual_warnings_identify_original_includes() {
     assert!(child[warning.byte_start.unwrap()..warning.byte_end.unwrap()].contains("$display"));
 }
 
+/// A module's variables read before they are assigned are one finding that
+/// lists each at the line of its first such read in the file the author
+/// wrote, on every path that reports it: the prepared source, the virtual
+/// runtime report the workbench publishes, and an in-memory compile whose
+/// header include moves every expanded line away from its authored one.
+#[test]
+fn retained_variables_are_listed_at_their_authored_lines() {
+    const CODE: &str = "VA-SEM-RETAINED-VARIABLE";
+    let root = "`include \"disciplines.vams\"\nmodule counter(p, n);\n  inout p, n; electrical p, n;\n  real count, held;\n  analog begin\n    count = count + 1;\n`include \"body.vams\"\n    I(p, n) <+ count * V(p, n) + held;\n  end\nendmodule\n";
+    let body = "// hold the input while it is high\nif (V(p, n) > 0.5) held = held + V(p, n);\n";
+    let listed = "Module `counter` has 2 variables read before they are assigned, so they keep \
+                  their values from the last accepted time point: `count` (line 6), `held` \
+                  (line 2 of body.vams)";
+    let bundle =
+        VirtualSourceBundle::from_sources("root.va", [("root.va", root), ("body.vams", body)])
+            .unwrap();
+    let compiler = VerilogACompiler::default();
+
+    let prepared = compiler
+        .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
+        .unwrap();
+    let [warning] = prepared.diagnostics() else {
+        panic!("expected one compiler warning")
+    };
+    assert_eq!(warning.code, CODE);
+    assert_eq!(warning.message, listed);
+    assert_eq!(warning.path.as_deref(), Some("root.va"));
+    assert_eq!(warning.line, Some(6));
+
+    let compilation = compiler
+        .compile_virtual_runtime(&bundle, "counter", VirtualCompileLimits::default())
+        .unwrap();
+    let reported: Vec<_> = compilation
+        .runtime
+        .diagnostics
+        .iter()
+        .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.message.as_str()))
+        .collect();
+    assert_eq!(reported, [(CODE, listed)]);
+
+    let single = root.replace(
+        "`include \"body.vams\"\n",
+        "    if (V(p, n) > 0.5) held = held + V(p, n);\n",
+    );
+    let report = compiler.compile_runtime(&single, Some("counter")).unwrap();
+    let reported: Vec<_> = report
+        .diagnostics
+        .iter()
+        .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.message.as_str()))
+        .collect();
+    assert_eq!(
+        reported,
+        [(
+            CODE,
+            "Module `counter` has 2 variables read before they are assigned, so they keep \
+             their values from the last accepted time point: `count` (line 6), `held` (line 7)"
+        )]
+    );
+}
+
 #[test]
 fn include_graph_contains_only_conditionally_active_resolutions() {
     let bundle = VirtualSourceBundle::from_sources(

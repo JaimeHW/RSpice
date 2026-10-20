@@ -1277,9 +1277,11 @@ fn collect_compile_diagnostics(
 ///
 /// `source` is the preprocessed text the analyzer saw, so line and column
 /// resolution follows exactly the same rule as [`compile_diagnostics`].
+/// `lines` places each site a finding lists in the author's files.
 pub(crate) fn semantic_warning_diagnostics(
     source: &str,
     warnings: &[crate::semantic::SemanticWarning],
+    lines: &dyn SiteLines,
 ) -> Vec<CompileDiagnostic> {
     warnings
         .iter()
@@ -1289,11 +1291,57 @@ pub(crate) fn semantic_warning_diagnostics(
                 CompileDiagnosticSeverity::Warning,
                 CompileDiagnosticPhase::Semantic,
                 warning.code,
-                warning.message.clone(),
+                listed_message(warning, lines),
                 Some(warning.span),
             )
         })
         .collect()
+}
+
+/// Where a position in the expanded compiler input sits in the author's
+/// files, for the sites a semantic finding lists after its message. Shared
+/// with the compile stack's worker thread, hence `Sync`.
+pub(crate) trait SiteLines: Sync {
+    /// The document and one-based line `span` starts on. The document is
+    /// `None` when the input carries no map back to its files; the result is
+    /// `None` when the span is not in this input.
+    fn site_line(&self, span: Span) -> Option<(Option<&Path>, usize)>;
+}
+
+/// The expanded input's own lines, for a caller that holds no source map.
+pub(crate) struct ExpandedLines<'a>(pub(crate) &'a str);
+
+impl SiteLines for ExpandedLines<'_> {
+    fn site_line(&self, span: Span) -> Option<(Option<&Path>, usize)> {
+        let position = source_position(self.0, span.start)?;
+        Some((None, usize::try_from(position.line).ok()?))
+    }
+}
+
+/// The finding's message, then each site it lists with its line: "`count`
+/// (line 5)", or "`count` (line 5 of file.va)" when the site is in another
+/// file than the finding itself.
+fn listed_message(warning: &crate::semantic::SemanticWarning, lines: &dyn SiteLines) -> String {
+    if warning.sites.is_empty() {
+        return warning.message.clone();
+    }
+    let home = lines.site_line(warning.span).and_then(|(path, _)| path);
+    let sites: Vec<_> = warning
+        .sites
+        .iter()
+        .map(|site| match lines.site_line(site.span) {
+            Some((Some(path), line)) if Some(path) != home => {
+                let file = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                );
+                format!("`{}` (line {line} of {file})", site.name)
+            }
+            Some((_, line)) => format!("`{}` (line {line})", site.name),
+            None => format!("`{}`", site.name),
+        })
+        .collect();
+    format!("{}: {}", warning.message, sites.join(", "))
 }
 
 fn diagnostic(

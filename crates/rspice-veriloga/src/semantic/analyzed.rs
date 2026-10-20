@@ -50,6 +50,20 @@ pub struct SemanticWarning {
     pub message: String,
     /// The construct this finding is about.
     pub span: Span,
+    /// Further constructs the finding names, listed after the message with
+    /// the line each starts on in the author's file. Lines are resolved where
+    /// the finding becomes a diagnostic, because only there is the expanded
+    /// input mapped back to the files the author wrote.
+    pub sites: Vec<SemanticWarningSite>,
+}
+
+/// One construct a [`SemanticWarning`] lists by name and line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticWarningSite {
+    /// What the message calls the construct, such as a variable's name.
+    pub name: SmolStr,
+    /// Where the construct is, in the expanded compiler input.
+    pub span: Span,
 }
 
 /// Analyzed module with resolved types

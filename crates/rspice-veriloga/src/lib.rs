@@ -549,10 +549,11 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
-            .preprocess_source(source)
+            .preprocess_source_mapped(source)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
-        measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
+        measurements.metrics_mut().preprocessed_bytes =
+            metrics::usize_to_u64(preprocessed.source.len());
         let (output, _) =
             self.compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)?;
         Ok(Measured {
@@ -617,10 +618,11 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
-            .preprocess_source(source)
+            .preprocess_source_mapped(source)
             .map_err(|error| CompileError::io_error(format!("Preprocessor error: {error}")))?;
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
-        measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
+        measurements.metrics_mut().preprocessed_bytes =
+            metrics::usize_to_u64(preprocessed.source.len());
         self.compile_runtime_preprocessed_measured(
             "<input>",
             &preprocessed,
@@ -734,13 +736,14 @@ impl VerilogACompiler {
     fn compile_runtime_preprocessed_measured(
         &self,
         source_package: &str,
-        preprocessed: &str,
+        preprocessed: &preprocessor::PreprocessedSource,
         module_name: Option<&str>,
         qualifications: RuntimeQualificationOptions,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<RuntimeCompileReport> {
         self.compile_runtime_specialized_measured(
             source_package,
+            &preprocessed.source,
             preprocessed,
             module_name,
             &[],
@@ -829,6 +832,7 @@ impl VerilogACompiler {
         self.compile_runtime_analyzed_measured(
             source_package,
             preprocessed,
+            &runtime_report::ExpandedLines(preprocessed),
             &analyzed,
             Some(module),
             RuntimeQualificationOptions::default(),
@@ -924,6 +928,7 @@ impl VerilogACompiler {
         self.compile_runtime_analyzed_measured(
             &artifact.metadata.source_package,
             source,
+            &runtime_report::ExpandedLines(source),
             &analyzed,
             Some(&artifact.hir.module_name),
             RuntimeQualificationOptions::default(),
@@ -935,6 +940,7 @@ impl VerilogACompiler {
         &self,
         source_package: &str,
         preprocessed: &str,
+        lines: &dyn runtime_report::SiteLines,
         module_name: Option<&str>,
         parameters: &[(&str, ScalarParameterValue)],
         qualifications: RuntimeQualificationOptions,
@@ -950,6 +956,7 @@ impl VerilogACompiler {
         self.compile_runtime_analyzed_measured(
             source_package,
             preprocessed,
+            lines,
             &analyzed,
             module_name,
             qualifications,
@@ -961,6 +968,7 @@ impl VerilogACompiler {
         &self,
         source_package: &str,
         preprocessed: &str,
+        lines: &dyn runtime_report::SiteLines,
         analyzed: &semantic::AnalyzedFile,
         module_name: Option<&str>,
         qualifications: RuntimeQualificationOptions,
@@ -970,6 +978,7 @@ impl VerilogACompiler {
             self.compile_runtime_analyzed_measured_inline(
                 source_package,
                 preprocessed,
+                lines,
                 analyzed,
                 module_name,
                 qualifications,
@@ -982,6 +991,7 @@ impl VerilogACompiler {
         &self,
         source_package: &str,
         preprocessed: &str,
+        lines: &dyn runtime_report::SiteLines,
         analyzed: &semantic::AnalyzedFile,
         module_name: Option<&str>,
         qualifications: RuntimeQualificationOptions,
@@ -1024,14 +1034,21 @@ impl VerilogACompiler {
             .iter()
             .chain(&executable.elaboration_warnings)
             .flat_map(|warning| {
-                let source = analyzed
+                let library = analyzed
                     .connection_configuration
                     .as_deref()
                     .filter(|_| warning.span.source.raw() == 1)
-                    .map_or(preprocessed, |configuration| {
-                        configuration.library().preprocessed_source()
-                    });
-                runtime_report::semantic_warning_diagnostics(source, std::slice::from_ref(warning))
+                    .map(|configuration| configuration.library().preprocessed_source());
+                let source = library.unwrap_or(preprocessed);
+                let library_lines = library.map(runtime_report::ExpandedLines);
+                let lines = library_lines
+                    .as_ref()
+                    .map_or(lines, |library| library as &dyn runtime_report::SiteLines);
+                runtime_report::semantic_warning_diagnostics(
+                    source,
+                    std::slice::from_ref(warning),
+                    lines,
+                )
             })
             .collect();
         measurements.record(PipelinePhase::RuntimeQualification, phase_started.elapsed())?;
@@ -1161,21 +1178,22 @@ impl VerilogACompiler {
 
     fn compile_preprocessed_measured(
         &self,
-        source: &str,
+        preprocessed: &preprocessor::PreprocessedSource,
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<(CompiledModel, Vec<CompileDiagnostic>)> {
         compile_stack::run(|| {
-            self.compile_preprocessed_measured_inline(source, module_name, measurements)
+            self.compile_preprocessed_measured_inline(preprocessed, module_name, measurements)
         })
     }
 
     fn compile_preprocessed_measured_inline(
         &self,
-        source: &str,
+        preprocessed: &preprocessor::PreprocessedSource,
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<(CompiledModel, Vec<CompileDiagnostic>)> {
+        let source = preprocessed.source.as_str();
         let analyzed = self.analyze_preprocessed("<input>", source, module_name, measurements)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
 
@@ -1189,11 +1207,12 @@ impl VerilogACompiler {
 
         Ok((
             model,
-            runtime_report::semantic_warning_diagnostics(source, &analyzed.warnings)
+            runtime_report::semantic_warning_diagnostics(source, &analyzed.warnings, preprocessed)
                 .into_iter()
                 .chain(runtime_report::semantic_warning_diagnostics(
                     source,
                     &executable.elaboration_warnings,
+                    preprocessed,
                 ))
                 .collect(),
         ))
@@ -1288,6 +1307,7 @@ impl VerilogACompiler {
                     "compiler directive `{name} has no effect in this compiler and is ignored"
                 ),
                 span: *span,
+                sites: Vec::new(),
             })
             .collect();
         // `defparam` (section 12.2.1) over the whole unit, before a root's
@@ -1869,11 +1889,8 @@ impl VerilogACompiler {
         }
 
         // Compile the preprocessed source
-        let (model, diagnostics) = self.compile_preprocessed_measured(
-            &preprocessed.source,
-            module_name,
-            &mut measurements,
-        )?;
+        let (model, diagnostics) =
+            self.compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)?;
         Ok(CompiledFile {
             model,
             dependencies,
@@ -1930,7 +1947,7 @@ impl VerilogACompiler {
             metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
         let (model, diagnostics) = self
-            .compile_preprocessed_measured(&preprocessed.source, module_name, &mut measurements)
+            .compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)
             .map_err(|source| ProviderCompileError::Compile {
                 diagnostics: source_diagnostics::provider_diagnostics(
                     &source,
@@ -2280,6 +2297,7 @@ impl VerilogACompiler {
             runtime_report::semantic_warning_diagnostics(
                 &preprocessed.source,
                 &[unit_warnings.as_slice(), analyzed.warnings.as_slice()].concat(),
+                &preprocessed,
             ),
             &preprocessed,
             pp.dependency_documents(),
@@ -2396,6 +2414,9 @@ impl VerilogACompiler {
                     runtime_report::semantic_warning_diagnostics(
                         configuration.library().preprocessed_source(),
                         std::slice::from_ref(warning),
+                        &runtime_report::ExpandedLines(
+                            configuration.library().preprocessed_source(),
+                        ),
                     )
                     .into_iter()
                     .map(|diagnostic| {

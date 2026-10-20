@@ -243,6 +243,7 @@ pub(super) fn resolve(
             code: "VA-SEM-DISCIPLINE-RESOLUTION",
             message: message.clone(),
             span: graph.spans[index],
+            sites: Vec::new(),
         });
     }
     let mut assignments = Assignments::new();

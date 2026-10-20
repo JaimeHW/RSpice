@@ -371,8 +371,9 @@ const NO_EFFECT_SYSTEM_TASK_CODE: &str = "VA-SEM-NO-EFFECT-SYSTEM-TASK";
 /// Diagnostic code for `posedge`/`negedge` lowered to an analog `cross`.
 const EDGE_EVENT_AS_CROSS_CODE: &str = "VA-SEM-EDGE-EVENT-AS-CROSS";
 
-/// Diagnostic code for a variable some path reads before assigning it, which
-/// therefore carries its value from the last accepted point.
+/// Diagnostic code for a module with variables some path reads before
+/// assigning, which therefore carry their values from the last accepted
+/// point. One finding per module lists them all.
 const RETAINED_VARIABLE_CODE: &str = "VA-SEM-RETAINED-VARIABLE";
 
 /// Widest packed vector this front end will resolve.
@@ -805,6 +806,17 @@ impl SemanticAnalyzer {
     /// statements, so a repeat of an identical code and span is the same
     /// construct seen twice, not a second occurrence in the source.
     fn warn(&mut self, code: &'static str, message: String, span: Span) {
+        self.warn_listing(code, message, span, Vec::new());
+    }
+
+    /// [`Self::warn`], for a finding that lists further sites by name.
+    fn warn_listing(
+        &mut self,
+        code: &'static str,
+        message: String,
+        span: Span,
+        sites: Vec<SemanticWarningSite>,
+    ) {
         if self
             .warnings
             .iter()
@@ -816,6 +828,7 @@ impl SemanticAnalyzer {
             code,
             message,
             span,
+            sites,
         });
     }
 
@@ -2418,16 +2431,32 @@ impl SemanticAnalyzer {
 
         analyzed.symbol_table = self.symbols.clone();
         analyzed.noise_process_count = self.next_noise_process;
-        for retained in retained_inputs::record(&mut analyzed) {
-            self.warn(
-                RETAINED_VARIABLE_CODE,
-                format!(
-                    "`{}` is read before it is assigned, so it keeps its value from the last \
-                     accepted time point",
-                    retained.name
+        let retained = retained_inputs::record(&mut analyzed);
+        if let Some(first) = retained.first() {
+            // One finding per module: a released compact model can carry
+            // dozens of these, and one row naming them all is what an author
+            // can act on.
+            let message = match retained.len() {
+                1 => format!(
+                    "Module `{}` has 1 variable read before it is assigned, so it keeps its \
+                     value from the last accepted time point",
+                    analyzed.name
                 ),
-                retained.first_read,
-            );
+                count => format!(
+                    "Module `{}` has {count} variables read before they are assigned, so they \
+                     keep their values from the last accepted time point",
+                    analyzed.name
+                ),
+            };
+            let span = first.first_read;
+            let sites = retained
+                .into_iter()
+                .map(|variable| SemanticWarningSite {
+                    name: variable.name,
+                    span: variable.first_read,
+                })
+                .collect();
+            self.warn_listing(RETAINED_VARIABLE_CODE, message, span, sites);
         }
         self.assignment_events.finish(&mut analyzed)?;
         for (item, _) in &parameter_arrays {

@@ -208,6 +208,16 @@ impl PreprocessedSource {
     }
 }
 
+impl crate::runtime_report::SiteLines for PreprocessedSource {
+    fn site_line(&self, span: crate::source::Span) -> Option<(Option<&Path>, usize)> {
+        if span.source.raw() != 0 {
+            return None;
+        }
+        let segment = self.segment_at(usize::try_from(span.start).ok()?)?;
+        Some((Some(segment.logical_path.as_path()), segment.source_line))
+    }
+}
+
 pub(crate) fn source_line_range(
     source: &str,
     one_based_line: usize,
