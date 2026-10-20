@@ -1058,9 +1058,15 @@ fn parse_sffm_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let offset = source_value_or_default(stream, line_num, params, "SFFM", "VO", has_paren, 0.0)?;
-    let amplitude =
-        source_value_or_default(stream, line_num, params, "SFFM", "VA", has_paren, 1.0)?;
+    let offset = source_optional_value(stream, line_num, params, "SFFM", "VO", has_paren)?;
+    let amplitude = source_optional_value(stream, line_num, params, "SFFM", "VA", has_paren)?;
+    require_leading_source_values(
+        line_num,
+        "SFFM",
+        &["VO", "VA"],
+        leading_source_values(&[offset, amplitude]),
+    )?;
+    let (offset, amplitude) = (offset.unwrap_or(0.0), amplitude.unwrap_or(1.0));
     let carrier_freq = source_optional_value(stream, line_num, params, "SFFM", "FC", has_paren)?
         .unwrap_or(Value::NAN);
     let modulation_index =
@@ -1112,9 +1118,16 @@ fn parse_am_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let offset = source_value_or_default(stream, line_num, params, "AM", "VO", has_paren, 0.0)?;
+    let offset = source_optional_value(stream, line_num, params, "AM", "VO", has_paren)?;
     let modulation_offset =
-        source_value_or_default(stream, line_num, params, "AM", "VMO", has_paren, 0.0)?;
+        source_optional_value(stream, line_num, params, "AM", "VMO", has_paren)?;
+    require_leading_source_values(
+        line_num,
+        "AM",
+        &["VO", "VMO"],
+        leading_source_values(&[offset, modulation_offset]),
+    )?;
+    let (offset, modulation_offset) = (offset.unwrap_or(0.0), modulation_offset.unwrap_or(0.0));
     let modulation_amplitude =
         source_value_or_default(stream, line_num, params, "AM", "VMA", has_paren, 1.0)?;
     let modulating_freq = source_optional_value(stream, line_num, params, "AM", "FM", has_paren)?
@@ -1154,8 +1167,21 @@ fn parse_pulse_spec(
     // AC/DC/transient annotations at the correct level.
     let nested_paren = has_paren && stream.consume(&TokenKind::LParen);
 
-    let v1 = source_value_or_default(stream, line_num, params, "PULSE", "V1", has_paren, 0.0)?;
-    let v2 = source_value_or_default(stream, line_num, params, "PULSE", "V2", has_paren, 1.0)?;
+    let v1 = source_optional_value(stream, line_num, params, "PULSE", "V1", has_paren)?;
+    let v2 = source_optional_value(stream, line_num, params, "PULSE", "V2", has_paren)?;
+    // Xyce asks only for V1, as HSPICE does; ngspice and PSpice need V2 too.
+    let required: &[&str] = if xyce_source_dialect(params) {
+        &["V1"]
+    } else {
+        &["V1", "V2"]
+    };
+    require_leading_source_values(
+        line_num,
+        "PULSE",
+        required,
+        leading_source_values(&[v1, v2]),
+    )?;
+    let (v1, v2) = (v1.unwrap_or(0.0), v2.unwrap_or(1.0));
     let delay = source_value_or_default(stream, line_num, params, "PULSE", "TD", has_paren, 0.0)?;
     // Keep omitted timing fields as NaN sentinels so transient runtime can
     // resolve ngspice-compatible defaults from .TRAN context (tstep/tstop).
@@ -1193,10 +1219,23 @@ fn parse_sin_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let offset = source_value_or_default(stream, line_num, params, "SIN", "VO", has_paren, 0.0)?;
-    let amplitude = source_value_or_default(stream, line_num, params, "SIN", "VA", has_paren, 1.0)?;
-    let frequency = source_optional_value(stream, line_num, params, "SIN", "FREQ", has_paren)?
-        .unwrap_or(Value::NAN);
+    let offset = source_optional_value(stream, line_num, params, "SIN", "VO", has_paren)?;
+    let amplitude = source_optional_value(stream, line_num, params, "SIN", "VA", has_paren)?;
+    let frequency = source_optional_value(stream, line_num, params, "SIN", "FREQ", has_paren)?;
+    // Xyce also asks for FREQ; ngspice defaults it to 1/TSTOP.
+    let required: &[&str] = if xyce_source_dialect(params) {
+        &["VO", "VA", "FREQ"]
+    } else {
+        &["VO", "VA"]
+    };
+    require_leading_source_values(
+        line_num,
+        "SIN",
+        required,
+        leading_source_values(&[offset, amplitude, frequency]),
+    )?;
+    let (offset, amplitude) = (offset.unwrap_or(0.0), amplitude.unwrap_or(1.0));
+    let frequency = frequency.unwrap_or(Value::NAN);
     let delay = source_value_or_default(stream, line_num, params, "SIN", "TD", has_paren, 0.0)?;
     let damping =
         source_value_or_default(stream, line_num, params, "SIN", "THETA", has_paren, 0.0)?;
@@ -1365,8 +1404,14 @@ fn parse_pwl_spec(
     close_source_args(stream, line_num, "PWL", has_paren)?;
     let (delay, repeat_from) = parse_pwl_timing_options(stream, line_num, params)?;
 
+    // ngspice and Xyce both refuse a PWL with no time/value pair; a silent
+    // 0 V waveform is not what the card asked for.
     if points.is_empty() {
-        points.push((0.0, 0.0));
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "PWL requires at least one time/value pair, but the card gives none"
+                .to_string(),
+        });
     }
     validate_pwl_repeat_from(line_num, repeat_from)?;
     validate_pwl_repeat_before_last(line_num, repeat_from, points.last().map(|(time, _)| *time))?;
@@ -1656,6 +1701,49 @@ fn validate_pat_spec(
         });
     }
     Ok(())
+}
+
+/// Refuse a source function that leaves out a value its dialect requires.
+///
+/// Positional source arguments end at the first omitted one, so `leading`
+/// is how many of the function's leading values the card wrote. ngspice
+/// refuses PULSE, SIN, EXP, SFFM, AM and PWL with fewer than two values
+/// (`vsrcpar.c`, `isrcpar.c`: `numValue < 2` is `E_BADPARM`); Xyce asks for
+/// V0, VA and FREQ on SIN, V1 and V2 on EXP, V1 on PULSE and V0 and VA on
+/// SFFM (`N_DEV_SourceData.C`). Filling the gap with defaults would run a
+/// waveform the deck never described.
+fn require_leading_source_values(
+    line_num: usize,
+    source_name: &str,
+    names: &[&str],
+    leading: usize,
+) -> Result<(), ParseError> {
+    if leading >= names.len() {
+        return Ok(());
+    }
+    let required = match names {
+        [only] => (*only).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        [] => return Ok(()),
+    };
+    let written = match leading {
+        0 => "no values".to_string(),
+        1 => "only one value".to_string(),
+        count => format!("only {count} values"),
+    };
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!("{source_name} requires {required}, but the card gives {written}"),
+    })
+}
+
+/// How many of `values` the card wrote before the first omitted one.
+fn leading_source_values(values: &[Option<Value>]) -> usize {
+    values.iter().take_while(|value| value.is_some()).count()
+}
+
+fn xyce_source_dialect(params: &SourceParseContext<'_>) -> bool {
+    params.expression_dialect() == crate::config::ExpressionDialect::Xyce
 }
 
 fn source_value_or_default(
@@ -1961,8 +2049,15 @@ fn parse_exp_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let v1 = source_value_or_default(stream, line_num, params, "EXP", "V1", has_paren, 0.0)?;
-    let v2 = source_value_or_default(stream, line_num, params, "EXP", "V2", has_paren, 1.0)?;
+    let v1 = source_optional_value(stream, line_num, params, "EXP", "V1", has_paren)?;
+    let v2 = source_optional_value(stream, line_num, params, "EXP", "V2", has_paren)?;
+    require_leading_source_values(
+        line_num,
+        "EXP",
+        &["V1", "V2"],
+        leading_source_values(&[v1, v2]),
+    )?;
+    let (v1, v2) = (v1.unwrap_or(0.0), v2.unwrap_or(1.0));
     let td1 = source_optional_value(stream, line_num, params, "EXP", "TD1", has_paren)?
         .unwrap_or(Value::NAN);
     let tau1 = source_optional_value(stream, line_num, params, "EXP", "TAU1", has_paren)?
@@ -2324,6 +2419,63 @@ mod tests {
             .expect("ngspice source multiplier parses");
         assert!(
             matches!(source, SourceSpec::Dc(value) if (value - 3.361e-2 * 4.190e-7).abs() < 1e-22)
+        );
+    }
+
+    /// A source function that leaves out a value its dialect requires is
+    /// refused with the card's line, not run with invented defaults. ngspice
+    /// 46 refuses `SIN()`, `SIN(0)`, `PULSE(0)`, `EXP(0)`, `SFFM(0)`,
+    /// `AM(1)` and `PWL()` (vsrcpar.c: fewer than two values is
+    /// E_BADPARM) and runs `SIN(0 1)`.
+    #[test]
+    fn source_functions_refuse_missing_required_values() {
+        let ngspice = ParamContext::new();
+        let mut xyce = ParamContext::new();
+        xyce.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
+        for (text, refused_by_ngspice, refused_by_xyce) in [
+            ("SIN()", true, true),
+            ("SIN", true, true),
+            ("SIN(0)", true, true),
+            ("SIN(0 1)", false, true),
+            ("SIN(0 1 1k)", false, false),
+            ("DC 1 SIN()", true, true),
+            ("SIN() AC 1", true, true),
+            ("PULSE()", true, true),
+            ("PULSE(0)", true, false),
+            ("PULSE(0 1)", false, false),
+            ("EXP()", true, true),
+            ("EXP(0)", true, true),
+            ("EXP(0 1)", false, false),
+            ("SFFM()", true, true),
+            ("SFFM(0)", true, true),
+            ("SFFM(0 1)", false, false),
+            ("AM()", true, true),
+            ("AM(1)", true, true),
+            ("AM(1 0)", false, false),
+            ("PWL()", true, true),
+            ("PWL", true, true),
+            ("PWL(0 1)", false, false),
+        ] {
+            for (scope, refused, dialect) in [
+                (&ngspice, refused_by_ngspice, "ngspice"),
+                (&xyce, refused_by_xyce, "Xyce"),
+            ] {
+                match parse_source_spec_text(text, 7, scope) {
+                    Err(ParseError::Syntax { line, message }) if refused => {
+                        assert_eq!(line, 7, "{text} under {dialect}: {message}");
+                        assert!(message.contains("requires"), "{text}: {message}");
+                    }
+                    Ok(_) if !refused => {}
+                    other => panic!("{text} under {dialect}: {other:?}"),
+                }
+            }
+        }
+        let message = parse_source_spec_text("SIN(0)", 3, &ngspice)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("SIN requires VO and VA, but the card gives only one value"),
+            "{message}"
         );
     }
 }
