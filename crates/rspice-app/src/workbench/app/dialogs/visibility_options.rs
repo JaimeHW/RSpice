@@ -386,7 +386,7 @@ mod tests {
                     .flat_map(|(_, node)| [node.label(), node.value()])
                     .flatten()
                 {
-                    labels.push_str(&text);
+                    labels.push_str(text);
                     labels.push('\n');
                 }
             }
