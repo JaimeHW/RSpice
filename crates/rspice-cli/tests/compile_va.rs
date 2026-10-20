@@ -564,3 +564,92 @@ fn successful_compilation_reports_warnings_and_retains_them_when_quiet() {
         }
     }
 }
+
+#[test]
+fn the_interface_states_parameters_as_declared() {
+    let dir = common::test_dir("declared_parameters");
+    let input = dir.join("prm.va");
+    let summary = dir.join("prm.json");
+    std::fs::write(
+        &input,
+        "`include \"disciplines.vams\"\n\
+         module leaf(p,n);\ninout p,n; electrical p,n;\nparameter real r = 1;\n\
+         analog I(p,n) <+ V(p,n)/r;\nendmodule\n\
+         module prm(a,b);\ninout a,b; electrical a,b;\n\
+         parameter real r = 1k from (0:inf);\n\
+         parameter real g = 2 from [0:10] exclude 5;\n\
+         parameter integer m = 3 from [1:8];\n\
+         parameter real dep = 2 * r;\n\
+         parameter real lim = 1 from [0:r);\n\
+         parameter string mode = \"fast\";\n\
+         leaf #(.r(r)) child (a, b);\n\
+         analog I(a,b) <+ (dep + g + m + lim + ((mode == \"slow\") ? 2 : 1)) * 1e-3 * V(a,b);\n\
+         endmodule\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("compile-va")
+        .arg(&input)
+        .args(["--module", "prm", "-o"])
+        .arg(&summary)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    // The public parameters only: the child's hidden slot is not one, and
+    // printed as `__rspice_h0_r` with default 0 it named neither.
+    let interface = common::read_json(&summary);
+    let parameters = interface["parameters"].as_array().unwrap();
+    let names: Vec<_> = parameters
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["r", "g", "m", "dep", "lim", "mode"], "{interface}");
+    let parameter = |name: &str| parameters.iter().find(|p| p["name"] == name).unwrap();
+    // A default computed from another parameter was reported as 0.
+    assert_eq!(parameter("dep")["default"], serde_json::Value::Null);
+    assert_eq!(parameter("dep")["default_expression"], "2 * r");
+    // A string default was reported as 0.
+    assert_eq!(parameter("mode")["type"], "string");
+    assert_eq!(parameter("mode")["default"], "fast");
+    assert_eq!(parameter("m")["type"], "integer");
+    assert_eq!(parameter("m")["default"], 3);
+    assert_eq!(parameter("r")["default"], 1000.0);
+    assert_eq!(
+        parameter("r")["default_expression"],
+        serde_json::Value::Null
+    );
+    // `(0:inf)` read as `[0:inf)`: the open end was lost.
+    assert_eq!(parameter("r")["min"], 0.0);
+    assert_eq!(parameter("r")["min_exclusive"], true);
+    assert_eq!(parameter("r")["max"], serde_json::Value::Null);
+    assert_eq!(parameter("g")["min_exclusive"], false);
+    assert_eq!(parameter("g")["max"], 10.0);
+    assert_eq!(parameter("g")["max_exclusive"], false);
+    assert_eq!(parameter("g")["exclude"], serde_json::json!([5.0]));
+    assert_eq!(parameter("lim")["max"], serde_json::Value::Null);
+    assert_eq!(parameter("lim")["max_expression"], "r");
+    assert_eq!(parameter("lim")["max_exclusive"], true);
+
+    let table = String::from_utf8(output.stdout).unwrap();
+    assert!(!table.contains("__rspice"), "{table}");
+    for row in [
+        ["dep ", "real", "2 * r", "-"],
+        ["mode ", "string", "\"fast\"", "-"],
+        ["m ", "integer", "3", "[1:8]"],
+        ["r ", "real", "1e3", "(0:inf)"],
+        ["g ", "real", "2", "[0:10] exclude 5"],
+        ["lim ", "real", "1", "[0:r)"],
+    ] {
+        let line = table
+            .lines()
+            .find(|line| line.trim_start().starts_with(row[0]))
+            .unwrap_or_else(|| panic!("no row for {}: {table}", row[0]));
+        let cells: Vec<_> = line.split_whitespace().collect();
+        assert_eq!(cells[1], row[1], "{line}");
+        assert!(
+            line.contains(row[2]) && line.trim_end().ends_with(row[3]),
+            "{line}"
+        );
+    }
+}

@@ -175,7 +175,7 @@ pub use preprocessor::{
 };
 pub use runtime_report::{
     BackendQualificationError, CompileDiagnostic, CompileDiagnosticPhase,
-    CompileDiagnosticSeverity, CompileDiagnosticSpan, CompileSourcePosition,
+    CompileDiagnosticSeverity, CompileDiagnosticSpan, CompileSourcePosition, DeclaredParameter,
     InterpreterFallbackPolicy, RuntimeAbiFormalPort, RuntimeAbiParameter, RuntimeAbiParameterRange,
     RuntimeAbiParameterValue, RuntimeAbiPort, RuntimeAbiRangeBound, RuntimeAbiRangeValue,
     RuntimeAbiSummary, RuntimeArtifactIntegrityError, RuntimeCompileReport,
@@ -259,6 +259,9 @@ impl From<CompileError> for ProviderCompileError {
 pub struct CompiledFile {
     /// Compiled model artifact used by the simulation engine.
     pub model: CompiledModel,
+    /// The selected module's public parameters as declared: typed and
+    /// textual defaults and ranges the compiled model does not keep.
+    pub parameters: Vec<DeclaredParameter>,
     /// Canonical source/include dependencies captured at compile time.
     pub dependencies: Vec<std::path::PathBuf>,
     /// Structured phase timings and work-size counters.
@@ -559,7 +562,7 @@ impl VerilogACompiler {
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
-        let (output, _) =
+        let (output, _, _) =
             self.compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)?;
         Ok(Measured {
             output,
@@ -1247,7 +1250,11 @@ impl VerilogACompiler {
         preprocessed: &preprocessor::PreprocessedSource,
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
-    ) -> CompileResult<(CompiledModel, Vec<CompileDiagnostic>)> {
+    ) -> CompileResult<(
+        CompiledModel,
+        Vec<DeclaredParameter>,
+        Vec<CompileDiagnostic>,
+    )> {
         compile_stack::run(|| {
             self.compile_preprocessed_measured_inline(preprocessed, module_name, measurements)
         })
@@ -1258,7 +1265,11 @@ impl VerilogACompiler {
         preprocessed: &preprocessor::PreprocessedSource,
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
-    ) -> CompileResult<(CompiledModel, Vec<CompileDiagnostic>)> {
+    ) -> CompileResult<(
+        CompiledModel,
+        Vec<DeclaredParameter>,
+        Vec<CompileDiagnostic>,
+    )> {
         let source = preprocessed.source.as_str();
         let analyzed = self.analyze_preprocessed("<input>", source, module_name, measurements)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
@@ -1273,6 +1284,7 @@ impl VerilogACompiler {
 
         Ok((
             model,
+            DeclaredParameter::of_module(&executable, source),
             runtime_report::semantic_warning_diagnostics(source, &analyzed.warnings, preprocessed)
                 .into_iter()
                 .chain(runtime_report::semantic_warning_diagnostics(
@@ -1959,10 +1971,11 @@ impl VerilogACompiler {
         }
 
         // Compile the preprocessed source
-        let (model, diagnostics) =
+        let (model, parameters, diagnostics) =
             self.compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)?;
         Ok(CompiledFile {
             model,
+            parameters,
             dependencies,
             metrics: measurements.finish(),
             diagnostics: source_diagnostics::map_diagnostics(
@@ -2016,7 +2029,7 @@ impl VerilogACompiler {
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
-        let (model, diagnostics) = self
+        let (model, parameters, diagnostics) = self
             .compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)
             .map_err(|source| ProviderCompileError::Compile {
                 diagnostics: source_diagnostics::provider_diagnostics(
@@ -2028,6 +2041,7 @@ impl VerilogACompiler {
             })?;
         Ok(CompiledFile {
             model,
+            parameters,
             dependencies,
             metrics: measurements.finish(),
             diagnostics: source_diagnostics::map_diagnostics(

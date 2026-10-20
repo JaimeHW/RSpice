@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use thiserror::Error;
 
-use crate::ast::PortDirection;
+use crate::ast::{Expression, PortDirection};
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, HirExprKind, HirExprRef, HirModel, HirParamRange,
     HirParameter,
@@ -25,6 +25,7 @@ use crate::metrics::PipelineMetrics;
 use crate::rust_backend::{RustTranspileOptions, RustTranspiler};
 use crate::semantic::VectorBounds;
 use crate::source::Span;
+use crate::types::ParameterRange as TypedParameterRange;
 
 /// The complete, mutually consistent output of an in-memory runtime compile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -522,17 +523,97 @@ impl RuntimeAbiParameterValue {
                     _ => None,
                 }
             }
-            // Integer defaults are folded to integral values before lowering.
-            CanonicalValueType::Integer => parameter.default.map(|value| {
-                if value.fract() == 0.0 && value.abs() <= i64::MAX as f64 {
-                    Self::Integer(value as i64)
-                } else {
-                    Self::Real(value)
-                }
-            }),
-            _ => parameter.default.map(Self::Real),
+            _ => parameter
+                .default
+                .map(|value| Self::number(parameter.value_type, value)),
         }
     }
+
+    /// A folded numeric default, typed as `value_type` declares it.
+    fn number(value_type: CanonicalValueType, value: f64) -> Self {
+        // Integer defaults are folded to integral values before lowering.
+        if value_type == CanonicalValueType::Integer
+            && value.fract() == 0.0
+            && value.abs() <= i64::MAX as f64
+        {
+            Self::Integer(value as i64)
+        } else {
+            Self::Real(value)
+        }
+    }
+}
+
+/// A public parameter as its declaration states it, for interface reports
+/// such as `compile-va`. The compiled model keeps what it evaluates: 0 in
+/// place of a default computed from other parameters and of a string
+/// default, and no text for a bound that reads other parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclaredParameter {
+    pub name: SmolStr,
+    pub value_type: CanonicalValueType,
+    /// The default when it is a compile-time constant, typed as declared.
+    pub default: Option<RuntimeAbiParameterValue>,
+    /// How a default that is not a constant reads in the preprocessed source
+    /// (it reads other parameters, or is computed per instance).
+    pub default_text: Option<SmolStr>,
+    /// The values the parameter accepts; `None` when it accepts any value.
+    pub range: Option<RuntimeAbiParameterRange>,
+}
+
+impl DeclaredParameter {
+    /// The public parameters of `module` in declaration order; `source` is
+    /// the text its spans index.
+    pub(crate) fn of_module(module: &crate::semantic::AnalyzedModule, source: &str) -> Vec<Self> {
+        module
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.is_public)
+            .map(|parameter| {
+                let value_type = CanonicalValueType::from(parameter.value_type);
+                let default = match (value_type, &parameter.default_expr) {
+                    // A string default never folds to a number; a literal is
+                    // the only constant form it has.
+                    (CanonicalValueType::String, Some(Expression::StringLit(literal))) => {
+                        Some(RuntimeAbiParameterValue::String(literal.value.clone()))
+                    }
+                    (CanonicalValueType::String, _) => None,
+                    _ => parameter
+                        .default
+                        .map(|value| RuntimeAbiParameterValue::number(value_type, value)),
+                };
+                Self {
+                    name: parameter.name.clone(),
+                    value_type,
+                    default_text: if default.is_none() {
+                        parameter
+                            .default_expr
+                            .as_ref()
+                            .map(|expression| declared_text(source, expression))
+                    } else {
+                        None
+                    },
+                    default,
+                    range: parameter.range.as_ref().and_then(|range| {
+                        RuntimeAbiParameterRange::from_declaration(range, source)
+                    }),
+                }
+            })
+            .collect()
+    }
+}
+
+/// How `expression` reads in `source`, each run of whitespace one space.
+fn declared_text(source: &str, expression: &Expression) -> SmolStr {
+    let span = expression.span();
+    usize::try_from(span.start)
+        .ok()
+        .zip(usize::try_from(span.end).ok())
+        .and_then(|(start, end)| source.get(start..end))
+        .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|text| !text.is_empty())
+        // A span that does not index this source still names a value
+        // computed when the instance is set up, never a constant.
+        .map_or_else(|| SmolStr::new_static("computed"), SmolStr::from)
 }
 
 /// The values a parameter accepts: one `from` interval and its `exclude`
@@ -636,6 +717,66 @@ impl RuntimeAbiParameterRange {
                     }),
             )
             .collect();
+        Self::constrained(lower, upper, exclude)
+    }
+
+    /// The range a declaration states, its dependent bounds and exclusions
+    /// read from `source` (the text the expressions' spans index).
+    fn from_declaration(range: &TypedParameterRange, source: &str) -> Option<Self> {
+        let bound = |constant: Option<f64>,
+                     parameter: Option<&SmolStr>,
+                     expression: Option<&Expression>,
+                     exclusive: bool| {
+            let value = match (constant, parameter, expression) {
+                (Some(value), _, _) => RuntimeAbiRangeValue::Constant(value),
+                (None, Some(parameter), _) => RuntimeAbiRangeValue::Dependent(parameter.clone()),
+                (None, None, Some(expression)) => {
+                    RuntimeAbiRangeValue::Dependent(declared_text(source, expression))
+                }
+                (None, None, None) => return RuntimeAbiRangeBound::Unbounded,
+            };
+            if exclusive {
+                RuntimeAbiRangeBound::Exclusive(value)
+            } else {
+                RuntimeAbiRangeBound::Inclusive(value)
+            }
+        };
+        let lower = bound(
+            range.min,
+            range.min_parameter.as_ref(),
+            range.min_expression.as_ref(),
+            range.min_exclusive,
+        );
+        let upper = bound(
+            range.max,
+            range.max_parameter.as_ref(),
+            range.max_expression.as_ref(),
+            range.max_exclusive,
+        );
+        let exclude = range
+            .exclude
+            .iter()
+            .copied()
+            .map(RuntimeAbiRangeValue::Constant)
+            .chain(
+                range
+                    .exclude_parameters
+                    .iter()
+                    .cloned()
+                    .map(RuntimeAbiRangeValue::Dependent),
+            )
+            .chain(range.exclude_expressions.iter().map(|expression| {
+                RuntimeAbiRangeValue::Dependent(declared_text(source, expression))
+            }))
+            .collect();
+        Self::constrained(lower, upper, exclude)
+    }
+
+    fn constrained(
+        lower: RuntimeAbiRangeBound,
+        upper: RuntimeAbiRangeBound,
+        exclude: Vec<RuntimeAbiRangeValue>,
+    ) -> Option<Self> {
         let unconstrained = lower == RuntimeAbiRangeBound::Unbounded
             && upper == RuntimeAbiRangeBound::Unbounded
             && exclude.is_empty();

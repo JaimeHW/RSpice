@@ -768,11 +768,14 @@ integer timeline.
 ## Verilog-A models (`compile-va`)
 
 `rspice compile-va MODEL.va` compiles a Verilog-A source and prints its
-interface table unless `--quiet` is set.
+interface table unless `--quiet` is set. The table lists the public parameters
+with their type, their default as declared (the expression, for one computed
+from other parameters) and their range as a declaration writes it
+(`(0:inf)`, `[0:10] exclude 5`).
 
 | Option | Effect |
 | :--- | :--- |
-| `-o`, `--output FILE` | Write a versioned `rspice.compile_va` JSON summary: source, model, terminals, internal nodes, parameters with defaults and bounds, and compiler warnings |
+| `-o`, `--output FILE` | Write a versioned `rspice.compile_va` JSON summary: source, model, terminals, internal nodes, parameters, and compiler warnings. Each public parameter gives its `type`, its constant `default` (a string for a string parameter) or, for a default computed from other parameters, `default: null` with the source text in `default_expression`, and its `min`/`max` bounds with `min_exclusive`/`max_exclusive`, `min_expression`/`max_expression` and `exclude` |
 | `-I`, `--include DIR` | Extra include directory (repeatable) |
 | `--module NAME` | Select one module of a multi-module source |
 | `--detailed` | Also print per-branch stamp and Jacobian entry counts |

@@ -4,7 +4,11 @@
 
 use crate::cli::{CliError, CompileVaArgs, Config, map_atomic_output_error};
 use crate::commands::publish;
-use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+use rspice_veriloga::canonical_ir::CanonicalValueType;
+use rspice_veriloga::{
+    CompilerOptions, DeclaredParameter, RuntimeAbiParameterRange, RuntimeAbiParameterValue,
+    RuntimeAbiRangeBound, RuntimeAbiRangeValue, VerilogACompiler,
+};
 
 /// Execute the compile-va command
 pub fn execute(
@@ -88,6 +92,7 @@ pub fn execute(
         )?;
     }
     let model = compiled.model;
+    let parameters = &compiled.parameters;
 
     // Quiet suppresses all text; an explicitly requested file still publishes.
     if !quiet {
@@ -118,24 +123,30 @@ pub fn execute(
             crate::console::line(format_args!(""))?;
         }
 
-        // Parameters
-        if !model.parameters.is_empty() {
-            crate::console::line(format_args!("Parameters ({}):", model.parameters.len()))?;
+        // Parameters: the public ones, as declared. The compiled model's list
+        // also holds the hidden slots of child instances, and keeps 0 for a
+        // default computed from other parameters or a string.
+        if !parameters.is_empty() {
+            crate::console::line(format_args!("Parameters ({}):", parameters.len()))?;
             crate::console::line(format_args!(
-                "  {:<20} {:>15} {:>12} {:>12}",
-                "Name", "Default", "Min", "Max"
+                "  {:<20} {:<7} {:<15} Range",
+                "Name", "Type", "Default"
             ))?;
             crate::console::line(format_args!(
-                "  {:-<20} {:-^15} {:-^12} {:-^12}",
+                "  {:-<20} {:-<7} {:-<15} {:-<15}",
                 "", "", "", ""
             ))?;
 
-            for param in &model.parameters {
-                let min_str = param.min.map_or("-".to_string(), |v| format!("{:.4e}", v));
-                let max_str = param.max.map_or("-".to_string(), |v| format!("{:.4e}", v));
+            for parameter in parameters {
                 crate::console::line(format_args!(
-                    "  {:<20} {:>15.6e} {:>12} {:>12}",
-                    param.name, param.default, min_str, max_str
+                    "  {:<20} {:<7} {:<15} {}",
+                    parameter.name,
+                    type_name(parameter.value_type),
+                    default_text(parameter).unwrap_or_else(|| "-".into()),
+                    parameter
+                        .range
+                        .as_ref()
+                        .map_or_else(|| "-".into(), range_text)
                 ))?;
             }
             crate::console::line(format_args!(""))?;
@@ -172,14 +183,7 @@ pub fn execute(
                 "terminals": model.terminal_names,
                 "internal_nodes": model.internal_nodes,
                 "diagnostics": compiled.diagnostics,
-                "parameters": model.parameters.iter().map(|p| {
-                    serde_json::json!({
-                        "name": p.name,
-                        "default": p.default,
-                        "min": p.min,
-                        "max": p.max,
-                    })
-                }).collect::<Vec<_>>(),
+                "parameters": parameters.iter().map(parameter_json).collect::<Vec<_>>(),
             }),
         );
         let text = serde_json::to_string_pretty(&json)
@@ -207,10 +211,14 @@ pub fn execute(
     // example writes instance parameters where the parser reads them.
     if let Some(source) = usage_source {
         let terminal_list = model.terminal_names.join(" ");
-        let instance_parameters = model
-            .parameters
-            .first()
-            .map(|parameter| format!(" {}={}", parameter.name, parameter.default))
+        // The first parameter with a numeric default: setting a computed
+        // default to a number would replace it, not illustrate it.
+        let instance_parameters = parameters
+            .iter()
+            .find_map(|parameter| {
+                let value = parameter.default.as_ref()?.numeric()?;
+                Some(format!(" {}={}", parameter.name, value))
+            })
             .unwrap_or_default();
 
         crate::console::line(format_args!(""))?;
@@ -232,6 +240,122 @@ pub fn execute(
     }
 
     Ok(())
+}
+
+fn type_name(value_type: CanonicalValueType) -> &'static str {
+    match value_type {
+        CanonicalValueType::Integer => "integer",
+        CanonicalValueType::String => "string",
+        _ => "real",
+    }
+}
+
+/// A number as short as it reads exactly: `1e3`, `0.25`, `3e-8`.
+fn number_text(value: f64) -> String {
+    let plain = value.to_string();
+    let scientific = format!("{value:e}");
+    if scientific.len() < plain.len() {
+        scientific
+    } else {
+        plain
+    }
+}
+
+/// The default as the declaration states it: a constant, a quoted string,
+/// or the expression that computes it per instance.
+fn default_text(parameter: &DeclaredParameter) -> Option<String> {
+    match &parameter.default {
+        Some(RuntimeAbiParameterValue::Real(value)) => Some(number_text(*value)),
+        Some(RuntimeAbiParameterValue::Integer(value)) => Some(value.to_string()),
+        Some(RuntimeAbiParameterValue::String(text)) => Some(format!("{text:?}")),
+        None => parameter.default_text.as_ref().map(ToString::to_string),
+    }
+}
+
+fn range_value_text(value: &RuntimeAbiRangeValue) -> String {
+    match value {
+        RuntimeAbiRangeValue::Constant(value) => number_text(*value),
+        RuntimeAbiRangeValue::Dependent(text) => text.to_string(),
+    }
+}
+
+/// A range as a declaration writes it: `[0:10] exclude 5`, `(0:inf)`.
+fn range_text(range: &RuntimeAbiParameterRange) -> String {
+    let (open, lower) = match &range.lower {
+        RuntimeAbiRangeBound::Unbounded => ('(', "-inf".to_string()),
+        RuntimeAbiRangeBound::Inclusive(bound) => ('[', range_value_text(bound)),
+        RuntimeAbiRangeBound::Exclusive(bound) => ('(', range_value_text(bound)),
+    };
+    let (upper, close) = match &range.upper {
+        RuntimeAbiRangeBound::Unbounded => ("inf".to_string(), ')'),
+        RuntimeAbiRangeBound::Inclusive(bound) => (range_value_text(bound), ']'),
+        RuntimeAbiRangeBound::Exclusive(bound) => (range_value_text(bound), ')'),
+    };
+    let mut clauses = Vec::new();
+    if range.lower != RuntimeAbiRangeBound::Unbounded
+        || range.upper != RuntimeAbiRangeBound::Unbounded
+    {
+        clauses.push(format!("{open}{lower}:{upper}{close}"));
+    }
+    clauses.extend(
+        range
+            .exclude
+            .iter()
+            .map(|value| format!("exclude {}", range_value_text(value))),
+    );
+    clauses.join(" ")
+}
+
+/// One parameter of the `-o` summary. `default` is a constant default typed
+/// as declared (a string for a string parameter), or null with
+/// `default_expression` giving the source text of a default computed per
+/// instance. `min`/`max` are constant bounds, `*_exclusive` says the bound
+/// itself is refused, and `*_expression` gives a bound read from other
+/// parameters; `exclude` lists excluded constants and expressions.
+fn parameter_json(parameter: &DeclaredParameter) -> serde_json::Value {
+    let value_json = |value: &RuntimeAbiRangeValue| match value {
+        RuntimeAbiRangeValue::Constant(value) => serde_json::json!(value),
+        RuntimeAbiRangeValue::Dependent(text) => serde_json::json!(text.as_str()),
+    };
+    let bound = |bound: Option<&RuntimeAbiRangeBound>| {
+        let (value, exclusive) = match bound {
+            Some(RuntimeAbiRangeBound::Inclusive(value)) => (Some(value), false),
+            Some(RuntimeAbiRangeBound::Exclusive(value)) => (Some(value), true),
+            Some(RuntimeAbiRangeBound::Unbounded) | None => (None, false),
+        };
+        let constant = match value {
+            Some(RuntimeAbiRangeValue::Constant(value)) => Some(*value),
+            _ => None,
+        };
+        let expression = match value {
+            Some(RuntimeAbiRangeValue::Dependent(text)) => Some(text.to_string()),
+            _ => None,
+        };
+        (constant, exclusive, expression)
+    };
+    let range = parameter.range.as_ref();
+    let (min, min_exclusive, min_expression) = bound(range.map(|range| &range.lower));
+    let (max, max_exclusive, max_expression) = bound(range.map(|range| &range.upper));
+    serde_json::json!({
+        "name": parameter.name.as_str(),
+        "type": type_name(parameter.value_type),
+        "default": match &parameter.default {
+            Some(RuntimeAbiParameterValue::Real(value)) => serde_json::json!(value),
+            Some(RuntimeAbiParameterValue::Integer(value)) => serde_json::json!(value),
+            Some(RuntimeAbiParameterValue::String(text)) => serde_json::json!(text.as_str()),
+            None => serde_json::Value::Null,
+        },
+        "default_expression": parameter.default_text.as_deref(),
+        "min": min,
+        "min_exclusive": min_exclusive,
+        "min_expression": min_expression,
+        "max": max,
+        "max_exclusive": max_exclusive,
+        "max_expression": max_expression,
+        "exclude": range
+            .map(|range| range.exclude.iter().map(value_json).collect::<Vec<_>>())
+            .unwrap_or_default(),
+    })
 }
 
 fn usage_source_path(input: &std::path::Path) -> Result<String, CliError> {
