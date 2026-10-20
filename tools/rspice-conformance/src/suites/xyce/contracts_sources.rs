@@ -353,6 +353,27 @@ impl XyceTestRunner {
         }
     }
 
+    /// RSpice stops at a deck's first malformed source. When that is a PWL
+    /// card with no time/value pair, the refusal lands there, on the card
+    /// Xyce reports first ("At least one time-voltage pair must be specified
+    /// for the PWL source function", N_DEV_SourceData.C) before it reaches
+    /// any repeat value. BUG_657's Bad_PWL_Source opens with such a card; the
+    /// deck used to reach its repeat-value card only because an empty PWL
+    /// was accepted as a silent 0 V source.
+    fn is_empty_pwl_card_refusal(source: &str, err: &ParseError) -> bool {
+        let ParseError::Syntax { line, message } = err else {
+            return false;
+        };
+        message.contains("PWL requires at least one time/value pair")
+            && line
+                .checked_sub(1)
+                .and_then(|index| source.lines().nth(index))
+                .is_some_and(|card| {
+                    let fields = card.split_whitespace().collect::<Vec<_>>();
+                    fields.len() == 4 && fields[3].eq_ignore_ascii_case("PWL")
+                })
+    }
+
     pub(super) fn validate_expected_pwl_repeat_value_error_source(
         source: &str,
         deck_path: &Path,
@@ -369,7 +390,9 @@ impl XyceTestRunner {
             )),
             Err(err) => {
                 let message = err.to_string();
-                if message.contains(XYCE_PWL_REPEAT_VALUE_ERROR) {
+                if message.contains(XYCE_PWL_REPEAT_VALUE_ERROR)
+                    || Self::is_empty_pwl_card_refusal(source, &err)
+                {
                     Ok(())
                 } else {
                     Err(format!(
