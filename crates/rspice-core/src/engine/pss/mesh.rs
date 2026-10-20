@@ -329,6 +329,17 @@ fn is_pwl_source(spec: &crate::netlist::SourceSpec) -> bool {
     }
 }
 
+/// The time in sorted `times` nearest `time`, if one lies within `tolerance`.
+fn nearest_within(times: &[Value], time: Value, tolerance: Value) -> Option<Value> {
+    let position = times.partition_point(|candidate| *candidate < time);
+    [position.checked_sub(1), Some(position)]
+        .into_iter()
+        .flatten()
+        .filter_map(|index| times.get(index).copied())
+        .filter(|candidate| (*candidate - time).abs() <= tolerance)
+        .min_by(|left, right| (*left - time).abs().total_cmp(&(*right - time).abs()))
+}
+
 impl Engine {
     /// Resolve another generation of line arrivals only between solved meshes.
     /// All shooting/Jacobian workers then replay the same immutable clocks.
@@ -416,6 +427,15 @@ impl Engine {
                 } else {
                     PssIntegrationMesh::shifted_clock(&mesh.delay_corners, index, &[phase_delay])
                 };
+                // A corner delayed through one line and then another can land
+                // a few ulps from a time the mesh already holds, such as a
+                // point of its uniform base grid: 740n through 137n and 83n
+                // arrives 2 ulps below the grid's 960n. That is one instant
+                // reached two ways, and kept apart the two leave a 2e-22 s
+                // step whose companion stamps swamp the period map in
+                // roundoff, so the arrival takes the mesh's time.
+                let arrival =
+                    nearest_within(&mesh.times, arrival, merge_tolerance).unwrap_or(arrival);
                 let position = corners.partition_point(|time| *time < arrival);
                 if corners
                     .get(position)
