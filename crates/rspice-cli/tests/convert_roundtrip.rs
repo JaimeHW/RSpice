@@ -765,6 +765,24 @@ fn a_declared_bus_reaches_every_carrier_as_one_vector() {
         );
     }
 
+    // A table carries no declaration, only the members' D(node) columns, so
+    // its dump has one scalar per member. `convert --help` said every
+    // artifact of one run converted to the same dump; it now says this.
+    let table = simulate(&dir, &deck, "csv", "run.csv");
+    let from_table = dir.join("from_csv.vcd");
+    convert(&table, &from_table, "vcd", &[]);
+    let text = std::fs::read_to_string(&from_table).expect("read the table's dump");
+    assert!(!text.contains("$var wire 2"), "{text}");
+    let help = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["convert", "--help"])
+        .output()
+        .expect("run rspice");
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(
+        help.contains("one scalar per member") && !help.contains("every artifact of one run"),
+        "{help}"
+    );
+
     // Reading a vector back and writing it again is a fixed point: the `$var`
     // becomes an imported declaration over synthesized `name[k]` members,
     // which project back to the same vector.

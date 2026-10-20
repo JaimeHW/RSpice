@@ -247,7 +247,11 @@ pub enum Commands {
     /// A declared digital bus — a vector boundary port of a mixed Verilog-AMS
     /// module, or a wide `$var` in a dump being read — reaches `--to vcd` as
     /// one `$var wire N` named `bus [msb:lsb]`, with no member scalar beside
-    /// it; every artifact of one run therefore converts to the same dump.
+    /// it, from every source that carries the declaration: a rawfile with
+    /// event plots, a typed JSON result document, or a dump. Those artifacts
+    /// of one run convert to the same dump. A CSV, TSV or HDF5 table carries
+    /// no declaration, only the members' flattened D(node) columns, so its
+    /// dump has one scalar per member, and x where a member was x or z.
     /// Converting to a table format writes the members as the separate
     /// flattened D(node) columns the grid already holds, whichever artifact of
     /// the run is being read: a dump's vector expands the same way.
