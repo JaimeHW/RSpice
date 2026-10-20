@@ -112,11 +112,61 @@ pub(crate) fn provider_diagnostics(
     preprocessed: &PreprocessedSource,
     dependencies: &[PreprocessedDependency],
 ) -> Vec<SourceCompileDiagnostic> {
-    map_diagnostics(
+    let mut diagnostics = map_diagnostics(
         crate::compile_diagnostics(&preprocessed.source, error),
         preprocessed,
         dependencies,
-    )
+    );
+    name_first_declaration(error, &mut diagnostics, |offset| {
+        let span = crate::CompileDiagnosticSpan {
+            source_id: 0,
+            byte_start: offset,
+            byte_end: offset,
+            start: None,
+            end: None,
+        };
+        let mapped = preprocessed.map_span(&span, |path| {
+            dependencies
+                .iter()
+                .find(|dependency| dependency.logical_path == path)
+                .map(|dependency| dependency.source.as_str())
+        })?;
+        Some((
+            crate::source::display_path(mapped.path),
+            mapped.line,
+            mapped.column,
+        ))
+    });
+    diagnostics
+}
+
+/// Name where the first of two declarations was written, for a refusal of
+/// the second.
+///
+/// The refusal is located at the repeat and its message carries no offsets
+/// ([`crate::compile_diagnostics`]); `locate` turns a byte of the compiled
+/// text into the file, line and column the finding itself was mapped with.
+pub(crate) fn name_first_declaration(
+    error: &CompileError,
+    diagnostics: &mut [SourceCompileDiagnostic],
+    locate: impl FnOnce(u32) -> Option<(String, usize, usize)>,
+) {
+    if let CompileError::Semantic(inner) = error
+        && let crate::error::SemanticErrorKind::ConnectRules(refusal) = &inner.kind
+        && let crate::connect::ConnectError::DuplicateConnectDeclaration { first, .. } =
+            refusal.as_ref()
+        && let [diagnostic] = diagnostics
+        && let Some((path, line, column)) = locate(first.start)
+    {
+        let at = if diagnostic.path.as_deref() == Some(path.as_str()) {
+            format!("line {line}, column {column}")
+        } else {
+            format!("{path}:{line}:{column}")
+        };
+        diagnostic
+            .message
+            .push_str(&format!("; the first is at {at}"));
+    }
 }
 
 pub(crate) fn map_diagnostics(

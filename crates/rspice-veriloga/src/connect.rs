@@ -1557,7 +1557,9 @@ pub enum ConnectError {
         available: Vec<SmolStr>,
     },
 
-    #[error("{kind} '{name}' is declared more than once ({first:?} and {second:?})")]
+    /// Located at `second`; a caller with a source map names where `first`
+    /// was written, since the message itself carries no offsets.
+    #[error("{kind} '{name}' is declared more than once")]
     DuplicateConnectDeclaration {
         kind: &'static str,
         name: SmolStr,

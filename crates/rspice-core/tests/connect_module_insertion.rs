@@ -334,6 +334,31 @@ fn connect_refusals_point_at_the_line_the_author_wrote() {
         text.contains(&at) && !text.contains("offset") && !text.contains(".vams:0"),
         "{text}"
     );
+
+    // A connectmodule declared twice: the repeat, and the first by its line
+    // (they were two `Span { source: SourceId(0), start: …, end: … }`).
+    let source = LOCATED_DESIGN.replace(
+        "connectrules hyst;",
+        "connectmodule a2d_h(a, d);\n  input a; output d; electrical a; logic d; reg d;\n  \
+         initial d = 0;\nendmodule\nconnectrules hyst;",
+    );
+    let text = refusal("twice.vams", &source, "hyst");
+    let repeat = source
+        .lines()
+        .collect::<Vec<_>>()
+        .iter()
+        .rposition(|line| line.starts_with("connectmodule a2d_h"))
+        .expect("the repeat")
+        + 1;
+    let at = format!("twice.vams:{repeat}:1");
+    let first = format!(
+        "connectmodule 'a2d_h' is declared more than once; the first is at line {}, column 1",
+        line_of(&source, "connectmodule a2d_h")
+    );
+    assert!(
+        text.contains(&at) && text.contains(&first) && !text.contains("Span {"),
+        "{text}"
+    );
 }
 
 /// A design that instantiates a `connectmodule` by name is refused as that,

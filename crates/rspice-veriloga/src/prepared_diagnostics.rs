@@ -149,7 +149,12 @@ impl PreparedSourceMap {
         source: &str,
         error: &CompileError,
     ) -> Vec<SourceCompileDiagnostic> {
-        self.map_diagnostics(source, crate::compile_diagnostics(source, error))
+        let mut diagnostics =
+            self.map_diagnostics(source, crate::compile_diagnostics(source, error));
+        crate::source_diagnostics::name_first_declaration(error, &mut diagnostics, |offset| {
+            self.locate_byte(source, offset as usize)
+        });
+        diagnostics
     }
 
     fn map_diagnostics(
