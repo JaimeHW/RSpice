@@ -9,46 +9,60 @@ mod panel;
 
 use egui::{Context, Ui};
 
+use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, IconButton};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::slots::ResultsState;
 use crate::workbench::state::WorkbenchSession;
 
-/// Default geometry of the mockup's modeless lower-right calculator.
-const TOOL_WIDTH: f32 = 372.0;
-const TOOL_DEFAULT_HEIGHT: f32 = 390.0;
-const TOOL_MIN_HEIGHT: f32 = 240.0;
-/// Inset from the workspace edges on first open.
-const TOOL_MARGIN: f32 = 24.0;
+const TITLE: &str = "Waveform calculator";
+/// The kit dialog's header, body and footer measures, so the tool reads as
+/// one of the dialogs while staying modeless.
+const HEADER_HEIGHT: f32 = 48.0;
+const EDGE: i8 = 12;
+const FOOTER_VERTICAL: i8 = 10;
+/// Inset from the workspace's lower-right corner on first open.
+const TOOL_MARGIN: f32 = 12.0;
 
 /// Show the calculator when it is open. Modeless: the workspace behind it
 /// stays live, so cursors can be placed and traces read while an expression
 /// is being composed.
+///
+/// It wears the kit dialog's chrome (title left, close target right, a
+/// footer holding the verbs) and opens in the lower right of the workspace,
+/// held between the toolbar and the status bar. It was an egui window with
+/// egui's centred title, 372 pt wide for a 244 pt signal rail, so the
+/// function list drew over itself, and it was placed by a height it did not
+/// have, so its footer ran off the bottom of a 1440 x 900 window.
 pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
     if !cx.state.waveform_calculator_dialog {
         return;
     }
     let t = Tokens::get(ctx);
-    let screen = ctx.content_rect();
-    let default_pos = egui::pos2(
-        (screen.right() - TOOL_WIDTH - TOOL_MARGIN).max(screen.left() + TOOL_MARGIN),
-        (screen.bottom() - TOOL_DEFAULT_HEIGHT - TOOL_MARGIN).max(screen.top() + TOOL_MARGIN),
-    );
+    let workspace = workspace_rect(ctx, cx.wb, cx.platform.project_lifecycle.is_open());
+    let body_width = panel::body_width(ctx);
+    let id = egui::Id::new("workbench.calculator-tool");
+    // Esc closes the tool while the reader is in it, as it closes a dialog.
+    // Read before the frame's widgets run: the expression field gives up
+    // focus to the same key.
+    let escaped = ctx.input(|input| input.key_pressed(egui::Key::Escape))
+        && ctx
+            .memory(|memory| memory.focused())
+            .and_then(|focused| ctx.read_response(focused))
+            .is_some_and(|focused| focused.layer_id == egui::LayerId::new(egui::Order::Middle, id));
 
-    let mut open = true;
-    egui::Window::new("Waveform calculator")
-        .id(egui::Id::new("workbench.calculator-tool"))
-        .open(&mut open)
-        .default_pos(default_pos)
-        .default_width(TOOL_WIDTH)
-        .default_height(TOOL_DEFAULT_HEIGHT)
-        .min_width(TOOL_WIDTH * 0.7)
-        .min_height(TOOL_MIN_HEIGHT)
-        .resizable(true)
+    let mut closed = false;
+    egui::Window::new(TITLE)
+        .id(id)
+        .title_bar(false)
+        .pivot(egui::Align2::RIGHT_BOTTOM)
+        .default_pos(workspace.right_bottom() - egui::vec2(TOOL_MARGIN, TOOL_MARGIN))
+        .constrain_to(workspace)
+        .resizable(false)
         .collapsible(false)
         .frame(
             egui::Frame::new()
@@ -58,54 +72,127 @@ pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
                 .inner_margin(egui::Margin::ZERO)
                 .shadow(t.shadow()),
         )
-        .show(ctx, |ui| body(ui, cx));
-    if !open {
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            closed = header(ui, &t);
+            body(ui, cx, body_width);
+        });
+    if closed || escaped {
         cx.state.waveform_calculator_dialog = false;
     }
 }
 
-fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>) {
+/// The part of the window the workspace owns: under the title bar and the
+/// toolbar, over the status bar. The tool never covers the menus.
+fn workspace_rect(ctx: &Context, wb: &WorkbenchSession, project_open: bool) -> egui::Rect {
+    let screen = ctx.content_rect();
+    // The bar heights read here depend on the viewport and the pointer, not
+    // on the strips or docks the remaining arguments describe.
+    let layout = crate::workbench::layout::LayoutSpec::resolve_for_shell(
+        screen.width(),
+        screen.height(),
+        wb.coarse_pointer,
+        true,
+        false,
+        project_open,
+        true,
+        wb,
+    );
+    egui::Rect::from_min_max(
+        egui::pos2(
+            screen.left(),
+            screen.top() + layout.title_bar_height + layout.toolbar_height,
+        ),
+        egui::pos2(screen.right(), screen.bottom() - layout.status_bar_height),
+    )
+}
+
+/// The kit dialog's header: the title on the body's left edge, the close
+/// target on its right edge, a hairline under both. Returns whether the
+/// close target was clicked.
+fn header(ui: &mut Ui, t: &Tokens) -> bool {
+    let mut closed = false;
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(EDGE, 0))
+        .show(ui, |ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), HEADER_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_min_height(HEADER_HEIGHT);
+                    ui.label(
+                        egui::RichText::new(TITLE)
+                            .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                            .color(t.color.text),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        closed = IconButton::new(Icon::Close)
+                            .size(28.0, 27.0)
+                            .tooltip("Close (Esc)")
+                            .show(ui)
+                            .clicked();
+                    });
+                },
+            );
+        });
+    ui.painter().hline(
+        ui.max_rect().x_range(),
+        ui.cursor().top(),
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    closed
+}
+
+fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>, body_width: f32) {
     let t = Tokens::get(ui.ctx());
-    ui.spacing_mut().item_spacing.y = 0.0;
 
     egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(12, 10))
+        .inner_margin(egui::Margin::same(EDGE))
         .show(ui, |ui| {
-            ui.set_width(ui.available_width());
+            ui.set_width(body_width);
             let (panel, simulation) = (&mut cx.state.calculator_panel, &cx.model.simulation);
             panel.show_body(ui, simulation);
         });
 
-    // The context line names the dataset the expression evaluates against,
-    // so a number can never be read against the wrong run.
-    let hint = cx.state.calculator_panel.context_hint(&cx.model.simulation);
+    // The footer names the dataset the expression evaluates against, so a
+    // number can never be read against the wrong run, and says why Plot is
+    // unavailable while it is.
+    let expression_empty = cx.state.calculator_panel.expression.trim().is_empty();
+    let hint = if expression_empty {
+        "Enter an expression to evaluate or plot".to_owned()
+    } else {
+        cx.state.calculator_panel.context_hint(&cx.model.simulation)
+    };
     ui.painter().hline(
         ui.max_rect().x_range(),
         ui.cursor().top(),
         egui::Stroke::new(1.0, t.color.border),
     );
     egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(12, 8))
+        .inner_margin(egui::Margin::symmetric(EDGE, FOOTER_VERTICAL))
         .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+            ui.set_width(body_width);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
                 ui.label(
                     egui::RichText::new(hint)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
+                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                        .color(t.color.text_dim),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if Button::new("Plot")
                         .accent()
-                        .enabled(!cx.state.calculator_panel.expression.trim().is_empty())
+                        .enabled(!expression_empty)
                         .show(ui)
-                        .on_disabled_hover_text("Enter an expression first")
                         .clicked()
                     {
                         plot_expression(cx.state, cx.model, cx.wb);
                     }
-                    if Button::new("Evaluate").show(ui).clicked() {
+                    if Button::new("Evaluate")
+                        .enabled(!expression_empty)
+                        .show(ui)
+                        .clicked()
+                    {
                         let (panel, simulation) =
                             (&mut cx.state.calculator_panel, &cx.model.simulation);
                         panel.evaluate(simulation);

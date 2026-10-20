@@ -84,3 +84,59 @@ fn an_empty_expression_plots_nothing() {
 
     assert!(app.state.results.results.session.exprs.is_empty());
 }
+
+/// The tool opens whole inside the workspace, in its lower right, between
+/// the toolbar and the status bar. It was placed by a height it did not
+/// have, so its footer ran off the bottom of a 1440 x 900 window, and it was
+/// 372 pt wide around a 244 pt rail, so its function rows drew over one
+/// another.
+#[test]
+fn the_tool_opens_whole_in_the_lower_right_of_the_workspace() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.results.waveform_calculator_dialog = true;
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1440.0, 900.0));
+    for _ in 0..3 {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ui| {
+                app.prepare_frame(ui.ctx());
+                app.render_frame_chrome(ui);
+                app.render_frame_dialogs(ui.ctx());
+            },
+        );
+    }
+    let tool = ctx
+        .memory(|memory| memory.area_rect(egui::Id::new("workbench.calculator-tool")))
+        .expect("the tool is on screen");
+    let layout = crate::workbench::layout::LayoutSpec::resolve_for_shell(
+        screen.width(),
+        screen.height(),
+        app.state.workbench.coarse_pointer,
+        true,
+        false,
+        app.state.platform.project_lifecycle.is_open(),
+        true,
+        &app.state.workbench,
+    );
+    let workspace = egui::Rect::from_min_max(
+        egui::pos2(0.0, layout.title_bar_height + layout.toolbar_height),
+        egui::pos2(screen.right(), screen.bottom() - layout.status_bar_height),
+    );
+    assert!(
+        workspace.contains_rect(tool),
+        "the tool {tool:?} lies inside the workspace {workspace:?}"
+    );
+    assert!(
+        workspace.right() - tool.right() <= 13.0 && workspace.bottom() - tool.bottom() <= 13.0,
+        "the tool {tool:?} opens in the lower right of {workspace:?}"
+    );
+    assert!(
+        tool.width() > 372.0,
+        "the tool {tool:?} is wider than the rail and its function rows"
+    );
+}

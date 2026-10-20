@@ -18,12 +18,51 @@ use crate::state::SimulationState;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header, two_pane,
+    PANE_FOOTER_H, PANE_HEADER_H, PaneSide, pane_footer, pane_header, two_pane,
 };
 use crate::workbench::app_state::session::calculator::{CalculatorPanel, FunctionCategory};
 use crate::workbench::design_system::subsection_header;
 
 const PANE_HEIGHT: f32 = 286.0;
+/// The signal rail: a node path and its unit.
+const RAIL_WIDTH: f32 = 200.0;
+/// A row's inset from each pane edge, and the least gap between a function
+/// template and its description.
+const ROW_INSET: f32 = 10.0;
+const ROW_GAP: f32 = 16.0;
+/// The result row's height, held while it has nothing to say.
+const OUTCOME_ROW_H: f32 = 18.0;
+
+/// The body's width: the signal rail beside a function pane as wide as its
+/// longest row and its conventions line, so no description is drawn over
+/// its template.
+///
+/// The tool was 372 pt wide around a 244 pt rail, which left the function
+/// pane 128 pt: every template and its description overlapped.
+pub(super) fn body_width(ctx: &egui::Context) -> f32 {
+    let measure = |text: &str, font: egui::FontId| {
+        ctx.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
+                .size()
+                .x
+        })
+    };
+    let longest_row = [MATH_FUNCTIONS, SIGNAL_FUNCTIONS, MEASURE_FUNCTIONS]
+        .into_iter()
+        .flatten()
+        .map(|entry| {
+            measure(entry.label, theme::mono(tokens::FS_1, FontWeight::Regular))
+                + ROW_GAP
+                + measure(entry.hint, theme::sans(tokens::FS_0, FontWeight::Regular))
+        })
+        .fold(0.0, f32::max);
+    let conventions = measure(
+        FUNCTION_CONVENTIONS,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+    );
+    (RAIL_WIDTH + longest_row.max(conventions) + 2.0 * ROW_INSET).ceil()
+}
 
 /// One function-reference row: label, one-line hint, what to insert, and
 /// how many characters the caret steps back into the inserted text.
@@ -67,7 +106,8 @@ const MATH_FUNCTIONS: &[FunctionEntry] = &[
     },
     FunctionEntry {
         label: "exp(x)",
-        hint: "eˣ",
+        // Plex has no modifier small x: "eˣ" drew a missing-glyph box.
+        hint: "exponential",
         insert: "exp()",
         caret_back: 1,
     },
@@ -304,7 +344,6 @@ impl CalculatorPanel {
             egui::TextEdit::singleline(&mut self.expression)
                 .id(editor_id)
                 .font(theme::mono(tokens::FS_2, FontWeight::Regular))
-                .hint_text("dB(V(out) / V(in))")
                 .desired_width(f32::INFINITY),
         );
         if response.changed() {
@@ -318,17 +357,25 @@ impl CalculatorPanel {
         // result is click-to-copy: the clipboard gets the exact f64 behind it.
         ui.add_space(4.0);
         let mut copy: Option<String> = None;
+        // The row keeps its height while it is empty, so the panes under it
+        // do not move when the first result arrives. A value is mono; an
+        // error is the evaluator's sentence, in the body face.
         ui.horizontal(|ui| {
-            let (text, color) = match &self.outcome {
-                Some(Ok(result)) => (result.readout.as_str(), c.text),
-                Some(Err(error)) => (error.as_str(), c.err),
-                None => ("evaluate to see the result here", c.text_faint),
+            ui.set_min_height(OUTCOME_ROW_H);
+            let (text, font, color) = match &self.outcome {
+                Some(Ok(result)) => (
+                    result.readout.as_str(),
+                    theme::mono(tokens::FS_1, FontWeight::Regular),
+                    c.text,
+                ),
+                Some(Err(error)) => (
+                    error.as_str(),
+                    theme::sans(tokens::FS_1, FontWeight::Regular),
+                    c.err,
+                ),
+                None => ("", theme::sans(tokens::FS_1, FontWeight::Regular), c.text),
             };
-            let mut readout = egui::Label::new(
-                egui::RichText::new(text)
-                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                    .color(color),
-            );
+            let mut readout = egui::Label::new(egui::RichText::new(text).font(font).color(color));
             if self.outcome.as_ref().is_some_and(|outcome| {
                 outcome
                     .as_ref()
@@ -384,7 +431,7 @@ impl CalculatorPanel {
 
         // Two panes: signals rail + function reference.
         let mut insert: Option<(String, usize)> = None;
-        two_pane(ui, PANE_RAIL_W, PANE_HEIGHT, |ui, side| match side {
+        two_pane(ui, RAIL_WIDTH, PANE_HEIGHT, |ui, side| match side {
             PaneSide::Rail => self.signals_pane(ui, simulation, &mut insert),
             PaneSide::Detail => self.functions_pane(ui, &mut insert),
         });
@@ -486,9 +533,8 @@ impl CalculatorPanel {
     }
 
     fn functions_pane(&mut self, ui: &mut Ui, insert: &mut Option<(String, usize)>) {
-        let t = Tokens::get(ui.ctx());
-        let c = t.color;
-
+        // The categories alone: the caption that shared this strip said
+        // what the rail's footer says, and was drawn under the chips.
         pane_header(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for category in FunctionCategory::ALL {
@@ -498,13 +544,6 @@ impl CalculatorPanel {
                     self.category = category;
                 }
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new("click inserts · caret lands in the parens")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(c.text_faint),
-                );
-            });
         });
 
         egui::ScrollArea::vertical()
@@ -598,15 +637,15 @@ impl CalculatorPanel {
 // rows (the spec's .it vocabulary; pane chrome lives in ui/widgets/pane.rs)
 // ---------------------------------------------------------------------------
 
-/// A field caption, painted as written: sentence case, no tracking.
+/// A field caption, painted as written: sentence case, in the body face.
 fn caption(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
         egui::RichText::new(text)
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text_faint),
+            .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+            .color(t.color.text_dim),
     );
-    ui.add_space(3.0);
+    ui.add_space(4.0);
 }
 
 fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
@@ -688,17 +727,18 @@ fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
         );
     }
     painter.text(
-        egui::pos2(rect.left() + 10.0, rect.center().y),
+        egui::pos2(rect.left() + ROW_INSET, rect.center().y),
         egui::Align2::LEFT_CENTER,
         entry.label,
         theme::mono(tokens::FS_1, FontWeight::Regular),
         mix(c.text_dim, c.text, hover),
     );
+    // The description is prose, in the body face.
     painter.text(
-        egui::pos2(rect.right() - 10.0, rect.center().y),
+        egui::pos2(rect.right() - ROW_INSET, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         entry.hint,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
         c.text_faint,
     );
     theme::paint_focus_ring(ui, &response, rect);

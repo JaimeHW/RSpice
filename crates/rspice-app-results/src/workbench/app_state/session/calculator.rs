@@ -112,8 +112,8 @@ impl CalculatorPanel {
     /// Footer hint for the dialog: what the expression evaluates against.
     pub fn context_hint(&self, simulation: &SimulationState) -> String {
         match simulation.active_run() {
-            Some(run) => format!("evaluates against run #{}", run.id),
-            None => "no run yet — signals resolve after a simulation".to_owned(),
+            Some(run) => format!("Evaluates against run #{}", run.id),
+            None => "Run a simulation to evaluate against its signals".to_owned(),
         }
     }
 
