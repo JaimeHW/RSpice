@@ -118,8 +118,16 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 /// edge, now interrupts the 2.42 ps step resumed after the completion, and
 /// the restart after that root is a tenth of it, where the hard-minimum
 /// landing had restored the edge's 24 ps approach. 1139 + 6 × 3 is 1157.
-const DECK_A_POINTS: usize = 1157;
-const DECK_A_GRID_HASH: u64 = 0xf90b_311b_de64_ddd7;
+///
+/// Re-measured at 1156 when a scaled number became the double nearest its
+/// decimal: the clock's `0.1n` edges are 1e-10, where they were
+/// 1.0000000000000002e-10, and its `4.9n` width 4.9e-9, where it was
+/// 4.900000000000001e-9. The run with those two old doubles written into the
+/// deck reproduces 1157 and the previous grid hash bit for bit. That run takes
+/// one solver-floor step and dates the first `d_clk` instant 1e-20 s later;
+/// the decimal deck takes none.
+const DECK_A_POINTS: usize = 1156;
+const DECK_A_GRID_HASH: u64 = 0x4ae1_4cf4_9289_1c88;
 
 // Deck A pins its point count and grid hash, not a hash of its node waveforms.
 // Its generated diode and its sources run through the platform's libm, which
