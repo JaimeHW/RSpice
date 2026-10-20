@@ -7042,6 +7042,56 @@ fn checked_poly_form(
     Ok(ControlledSourceForm::Poly(dims))
 }
 
+/// One POLY coefficient or TABLE entry of a controlled source.
+///
+/// A number folds into the behavioral expression the card lowers to. An
+/// expression that cites parameters this pass cannot resolve (a subcircuit's
+/// instance parameters, a root `.PARAM` declared later) stays text inside
+/// that expression, which is evaluated in the right scope: each instance's
+/// during flattening, the complete root scope at build.
+#[derive(Debug, Clone)]
+enum NumericTerm {
+    Value(Value),
+    Expression(String),
+}
+
+impl NumericTerm {
+    fn negated(self) -> Self {
+        match self {
+            Self::Value(value) => Self::Value(-value),
+            Self::Expression(expression) => Self::Expression(format!("-({expression})")),
+        }
+    }
+
+    fn spelling(&self) -> String {
+        match self {
+            Self::Value(value) => value.to_string(),
+            Self::Expression(expression) => format!("({expression})"),
+        }
+    }
+}
+
+/// Read one numeric-tail entry. Inside a subcircuit a braced expression is
+/// always kept for the instance scope; at the root it resolves now unless it
+/// cites a parameter declared later.
+fn take_numeric_term(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+    defer: bool,
+) -> Option<NumericTerm> {
+    if let TokenKind::Expression(expression) = &stream.peek().kind {
+        let expression = expression.clone();
+        let resolved = if defer {
+            None
+        } else {
+            stream.evaluate_expression(&expression, params).ok()
+        };
+        stream.advance();
+        return Some(resolved.map_or(NumericTerm::Expression(expression), NumericTerm::Value));
+    }
+    try_value(stream, params).map(NumericTerm::Value)
+}
+
 /// Collect a signed numeric list (POLY coefficients, TABLE pairs) to end of
 /// line, tolerating commas and parentheses as pair decoration.
 fn collect_numeric_tail(
@@ -7050,7 +7100,8 @@ fn collect_numeric_tail(
     params: &ParamContext,
     element_label: &str,
     stop_at_multiplicity: bool,
-) -> Result<Vec<Value>, ParseError> {
+    defer: bool,
+) -> Result<Vec<NumericTerm>, ParseError> {
     let mut values = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         if stop_at_multiplicity && source_multiplicity_assignment(stream) {
@@ -7062,8 +7113,8 @@ fn collect_numeric_tail(
             }
             TokenKind::Minus => {
                 stream.advance();
-                if let Some(value) = try_value(stream, params) {
-                    values.push(-value);
+                if let Some(term) = take_numeric_term(stream, params, defer) {
+                    values.push(term.negated());
                 } else {
                     return Err(ParseError::Syntax {
                         line: line_num,
@@ -7092,8 +7143,8 @@ fn collect_numeric_tail(
                 }
             }
             _ => {
-                if let Some(value) = try_value(stream, params) {
-                    values.push(value);
+                if let Some(term) = take_numeric_term(stream, params, defer) {
+                    values.push(term);
                 } else {
                     return Err(ParseError::Syntax {
                         line: line_num,
@@ -7322,14 +7373,18 @@ fn expect_poly_controlling_pair(
 ///
 /// SPICE2 special case: a single coefficient is `p1` (a pure linear gain on
 /// the first controlling variable), not a constant.
-fn poly_expression(vars: &[String], coeffs: &[Value], line: usize) -> Result<String, ParseError> {
+fn poly_expression(
+    vars: &[String],
+    coeffs: &[NumericTerm],
+    line: usize,
+) -> Result<String, ParseError> {
     use crate::netlist::polynomial::{PolynomialOrdering, expand_polynomial};
     let mut coefficients = Vec::with_capacity(coeffs.len().saturating_add(1));
     if coeffs.len() == 1 {
         // SPICE2's lone coefficient is a linear gain, not the constant term.
         coefficients.push("0".to_owned());
     }
-    coefficients.extend(coeffs.iter().map(Value::to_string));
+    coefficients.extend(coeffs.iter().map(NumericTerm::spelling));
     expand_polynomial(
         vars,
         &coefficients,
@@ -7347,12 +7402,37 @@ fn poly_expression(vars: &[String], coeffs: &[Value], line: usize) -> Result<Str
 /// PSpice TABLE sources clamp to the endpoint outputs outside the listed
 /// range; clamping the *input* into `[x_first, x_last]` reproduces that
 /// exactly with the runtime's interpolating `table()` function.
-fn table_transfer_expression(input_expr: &str, pairs: &[(Value, Value)]) -> String {
-    let mut sorted = pairs.to_vec();
+///
+/// Numeric pairs are sorted by x. An entry kept as an expression cannot be
+/// ordered here, so such a table keeps the authored order, which SPICE
+/// already requires to be ascending.
+fn table_transfer_expression(input_expr: &str, pairs: &[(NumericTerm, NumericTerm)]) -> String {
+    let input_expr = input_expr.trim();
+    let numeric = pairs
+        .iter()
+        .map(|pair| match pair {
+            (NumericTerm::Value(x), NumericTerm::Value(y)) => Some((*x, *y)),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>();
+    let Some(mut sorted) = numeric else {
+        let x_first = pairs
+            .first()
+            .map_or_else(|| "0".to_owned(), |(x, _)| x.spelling());
+        let x_last = pairs
+            .last()
+            .map_or_else(|| "0".to_owned(), |(x, _)| x.spelling());
+        let mut args = Vec::with_capacity(1 + pairs.len() * 2);
+        args.push(format!("limit(({input_expr}), {x_first}, {x_last})"));
+        for (x, y) in pairs {
+            args.push(x.spelling());
+            args.push(y.spelling());
+        }
+        return format!("table({})", args.join(", "));
+    };
     sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let x_min = sorted.first().map(|(x, _)| *x).unwrap_or(0.0);
     let x_max = sorted.last().map(|(x, _)| *x).unwrap_or(0.0);
-    let input_expr = input_expr.trim();
 
     let mut args = Vec::with_capacity(1 + sorted.len() * 2);
     args.push(format!("limit(({}), {}, {})", input_expr, x_min, x_max));
@@ -7841,8 +7921,14 @@ fn parse_voltage_controlled_source(
                 let (cp, cn) = expect_poly_controlling_pair(stream, line_num)?;
                 vars.push(format!("V({},{})", cp, cn));
             }
-            let coeffs =
-                collect_numeric_tail(stream, line_num, params, element_label, !is_voltage_output)?;
+            let coeffs = collect_numeric_tail(
+                stream,
+                line_num,
+                params,
+                element_label,
+                !is_voltage_output,
+                defer_simple_param_refs,
+            )?;
             if coeffs.is_empty() {
                 return Err(ParseError::Syntax {
                     line: line_num,
@@ -7889,15 +7975,24 @@ fn parse_voltage_controlled_source(
             let input_expr =
                 collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
             stream.consume(&TokenKind::Equals);
-            let flat =
-                collect_numeric_tail(stream, line_num, params, element_label, !is_voltage_output)?;
+            let flat = collect_numeric_tail(
+                stream,
+                line_num,
+                params,
+                element_label,
+                !is_voltage_output,
+                defer_simple_param_refs,
+            )?;
             if flat.len() < 4 || !flat.len().is_multiple_of(2) {
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: format!("{} TABLE requires at least two (x,y) pairs", element_label),
                 });
             }
-            let pairs: Vec<(Value, Value)> = flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+            let pairs: Vec<(NumericTerm, NumericTerm)> = flat
+                .chunks_exact(2)
+                .map(|c| (c[0].clone(), c[1].clone()))
+                .collect();
             let multiplicity = parse_source_multiplicity_tail(
                 stream,
                 line_num,
@@ -8240,7 +8335,14 @@ fn parse_current_controlled_source(
                 let source = expect_ident(stream, line_num)?;
                 vars.push(format!("I({})", source));
             }
-            let coeffs = collect_numeric_tail(stream, line_num, params, element_label, false)?;
+            let coeffs = collect_numeric_tail(
+                stream,
+                line_num,
+                params,
+                element_label,
+                false,
+                defer_simple_param_refs,
+            )?;
             if coeffs.is_empty() {
                 return Err(ParseError::Syntax {
                     line: line_num,
@@ -8478,7 +8580,8 @@ pub(super) fn parse_behavioral(
         });
     }
     let expression =
-        lower_behavioral_table_expression(&expression, line_num, params)?.unwrap_or(expression);
+        lower_behavioral_table_expression(&expression, line_num, params, defer_simple_param_refs)?
+            .unwrap_or(expression);
 
     let mut tc1 = 0.0;
     let mut tc2 = 0.0;
@@ -8574,6 +8677,7 @@ fn lower_behavioral_table_expression(
     expression: &str,
     line_num: usize,
     params: &ParamContext,
+    defer: bool,
 ) -> Result<Option<String>, ParseError> {
     let tokens = match tokenize(expression) {
         Ok(tokens) => tokens,
@@ -8593,7 +8697,14 @@ fn lower_behavioral_table_expression(
     stream.advance();
     let input_expr = collect_expression_argument(&mut stream, line_num, None)?;
     stream.consume(&TokenKind::Equals);
-    let flat = collect_numeric_tail(&mut stream, line_num, params, "Behavioral TABLE", false)?;
+    let flat = collect_numeric_tail(
+        &mut stream,
+        line_num,
+        params,
+        "Behavioral TABLE",
+        false,
+        defer,
+    )?;
     if flat.len() < 4 || !flat.len().is_multiple_of(2) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -8603,7 +8714,7 @@ fn lower_behavioral_table_expression(
 
     let pairs = flat
         .chunks_exact(2)
-        .map(|c| (c[0], c[1]))
+        .map(|c| (c[0].clone(), c[1].clone()))
         .collect::<Vec<_>>();
     Ok(Some(table_transfer_expression(&input_expr, &pairs)))
 }

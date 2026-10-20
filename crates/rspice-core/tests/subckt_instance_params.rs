@@ -251,3 +251,59 @@ fn coupling_coefficient_override_reaches_the_mutual_inductance() {
         "|V(s)| = {magnitude}, ngspice 0.5303726"
     );
 }
+
+/// POLY coefficients and TABLE entries of E/G/F/H sources are evaluated in
+/// the instance's scope. ngspice 46 on this deck: every output is 2 V except
+/// the TABLE's 1.5 V. With the subcircuit defaults (g=1, vmax=1), which is
+/// what RSpice used, every output was 0.5 V.
+#[test]
+fn poly_and_table_terms_resolve_in_each_instance_scope() {
+    let deck = "poly and table in subckt\n\
+         .subckt amp in o1 o2 o3 o4 o5 params: g=1 vmax=1\n\
+         E1 o1 0 POLY(1) in 0 0 {g}\n\
+         G2 0 o2 POLY(1) in 0 0 {g*1m}\n\
+         R2 o2 0 1k\n\
+         E3 o3 0 TABLE {v(in)} = (0, 0) (1, {vmax}) (10, {10*vmax})\n\
+         Vs in s 0\n\
+         Rs s 0 1k\n\
+         F4 0 o4 POLY(1) Vs 0 {g}\n\
+         R4 o4 0 1k\n\
+         H5 o5 0 POLY(1) Vs 0 {g*1k}\n\
+         .ends\n\
+         V1 in 0 0.5\n\
+         X1 in a1 a2 a3 a4 a5 amp g=4 vmax=3\n\
+         R1 a1 0 1k\n\
+         R3 a3 0 1k\n\
+         R5 a5 0 1k\n\
+         .op\n\
+         .end\n";
+    for (node, expected) in [
+        ("a1", 2.0),
+        ("a2", 2.0),
+        ("a3", 1.5),
+        ("a4", 2.0),
+        ("a5", 2.0),
+    ] {
+        let v = op_voltage(deck, node);
+        assert!(
+            (v - expected).abs() < 1e-9,
+            "V({node}) = {v}, ngspice {expected}"
+        );
+    }
+}
+
+/// A root POLY coefficient may cite a `.param` declared later in the file;
+/// ngspice 46 gives V(p) = 3 V here. It used to fail to parse.
+#[test]
+fn root_poly_coefficients_read_later_parameters() {
+    let deck = "forward poly\n\
+         V1 in 0 1\n\
+         R1 in 0 1k\n\
+         E2 p 0 POLY(1) in 0 0 {g}\n\
+         R5 p 0 1k\n\
+         .param g=3\n\
+         .op\n\
+         .end\n";
+    let v = op_voltage(deck, "p");
+    assert!((v - 3.0).abs() < 1e-9, "V(p) = {v}, ngspice 3");
+}
