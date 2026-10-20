@@ -1,7 +1,7 @@
 # RSPICE-NGSPICE-ORACLE 2
 # ngspice: ngspice-46 : Circuit level simulation program
 # executable-sha256: 86c9ea5f645ca919e305639fa7bdb522355364c424d14e197f1ade617feb3453
-# input-blake3: f10ef10c3ad7dc459d1f76a9bc9a2bcc2fd72afa14b0b14e6c811b3d3254979b
+# input-blake3: 8e2fdc037c9c84ba39eeedd9c6e18748aa974804b7438a370d812128f8bba4f4
 # analysis: tran
 Index time v(g426)
 0 0 1.7926274650089211
