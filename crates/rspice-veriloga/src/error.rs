@@ -239,6 +239,15 @@ pub enum ParseErrorKind {
         limit: usize,
         counted: &'static str,
     },
+
+    /// A block whose terminator never comes, reported at the opener so the
+    /// location says where the unclosed construct began.
+    #[error("{construct} has no matching {terminator}; {found} comes first")]
+    Unclosed {
+        construct: String,
+        terminator: &'static str,
+        found: String,
+    },
 }
 
 impl LexerErrorKind {
@@ -283,6 +292,7 @@ impl ParseErrorKind {
             Self::UnsupportedGenerate { .. } => "VA-PARSE-UNSUPPORTED-GENERATE",
             Self::UnsupportedAmsConstruct { .. } => "VA-PARSE-UNSUPPORTED-AMS-DIGITAL",
             Self::NestingLimit { .. } => "VA-PARSE-NESTING-LIMIT",
+            Self::Unclosed { .. } => "VA-PARSE-UNCLOSED",
         }
     }
 }

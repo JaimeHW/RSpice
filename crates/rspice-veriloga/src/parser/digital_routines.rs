@@ -269,7 +269,7 @@ impl Parser<'_> {
                         expected: "`input`, `output` or `inout` before a routine argument \
                                    declaration (IEEE 1364-2005 section 10.2.1)"
                             .to_string(),
-                        found: format!("{:?}", self.current().kind),
+                        found: self.current().describe(),
                     },
                     self.current_span(),
                 ));
@@ -358,7 +358,7 @@ impl Parser<'_> {
                         expected: "a statement: an unnamed `fork` block declares nothing \
                                    (IEEE 1364-2005 section 9.8.2)"
                             .to_string(),
-                        found: format!("{:?}", self.current().kind),
+                        found: self.current().describe(),
                     },
                     self.current_span(),
                 ));

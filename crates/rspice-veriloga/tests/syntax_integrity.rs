@@ -621,3 +621,66 @@ fn directive_typos_are_refused_and_ignorable_directives_warn() {
         ]
     );
 }
+
+/// Parse errors name tokens as they are written and name the mistakes a
+/// Verilog-A author makes most, at the place to fix.
+///
+/// Before, each of these leaked the parser's own token names: a missing `end`
+/// read "Expected Assign_, found Eof", `V(p,n) = 1;` read "Expected Assign_,
+/// found LParen", `x <+ 1;` read "Expected Assign_, found Contribute", and an
+/// extra `end` read "Unsupported module item: end".
+#[test]
+fn parse_errors_name_tokens_as_source_text() {
+    let module = |body: &str| {
+        format!("module m(p, n); inout p, n; electrical p, n; real x;\n{body}\nendmodule\n")
+    };
+    for (source, at, message) in [
+        (
+            module("analog begin\nI(p, n) <+ V(p, n);"),
+            "begin",
+            "'begin' has no matching 'end'; 'endmodule' comes first",
+        ),
+        (
+            "module m(p, n); inout p, n; electrical p, n;\nanalog I(p, n) <+ V(p, n);\n".to_owned(),
+            "module",
+            "module 'm' has no matching 'endmodule'; end of file comes first",
+        ),
+        (
+            module("analog V(p, n) = 1;"),
+            "= 1",
+            "'=' after the access function V(...): use '<+' to contribute to a branch",
+        ),
+        (
+            module("analog begin x <+ 1; I(p, n) <+ x; end"),
+            "<+ 1",
+            "'<+' after 'x', which is not an access function",
+        ),
+        (
+            module("analog begin I(p, n) <+ V(p, n); end\nend"),
+            "end\nendmodule",
+            "'end' with no 'begin' open",
+        ),
+        (
+            module("analog begin x = 1\nI(p, n) <+ x; end"),
+            "I(p, n) <+ x",
+            "Expected ';', found 'I'",
+        ),
+        (
+            module("analog begin if (V(p, n) > 0 begin I(p, n) <+ 1; end end"),
+            "begin I(",
+            "Expected ')', found 'begin'",
+        ),
+    ] {
+        let error = match VerilogACompiler::default().compile(&source).map(|_| ()) {
+            Err(rspice_veriloga::CompileError::Parser(error)) => error,
+            other => panic!("{source}: expected a parse error, got {other:?}"),
+        };
+        let rendered = error.to_string();
+        assert!(rendered.contains(message), "{source}: {rendered}");
+        assert_eq!(
+            error.span.start as usize,
+            source.find(at).unwrap(),
+            "{source}: {rendered}"
+        );
+    }
+}

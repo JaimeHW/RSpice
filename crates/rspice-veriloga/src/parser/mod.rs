@@ -260,10 +260,7 @@ impl<'a> Parser<'a> {
                 // `connectmodule`, `primitive`, `always`, ... at file scope.
                 return Err(self.unsupported_ams_construct());
             } else {
-                return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
-                    "{:?}",
-                    self.current().kind
-                ))));
+                return Err(self.error(ParseErrorKind::UnexpectedToken(self.current().describe())));
             }
         }
 
@@ -373,8 +370,8 @@ impl<'a> Parser<'a> {
         while !self.check(TokenKind::Endconnectrules) && !self.at_end() {
             if !self.check(TokenKind::Connect) {
                 return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
-                    "{:?} in a connectrules block, which holds `connect` statements only",
-                    self.current().kind
+                    "{} in a connectrules block, which holds `connect` statements only",
+                    self.current().describe()
                 ))));
             }
             items.push(if self.connect_statement_is_resolution() {
@@ -574,7 +571,17 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Semicolon)?;
 
         // Module body
-        while !self.check(TokenKind::Endmodule) && !self.at_end() {
+        while !self.check(TokenKind::Endmodule) {
+            if self.at_end() {
+                return Err(ParseError::new(
+                    ParseErrorKind::Unclosed {
+                        construct: format!("module '{}'", module.name),
+                        terminator: "'endmodule'",
+                        found: self.current().describe(),
+                    },
+                    start,
+                ));
+            }
             self.parse_module_item(&mut module)?;
         }
 
@@ -794,6 +801,11 @@ impl<'a> Parser<'a> {
     fn parse_module_item(&mut self, module: &mut Module) -> Result<(), ParseError> {
         if self.check_identifier_text("__rspice_default_nettype") {
             return self.parse_default_nettype();
+        }
+        if self.check(TokenKind::End) {
+            return Err(self.error(ParseErrorKind::UnexpectedToken(
+                "'end' with no 'begin' open: the block it closes has already ended".into(),
+            )));
         }
         if self.check(TokenKind::Directive) {
             if matches!(
@@ -1627,7 +1639,7 @@ impl<'a> Parser<'a> {
                     "`parameter`, which opens each declaration of a module parameter port list \
                      (IEEE 1364-2005 A.1.3)"
                         .to_string(),
-                    format!("{:?}", self.current().kind),
+                    self.current().describe(),
                     self.current_span(),
                 ));
             }
@@ -1836,7 +1848,7 @@ impl<'a> Parser<'a> {
         } else {
             return Err(self.error(ParseErrorKind::Expected {
                 expected: "'[' or '('".to_string(),
-                found: format!("{:?}", self.current().kind),
+                found: self.current().describe(),
             }));
         };
 
@@ -1869,7 +1881,7 @@ impl<'a> Parser<'a> {
         } else {
             return Err(self.error(ParseErrorKind::Expected {
                 expected: "']' or ')'".to_string(),
-                found: format!("{:?}", self.current().kind),
+                found: self.current().describe(),
             }));
         };
 
@@ -1901,7 +1913,7 @@ impl<'a> Parser<'a> {
         } else {
             return Err(self.error(ParseErrorKind::Expected {
                 expected: "type".to_string(),
-                found: format!("{:?}", self.current().kind),
+                found: self.current().describe(),
             }));
         };
 
@@ -2267,7 +2279,19 @@ impl<'a> Parser<'a> {
 
         let mut statements = Vec::new();
         let mut variables = Vec::new();
-        while !self.check(TokenKind::End) && !self.at_end() {
+        while !self.check(TokenKind::End) {
+            if self.at_block_closer() {
+                // `endmodule` or the end of the file cannot start a statement:
+                // the block's own `end` is missing, so say so where it opened.
+                return Err(ParseError::new(
+                    ParseErrorKind::Unclosed {
+                        construct: "'begin'".into(),
+                        terminator: "'end'",
+                        found: self.current().describe(),
+                    },
+                    start,
+                ));
+            }
             if self.at_ignored_directive() {
                 self.skip_directive()?;
                 continue;
@@ -2712,6 +2736,18 @@ impl<'a> Parser<'a> {
         if self.check(TokenKind::Identifier) && self.peek_is(TokenKind::LParen) {
             // Try to parse as branch access
             if let Ok(access) = self.try_parse_branch_access() {
+                if self.check(TokenKind::Assign_) {
+                    let (BranchAccess::Nodes {
+                        access: function, ..
+                    }
+                    | BranchAccess::Branch {
+                        access: function, ..
+                    }) = &access;
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
+                        "'=' after the access function {function}(...): use '<+' to \
+                         contribute to a branch; '=' assigns only to variables"
+                    ))));
+                }
                 if self.match_token(TokenKind::Contribute) {
                     let value = self.parse_expression()?;
                     self.expect(TokenKind::Semicolon)?;
@@ -2806,6 +2842,13 @@ impl<'a> Parser<'a> {
             LValue::Variable { name, span: start }
         };
 
+        if self.check(TokenKind::Contribute) {
+            let (LValue::Variable { name, .. } | LValue::ArrayAccess { name, .. }) = &target;
+            return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
+                "'<+' after '{name}', which is not an access function: '<+' contributes only \
+                 to a branch such as V(p, n) or I(p, n); assign a variable with '='"
+            ))));
+        }
         self.expect(TokenKind::Assign_)?;
         let value = self.parse_expression()?;
         self.expect(TokenKind::Semicolon)?;
@@ -3786,8 +3829,8 @@ impl<'a> Parser<'a> {
             Ok(self.advance())
         } else {
             Err(ParseError::expected(
-                format!("{:?}", kind),
-                format!("{:?}", self.current().kind),
+                kind.spelling(),
+                self.current().describe(),
                 self.current_span(),
             ))
         }
@@ -3831,7 +3874,7 @@ impl<'a> Parser<'a> {
         } else {
             Err(ParseError::expected(
                 context.to_string(),
-                format!("{:?}", self.current().kind),
+                self.current().describe(),
                 self.current_span(),
             ))
         }
@@ -3842,7 +3885,7 @@ impl<'a> Parser<'a> {
             .current()
             .text
             .clone()
-            .unwrap_or_else(|| format!("{:?}", self.current().kind));
+            .unwrap_or_else(|| self.current().kind.spelling().to_owned());
         ParseError::new(
             ParseErrorKind::UnsupportedConstruct {
                 context: context.to_string(),
@@ -4077,6 +4120,19 @@ impl<'a> Parser<'a> {
             self.advance();
         }
         Ok(())
+    }
+
+    /// Whether the current token closes a construct around a statement block
+    /// (or ends the file), so it can only mean the block was left unclosed.
+    fn at_block_closer(&self) -> bool {
+        matches!(
+            self.current().kind,
+            TokenKind::Endmodule
+                | TokenKind::Endfunction
+                | TokenKind::Endgenerate
+                | TokenKind::Endcase
+                | TokenKind::Eof
+        )
     }
 
     /// Whether the current token is a directive read past without effect.

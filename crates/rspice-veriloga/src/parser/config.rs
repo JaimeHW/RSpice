@@ -80,7 +80,7 @@ impl Parser<'_> {
         if !self.check_identifier_text("design") {
             return Err(self.error(ParseErrorKind::Expected {
                 expected: "`design` statement".into(),
-                found: format!("{:?}", self.current().kind),
+                found: self.current().describe(),
             }));
         }
         self.advance();
@@ -154,8 +154,8 @@ impl Parser<'_> {
             ConfigSelection::Cell(self.parse_library_cell("cell name")?)
         } else {
             return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
-                "{:?} in a configuration, whose rules begin with `default`, `instance` or `cell`",
-                self.current().kind
+                "{} in a configuration, whose rules begin with `default`, `instance` or `cell`",
+                self.current().describe()
             ))));
         };
         let expansion = if self.check_identifier_text("liblist") {
@@ -178,7 +178,7 @@ impl Parser<'_> {
                 if !self.check_identifier_text("config") {
                     return Err(self.error(ParseErrorKind::Expected {
                         expected: "`config`".into(),
-                        found: format!("{:?}", self.current().kind),
+                        found: self.current().describe(),
                     }));
                 }
                 self.advance();
@@ -193,7 +193,7 @@ impl Parser<'_> {
         } else {
             return Err(self.error(ParseErrorKind::Expected {
                 expected: "`liblist` or `use`".into(),
-                found: format!("{:?}", self.current().kind),
+                found: self.current().describe(),
             }));
         };
         self.expect(TokenKind::Semicolon)?;
