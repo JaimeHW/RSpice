@@ -1827,6 +1827,9 @@ fn generate_device_work_item(
     let options = CompilerOptions {
         defines: item.compile_profile.defines,
         undefines: item.compile_profile.undefines,
+        // The shipped models' `$strobe`-family calls stay warned no-ops:
+        // printing from them changes their generated code.
+        discard_output_tasks: true,
         ..CompilerOptions::default()
     };
     let compiler = VerilogACompiler::new(options);

@@ -461,7 +461,7 @@ fn emit_model_value_module(
             match assignment {
                 NativeAssignment::Task(task) => {
                     let program = task
-                        .finish_operand()
+                        .plan_operand()
                         .ok_or_else(|| WasmJitError::Encoding("invalid analog task plan".into()))?;
                     let guard_entry = if let Some(guard) = &task.guard {
                         let entry = u32_index(entries.len(), "scalar entry")?;
@@ -486,10 +486,18 @@ fn emit_model_value_module(
                             expression: WasmJitAssignmentExpression::TaskArgument,
                         },
                     });
-                    kernel.push(codegen::WasmAssignment::Finish {
-                        site: task.site,
-                        guard_entry,
-                        argument_entry,
+                    kernel.push(if task.finish_operand().is_some() {
+                        codegen::WasmAssignment::Finish {
+                            site: task.site,
+                            guard_entry,
+                            argument_entry,
+                        }
+                    } else {
+                        codegen::WasmAssignment::Output {
+                            site: task.site,
+                            guard_entry,
+                            argument_entry,
+                        }
                     });
                 }
                 NativeAssignment::Direct { var_index, program } => {
@@ -3186,6 +3194,44 @@ endmodule
                 .candidate_analog_tasks()
                 .unwrap(),
             pending
+        );
+    }
+
+    #[test]
+    fn wasm_output_tasks_journal_their_numeric_operands_in_source_order() {
+        use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskKind};
+        let mut harness = FusedKernelHarness::for_source(
+            "module printer(p,n); inout p,n; electrical p,n; integer k;
+             analog begin k=3; $strobe(\"k=%d x=%g\", k, 2.5*k); $display(\"plain\");
+             I(p,n)<+V(p,n); end endmodule",
+            "printer",
+        );
+        harness.reset();
+        harness
+            .store
+            .data_mut()
+            .context_mut()
+            .begin_stateful_evaluation();
+        harness.call_assignments();
+        harness.call_prelude();
+        let pending = harness
+            .store
+            .data()
+            .context()
+            .candidate_analog_tasks()
+            .unwrap()
+            .iter()
+            .map(|call| (call.kind, call.arguments.to_vec()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pending,
+            vec![
+                (
+                    AnalogTaskKind::Strobe,
+                    vec![AnalogTaskArgument::Real(3.0), AnalogTaskArgument::Real(7.5)]
+                ),
+                (AnalogTaskKind::Display, Vec::new()),
+            ]
         );
     }
 

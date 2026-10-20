@@ -921,6 +921,20 @@ impl Lowerer<'_> {
                         self.refuse("task guard was not lowered before its arguments".into())
                     );
                 }
+                if let Some(values) = task.output_operands() {
+                    let operands = values
+                        .into_iter()
+                        .map(|value| operand(*value))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return push(
+                        NativeOp::AnalogOutput {
+                            site: task.site,
+                            kind: task.kind,
+                            arguments: operands.len(),
+                        },
+                        &operands,
+                    );
+                }
                 let value = task.finish_operand().ok_or_else(|| {
                     self.refuse("unsupported canonical analog task or argument type".into())
                 })?;

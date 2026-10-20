@@ -210,6 +210,7 @@ impl Iterator for ShippedCensusModels {
         let options = CompilerOptions {
             defines: pending.defines.clone(),
             undefines: pending.undefines.clone(),
+            discard_output_tasks: true,
             ..CompilerOptions::default()
         };
         let compiler = VerilogACompiler::new(options);

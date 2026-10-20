@@ -1920,7 +1920,7 @@ mod tests {
     fn a_compile_carrying_warnings_publishes_its_receipt_and_never_reads_as_failed() {
         let mut app = module_source_with(
             "legacy",
-            "module legacy(p, n);\n  inout p, n; electrical p, n;\n  analog begin\n    $display(\"trace\");\n    I(p, n) <+ V(p, n);\n  end\nendmodule\n",
+            "module legacy(p, n);\n  inout p, n; electrical p, n; parameter string label = \"x\";\n  analog begin\n    $display(\"%s\", label);\n    I(p, n) <+ V(p, n);\n  end\nendmodule\n",
         );
 
         let selected = selected_veriloga_source(&app).unwrap();

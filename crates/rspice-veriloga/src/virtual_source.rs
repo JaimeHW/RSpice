@@ -781,6 +781,10 @@ pub(crate) fn compiler_contract_identity(
     hasher.field(closure_identity.as_bytes());
     hasher.byte(u8::from(options.enable_ams));
     hasher.byte(u8::from(options.strict_mode));
+    // Folded in only when set, so every existing identity is unchanged.
+    if options.discard_output_tasks {
+        hasher.field(b"discard-output-tasks");
+    }
     hasher.byte(match options.integration_order {
         IntegrationOrder::First => 1,
         IntegrationOrder::Second => 2,

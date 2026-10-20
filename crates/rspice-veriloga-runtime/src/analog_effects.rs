@@ -23,6 +23,51 @@ pub enum AnalogTaskKind {
     Monitor,
 }
 
+impl AnalogTaskKind {
+    const ALL: [Self; 10] = [
+        Self::Finish,
+        Self::Stop,
+        Self::Fatal,
+        Self::Error,
+        Self::Warning,
+        Self::Info,
+        Self::Display,
+        Self::Write,
+        Self::Strobe,
+        Self::Monitor,
+    ];
+
+    /// A stable small code, for machine-code descriptors that carry the kind.
+    pub fn code(self) -> u8 {
+        Self::ALL
+            .iter()
+            .position(|kind| *kind == self)
+            .expect("every kind is listed") as u8
+    }
+
+    pub fn from_code(code: u64) -> Option<Self> {
+        usize::try_from(code)
+            .ok()
+            .and_then(|code| Self::ALL.get(code))
+            .copied()
+    }
+
+    /// Whether the task writes formatted text: `$display` and its kin and the
+    /// severity tasks that do not stop the run.
+    pub fn is_output(self) -> bool {
+        matches!(
+            self,
+            Self::Display
+                | Self::Write
+                | Self::Strobe
+                | Self::Monitor
+                | Self::Info
+                | Self::Warning
+                | Self::Error
+        )
+    }
+}
+
 /// Argument values captured when the call executes, before a later statement
 /// can change a variable used by the call.
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +100,15 @@ pub struct AnalogTaskEvent<'a> {
     pub instance: &'a str,
     pub model: &'a str,
     pub call: AnalogTaskInvocation,
+    /// Where the call was written, when the model knows.
+    pub source: Option<AnalogTaskSource<'a>>,
+}
+
+/// The file and one-based line of an authored task call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnalogTaskSource<'a> {
+    pub file: &'a str,
+    pub line: u32,
 }
 
 impl AnalogTaskInvocation {
@@ -181,6 +235,34 @@ impl AnalogEffectJournal {
             site,
             time,
             arguments: Box::new([AnalogTaskArgument::Integer(diagnostic as i64)]),
+        })
+    }
+
+    /// Capture an output task's numeric arguments in source order. The model's
+    /// task table supplies the string literals and the integer typing when the
+    /// host formats the accepted call.
+    pub fn record_values(
+        &mut self,
+        kind: AnalogTaskKind,
+        site: u32,
+        time: f64,
+        values: &[f64],
+    ) -> Result<(), AnalogEffectError> {
+        if !kind.is_output() {
+            self.invalidate_candidate(AnalogEffectError::InvalidArgument);
+            return self.validate_candidate();
+        }
+        let mut arguments = Vec::new();
+        if arguments.try_reserve_exact(values.len()).is_err() {
+            self.invalidate_candidate(AnalogEffectError::AllocationFailed);
+            return self.validate_candidate();
+        }
+        arguments.extend(values.iter().map(|value| AnalogTaskArgument::Real(*value)));
+        self.record(AnalogTaskInvocation {
+            kind,
+            site,
+            time,
+            arguments: arguments.into_boxed_slice(),
         })
     }
 

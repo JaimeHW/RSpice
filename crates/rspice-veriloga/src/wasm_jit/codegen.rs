@@ -147,6 +147,12 @@ pub(crate) enum WasmAssignment {
         guard_entry: Option<u32>,
         argument_entry: u32,
     },
+    /// An output task, whose argument entry journals its own operands.
+    Output {
+        site: u32,
+        guard_entry: Option<u32>,
+        argument_entry: u32,
+    },
     Direct {
         variable_index: u32,
         value_entry: u32,
@@ -1093,7 +1099,8 @@ fn assignment_loop_depth(assignments: &[WasmAssignment]) -> WasmJitResult<usize>
         let depth = match assignment {
             WasmAssignment::Direct { .. }
             | WasmAssignment::Indexed { .. }
-            | WasmAssignment::Finish { .. } => 0,
+            | WasmAssignment::Finish { .. }
+            | WasmAssignment::Output { .. } => 0,
             WasmAssignment::Loop { body, .. } => assignment_loop_depth(body)?
                 .checked_add(1)
                 .ok_or_else(|| WasmJitError::Encoding("assignment loop depth overflow".into()))?,
@@ -1138,6 +1145,11 @@ fn emit_assignments(
                 site,
                 guard_entry,
                 argument_entry,
+            }
+            | WasmAssignment::Output {
+                site,
+                guard_entry,
+                argument_entry,
             } => {
                 body.instruction(&WasmInstruction::Block(BlockType::Empty));
                 emit_task_helper(body, 460, *site, false, scratch_f64_local);
@@ -1152,7 +1164,9 @@ fn emit_assignments(
                     body.instruction(&WasmInstruction::BrIf(0));
                 }
                 emit_value_entry_call(body, *argument_entry, scalar_count)?;
-                emit_task_helper(body, 462, *site, true, scratch_f64_local);
+                if matches!(assignment, WasmAssignment::Finish { .. }) {
+                    emit_task_helper(body, 462, *site, true, scratch_f64_local);
+                }
                 body.instruction(&WasmInstruction::Drop);
                 body.instruction(&WasmInstruction::End);
             }
@@ -2064,6 +2078,14 @@ fn emit_helper_call(
     }
 
     let descriptor = helper_descriptor(op)?;
+    if let NativeOp::AnalogOutput { arguments, .. } = op {
+        if arguments != operands.len() {
+            return Err(WasmJitError::Encoding(
+                "analog output task operand count mismatch".into(),
+            ));
+        }
+        return emit_slice_helper_call(body, descriptor, operands, result);
+    }
     if let NativeOp::SumProductsDiv(terms) = op {
         if terms.checked_mul(2).and_then(|n| n.checked_add(1)) != Some(operands.len()) {
             return Err(WasmJitError::Encoding(
@@ -2278,6 +2300,10 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::AnalogTasksEnabled => descriptor.opcode = 460,
         NativeOp::AnalogTaskGuard => descriptor.opcode = 461,
         NativeOp::AnalogFinish(site) => set_index(&mut descriptor, 462, site as usize)?,
+        NativeOp::AnalogOutput { site, kind, .. } => {
+            set_index(&mut descriptor, 464, site as usize)?;
+            descriptor.aux1 = i32::from(kind.code());
+        }
         NativeOp::LoadSimParamValue(parameter) => {
             set_index(&mut descriptor, 470, parameter as usize)?
         }

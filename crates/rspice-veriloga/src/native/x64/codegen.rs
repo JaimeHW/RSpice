@@ -1340,6 +1340,7 @@ impl FunctionCompiler {
                         | NativeOp::AnalogTasksEnabled
                         | NativeOp::AnalogTaskGuard
                         | NativeOp::AnalogFinish(_)
+                        | NativeOp::AnalogOutput { .. }
                         | NativeOp::RecordAnalogCounter => {
                             unreachable!(
                                 "operand-array helpers are emitted before register preparation"
@@ -2294,7 +2295,7 @@ impl FunctionCompiler {
             crate::canonical_ir::SourceSpanRef,
         >,
     ) -> JitResult<()> {
-        let program = task.finish_operand().ok_or_else(|| JitError::Verifier {
+        let program = task.plan_operand().ok_or_else(|| JitError::Verifier {
             model: MODEL.into(),
             detail: "invalid analog task plan".into(),
         })?;
@@ -2325,11 +2326,14 @@ impl FunctionCompiler {
         };
         self.emit_native_program(program)?;
         self.emit_kernel_abort_if_failed()?;
-        self.emit_context_filter_helper_call(
-            Xmm::Xmm0,
-            task.site as usize,
-            crate::native::abi::rspice_finish_native,
-        )?;
+        // An output task's program journals its operands itself.
+        if task.finish_operand().is_some() {
+            self.emit_context_filter_helper_call(
+                Xmm::Xmm0,
+                task.site as usize,
+                crate::native::abi::rspice_finish_native,
+            )?;
+        }
         self.depth = 0;
         self.spilled_depth = 0;
         self.emit_kernel_abort_if_failed()?;

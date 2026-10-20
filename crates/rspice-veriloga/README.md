@@ -197,8 +197,18 @@ simulation-control semantics are not implemented. `$error` is refused in
 pre-simulation initialization, where it must stop the run. These checks follow
 transitive function calls and branches removed by constant folding.
 `$display`, `$write`, `$strobe`, `$monitor`, `$info`, `$warning` and ordinary
-analog `$error` are accepted and discarded with a warning: they produce no
-runtime output.
+analog `$error` print through the run's HDL console (standard output on the
+command line, the Console tab in the workbench) with the digital `$display`
+formatter. Every route journals a call's arguments as the evaluation runs, and
+the host prints only the calls of an accepted operating point, sweep point or
+time step: a Newton iteration the solver goes past or a rejected step prints
+nothing. `$display`, `$strobe` and `$monitor` end their line, `$write` does not;
+`$monitor` prints again only when one of its arguments changes; the severity
+tasks report the instance, file and line of the call. A small-signal frequency
+point prints nothing, because it linearizes the accepted bias rather than
+evaluating the model again. A call with an argument that is neither a string
+literal nor a number (a string parameter) is discarded with a warning
+(`VA-SEM-NO-EFFECT-SYSTEM-TASK`).
 
 The preprocessor refuses an undefined macro or an unknown compiler directive
 where it is written, in any position, and names the directive or macro it most

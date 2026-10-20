@@ -443,6 +443,9 @@ pub struct SemanticAnalyzer {
     functions: FunctionRegistry,
     symbols: SymbolTable,
     errors: Vec<SemanticError>,
+    /// Compile output tasks as warned no-ops
+    /// ([`crate::CompilerOptions::discard_output_tasks`]).
+    discard_output_tasks: bool,
     /// User-defined analog functions of the module under analysis
     user_functions: HashMap<SmolStr, FunctionDef>,
     effectful_functions: HashSet<SmolStr>,
@@ -578,6 +581,7 @@ impl SemanticAnalyzer {
             region_stack: vec![Vec::new()],
             subst_stack: Vec::new(),
             function_side_effects: Vec::new(),
+            discard_output_tasks: false,
             local_counter: 0,
             next_analog_site: 0,
             in_analog_initial: false,
@@ -611,6 +615,12 @@ impl SemanticAnalyzer {
             next_noise_process: 0,
             implicit_integrators: Vec::new(),
         }
+    }
+
+    /// Compile output tasks as warned no-ops when `discard` is set.
+    pub(crate) fn discarding_output_tasks(mut self, discard: bool) -> Self {
+        self.discard_output_tasks = discard;
+        self
     }
 
     pub fn analyze(&mut self, source: &SourceFile) -> CompileResult<AnalyzedFile> {
@@ -649,6 +659,7 @@ impl SemanticAnalyzer {
             modules: HashMap::new(),
             warnings: Vec::new(),
             connection_configuration: None,
+            discard_output_tasks: self.discard_output_tasks,
         })
     }
 
@@ -799,6 +810,7 @@ impl SemanticAnalyzer {
             warnings: std::mem::take(&mut self.warnings),
             connect_rules,
             connection_configuration: None,
+            discard_output_tasks: self.discard_output_tasks,
         })
     }
 
@@ -3879,9 +3891,9 @@ impl SemanticAnalyzer {
                 self.analyze_indirect_contribution(stmt, module, sink)?;
             }
             // $bound_step and $discontinuity steer the transient stepper
-            // through hidden per-evaluation variables; other system tasks
-            // ($strobe, $display, ...) have no effect on the device
-            // equations
+            // through hidden per-evaluation variables; the output tasks
+            // ($strobe, $display, ...) journal their arguments, and the host
+            // prints the calls of accepted evaluations only
             AnalogStatement::Call(call) => match call.name.as_str() {
                 "$finish" => self.analyze_control_task(call, module, sink)?,
                 "$bound_step" => {
@@ -3893,7 +3905,7 @@ impl SemanticAnalyzer {
                     self.analyze_discontinuity(call, module, sink)?;
                 }
                 name if Self::is_no_effect_system_task(name) => {
-                    self.warn_no_effect_system_task(call);
+                    self.analyze_output_task(call, module, sink)?;
                 }
                 _ => return Err(Self::unknown_system_task_error(call)),
             },
@@ -3940,6 +3952,77 @@ impl SemanticAnalyzer {
         sink.push(AnalyzedStatement::Task(task));
         Ok(())
     }
+    /// `$strobe`, `$display`, `$write`, `$monitor`, `$info`, `$warning` and
+    /// `$error`: a string literal stays text for the host's formatter, and
+    /// every other argument is a numeric operand captured when the call runs.
+    /// An argument of another type (a string parameter) keeps the call a
+    /// warned no-op rather than printing something other than what it names.
+    fn analyze_output_task(
+        &mut self,
+        call: &CallStmt,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
+        use crate::analog_tasks::{AnalogTaskCall, AnalogTaskKind, AnalogTaskOperand};
+        if self.discard_output_tasks {
+            self.warn_no_effect_system_task(call);
+            return Ok(());
+        }
+        let kind = match call.name.as_str() {
+            "$display" => AnalogTaskKind::Display,
+            "$write" => AnalogTaskKind::Write,
+            "$strobe" => AnalogTaskKind::Strobe,
+            "$monitor" => AnalogTaskKind::Monitor,
+            "$info" => AnalogTaskKind::Info,
+            "$warning" => AnalogTaskKind::Warning,
+            "$error" => AnalogTaskKind::Error,
+            _ => return Err(Self::unknown_system_task_error(call)),
+        };
+        let mut arguments = Vec::with_capacity(call.args.len());
+        let mut lowered = Vec::new();
+        for argument in &call.args {
+            if let Expression::StringLit(text) = argument {
+                arguments.push(AnalogTaskOperand::String(text.value.clone()));
+                continue;
+            }
+            let typed = self
+                .lower_expression_with_side_effects(argument, module, &mut lowered)
+                .and_then(|value| Ok((self.infer_type(&value)?, value)));
+            match typed {
+                Ok((ValueType::Integer | ValueType::Boolean, value)) => {
+                    arguments.push(AnalogTaskOperand::Integer(value));
+                }
+                Ok((found, value)) if found.is_numeric() => {
+                    arguments.push(AnalogTaskOperand::Real(value));
+                }
+                _ => {
+                    self.warn(
+                        NO_EFFECT_SYSTEM_TASK_CODE,
+                        format!(
+                            "System task '{}' is parsed and discarded: an argument is neither a string literal nor a number, so the call writes nothing at run time.",
+                            call.name
+                        ),
+                        call.span,
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        sink.append(&mut lowered);
+        let mut task = AnalogTaskCall {
+            kind,
+            site: self.next_analog_site().0,
+            guard: None,
+            arguments,
+            span: call.span,
+            initialization: self.in_analog_initial,
+        };
+        self.record_region(AnalyzedRegion::Task(task.clone()));
+        task.guard = self.current_guard();
+        sink.push(AnalyzedStatement::Task(task));
+        Ok(())
+    }
+
     const MAX_UNROLL_ITERATIONS: usize = 65536;
 
     /// Analyze a for loop: statically unroll when the bounds fold to

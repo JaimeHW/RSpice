@@ -64,6 +64,19 @@ pub(crate) fn operand_array_call(
             helper: rspice_evaluation_state_native,
         }));
     }
+    if let NativeOp::AnalogOutput {
+        site,
+        kind,
+        arguments,
+    } = op
+    {
+        return Ok(Some(OperandArrayCall {
+            count: arguments,
+            descriptor: analog_output_descriptor(site, kind, arguments)
+                .ok_or_else(|| invalid("analog output task has too many operands".into()))?,
+            helper: rspice_output_operands_native,
+        }));
+    }
     if matches!(
         op,
         NativeOp::AnalogTasksEnabled | NativeOp::AnalogTaskGuard | NativeOp::AnalogFinish(_)
@@ -168,6 +181,53 @@ unsafe extern "C" fn rspice_finish_operands_native(
 ) -> f64 {
     // SAFETY: the validated instruction marshals one operand and a live frame.
     unsafe { rspice_finish_native(*operands, ctx, site) }
+}
+
+/// An output task's descriptor: the site in the low 32 bits, then the kind's
+/// code, then the operand count.
+fn analog_output_descriptor(
+    site: u32,
+    kind: rspice_veriloga_runtime::AnalogTaskKind,
+    arguments: usize,
+) -> Option<usize> {
+    let arguments = u16::try_from(arguments).ok()?;
+    usize::try_from(u64::from(site) | (u64::from(kind.code()) << 32) | (u64::from(arguments) << 40))
+        .ok()
+}
+
+unsafe extern "C" fn rspice_output_operands_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    descriptor: usize,
+) -> f64 {
+    let Some(ctx) = (unsafe { ctx.as_ref() }) else {
+        return f64::NAN;
+    };
+    let Some(slot) = (unsafe { ctx.analog_effects.as_mut() }) else {
+        return 0.0;
+    };
+    let descriptor = descriptor as u64;
+    let site = descriptor as u32;
+    let count = ((descriptor >> 40) & 0xffff) as usize;
+    let Some(kind) = rspice_veriloga_runtime::AnalogTaskKind::from_code((descriptor >> 32) & 0xff)
+    else {
+        ctx.record_runtime_error("analog output task descriptor names no task");
+        return f64::NAN;
+    };
+    // SAFETY: the validated instruction marshals `count` operands.
+    let values = if count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(operands, count) }
+    };
+    if let Err(error) = slot
+        .get_or_insert_with(Default::default)
+        .record_values(kind, site, ctx.time, values)
+    {
+        ctx.record_runtime_error(format!("{kind:?}: {error}"));
+        return f64::NAN;
+    }
+    0.0
 }
 
 /// Query the simulator environment without evaluating a model fallback.

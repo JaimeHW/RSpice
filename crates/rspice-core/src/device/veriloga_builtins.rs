@@ -503,6 +503,7 @@ impl BuiltinVerilogADevices {
                     instance: &device.instance_name,
                     model: device.model_name,
                     call,
+                    source: None,
                 });
             });
         }
@@ -523,6 +524,7 @@ impl BuiltinVerilogADevices {
                     instance: &device.instance_name,
                     model: device.model_name,
                     call: call.clone(),
+                    source: None,
                 }));
             }
         }

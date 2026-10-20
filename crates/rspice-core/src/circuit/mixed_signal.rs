@@ -1117,6 +1117,7 @@ impl CircuitData {
                             )),
                         ]),
                     },
+                    source: None,
                 });
             }
             for host in trial.hosts_mut() {

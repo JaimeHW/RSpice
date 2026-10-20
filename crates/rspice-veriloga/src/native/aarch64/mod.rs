@@ -297,6 +297,7 @@ mod tests {
             assignment_steps: Vec::new(),
             initialization_prologue_variables: Vec::new(),
             noise_assignment_steps: Vec::new(),
+            analog_task_origins: Vec::new(),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),
             internal_nodes: 0,

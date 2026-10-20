@@ -3373,12 +3373,7 @@ impl VerilogADevice {
                                 "analog task initialization flag disagrees with its execution phase".into(),
                             ));
                         }
-                        if task.kind != crate::analog_tasks::AnalogTaskKind::Finish
-                            || !matches!(
-                                task.arguments.as_slice(),
-                                [crate::analog_tasks::AnalogTaskOperand::Integer(_)]
-                            )
-                        {
+                        if !task.is_executable() {
                             return Err(VmError::InvalidModel(
                                 "invalid analog task call shape".into(),
                             ));
@@ -5252,7 +5247,8 @@ impl VerilogADevice {
             .map(|call| rspice_veriloga_runtime::AnalogTaskEvent {
                 instance: &self.name,
                 model: &self.model.name,
-                call: call.clone(),
+                source: Self::task_source(&self.model, call.site),
+                call: Self::typed_task_call(&self.model, call.clone()),
             }))
     }
 
@@ -5287,12 +5283,63 @@ impl VerilogADevice {
         consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
     ) {
         for call in self.context.drain_accepted_analog_tasks() {
+            let call = Self::typed_task_call(&self.model, call);
             consume(rspice_veriloga_runtime::AnalogTaskEvent {
                 instance: &self.name,
                 model: &self.model.name,
+                source: Self::task_source(&self.model, call.site),
                 call,
             });
         }
+    }
+
+    fn task_source(
+        model: &CompiledModel,
+        site: u32,
+    ) -> Option<rspice_veriloga_runtime::AnalogTaskSource<'_>> {
+        model
+            .analog_task_origin(site)
+            .map(|origin| rspice_veriloga_runtime::AnalogTaskSource {
+                file: &origin.file,
+                line: origin.line,
+            })
+    }
+
+    /// An output call journals only its numeric operands; the model's task
+    /// table restores the string literals and the integer typing, in source
+    /// order, so the host formats what the author wrote.
+    fn typed_task_call(
+        model: &CompiledModel,
+        mut call: rspice_veriloga_runtime::AnalogTaskInvocation,
+    ) -> rspice_veriloga_runtime::AnalogTaskInvocation {
+        use crate::analog_tasks::AnalogTaskOperand;
+        use rspice_veriloga_runtime::AnalogTaskArgument;
+        if !call.kind.is_output() {
+            return call;
+        }
+        let Some(task) = model.analog_task(call.site) else {
+            return call;
+        };
+        let mut values = call.arguments.iter();
+        let mut arguments = Vec::with_capacity(task.arguments.len());
+        for operand in &task.arguments {
+            let value = match operand {
+                AnalogTaskOperand::String(text) => {
+                    arguments.push(AnalogTaskArgument::String(text.to_string()));
+                    continue;
+                }
+                AnalogTaskOperand::Real(_) | AnalogTaskOperand::Integer(_) => values.next(),
+            };
+            let Some(AnalogTaskArgument::Real(value)) = value else {
+                return call;
+            };
+            arguments.push(match operand {
+                AnalogTaskOperand::Integer(_) => AnalogTaskArgument::Integer(value.round() as i64),
+                _ => AnalogTaskArgument::Real(*value),
+            });
+        }
+        call.arguments = arguments.into_boxed_slice();
+        call
     }
 
     /// Capture the accepted state, and nothing derived from it.

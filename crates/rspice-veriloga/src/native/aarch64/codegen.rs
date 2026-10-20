@@ -1217,7 +1217,7 @@ impl FunctionCompiler {
         >,
     ) -> JitResult<()> {
         let program = task
-            .finish_operand()
+            .plan_operand()
             .ok_or_else(|| verifier_error("invalid analog task plan"))?;
         self.encoder.ldr_x_unsigned(
             XReg::X9,
@@ -1241,11 +1241,14 @@ impl FunctionCompiler {
         let result = self.emit_native_program_for_pass(program)?;
         self.materialize_location(result, DReg::D0)?;
         self.emit_kernel_abort_if_failed()?;
-        self.emit_task_helper(
-            task.site,
-            crate::native::abi::rspice_finish_native as *const () as usize,
-        )?;
-        self.emit_kernel_abort_if_failed()?;
+        // An output task's program journals its operands itself.
+        if task.finish_operand().is_some() {
+            self.emit_task_helper(
+                task.site,
+                crate::native::abi::rspice_finish_native as *const () as usize,
+            )?;
+            self.emit_kernel_abort_if_failed()?;
+        }
         let end = self.encoder.position();
         if let Some(inactive) = inactive {
             self.encoder.patch_branch(inactive, end)?;
@@ -1820,6 +1823,7 @@ impl FunctionCompiler {
             | NativeOp::AnalogTasksEnabled
             | NativeOp::AnalogTaskGuard
             | NativeOp::AnalogFinish(_)
+            | NativeOp::AnalogOutput { .. }
             | NativeOp::RecordAnalogCounter => {
                 unreachable!("operand-array helpers are emitted before register preparation")
             }

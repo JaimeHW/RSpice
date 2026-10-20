@@ -40,6 +40,125 @@ fn finish_level(event: &AnalogTaskEvent<'_>) -> Result<u8, &'static str> {
     Ok(*level as u8)
 }
 
+/// One accepted analog output call as the run's HDL output record (a call
+/// whose model has no source text names the model as its file), or `None`
+/// for a call that prints nothing: a `$monitor` whose arguments have not
+/// changed since it last printed, or any call at a small-signal frequency
+/// point, which linearizes the accepted bias rather than evaluating the model
+/// at a new solution.
+fn analog_output_record(
+    event: &AnalogTaskEvent<'_>,
+    point: ModelFinishPoint,
+    monitors: &mut std::collections::HashMap<(String, u32), Box<[AnalogTaskArgument]>>,
+) -> Option<crate::config::HdlOutputRecord> {
+    use crate::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
+    let point = match point {
+        ModelFinishPoint::Initialization => HdlPoint::Initialization,
+        ModelFinishPoint::OperatingPoint => HdlPoint::OperatingPoint,
+        ModelFinishPoint::Transient { time } => HdlPoint::Transient { time },
+        ModelFinishPoint::DcSweep { value } => HdlPoint::DcSweep { value },
+        ModelFinishPoint::Frequency { .. } => return None,
+    };
+    if event.call.kind == AnalogTaskKind::Monitor {
+        let key = (event.instance.to_owned(), event.call.site);
+        if monitors.get(&key) == Some(&event.call.arguments) {
+            return None;
+        }
+        monitors.insert(key, event.call.arguments.clone());
+    }
+    let mut text = format_analog_output(event);
+    let stream = match event.call.kind {
+        AnalogTaskKind::Info => HdlStream::Diagnostic {
+            severity: HdlSeverity::Info,
+        },
+        AnalogTaskKind::Warning => HdlStream::Diagnostic {
+            severity: HdlSeverity::Warning,
+        },
+        AnalogTaskKind::Error => HdlStream::Diagnostic {
+            severity: HdlSeverity::Error,
+        },
+        kind => {
+            if kind != AnalogTaskKind::Write {
+                text.push('\n');
+            }
+            HdlStream::Stdout
+        }
+    };
+    Some(HdlOutputRecord {
+        point,
+        tick: 0,
+        seconds: event.call.time,
+        stream,
+        text,
+        origin: HdlOrigin {
+            scope: event.instance.into(),
+            file: event
+                .source
+                .map_or_else(|| event.model.into(), |source| source.file.into()),
+            line: event.source.map_or(0, |source| source.line),
+        },
+    })
+}
+
+/// The `$display` formatter of the digital host (IEEE 1364-2005 section
+/// 17.1.1), with `%m` naming the instance.
+#[cfg(feature = "veriloga")]
+fn format_analog_output(event: &AnalogTaskEvent<'_>) -> String {
+    use crate::xspice::verilog::effects::format::{
+        FormatArgument, FormatContext, TimeFormat, format,
+    };
+    use rspice_veriloga::canonical_ir::digital::DigitalRadix;
+    use rspice_veriloga::canonical_ir::digital_eval::DigitalScalar;
+    let scalars = event
+        .call
+        .arguments
+        .iter()
+        .map(|argument| match argument {
+            AnalogTaskArgument::Real(value) => DigitalScalar::Real(*value),
+            AnalogTaskArgument::Integer(value) => DigitalScalar::Integer(
+                (*value).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            ),
+            AnalogTaskArgument::String(_) => DigitalScalar::Effect,
+        })
+        .collect::<Vec<_>>();
+    let arguments = event
+        .call
+        .arguments
+        .iter()
+        .zip(&scalars)
+        .map(|(argument, scalar)| match argument {
+            AnalogTaskArgument::String(text) => FormatArgument::Literal(text),
+            _ => FormatArgument::Value(scalar, true),
+        })
+        .collect::<Vec<_>>();
+    let time_format = TimeFormat::default_for(0);
+    format(
+        &arguments,
+        &FormatContext {
+            radix: DigitalRadix::Decimal,
+            scope: event.instance,
+            module: event.model,
+            time_unit: 0,
+            time_format: &time_format,
+        },
+    )
+}
+
+/// Without the digital host, the arguments in order, as written.
+#[cfg(not(feature = "veriloga"))]
+fn format_analog_output(event: &AnalogTaskEvent<'_>) -> String {
+    event
+        .call
+        .arguments
+        .iter()
+        .map(|argument| match argument {
+            AnalogTaskArgument::Real(value) => format!("{value}"),
+            AnalogTaskArgument::Integer(value) => format!("{value}"),
+            AnalogTaskArgument::String(text) => text.clone(),
+        })
+        .collect()
+}
+
 impl Engine {
     /// Finish an AC/noise bias point before any frequency result exists. A
     /// finish makes this both the initial and final point of the analysis;
@@ -228,26 +347,36 @@ impl Engine {
             SimulationError::Circuit("analog task delivery has no simulation run scope".into())
         })?;
         let mut invalid = None;
-        circuit
-            .visit_accepted_analog_tasks(&mut |event| {
-                let level = match finish_level(&event) {
-                    Ok(level) => level,
-                    Err(error) => {
-                        invalid = Some(error);
-                        return;
-                    }
-                };
-                if !control.is_finished() {
-                    control.request_finish(ModelFinish {
-                        instance: event.instance.into(),
-                        model: event.model.into(),
-                        site: event.call.site,
-                        point,
-                        diagnostic_level: level,
-                    });
+        let output = circuit.analog_task_output.clone();
+        let mut monitors = std::mem::take(&mut circuit.analog_monitor_values);
+        let visited = circuit.visit_accepted_analog_tasks(&mut |event| {
+            if event.call.kind.is_output() {
+                if let Some(sink) = &output
+                    && let Some(record) = analog_output_record(&event, point, &mut monitors)
+                {
+                    sink.emit(&record);
                 }
-            })
-            .map_err(SimulationError::Circuit)?;
+                return;
+            }
+            let level = match finish_level(&event) {
+                Ok(level) => level,
+                Err(error) => {
+                    invalid = Some(error);
+                    return;
+                }
+            };
+            if !control.is_finished() {
+                control.request_finish(ModelFinish {
+                    instance: event.instance.into(),
+                    model: event.model.into(),
+                    site: event.call.site,
+                    point,
+                    diagnostic_level: level,
+                });
+            }
+        });
+        circuit.analog_monitor_values = monitors;
+        visited.map_err(SimulationError::Circuit)?;
         if let Some(message) = invalid {
             return Err(SimulationError::Circuit(message.into()));
         }

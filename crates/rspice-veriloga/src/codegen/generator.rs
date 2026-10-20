@@ -547,6 +547,7 @@ impl CodeGenerator {
             initialization_prologue_variables: ir.initialization_prologue_variables.clone(),
             assignment_steps: Vec::new(),
             noise_assignment_steps: Vec::new(),
+            analog_task_origins: Vec::new(),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),
             internal_nodes: ir.internal_nodes.len(),

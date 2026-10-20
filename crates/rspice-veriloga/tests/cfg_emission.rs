@@ -161,6 +161,72 @@ for level in calls {{ println!("{{:x}}",f64::to_bits(level)); }}
     );
 }
 
+/// A generated model has no task table at run time, so an output task
+/// journals its whole typed argument list, literals included, in source order.
+#[test]
+fn emitted_output_tasks_journal_their_typed_arguments_in_source_order() {
+    use rspice_veriloga::canonical_ir::cfg::CfgValueKind;
+    let artifact = artifact(
+        r#"`include "disciplines.vams"
+module printer(p,n);
+inout p,n; electrical p,n;
+integer k;
+analog begin
+k=3;
+$strobe("k=%d v=%g", k, 2.5*k);
+$warning("plain");
+I(p,n) <+ V(p,n);
+end
+endmodule"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+    let effects = cfg
+        .function
+        .values
+        .iter()
+        .filter_map(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)).then_some(value.id))
+        .collect::<Vec<_>>();
+    assert_eq!(effects.len(), 2);
+    let (function, effects) = optimize_cfg(&cfg.function, &effects);
+    let (body, _) = emit_body(&function, &effects, &EmitBindings::default()).unwrap();
+    let program = format!(
+        r#"#![allow(unused_variables,unused_mut,unused_parens,dead_code)]
+{RUNTIME_PRELUDE}
+mod rspice_veriloga_runtime {{
+#[derive(Debug)] pub enum AnalogTaskKind {{ Strobe, Warning }}
+#[derive(Debug)] pub enum AnalogTaskArgument {{ Real(f64), Integer(i64), String(String) }}
+}}
+fn main() {{
+let time=2.0f64;
+let mut calls=Vec::new();
+let mut analog_output=|site:u32,kind:rspice_veriloga_runtime::AnalogTaskKind,_time:f64,arguments:Box<[rspice_veriloga_runtime::AnalogTaskArgument]>| calls.push(format!("{{kind:?}} {{arguments:?}}"));
+{body}
+for call in calls {{ println!("{{call}}"); }}
+}}
+"#
+    );
+    let directory = scratch("output-task-effects");
+    let source = directory.join("output_tasks.rs");
+    let binary = directory.join(format!("output_tasks{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&source, &program).unwrap();
+    let compiled = Command::new("rustc")
+        .args(["--edition=2021", "-O", "-o"])
+        .arg(&binary)
+        .arg(&source)
+        .output()
+        .expect("rustc must be on PATH");
+    assert!(
+        compiled.status.success(),
+        "{}\n--- source ---\n{program}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let output = Command::new(&binary).output().unwrap();
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "Strobe [String(\"k=%d v=%g\"), Integer(3), Real(7.5)]\nWarning [String(\"plain\")]\n"
+    );
+}
+
 #[test]
 #[ignore = "invokes rustc on the emitted source; run with --ignored"]
 fn the_emitted_rust_reproduces_the_interpreter() {

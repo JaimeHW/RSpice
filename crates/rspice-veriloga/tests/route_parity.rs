@@ -227,6 +227,18 @@ impl Probe<'_> {
         }
     }
 
+    /// Record the calls the last acceptance published, with their arguments.
+    fn tasks(&mut self, label: &str) {
+        let mut calls = Vec::new();
+        self.device.visit_accepted_analog_tasks(&mut |event| {
+            calls.push(format!(
+                "{:?}@{}:{:?}",
+                event.call.kind, event.call.time, event.call.arguments
+            ));
+        });
+        self.text(format!("{label}.tasks"), calls.join("; "));
+    }
+
     /// Install an ambient temperature, recording whether the route took it.
     fn temperature(&mut self, label: &str, kelvin: f64) {
         let applied = self.device.try_set_temperature(kelvin);
@@ -712,6 +724,58 @@ endmodule
             probe.accept("above");
             probe.tran("back", 2.0e-9, 1.0e-9, &[0.2]);
         },
+    );
+}
+
+/// `$strobe` and its kin publish what the accepted evaluation computed, on
+/// both routes, and nothing from an evaluation the solver iterated past.
+#[test]
+fn output_tasks_agree_across_lowerings() {
+    let trace = compare_routes_traced(
+        r#"
+`include "disciplines.vams"
+module route_output(p, n);
+    inout p, n;
+    electrical p, n;
+    integer k;
+    analog begin
+        k = 2;
+        I(p, n) <+ V(p, n) * 1.0e-3;
+        $strobe("v=%g k=%d t=%g", V(p, n), k, $abstime);
+        if (V(p, n) > 0.5)
+            $display("high");
+        $write("w");
+    end
+endmodule
+"#,
+        &[1, 0],
+        0,
+        |probe: &mut Probe| {
+            probe.tran("t1", 1.0e-9, 1.0e-9, &[0.2]);
+            probe.tran("t1n", 1.0e-9, 1.0e-9, &[0.8]);
+            probe.accept("t1");
+            probe.tasks("t1");
+            probe.tran("t2", 2.0e-9, 1.0e-9, &[0.2]);
+            probe.accept("t2");
+            probe.tasks("t2");
+        },
+    );
+    let tasks = |label: &str| {
+        trace
+            .iter()
+            .find(|entry| entry.key == label)
+            .and_then(|entry| entry.text.clone())
+            .unwrap()
+    };
+    assert_eq!(
+        tasks("t1.tasks"),
+        "Strobe@0.000000001:[String(\"v=%g k=%d t=%g\"), Real(0.8), Integer(2), Real(1e-9)]; \
+         Display@0.000000001:[String(\"high\")]; Write@0.000000001:[String(\"w\")]"
+    );
+    assert_eq!(
+        tasks("t2.tasks"),
+        "Strobe@0.000000002:[String(\"v=%g k=%d t=%g\"), Real(0.2), Integer(2), Real(2e-9)]; \
+         Write@0.000000002:[String(\"w\")]"
     );
 }
 

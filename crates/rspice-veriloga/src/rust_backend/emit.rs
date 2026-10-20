@@ -1828,6 +1828,36 @@ impl Emitter<'_> {
                     operator: "executable analog occurrence binding",
                 });
             }
+            // A generated model has no task table at run time, so it journals
+            // the whole typed argument list, literals included.
+            CfgValueKind::AnalogTask(task) if task.kind.is_output() => {
+                use crate::analog_tasks::AnalogTaskOperand;
+                let arguments = task
+                    .arguments
+                    .iter()
+                    .map(|argument| match argument {
+                        AnalogTaskOperand::String(text) => format!(
+                            "rspice_veriloga_runtime::AnalogTaskArgument::String(String::from({:?}))",
+                            text.as_str()
+                        ),
+                        AnalogTaskOperand::Integer(value) => format!(
+                            "rspice_veriloga_runtime::AnalogTaskArgument::Integer(({}).round() as i64)",
+                            self.numeric_operand(*value)
+                        ),
+                        AnalogTaskOperand::Real(value) => format!(
+                            "rspice_veriloga_runtime::AnalogTaskArgument::Real({})",
+                            self.numeric_operand(*value)
+                        ),
+                    })
+                    .collect::<Vec<_>>();
+                format!(
+                    "analog_output({}, rspice_veriloga_runtime::AnalogTaskKind::{:?}, {}, Box::new([{}]))",
+                    task.site,
+                    task.kind,
+                    bindings.time,
+                    arguments.join(", ")
+                )
+            }
             CfgValueKind::AnalogTask(task) => {
                 let operand =
                     task.finish_operand()

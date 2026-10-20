@@ -244,6 +244,18 @@ impl<'a> Vm<'a> {
                 return Ok(());
             }
         }
+        if let Some(programs) = task.output_operands() {
+            let mut values = Vec::with_capacity(programs.len());
+            for program in programs {
+                values.push(self.execute(program)?);
+            }
+            let time = self.context.time;
+            return self
+                .context
+                .analog_effect_journal()
+                .record_values(task.kind, task.site, time, &values)
+                .map_err(|error| VmError::AnalogTask(format!("{:?}: {error}", task.kind)));
+        }
         if task.kind != AnalogTaskKind::Finish {
             return Err(VmError::AnalogTask(format!(
                 "task {:?} is not executable",

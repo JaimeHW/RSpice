@@ -2346,7 +2346,7 @@ impl HirModel {
                             task.span,
                         ));
                     }
-                    if task.finish_operand().is_none() {
+                    if !task.is_executable() {
                         diagnostics.push(IrDiagnostic::error(
                             CompilerPhase::HirValidation,
                             "invalid analog task kind or arguments",

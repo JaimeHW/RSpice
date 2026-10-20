@@ -774,6 +774,13 @@ pub struct CircuitData {
     /// (Spectre's `actimes`).
     #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     pub(crate) veriloga_point_time: Value,
+    /// Where accepted analog output tasks (`$strobe`, `$display`, ...)
+    /// print: the run's HDL output sink, when the run has one.
+    pub(crate) analog_task_output: Option<std::sync::Arc<dyn crate::config::HdlOutputSink>>,
+    /// The arguments each `$monitor` call last printed, by instance and
+    /// site: a monitor prints again only when one of them changes.
+    pub(crate) analog_monitor_values:
+        HashMap<(String, u32), Box<[rspice_veriloga_runtime::AnalogTaskArgument]>>,
 }
 
 /// Stable probe metadata for inductor-backed branch measurements.

@@ -504,7 +504,7 @@ fn successful_compilation_reports_warnings_and_retains_them_when_quiet() {
     std::fs::write(&root, "`include \"child.va\"\n").unwrap();
     std::fs::write(
         &child,
-        "module chatty(p,n);\ninout p,n; electrical p,n;\nanalog begin\n $display(\"one\");\n $strobe(\"two\");\n I(p,n) <+ V(p,n);\nend\nendmodule\n",
+        "module chatty(p,n);\ninout p,n; electrical p,n; parameter string label = \"x\";\nanalog begin\n $display(\"%s\", label);\n $strobe(\"two %s\", label);\n I(p,n) <+ V(p,n);\nend\nendmodule\n",
     )
     .unwrap();
     for quiet in [false, true] {

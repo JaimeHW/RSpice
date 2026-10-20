@@ -5,7 +5,7 @@ use std::process::Command;
 fn fixture(name: &str) -> (common::TestDirectory, std::path::PathBuf) {
     let root = common::test_dir(name);
     std::fs::write(root.join("model.va"), "`include \"child.va\"\n").unwrap();
-    std::fs::write(root.join("child.va"), "module chatty(p,n);\ninout p,n; electrical p,n;\nanalog begin\n $display(\"ignored\");\n I(p,n) <+ V(p,n);\nend\nendmodule\n").unwrap();
+    std::fs::write(root.join("child.va"), "module chatty(p,n);\ninout p,n; electrical p,n; parameter string label = \"x\";\nanalog begin\n $display(\"%s\", label);\n I(p,n) <+ V(p,n);\nend\nendmodule\n").unwrap();
     let deck = root.join("op.cir");
     std::fs::write(
         &deck,
@@ -459,4 +459,36 @@ fn control_and_parallel_step_failures_retain_compiler_metadata() {
             child.canonicalize().unwrap()
         );
     }
+}
+
+/// An analog `$strobe` prints once per accepted point on standard output, and
+/// a severity task reports where it was written on standard error; neither
+/// prints from a Newton iteration the solver went past.
+#[test]
+fn analog_output_tasks_print_once_per_accepted_point() {
+    let root = common::test_dir("analog_output_tasks");
+    std::fs::write(
+        root.join("printer.va"),
+        "module printer(a);\ninout a; electrical a;\nanalog begin\n V(a) <+ 1.5;\n $strobe(\"STROBE V(a)=%g\", V(a));\n $warning(\"careful at %g\", V(a));\nend\nendmodule\n",
+    )
+    .unwrap();
+    let deck = root.join("strobe.cir");
+    std::fs::write(
+        &deck,
+        "Analog output\n.hdl \"printer.va\"\nX1 a printer\nRa a 0 1k\n.op\n.end\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("run")
+        .arg(&deck)
+        .env("RSPICE_VERILOGA_CACHE_DIR", root.join("cache"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.matches("STROBE V(a)=1.5\n").count(), 1, "{stdout}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.matches("careful at 1.5").count(), 1, "{stderr}");
+    assert!(stderr.contains("printer.va:6, X1)"), "{stderr}");
+    assert!(!stderr.contains("VA-SEM-NO-EFFECT-SYSTEM-TASK"), "{stderr}");
 }

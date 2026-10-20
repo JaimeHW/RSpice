@@ -7,6 +7,15 @@ use smol_str::SmolStr;
 /// Hidden scalar results read by simulator-control task consumers.
 pub(crate) const SIMULATOR_CONTROL_TASK_VARIABLES: [&str; 2] = ["$bound_step", "$discontinuity"];
 
+/// Where one task call was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalogTaskOrigin {
+    pub site: u32,
+    pub file: SmolStr,
+    /// One-based.
+    pub line: u32,
+}
+
 /// An argument's language type must survive numerical backend lowering.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnalogTaskOperand<E> {
@@ -33,6 +42,41 @@ impl<E, S> AnalogTaskCall<E, S> {
             (AnalogTaskKind::Finish, [AnalogTaskOperand::Integer(value)]) => Some(value),
             _ => None,
         }
+    }
+
+    /// Every backend executes a `$finish` with its level and the output tasks.
+    pub(crate) fn is_executable(&self) -> bool {
+        self.finish_operand().is_some() || self.kind.is_output()
+    }
+
+    /// An output task's numeric operands in source order; the string literals
+    /// stay in the task table for the host's formatter.
+    pub(crate) fn output_operands(&self) -> Option<Vec<&E>> {
+        self.kind.is_output().then(|| {
+            self.arguments
+                .iter()
+                .filter_map(|argument| match argument {
+                    AnalogTaskOperand::Real(value) | AnalogTaskOperand::Integer(value) => {
+                        Some(value)
+                    }
+                    AnalogTaskOperand::String(_) => None,
+                })
+                .collect()
+        })
+    }
+
+    /// The one program a native plan evaluates for this call: the `$finish`
+    /// level, or the program that evaluates an output task's operands and
+    /// journals them itself (a plan merges them into one, see
+    /// `NativeProgram::analog_output`).
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
+    pub(crate) fn plan_operand(&self) -> Option<&E> {
+        self.finish_operand().or_else(
+            || match (self.kind.is_output(), self.arguments.as_slice()) {
+                (true, [AnalogTaskOperand::Real(value)]) => Some(value),
+                _ => None,
+            },
+        )
     }
 
     pub fn map<T, U>(&self, span: U, mut lower: impl FnMut(&E) -> T) -> AnalogTaskCall<T, U> {

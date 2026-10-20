@@ -5601,6 +5601,8 @@ impl Engine {
                 log::info!("{inventory}");
             }
         }
+        let mut built = built;
+        built.circuit.analog_task_output = self.config.hdl.output.clone();
         Ok(*built)
     }
 

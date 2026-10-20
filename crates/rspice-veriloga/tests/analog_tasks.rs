@@ -424,3 +424,62 @@ fn canonical_validation_rejects_task_metadata_that_disagrees_with_execution() {
             .any(|diagnostic| diagnostic.message.contains("analog task region disagrees"))
     );
 }
+
+#[test]
+fn output_tasks_publish_their_typed_arguments_and_line_only_from_accepted_points() {
+    let fixture = DeviceFixture::compile(
+        "module printer(p,n);
+inout p,n; electrical p,n;
+integer k;
+analog begin
+ k = 3;
+ I(p,n) <+ V(p,n);
+ $strobe(\"v=%g k=%d\", V(p,n), k);
+ if (V(p,n) > 1) $warning(\"high %g\", V(p,n));
+ $write(\"no newline\");
+end
+endmodule",
+    );
+    let mut device = fixture.device("XP", &[1, 0]);
+    let published = |device: &mut rspice_veriloga::device::VerilogADevice| {
+        let mut events = Vec::new();
+        device.visit_accepted_analog_tasks(&mut |event| {
+            events.push((
+                event.call.kind,
+                event.call.arguments.to_vec(),
+                event.source.map(|source| source.line),
+            ));
+        });
+        events
+    };
+    // Two Newton evaluations of one point publish nothing until the point is
+    // accepted, and then only the last evaluation's calls.
+    for voltage in [0.5, 2.0] {
+        device.update_voltages(&[voltage]);
+        device.try_evaluate().unwrap();
+        assert!(published(&mut device).is_empty());
+    }
+    device.try_advance_state().unwrap();
+    let text = |value: &str| AnalogTaskArgument::String(value.into());
+    assert_eq!(
+        published(&mut device),
+        vec![
+            (
+                AnalogTaskKind::Strobe,
+                vec![
+                    text("v=%g k=%d"),
+                    AnalogTaskArgument::Real(2.0),
+                    AnalogTaskArgument::Integer(3)
+                ],
+                Some(7)
+            ),
+            (
+                AnalogTaskKind::Warning,
+                vec![text("high %g"), AnalogTaskArgument::Real(2.0)],
+                Some(8)
+            ),
+            (AnalogTaskKind::Write, vec![text("no newline")], Some(9)),
+        ]
+    );
+    assert!(published(&mut device).is_empty());
+}

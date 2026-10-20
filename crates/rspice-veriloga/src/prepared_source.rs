@@ -351,6 +351,7 @@ impl PreparedRuntimeSource {
         measurements.checkpoint(crate::PipelinePhase::Semantic)?;
         let started = web_time::Instant::now();
         let mut analyzed = crate::semantic::SemanticAnalyzer::new()
+            .discarding_output_tasks(self.analyzed.discard_output_tasks)
             .analyze_selected(&self.analyzed.source, Some(name))?;
         analyzed.source_specialization = self.analyzed.source_specialization.clone();
         measurements.record(crate::PipelinePhase::Semantic, started.elapsed())?;

@@ -3705,7 +3705,7 @@ fn lower_canonical_assignment_statement(
                     detail: "analog task has excess executable operands".into(),
                 });
             }
-            Ok(vec![NativeAssignment::Task(lowered)])
+            Ok(vec![NativeAssignment::Task(plan_task(lowered))])
         }
         HirStatement::Assignment(assignment) => lower_canonical_assignment(
             model,
@@ -4834,7 +4834,7 @@ fn lower_assignment_step_with_limits(
             model: model.name.clone(),
             detail: "initialization region reached Newton assignment lowering".into(),
         }),
-        AssignmentStep::Task(task) => Ok(NativeAssignment::Task(task.try_map(
+        AssignmentStep::Task(task) => Ok(NativeAssignment::Task(plan_task(task.try_map(
             task.span,
             |program| {
                 NativeProgram::from_bytecode(
@@ -4844,7 +4844,7 @@ fn lower_assignment_step_with_limits(
                     limits,
                 )
             },
-        )?)),
+        )?))),
         AssignmentStep::Assign(assignment) => {
             validate_assignment_target(model, assignment.var_index)?;
             let program = NativeProgram::from_bytecode(
@@ -4909,6 +4909,31 @@ fn lower_assignment_step_with_limits(
                 .collect::<JitResult<Vec<_>>>()?;
             Ok(NativeAssignment::Loop { condition, body })
         }
+    }
+}
+
+/// A plan executes an output task as one program that journals its own
+/// operands (`NativeProgram::analog_output`); a `$finish` keeps its level.
+fn plan_task(
+    task: crate::analog_tasks::AnalogTaskCall<NativeProgram, crate::canonical_ir::SourceSpanRef>,
+) -> crate::analog_tasks::AnalogTaskCall<NativeProgram, crate::canonical_ir::SourceSpanRef> {
+    use crate::analog_tasks::{AnalogTaskCall, AnalogTaskOperand};
+    if !task.kind.is_output() {
+        return task;
+    }
+    let programs = task
+        .arguments
+        .into_iter()
+        .filter_map(|argument| match argument {
+            AnalogTaskOperand::Real(program) | AnalogTaskOperand::Integer(program) => Some(program),
+            AnalogTaskOperand::String(_) => None,
+        })
+        .collect();
+    AnalogTaskCall {
+        arguments: vec![AnalogTaskOperand::Real(NativeProgram::analog_output(
+            task.site, task.kind, programs,
+        ))],
+        ..task
     }
 }
 

@@ -122,6 +122,8 @@ impl CircuitData {
                 rspice_veriloga_runtime::GeneratedSimulationParameters::default(),
             #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
             veriloga_point_time: 0.0,
+            analog_task_output: None,
+            analog_monitor_values: HashMap::new(),
         }
     }
 

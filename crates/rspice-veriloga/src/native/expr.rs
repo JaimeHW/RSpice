@@ -124,6 +124,13 @@ pub(crate) enum NativeOp {
     AnalogTaskGuard,
     /// Append one source-ordered call to the current candidate journal.
     AnalogFinish(u32),
+    /// Append one output task (`$strobe`, `$display`, ...) with its numeric
+    /// operands, in source order, to the current candidate journal.
+    AnalogOutput {
+        site: u32,
+        kind: rspice_veriloga_runtime::AnalogTaskKind,
+        arguments: usize,
+    },
     /// Record a counter write: operands are new value and absolute slot.
     RecordAnalogCounter,
     Const(f64),
@@ -1475,6 +1482,55 @@ pub(crate) fn pair_canonical_state_slots(
 }
 
 impl NativeProgram {
+    /// One postfix program that evaluates an output task's numeric operands
+    /// in source order and journals them with its last operation, so a plan
+    /// executes the call as a single task program on every target.
+    pub(crate) fn analog_output(
+        site: u32,
+        kind: rspice_veriloga_runtime::AnalogTaskKind,
+        programs: Vec<NativeProgram>,
+    ) -> Self {
+        let arguments = programs.len();
+        let mut merged = Self {
+            analog_occurrence_source: None,
+            ops: Vec::new(),
+            max_stack_depth: 1,
+            current_pair_dependencies: Vec::new(),
+            prior_current_dependencies: Vec::new(),
+            branch_unknown_dependencies: Vec::new(),
+        };
+        for (depth, program) in programs.into_iter().enumerate() {
+            merged.max_stack_depth = merged.max_stack_depth.max(depth + program.max_stack_depth);
+            merged.analog_occurrence_source = merged
+                .analog_occurrence_source
+                .or(program.analog_occurrence_source);
+            merged.ops.extend(program.ops);
+            merged
+                .current_pair_dependencies
+                .extend(program.current_pair_dependencies);
+            merged
+                .prior_current_dependencies
+                .extend(program.prior_current_dependencies);
+            merged
+                .branch_unknown_dependencies
+                .extend(program.branch_unknown_dependencies);
+        }
+        for dependencies in [
+            &mut merged.current_pair_dependencies,
+            &mut merged.prior_current_dependencies,
+            &mut merged.branch_unknown_dependencies,
+        ] {
+            dependencies.sort_unstable();
+            dependencies.dedup();
+        }
+        merged.ops.push(NativeOp::AnalogOutput {
+            site,
+            kind,
+            arguments,
+        });
+        merged
+    }
+
     #[cfg(test)]
     pub(crate) fn from_ops_for_test(
         ops: Vec<NativeOp>,
@@ -8560,6 +8616,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::AnalogTasksEnabled => "AnalogTasksEnabled",
         NativeOp::AnalogTaskGuard => "AnalogTaskGuard",
         NativeOp::AnalogFinish(_) => "AnalogFinish",
+        NativeOp::AnalogOutput { .. } => "AnalogOutput",
         NativeOp::RecordAnalogCounter => "RecordAnalogCounter",
         NativeOp::Const(_) => "Const",
         NativeOp::LoadParam(_) => "LoadParam",
@@ -9547,6 +9604,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         NativeOp::RecordAnalogCounter => (4, 1),
         NativeOp::AnalogTasksEnabled => (0, 1),
         NativeOp::AnalogTaskGuard | NativeOp::AnalogFinish(_) => (1, 1),
+        NativeOp::AnalogOutput { arguments, .. } => (*arguments, 1),
         NativeOp::Const(_)
         | NativeOp::LoadParam(_)
         | NativeOp::LoadParamGiven(_)

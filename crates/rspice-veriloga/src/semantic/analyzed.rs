@@ -33,6 +33,9 @@ pub struct AnalyzedFile {
     pub connect_rules: crate::connect::ConnectRuleTable,
     /// Explicit design selection, retained for executable identity and replay.
     pub connection_configuration: Option<Box<crate::ConnectionConfiguration>>,
+    /// The analysis compiled output tasks as warned no-ops; a re-analysis of
+    /// the same file does the same.
+    pub(crate) discard_output_tasks: bool,
 }
 
 /// One non-fatal finding raised by semantic analysis.

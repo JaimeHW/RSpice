@@ -520,6 +520,22 @@ pub(super) fn evaluate_slice_helper_with_session(
     if opcode == 251 {
         return evaluate_sum_products_div(aux0, aux1, aux2, operands);
     }
+    if opcode == 464 {
+        let kind = u64::try_from(aux1)
+            .ok()
+            .and_then(rspice_veriloga_runtime::AnalogTaskKind::from_code)
+            .ok_or_else(|| session.fail("analog output task descriptor names no task"))?;
+        if !session.context.record_task_effects {
+            return Ok(0.0);
+        }
+        let time = session.context.time;
+        return session
+            .context
+            .analog_effect_journal()
+            .record_values(kind, aux0 as u32, time, operands)
+            .map(|()| 0.0)
+            .map_err(|error| session.fail(format!("{kind:?}: {error}")));
+    }
     if matches!(opcode, 445 | 481) {
         if aux1 != 0 || aux2 != 0 {
             return Err(session.fail(
@@ -1024,7 +1040,7 @@ pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
 fn is_stateful_opcode(opcode: i32) -> bool {
     matches!(
         opcode,
-        400..=429 | 432 | 440..=449 | 460..=463 | 470..=471 | 480..=484
+        400..=429 | 432 | 440..=449 | 460..=464 | 470..=471 | 480..=484
     )
 }
 
@@ -1238,8 +1254,8 @@ mod tests {
     fn emitted_stateful_helpers_require_the_active_runtime_session() {
         for opcode in [
             400, 401, 402, 410, 411, 412, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 432,
-            440, 442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 463, 470, 471, 480, 481,
-            482, 483, 484,
+            440, 442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 463, 464, 470, 471, 480,
+            481, 482, 483, 484,
         ] {
             assert!(
                 is_stateful_opcode(opcode),

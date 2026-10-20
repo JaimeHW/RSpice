@@ -4061,7 +4061,33 @@ impl ModelPlan {
             let source = if initialization { "0.0" } else { "self.time" };
             let _ = writeln!(out, "{pad}let time = {source};");
         }
-        if wants.analog_tasks {
+        if wants.analog_tasks && wants.analog_output {
+            let guard = if initialization {
+                ""
+            } else {
+                "if ctx.analog_tasks_enabled() "
+            };
+            // Both callbacks journal into one slot, so they share it through
+            // a cell rather than each holding it exclusively.
+            let _ = writeln!(
+                out,
+                "{pad}let analog_effects = std::cell::RefCell::new(&mut self.analog_effects);\n\
+                 {pad}let analog_finish = |site: u32, time: f64, diagnostic: f64| {{\n\
+                 {pad}    {guard}{{\n\
+                 {pad}        if let Err(source) = analog_effects.borrow_mut().get_or_insert_with(Default::default).record_finish(site, time, diagnostic) {{\n\
+                 {pad}            ctx.report_analog_task_error(site, source);\n\
+                 {pad}        }}\n\
+                 {pad}    }}\n\
+                 {pad}}};\n\
+                 {pad}let analog_output = |site: u32, kind: rspice_veriloga_runtime::AnalogTaskKind, time: f64, arguments: Box<[rspice_veriloga_runtime::AnalogTaskArgument]>| {{\n\
+                 {pad}    {guard}{{\n\
+                 {pad}        if let Err(source) = analog_effects.borrow_mut().get_or_insert_with(Default::default).record(rspice_veriloga_runtime::AnalogTaskInvocation {{ kind, site, time, arguments }}) {{\n\
+                 {pad}            ctx.report_analog_task_error(site, source);\n\
+                 {pad}        }}\n\
+                 {pad}    }}\n\
+                 {pad}}};"
+            );
+        } else if wants.analog_tasks {
             let guard = if initialization {
                 ""
             } else {
@@ -5520,6 +5546,8 @@ enum Reactive {
 #[derive(Default)]
 struct Wants {
     analog_tasks: bool,
+    /// `$strobe` and its kin, which share the journal with `$finish`.
+    analog_output: bool,
     parameters: bool,
     parameter_given: bool,
     port_connected: bool,
@@ -5554,6 +5582,9 @@ impl Wants {
             CfgValueKind::AnalogTask(_) | CfgValueKind::AnalogCounter { .. } => {
                 self.analog_tasks = true;
                 self.time = true;
+                if let CfgValueKind::AnalogTask(task) = kind {
+                    self.analog_output |= task.kind.is_output();
+                }
             }
             CfgValueKind::Parameter(_) => self.parameters = true,
             CfgValueKind::ParameterGiven(_) => self.parameter_given = true,

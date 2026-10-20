@@ -124,6 +124,11 @@ pub struct CompiledModel {
     /// the replay should execute, so old artifacts stay readable.
     #[serde(default)]
     pub noise_assignment_steps: Vec<AssignmentStep>,
+    /// The source file and line of each analog task call, by site, for the
+    /// host's report of an output line or a `$finish`. Empty when the compile
+    /// had no source text to locate a call in.
+    #[serde(default)]
+    pub analog_task_origins: Vec<crate::analog_tasks::AnalogTaskOrigin>,
     /// Compiled stamp programs for each contribution
     pub stamp_programs: Vec<StampProgram>,
     /// Lookup tables for $table_model (x_data, y_data pairs)
@@ -1033,6 +1038,65 @@ pub enum Instruction {
 }
 
 impl CompiledModel {
+    /// The task call at `site`, wherever the assignment steps nest it.
+    pub fn analog_task(
+        &self,
+        site: u32,
+    ) -> Option<
+        &crate::analog_tasks::AnalogTaskCall<BytecodeProgram, crate::canonical_ir::SourceSpanRef>,
+    > {
+        let mut pending = vec![self.assignment_steps.as_slice()];
+        while let Some(steps) = pending.pop() {
+            for step in steps {
+                match step {
+                    AssignmentStep::Task(task) if task.site == site => return Some(task),
+                    AssignmentStep::Loop { body, .. }
+                    | AssignmentStep::Initialization { body, .. } => pending.push(body),
+                    _ => {}
+                }
+            }
+        }
+        None
+    }
+
+    /// Where the task call at `site` was written, when the compile knew.
+    pub fn analog_task_origin(&self, site: u32) -> Option<&crate::analog_tasks::AnalogTaskOrigin> {
+        self.analog_task_origins
+            .iter()
+            .find(|origin| origin.site == site)
+    }
+
+    /// Locate every task call through `locate`, which maps a call's span to
+    /// its file and one-based line.
+    pub(crate) fn locate_analog_tasks(
+        &mut self,
+        mut locate: impl FnMut(crate::canonical_ir::SourceSpanRef) -> Option<(SmolStr, u32)>,
+    ) {
+        let mut origins = Vec::new();
+        let mut pending = vec![self.assignment_steps.as_slice()];
+        while let Some(steps) = pending.pop() {
+            for step in steps {
+                match step {
+                    AssignmentStep::Task(task) => {
+                        if let Some((file, line)) = locate(task.span) {
+                            origins.push(crate::analog_tasks::AnalogTaskOrigin {
+                                site: task.site,
+                                file,
+                                line,
+                            });
+                        }
+                    }
+                    AssignmentStep::Loop { body, .. }
+                    | AssignmentStep::Initialization { body, .. } => pending.push(body),
+                    _ => {}
+                }
+            }
+        }
+        origins.sort_by_key(|origin| origin.site);
+        origins.dedup_by_key(|origin| origin.site);
+        self.analog_task_origins = origins;
+    }
+
     /// Resolve the shared ordinary/noise assignment representation.
     pub(crate) fn noise_assignment_replay(&self) -> &[AssignmentStep] {
         if self.noise_assignment_steps.is_empty() {

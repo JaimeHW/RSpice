@@ -348,6 +348,11 @@ pub struct CompilerOptions {
     /// Optional wall-clock limits. Empty by default, so ordinary compilation
     /// is never rejected due to host load or timer resolution.
     pub performance_budget: PerformanceBudget,
+    /// Compile `$strobe`, `$display` and the other output tasks as warned
+    /// no-ops instead of journaling them for the host to print. The built-in
+    /// generator sets it: printing from the shipped compact models changes
+    /// their generated code and is a separate decision.
+    pub discard_output_tasks: bool,
 }
 
 /// Integration order for the `idt` and `ddt` companion models.
@@ -1019,6 +1024,7 @@ impl VerilogACompiler {
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir)?;
+        Self::locate_analog_tasks(&mut model, source_package, preprocessed, None);
         measurements.checkpoint(PipelinePhase::RuntimeQualification)?;
         let phase_started = web_time::Instant::now();
         let mut report = RuntimeCompileReport::from_artifacts(model, canonical_ir, qualifications);
@@ -1076,6 +1082,34 @@ impl VerilogACompiler {
     /// runs here rather than inside the generator because the canonical HIR —
     /// which defines the site numbering — does not exist until this point.
     ///
+    /// Record the file and line of every analog task call, the way a digital
+    /// system call is located: through the prepared source map when there is
+    /// one, else by counting the compiled text's lines.
+    fn locate_analog_tasks(
+        model: &mut CompiledModel,
+        source_package: &str,
+        source: &str,
+        source_map: Option<&prepared_diagnostics::PreparedSourceMap>,
+    ) {
+        model.locate_analog_tasks(|span| {
+            // Only the compiled document's own text is indexed here.
+            if span.source_file_id != 0 {
+                return None;
+            }
+            let offset = span.start as usize;
+            if let Some(map) = source_map {
+                return map
+                    .locate(offset)
+                    .map(|(path, line)| (path.display().to_string().into(), line as u32));
+            }
+            let prefix = source.get(..offset)?;
+            Some((
+                source_package.into(),
+                prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1,
+            ))
+        });
+    }
+
     /// It runs for every runtime, not only the JIT: the VM and the JIT read the
     /// same `state_values` array through the same programs, so a model
     /// renumbered for one is renumbered for both, and a model renumbered for
@@ -1385,10 +1419,12 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Semantic)?;
         trace_compiler_phase(trace, &target, "semantic", None, None);
         let phase_started = web_time::Instant::now();
+        let mut analyzer =
+            SemanticAnalyzer::new().discarding_output_tasks(self.options.discard_output_tasks);
         let mut analyzed = if module_name.is_some() {
-            SemanticAnalyzer::new().analyze_selected(&source_file, module_name)?
+            analyzer.analyze_selected(&source_file, module_name)?
         } else {
-            SemanticAnalyzer::new().prepare_source(&source_file)?
+            analyzer.prepare_source(&source_file)?
         };
         analyzed.source_specialization = source_specialization;
         if !front_end_warnings.is_empty() {
@@ -1661,7 +1697,9 @@ impl VerilogACompiler {
             source
                 .items
                 .insert(index + 1, ast::Item::Module(module.clone()));
-            let mut promoted = SemanticAnalyzer::new().analyze_selected(&source, Some(name))?;
+            let mut promoted = SemanticAnalyzer::new()
+                .discarding_output_tasks(analyzed.discard_output_tasks)
+                .analyze_selected(&source, Some(name))?;
             promoted.connection_configuration = analyzed.connection_configuration.clone();
             promoted.source_specialization = analyzed.source_specialization.clone();
             let selected = self.select_analyzed_module(&promoted, Some(name))?;
@@ -2390,6 +2428,12 @@ impl VerilogACompiler {
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir)?;
+        Self::locate_analog_tasks(
+            &mut model,
+            &prepared.source_package,
+            &prepared.source,
+            Some(&prepared.source_map),
+        );
 
         let mut diagnostics = prepared.diagnostics.clone();
         let source_warnings: Vec<_> = executable
