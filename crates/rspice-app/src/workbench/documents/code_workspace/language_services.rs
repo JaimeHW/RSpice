@@ -15,7 +15,6 @@ use crate::workbench::RSpiceApp;
 const MAX_INDEX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_INDEX_TOKENS: usize = 500_000;
 const MAX_RENAME_EDITS: usize = 50_000;
-const MAX_COMPLETIONS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SourceSymbolKind {
@@ -32,24 +31,6 @@ pub(crate) enum SourceSymbolKind {
     Nature,
 }
 
-impl SourceSymbolKind {
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Module => "module",
-            Self::Function => "function",
-            Self::Class => "class",
-            Self::Parameter => "parameter",
-            Self::Port => "port",
-            Self::Net => "net",
-            Self::Variable => "variable",
-            Self::Import => "import",
-            Self::Configuration => "configuration",
-            Self::Discipline => "discipline",
-            Self::Nature => "nature",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceSymbol {
     pub name: String,
@@ -61,45 +42,13 @@ pub(crate) struct SourceSymbol {
     pub signature: String,
 }
 
+/// One occurrence of a name, as Find references lists it: where it is, and
+/// the line it sits on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SymbolOccurrence {
-    pub name: String,
     pub logical_path: String,
-    pub byte_range: Range<usize>,
     pub line: usize,
-    pub column: usize,
-    pub definition: bool,
     pub line_preview: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LanguageCompletion {
-    pub label: String,
-    pub kind: String,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SourceCodeActionKind {
-    QuickFix,
-    Format,
-}
-
-impl SourceCodeActionKind {
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::QuickFix => "quick fix",
-            Self::Format => "format",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SourceCodeAction {
-    pub title: String,
-    pub kind: SourceCodeActionKind,
-    pub logical_path: String,
-    replacement: String,
 }
 
 #[derive(Debug, Clone)]
@@ -125,45 +74,15 @@ pub(crate) struct LanguageServiceIndex {
     sources: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum LanguageToolView {
-    #[default]
-    DocumentSymbols,
-    Completion,
-    Hover,
-    SignatureHelp,
-    Definitions,
-    Declarations,
-    References,
-    WorkspaceSymbols,
-    CodeActions,
-}
-
-impl LanguageToolView {
-    /// Every view the index can answer, in the order the tools surface offers
-    /// them: what the document declares, what the caret is on, then what the
-    /// whole project says about it.
-    pub(crate) const ALL: [Self; 9] = [
-        Self::DocumentSymbols,
-        Self::Completion,
-        Self::Hover,
-        Self::SignatureHelp,
-        Self::Definitions,
-        Self::Declarations,
-        Self::References,
-        Self::WorkspaceSymbols,
-        Self::CodeActions,
-    ];
-}
-
+/// An open Rename symbol: the index it was opened against, the name under
+/// the caret, and the new name being typed.
 #[derive(Debug, Clone)]
 pub(crate) struct CodeLanguageToolsState {
     pub index: LanguageServiceIndex,
     pub active_path: String,
-    pub caret_char_index: usize,
     pub query: String,
     pub replacement: String,
-    pub view: LanguageToolView,
+    /// Why the last Rename was refused, until the name is edited.
     pub error: Option<String>,
 }
 
@@ -204,10 +123,8 @@ pub(crate) fn open_language_tools_in_bundle(
     app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
         index,
         active_path,
-        caret_char_index,
         query,
         replacement: String::new(),
-        view: LanguageToolView::DocumentSymbols,
         error: None,
     });
     Ok(())
@@ -230,7 +147,7 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
             "Rename would change governed read-only source '{logical_path}'. No project source was changed."
         ));
     }
-    let edit_count = state.index.references(&state.query).len();
+    let (occurrences, _) = state.index.rename_extent(&state.query);
     let changed_files = app
         .state
         .model
@@ -246,84 +163,25 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
             super::automation::invalidate_automation_evidence(app);
         }
     }
-    let bundle = app
-        .state
-        .model
-        .workspace
-        .content
-        .project_sources
-        .get_bundle(state.index.bundle_id)
-        .ok_or_else(|| "The renamed source bundle could not be reloaded.".to_owned())?;
-    let index =
-        LanguageServiceIndex::build(app.state.model.workspace.content.project.id(), bundle)?;
     let message = format!(
-        "Renamed '{}' to '{}' at {} indexed occurrence{} across {} project source file{}.",
+        "Renamed {} to {}: {}.",
         state.query,
         state.replacement,
-        edit_count,
-        if edit_count == 1 { "" } else { "s" },
-        changed_files,
-        if changed_files == 1 { "" } else { "s" }
+        extent_words(occurrences, changed_files)
     );
-    app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
-        index,
-        active_path: state.active_path,
-        caret_char_index: state.caret_char_index,
-        query: state.replacement,
-        replacement: String::new(),
-        view: LanguageToolView::References,
-        error: None,
-    });
+    // The rename is the form's one transaction: done, the form is closed.
+    app.state.code.code_workspace.language_tools = None;
     app.state.prompt(message.clone());
     Ok(message)
 }
 
-pub(crate) fn commit_language_completion(
-    app: &mut RSpiceApp,
-    completion: &str,
-) -> Result<String, String> {
-    let state = current_language_transaction(app)?;
-    if !valid_identifier(completion) {
-        return Err("The selected completion is not an insertable identifier.".to_owned());
-    }
-    let replacement = state.index.completion_replacement(
-        &state.active_path,
-        state.caret_char_index,
-        completion,
-    )?;
-    replace_one_language_document(app, &state, &state.active_path, replacement)?;
-    let message = format!(
-        "Inserted completion '{completion}' into '{}'.",
-        state.active_path
-    );
-    app.state.prompt(message.clone());
-    Ok(message)
-}
-
-pub(crate) fn commit_language_code_action(
-    app: &mut RSpiceApp,
-    action: &SourceCodeAction,
-) -> Result<String, String> {
-    let state = current_language_transaction(app)?;
-    if !crate::state::project_source_paths_equal(&action.logical_path, &state.active_path) {
-        return Err("The code action does not target the active source document.".to_owned());
-    }
-    let current = state
-        .index
-        .source_for_path(&action.logical_path)
-        .ok_or_else(|| "The code-action source is no longer indexed.".to_owned())?;
-    if current == &action.replacement {
-        return Ok("The active source already satisfies this code action.".to_owned());
-    }
-    replace_one_language_document(
-        app,
-        &state,
-        &action.logical_path,
-        action.replacement.clone(),
-    )?;
-    let message = format!("Applied {}: {}.", action.kind.label(), action.title);
-    app.state.prompt(message.clone());
-    Ok(message)
+/// "3 occurrences in 2 files", for the rename form and its receipt.
+pub(crate) fn extent_words(occurrences: usize, files: usize) -> String {
+    format!(
+        "{occurrences} occurrence{} in {files} file{}",
+        if occurrences == 1 { "" } else { "s" },
+        if files == 1 { "" } else { "s" }
+    )
 }
 
 fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsState, String> {
@@ -402,10 +260,7 @@ pub(crate) fn format_language_document(
                 .map(|(_, source)| source.to_owned())
         })
         .ok_or_else(|| format!("{logical_path} is no longer part of this project."))?;
-    let syntax = document_syntax(language, logical_path);
-    validate_source_for_formatting(syntax, logical_path, &source)?;
-    let protected = protected_string_lines(&source, syntax);
-    let (formatted, _) = normalize_source_whitespace(&source, &protected);
+    let formatted = formatted_source(language, logical_path, &source)?;
     let message = if formatted == source {
         format!("{logical_path} is already formatted.")
     } else {
@@ -414,6 +269,19 @@ pub(crate) fn format_language_document(
     };
     app.state.prompt(message.clone());
     Ok(message)
+}
+
+/// The formatter's whole-document edit: trailing blanks removed outside
+/// string literals and one final line break, or why the source is refused.
+fn formatted_source(
+    language: ProjectSourceLanguage,
+    logical_path: &str,
+    source: &str,
+) -> Result<String, String> {
+    let syntax = document_syntax(language, logical_path);
+    validate_source_for_formatting(syntax, logical_path, source)?;
+    let protected = protected_string_lines(source, syntax);
+    Ok(normalize_source_whitespace(source, &protected).0)
 }
 
 fn write_language_document(
@@ -436,36 +304,6 @@ fn write_language_document(
         ProjectSourceLanguage::RSpiceAutomation => {
             super::automation::invalidate_automation_evidence(app);
         }
-    }
-    Ok(())
-}
-
-fn replace_one_language_document(
-    app: &mut RSpiceApp,
-    state: &CodeLanguageToolsState,
-    logical_path: &str,
-    replacement: String,
-) -> Result<(), String> {
-    write_language_document(
-        app,
-        state.index.language,
-        state.index.bundle_id,
-        logical_path,
-        replacement,
-    )?;
-    let bundle = app
-        .state
-        .model
-        .workspace
-        .content
-        .project_sources
-        .get_bundle(state.index.bundle_id)
-        .ok_or_else(|| "The changed source bundle could not be reloaded.".to_owned())?;
-    let index =
-        LanguageServiceIndex::build(app.state.model.workspace.content.project.id(), bundle)?;
-    if let Some(tools) = app.state.code.code_workspace.language_tools.as_mut() {
-        tools.index = index;
-        tools.error = None;
     }
     Ok(())
 }
@@ -542,10 +380,6 @@ impl LanguageServiceIndex {
             && self.language == bundle.language()
     }
 
-    pub(crate) fn symbols(&self) -> &[SourceSymbol] {
-        &self.symbols
-    }
-
     pub(crate) fn document_symbols(&self, logical_path: &str) -> Vec<&SourceSymbol> {
         self.symbols
             .iter()
@@ -580,12 +414,8 @@ impl LanguageServiceIndex {
             .iter()
             .filter(|token| token.name == name)
             .map(|token| SymbolOccurrence {
-                name: token.name.clone(),
                 logical_path: token.logical_path.clone(),
-                byte_range: token.byte_range.clone(),
                 line: token.line,
-                column: token.column,
-                definition: token.definition,
                 line_preview: self
                     .source_for_path(&token.logical_path)
                     .map_or_else(String::new, |source| {
@@ -595,180 +425,18 @@ impl LanguageServiceIndex {
             .collect()
     }
 
-    pub(crate) fn declarations(&self, name: &str) -> Vec<&SourceSymbol> {
-        // Python and Verilog-A declarations are the authoritative indexed
-        // definitions in this project-owned source closure. Keeping this as a
-        // separate operation preserves the language-service contract even
-        // where the two locations are identical.
-        self.definitions(name)
-    }
-
-    pub(crate) fn completions(
-        &self,
-        logical_path: &str,
-        caret_char_index: usize,
-        query: &str,
-    ) -> Vec<LanguageCompletion> {
-        let prefix = self
-            .identifier_prefix(logical_path, caret_char_index)
-            .unwrap_or_default();
-        let filter = if query.trim().is_empty() {
-            prefix
-        } else {
-            query.trim()
-        }
-        .to_ascii_lowercase();
-        let mut candidates = BTreeMap::<String, LanguageCompletion>::new();
-        for symbol in &self.symbols {
-            candidates
-                .entry(symbol.name.clone())
-                .or_insert_with(|| LanguageCompletion {
-                    label: symbol.name.clone(),
-                    kind: symbol.kind.label().to_owned(),
-                    detail: format!(
-                        "{} · {}:{}",
-                        symbol.signature, symbol.logical_path, symbol.line
-                    ),
-                });
-        }
-        let syntax = document_syntax(self.language, logical_path);
-        for (label, kind, detail) in language_completion_catalog(syntax) {
-            candidates
-                .entry((*label).to_owned())
-                .or_insert_with(|| LanguageCompletion {
-                    label: (*label).to_owned(),
-                    kind: (*kind).to_owned(),
-                    detail: (*detail).to_owned(),
-                });
-        }
-        candidates
-            .into_values()
-            .filter(|candidate| {
-                filter.is_empty() || candidate.label.to_ascii_lowercase().starts_with(&filter)
-            })
-            .take(MAX_COMPLETIONS)
-            .collect()
-    }
-
-    pub(crate) fn hover(&self, name: &str) -> Option<String> {
-        if name.is_empty() {
-            return None;
-        }
-        let definitions = self.definitions(name);
-        if !definitions.is_empty() {
-            let signatures = definitions
-                .iter()
-                .map(|definition| {
-                    format!(
-                        "{} · {}:{}",
-                        definition.signature, definition.logical_path, definition.line
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Some(format!(
-                "{} {} · {} indexed reference{}\n{}",
-                definitions[0].kind.label(),
-                name,
-                self.references(name).len(),
-                if self.references(name).len() == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                signatures
-            ));
-        }
-        language_completion_catalog_for(self.language)
+    /// What a rename of `name` rewrites: its occurrences outside comments and
+    /// strings, and the files they sit in.
+    pub(crate) fn rename_extent(&self, name: &str) -> (usize, usize) {
+        let occurrences = self
+            .tokens
             .iter()
-            .find(|(label, _, _)| *label == name)
-            .map(|(_, kind, detail)| format!("{kind} {name}\n{detail}"))
-    }
-
-    pub(crate) fn signature_help(
-        &self,
-        logical_path: &str,
-        caret_char_index: usize,
-    ) -> Option<String> {
-        let source = self.source_for_path(logical_path)?;
-        let caret = char_to_byte(source, caret_char_index);
-        let function = call_identifier_before(source, caret)?;
-        let indexed = self
-            .definitions(function)
-            .into_iter()
-            .filter(|symbol| matches!(symbol.kind, SourceSymbolKind::Function))
-            .map(|symbol| symbol.signature.clone())
-            .collect::<Vec<_>>();
-        if !indexed.is_empty() {
-            return Some(indexed.join("\n"));
-        }
-        language_completion_catalog(document_syntax(self.language, logical_path))
-            .iter()
-            .find(|(label, kind, _)| *label == function && *kind == "function")
-            .map(|(_, _, detail)| (*detail).to_owned())
-    }
-
-    pub(crate) fn code_actions(&self, logical_path: &str) -> Result<Vec<SourceCodeAction>, String> {
-        let source = self
-            .source_for_path(logical_path)
-            .ok_or_else(|| format!("The source document '{logical_path}' is not indexed."))?;
-        let syntax = document_syntax(self.language, logical_path);
-        validate_source_for_formatting(syntax, logical_path, source)?;
-        let protected = protected_string_lines(source, syntax);
-        let (normalized, removed_whitespace) = normalize_source_whitespace(source, &protected);
-        let mut actions = Vec::new();
-        if removed_whitespace {
-            actions.push(SourceCodeAction {
-                title: "Remove trailing whitespace outside string literals".to_owned(),
-                kind: SourceCodeActionKind::QuickFix,
-                logical_path: logical_path.to_owned(),
-                replacement: normalized.clone(),
-            });
-        }
-        if normalized != *source {
-            actions.push(SourceCodeAction {
-                title: "Format active document".to_owned(),
-                kind: SourceCodeActionKind::Format,
-                logical_path: logical_path.to_owned(),
-                replacement: normalized,
-            });
-        }
-        Ok(actions)
-    }
-
-    fn identifier_prefix(&self, logical_path: &str, caret_char_index: usize) -> Option<&str> {
-        let source = self.source_for_path(logical_path)?;
-        let byte = char_to_byte(source, caret_char_index);
-        let start = source[..byte]
-            .char_indices()
-            .rev()
-            .find(|(_, character)| !(*character == '_' || character.is_alphanumeric()))
-            .map_or(0, |(index, character)| index + character.len_utf8());
-        source.get(start..byte)
-    }
-
-    fn completion_replacement(
-        &self,
-        logical_path: &str,
-        caret_char_index: usize,
-        completion: &str,
-    ) -> Result<String, String> {
-        let source = self
-            .source_for_path(logical_path)
-            .ok_or_else(|| format!("The source document '{logical_path}' is not indexed."))?;
-        let caret = char_to_byte(source, caret_char_index);
-        let start = source[..caret]
-            .char_indices()
-            .rev()
-            .find(|(_, character)| !(*character == '_' || character.is_alphanumeric()))
-            .map_or(0, |(index, character)| index + character.len_utf8());
-        let end = source[caret..]
-            .char_indices()
-            .find(|(_, character)| !(*character == '_' || character.is_alphanumeric()))
-            .map_or(source.len(), |(index, _)| caret + index);
-        let mut replacement = source.clone();
-        replacement.replace_range(start..end, completion);
-        Ok(replacement)
+            .filter(|token| token.name == name && token.renamable);
+        let files = occurrences
+            .clone()
+            .map(|token| crate::state::project_source_path_key(&token.logical_path))
+            .collect::<BTreeSet<_>>();
+        (occurrences.count(), files.len())
     }
 
     pub(crate) fn rename_preview(
@@ -859,198 +527,6 @@ fn document_syntax(language: ProjectSourceLanguage, logical_path: &str) -> Docum
             }
         }
     }
-}
-
-fn language_completion_catalog(
-    syntax: DocumentSyntax,
-) -> &'static [(&'static str, &'static str, &'static str)] {
-    match syntax {
-        DocumentSyntax::VerilogA => &[
-            ("module", "keyword", "module name(ports); ... endmodule"),
-            ("analog", "keyword", "analog begin ... end"),
-            ("parameter", "keyword", "parameter real name = value"),
-            ("electrical", "keyword", "electrical node declarations"),
-            ("discipline", "keyword", "discipline declaration"),
-            ("nature", "keyword", "nature declaration"),
-            (
-                "transition",
-                "function",
-                "transition(expression, delay, rise, fall)",
-            ),
-            ("slew", "function", "slew(expression, rise, fall)"),
-            ("ddt", "function", "ddt(expression)"),
-            ("idt", "function", "idt(expression[, initial_condition])"),
-            (
-                "laplace_nd",
-                "function",
-                "laplace_nd(expression, numerator, denominator)",
-            ),
-            (
-                "laplace_np",
-                "function",
-                "laplace_np(expression, numerator, poles)",
-            ),
-            ("white_noise", "function", "white_noise(power, name)"),
-            (
-                "flicker_noise",
-                "function",
-                "flicker_noise(power, exponent, name)",
-            ),
-            (
-                "cross",
-                "function",
-                "cross(expression[, direction[, time_tol[, expr_tol]]])",
-            ),
-            (
-                "timer",
-                "function",
-                "timer(start_time[, period[, time_tol]])",
-            ),
-            ("V", "access function", "V(node) or V(positive, negative)"),
-            ("I", "access function", "I(branch) or I(positive, negative)"),
-        ],
-        DocumentSyntax::Python => &[
-            ("def", "keyword", "def name(parameters):"),
-            ("class", "keyword", "class Name:"),
-            ("async", "keyword", "async def or async with statement"),
-            ("await", "keyword", "await expression"),
-            ("import", "keyword", "import module"),
-            ("from", "keyword", "from module import name"),
-            ("Project", "class", "rspice.Project.open(path) -> Project"),
-            (
-                "Environment",
-                "class",
-                "rspice.Environment provides capability-scoped environment reads",
-            ),
-            (
-                "ArtifactFormat",
-                "enum",
-                "RSpice artifact format identifier",
-            ),
-            ("open", "function", "Project.open(path) -> Project"),
-            (
-                "get",
-                "function",
-                "Environment.get(name, default=None) -> str | None",
-            ),
-            (
-                "validate",
-                "function",
-                "plan.validate(target, fail_closed=True) -> Preview",
-            ),
-            ("execute", "function", "preview.execute() -> Run"),
-            ("evaluate", "function", "run.requirements.evaluate(profile)"),
-            (
-                "compare",
-                "function",
-                "run.compare(baseline, waveforms=True)",
-            ),
-            (
-                "export",
-                "function",
-                "run.export(formats) -> list[Artifact]",
-            ),
-        ],
-        DocumentSyntax::Yaml => &[
-            ("schema", "configuration key", "Run-plan schema identity"),
-            ("name", "configuration key", "Human-readable run-plan name"),
-            (
-                "source",
-                "configuration key",
-                "Project-relative top-deck source",
-            ),
-            (
-                "analyses",
-                "configuration key",
-                "Ordered analysis selection",
-            ),
-            ("corners", "configuration key", "Qualified corner selection"),
-            (
-                "requirements",
-                "configuration key",
-                "Requirement profile identity",
-            ),
-            (
-                "artifacts",
-                "configuration key",
-                "Requested governed artifacts",
-            ),
-        ],
-        DocumentSyntax::Toml => &[
-            (
-                "project_files",
-                "capability key",
-                "Project-file access disposition",
-            ),
-            (
-                "artifact_directory",
-                "capability key",
-                "Artifact-directory access disposition",
-            ),
-            (
-                "network",
-                "capability key",
-                "Network capability disposition",
-            ),
-            (
-                "process_spawn",
-                "capability key",
-                "Process-spawn capability disposition",
-            ),
-            (
-                "environment",
-                "capability key",
-                "Explicit environment-variable allowlist",
-            ),
-            (
-                "secret_logging",
-                "capability key",
-                "Secret redaction policy",
-            ),
-            ("python", "lock key", "Managed Python version requirement"),
-            (
-                "rspice_api",
-                "lock key",
-                "RSpice Automation API version requirement",
-            ),
-        ],
-    }
-}
-
-fn language_completion_catalog_for(
-    language: ProjectSourceLanguage,
-) -> &'static [(&'static str, &'static str, &'static str)] {
-    match language {
-        ProjectSourceLanguage::VerilogA => language_completion_catalog(DocumentSyntax::VerilogA),
-        ProjectSourceLanguage::RSpiceAutomation => {
-            language_completion_catalog(DocumentSyntax::Python)
-        }
-    }
-}
-
-fn call_identifier_before(source: &str, caret: usize) -> Option<&str> {
-    let bytes = source.as_bytes();
-    let mut cursor = caret.min(bytes.len());
-    let mut depth = 0_usize;
-    let open = loop {
-        cursor = cursor.checked_sub(1)?;
-        match bytes[cursor] {
-            b')' | b']' | b'}' => depth += 1,
-            b'(' if depth == 0 => break cursor,
-            b'(' | b'[' | b'{' => depth = depth.saturating_sub(1),
-            b'\n' if depth == 0 => return None,
-            _ => {}
-        }
-    };
-    let mut end = open;
-    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
-        end -= 1;
-    }
-    let mut start = end;
-    while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
-        start -= 1;
-    }
-    (start < end).then_some(&source[start..end])
 }
 
 fn validate_source_for_formatting(
@@ -1725,6 +1201,8 @@ mod tests {
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         assert_eq!(index.definitions("resistance").len(), 1);
         assert_eq!(index.references("resistance").len(), 3);
+        // What the rename form states: three occurrences in the two files.
+        assert_eq!(index.rename_extent("resistance"), (3, 2));
         let changed = index.rename_preview("resistance", "r_value").unwrap();
         assert_eq!(changed.len(), 2);
         let root = changed
@@ -1853,15 +1331,7 @@ mod tests {
         assert_eq!(index.document_symbols(alias).len(), 1);
         assert_eq!(index.symbol_at(alias, 6), Some("mesurer"));
         assert_eq!(index.references("mesurer").len(), 2);
-        let actions = index.code_actions(alias).unwrap();
-        assert!(actions.iter().any(|action| {
-            action.kind == SourceCodeActionKind::QuickFix
-                && crate::state::project_source_paths_equal(&action.logical_path, alias)
-        }));
-        assert_eq!(
-            index.identifier_prefix(alias, source.chars().count()),
-            index.identifier_prefix(bundle.root().logical_path(), source.chars().count())
-        );
+        assert_eq!(index.rename_extent("mesurer"), (2, 1));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1928,10 +1398,8 @@ mod tests {
         app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
             index,
             active_path: root_path.to_owned(),
-            caret_char_index: root_source.find("protected_name").unwrap(),
             query: "protected_name".to_owned(),
             replacement: "renamed".to_owned(),
-            view: LanguageToolView::References,
             error: None,
         });
 
@@ -1952,88 +1420,20 @@ mod tests {
     }
 
     #[test]
-    fn completion_hover_signature_and_declaration_use_the_exact_indexed_closure() {
-        let source = "from rspice import Project\n\ndef evaluate(value):\n    return value\n\nresult = evaluate(1)\n";
-        let bundle = bundle(
-            ProjectSourceLanguage::RSpiceAutomation,
-            "flows/main.py",
-            source,
-            Vec::new(),
-        );
-        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
-        let caret = source.find("eval").unwrap() + "eval".len();
-        let caret_chars = source[..caret].chars().count();
-        let completions = index.completions("flows/main.py", caret_chars, "");
-        assert!(
-            completions
-                .iter()
-                .any(|completion| completion.label == "evaluate")
-        );
-        let catalog_completions = index.completions("flows/main.py", 0, "");
-        assert!(
-            catalog_completions
-                .iter()
-                .any(|completion| completion.label == "Environment")
-        );
-        assert!(
-            index
-                .hover("evaluate")
-                .unwrap()
-                .contains("indexed reference")
-        );
-        assert_eq!(index.declarations("evaluate").len(), 1);
-
-        let call_caret = source.rfind("evaluate(1").unwrap() + "evaluate(".len();
-        let signature = index
-            .signature_help("flows/main.py", source[..call_caret].chars().count())
-            .unwrap();
-        assert!(signature.contains("def evaluate(value)"));
-    }
-
-    #[test]
-    fn completion_replaces_only_the_identifier_fragment_at_the_captured_caret() {
-        let source = "def evaluate(value):\n    return value\n\neval(1)\n";
-        let source_bundle = bundle(
-            ProjectSourceLanguage::RSpiceAutomation,
-            "main.py",
-            source,
-            Vec::new(),
-        );
-        let index = LanguageServiceIndex::build(ProjectId::new(), &source_bundle).unwrap();
-        let byte_caret = source.rfind("eval(").unwrap() + "eval".len();
-        let replacement = index
-            .completion_replacement("main.py", source[..byte_caret].chars().count(), "evaluate")
-            .unwrap();
-        assert!(replacement.ends_with("evaluate(1)\n"));
-        assert!(replacement.starts_with("def evaluate(value):"));
-    }
-
-    #[test]
-    fn formatting_actions_preserve_literal_whitespace_without_claiming_python_authority() {
+    fn formatting_preserves_literal_whitespace_without_claiming_python_authority() {
+        let language = ProjectSourceLanguage::RSpiceAutomation;
         let source = "def evaluate(value):   \n    label = \"keep   \"\n    return value   ";
-        let source_bundle = bundle(
-            ProjectSourceLanguage::RSpiceAutomation,
-            "main.py",
-            source,
-            Vec::new(),
-        );
-        let index = LanguageServiceIndex::build(ProjectId::new(), &source_bundle).unwrap();
-        let actions = index.code_actions("main.py").unwrap();
-        let format = actions
-            .iter()
-            .find(|action| action.kind == SourceCodeActionKind::Format)
-            .unwrap();
-        assert!(format.replacement.contains("label = \"keep   \""));
-        assert!(!format.replacement.contains("return value   "));
-        assert!(format.replacement.ends_with('\n'));
+        let formatted = formatted_source(language, "main.py", source).unwrap();
+        assert!(formatted.contains("label = \"keep   \""));
+        assert!(!formatted.contains("return value   "));
+        assert!(formatted.ends_with('\n'));
 
-        let malformed = bundle(
-            ProjectSourceLanguage::RSpiceAutomation,
-            "broken.py",
-            "def broken(:\n",
-            Vec::new(),
+        // Python's grammar is the managed interpreter's to judge: a source
+        // it would refuse is left as it is, not refused here.
+        let malformed = "def broken(:\n";
+        assert_eq!(
+            formatted_source(language, "broken.py", malformed).unwrap(),
+            malformed
         );
-        let malformed = LanguageServiceIndex::build(ProjectId::new(), &malformed).unwrap();
-        assert!(malformed.code_actions("broken.py").unwrap().is_empty());
     }
 }

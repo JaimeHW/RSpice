@@ -227,25 +227,115 @@ fn find_in_a_veriloga_cell_view_searches_that_views_bundle() {
     );
 }
 
-/// The language tools index the bundle in front of the reader.
+/// The caret's place in `source`, as the character index the editor reports,
+/// just inside the first `needle`.
+fn caret_in(source: &str, needle: &str) -> usize {
+    source[..source.find(needle).expect("the needle") + 1]
+        .chars()
+        .count()
+}
+
+/// Rename symbol is a command form over the bundle in front of the reader:
+/// it opens on the name under the caret, states how many occurrences in how
+/// many files it rewrites, and Enter renames them and closes it. It was a
+/// tab of the nine-tab language-tools dialog.
 #[test]
-fn language_tools_in_a_veriloga_cell_view_index_that_views_bundle() {
+fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
     let mut app = open_project_app();
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
+    let source = module_source("gain", "");
+    app.state.code.code_workspace.source_carets.insert(
+        (bundle_id, "model.va".to_owned()),
+        caret_in(&source, "g * V"),
+    );
 
-    assert!(Command::SourceLanguageTools.is_enabled(&app));
-    Command::SourceLanguageTools.execute(&mut app);
-
-    let tools = app
+    super::navigate_active_source(&mut app, Command::RenameSymbol).expect("the caret is on g");
+    let form = app
         .state
         .code
         .code_workspace
         .language_tools
         .as_ref()
-        .expect("the tools opened");
-    assert_eq!(tools.index.bundle_id, bundle_id);
-    assert_eq!(tools.active_path, "model.va");
+        .expect("the form opened");
+    assert_eq!(form.index.bundle_id, bundle_id);
+    assert_eq!(form.query, "g");
+    assert_eq!(form.replacement, "g", "the field opens on the current name");
+    assert_eq!(form.index.rename_extent("g"), (2, 1));
+
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    if let Some(form) = app.state.code.code_workspace.language_tools.as_mut() {
+        form.replacement = "conductance".to_owned();
+    }
+    let enter = egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame_with(&ctx, &mut app, DESKTOP, vec![enter]);
+
+    assert!(
+        app.state.code.code_workspace.language_tools.is_none(),
+        "the form closes on a rename"
+    );
+    let renamed = app
+        .state
+        .model
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(bundle_id)
+        .and_then(|bundle| bundle.file_content("model.va"))
+        .expect("the renamed source")
+        .to_owned();
+    assert_eq!(renamed, source.replace(" g ", " conductance "));
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("Renamed g to conductance: 2 occurrences in 1 file.")
+    );
+}
+
+/// Find references lists each occurrence in the Console and says how many
+/// on the status bar; no dialog opens. It was the References tab of the
+/// language-tools dialog.
+#[test]
+fn find_references_lists_each_occurrence_in_the_console() {
+    let mut app = open_project_app();
+    let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    let source = module_source("gain", "");
+    app.state.code.code_workspace.source_carets.insert(
+        (bundle_id, "model.va".to_owned()),
+        caret_in(&source, "g * V"),
+    );
+
+    super::navigate_active_source(&mut app, Command::FindReferences).expect("the caret is on g");
+
+    assert!(app.state.code.code_workspace.language_tools.is_none());
+    let listed = app
+        .state
+        .model
+        .log_buffer
+        .entries()
+        .filter(|entry| entry.message.starts_with("model.va:"))
+        .map(|entry| entry.message.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        listed,
+        [
+            "model.va:5: parameter real g = 1m;",
+            "model.va:6: analog I(p, n) <+ g * V(p, n);",
+        ]
+    );
+    assert!(app.state.workbench.console_visible);
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("2 references to g in 1 file, listed in the Console.")
+    );
 }
 
 /// Format is the editor's request, and it formats the document that view's
@@ -317,18 +407,19 @@ fn two_cell_views_sharing_a_logical_path_keep_separate_carets() {
     frame(&ctx, &mut app, DESKTOP);
 
     // Back to the first view without a frame of its editor in between: the
-    // caret the tools read is the one that view's editor last reported.
+    // caret the source commands read is the one that view's editor last
+    // reported.
     open_in_design(&mut app.state, &first);
-    super::open_active_language_tools(&mut app).expect("the first view is indexable");
-    let tools = app
-        .state
-        .code
-        .code_workspace
-        .language_tools
-        .as_ref()
-        .expect("the tools opened");
-    assert_eq!(tools.index.bundle_id, first_bundle);
-    assert_eq!(tools.caret_char_index, 5);
+    let caret = |bundle_id: ProjectSourceId| {
+        app.state
+            .code
+            .code_workspace
+            .source_carets
+            .get(&(bundle_id, "model.va".to_owned()))
+            .copied()
+    };
+    assert_eq!(caret(first_bundle), Some(5));
+    assert_eq!(caret(second_bundle), Some(9));
 }
 
 /// Compile is a Design command for a Verilog-A view, and its answer is

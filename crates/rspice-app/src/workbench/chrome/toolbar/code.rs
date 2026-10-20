@@ -54,13 +54,6 @@ pub(in crate::workbench) fn veriloga_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::SourceLanguageTools.key(),
-        WorkbenchIcon::Target,
-        layout,
-    );
-    toolbar_icon_command(
-        ui,
-        app,
         Command::ManageSourceDocument.key(),
         WorkbenchIcon::Folder,
         layout,
@@ -190,17 +183,10 @@ pub(in crate::workbench) fn netlist_tools(
     toolbar_icon_command(ui, app, ids::RUN_SIMULATION, WorkbenchIcon::Run, layout);
 }
 
-/// The Automation page's source tools: navigate the index, manage the
-/// document, search the closure.
+/// The Automation page's source tools: manage the document, search the
+/// closure.
 fn source_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     context_separator(ui, layout);
-    toolbar_icon_command(
-        ui,
-        app,
-        Command::SourceLanguageTools.key(),
-        WorkbenchIcon::Target,
-        layout,
-    );
     toolbar_icon_command(
         ui,
         app,

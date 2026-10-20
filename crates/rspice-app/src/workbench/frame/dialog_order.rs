@@ -257,10 +257,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| app.render_source_find_dialog(ctx),
     },
     DialogSpec {
-        key: DialogKey("code.source_language_tools"),
+        key: DialogKey("code.rename_symbol"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| app.render_source_language_tools_dialog(ctx),
+        render: |app, ctx| app.render_rename_symbol_form(ctx),
     },
     DialogSpec {
         key: DialogKey("design.create_model_bound_symbol"),
