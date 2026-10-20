@@ -126,6 +126,12 @@ impl<'u> FormRows<'u> {
     fn new(ui: &'u mut Ui, label_col: f32) -> Self {
         let stacked = ui.available_width() < STACKED_MAX_WIDTH;
         ui.spacing_mut().item_spacing.y = 0.0;
+        // egui sets a field's hint in `weak_text_color`, which it derives by
+        // fading the body tone, and overwrites any colour stated on the hint
+        // itself. Derived, a hint landed darker than the labels in light mode
+        // and brighter than them in dark: it read as a value already typed.
+        // Stated for the form's body, it is the palette's faint tone.
+        ui.visuals_mut().weak_text_color = Some(Tokens::get(ui.ctx()).color.text_faint);
         Self {
             ui,
             label_col,
@@ -1999,6 +2005,42 @@ mod tests {
                 assert!(rect.is_some(), "{cell} does not start under {header}");
             }
         }
+    }
+
+    /// An empty field's hint is set in the faint tone, below the labels, so it
+    /// cannot be read as a value already typed. egui's own derived tone put
+    /// it darker than the labels in light mode and brighter in dark.
+    #[test]
+    fn a_hint_is_set_in_the_faint_tone() {
+        let hint = "name[msb:lsb]";
+        let texts = painted_texts(|ctx| {
+            let mut bus = String::new();
+            let _ = CommandForm::new("Place bus tap", "Place").show(ctx, |rows| {
+                let field = rows.text("Bus", Id::new("command-form.hint.bus"), &mut bus, hint);
+                Some(field.id)
+            });
+        });
+        let painted = texts
+            .iter()
+            .find(|text| text.galley.job.text == hint)
+            .expect("the hint is painted");
+        let faint = Tokens::default().color.text_faint;
+        assert!(
+            painted
+                .galley
+                .job
+                .sections
+                .iter()
+                .all(|section| section.format.color == faint),
+            "the hint is not in the faint tone: {:?}",
+            painted
+                .galley
+                .job
+                .sections
+                .iter()
+                .map(|section| section.format.color)
+                .collect::<Vec<_>>()
+        );
     }
 
     /// A consequence is stated behind the warning mark in dim text, and a
