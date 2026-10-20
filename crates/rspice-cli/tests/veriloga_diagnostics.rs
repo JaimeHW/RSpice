@@ -560,3 +560,92 @@ fn a_non_finite_contribution_names_its_source_line() {
         "{stderr}"
     );
 }
+
+#[test]
+fn module_selection_and_misspelled_masters_say_what_to_write() {
+    let root = common::test_dir("module_selection_advice");
+    let source = root.join("two.va");
+    std::fs::write(
+        &source,
+        "`include \"disciplines.vams\"\n\
+         module res(p,n);\ninout p,n; electrical p,n;\nparameter real r = 1k;\n\
+         analog I(p,n) <+ V(p,n)/r;\nendmodule\n\
+         module top(a,b);\ninout a,b; electrical a,b;\nres #(.r(2k)) r1 (a, b);\nendmodule\n",
+    )
+    .unwrap();
+    let run = |name: &str, directive: &str, master: &str| {
+        let deck = root.join(name);
+        std::fs::write(
+            &deck,
+            format!("Module selection\n{directive}\nV1 a 0 2\nX1 a 0 {master}\n.op\n.end\n"),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--log-level", "off", "run"])
+            .arg(&deck)
+            .env("RSPICE_VERILOGA_CACHE_DIR", root.join("cache"))
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        (output.status.code(), stdout, stderr)
+    };
+
+    // Two modules and none named: the refusal said "select one by name",
+    // naming neither the file nor how a deck selects, after "Simulation
+    // complete".
+    let (code, stdout, stderr) = run("unselected.cir", ".hdl \"two.va\"", "top");
+    assert_eq!(code, Some(65), "{stdout}{stderr}");
+    assert!(
+        stderr.contains("two.va: [VA-MODULE-SELECTION]")
+            && stderr.contains(
+                "declares multiple modules: res, top; \
+                 select one with module=<name> on the line that loads it"
+            ),
+        "{stderr}"
+    );
+    assert!(!stdout.contains("Simulation complete"), "{stdout}");
+
+    let (code, stdout, stderr) = run("selected.cir", ".hdl \"two.va\" module=top", "top");
+    assert_eq!(code, Some(0), "{stdout}{stderr}");
+    assert!(stdout.contains("Simulation complete"), "{stdout}");
+
+    // A misspelled master is refused as an undefined subcircuit, now with
+    // the module it most likely means: one the directive selects, and one
+    // only compiling the source finds.
+    std::fs::write(
+        root.join("one.va"),
+        "`include \"disciplines.vams\"\nmodule okres(p,n);\ninout p,n; electrical p,n;\n\
+         analog I(p,n) <+ V(p,n)/1k;\nendmodule\n",
+    )
+    .unwrap();
+    for (directive, master, intended) in [
+        (".hdl \"two.va\" module=res", "rse", "res"),
+        (".hdl \"one.va\"", "okress", "okres"),
+    ] {
+        let (code, stdout, stderr) = run("misspelled.cir", directive, master);
+        assert_eq!(code, Some(65), "{stdout}{stderr}");
+        assert!(
+            stderr.contains(&format!(
+                "Subcircuit {} has not been defined for instance X1 (did you mean '{intended}'?)",
+                master.to_ascii_uppercase()
+            )),
+            "{stderr}"
+        );
+        assert!(!stdout.contains("Simulation complete"), "{stdout}");
+    }
+
+    // compile-va names its own option.
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--log-level", "off", "compile-va"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("two.va: [VA-MODULE-SELECTION]")
+            && stderr.contains("select one with --module <name>"),
+        "{stderr}"
+    );
+}

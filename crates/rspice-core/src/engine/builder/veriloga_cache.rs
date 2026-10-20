@@ -2541,12 +2541,22 @@ pub(super) fn compile_and_cache_prepared_with_connections(
             VERILOGA_CACHE_TELEMETRY
                 .compilations_failed
                 .fetch_add(1, Relaxed);
-            let diagnostics = match configuration {
+            let mut diagnostics = match configuration {
                 Some(configuration) => {
                     prepared.diagnostics_for_error_with_connections(configuration, &error)
                 }
                 None => prepared.diagnostics_for_error(&error),
             };
+            // A deck names the module of a several-module source on the
+            // directive that loads it.
+            if selected_module.is_none() {
+                for diagnostic in &mut diagnostics {
+                    diagnostic.explain_module_selection(
+                        "with module=<name> on the line that loads it",
+                        path,
+                    );
+                }
+            }
             let detail = if diagnostics.is_empty() {
                 format!("compilation failed: {error}")
             } else {

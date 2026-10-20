@@ -218,7 +218,8 @@ fn a_misspelled_master_beside_a_veriloga_include_is_refused_like_a_va_free_deck(
         .to_string();
     assert_eq!(
         free,
-        "Netlist error: subcircuit flattening error: Subcircuit PROB has not been defined for instance X1",
+        "Netlist error: subcircuit flattening error: Subcircuit PROB has not been defined for \
+         instance X1 (did you mean 'probe'?)",
     );
     assert_eq!(included, free);
 }

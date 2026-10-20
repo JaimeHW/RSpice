@@ -83,6 +83,15 @@ impl CompileError {
         }
     }
 
+    /// The refusal of a source that declares several modules, compiled
+    /// without naming one.
+    pub(crate) fn unselected_module(modules: &[&str]) -> Self {
+        Self::ModuleSelection(format!(
+            "the file declares multiple modules: {}; {SELECT_ONE_BY_NAME}",
+            modules.join(", ")
+        ))
+    }
+
     /// A preprocessing refusal, reported as the preprocessor states it
     /// (it used to read "I/O error: Preprocessor error: ...").
     pub fn preprocess(error: crate::preprocessor::PreprocessorError) -> Self {
@@ -589,7 +598,11 @@ const COMPILE_VIRTUAL_SOURCE_CODE: &str = "VA-INPUT-VIRTUAL-SOURCE";
 /// Diagnostic code for a cooperative cancellation checkpoint.
 const COMPILE_CANCELLED_CODE: &str = "VA-INPUT-CANCELLED";
 /// Diagnostic code for a module that could not be selected.
-const COMPILE_MODULE_SELECTION_CODE: &str = "VA-MODULE-SELECTION";
+pub(crate) const COMPILE_MODULE_SELECTION_CODE: &str = "VA-MODULE-SELECTION";
+/// How the refusal of a source that declares several modules ends when the
+/// compile named none. A host replaces it with how its users name one
+/// ([`crate::SourceCompileDiagnostic::explain_module_selection`]).
+pub(crate) const SELECT_ONE_BY_NAME: &str = "select one by name";
 /// Diagnostic code for a required backend that did not qualify.
 const COMPILE_BACKEND_QUALIFICATION_CODE: &str = "VA-BACKEND-QUALIFICATION";
 /// Diagnostic code for an exceeded compiler performance budget.

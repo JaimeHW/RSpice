@@ -326,10 +326,7 @@ impl PreparedRuntimeSource {
             [] => Err(crate::CompileError::ModuleSelection(
                 "no modules found in source".into(),
             )),
-            names => Err(crate::CompileError::ModuleSelection(format!(
-                "the file declares multiple modules: {}; select one by name",
-                names.join(", ")
-            ))),
+            names => Err(crate::CompileError::unselected_module(names)),
         }
     }
 

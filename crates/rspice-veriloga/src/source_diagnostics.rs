@@ -45,6 +45,24 @@ impl SourceCompileDiagnostic {
     pub fn located(&self) -> impl std::fmt::Display + '_ {
         Located(self)
     }
+
+    /// Complete the refusal of a source that declares several modules when
+    /// the compile named none: `how` is the host's way to name one ("with
+    /// --module <name>"), and `source`, the file compiled, locates a refusal
+    /// that has no location. Any other diagnostic is left as it is.
+    pub fn explain_module_selection(&mut self, how: &str, source: &Path) {
+        let Some(declared) = self
+            .message
+            .strip_suffix(crate::error::SELECT_ONE_BY_NAME)
+            .filter(|_| self.code == crate::error::COMPILE_MODULE_SELECTION_CODE)
+        else {
+            return;
+        };
+        self.message = format!("{declared}select one {how}");
+        if self.path.is_none() {
+            self.path = Some(crate::source::display_path(source));
+        }
+    }
 }
 
 struct Located<'a>(&'a SourceCompileDiagnostic);

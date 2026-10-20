@@ -1699,10 +1699,7 @@ impl VerilogACompiler {
                     )))
                     .into()
                 }),
-                names => Err(CompileError::ModuleSelection(format!(
-                    "the file declares multiple modules: {}; select one by name",
-                    names.join(", ")
-                ))),
+                names => Err(CompileError::unselected_module(names)),
             },
         }
     }

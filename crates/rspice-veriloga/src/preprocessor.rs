@@ -2172,8 +2172,9 @@ fn invoked_macro_names(text: &str) -> impl Iterator<Item = &str> {
 }
 
 /// The candidate closest to `name` in edit distance (a transposition counts as
-/// one edit), if it is close enough to be a likely misspelling.
-pub(crate) fn closest_name<'a>(
+/// one edit), if it is close enough to be a likely misspelling. The engine
+/// uses it too, to suggest a loaded module for a misspelled master.
+pub fn closest_name<'a>(
     name: &str,
     candidates: impl IntoIterator<Item = &'a str>,
 ) -> Option<&'a str> {

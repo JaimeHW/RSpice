@@ -658,7 +658,7 @@ fn unit_second_pass(
                         path,
                         ElaborationErrorKind::ModuleNotSelected,
                         format!(
-                            "the file declares multiple modules: {}; select one by name",
+                            "the file declares multiple modules: {}; select one with module=<name> on the line that loads it",
                             modules
                                 .iter()
                                 .map(|module| module.as_str())

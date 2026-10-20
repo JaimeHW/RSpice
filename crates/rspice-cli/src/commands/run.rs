@@ -470,7 +470,8 @@ fn execute_with_destinations(
         None => {}
     }
 
-    if !quiet {
+    // A run that failed did not complete: the error follows instead.
+    if !quiet && first_error.is_none() {
         crate::console::line(format_args!("\nSimulation complete in {:.3}s.", duration))?;
     }
 

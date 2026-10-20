@@ -347,6 +347,50 @@ fn bind_veriloga_model(
     Ok(())
 }
 
+/// The masters a deck names for itself: its subcircuits and what its
+/// Verilog-A source directives declare.
+fn deck_master_names(netlist: &Netlist) -> impl Iterator<Item = &str> {
+    netlist
+        .subcircuits
+        .iter()
+        .map(|subcircuit| subcircuit.name.as_str())
+        .chain(
+            netlist
+                .veriloga_includes
+                .iter()
+                .flat_map(|include| include.declared_model_names()),
+        )
+}
+
+/// An undefined-master refusal completed with the one of `candidates` the
+/// master most likely misspells.
+fn with_intended_master<'n>(
+    refusal: SimulationError,
+    master: &str,
+    candidates: impl IntoIterator<Item = &'n str>,
+) -> SimulationError {
+    #[cfg(feature = "veriloga")]
+    {
+        // Masters match case-insensitively: compare normalized names and
+        // give the definition as its source spells it.
+        let names: BTreeMap<String, &str> = candidates
+            .into_iter()
+            .map(|name| (name.to_ascii_uppercase(), name))
+            .collect();
+        let intended = rspice_veriloga::preprocessor::closest_name(
+            &master.to_ascii_uppercase(),
+            names.keys().map(String::as_str),
+        )
+        .and_then(|closest| names.get(closest));
+        if let (SimulationError::Netlist(message), Some(intended)) = (&refusal, intended) {
+            return SimulationError::Netlist(format!("{message} (did you mean '{intended}'?)"));
+        }
+    }
+    #[cfg(not(feature = "veriloga"))]
+    let _ = (master, candidates.into_iter());
+    refusal
+}
+
 mod model_policy;
 pub(crate) use model_policy::without_repeated_topology_reports;
 use model_policy::*;
@@ -5719,7 +5763,19 @@ impl Engine {
             },
             abort,
         )
-        .map_err(|error| map_build_parse_error("subcircuit flattening", error))?;
+        .map_err(|error| {
+            let master = match &error {
+                ParseWithAbortError::Parse(ParseError::UndefinedSubcircuit(undefined)) => {
+                    Some(undefined.subcircuit_name.clone())
+                }
+                _ => None,
+            };
+            let refusal = map_build_parse_error("subcircuit flattening", error);
+            match master {
+                Some(master) => with_intended_master(refusal, &master, deck_master_names(netlist)),
+                None => refusal,
+            }
+        })?;
         circuit.parameter_direction = parameter_direction;
         let mut flat_elements = flattened.elements;
         let requires_statistical_materialization =
@@ -9029,7 +9085,7 @@ impl Engine {
                     // refused with the same typed error rather than a
                     // build-internal one — a `.VERILOGA` include must not cost
                     // a deck its `UndefinedSubcircuit` diagnostic.
-                    return Err(map_build_parse_error(
+                    let refusal = map_build_parse_error(
                         "subcircuit flattening",
                         ParseError::UndefinedSubcircuit(Box::new(
                             crate::netlist::UndefinedSubcircuitError {
@@ -9044,6 +9100,20 @@ impl Engine {
                             },
                         ))
                         .into(),
+                    );
+                    // The modules compiled sources declare are known here,
+                    // beyond what the deck's directives name.
+                    #[cfg(feature = "veriloga")]
+                    let loaded = veriloga_models
+                        .values()
+                        .filter_map(|binding| binding.model.as_ref())
+                        .map(|entry| entry.model.name.as_str());
+                    #[cfg(not(feature = "veriloga"))]
+                    let loaded = std::iter::empty();
+                    return Err(with_intended_master(
+                        refusal,
+                        subckt_name,
+                        deck_master_names(netlist).chain(loaded),
                     ));
                 }
 

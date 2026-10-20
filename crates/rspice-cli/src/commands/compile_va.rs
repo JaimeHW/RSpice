@@ -79,7 +79,7 @@ pub fn execute(
             args.module.as_deref(),
             &ProcessControl,
         )
-        .map_err(|error| compile_error(error, &args.input))?;
+        .map_err(|error| compile_error(error, &args.input, args.module.as_deref()))?;
     if let Some(output) = args.output.as_deref() {
         publish::destinations::protect_sources(
             output,
@@ -389,6 +389,7 @@ impl rspice_veriloga::PipelineControl for ProcessControl {
 fn compile_error(
     error: rspice_veriloga::ProviderCompileError,
     input: &std::path::Path,
+    module: Option<&str>,
 ) -> CliError {
     use rspice_veriloga::preprocessor::SourceResource;
     use rspice_veriloga::{CompileError, ProviderCompileError};
@@ -445,8 +446,13 @@ fn compile_error(
         }
         ProviderCompileError::Compile {
             source,
-            diagnostics,
+            mut diagnostics,
         } => {
+            if module.is_none() {
+                for diagnostic in &mut diagnostics {
+                    diagnostic.explain_module_selection("with --module <name>", input);
+                }
+            }
             let error = CliError::VerilogAError {
                 message: if diagnostics.is_empty() {
                     source.to_string()
