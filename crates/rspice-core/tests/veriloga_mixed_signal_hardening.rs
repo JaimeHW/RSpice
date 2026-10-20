@@ -263,10 +263,17 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // at the 34 points that land on its PULSE corners, by at most
         // 8.7e-13 V — the corner is now evaluated on the segment that leads
         // into it, which rounds differently from the one that leaves it.
+        //
+        // Re-measured when a scaled number became the double nearest its
+        // decimal: the PULSE edge `0.1n` is 1e-10, where it was 0.1 * 1e-9 =
+        // 1.0000000000000002e-10. The same 518 points on the same grid, every
+        // event, P and QS bit-identical, and CLK moved at the 89 points on
+        // its edges by at most 4.4e-16 V. The deck with that old double
+        // written out reproduces the previous hash.
         Fingerprint {
             points: 518,
             grid_hash: 0xac5c_1670_ff3a_1bea,
-            volt_hash: 0xe168_6057_86ee_1195,
+            volt_hash: 0xb02c_de0c_fb84_6c84,
         },
     ),
     (
