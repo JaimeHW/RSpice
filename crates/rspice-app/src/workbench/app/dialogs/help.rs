@@ -1,7 +1,7 @@
 //! Help dialogs on the modal primitive: About, keyboard shortcuts, and the
 //! waveform calculator host.
 
-use egui::{Context, Grid, RichText, ScrollArea};
+use egui::{Context, Grid, RichText};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -13,6 +13,8 @@ use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
 const PRODUCT_LICENSE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE"));
+const THIRD_PARTY_NOTICES: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../NOTICE"));
 
 #[derive(Debug, Clone, Copy)]
 enum HelpAction {
@@ -540,16 +542,29 @@ fn render_legal_privacy(ui: &mut egui::Ui) {
         "Project content, models, results, credentials, license keys, and recovery checkpoints are excluded from the support artifact.",
     );
     ui.add_space(10.0);
+    // Both documents read in the dialog's own scrolling body: a second
+    // scroller inside it left the notices with nowhere to go.
     section_heading(ui, "Product license");
-    ScrollArea::vertical()
-        .id_salt("help.legal-license")
-        .auto_shrink([false, true])
-        .max_height(300.0)
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(PRODUCT_LICENSE).font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-            );
-        });
+    legal_document(ui, PRODUCT_LICENSE);
+    ui.add_space(10.0);
+    section_heading(ui, "Third-party notices");
+    legal_document(ui, THIRD_PARTY_NOTICES);
+}
+
+/// A shipped legal file as written. A Windows checkout gives the embedded
+/// text carriage returns, which are not text to a reader.
+fn legal_document(ui: &mut egui::Ui, source: &'static str) {
+    ui.label(
+        RichText::new(legal_text(source)).font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+    );
+}
+
+fn legal_text(source: &'static str) -> std::borrow::Cow<'static, str> {
+    if source.contains('\r') {
+        std::borrow::Cow::Owned(source.replace("\r\n", "\n"))
+    } else {
+        std::borrow::Cow::Borrowed(source)
+    }
 }
 
 fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
@@ -696,6 +711,53 @@ mod tests {
             message,
             r"Opened project amp (<HOME>\designs\amp.rspiceproj)."
         );
+    }
+
+    /// Every text the frame published for a reader to hear.
+    fn shown_texts(mut app: RSpiceApp) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut update = None;
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.render_help_center_dialog(ui.ctx()),
+            );
+            update = output.platform_output.accesskit_update;
+        }
+        update
+            .expect("the frame published its accessibility tree")
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value().or_else(|| node.label()))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The legal page shows the license and the third-party notices the
+    /// repository ships, each whole and as written.
+    #[test]
+    fn the_legal_page_shows_the_shipped_license_and_third_party_notices() {
+        let mut app = RSpiceApp::test_instance();
+        Command::LegalPrivacy.execute(&mut app);
+        let shown = shown_texts(app);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for name in ["LICENSE", "NOTICE"] {
+            let file = std::fs::read_to_string(root.join(name))
+                .expect("the repository ships the file")
+                .replace("\r\n", "\n");
+            assert!(
+                shown.iter().any(|text| *text == file),
+                "the legal page shows {name} as shipped"
+            );
+        }
     }
 
     /// Writes nothing, and fails the write when told to.
