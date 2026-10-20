@@ -26,8 +26,7 @@ fn nonpositive_explicit_inductance_cannot_select_a_model_default() {
     let source = "Zero inductance\nV1 in 0 1\nL1 in 0 0 LM\n.model LM L(L=1m)\n.end\n";
     let error = Engine::default()
         .build_circuit(&Netlist::parse(source).unwrap())
-        .err()
-        .expect("an explicit zero inductance must not select the model default");
+        .expect_err("an explicit zero inductance must not select the model default");
     assert!(
         matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
         "L=0: {error}"
