@@ -1,11 +1,13 @@
-//! Device-local schematic visibility workflow.
+//! Display options: what the schematic canvas shows, on this device.
 //!
-//! The mockup defines this as a display-only transaction. The dialog edits an
-//! isolated copy and publishes all six choices together; neither opening,
-//! cancelling, nor applying can create a schematic undo record or modify
-//! project-owned design data.
+//! One dialog for the schematic's overlays and labels and for the optional
+//! drawing-sheet layers. It edits an isolated copy of both and publishes them
+//! together on Apply; neither opening, cancelling, nor applying can create a
+//! schematic undo record or modify project-owned design data, printing or
+//! export. Wire routing is an editing behaviour, not a display one, and is
+//! set only in Grid, snap and routing.
 
-use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
+use egui::{Context, Id};
 
 use crate::state::WireRoutingMode;
 use crate::state::{
@@ -13,28 +15,34 @@ use crate::state::{
     SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility, SchematicVisibilityPolicy,
     SchematicWireRoutingStyle,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
-const TITLE: &str = "Schematic visibility";
-const PRIMARY: &str = "Apply visibility";
-const BODY: &str = "Control operating-point annotations, labels, routing, net highlighting, and review markers without changing design data.";
+const TITLE: &str = "Display options";
+const PRIMARY: &str = "Apply";
+const DESCRIPTION: &str = "Choose what the schematic canvas shows on this device. The design, printing and export are unchanged.";
 
-pub(crate) fn open_schematic_visibility_options(state: &mut AppState) -> bool {
+/// Open Display options. Both the schematic-visibility and the
+/// drawing-sheet-layers commands land here; it is one dialog.
+pub(crate) fn open_display_options(state: &mut AppState) -> bool {
     if state.dialogs.schematic_visibility.open {
         return false;
     }
     state
         .dialogs
         .schematic_visibility
-        .open(state.ui.schematic_visibility);
+        .open(state.ui.schematic_visibility, state.ui.drawing_sheet_layers);
     true
+}
+
+pub(crate) fn open_schematic_visibility_options(state: &mut AppState) -> bool {
+    open_display_options(state)
+}
+
+pub(crate) fn open_drawing_sheet_layers_dialog(state: &mut AppState) -> bool {
+    open_display_options(state)
 }
 
 impl RSpiceApp {
@@ -43,36 +51,24 @@ impl RSpiceApp {
             return;
         }
 
-        let dirty = self.state.dialogs.schematic_visibility.dirty();
         let recovery_available = visibility_recovery_available(&self.state);
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(BODY)
-            .size(DialogSize::Transaction)
-            .ghost(if dirty { "Discard changes" } else { "Cancel" })
-            .initial_focus(DialogInitialFocus::BodyControl);
+        let mut form = CommandForm::new(TITLE, PRIMARY)
+            .describe(DESCRIPTION)
+            .status_fixed_at_open();
         if recovery_available {
-            dialog = dialog.secondary("Undo last visibility change");
+            form = form.secondary("Undo last change");
         }
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            Some(visibility_body(
-                ui,
-                &mut self.state.dialogs.schematic_visibility.draft,
+        let dialog_state = &mut self.state.dialogs.schematic_visibility;
+        let choice = form.show(ctx, |rows| {
+            Some(display_options_rows(
+                rows,
+                &mut dialog_state.draft,
+                &mut dialog_state.layers_draft,
             ))
         });
 
         match choice {
-            DialogChoice::Primary => {
-                let policy = self.state.dialogs.schematic_visibility.draft;
-                if policy != self.state.ui.schematic_visibility {
-                    let recovery = capture_visibility_recovery(&self.state);
-                    self.state.ui.schematic_visibility_recovery = Some(recovery);
-                }
-                publish_visibility_policy(&mut self.state, policy);
-                self.state.dialogs.schematic_visibility.close();
-                self.state.prompt(
-                    "Schematic visibility applied on this device; the design is unchanged.",
-                );
-            }
+            DialogChoice::Primary => apply_display_options(&mut self.state),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.schematic_visibility.close();
             }
@@ -89,6 +85,19 @@ impl RSpiceApp {
             DialogChoice::None => {}
         }
     }
+}
+
+/// Publish both drafts together and close.
+fn apply_display_options(state: &mut AppState) {
+    let policy = state.dialogs.schematic_visibility.draft;
+    if policy != state.ui.schematic_visibility {
+        let recovery = capture_visibility_recovery(state);
+        state.ui.schematic_visibility_recovery = Some(recovery);
+    }
+    publish_visibility_policy(state, policy);
+    state.ui.drawing_sheet_layers = state.dialogs.schematic_visibility.layers_draft;
+    state.dialogs.schematic_visibility.close();
+    state.prompt("Display options applied on this device; the design is unchanged.");
 }
 
 fn capture_visibility_recovery(state: &AppState) -> crate::workbench::SchematicVisibilityRecovery {
@@ -186,22 +195,26 @@ fn routing_mode_for(style: SchematicWireRoutingStyle, current: WireRoutingMode) 
     }
 }
 
-fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::Id {
-    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+/// The rows of Display options. Returns the first control, which takes the
+/// caret when the dialog opens.
+fn display_options_rows(
+    rows: &mut FormRows<'_>,
+    draft: &mut SchematicVisibilityPolicy,
+    layers: &mut crate::state::DrawingSheetLayerVisibility,
+) -> Id {
+    let options = |labels: &[&str]| labels.iter().map(|label| (*label).to_owned()).collect::<Vec<_>>();
 
-    let annotation = enum_row(
-        ui,
+    let annotation = rows.select_with_response(
         "Annotations",
-        "Mutually exclusive result or verification overlay.",
-        "schematic-visibility-annotations",
+        "display-options-annotations",
         annotation_label(draft.annotations),
-        &[
+        &options(&[
             "OP voltages + selected currents",
             "Violations only",
             "Hidden",
-        ],
+        ]),
     );
-    if let Some(index) = annotation.0 {
+    if let Some(index) = annotation.picked {
         draft.annotations = match index {
             1 => SchematicAnnotationVisibility::ViolationsOnly,
             2 => SchematicAnnotationVisibility::Hidden,
@@ -209,19 +222,17 @@ fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::
         };
     }
 
-    let back_annotation = enum_row(
-        ui,
-        "Back-annotation content",
-        "Quantities from the explicitly selected retained run.",
-        "schematic-visibility-back-annotation",
+    let back_annotation = rows.select(
+        "Back-annotation",
+        "display-options-back-annotation",
         back_annotation_label(draft.back_annotation),
-        &[
+        &options(&[
             "Net voltages + device currents",
             "Voltages only",
             "Voltages + currents + power",
-        ],
+        ]),
     );
-    if let Some(index) = back_annotation.0 {
+    if let Some(index) = back_annotation {
         draft.back_annotation = match index {
             1 => SchematicBackAnnotationContent::VoltagesOnly,
             2 => SchematicBackAnnotationContent::VoltagesCurrentsAndPower,
@@ -229,15 +240,13 @@ fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::
         };
     }
 
-    let parameter_labels = enum_row(
-        ui,
+    let parameter_labels = rows.select(
         "Parameter labels",
-        "Instance identity and value labels painted on the canvas.",
-        "schematic-visibility-parameter-labels",
+        "display-options-parameter-labels",
         parameter_label(draft.parameter_labels),
-        &["Values only", "Names + values", "Hidden"],
+        &options(&["Values only", "Names + values", "Hidden"]),
     );
-    if let Some(index) = parameter_labels.0 {
+    if let Some(index) = parameter_labels {
         draft.parameter_labels = match index {
             0 => SchematicParameterLabelVisibility::ValuesOnly,
             2 => SchematicParameterLabelVisibility::Hidden,
@@ -245,36 +254,18 @@ fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::
         };
     }
 
-    let routing = enum_row(
-        ui,
-        "Wire routing style",
-        "Shared interactive routing for wires and buses.",
-        "schematic-visibility-wire-routing",
-        routing_label(draft.wire_routing),
-        &["Orthogonal", "45\u{00b0} diagonal", "Free angle"],
-    );
-    if let Some(index) = routing.0 {
-        draft.wire_routing = match index {
-            1 => SchematicWireRoutingStyle::FortyFiveDegree,
-            2 => SchematicWireRoutingStyle::FreeAngle,
-            _ => SchematicWireRoutingStyle::Orthogonal,
-        };
-    }
-
-    let highlighting = enum_row(
-        ui,
+    let highlighting = rows.select(
         "Net highlighting",
-        "Temporary highlighting of nets in the open view.",
-        "schematic-visibility-net-highlighting",
+        "display-options-net-highlighting",
         net_highlighting_label(draft.net_highlighting),
-        &[
+        &options(&[
             "Selected net",
             "Selected net across hierarchy",
             "Net class colors",
             "Off",
-        ],
+        ]),
     );
-    if let Some(index) = highlighting.0 {
+    if let Some(index) = highlighting {
         draft.net_highlighting = match index {
             1 => SchematicNetHighlighting::SelectedNetAcrossHierarchy,
             2 => SchematicNetHighlighting::NetClassColors,
@@ -283,15 +274,13 @@ fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::
         };
     }
 
-    let review = enum_row(
-        ui,
+    let review = rows.select(
         "Review markers",
-        "Governed review-note markers visible in this session.",
-        "schematic-visibility-review-markers",
+        "display-options-review-markers",
         review_marker_label(draft.review_markers),
-        &["Open + assigned", "All", "Hidden"],
+        &options(&["Open + assigned", "All", "Hidden"]),
     );
-    if let Some(index) = review.0 {
+    if let Some(index) = review {
         draft.review_markers = match index {
             1 => SchematicReviewMarkerVisibility::All,
             2 => SchematicReviewMarkerVisibility::Hidden,
@@ -299,73 +288,18 @@ fn visibility_body(ui: &mut Ui, draft: &mut SchematicVisibilityPolicy) -> egui::
         };
     }
 
-    annotation.1
-}
+    // The paper edge is not among them: it is always drawn.
+    rows.checks(
+        "Sheet layers",
+        &mut [
+            ("Zone references", &mut layers.zones),
+            ("Title block", &mut layers.title_block),
+            ("Centring marks", &mut layers.centring_marks),
+            ("Dimensions at detail zoom", &mut layers.dimensions_at_detail_zoom),
+        ],
+    );
 
-fn enum_row(
-    ui: &mut Ui,
-    title: &str,
-    detail: &str,
-    id: &str,
-    selected: &str,
-    options: &[&str],
-) -> (Option<usize>, egui::Id) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let options = options
-        .iter()
-        .map(|option| (*option).to_owned())
-        .collect::<Vec<_>>();
-    let row = Frame::new()
-        .fill(t.color.bg_app)
-        .inner_margin(Margin::symmetric(12, 9))
-        .show(ui, |ui| {
-            ui.set_min_width((width - 24.0).max(1.0));
-            let narrow = ui.available_width() < 520.0;
-            if narrow {
-                setting_copy(ui, title, detail);
-                ui.add_space(7.0);
-                let control_width = ui.available_width();
-                let output =
-                    select_mono_with_response(ui, id, title, selected, &options, control_width);
-                (output.picked, output.response.id)
-            } else {
-                ui.horizontal(|ui| {
-                    let copy_width = (ui.available_width() * 0.43).clamp(190.0, 270.0);
-                    ui.allocate_ui_with_layout(
-                        vec2(copy_width, t.metrics.ctl_h),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| setting_copy(ui, title, detail),
-                    );
-                    ui.add_space(12.0);
-                    let control_width = ui.available_width();
-                    let output =
-                        select_mono_with_response(ui, id, title, selected, &options, control_width);
-                    (output.picked, output.response.id)
-                })
-                .inner
-            }
-        });
-    ui.painter().hline(
-        row.response.rect.x_range(),
-        row.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    row.inner
-}
-
-fn setting_copy(ui: &mut Ui, title: &str, detail: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(title)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text),
-    );
-    ui.label(
-        egui::RichText::new(detail)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
+    annotation.response.id
 }
 
 const fn annotation_label(value: SchematicAnnotationVisibility) -> &'static str {
@@ -394,14 +328,6 @@ const fn parameter_label(value: SchematicParameterLabelVisibility) -> &'static s
     }
 }
 
-const fn routing_label(value: SchematicWireRoutingStyle) -> &'static str {
-    match value {
-        SchematicWireRoutingStyle::Orthogonal => "Orthogonal",
-        SchematicWireRoutingStyle::FortyFiveDegree => "45\u{00b0} diagonal",
-        SchematicWireRoutingStyle::FreeAngle => "Free angle",
-    }
-}
-
 const fn net_highlighting_label(value: SchematicNetHighlighting) -> &'static str {
     match value {
         SchematicNetHighlighting::SelectedNet => "Selected net",
@@ -422,6 +348,60 @@ const fn review_marker_label(value: SchematicReviewMarkerVisibility) -> &'static
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The visibility and the drawing-sheet-layers commands open one
+    /// dialog, which applies both together and offers no wire routing: that
+    /// is set in Grid, snap and routing alone.
+    #[test]
+    fn one_display_options_dialog_owns_visibility_and_sheet_layers() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(open_drawing_sheet_layers_dialog(&mut app.state));
+        assert!(
+            !open_schematic_visibility_options(&mut app.state),
+            "both commands open the same dialog"
+        );
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        // A later pass publishes only the nodes that changed, so the tree is
+        // what every pass published.
+        let mut labels = String::new();
+        for _ in 0..2 {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                app.render_schematic_visibility_dialog(ui.ctx());
+            });
+            if let Some(update) = output.platform_output.accesskit_update {
+                for text in update
+                    .nodes
+                    .iter()
+                    .flat_map(|(_, node)| [node.label(), node.value()])
+                    .flatten()
+                {
+                    labels.push_str(&text);
+                    labels.push('\n');
+                }
+            }
+        }
+        for row in ["Annotations", "Net highlighting", "Zone references", "Title block"] {
+            assert!(labels.contains(row), "{row} is missing:\n{labels}");
+        }
+        assert!(
+            !labels.contains("Wire routing"),
+            "wire routing is not a display option:\n{labels}"
+        );
+
+        app.state.dialogs.schematic_visibility.layers_draft.zones = false;
+        app.state.dialogs.schematic_visibility.draft.parameter_labels =
+            SchematicParameterLabelVisibility::Hidden;
+        apply_display_options(&mut app.state);
+        assert!(!app.state.ui.drawing_sheet_layers.zones);
+        assert_eq!(
+            app.state.ui.schematic_visibility.parameter_labels,
+            SchematicParameterLabelVisibility::Hidden
+        );
+        assert!(!app.state.dialogs.schematic_visibility.open);
+    }
 
     #[test]
     fn orthogonal_publication_preserves_the_users_axis_order() {

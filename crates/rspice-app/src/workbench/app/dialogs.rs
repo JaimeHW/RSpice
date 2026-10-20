@@ -16,7 +16,6 @@ pub(in crate::workbench) mod delete_sheet;
 pub(in crate::workbench) mod design_management;
 pub(in crate::workbench) mod design_review_comments;
 pub(in crate::workbench) mod drawing_sheet_defaults;
-pub(in crate::workbench) mod drawing_sheet_layers;
 pub(in crate::workbench) mod drawing_sheet_overflow;
 pub(in crate::workbench) mod drawing_sheet_presets;
 pub(in crate::workbench) mod drawing_sheet_preview;

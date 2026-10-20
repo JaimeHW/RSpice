@@ -199,7 +199,6 @@ pub(crate) use schematic::named_net::{
 };
 
 pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
-pub(crate) use dialogs::drawing_sheet_layers::open_drawing_sheet_layers_dialog;
 pub(crate) use dialogs::drawing_sheet_overflow::open_drawing_sheet_overflow_review;
 pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
 pub(crate) use dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
@@ -251,7 +250,9 @@ pub(crate) use dialogs::symbol_definition::{
     SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,
     open_symbol_parameter_form_dialog,
 };
-pub(crate) use dialogs::visibility_options::open_schematic_visibility_options;
+pub(crate) use dialogs::visibility_options::{
+    open_drawing_sheet_layers_dialog, open_schematic_visibility_options,
+};
 
 pub(crate) use dialogs::selection::rename::{
     open_selected_object_rename, rename_selection_available,
@@ -904,7 +905,6 @@ impl RSpiceApp {
         self.render_builtin_xspice_placement_dialog(ctx);
         self.render_net_label_dialog(ctx);
         self.render_grid_snap_routing_dialog(ctx);
-        self.render_drawing_sheet_layers_dialog(ctx);
         self.render_drawing_sheet_overflow_dialog(ctx);
         self.render_schematic_visibility_dialog(ctx);
         self.render_descend_hierarchy_dialog(ctx);

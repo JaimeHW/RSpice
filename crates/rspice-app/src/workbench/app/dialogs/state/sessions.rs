@@ -396,12 +396,9 @@ pub struct DialogState {
     /// Snapped, typed net-label placement transaction.
     pub(crate) net_label_placement: NetLabelPlacementDialogState,
 
-    /// Device-local schematic visibility transaction.
+    /// Display options: device-local schematic visibility and drawing-sheet
+    /// layers, neither of which modifies project-owned design data.
     pub(crate) schematic_visibility: SchematicVisibilityDialogState,
-
-    /// Device-local construction-layer visibility around the permanent paper
-    /// edge. These choices never modify project-owned drawing-sheet setup.
-    pub(crate) drawing_sheet_layers: DrawingSheetLayersDialogState,
 
     /// Live advisory review of printable objects outside the authored drawing
     /// area or overlapping the title block.
@@ -572,7 +569,6 @@ impl DialogState {
             || self.builtin_xspice_placement.open
             || self.net_label_placement.open
             || self.schematic_visibility.open
-            || self.drawing_sheet_layers.open
             || self.drawing_sheet_overflow_open
             || self.grid_snap_routing.open
             || self.engineering_table.open

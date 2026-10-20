@@ -62,7 +62,6 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| dialogs.builtin_xspice_placement.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.net_label_placement.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.schematic_visibility.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_layers.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_overflow_open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.grid_snap_routing.open = true);
     assert_blocks_shortcuts(|dialogs| {

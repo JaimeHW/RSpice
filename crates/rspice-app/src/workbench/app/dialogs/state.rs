@@ -571,47 +571,30 @@ impl GridSnapRoutingDialogState {
     }
 }
 
-/// Isolated draft for the View ▸ Schematic visibility transaction.
+/// Isolated draft for Display options.
 ///
-/// The draft is device-local presentation state. Apply publishes all six
-/// controls atomically; Cancel discards them without touching schematic
+/// The draft is device-local presentation state. Apply publishes every
+/// control atomically; Cancel discards them without touching schematic
 /// history, topology, project serialization, or retained result data.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SchematicVisibilityDialogState {
     pub(crate) open: bool,
     pub(crate) draft: crate::state::SchematicVisibilityPolicy,
-    pub(crate) original: crate::state::SchematicVisibilityPolicy,
+    /// The drawing-sheet layers, edited beside the visibility policy and
+    /// applied with it.
+    pub(crate) layers_draft: crate::state::DrawingSheetLayerVisibility,
 }
 
 impl SchematicVisibilityDialogState {
-    pub(crate) fn open(&mut self, policy: crate::state::SchematicVisibilityPolicy) {
+    pub(crate) fn open(
+        &mut self,
+        policy: crate::state::SchematicVisibilityPolicy,
+        layers: crate::state::DrawingSheetLayerVisibility,
+    ) {
         *self = Self {
             open: true,
             draft: policy,
-            original: policy,
-        };
-    }
-
-    pub(crate) fn close(&mut self) {
-        *self = Self::default();
-    }
-
-    pub(crate) fn dirty(&self) -> bool {
-        self.open && self.draft != self.original
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct DrawingSheetLayersDialogState {
-    pub(crate) open: bool,
-    pub(crate) draft: crate::state::DrawingSheetLayerVisibility,
-}
-
-impl DrawingSheetLayersDialogState {
-    pub(crate) fn open(&mut self, layers: crate::state::DrawingSheetLayerVisibility) {
-        *self = Self {
-            open: true,
-            draft: layers,
+            layers_draft: layers,
         };
     }
 
