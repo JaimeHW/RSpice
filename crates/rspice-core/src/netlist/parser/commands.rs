@@ -3468,12 +3468,62 @@ struct PointMeasureOptions {
     occurrence_given: bool,
 }
 
+/// Read a `.MEAS` numeric field: a number, a parameter, a `{expression}`,
+/// or, as ngspice also reads it, an unbraced expression written as one word
+/// (`AT=t0/2`). The word ends at the first space, so a following keyword is
+/// never taken into it.
+fn expect_measure_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<Value, ParseError> {
+    skip_commas(stream);
+    let mut length = 1;
+    let mut operator_inside = false;
+    loop {
+        let previous = stream.peek_n(length - 1);
+        let next = stream.peek_n(length);
+        if next.span.start != previous.span.end
+            || next.span.line != previous.span.line
+            || matches!(
+                next.kind,
+                TokenKind::Newline | TokenKind::Eof | TokenKind::Comma | TokenKind::Equals
+            )
+        {
+            break;
+        }
+        operator_inside |= matches!(
+            next.kind,
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash
+        ) || matches!(next.kind, TokenKind::Other(ch) if param_rhs_operator_char(ch));
+        length += 1;
+    }
+    if !operator_inside {
+        return expect_value(stream, line_num, params);
+    }
+    let mut expression = String::new();
+    for offset in 0..length {
+        let token = stream.peek_n(offset);
+        expression.push_str(&param_rhs_token_fragment(&token.kind, &token.lexeme));
+    }
+    let value = stream
+        .numeric_expression(&expression, params)
+        .map_err(|error| ParseError::Syntax {
+            line: line_num,
+            message: format!(".MEAS value '{expression}' could not be evaluated: {error}"),
+        })?;
+    for _ in 0..length {
+        stream.advance();
+    }
+    Ok(value)
+}
+
 fn expect_finite_measure_td(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
 ) -> Result<Value, ParseError> {
-    let value = expect_value(stream, line_num, params)?;
+    let value = expect_measure_value(stream, line_num, params)?;
     if !value.is_finite() {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -3534,7 +3584,7 @@ fn parse_point_measure_options(
                 let value = if keyword == "TD" {
                     expect_finite_measure_td(stream, line_num, params)?
                 } else {
-                    expect_value(stream, line_num, params)?
+                    expect_measure_value(stream, line_num, params)?
                 };
                 match keyword.as_str() {
                     "AT" => options.at = Some(value),
@@ -3629,7 +3679,7 @@ fn parse_measure_when_operand(
         TokenKind::Ident(name) if params.get(name).is_none() => Ok(MeasureOperand::Waveform(
             parse_meas_signal(stream, line_num, params)?,
         )),
-        _ => Ok(MeasureOperand::Constant(expect_value(
+        _ => Ok(MeasureOperand::Constant(expect_measure_value(
             stream, line_num, params,
         )?)),
     }
@@ -3700,7 +3750,7 @@ fn parse_measure_error_function_options(
                 message: format!("Expected '=' after {keyword} in .MEAS ERR"),
             });
         }
-        let value = expect_value(stream, line_num, params)?;
+        let value = expect_measure_value(stream, line_num, params)?;
         if !value.is_finite() {
             return Err(ParseError::Syntax {
                 line: line_num,
@@ -3990,8 +4040,8 @@ fn parse_measure_when_event_options(
             });
         }
         match keyword.as_str() {
-            "FROM" => from = Some(expect_value(stream, line_num, params)?),
-            "TO" => to = Some(expect_value(stream, line_num, params)?),
+            "FROM" => from = Some(expect_measure_value(stream, line_num, params)?),
+            "TO" => to = Some(expect_measure_value(stream, line_num, params)?),
             "TD" => td = Some(expect_finite_measure_td(stream, line_num, params)?),
             "RISE" | "FALL" | "CROSS" => {
                 if occurrence_given {
@@ -4198,7 +4248,7 @@ pub(super) fn parse_meas_delay_spec(
     {
         stream.advance();
         stream.advance();
-        TriggerEvent::At(expect_value(stream, line_num, params)?)
+        TriggerEvent::At(expect_measure_value(stream, line_num, params)?)
     } else {
         let left = parse_meas_signal(stream, line_num, params)?;
         let right = if stream.consume(&TokenKind::Equals) {
@@ -4278,7 +4328,7 @@ pub(super) fn parse_meas_delay_spec(
                 let key = s.to_ascii_uppercase();
                 stream.advance();
                 let _optional_equals = stream.consume(&TokenKind::Equals);
-                let value = expect_value(stream, line_num, params)?;
+                let value = expect_measure_value(stream, line_num, params)?;
                 if !value.is_finite() {
                     return Err(ParseError::Syntax {
                         line: line_num,
@@ -4438,7 +4488,7 @@ pub(super) fn parse_measure_range_options(
                         message: format!("Expected '=' after {} in .MEAS", key),
                     });
                 }
-                let value = expect_value(stream, line_num, params)?;
+                let value = expect_measure_value(stream, line_num, params)?;
                 match key.as_str() {
                     "FROM" => from = Some(value),
                     "TO" => to = Some(value),
@@ -4518,7 +4568,7 @@ fn parse_measure_extrema_options(
                 output = ExtremaOutput::IndependentAxis;
             }
         } else {
-            let value = expect_value(stream, line_num, params)?;
+            let value = expect_measure_value(stream, line_num, params)?;
             if key == "FROM" {
                 from = Some(value);
             } else {
@@ -4562,7 +4612,7 @@ fn parse_measure_equation_options(
                 message: format!("Expected '=' after {key} in .MEAS equation"),
             });
         }
-        let value = expect_value(stream, line_num, params)?;
+        let value = expect_measure_value(stream, line_num, params)?;
         match key.as_str() {
             "FROM" => from = Some(value),
             "TO" => to = Some(value),
@@ -5434,45 +5484,28 @@ pub(super) fn parse_func_statement(
 
     let args = parse_function_argument_list(stream, line_num, &func_name)?;
 
-    // Check for = sign or Expression (which is {expression})
-    let body: String;
-
-    if stream.consume(&TokenKind::Equals) {
-        // Standard syntax: .FUNC name(args) = expression
-        // Collect the rest of the line as the expression body
-        let mut body_parts = Vec::new();
-        while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
-        {
-            match &stream.peek().kind {
-                TokenKind::Ident(s) => body_parts.push(s.clone()),
-                TokenKind::Number(n) => body_parts.push(format!("{}", n)),
-                TokenKind::Expression(e) => body_parts.push(e.clone()),
-                TokenKind::LParen => body_parts.push("(".to_string()),
-                TokenKind::RParen => body_parts.push(")".to_string()),
-                TokenKind::Comma => body_parts.push(",".to_string()),
-                TokenKind::Plus => body_parts.push("+".to_string()),
-                TokenKind::Minus => body_parts.push("-".to_string()),
-                TokenKind::Star => body_parts.push("*".to_string()),
-                TokenKind::Slash => body_parts.push("/".to_string()),
-                TokenKind::Equals => body_parts.push("=".to_string()),
-                _ => {}
-            }
+    // The body is `{expression}`, `= expression`, or, as ngspice also
+    // reads it, the bare rest of the card: `.FUNC f(x) x*2`.
+    let body = match (&stream.peek().kind, &stream.peek_n(1).kind) {
+        (TokenKind::Expression(expr), TokenKind::Newline | TokenKind::Eof) => {
+            let body = expr.clone();
             stream.advance();
+            body
         }
-        body = body_parts.join("");
-    } else if let TokenKind::Expression(expr) = &stream.peek().kind {
-        // Function definition: .FUNC name(args) {expression}
-        body = expr.clone();
-        stream.advance();
-    } else {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "Expected '=' or '{{expression}}' after .FUNC {}(...)",
-                func_name
-            ),
-        });
-    }
+        _ => {
+            stream.consume(&TokenKind::Equals);
+            // Keep every token as written. The body used to be rebuilt from a
+            // list of known token kinds, which dropped the rest: `x^2` read
+            // as `x2`.
+            let mut body = String::new();
+            while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                let token = stream.peek().clone();
+                append_param_rhs_token(&mut body, &token.kind, &token.lexeme);
+                stream.advance();
+            }
+            body
+        }
+    };
 
     if body.is_empty() {
         return Err(ParseError::Syntax {
@@ -7667,6 +7700,75 @@ mod tests {
                 panic!("typed MINVAL owner failed to parse: {statement}: {error}")
             });
         }
+    }
+
+    /// ngspice 46 reads an unbraced `.func` body and an unbraced one-word
+    /// `.meas` value: `.func f(x) x*2` gives f(3) = 6, and `AT=t0/2` with
+    /// t0 = 2m measures at 1m. Both were syntax errors here, and the `=` form
+    /// of `.func` dropped every token kind it did not list (`x^2` read as
+    /// `x2`).
+    #[test]
+    fn unbraced_func_bodies_and_measure_values_read_as_ngspice_does() {
+        for dialect in [
+            crate::config::ExpressionDialect::Ngspice,
+            crate::config::ExpressionDialect::Xyce,
+        ] {
+            let netlist = Netlist::parse_with_options(
+                "unbraced\n.func f(x) x*2\n.func g(x) = x^2+1\n.func h(x,y) {x-y}\n\
+                 .param t0=2m a={f(3)} b={g(3)} c={h(5,1)}\n\
+                 V1 out 0 PWL(0 0 2m 2)\n.tran 10u 2m\n\
+                 .meas tran find_at FIND V(out) AT=t0/2\n\
+                 .meas tran avg_window AVG V(out) FROM=t0/4 TO=t0*0.5\n\
+                 .meas tran trig_at TRIG AT=t0/4 TARG V(out) VAL=t0*500 RISE=1\n.end\n",
+                crate::netlist::NetlistParseOptions {
+                    expression_dialect: dialect,
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+            for (name, expected) in [("A", 6.0), ("B", 10.0), ("C", 4.0)] {
+                let value = netlist.params.get(name).expect("parameter is defined");
+                assert!(
+                    (value - expected).abs() < 1e-12,
+                    "{dialect:?} {name}={value}"
+                );
+            }
+            let measure = |name: &str| {
+                &netlist
+                    .measurements
+                    .iter()
+                    .find(|measure| measure.name.eq_ignore_ascii_case(name))
+                    .expect("measurement parses")
+                    .measure_type
+            };
+            let close = |value: Option<f64>, expected: f64| {
+                value.is_some_and(|value| (value - expected).abs() < 1e-15)
+            };
+            assert!(
+                matches!(measure("find_at"), crate::netlist::measure::MeasureType::Find { at, .. } if close(*at, 1e-3)),
+                "{dialect:?}: {:?}",
+                measure("find_at")
+            );
+            assert!(
+                format!("{:?}", measure("avg_window")).contains("0.0005")
+                    && format!("{:?}", measure("avg_window")).contains("0.001"),
+                "{dialect:?}: {:?}",
+                measure("avg_window")
+            );
+            assert!(
+                format!("{:?}", measure("trig_at")).contains("At(0.0005)"),
+                "{dialect:?}: {:?}",
+                measure("trig_at")
+            );
+        }
+        // A space still ends the value, so a following keyword is never read
+        // into it, and a word that is not an expression stays an error.
+        assert!(
+            Netlist::parse(
+                ".meas word\nV1 out 0 1\n.tran 1n 2n\n.meas tran x FIND V(out) AT=1n /2\n.end\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]

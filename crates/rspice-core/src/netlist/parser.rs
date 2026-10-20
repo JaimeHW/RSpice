@@ -244,6 +244,14 @@ pub fn strip_spice_inline_comment(line: &str, dialect: ExpressionDialect) -> &st
     )
 }
 
+/// Remove an unquoted `;` comment: the one inline-comment rule every dialect
+/// shares. ngspice ends a card at any `;` outside quotes
+/// (`inp_stripcomments_line` in inpcom.c), and so does Xyce's field scanner
+/// (`SpiceSeparatedFieldTool::NextChar_`).
+pub(crate) fn strip_semicolon_comment(line: &str) -> &str {
+    strip_inline_semicolon_comment_with_non_semicolon_comments(line, false)
+}
+
 #[cfg(test)]
 mod end_card_tests {
     use super::*;

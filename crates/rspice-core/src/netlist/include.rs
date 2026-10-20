@@ -1910,7 +1910,9 @@ fn is_windows_source_path_literal(path: &str) -> bool {
 /// Handles quote styles and whitespace without accepting longer lookalike
 /// directive names.
 pub fn parse_include_directive(line: &str) -> Option<String> {
-    let trimmed = line.trim();
+    // `.include r9.inc;c` names `r9.inc`: every dialect ends a card at an
+    // unquoted `;`.
+    let trimmed = super::parser::strip_semicolon_comment(line).trim();
     let (directive, rest) = split_directive(trimmed)?;
     if !matches_ignore_ascii_case(directive, &[".include", ".inc", ".incl"]) {
         return None;
@@ -1993,7 +1995,7 @@ fn spice_relative_path(path: &str) -> PathBuf {
 ///
 /// Returns (filename, optional_section)
 pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
-    let trimmed = line.trim();
+    let trimmed = super::parser::strip_semicolon_comment(line).trim();
     let (directive, rest) = split_directive(trimmed)?;
     if !directive.eq_ignore_ascii_case(".lib") {
         return None;
@@ -2126,6 +2128,34 @@ mod tests {
         );
         assert_eq!(parse_include_directive(".includex bad"), None);
         assert_eq!(parse_include_directive(".incbin bad"), None);
+    }
+
+    /// ngspice 46 includes `r9.inc` for `.include r9.inc;c` (a `;` ends the
+    /// card outside quotes, as it does in Xyce); RSpice looked for a file
+    /// named `r9.inc;c`. A quoted `;` is still part of the name.
+    #[test]
+    fn a_semicolon_ends_an_include_or_lib_card_outside_quotes() {
+        assert_eq!(
+            parse_include_directive(".include r9.inc;c").as_deref(),
+            Some("r9.inc")
+        );
+        assert_eq!(
+            parse_include_directive(".inc r9.inc ; trailing").as_deref(),
+            Some("r9.inc")
+        );
+        assert_eq!(
+            parse_include_directive(".include \"wave;file.inc\";c").as_deref(),
+            Some("wave;file.inc")
+        );
+        assert_eq!(parse_include_directive(".include;r9.inc"), None);
+        assert_eq!(
+            parse_lib_directive(".lib models.lib;c"),
+            Some(("models.lib".to_owned(), None))
+        );
+        assert_eq!(
+            parse_lib_directive(".lib models.lib tt;c"),
+            Some(("models.lib".to_owned(), Some("tt".to_owned())))
+        );
     }
 
     #[test]
