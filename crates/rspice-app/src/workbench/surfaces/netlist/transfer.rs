@@ -11,7 +11,7 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::design_system::{Problem, problem_line};
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
@@ -176,24 +176,19 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpic
     }
 }
 
-fn dependency_status_label(
-    messages: MessageCatalog,
-    count: usize,
-    sealed: bool,
-    external: bool,
-) -> String {
-    let id = match (external, sealed, count == 1) {
-        (false, true, true) => MessageId::NetlistDependencySealedSingular,
-        (false, true, false) => MessageId::NetlistDependencySealed,
-        (false, false, true) => MessageId::NetlistDependencyResolutionSingular,
-        (false, false, false) => MessageId::NetlistDependencyResolution,
-        (true, true, true) => MessageId::NetlistExportExternalSealedSingular,
-        (true, true, false) => MessageId::NetlistExportExternalSealed,
-        (true, false, true) => MessageId::NetlistExportExternalResolutionSingular,
-        (true, false, false) => MessageId::NetlistExportExternalResolution,
-    };
-    let count = count.to_string();
-    messages.format(id, &[("count", &count)])
+/// The dialects a generated deck exports in, as the Dialect select lists them.
+const EXPORT_DIALECTS: [(crate::io::NetlistFormat, &str); 2] = [
+    (crate::io::NetlistFormat::Spice, "SPICE"),
+    (crate::io::NetlistFormat::Spectre, "Spectre"),
+];
+
+/// "1 included file", "3 included files".
+fn files_phrase(count: usize) -> String {
+    if count == 1 {
+        "1 included file".to_owned()
+    } else {
+        format!("{count} included files")
+    }
 }
 
 pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
@@ -227,108 +222,97 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
             )
         })
         .unwrap_or_default();
+    // A deck that includes other files exports them with it, as a .zip.
     let requires_bundle = dependency_count > 0;
     if requires_bundle {
         dialog.bundle_dependencies = true;
     }
+    // Source-map positions are the SPICE deck's, before translation.
+    let source_map_supported = dialog.format == crate::io::NetlistFormat::Spice;
+    if !source_map_supported {
+        dialog.include_source_map = false;
+    }
     let messages = app.state.workbench.messages();
-    let bundle_ready = !dialog.bundle_dependencies || dependencies_sealed;
-    let primary = if dialog.bundle_dependencies {
-        messages.text(MessageId::NetlistExportBundle)
+    let netlist = &app.state.model.netlist_artifacts;
+    let refusal = if netlist.generation_error.is_some() {
+        Some("The netlist could not be generated. Fix its problems, then export.".to_owned())
+    } else if netlist.generated_document.is_none() {
+        Some("No netlist has been generated yet.".to_owned())
+    } else if !current {
+        Some("The netlist changed since it was generated. Regenerate it, then export.".to_owned())
+    } else if dialog.bundle_dependencies && !dependencies_sealed {
+        Some(format!(
+            "Resolve the deck's {} before exporting it.",
+            files_phrase(dependency_count)
+        ))
     } else {
-        messages.text(MessageId::NetlistExportDeck)
+        None
     };
-    let footer_hint =
-        dependency_status_label(messages, dependency_count, dependencies_sealed, false);
-    let choice = Dialog::new(messages.text(MessageId::NetlistExportTitle), primary)
-        .description(messages.text(MessageId::NetlistExportDescription))
-        .size(DialogSize::Transaction)
-        .initial_focus(DialogInitialFocus::BodyControl)
-        .primary_enabled(current && bundle_ready)
-        .ghost(messages.text(MessageId::CommonCancel))
-        .hint(&footer_hint)
-        .show_with_initial_body_focus(ctx, |ui| {
-            let t = Tokens::get(ctx);
-            egui::Frame::new()
-                .fill(t.color.bg_inset)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .corner_radius(t.radius)
-                .inner_margin(10)
-                .show(ui, |ui| {
-                    ui.label(messages.text(MessageId::NetlistExportSnapshotNotice));
-                });
-            ui.add_space(8.0);
-            ui.label(messages.text(MessageId::NetlistDialect));
-            let dialect = egui::ComboBox::from_id_salt("rspice.code.export-dialect")
-                .selected_text(match dialog.format {
-                    crate::io::NetlistFormat::Spice => "SPICE",
-                    crate::io::NetlistFormat::Spectre => "Spectre",
-                })
-                .width(ui.available_width().max(1.0))
-                .show_ui(ui, |ui| {
-                    for (format, label) in [
-                        (crate::io::NetlistFormat::Spice, "SPICE"),
-                        (crate::io::NetlistFormat::Spectre, "Spectre"),
-                    ] {
-                        ui.selectable_value(&mut dialog.format, format, label);
-                    }
-                });
-            ui.add_space(6.0);
-            let bundle_response = ui.add_enabled(
-                !requires_bundle,
-                egui::Checkbox::new(
-                    &mut dialog.bundle_dependencies,
-                    messages.text(MessageId::NetlistExportDependencyBundle),
-                ),
-            );
-            if requires_bundle {
-                bundle_response
-                    .clone()
-                    .on_disabled_hover_text(messages.text(MessageId::NetlistExportBundleRequired));
-            }
-            if bundle_response.changed() && !dialog.bundle_dependencies {
-                dialog.include_source_map = false;
-            }
-            let source_map_supported = dialog.format == crate::io::NetlistFormat::Spice;
-            let source_map_response = ui.add_enabled(
-                source_map_supported,
-                egui::Checkbox::new(
-                    &mut dialog.include_source_map,
-                    messages.text(MessageId::NetlistExportSourceMap),
-                ),
-            );
-            if source_map_response.changed() && dialog.include_source_map {
-                dialog.bundle_dependencies = true;
-            }
-            if !source_map_supported {
-                dialog.include_source_map = false;
-                source_map_response.on_disabled_hover_text(
-                    messages.text(MessageId::NetlistExportSourceMapSpiceOnly),
-                );
-            }
-            egui::Frame::new()
-                .fill(t.color.bg_inset)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .corner_radius(t.radius)
-                .inner_margin(10)
-                .show(ui, |ui| {
-                    ui.label(dependency_status_label(
-                        messages,
-                        dependency_count,
-                        dependencies_sealed,
-                        true,
-                    ));
-                    ui.label(if dialog.bundle_dependencies {
-                        messages.text(MessageId::NetlistExportBundleBehavior)
-                    } else {
-                        messages.text(MessageId::NetlistExportDeckBehavior)
-                    });
-                });
-            if let Some(error) = &dialog.error {
-                problem_line(ui, Problem::Failure, error);
-            }
-            Some(dialect.response.id)
-        });
+    let error = dialog.error.clone();
+    let status = match (error.as_deref(), refusal.as_deref()) {
+        (Some(error), _) => Err(error),
+        (None, Some(refusal)) => Err(refusal),
+        (None, None) => Ok(None),
+    };
+    let dialects = EXPORT_DIALECTS.map(|(_, label)| label.to_owned());
+    let bundle_label = messages.text(MessageId::NetlistExportDependencyBundle);
+    let source_map_label = messages.text(MessageId::NetlistExportSourceMap);
+    let bundled_includes = requires_bundle.then(|| {
+        format!(
+            "The deck includes {}, so it exports as a .zip bundle.",
+            files_phrase(dependency_count)
+        )
+    });
+    let before = (dialog.bundle_dependencies, dialog.include_source_map);
+    let choice = CommandForm::new(
+        &messages.text(MessageId::NetlistExportTitle),
+        &messages.text(MessageId::NetlistExportDeck),
+    )
+    .describe(&messages.text(MessageId::NetlistExportDescription))
+    .primary_enabled(refusal.is_none())
+    .status(status)
+    .show(ctx, |rows| {
+        let current_dialect = EXPORT_DIALECTS
+            .iter()
+            .position(|(format, _)| *format == dialog.format)
+            .unwrap_or_default();
+        let dialect = rows.select_with_response(
+            &messages.text(MessageId::NetlistDialect),
+            "rspice.code.export-dialect",
+            EXPORT_DIALECTS[current_dialect].1,
+            &dialects,
+        );
+        if let Some((format, _)) = dialect
+            .picked
+            .and_then(|picked| EXPORT_DIALECTS.get(picked))
+        {
+            dialog.format = *format;
+        }
+        let mut items: Vec<(&str, &mut bool)> = Vec::new();
+        if !requires_bundle {
+            items.push((bundle_label.as_str(), &mut dialog.bundle_dependencies));
+        }
+        if source_map_supported {
+            items.push((source_map_label.as_str(), &mut dialog.include_source_map));
+        }
+        if !items.is_empty() {
+            rows.checks("Include", &mut items);
+        }
+        if let Some(bundled) = &bundled_includes {
+            rows.derived(bundled);
+        }
+        Some(dialect.response.id)
+    });
+    // A source map travels in the bundle: asking for one asks for the
+    // bundle, and leaving the bundle leaves the map.
+    if dialog.include_source_map && !before.1 {
+        dialog.bundle_dependencies = true;
+    } else if !dialog.bundle_dependencies && before.0 {
+        dialog.include_source_map = false;
+    }
+    if (dialog.bundle_dependencies, dialog.include_source_map) != before {
+        dialog.error = None;
+    }
     match choice {
         DialogChoice::Primary => {
             if crate::workbench::menu_bar::action_export_generated_netlist_with_options(
@@ -616,5 +600,52 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
             );
         }
         DialogChoice::None | DialogChoice::Secondary => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Export is a command form: the dialect, what goes with the deck, and
+    /// Export…; a refusal is its status. It used to open on a boxed paragraph
+    /// about snapshots, close on a box saying "0 external dependencies ·
+    /// sealed" and "accompanied by an integrity manifest", and repeat the
+    /// count in the footer.
+    #[test]
+    fn export_is_a_command_form_without_the_sealing_boxes() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.code.netlist.export_dialog.open = true;
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| export_generated_dialog_window(ui.ctx(), &mut app),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        let names = nodes
+            .values()
+            .flat_map(|node| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        let says = |text: &str| names.iter().any(|name| name.contains(text));
+        assert!(says("Dialect"), "{names:?}");
+        assert!(says("Export\u{2026}"), "the primary is not Export…");
+        assert!(says("Cancel"));
+        for jargon in ["sealed", "integrity", "snapshot", "dependency members"] {
+            assert!(!says(jargon), "the dialog says {jargon:?}");
+        }
     }
 }
