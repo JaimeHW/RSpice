@@ -2005,6 +2005,69 @@ mod tests {
         assert_eq!(diagnostics[0].line, Some(3));
     }
 
+    /// A variable read before it is assigned keeps its value from the last
+    /// accepted time point. The compile succeeds, and Problems lists one
+    /// warning for the module naming the variable and the line of that first
+    /// read.
+    #[test]
+    fn a_retained_variable_reaches_problems_as_a_warning_naming_its_first_read() {
+        let mut app = module_source_with(
+            "counter",
+            "module counter(p, n);\n  inout p, n; electrical p, n;\n  real count;\n  analog begin\n    count = count + 1;\n    I(p, n) <+ count * V(p, n);\n  end\nendmodule\n",
+        );
+
+        let selected = selected_veriloga_source(&app).unwrap();
+        let token = selected.token(app.state.workspace.content.project.id());
+        let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
+            panic!("a retained variable is legal Verilog-A and must not fail the compile")
+        };
+        let receipt = receipt_from_report(token, &report, Some(selected.bundle())).unwrap();
+        let retained: Vec<_> = receipt
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == "VA-SEM-RETAINED-VARIABLE")
+            .collect();
+        assert_eq!(retained.len(), 1, "one warning per module");
+        assert_eq!(retained[0].severity, CodeEditorSeverity::Warning);
+        assert_eq!(
+            &*retained[0].message,
+            "Module `counter` has 1 variable read before it is assigned, so it keeps its value \
+             from the last accepted time point: `count` (line 5)"
+        );
+
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(VerilogACompileOutcome::Success(Box::new(
+                (**receipt.compilation.report()).clone(),
+            )))
+            .unwrap();
+        app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+            token: receipt.compilation.token(),
+            receiver: Arc::new(Mutex::new(receiver)),
+        });
+        poll_veriloga_compile(&mut app);
+
+        // Problems lists every diagnostic of the published receipt.
+        let published = app
+            .state
+            .ui
+            .code_workspace
+            .veriloga
+            .receipt
+            .as_ref()
+            .expect("a pass carrying a warning still publishes a receipt");
+        let warning = published
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code() == "VA-SEM-RETAINED-VARIABLE")
+            .expect("the published receipt carries the retained variable");
+        assert!(
+            warning.message.contains("`count` (line 5)"),
+            "{}",
+            warning.message
+        );
+    }
+
     #[test]
     fn completed_async_compile_cannot_cross_publish_between_cell_views() {
         let mut app = RSpiceApp::test_instance();
