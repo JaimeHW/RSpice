@@ -662,3 +662,80 @@ fn render_every_menu_dialog_for_review() {
         directory.display()
     );
 }
+
+/// How a Help dialog is opened for review.
+#[derive(Debug, Clone, Copy)]
+enum Opens {
+    Command(Command),
+    /// The Examples dialog, which no menu row offers yet.
+    Examples,
+    /// The license dialog over a key it verified, before Activate.
+    VerifiedKey,
+}
+
+/// The Help dialogs, by the name their renders are filed under.
+const HELP_DIALOGS: [(&str, Seed, Opens); 9] = [
+    ("license-verified", Seed::Project, Opens::VerifiedKey),
+    ("about", Seed::Project, Opens::Command(Command::About)),
+    (
+        "help-center",
+        Seed::Project,
+        Opens::Command(Command::HelpCenter),
+    ),
+    (
+        "legal",
+        Seed::Project,
+        Opens::Command(Command::LegalPrivacy),
+    ),
+    (
+        "report-problem",
+        Seed::Project,
+        Opens::Command(Command::SystemDiagnostics),
+    ),
+    ("examples", Seed::Project, Opens::Examples),
+    ("examples-no-project", Seed::NoProject, Opens::Examples),
+    ("license", Seed::Project, Opens::Command(Command::License)),
+    (
+        "command-reference",
+        Seed::Project,
+        Opens::Command(Command::KeyboardShortcuts),
+    ),
+];
+
+/// The Help dialogs, each rendered: light and dark at desktop size, light
+/// at tablet size with a touch pointer.
+#[test]
+#[ignore = "writes PNGs for a human to review; run with --ignored"]
+fn render_the_help_dialogs_for_review() {
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    std::thread::scope(|scope| {
+        for (name, seed, opens) in HELP_DIALOGS {
+            let directory = &directory;
+            scope.spawn(move || {
+                let (mut reader, _) = seeded(seed);
+                match opens {
+                    Opens::Command(command) => command.execute(&mut reader.app),
+                    Opens::VerifiedKey => {
+                        use crate::services::license;
+                        Command::License.execute(&mut reader.app);
+                        let dialog = &mut reader.app.state.dialogs.license_dialog;
+                        dialog.text = license::SAMPLE_KEY.to_owned();
+                        dialog.phase = crate::workbench::app::LicensePhase::Verified(
+                            license::parse_and_verify(license::SAMPLE_KEY)
+                                .expect("the sample key verifies in a test build"),
+                        );
+                    }
+                    Opens::Examples => reader.app.state.workbench.open_examples(),
+                }
+                let light = reader.look(crate::ui::Mode::Light, DESKTOP, false);
+                light.write(directory, &format!("{name}-light-1440x900.png"), DESKTOP);
+                let dark = reader.look(crate::ui::Mode::Dark, DESKTOP, false);
+                dark.write(directory, &format!("{name}-dark-1440x900.png"), DESKTOP);
+                let touch = reader.look(crate::ui::Mode::Light, TABLET, true);
+                touch.write(directory, &format!("{name}-light-1024x768.png"), TABLET);
+            });
+        }
+    });
+}
