@@ -499,9 +499,9 @@ fn default_noise_rhs_sign() -> f64 {
 
 /// Lookup table for $table_model interpolation
 ///
-/// Provides commercial-grade linear interpolation with:
+/// Provides commercial-grade interpolation with:
 /// - Binary search for O(log n) lookup performance
-/// - Linear extrapolation beyond table bounds
+/// - The control string's interpolation degree and per-end extrapolation
 /// - Proper handling of edge cases (empty, single point, duplicate x)
 /// - Optional derivative computation for Jacobian calculation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -512,6 +512,51 @@ pub struct LookupTable {
     pub y_data: Vec<f64>,
     /// Optional table name for debugging
     pub name: Option<SmolStr>,
+    /// Interpolation degree and extrapolation the control string selected.
+    #[serde(default)]
+    pub control: TableControl,
+    /// Per-knot spline data: the knot slopes of a quadratic spline, or the
+    /// knot second derivatives of a cubic one. Empty for the other degrees.
+    #[serde(default)]
+    pub knots: Vec<f64>,
+}
+
+/// How `$table_model` interpolates between its data points (Verilog-AMS LRM
+/// 2.4 section 9.21, the leading character of a control-string field).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TableInterpolation {
+    /// `D`: the value of the closest data point.
+    Discrete,
+    /// `1`: piecewise linear (the default).
+    #[default]
+    Linear,
+    /// `2`: C1 quadratic spline with knots at the data points.
+    Quadratic,
+    /// `3`: natural cubic spline (zero curvature at both ends).
+    Cubic,
+}
+
+/// What `$table_model` does with an input outside the data (the `C`/`L`/`E`
+/// characters of a control-string field).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TableExtrapolation {
+    /// `C`: hold the end value.
+    Clamp,
+    /// `L`: continue along the interpolant's slope at the end (the default).
+    #[default]
+    Linear,
+    /// `E`: an out-of-range input is a runtime error.
+    Error,
+}
+
+/// The parsed control string of one `$table_model` dimension.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TableControl {
+    pub interpolation: TableInterpolation,
+    /// Below the first data point.
+    pub below: TableExtrapolation,
+    /// Above the last data point.
+    pub above: TableExtrapolation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

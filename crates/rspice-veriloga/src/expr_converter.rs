@@ -13,8 +13,11 @@ use crate::ast::{
     LimiterArgument, NumberLit, SystemFunction,
 };
 use crate::branch_identity::BranchIdentity;
+use crate::codegen::{TableControl, TableExtrapolation, TableInterpolation};
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
-use crate::ir::arena::{ExprArena, Heavy, IndexedRead, IrUnaryOp, Node, ZiPolynomial, pack_index};
+use crate::ir::arena::{
+    ExprArena, Heavy, IndexedRead, IrUnaryOp, Node, TableData, ZiPolynomial, pack_index,
+};
 use crate::ir::{BranchRef, DdxAxis, IrFunction, NodeId};
 use crate::semantic::AnalyzedModule;
 use smol_str::SmolStr;
@@ -167,6 +170,82 @@ fn validate_laplace_coefficients(
     crate::laplace::StateSpaceFilter::from_transfer_function(&numerator, &denominator)
         .map(|_| ())
         .map_err(|error| laplace_error(operator, error))
+}
+
+/// Parse a `$table_model` control string (Verilog-AMS LRM 2.4 section 9.21)
+/// for a one-input table: comma-separated fields, one per data column ahead of
+/// the output column. A field is an interpolation character (`1`, `2`, `3`,
+/// `D`; empty means `1`) and up to two extrapolation characters (`C`, `L`,
+/// `E`; one covers both ends, two are the lower then the upper end), or `I`,
+/// which ignores that column. Returns the control and which columns are
+/// ignored.
+fn parse_table_control(text: &str) -> Result<(TableControl, Vec<bool>), String> {
+    let mut control = TableControl::default();
+    let mut ignored = Vec::new();
+    for field in text.split(',') {
+        let mut chars = field.trim().chars();
+        let interpolation = match chars.next() {
+            None => TableInterpolation::Linear,
+            Some('I') => {
+                if let Some(extra) = chars.next() {
+                    return Err(format!(
+                        "$table_model control string \"{text}\": an ignored column (I) takes no \
+                         extrapolation, found '{extra}'"
+                    ));
+                }
+                ignored.push(true);
+                continue;
+            }
+            Some('1') => TableInterpolation::Linear,
+            Some('2') => TableInterpolation::Quadratic,
+            Some('3') => TableInterpolation::Cubic,
+            Some('D') => TableInterpolation::Discrete,
+            Some(other) => {
+                return Err(format!(
+                    "$table_model control string \"{text}\": unknown interpolation '{other}' \
+                     (expected 1, 2, 3, D or I)"
+                ));
+            }
+        };
+        let mut ends = Vec::new();
+        for code in chars {
+            let extrapolation = match code {
+                'C' => TableExtrapolation::Clamp,
+                'L' => TableExtrapolation::Linear,
+                'E' => TableExtrapolation::Error,
+                other => {
+                    return Err(format!(
+                        "$table_model control string \"{text}\": unknown extrapolation \
+                         '{other}' (expected C, L or E)"
+                    ));
+                }
+            };
+            ends.push(extrapolation);
+        }
+        if ends.len() > 2 {
+            return Err(format!(
+                "$table_model control string \"{text}\": a field takes at most two \
+                 extrapolation characters (lower then upper)"
+            ));
+        }
+        let below = ends.first().copied().unwrap_or_default();
+        control = TableControl {
+            interpolation,
+            below,
+            above: ends.get(1).copied().unwrap_or(below),
+        };
+        ignored.push(false);
+    }
+    match ignored.iter().filter(|ignored| !**ignored).count() {
+        1 => Ok((control, ignored)),
+        0 => Err(format!(
+            "$table_model control string \"{text}\" ignores every input column"
+        )),
+        usable => Err(format!(
+            "multi-dimensional $table_model is not supported: control string \"{text}\" \
+             describes {usable} input dimensions"
+        )),
+    }
 }
 
 fn validate_arg_range(
@@ -917,14 +996,15 @@ impl<'a> ExprConverter<'a> {
             }
             "$table_model" => {
                 validate_arg_range(&func.name, func.args.len(), 2, None)?;
-                // $table_model(input, table_spec, ...)
+                // $table_model(input, table_spec [, control])
                 // Supports:
                 // 1) Inline numeric pairs: $table_model(x, 0,0, 1,2, 2,4)
                 // 2) Inline string table: $table_model(x, "0 0; 1 2; 2 4")
                 // 3) Table file path:    $table_model(x, "table.dat")
+                // each optionally followed by the LRM control string ("3L").
+                let data = self.parse_table_model_data(func)?;
                 let input = self.convert(arena, &func.args[0])?;
-                let (x_data, y_data) = self.parse_table_model_data(func)?;
-                let table = arena.push_table(x_data, y_data);
+                let table = arena.push_table(data);
                 Ok(arena.push(Node::TableLookup { input, table }))
             }
             "absdelay" => {
@@ -2446,8 +2526,32 @@ impl<'a> ExprConverter<'a> {
         }
     }
 
-    fn parse_table_model_data(&self, func: &SystemFunction) -> CompileResult<(Vec<f64>, Vec<f64>)> {
-        let data_args = &func.args[1..];
+    fn parse_table_model_data(&self, func: &SystemFunction) -> CompileResult<TableData> {
+        let invalid = |message: String| -> crate::error::CompileError {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(message)).into()
+        };
+        let args = &func.args;
+        let first_string = args
+            .iter()
+            .position(|arg| matches!(arg, Expression::StringLit(_)));
+        let data_end = first_string.unwrap_or(args.len());
+        let control_text = |index: usize| -> CompileResult<Option<&str>> {
+            match args.get(index) {
+                None => Ok(None),
+                Some(Expression::StringLit(text)) if index + 1 == args.len() => {
+                    Ok(Some(text.value.as_str()))
+                }
+                Some(Expression::StringLit(_)) => Err(invalid(format!(
+                    "$table_model takes nothing after its control string, found {} more \
+                     argument(s)",
+                    args.len() - index - 1
+                ))),
+                Some(_) => Err(invalid(
+                    "$table_model control string must be a string literal".into(),
+                )),
+            }
+        };
+        let data_args = &args[1..data_end];
 
         if data_args.len() >= 2
             && data_args
@@ -2459,6 +2563,18 @@ impl<'a> ExprConverter<'a> {
                     "$table_model numeric table data requires x/y pairs".into(),
                 ))
                 .into());
+            }
+            let (control, ignored) = match control_text(data_end)? {
+                Some(text) => parse_table_control(text).map_err(invalid)?,
+                None => (TableControl::default(), vec![false]),
+            };
+            if ignored.len() != 1 {
+                return Err(invalid(format!(
+                    "$table_model control string \"{}\" names {} columns; inline x/y pairs have \
+                     one input column",
+                    control_text(data_end)?.unwrap_or_default(),
+                    ignored.len()
+                )));
             }
             let mut x_data = Vec::with_capacity(data_args.len() / 2);
             let mut y_data = Vec::with_capacity(data_args.len() / 2);
@@ -2472,19 +2588,62 @@ impl<'a> ExprConverter<'a> {
                 x_data.push(x.value);
                 y_data.push(y.value);
             }
-            return Self::validate_and_sort_table_data(x_data, y_data);
+            let (x, y) = Self::validate_and_sort_table_data(x_data, y_data)?;
+            return Ok(TableData { x, y, control });
         }
 
-        let Some(Expression::StringLit(spec)) = data_args.first() else {
+        // An array data source (one sample array per input plus the output
+        // array) or more than one input both put non-string arguments ahead
+        // of the first string; neither has a data path behind it.
+        let array_source = data_args.iter().any(|arg| match arg {
+            Expression::ArrayLiteral(_) => true,
+            Expression::Identifier(identifier) => {
+                self.array_layout(identifier.name.as_str()).is_some()
+            }
+            _ => false,
+        });
+        if array_source {
+            return Err(invalid(
+                "$table_model array data sources are not supported; give the table as a file \
+                 or an inline string"
+                    .into(),
+            ));
+        }
+        let Some(source) = first_string else {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "$table_model table data must be numeric pairs or a string table/file path".into(),
             ))
             .into());
         };
+        if source > 1 {
+            return Err(invalid(format!(
+                "multi-dimensional $table_model is not supported: the call has {source} inputs \
+                 before its table data"
+            )));
+        }
+        let Expression::StringLit(spec) = &args[source] else {
+            unreachable!("the first string argument is a string literal")
+        };
+        let (control, ignored) = match control_text(source + 1)? {
+            Some(text) => parse_table_control(text).map_err(invalid)?,
+            None => (TableControl::default(), vec![false]),
+        };
+        let columns = ignored.len() + 1;
+        let select = |rows: Vec<Vec<f64>>| {
+            let input = ignored
+                .iter()
+                .position(|ignored| !ignored)
+                .expect("a parsed control string has one input column");
+            rows.into_iter()
+                .map(|row| (row[input], row[columns - 1]))
+                .unzip::<f64, f64, Vec<f64>, Vec<f64>>()
+        };
 
         let raw = spec.value.as_str();
-        if let Ok((x_data, y_data)) = Self::parse_inline_table_spec(raw) {
-            return Self::validate_and_sort_table_data(x_data, y_data);
+        if let Ok(rows) = Self::parse_inline_table_spec(raw, columns) {
+            let (x, y) = select(rows);
+            let (x, y) = Self::validate_and_sort_table_data(x, y)?;
+            return Ok(TableData { x, y, control });
         }
 
         let path = Path::new(raw);
@@ -2494,19 +2653,73 @@ impl<'a> ExprConverter<'a> {
                 raw, e
             )))
         })?;
-        let (x_data, y_data) = Self::parse_inline_table_spec(&table_text).map_err(|e| {
+        let rows = Self::parse_inline_table_spec(&table_text, columns).map_err(|e| {
             CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                 "$table_model failed to parse table file '{}': {}",
                 raw, e
             )))
         })?;
-        Self::validate_and_sort_table_data(x_data, y_data)
+        let (x, y) = select(rows);
+        let (x, y) = Self::validate_and_sort_table_data(x, y)?;
+        Ok(TableData { x, y, control })
     }
 
-    fn parse_inline_table_spec(spec: &str) -> Result<(Vec<f64>, Vec<f64>), String> {
+    /// Rows of `columns` numbers each. Rows are lines or `;`-separated
+    /// segments, values are separated by whitespace or commas, and `#` or `!`
+    /// starts a comment. A two-column table may also be one flat run of x/y
+    /// pairs.
+    fn parse_inline_table_spec(spec: &str, columns: usize) -> Result<Vec<Vec<f64>>, String> {
+        if columns != 2 {
+            let mut rows = Vec::new();
+            for line in spec.lines() {
+                let line = line.split(['#', '!']).next().unwrap_or("");
+                for segment in line.split(';') {
+                    let segment = segment.replace(',', " ");
+                    let tokens: Vec<&str> = segment.split_whitespace().collect();
+                    if tokens.is_empty() {
+                        continue;
+                    }
+                    if tokens.len() != columns {
+                        return Err(format!(
+                            "each table row must hold {columns} values (one per control-string \
+                             field plus the output), found {}",
+                            tokens.len()
+                        ));
+                    }
+                    let row = tokens
+                        .iter()
+                        .map(|token| {
+                            token
+                                .parse::<f64>()
+                                .map_err(|_| format!("invalid table value '{token}'"))
+                        })
+                        .collect::<Result<Vec<f64>, String>>()?;
+                    rows.push(row);
+                }
+            }
+            if rows.is_empty() {
+                return Err("table data is empty".to_string());
+            }
+            return Ok(rows);
+        }
+        let (x_data, y_data) = Self::parse_pair_table_spec(spec)?;
+        Ok(x_data
+            .into_iter()
+            .zip(y_data)
+            .map(|(x, y)| vec![x, y])
+            .collect())
+    }
+
+    fn parse_pair_table_spec(spec: &str) -> Result<(Vec<f64>, Vec<f64>), String> {
         let cleaned_lines: Vec<String> = spec
             .lines()
-            .map(|line| line.split('!').next().unwrap_or("").trim().to_string())
+            .map(|line| {
+                line.split(['#', '!'])
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            })
             .filter(|line| !line.is_empty())
             .collect();
         let normalized = cleaned_lines.join(";");
@@ -3361,5 +3574,97 @@ mod tests {
         assert_ne!(left, right, "equal/dummy spans must not alias Zi state");
         assert_eq!(left.ordinal, 0);
         assert_eq!(right.ordinal, 1);
+    }
+
+    fn converted_table(args: Vec<Expression>) -> CompileResult<TableData> {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
+        let call = Expression::SystemFunction(SystemFunction {
+            name: "$table_model".into(),
+            args,
+            span: Span::dummy(),
+        });
+        let converted = converter.convert(arena, &call)?;
+        let Node::TableLookup { table, .. } = *arena.node(converted) else {
+            panic!("$table_model did not lower to a table lookup");
+        };
+        Ok(arena.table(table).clone())
+    }
+
+    fn text(value: &str) -> Expression {
+        Expression::StringLit(crate::ast::StringLit {
+            value: value.into(),
+            span: Span::dummy(),
+        })
+    }
+
+    /// LRM 2.4 section 9.21: one field per data column ahead of the output,
+    /// an interpolation character and up to two extrapolation characters
+    /// (lower then upper), or `I` to skip a column.
+    #[test]
+    fn table_model_control_string_reaches_the_table_or_names_its_mistake() {
+        let squares = || text("0 0; 1 1; 2 4");
+        let table = converted_table(vec![number(1.0), squares(), text("3CE")]).unwrap();
+        assert_eq!(
+            table.control,
+            TableControl {
+                interpolation: TableInterpolation::Cubic,
+                below: TableExtrapolation::Clamp,
+                above: TableExtrapolation::Error,
+            }
+        );
+        let table = converted_table(vec![number(1.0), squares(), text("D")]).unwrap();
+        assert_eq!(table.control.interpolation, TableInterpolation::Discrete);
+        assert_eq!(table.control.below, TableExtrapolation::Linear);
+        // Inline pairs take a trailing control string too.
+        let pairs = [0.0, 0.0, 1.0, 1.0].map(number).to_vec();
+        let mut args = vec![number(1.0)];
+        args.extend(pairs);
+        args.push(text("1C"));
+        let table = converted_table(args).unwrap();
+        assert_eq!(table.control.above, TableExtrapolation::Clamp);
+        // `I` skips a data column: x is the second column, y the last.
+        let table =
+            converted_table(vec![number(1.0), text("9 0 0; 9 1 10"), text("I,1L")]).unwrap();
+        assert_eq!((table.x, table.y), (vec![0.0, 1.0], vec![0.0, 10.0]));
+
+        for (args, expected) in [
+            (
+                vec![number(1.0), number(2.0), text("tbl2d.dat"), text("1L,1L")],
+                "multi-dimensional $table_model is not supported",
+            ),
+            (
+                vec![number(1.0), squares(), text("1L,1L")],
+                "multi-dimensional $table_model is not supported",
+            ),
+            (
+                vec![number(1.0), squares(), text("4")],
+                "unknown interpolation '4'",
+            ),
+            (
+                vec![number(1.0), squares(), text("1X")],
+                "unknown extrapolation 'X'",
+            ),
+            (
+                vec![number(1.0), squares(), text("1CLE")],
+                "at most two extrapolation characters",
+            ),
+            (
+                vec![number(1.0), squares(), text("I")],
+                "ignores every input column",
+            ),
+            (
+                vec![number(1.0), squares(), text("1"), text("x")],
+                "takes nothing after its control string",
+            ),
+            (
+                vec![number(1.0), squares(), number(3.0)],
+                "control string must be a string literal",
+            ),
+        ] {
+            let error = converted_table(args).expect_err(expected).to_string();
+            assert!(error.contains(expected), "{expected}: {error}");
+        }
     }
 }

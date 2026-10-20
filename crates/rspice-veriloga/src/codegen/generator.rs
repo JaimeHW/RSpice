@@ -1551,8 +1551,7 @@ impl CodeGenerator {
                 }
                 Node::TableDerivative { input, table } => {
                     self.emit_expr(arena, input, emit_ctx, program)?;
-                    let (x_data, y_data) = arena.table(table);
-                    let table_id = self.register_lookup_table(x_data, y_data)?;
+                    let table_id = self.register_lookup_table(arena.table(table))?;
                     program
                         .instructions
                         .push(Instruction::TableDerivative(table_id));
@@ -1564,8 +1563,7 @@ impl CodeGenerator {
                 } => {
                     self.emit_expr(arena, input, emit_ctx, program)?;
                     self.emit_expr(arena, input_derivative, emit_ctx, program)?;
-                    let (x_data, y_data) = arena.table(table);
-                    let table_id = self.register_lookup_table(x_data, y_data)?;
+                    let table_id = self.register_lookup_table(arena.table(table))?;
                     program
                         .instructions
                         .push(Instruction::TableDerivativeApply(table_id));
@@ -1630,11 +1628,10 @@ impl CodeGenerator {
                         .push(Instruction::NamedLimiterPrevious(state_id));
                 }
                 Node::TableLookup { input, table } => {
-                    // $table_model lookup with linear interpolation
+                    // $table_model lookup with the call's control string
                     // Emit input expression, then TableLookup instruction referencing the table
                     self.emit_expr(arena, input, emit_ctx, program)?;
-                    let (x_data, y_data) = arena.table(table);
-                    let table_id = self.register_lookup_table(x_data, y_data)?;
+                    let table_id = self.register_lookup_table(arena.table(table))?;
                     program
                         .instructions
                         .push(Instruction::TableLookup(table_id));
@@ -2214,7 +2211,8 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn register_lookup_table(&self, x_data: &[f64], y_data: &[f64]) -> CompileResult<usize> {
+    fn register_lookup_table(&self, data: &crate::ir::arena::TableData) -> CompileResult<usize> {
+        let (x_data, y_data) = (&data.x, &data.y);
         if x_data.len() != y_data.len() {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "$table_model x/y table length mismatch".into(),
@@ -2229,15 +2227,14 @@ impl CodeGenerator {
         }
 
         let mut tables = self.lookup_tables.borrow_mut();
-        if let Some((existing_idx, _)) = tables
-            .iter()
-            .enumerate()
-            .find(|(_, table)| table.x_data == x_data && table.y_data == y_data)
-        {
+        if let Some(existing_idx) = tables.iter().position(|table| {
+            table.x_data == *x_data && table.y_data == *y_data && table.control == data.control
+        }) {
             return Ok(existing_idx);
         }
 
-        let table = LookupTable::from_data(x_data.to_vec(), y_data.to_vec());
+        let table =
+            LookupTable::from_data(x_data.to_vec(), y_data.to_vec()).with_control(data.control);
         tables.push(table);
         Ok(tables.len() - 1)
     }

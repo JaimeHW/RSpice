@@ -119,6 +119,18 @@ which a compile runs on a thread of its own sized for those bounds.
   resolve. The integration rule for `ddt`/`idt` is not a compile-time choice:
   the engine supplies companion coefficients per timestep, so one compiled
   model runs under backward Euler or Gear-2/trapezoidal.
+- **Tables**: `$table_model(x, data, control)` reads a table file, an inline
+  string table (rows of numbers; `#` or `!` starts a comment) or inline x/y
+  number pairs. The optional control string follows Verilog-AMS LRM 2.4
+  section 9.21, one field per data column ahead of the output: `1` linear (the
+  default), `2` a C1 quadratic spline, `3` the natural cubic spline or `D` the
+  closest point, then `C` (clamp), `L` (linear, the default) or `E` (an input
+  beyond the data is a run-time error naming it), one character for both ends
+  or two for the lower then the upper end; `I` skips a data column. Linear
+  extrapolation continues the interpolant's slope at the end. A table takes one
+  input: a multi-dimensional table or an array data source is refused by name.
+  A second derivative of a spline table (`ddx` of `ddx`) treats its slope as
+  locally constant.
 - **Noise**: `white_noise`, `flicker_noise`, `noise_table`, `noise_table_log`,
   injected into `.noise` with amplitude scaling and mode gating. Distinct
   processes are uncorrelated; reusing one process through an assigned

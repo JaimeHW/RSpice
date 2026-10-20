@@ -19,11 +19,12 @@ mod model;
 pub(crate) mod state_renumbering;
 pub(crate) mod state_slots;
 
+pub use lookup_table::TableRangeError;
 pub use model::{
     AssignmentProgram, AssignmentStep, BytecodeProgram, CodeGenerator, ColumnAxis,
     CompiledBranchSource, CompiledModel, CompiledNoiseInjection, CompiledNoiseSource,
     CompiledParameter, CompiledZiFilterDefinition, CompiledZiPolynomial, Instruction,
-    JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram, ZiPolynomialLayout,
-    ZiRuntimeLayout,
+    JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram, TableControl,
+    TableExtrapolation, TableInterpolation, ZiPolynomialLayout, ZiRuntimeLayout,
 };
 pub use state_renumbering::StateRenumberingError;

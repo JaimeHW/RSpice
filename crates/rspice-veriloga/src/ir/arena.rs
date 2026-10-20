@@ -139,6 +139,25 @@ impl TableId {
     }
 }
 
+/// One `$table_model` call's data and control string.
+#[derive(Clone, PartialEq, Debug)]
+pub struct TableData {
+    pub x: Vec<f64>,
+    pub y: Vec<f64>,
+    pub control: crate::codegen::TableControl,
+}
+
+impl TableData {
+    /// Linear data with no control string.
+    pub fn linear(x: Vec<f64>, y: Vec<f64>) -> Self {
+        Self {
+            x,
+            y,
+            control: crate::codegen::TableControl::default(),
+        }
+    }
+}
+
 /// The operator of a [`Node::Unary`].
 ///
 /// This is [`UnaryOp`] less `ArrayIndex`, the compiler-inserted conversion
@@ -763,8 +782,8 @@ pub struct ExprArena {
     names: Interner,
     /// Payloads of the eighteen heavy operators.
     heavy: Vec<Heavy>,
-    /// `$table_model` `(x, y)` data.
-    tables: Vec<(Vec<f64>, Vec<f64>)>,
+    /// `$table_model` data.
+    tables: Vec<TableData>,
     /// Array reads of [`Node::VarIndexed`].
     indexed: Vec<IndexedRead>,
     /// Axis bounds of [`Node::ArrayIndex`].
@@ -866,15 +885,15 @@ impl ExprArena {
     }
 
     /// Append `$table_model` data.
-    pub fn push_table(&mut self, x_data: Vec<f64>, y_data: Vec<f64>) -> TableId {
+    pub fn push_table(&mut self, table: TableData) -> TableId {
         let id = TableId(u32::try_from(self.tables.len()).expect("table count is below u32::MAX"));
-        self.tables.push((x_data, y_data));
+        self.tables.push(table);
         id
     }
 
-    /// The `(x, y)` data `id` addresses.
+    /// The data `id` addresses.
     #[inline]
-    pub fn table(&self, id: TableId) -> &(Vec<f64>, Vec<f64>) {
+    pub fn table(&self, id: TableId) -> &TableData {
         &self.tables[id.0 as usize]
     }
 
@@ -1868,7 +1887,7 @@ mod tests {
     /// for every shape it can meet.
     fn one_of_every_node(arena: &mut ExprArena) -> Vec<NodeId> {
         let m = |arena: &mut ExprArena| marker(arena, "m");
-        let table = arena.push_table(vec![0.0, 1.0], vec![0.0, 1.0]);
+        let table = arena.push_table(TableData::linear(vec![0.0, 1.0], vec![0.0, 1.0]));
         let axis = arena.push_ddx_axis(DdxAxis::Potential {
             pos: Some(0),
             neg: None,

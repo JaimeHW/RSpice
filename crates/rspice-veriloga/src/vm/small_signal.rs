@@ -1520,7 +1520,10 @@ impl<V: DynamicOperators> SmallSignalEngine<'_, V> {
                     .lookup_tables
                     .get(*table_id)
                     .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
-                self.stack.push(V::constant(table.interpolate(input)));
+                let value = table
+                    .evaluate(input)
+                    .map_err(|refusal| VmError::InvalidNumericResult(refusal.to_string()))?;
+                self.stack.push(V::constant(value));
             }
             Instruction::AbsDelayState(buffer_id) => {
                 V::absdelay(self, *buffer_id, false, false, false)?

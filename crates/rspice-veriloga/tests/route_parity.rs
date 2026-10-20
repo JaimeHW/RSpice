@@ -1024,6 +1024,102 @@ endmodule
     );
 }
 
+/// The control string selects the interpolant and each end's extrapolation
+/// (LRM 2.4 section 9.21), on every route. Data (0,0) (1,1) (2,4): `1C` holds
+/// the end value; `2`, the quadratic spline, reproduces y = x^2; `3` is the
+/// natural cubic spline, S(0.5) = 0.3125 and S'(2) = 3.5 continued past the
+/// end; `D` is the closest point.
+#[test]
+fn table_model_control_string_agrees_across_lowerings() {
+    let trace = compare_routes_traced(
+        r#"
+`include "disciplines.vams"
+module route_table_control(p, n);
+    inout p, n;
+    electrical p, n;
+    real clamp, quad, cubic, near;
+    analog begin
+        clamp = $table_model(V(p, n), "0 0; 1 1; 2 4", "1C");
+        quad = $table_model(V(p, n), "0 0; 1 1; 2 4", "2");
+        cubic = $table_model(V(p, n), "0 0; 1 1; 2 4", "3L");
+        near = $table_model(V(p, n), "0 0; 1 1; 2 4", "D");
+        I(p, n) <+ (clamp + quad + cubic + near) * 1.0e-3;
+    end
+endmodule
+"#,
+        &[1, 0],
+        0,
+        |probe: &mut Probe| {
+            for (index, bias) in [-1.0, 0.5, 1.5, 3.0].into_iter().enumerate() {
+                probe.dc(&format!("dc{index}"), &[bias]);
+                probe.observe(&format!("dc{index}"), &["clamp", "quad", "cubic", "near"]);
+            }
+        },
+    );
+    let value = |key: &str| {
+        let entry = trace
+            .iter()
+            .find(|entry| entry.key == key)
+            .unwrap_or_else(|| panic!("{key} missing from the trace"));
+        assert!(entry.text.is_none(), "{key}: {:?}", entry.text);
+        entry.value
+    };
+    assert_eq!(value("dc0.var.clamp"), 0.0);
+    assert_eq!(value("dc3.var.clamp"), 4.0);
+    assert_eq!(value("dc1.var.quad"), 0.25);
+    assert_eq!(value("dc2.var.quad"), 2.25);
+    assert_eq!(value("dc1.var.cubic"), 0.3125);
+    assert_eq!(value("dc3.var.cubic"), 7.5);
+    assert_eq!(value("dc2.var.near"), 4.0);
+    // The Jacobian follows the interpolant: at 1.5 the slopes are clamp 3,
+    // quad 3, cubic 3 - 3 * (3 * 0.25 - 1) / 6 = 3.125 and near 0.
+    let conductance = trace
+        .iter()
+        .filter(|entry| entry.key.starts_with("dc2.g["))
+        .map(|entry| entry.value)
+        .fold(0.0_f64, f64::max);
+    assert!(
+        (conductance - 9.125e-3).abs() <= 1e-15,
+        "dc2 conductance {conductance}"
+    );
+}
+
+/// `E` refuses an input beyond the data at run time, naming it, on every
+/// route.
+#[test]
+fn table_model_error_extrapolation_agrees_across_lowerings() {
+    let trace = compare_routes_traced(
+        r#"
+`include "disciplines.vams"
+module route_table_error(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ $table_model(V(p, n), "0 0; 1 1; 2 4", "1E") * 1.0e-3;
+endmodule
+"#,
+        &[1, 0],
+        0,
+        |probe: &mut Probe| {
+            probe.dc("inside", &[1.5]);
+            probe.dc("outside", &[3.0]);
+        },
+    );
+    let inside = trace
+        .iter()
+        .find(|entry| entry.key == "inside.i[0]")
+        .expect("in-range point evaluates");
+    assert_eq!(inside.value, 2.5e-3);
+    let refusal = trace
+        .iter()
+        .find(|entry| entry.key == "outside.i")
+        .and_then(|entry| entry.text.clone())
+        .expect("out-of-range point is refused");
+    assert!(
+        refusal.contains("$table_model input 3 is outside the table data [0, 2]"),
+        "{refusal}"
+    );
+}
+
 /// A switch branch alternates the branch's own nature, so the row's unknown
 /// exists on one side and not the other. The internal index mirrors
 /// `timestep_control.rs`, which is the harness that pins this shape.

@@ -1241,7 +1241,13 @@ pub unsafe extern "C" fn rspice_table_lookup_native(
     }
 
     let tables = unsafe { std::slice::from_raw_parts(ctx.lookup_tables, ctx.lookup_tables_len) };
-    tables[table_id].interpolate(input)
+    match tables[table_id].evaluate(input) {
+        Ok(value) => value,
+        Err(refusal) => {
+            ctx.record_invalid_numeric_result(refusal.to_string());
+            0.0
+        }
+    }
 }
 
 /// External helper function for native x64 table-model derivatives.

@@ -1043,7 +1043,9 @@ impl<'a> Vm<'a> {
                     .lookup_tables
                     .get(*table_id)
                     .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
-                let result = table.interpolate(input);
+                let result = table
+                    .evaluate(input)
+                    .map_err(|refusal| VmError::InvalidNumericResult(refusal.to_string()))?;
                 self.stack.push(result);
             }
 

@@ -1,10 +1,11 @@
 //! Interpolation behind `$table_model`.
 //!
-//! Binary search into sorted x data, linear interpolation between points and
-//! linear extrapolation beyond the ends, plus the matching slope so the
-//! Jacobian stays consistent with the value. Degenerate tables — empty, single
-//! point, duplicate abscissae — are handled rather than left to produce
-//! infinities.
+//! Binary search into sorted x data, then the control string's interpolation
+//! (closest point, linear, C1 quadratic spline or natural cubic spline) and
+//! per-end extrapolation (clamp, linear along the end slope, or a refusal),
+//! plus the matching slope so the Jacobian stays consistent with the value.
+//! Degenerate tables — empty, single point, duplicate abscissae — are handled
+//! rather than left to produce infinities.
 
 use super::*;
 use rspice_veriloga_runtime::arithmetic::sum_products_ratio;
@@ -15,6 +16,35 @@ impl Default for LookupTable {
     }
 }
 
+/// An input outside the data of a table whose control string forbids
+/// extrapolation at that end (`E`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TableRangeError {
+    pub input: f64,
+    pub first: f64,
+    pub last: f64,
+}
+
+impl std::fmt::Display for TableRangeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "$table_model input {} is outside the table data [{}, {}] and the control string \
+             forbids extrapolation there (E)",
+            self.input, self.first, self.last
+        )
+    }
+}
+
+/// Where an input falls relative to the data.
+#[derive(Clone, Copy)]
+enum Region {
+    Below,
+    Above,
+    /// Inside segment `i`, `x_data[i] <= x <= x_data[i + 1]`.
+    Inside(usize),
+}
+
 impl LookupTable {
     /// Create a new empty lookup table
     pub fn new() -> Self {
@@ -22,7 +52,21 @@ impl LookupTable {
             x_data: Vec::new(),
             y_data: Vec::new(),
             name: None,
+            control: TableControl::default(),
+            knots: Vec::new(),
         }
+    }
+
+    /// Apply a control string's interpolation and extrapolation, computing the
+    /// spline knot data the degree needs.
+    pub fn with_control(mut self, control: TableControl) -> Self {
+        self.control = control;
+        self.knots = match control.interpolation {
+            TableInterpolation::Quadratic => quadratic_knot_slopes(&self.x_data, &self.y_data),
+            TableInterpolation::Cubic => natural_cubic_curvatures(&self.x_data, &self.y_data),
+            TableInterpolation::Discrete | TableInterpolation::Linear => Vec::new(),
+        };
+        self
     }
 
     /// Create a lookup table from data vectors
@@ -39,6 +83,8 @@ impl LookupTable {
             x_data,
             y_data,
             name: None,
+            control: TableControl::default(),
+            knots: Vec::new(),
         }
     }
 
@@ -53,6 +99,8 @@ impl LookupTable {
             x_data,
             y_data,
             name: Some(name.into()),
+            control: TableControl::default(),
+            knots: Vec::new(),
         }
     }
 
@@ -68,63 +116,159 @@ impl LookupTable {
         self.x_data.len()
     }
 
-    /// Perform linear interpolation at the given x value
+    /// The table's value at `x`, NaN where the control string forbids
+    /// extrapolating to `x` (see [`Self::evaluate`] for the refusal itself).
     ///
     /// Behavior:
     /// - Empty table: returns 0.0
     /// - Single point: returns that y value (constant)
-    /// - x below range: linear extrapolation from first two points
-    /// - x above range: linear extrapolation from last two points
-    /// - x within range: linear interpolation between bracketing points
+    /// - x outside the data: the end's extrapolation (linear by default)
+    /// - x within range: the control string's interpolation (linear by default)
     pub fn interpolate(&self, x: f64) -> f64 {
-        let n = self.x_data.len();
+        self.evaluate(x).unwrap_or(f64::NAN)
+    }
 
-        // Handle edge cases
+    /// The table's value at `x`, or the refusal an `E` end makes of an input
+    /// beyond it.
+    pub fn evaluate(&self, x: f64) -> Result<f64, TableRangeError> {
+        let n = self.x_data.len();
         if n == 0 {
-            return 0.0;
+            return Ok(0.0);
         }
         if n == 1 {
-            return self.y_data[0];
+            return Ok(self.y_data[0]);
         }
-
-        // Handle out-of-bounds with linear extrapolation
-        if x <= self.x_data[0] {
-            // Extrapolate below range
-            return self.linear_extrapolate(0, 1, x);
-        }
-        if x >= self.x_data[n - 1] {
-            // Extrapolate above range
-            return self.linear_extrapolate(n - 2, n - 1, x);
-        }
-
-        // Binary search for the bracketing interval
-        let idx = self.find_interval(x);
-        self.linear_interpolate(idx, idx + 1, x)
+        let linear = self.control.interpolation == TableInterpolation::Linear;
+        let value = match self.region(x) {
+            Region::Below => match self.control.below {
+                TableExtrapolation::Error => return Err(self.range_error(x)),
+                TableExtrapolation::Clamp => self.y_data[0],
+                TableExtrapolation::Linear if linear => self.linear_extrapolate(0, 1, x),
+                TableExtrapolation::Linear => {
+                    self.y_data[0] + self.end_slope(false) * (x - self.x_data[0])
+                }
+            },
+            Region::Above => match self.control.above {
+                TableExtrapolation::Error => return Err(self.range_error(x)),
+                TableExtrapolation::Clamp => self.y_data[n - 1],
+                TableExtrapolation::Linear if linear => self.linear_extrapolate(n - 2, n - 1, x),
+                TableExtrapolation::Linear => {
+                    self.y_data[n - 1] + self.end_slope(true) * (x - self.x_data[n - 1])
+                }
+            },
+            Region::Inside(i) => match self.control.interpolation {
+                TableInterpolation::Linear => self.linear_interpolate(i, i + 1, x),
+                TableInterpolation::Discrete => {
+                    if x.is_nan() {
+                        x
+                    } else if x - self.x_data[i] < self.x_data[i + 1] - x {
+                        self.y_data[i]
+                    } else {
+                        self.y_data[i + 1]
+                    }
+                }
+                TableInterpolation::Quadratic => {
+                    let (d, a) = self.quadratic_segment(i);
+                    let t = x - self.x_data[i];
+                    self.y_data[i] + t * (d + a * t)
+                }
+                TableInterpolation::Cubic => {
+                    let h = self.x_data[i + 1] - self.x_data[i];
+                    let a = (self.x_data[i + 1] - x) / h;
+                    let b = (x - self.x_data[i]) / h;
+                    a * self.y_data[i]
+                        + b * self.y_data[i + 1]
+                        + ((a * a * a - a) * self.knots[i] + (b * b * b - b) * self.knots[i + 1])
+                            * (h * h)
+                            / 6.0
+                }
+            },
+        };
+        Ok(value)
     }
 
     /// Compute the derivative (slope) at the given x value
     ///
-    /// This is useful for Jacobian computation. Uses the local slope
-    /// of the linear interpolation segment.
+    /// This is useful for Jacobian computation: the slope of the interpolant
+    /// the value comes from, the end slope beyond a linear end and zero beyond
+    /// a clamped one. A refused (`E`) end reports the slope a linear end
+    /// would, since the value evaluation is what refuses.
     pub fn derivative(&self, x: f64) -> f64 {
         let n = self.x_data.len();
 
         if n < 2 {
             return 0.0;
         }
+        let linear = self.control.interpolation == TableInterpolation::Linear;
+        match self.region(x) {
+            Region::Below if self.control.below == TableExtrapolation::Clamp => 0.0,
+            Region::Above if self.control.above == TableExtrapolation::Clamp => 0.0,
+            Region::Below if linear => self.slope(0, 1),
+            Region::Above if linear => self.slope(n - 2, n - 1),
+            Region::Below => self.end_slope(false),
+            Region::Above => self.end_slope(true),
+            Region::Inside(i) => self.segment_slope(i, x),
+        }
+    }
 
-        // Find the interval and return its slope
-        if x <= self.x_data[0] || x >= self.x_data[n - 1] {
-            // Use endpoint slopes for extrapolation
-            if x <= self.x_data[0] {
-                return self.slope(0, 1);
-            } else {
-                return self.slope(n - 2, n - 1);
+    /// Slope of the interpolant inside segment `i`.
+    fn segment_slope(&self, i: usize, x: f64) -> f64 {
+        match self.control.interpolation {
+            TableInterpolation::Discrete => 0.0,
+            TableInterpolation::Linear => self.slope(i, i + 1),
+            TableInterpolation::Quadratic => {
+                let (d, a) = self.quadratic_segment(i);
+                d + 2.0 * a * (x - self.x_data[i])
+            }
+            TableInterpolation::Cubic => {
+                let h = self.x_data[i + 1] - self.x_data[i];
+                let a = (self.x_data[i + 1] - x) / h;
+                let b = (x - self.x_data[i]) / h;
+                self.slope(i, i + 1) - (3.0 * a * a - 1.0) / 6.0 * h * self.knots[i]
+                    + (3.0 * b * b - 1.0) / 6.0 * h * self.knots[i + 1]
             }
         }
+    }
 
-        let idx = self.find_interval(x);
-        self.slope(idx, idx + 1)
+    /// The interpolant's slope at the last (`upper`) or first data point,
+    /// which linear extrapolation continues.
+    fn end_slope(&self, upper: bool) -> f64 {
+        let n = self.x_data.len();
+        let (segment, x) = if upper {
+            (n - 2, self.x_data[n - 1])
+        } else {
+            (0, self.x_data[0])
+        };
+        self.segment_slope(segment, x)
+    }
+
+    /// Start slope and curvature coefficient of quadratic segment `i`:
+    /// `y_i + d t + a t^2` with `t = x - x_i`.
+    fn quadratic_segment(&self, i: usize) -> (f64, f64) {
+        let d = self.knots[i];
+        let a = (self.slope(i, i + 1) - d) / (self.x_data[i + 1] - self.x_data[i]);
+        (d, a)
+    }
+
+    fn region(&self, x: f64) -> Region {
+        let n = self.x_data.len();
+        if x < self.x_data[0] {
+            Region::Below
+        } else if x > self.x_data[n - 1] {
+            Region::Above
+        } else if x == self.x_data[n - 1] {
+            Region::Inside(n - 2)
+        } else {
+            Region::Inside(self.find_interval(x))
+        }
+    }
+
+    fn range_error(&self, input: f64) -> TableRangeError {
+        TableRangeError {
+            input,
+            first: self.x_data[0],
+            last: self.x_data[self.x_data.len() - 1],
+        }
     }
 
     /// Apply the active slope without rounding it before its input derivative.
@@ -152,17 +296,30 @@ impl LookupTable {
         .unwrap_or(f64::NAN)
     }
 
+    /// The active slope as a rise over a run, `[x0, x1, y0, y1]`. A linear
+    /// segment returns its own endpoints so the slope is rounded once, after
+    /// it meets the input derivative; any other slope is `[0, 1, 0, slope]`.
     pub(crate) fn derivative_segment(&self, x: f64) -> Option<[f64; 4]> {
         let n = self.x_data.len();
         if n < 2 {
             return None;
         }
-        let i = if x <= self.x_data[0] {
-            0
-        } else if x >= self.x_data[n - 1] {
-            n - 2
-        } else {
-            self.find_interval(x)
+        let region = self.region(x);
+        let clamped = match region {
+            Region::Below => self.control.below == TableExtrapolation::Clamp,
+            Region::Above => self.control.above == TableExtrapolation::Clamp,
+            Region::Inside(_) => false,
+        };
+        if clamped {
+            return Some([0.0, 1.0, 0.0, 0.0]);
+        }
+        if self.control.interpolation != TableInterpolation::Linear {
+            return Some([0.0, 1.0, 0.0, self.derivative(x)]);
+        }
+        let i = match region {
+            Region::Below => 0,
+            Region::Above => n - 2,
+            Region::Inside(i) => i,
         };
         Some([
             self.x_data[i],
@@ -300,5 +457,150 @@ impl LookupTable {
         }
 
         Ok(())
+    }
+}
+
+/// Knot slopes of the C1 quadratic spline through the data.
+///
+/// A quadratic spline with knots at the data points leaves one slope free.
+/// Started from the parabola through the first three points and propagated
+/// forward (`d[i+1] = 2 s[i] - d[i]`), it reproduces any quadratic exactly;
+/// started from the last three points and propagated backward it does too.
+/// Their mean is again an interpolating C1 quadratic spline, and the only
+/// one of the family that does not depend on which end the data is read from.
+fn quadratic_knot_slopes(x: &[f64], y: &[f64]) -> Vec<f64> {
+    let n = x.len();
+    if n < 2 {
+        return vec![0.0; n];
+    }
+    let h: Vec<f64> = x.windows(2).map(|w| w[1] - w[0]).collect();
+    let s: Vec<f64> = (0..n - 1).map(|i| (y[i + 1] - y[i]) / h[i]).collect();
+    if n == 2 {
+        return vec![s[0], s[0]];
+    }
+    let mut forward = vec![0.0; n];
+    forward[0] = s[0] - h[0] * (s[1] - s[0]) / (h[0] + h[1]);
+    for i in 0..n - 1 {
+        forward[i + 1] = 2.0 * s[i] - forward[i];
+    }
+    let mut backward = vec![0.0; n];
+    backward[n - 1] = s[n - 2] + h[n - 2] * (s[n - 2] - s[n - 3]) / (h[n - 3] + h[n - 2]);
+    for i in (0..n - 1).rev() {
+        backward[i] = 2.0 * s[i] - backward[i + 1];
+    }
+    forward
+        .iter()
+        .zip(&backward)
+        .map(|(f, b)| 0.5 * (f + b))
+        .collect()
+}
+
+/// Knot second derivatives of the natural cubic spline through the data
+/// (zero curvature at both ends), by the tridiagonal (Thomas) solve.
+fn natural_cubic_curvatures(x: &[f64], y: &[f64]) -> Vec<f64> {
+    let n = x.len();
+    let mut m = vec![0.0; n];
+    if n < 3 {
+        return m;
+    }
+    let h: Vec<f64> = x.windows(2).map(|w| w[1] - w[0]).collect();
+    let s: Vec<f64> = (0..n - 1).map(|i| (y[i + 1] - y[i]) / h[i]).collect();
+    // Row i (1..n-1): h[i-1] m[i-1] + 2 (h[i-1] + h[i]) m[i] + h[i] m[i+1]
+    //                 = 6 (s[i] - s[i-1]).
+    let mut diagonal = vec![0.0; n];
+    let mut rhs = vec![0.0; n];
+    for i in 1..n - 1 {
+        diagonal[i] = 2.0 * (h[i - 1] + h[i]);
+        rhs[i] = 6.0 * (s[i] - s[i - 1]);
+        if i > 1 {
+            let factor = h[i - 1] / diagonal[i - 1];
+            diagonal[i] -= factor * h[i - 1];
+            rhs[i] -= factor * rhs[i - 1];
+        }
+    }
+    for i in (1..n - 1).rev() {
+        m[i] = (rhs[i] - h[i] * m[i + 1]) / diagonal[i];
+    }
+    m
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::*;
+
+    fn squares(control: &str) -> LookupTable {
+        let (interpolation, below, above) = match control {
+            "D" => (
+                TableInterpolation::Discrete,
+                TableExtrapolation::Linear,
+                TableExtrapolation::Linear,
+            ),
+            "1C" => (
+                TableInterpolation::Linear,
+                TableExtrapolation::Clamp,
+                TableExtrapolation::Clamp,
+            ),
+            "1E" => (
+                TableInterpolation::Linear,
+                TableExtrapolation::Error,
+                TableExtrapolation::Error,
+            ),
+            "2" => (
+                TableInterpolation::Quadratic,
+                TableExtrapolation::Linear,
+                TableExtrapolation::Linear,
+            ),
+            "3" => (
+                TableInterpolation::Cubic,
+                TableExtrapolation::Linear,
+                TableExtrapolation::Linear,
+            ),
+            "3CL" => (
+                TableInterpolation::Cubic,
+                TableExtrapolation::Clamp,
+                TableExtrapolation::Linear,
+            ),
+            _ => unreachable!(),
+        };
+        LookupTable::from_data(vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 4.0]).with_control(
+            TableControl {
+                interpolation,
+                below,
+                above,
+            },
+        )
+    }
+
+    #[test]
+    fn control_string_selects_the_interpolant_and_each_end() {
+        // Clamp holds the end value; linear (the default) continues the slope.
+        assert_eq!(squares("1C").interpolate(3.0), 4.0);
+        assert_eq!(squares("1C").derivative(3.0), 0.0);
+        assert_eq!(squares("1C").interpolate(-1.0), 0.0);
+        let refused = squares("1E").evaluate(3.0).unwrap_err();
+        assert_eq!(
+            (refused.input, refused.first, refused.last),
+            (3.0, 0.0, 2.0)
+        );
+        assert_eq!(squares("1E").evaluate(1.5), Ok(2.5));
+        // Closest point.
+        assert_eq!(squares("D").interpolate(0.4), 0.0);
+        assert_eq!(squares("D").interpolate(1.6), 4.0);
+        assert_eq!(squares("D").derivative(1.6), 0.0);
+        // The quadratic spline reproduces y = x^2 exactly.
+        assert_eq!(squares("2").interpolate(0.5), 0.25);
+        assert_eq!(squares("2").interpolate(1.5), 2.25);
+        assert_eq!(squares("2").derivative(1.5), 3.0);
+        assert_eq!(squares("2").interpolate(3.0), 4.0 + 4.0);
+        // Natural cubic spline through (0,0) (1,1) (2,4): curvature 3 at the
+        // middle knot, so S(0.5) = 0.5 - 3 * 0.375 / 6 = 0.3125 and
+        // S'(0) = 1 - 3 / 6 = 0.5, S'(2) = 3 + 3 / 6 = 3.5.
+        assert_eq!(squares("3").interpolate(0.5), 0.3125);
+        assert_eq!(squares("3").interpolate(1.5), 2.3125);
+        assert_eq!(squares("3").derivative(0.0), 0.5);
+        assert_eq!(squares("3").interpolate(3.0), 4.0 + 3.5);
+        assert_eq!(squares("3").derivative(3.0), 3.5);
+        assert_eq!(squares("3CL").interpolate(-1.0), 0.0);
+        assert_eq!(squares("3CL").derivative(-1.0), 0.0);
     }
 }
