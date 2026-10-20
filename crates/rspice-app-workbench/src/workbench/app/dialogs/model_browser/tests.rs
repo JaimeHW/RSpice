@@ -560,6 +560,52 @@ fn typing_narrows_and_escape_cancels() {
     assert!(!state.open);
 }
 
+/// With nothing picked, the sheet's note is centred in the pane it stands
+/// for, which it owns whole. It sat on the filter's line in the pane's top
+/// corner, over an empty sheet, like a caption to nothing.
+#[test]
+fn the_empty_sheet_is_one_note_centred_in_its_pane() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let manager = foundation();
+    let mut state = ModelBrowserState {
+        open: true,
+        ..ModelBrowserState::default()
+    };
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..3 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                vec2(1_440.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let output = ctx.run_ui(input, |ui| {
+            let _ = render_model_browser(ui.ctx(), &mut state, &manager);
+        });
+        if let Some(update) = output.platform_output.accesskit_update {
+            nodes.extend(update.nodes);
+        }
+    }
+    let note = nodes
+        .values()
+        .find(|node| {
+            [node.label(), node.value()]
+                .into_iter()
+                .flatten()
+                .any(|text| text.starts_with("Pick a model"))
+        })
+        .and_then(|node| node.bounds())
+        .expect("the sheet's note");
+    assert!(
+        note.y1 - note.y0 > 200.0,
+        "the note takes {} points of its pane's height",
+        note.y1 - note.y0
+    );
+}
+
 /// The L and W windows of the foundry kit's twelve `nch` bins, in metres: a
 /// four-by-three grid, numbered across W within each L.
 const KIT_LENGTHS: [(f64, f64); 4] = [

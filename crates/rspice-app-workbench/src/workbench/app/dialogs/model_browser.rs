@@ -1348,9 +1348,26 @@ fn sheet_pane(
             ui.spacing_mut().item_spacing.y = 0.0;
             let t = Tokens::get(ui.ctx());
             let Some((library, entry)) = picked else {
-                // On the filter's own line, as the model's name would be.
-                ui.add_space((t.metrics.ctl_h - NOTE_HEIGHT) * 0.5);
-                note(ui, "Pick a model to read its parameters");
+                // Centred in the pane it stands for. Pinned to the pane's top
+                // corner it read as a caption over an empty sheet.
+                let text = "Pick a model to read its parameters.";
+                let height = ui.available_height();
+                let height = if height.is_finite() {
+                    height.max(NOTE_HEIGHT)
+                } else {
+                    NOTE_HEIGHT
+                };
+                let (rect, response) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+                response
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    text,
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.text_faint,
+                );
                 return;
             };
             let model = entry.card(geometry);
