@@ -140,3 +140,20 @@ fn connectivity_only_variant_comparison_detects_dnp_topology_change() {
             > 0
     );
 }
+
+/// A menu row for Variants or Annotation lands on that tab, not on Sheets.
+#[test]
+fn design_management_opens_on_the_tab_a_row_asks_for() {
+    for tab in [DesignManagementTab::Variants, DesignManagementTab::Annotation] {
+        let mut app = RSpiceApp::test_instance();
+        open_design_management_on(&mut app.state, tab);
+        assert!(app.state.dialogs.design_management.open);
+        assert_eq!(app.state.dialogs.design_management.active_tab, tab);
+    }
+    let mut app = RSpiceApp::test_instance();
+    open_design_management_dialog(&mut app.state);
+    assert_eq!(
+        app.state.dialogs.design_management.active_tab,
+        DesignManagementTab::Sheets
+    );
+}

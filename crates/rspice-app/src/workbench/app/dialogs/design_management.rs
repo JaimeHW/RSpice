@@ -419,7 +419,24 @@ impl DesignManagementDialogState {
     }
 }
 
+/// Open Design management on its Sheets tab.
 pub(crate) fn open_design_management_dialog(state: &mut AppState) {
+    open_design_management_on(state, DesignManagementTab::Sheets);
+}
+
+/// Open Design management on `tab`, so a menu row can land on Variants or
+/// Annotation directly instead of on Sheets and a tab click.
+///
+/// Like [`open_design_management_dialog`], it expects the caller to have
+/// navigated to the Design management route first.
+pub(crate) fn open_design_management_on(state: &mut AppState, tab: DesignManagementTab) {
+    open_design_management_dialog_state(state);
+    if state.dialogs.design_management.open {
+        state.dialogs.design_management.active_tab = tab;
+    }
+}
+
+fn open_design_management_dialog_state(state: &mut AppState) {
     // The command is greyed with no project open.
     if !state.project_lifecycle.is_open() {
         return;
