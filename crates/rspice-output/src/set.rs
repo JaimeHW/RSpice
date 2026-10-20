@@ -728,6 +728,44 @@ mod tests {
         }
     }
 
+    /// Rerunning a deck into the same outputs replaces a published set, and
+    /// discarding each predecessor snapshot moves it to a tombstone whose
+    /// name hangs two RSpice suffixes off the result's. In a directory deep
+    /// enough for that tombstone's full path to pass Windows' MAX_PATH (260),
+    /// `MoveFileExW` took the path as written and failed with "The system
+    /// cannot find the path specified": the rerun exited 74 after publishing
+    /// and left one `.bak` per attempt. The directory here keeps the staging
+    /// names under the limit and puts the tombstone over it.
+    #[test]
+    fn a_set_republished_in_a_deep_directory_removes_its_predecessor_snapshot() {
+        let directory = TestDirectory::new("set-deep");
+        let mut deep = directory.path().to_path_buf();
+        while deep.as_os_str().len() < 150 {
+            deep.push("nested-dir");
+        }
+        std::fs::create_dir_all(&deep).expect("create the deep result directory");
+        let paths = [deep.join("t.run_d520b4c3f6eb9abf108b3e2056d0ca13_001.op-001.json")];
+        for attempt in 0..3 {
+            let mut set = AtomicArtifactSet::new();
+            stage_all(&mut set, &paths, &mut AmbientFaults).expect("stage the member");
+            set.commit()
+                .unwrap_or_else(|error| panic!("publish {attempt}: {error}"));
+            assert_eq!(
+                std::fs::read(&paths[0]).expect("read the published member"),
+                b"new 0"
+            );
+            let leaked = std::fs::read_dir(&deep)
+                .expect("list the result directory")
+                .map(|entry| entry.expect("directory entry").file_name())
+                .filter(|name| name.to_string_lossy().contains(PREDECESSOR_MARKER))
+                .collect::<Vec<_>>();
+            assert!(
+                leaked.is_empty(),
+                "publish {attempt} left predecessor snapshots: {leaked:?}"
+            );
+        }
+    }
+
     #[test]
     fn dropping_a_partially_staged_set_publishes_nothing() {
         for preexisting in [false, true] {

@@ -603,8 +603,25 @@ fn commit_staging_file(staging: &Path, destination: &Path) -> io::Result<()> {
         Ok(wide)
     }
 
-    let staging_wide = wide_path(staging)?;
-    let destination_wide = wide_path(destination)?;
+    // `MoveFileExW` takes a path as written, and one whose full spelling
+    // passes MAX_PATH (260) fails with "The system cannot find the path
+    // specified" unless it is verbatim (`\\?\`), which lifts the cap. A
+    // predecessor snapshot's tombstone hangs two RSpice suffixes off a
+    // result's name, so a rerun into a deep directory crossed it. A
+    // canonical Windows path is verbatim, so canonicalize the parent the two
+    // siblings share and rejoin each name (std::fs spells long paths itself).
+    fn verbatim(path: &Path) -> io::Result<PathBuf> {
+        let name = path.file_name().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "artifact destination must name a file",
+            )
+        })?;
+        Ok(std::fs::canonicalize(destination_parent(path))?.join(name))
+    }
+
+    let staging_wide = wide_path(&verbatim(staging)?)?;
+    let destination_wide = wide_path(&verbatim(destination)?)?;
     let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
 
     // SAFETY: Both buffers are NUL-terminated and remain alive through this
