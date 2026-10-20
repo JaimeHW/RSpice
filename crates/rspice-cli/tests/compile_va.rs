@@ -482,7 +482,8 @@ fn compiler_diagnostics_identify_original_include_and_macro_locations() {
                 let end = diagnostic["byte_end"].as_u64().unwrap() as usize;
                 assert!(source[start..end].contains(token), "{error}");
                 if token == "`BAD" {
-                    assert_eq!(diagnostic["column"], 1, "{error}");
+                    // The invocation's column, not the start of its line.
+                    assert_eq!(diagnostic["column"], 18, "{error}");
                 }
                 assert!(diagnostic["code"].as_str().unwrap().starts_with("VA-"));
                 assert!(diagnostic.get("source").is_none(), "{error}");

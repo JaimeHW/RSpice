@@ -263,13 +263,13 @@ fn fatal_compiler_findings_keep_original_include_locations_in_run_and_check() {
         ("`define BAD @\nanalog I(p,n) <+ `BAD;", "Parser", 5, "`BAD"),
         (
             "analog I(p,n) <+ V(p,n) + missing;",
-            "CodeGeneration",
+            "Semantic",
             4,
             "missing",
         ),
         (
             "`define BAD missing\nanalog I(p,n) <+ `BAD;",
-            "CodeGeneration",
+            "Semantic",
             5,
             "`BAD",
         ),

@@ -704,7 +704,10 @@ fn an_in_memory_preprocessing_refusal_is_not_framed_as_an_io_error() {
         .compile(&module_with_statement("x = `NOT_DEFINED;"))
         .expect_err("an undefined macro is refused");
     let message = error.to_string();
-    assert!(message.contains("undefined macro `NOT_DEFINED"), "{message}");
+    assert!(
+        message.contains("undefined macro `NOT_DEFINED"),
+        "{message}"
+    );
     assert!(!message.contains("I/O error"), "{message}");
     assert!(!message.contains("Preprocessor error"), "{message}");
     assert_eq!(error.diagnostic_code(), "VA-INPUT-PREPROCESS");
