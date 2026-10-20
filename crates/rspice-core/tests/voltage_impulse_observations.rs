@@ -576,12 +576,7 @@ fn ccvs_source_slope_changes_have_finite_voltage_and_capacitor_charge() {
     // restart step dominates the sum (2.8 fs after 2 ns gives 2e-23 C).
     let h1 = action_current(&result, "h1");
     let mut previous_corner = 0.0;
-    for (time, expected) in [
-        (0.0, 3e-14),
-        (1e-9, -3e-14),
-        (2e-9, -3e-14),
-        (3e-9, 3e-14),
-    ] {
+    for (time, expected) in [(0.0, 3e-14), (1e-9, -3e-14), (2e-9, -3e-14), (3e-9, 3e-14)] {
         let inverse_steps: f64 = result
             .time
             .windows(2)
