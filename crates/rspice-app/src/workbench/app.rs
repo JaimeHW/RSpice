@@ -1586,6 +1586,9 @@ fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod chrome_review_tests;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod dialog_review_tests;
+
 #[cfg(test)]
 mod gesture_tests;
 
