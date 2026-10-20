@@ -10,8 +10,12 @@ use crate::vector_preview::deck_bits;
 use rspice_design::schematic::bus::{BusDeclaration, BusSlice, BusTapOrientation};
 use rspice_ui_kit::widgets::FormRows;
 
+#[cfg(test)]
 const BUS_EXAMPLE: &str = "DATA[15:0]";
-const SLICE_EXAMPLE: &str = "DATA[7:0]";
+/// The fields' placeholders: the shape of an answer, never one. A sample
+/// name in the field read as a bus already chosen.
+const BUS_SHAPE: &str = "name[msb:lsb]";
+const SLICE_SHAPE: &str = "name[bit] or name[msb:lsb]";
 const ORIENTATION_LABELS: [&str; 5] = ["Automatic", "Left", "Right", "Up", "Down"];
 
 /// Editable bus-tap form fields, separate from the host modal and document
@@ -47,15 +51,11 @@ impl DraftValidation {
         matches!(self, Self::Valid(_))
     }
 
-    /// What the form says under its rows: a refusal on the left of the result,
-    /// a neutral note on the right, and nothing at all for a draft the reader
-    /// has not started.
-    ///
-    /// An untouched form has nothing to say: the reader has done nothing wrong
-    /// by not having typed yet.
+    /// What the form's footer says: a refusal behind its mark, or, while Place
+    /// is waiting for something, what it is waiting for, as a plain fact. An
+    /// untouched form has refused nothing, but it still says why Place is off.
     pub fn status(&self) -> Result<Option<&str>, &str> {
         match self {
-            Self::Incomplete("") => Ok(None),
             Self::Incomplete(message) => Ok(Some(message)),
             Self::Invalid(message) => Err(message.as_str()),
             Self::Valid(_) => Ok(None),
@@ -92,8 +92,8 @@ pub fn show(
     validation: &DraftValidation,
     draft: &mut BusTapFields,
 ) -> Option<egui::Id> {
-    let bus = rows.text("Bus", bus_field_id(), &mut draft.bus, BUS_EXAMPLE);
-    rows.text("Slice", field_id("Slice"), &mut draft.slice, SLICE_EXAMPLE);
+    let bus = rows.text("Bus", bus_field_id(), &mut draft.bus, BUS_SHAPE);
+    rows.text("Slice", field_id("Slice"), &mut draft.slice, SLICE_SHAPE);
     // The conductors wrap rather than eliding: a tap on sixteen bits whose
     // middle is an ellipsis has not said which bits it takes.
     if let Some(bits) = validation.resolved_bits() {
@@ -115,7 +115,7 @@ fn validate_draft(draft: &BusTapFields) -> DraftValidation {
     let bus = draft.bus.trim();
     let slice = draft.slice.trim();
     if bus.is_empty() && slice.is_empty() {
-        return DraftValidation::Incomplete("");
+        return DraftValidation::Incomplete("Enter the bus and the slice to tap.");
     }
     if bus.is_empty() {
         return DraftValidation::Incomplete("Enter the declared bus, for example DATA[15:0].");
@@ -177,11 +177,23 @@ mod tests {
         assert!(!validate_draft(&draft).can_commit());
     }
 
-    /// An untouched form says nothing: the reader has not been refused.
+    /// A placeholder is the shape of an answer: one that parses is an answer,
+    /// and reads as a bus already chosen.
     #[test]
-    fn an_empty_draft_states_no_status_and_a_half_draft_states_what_is_missing() {
+    fn the_placeholders_are_shapes_not_answers() {
+        assert!(BusDeclaration::parse(BUS_SHAPE).is_err());
+        assert!(BusSlice::parse(SLICE_SHAPE).is_err());
+    }
+
+    /// An untouched form has not been refused, but it says why Place is off;
+    /// a half draft says what is missing.
+    #[test]
+    fn an_empty_draft_states_what_place_waits_for_and_a_half_draft_what_is_missing() {
         let mut draft = BusTapFields::default();
-        assert_eq!(validate_draft(&draft).status(), Ok(None));
+        assert_eq!(
+            validate_draft(&draft).status(),
+            Ok(Some("Enter the bus and the slice to tap."))
+        );
         draft.bus = BUS_EXAMPLE.to_owned();
         assert_eq!(
             validate_draft(&draft).status(),
