@@ -131,6 +131,13 @@ const SECONDS_PER_TICK: [f64; 22] = [
     1e-15, 1e-16, 1e-17, 1e-18, 1e-19, 1e-20, 1e-21,
 ];
 
+/// Ticks per second, indexed by the negated decimal exponent. Every entry is
+/// an integer below `2^53`, so each is exact, unlike its reciprocal above.
+const TICKS_PER_SECOND: [f64; 22] = [
+    1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+    1e17, 1e18, 1e19, 1e20, 1e21,
+];
+
 /// Tick resolution of a scheduler: one tick is `10^exponent` seconds.
 ///
 /// Verilog spells precision as a decimal power of ten between 1 s and 1 fs, so
@@ -206,11 +213,38 @@ impl TimeResolution {
     /// past [`Self::MAX_EXACT_TICKS`] is refused rather than rounded: a
     /// breakpoint that does not land where the event is scheduled is a
     /// synchronization fault, not an accuracy loss.
+    ///
+    /// The result is the double nearest `ticks * 10^exponent`, which is what
+    /// the netlist reader makes of the same decimal: `#15` at 1 ns and a deck's
+    /// `15n` are one instant. The product with [`Self::seconds_per_tick`]
+    /// rounds twice and lands one ulp past `15n`, where a `.tran` stop at `15n`
+    /// would drop the event.
     pub fn ticks_to_seconds(self, ticks: u64) -> Result<f64, SchedulerError> {
         if ticks > Self::MAX_EXACT_TICKS {
             return Err(SchedulerError::TickNotExactlyRepresentable { ticks });
         }
-        Ok((ticks as f64) * self.seconds_per_tick())
+        Ok(self.tick_instant(ticks))
+    }
+
+    /// The seconds of a tick inside the exact range, correctly rounded: one
+    /// operation on two exact operands.
+    fn tick_instant(self, ticks: u64) -> f64 {
+        let count = ticks as f64;
+        match self.exponent {
+            1 => count * 10.0,
+            2 => count * 100.0,
+            exponent => count / TICKS_PER_SECOND[(-exponent) as usize],
+        }
+    }
+
+    /// Seconds as a tick count before rounding, from one operation on an
+    /// exact scale.
+    fn tick_estimate(self, seconds: f64) -> f64 {
+        match self.exponent {
+            1 => seconds / 10.0,
+            2 => seconds / 100.0,
+            exponent => seconds * TICKS_PER_SECOND[(-exponent) as usize],
+        }
     }
 
     /// Convert analog seconds to the nearest tick.
@@ -221,7 +255,7 @@ impl TimeResolution {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
-        let ticks = (seconds / self.seconds_per_tick()).round();
+        let ticks = self.tick_estimate(seconds).round();
         if !ticks.is_finite() || ticks < 0.0 || ticks > Self::MAX_EXACT_TICKS as f64 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
@@ -279,20 +313,19 @@ impl TimeResolution {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
-        let scale = self.seconds_per_tick();
-        let estimate = (seconds / scale).floor();
+        let estimate = self.tick_estimate(seconds).floor();
         if !estimate.is_finite() || estimate < 0.0 || estimate > Self::MAX_EXACT_TICKS as f64 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
-        // The division is accurate to within one ulp of the quotient, so each
-        // correction runs at most once; they are loops rather than single
-        // steps so the postcondition holds by construction instead of by an
-        // argument about rounding.
+        // The estimate is accurate to within one ulp, so each correction runs
+        // at most once; they are loops rather than single steps so the
+        // postcondition holds by construction instead of by an argument about
+        // rounding.
         let mut ticks = estimate as u64;
-        while ticks > 0 && (ticks as f64) * scale > seconds {
+        while ticks > 0 && self.tick_instant(ticks) > seconds {
             ticks -= 1;
         }
-        while ticks < Self::MAX_EXACT_TICKS && ((ticks + 1) as f64) * scale <= seconds {
+        while ticks < Self::MAX_EXACT_TICKS && self.tick_instant(ticks + 1) <= seconds {
             ticks += 1;
         }
         Ok(ticks)
@@ -341,7 +374,7 @@ impl TimeResolution {
     #[cfg(feature = "veriloga")]
     pub(crate) fn seconds_to_ceil_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         let ticks = self.seconds_to_floor_ticks(seconds)?;
-        if (ticks as f64) * self.seconds_per_tick() >= seconds {
+        if self.tick_instant(ticks) >= seconds {
             return Ok(ticks);
         }
         if ticks >= Self::MAX_EXACT_TICKS {

@@ -243,6 +243,26 @@ fn tick_conversion_feeds_analog_breakpoints_exactly() {
     assert_eq!(resolution.seconds_to_ticks(1.0e-9), Ok(1_000));
 }
 
+#[test]
+fn a_tick_is_the_instant_its_decimal_names_in_a_deck() {
+    // A deck's `15n` is the double nearest 15e-9, so `#15` at 1 ns must be
+    // that double too: `15.0 * 1e-9` is one ulp later, past a `.tran` stop
+    // written as `15n`.
+    for exponent in -21..=2_i8 {
+        let resolution = TimeResolution::new(exponent).expect("a declarable resolution");
+        for ticks in (0..=2_000_u64).chain([12_345_678_901, TimeResolution::MAX_EXACT_TICKS]) {
+            let written: f64 = format!("{ticks}e{exponent}").parse().expect("a decimal");
+            let seconds = resolution.ticks_to_seconds(ticks).expect("an exact tick");
+            assert_eq!(
+                seconds.to_bits(),
+                written.to_bits(),
+                "{ticks} ticks of 1e{exponent} s"
+            );
+            assert_eq!(resolution.seconds_to_ticks(seconds), Ok(ticks));
+        }
+    }
+}
+
 //=============================================================================
 // Stratified region ordering
 //=============================================================================

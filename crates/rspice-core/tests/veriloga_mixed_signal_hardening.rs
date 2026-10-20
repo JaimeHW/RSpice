@@ -91,12 +91,11 @@ fn tick_seconds() -> f64 {
 /// division is off by up to one ulp and this suite's whole subject is what the
 /// last ulp does.
 fn floor_ticks(seconds: f64) -> u64 {
-    let scale = tick_seconds();
-    let mut ticks = (seconds / scale).floor() as u64;
-    while ticks > 0 && (ticks as f64) * scale > seconds {
+    let mut ticks = (seconds / tick_seconds()).floor() as u64;
+    while ticks > 0 && tick_to_seconds(ticks) > seconds {
         ticks -= 1;
     }
-    while ((ticks + 1) as f64) * scale <= seconds {
+    while tick_to_seconds(ticks + 1) <= seconds {
         ticks += 1;
     }
     ticks
@@ -3790,14 +3789,21 @@ fn picosecond_tick() -> f64 {
         .seconds_per_tick()
 }
 
+/// The seconds a tick of that grid names, through the public conversion.
+fn picosecond_tick_seconds(ticks: u64) -> f64 {
+    TimeResolution::new(-12)
+        .expect("a picosecond resolution is declarable")
+        .ticks_to_seconds(ticks)
+        .expect("a tick inside the exactly-representable range")
+}
+
 /// The least tick of that grid whose own instant is not before `seconds`.
 fn ceil_picosecond_ticks(seconds: f64) -> u64 {
-    let scale = picosecond_tick();
-    let mut ticks = (seconds / scale).ceil() as u64;
-    while ticks > 0 && ((ticks - 1) as f64) * scale >= seconds {
+    let mut ticks = (seconds / picosecond_tick()).ceil() as u64;
+    while ticks > 0 && picosecond_tick_seconds(ticks - 1) >= seconds {
         ticks -= 1;
     }
-    while (ticks as f64) * scale < seconds {
+    while picosecond_tick_seconds(ticks) < seconds {
         ticks += 1;
     }
     ticks
@@ -3887,7 +3893,7 @@ fn an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it() {
     );
     for (index, (wake, (reaction, _))) in rising.iter().zip(reactions.iter().skip(1)).enumerate() {
         let dated = ceil_picosecond_ticks(*wake);
-        let expected = (dated + 1) as f64 * picosecond_tick();
+        let expected = picosecond_tick_seconds(dated + 1);
         assert!(
             (reaction - expected).abs() < 2.0e-20,
             "reaction {index} to a wake at {wake:.16e} s must fire one tick after tick \
