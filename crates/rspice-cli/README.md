@@ -437,7 +437,14 @@ than half of one. The `$timescale` is the coarsest period that keeps every
 rounded time an integer tick, so a run whose edges land on nanoseconds is
 written `1 ns`. Two values of one signal at different times that would share
 one tick, and a duration that no timescale can span, are refused rather than
-merged. VCD has
+merged. A net an HDL reads or drives (an A/D output feeding an HDL input, an
+HDL output, a net between HDL instances) is written as the HDL saw it: each
+change at the HDL's nearest tick of the design's finest `timescale`
+precision, and of several changes on one tick (the HDL's delta cycles) the
+last. Such a dump is written at that precision, the tick the HDL's own
+`$dumpvars` uses, so the two dumps line up; the result and the rawfile keep
+the physical instants, and the rawfile's event plots carry the precision, so
+`convert --to vcd` of a rawfile writes the same dump. VCD has
 four bit states and no drive strength, so the level survives and the XSPICE
 strength band does not.
 
