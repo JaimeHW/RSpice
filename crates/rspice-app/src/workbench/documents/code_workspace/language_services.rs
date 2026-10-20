@@ -167,22 +167,6 @@ pub(crate) struct CodeLanguageToolsState {
     pub error: Option<String>,
 }
 
-pub(crate) fn open_language_tools(
-    app: &mut RSpiceApp,
-    language: ProjectSourceLanguage,
-    active_path: &str,
-    caret_char_index: usize,
-) -> Result<(), String> {
-    let bundle_id = app
-        .state
-        .model
-        .workspace
-        .active_source_bundle(language)
-        .map(ProjectSourceBundle::id)
-        .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    open_language_tools_in_bundle(app, language, bundle_id, active_path, caret_char_index)
-}
-
 pub(crate) fn open_language_tools_in_bundle(
     app: &mut RSpiceApp,
     language: ProjectSourceLanguage,
@@ -384,9 +368,58 @@ fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsStat
     Ok(state)
 }
 
-fn replace_one_language_document(
+/// Format document over a project source: the formatter's whole-document
+/// edit, applied in place and stated on the status bar.
+///
+/// The editor's Format document used to open the language-tools dialog on
+/// its code actions instead, leaving the user to find and apply the format
+/// there. A read-only source, or one the formatter refuses to touch because
+/// it does not parse, says why instead of changing anything.
+pub(crate) fn format_language_document(
     app: &mut RSpiceApp,
-    state: &CodeLanguageToolsState,
+    language: ProjectSourceLanguage,
+    bundle_id: ProjectSourceId,
+    logical_path: &str,
+) -> Result<String, String> {
+    if let Some(reason) = super::source_file_mutation_block_reason(app, language) {
+        return Err(reason.to_owned());
+    }
+    if !super::source_bundle_document_is_editable(app, language, bundle_id, logical_path) {
+        return Err(format!(
+            "{logical_path} is read-only, so it was not formatted."
+        ));
+    }
+    let source = app
+        .state
+        .model
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(bundle_id)
+        .and_then(|bundle| {
+            bundle_documents(bundle)
+                .find(|(path, _)| crate::state::project_source_paths_equal(path, logical_path))
+                .map(|(_, source)| source.to_owned())
+        })
+        .ok_or_else(|| format!("{logical_path} is no longer part of this project."))?;
+    let syntax = document_syntax(language, logical_path);
+    validate_source_for_formatting(syntax, logical_path, &source)?;
+    let protected = protected_string_lines(&source, syntax);
+    let (formatted, _) = normalize_source_whitespace(&source, &protected);
+    let message = if formatted == source {
+        format!("{logical_path} is already formatted.")
+    } else {
+        write_language_document(app, language, bundle_id, logical_path, formatted)?;
+        format!("Formatted {logical_path}.")
+    };
+    app.state.prompt(message.clone());
+    Ok(message)
+}
+
+fn write_language_document(
+    app: &mut RSpiceApp,
+    language: ProjectSourceLanguage,
+    bundle_id: ProjectSourceId,
     logical_path: &str,
     replacement: String,
 ) -> Result<(), String> {
@@ -394,16 +427,32 @@ fn replace_one_language_document(
         .model
         .workspace
         .content
-        .replace_project_source_bundle_file(state.index.bundle_id, logical_path, replacement)
+        .replace_project_source_bundle_file(bundle_id, logical_path, replacement)
         .map_err(|error| error.to_string())?;
-    match state.index.language {
+    match language {
         ProjectSourceLanguage::VerilogA => {
-            super::veriloga::invalidate_veriloga_evidence(app, state.index.bundle_id);
+            super::veriloga::invalidate_veriloga_evidence(app, bundle_id);
         }
         ProjectSourceLanguage::RSpiceAutomation => {
             super::automation::invalidate_automation_evidence(app);
         }
     }
+    Ok(())
+}
+
+fn replace_one_language_document(
+    app: &mut RSpiceApp,
+    state: &CodeLanguageToolsState,
+    logical_path: &str,
+    replacement: String,
+) -> Result<(), String> {
+    write_language_document(
+        app,
+        state.index.language,
+        state.index.bundle_id,
+        logical_path,
+        replacement,
+    )?;
     let bundle = app
         .state
         .model

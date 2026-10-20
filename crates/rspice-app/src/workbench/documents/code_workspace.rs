@@ -38,7 +38,7 @@ pub use editor::{
 pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageToolView, SourceCodeAction, SourceSymbol, SourceSymbolKind,
     commit_language_code_action, commit_language_completion, commit_language_rename,
-    open_language_tools, open_language_tools_in_bundle,
+    format_language_document, open_language_tools_in_bundle,
 };
 pub(crate) use page::VerilogAHeaderView;
 pub use page::{

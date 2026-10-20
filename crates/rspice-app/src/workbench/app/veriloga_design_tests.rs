@@ -14,7 +14,7 @@ use crate::state::{
 };
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{
-    self, LanguageToolView, PendingVerilogACompile, VerilogACompileOutcome,
+    self, PendingVerilogACompile, VerilogACompileOutcome,
 };
 use crate::workbench::state::Workspace;
 
@@ -248,12 +248,20 @@ fn language_tools_in_a_veriloga_cell_view_index_that_views_bundle() {
     assert_eq!(tools.active_path, "model.va");
 }
 
-/// Format is the editor's request, and it reaches the tools over the bundle
-/// the editor is showing.
+/// Format is the editor's request, and it formats the document that view's
+/// editor is showing, in place. It used to open the language-tools dialog on
+/// its code actions and leave the source as it was.
 #[test]
-fn format_in_a_veriloga_cell_view_acts_on_that_views_bundle() {
+fn format_in_a_veriloga_cell_view_formats_that_views_document() {
     let mut app = open_project_app();
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
+    let untidy = module_source("gain", "  real x;   \n");
+    app.state
+        .model
+        .workspace
+        .content
+        .replace_project_source_bundle_file(bundle_id, "model.va", untidy.clone())
+        .expect("the untidy source");
     open_in_design(&mut app.state, &reference);
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
@@ -264,15 +272,21 @@ fn format_in_a_veriloga_cell_view_acts_on_that_views_bundle() {
     );
     frame(&ctx, &mut app, DESKTOP);
 
-    let tools = app
+    let formatted = app
         .state
-        .code
-        .code_workspace
-        .language_tools
-        .as_ref()
-        .expect("Format opened the document actions");
-    assert_eq!(tools.index.bundle_id, bundle_id);
-    assert_eq!(tools.view, LanguageToolView::CodeActions);
+        .model
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(bundle_id)
+        .and_then(|bundle| bundle.file_content("model.va"))
+        .expect("the formatted source")
+        .to_owned();
+    assert_eq!(formatted, module_source("gain", "  real x;\n"));
+    assert!(
+        app.state.code.code_workspace.language_tools.is_none(),
+        "Format opens no dialog"
+    );
 }
 
 /// Carets used to be keyed by language and path, so two cell views that each

@@ -343,20 +343,13 @@ fn source_editor(
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,
     ) {
-        match crate::workbench::documents::code_workspace::open_language_tools_in_bundle(
+        if let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
             app,
             crate::state::ProjectSourceLanguage::VerilogA,
             bundle_id,
             active_path,
-            interaction.cursor_char_index,
         ) {
-            Ok(()) => {
-                if let Some(tools) = app.state.code.code_workspace.language_tools.as_mut() {
-                    tools.view =
-                        crate::workbench::documents::code_workspace::LanguageToolView::CodeActions;
-                }
-            }
-            Err(error) => app.state.prompt(error),
+            app.state.prompt(error);
         }
     }
     drop(preceding_input);
