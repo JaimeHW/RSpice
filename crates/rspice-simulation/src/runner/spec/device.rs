@@ -178,12 +178,7 @@ fn run_optimization(
     let mut configured_variables = Vec::with_capacity(variables.len());
     for variable in variables {
         super::ensure_not_aborted(abort)?;
-        configured_variables.push(svc_runner::OptimizationVariable {
-            name: variable.name,
-            min: variable.min,
-            max: variable.max,
-            initial: variable.initial,
-        });
+        configured_variables.push(variable);
     }
     let cfg = svc_runner::OptimizationRunConfig {
         search,

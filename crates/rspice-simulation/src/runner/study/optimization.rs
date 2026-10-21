@@ -312,7 +312,7 @@ mod tests {
             "bin:0:magnitude:V(out)",
         );
         let config = services::OptimizationRunConfig {
-            variables: vec![services::OptimizationVariable {
+            variables: vec![OptimizationVariable {
                 name: "RLOAD".into(),
                 min: 1000.0,
                 max: 2000.0,
@@ -387,7 +387,7 @@ mod tests {
                 objective_unit: if weighted { String::new() } else { "mV".into() },
                 target: Some(350.0),
                 max_iterations: 4,
-                variables: vec![services::OptimizationVariable {
+                variables: vec![OptimizationVariable {
                     name: "X".into(),
                     min: 0.1,
                     max: 0.5,
@@ -765,7 +765,7 @@ mod tests {
             Err(SimulationError::InvalidConfig(_))
         ));
         let config = services::OptimizationRunConfig {
-            variables: vec![services::OptimizationVariable {
+            variables: vec![OptimizationVariable {
                 name: "UNDECLARED".into(),
                 min: 1.0,
                 max: 2.0,

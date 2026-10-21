@@ -62,9 +62,12 @@ pub struct SpPort {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TfNormalization {
+    /// Return the native engineering derivative (for example V/A).
     #[default]
     None,
+    /// Return `(dY / dX) * (Xnom / Ynom)`, a signed dimensionless ratio.
     RelativeToNominal,
+    /// Return the signed response to one engineering unit of source stimulus.
     PerSourceUnit,
 }
 

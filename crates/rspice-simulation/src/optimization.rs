@@ -12,41 +12,12 @@ use search::{DesignVar, OptimizerEngine};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
-/// Optimization objective strategy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OptimizationGoalMode {
-    /// Minimize objective value.
-    Minimize,
-    /// Maximize objective value.
-    Maximize,
-    /// Reach target value.
-    Target,
-}
-
-/// Optimization algorithm mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OptimizationAlgorithmMode {
-    /// Gradient-descent algorithm.
-    GradientDescent,
-    /// Pattern-search algorithm.
-    PatternSearch,
-    /// Simulated-annealing algorithm.
-    SimulatedAnnealing,
-}
-
-/// Single optimization variable.
-#[derive(Debug, Clone)]
-pub struct OptimizationVariable {
-    /// Parameter name (`.param <name>=...`).
-    pub name: String,
-    /// Lower bound.
-    pub min: Value,
-    /// Upper bound.
-    pub max: Value,
-    /// Initial value.
-    pub initial: Value,
-}
-
+// The goal, algorithm and variable a run is configured with are the
+// contract's own: a search runs exactly what the analysis declared.
+pub use rspice_simulation_contract::analysis_spec::OptimizationVariable;
+pub use rspice_simulation_contract::optimization_draft::{
+    OptimizationAlgorithmMode, OptimizationGoalMode,
+};
 use rspice_simulation_contract::optimization_search::OptimizationSearchControls;
 
 /// Optimization run configuration.

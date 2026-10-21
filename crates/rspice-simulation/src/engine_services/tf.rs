@@ -15,17 +15,9 @@ use rspice_core::netlist::ElementKind;
 #[cfg(test)]
 use std::path::Path;
 
-/// Post-solve normalization applied to the signed transfer derivative.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum TfNormalization {
-    /// Return the native engineering derivative (for example V/A).
-    #[default]
-    None,
-    /// Return `(dY / dX) * (Xnom / Ynom)`, a signed dimensionless ratio.
-    RelativeToNominal,
-    /// Return the signed response to one engineering unit of source stimulus.
-    PerSourceUnit,
-}
+/// Post-solve normalization applied to the signed transfer derivative: the
+/// one the analysis declared, so the runner applies exactly that policy.
+pub use rspice_simulation_contract::analysis_spec::TfNormalization;
 
 /// Numerical policy applied after source-authored `.OPTIONS` are resolved.
 ///

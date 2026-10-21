@@ -85,19 +85,11 @@ pub(super) fn run_small_signal_spec(
                 transfer_gain,
                 input_resistance,
                 output_resistance,
-                normalization: match normalization {
-                    rspice_simulation_contract::analysis_spec::TfNormalization::None => {
-                        svc_runner::TfNormalization::None
-                    }
-                    rspice_simulation_contract::analysis_spec::TfNormalization::RelativeToNominal => {
-                        svc_runner::TfNormalization::RelativeToNominal
-                    }
-                    rspice_simulation_contract::analysis_spec::TfNormalization::PerSourceUnit => {
-                        svc_runner::TfNormalization::PerSourceUnit
-                    }
-                },
+                normalization,
                 accuracy: match accuracy {
-                    rspice_simulation_contract::analysis_spec::TfAccuracy::Fast => svc_runner::TfAccuracy::Fast,
+                    rspice_simulation_contract::analysis_spec::TfAccuracy::Fast => {
+                        svc_runner::TfAccuracy::Fast
+                    }
                     rspice_simulation_contract::analysis_spec::TfAccuracy::Balanced => {
                         svc_runner::TfAccuracy::Balanced
                     }

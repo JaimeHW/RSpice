@@ -86,9 +86,7 @@ pub(crate) use monte_carlo::{
     run_monte_carlo_analysis_with_environment_and_source_path_and_abort,
     run_statistical_monte_carlo_with_environment_and_source_path_and_abort,
 };
-pub use optimization::{
-    OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
-};
+pub use optimization::{OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig};
 pub(crate) use optimization::{
     OptimizationData, OptimizationEvaluation, materialize_optimization_candidate,
     objective_to_cost as optimization_objective_cost, run_optimization_analysis_with_context,
@@ -135,7 +133,7 @@ pub use sweeps::{
     run_parametric_analysis_with_base_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,
 };
-pub use tf::{TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, infer_tf_run_config};
+pub use tf::{TfAccuracy, TfQuantity, TfRunConfig, infer_tf_run_config};
 pub use transient::TransientData;
 #[cfg(test)]
 pub use transient::run_transient_analysis_with_source_path_and_abort;
