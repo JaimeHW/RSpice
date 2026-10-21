@@ -1265,4 +1265,107 @@ mod tests {
             found.join("\n  ")
         );
     }
+
+    /// Whether a line assigns the model's project-open fact outright.
+    fn assigns_project_open(code: &str) -> bool {
+        let assigned = code.match_indices(".project_open").any(|(at, name)| {
+            let rest = code[at + name.len()..].trim_start();
+            rest.starts_with('=') && !rest.starts_with("==")
+        });
+        // `mem` is spelled in two halves so the scan does not find this line.
+        assigned || (code.contains("project_open") && code.contains(concat!("mem", "::")))
+    }
+
+    /// Model code reads whether a project is open from `AppState::project_open`,
+    /// and that copy is only right while one function writes it: the project
+    /// lifecycle's `publish_open`, which each transition that opens, resets or
+    /// closes the project calls in the same call. A second writer, or shipped
+    /// code that moves the lifecycle's authority past those transitions, leaves
+    /// the model reading an answer the lifecycle no longer gives.
+    #[test]
+    fn only_the_project_lifecycle_writes_whether_a_project_is_open() {
+        // Spelled in two halves so this scan does not find itself.
+        const WRITER: &str = concat!("set_from_", "lifecycle(");
+        let owner = Path::new("workbench")
+            .join("lifecycle")
+            .join("project_lifecycle.rs");
+        let fact = Path::new("state").join("project_open.rs");
+        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut paths = Vec::new();
+        rust_sources(&source_root, &mut paths);
+        paths.sort();
+        let sources = paths
+            .iter()
+            .map(|path| {
+                let source = std::fs::read_to_string(path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+                (path.clone(), source)
+            })
+            .collect::<Vec<_>>();
+        let roots = sources
+            .iter()
+            .flat_map(|(path, source)| test_only_roots(path, source))
+            .collect::<Vec<_>>();
+
+        let mut owner_writes = 0_usize;
+        let mut owner_reads = 0_usize;
+        let mut writers = Vec::new();
+        let mut moves = Vec::new();
+        for (path, source) in &sources {
+            if path.ends_with(&fact) {
+                continue;
+            }
+            let owned = path.ends_with(&owner);
+            for (number, line) in source.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                let writes = code.matches(WRITER).count();
+                if owned {
+                    owner_writes += writes;
+                    owner_reads += code.matches(".publish_open(").count();
+                } else if writes > 0 || assigns_project_open(code) {
+                    writers.push(format!("{}:{}", path.display(), number + 1));
+                }
+            }
+            if owned || !ships(path, &roots) {
+                continue;
+            }
+            for (number, line) in without_test_items(source).lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                if [
+                    ".open_session()",
+                    ".close_project()",
+                    ".reset_for_new_project()",
+                ]
+                .iter()
+                .any(|transition| code.contains(transition))
+                {
+                    moves.push(format!("{}:{}", path.display(), number + 1));
+                }
+            }
+        }
+
+        assert_eq!(
+            owner_writes,
+            1,
+            "the project lifecycle writes the model's project-open fact from one function, in {}",
+            owner.display()
+        );
+        assert!(
+            owner_reads >= 3,
+            "only {owner_reads} lifecycle transitions publish whether a project is open; open, \
+             new and close each must"
+        );
+        assert!(
+            writers.is_empty(),
+            "these write the model's project-open fact outside the project lifecycle — open, \
+             reset or close the project through it instead:\n  {}",
+            writers.join("\n  ")
+        );
+        assert!(
+            moves.is_empty(),
+            "these open or close the project lifecycle's authority directly, which leaves the \
+             model's project-open fact behind — go through the lifecycle's transitions:\n  {}",
+            moves.join("\n  ")
+        );
+    }
 }
