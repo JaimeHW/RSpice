@@ -451,7 +451,7 @@
       "disposition": "Diagnostic probe; inspect and replace with bounded assertions before treating as a correctness gate."
     },
     {
-      "path": "src/device/mosfet/bsim4v8/tests.rs",
+      "path": "tests/device_engine_roundtrip.rs",
       "symbol": "requires an externally supplied models/veriloga/bsim4.va",
       "owner": "C09",
       "disposition": "Feature-gated external-model comparison; requires actual model source and runtime. Open until supplied and executed."
