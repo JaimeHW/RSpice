@@ -279,13 +279,24 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .parent()
         .ok_or_else(|| std::io::Error::other("the cache path has no parent folder"))?;
     std::fs::create_dir_all(directory)?;
-    // Named apart from every other writer: two windows opening the same
-    // project materialize the same digest at the same moment.
-    let staging = directory.join(format!(".{}.partial", uuid::Uuid::new_v4().simple()));
-    std::fs::write(&staging, bytes)?;
-    std::fs::rename(&staging, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&staging);
-    })
+    publish(path, bytes)
+}
+
+/// The copy goes through the one publication policy every native artifact
+/// uses: a uniquely named sibling per writer — two windows opening the same
+/// project materialize the same digest at the same moment — synchronized and
+/// then renamed into place.
+#[cfg(not(target_arch = "wasm32"))]
+fn publish(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    rspice_output::write_atomic(path, |file| file.write_all(bytes))
+        .map_err(rspice_output::AtomicArtifactError::into_io_error)
+}
+
+/// The browser has no file system for the engine to open a table from: the
+/// `create_dir_all` before this has already refused, as it always did there.
+#[cfg(target_arch = "wasm32")]
+fn publish(_path: &Path, _bytes: &[u8]) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
 }
 
 #[cfg(test)]
