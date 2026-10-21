@@ -288,6 +288,11 @@ mod tests {
     }
 
     fn findings(deck: &str) -> Vec<ThresholdFinding> {
+        held(deck).0
+    }
+
+    /// The findings at the held equilibrium, and the code models it holds.
+    fn held(deck: &str) -> (Vec<ThresholdFinding>, Vec<String>) {
         let netlist = crate::Netlist::parse(deck).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
         let bias = engine
@@ -300,7 +305,16 @@ mod tests {
                 &crate::abort_signal::NoAbort,
             )
             .expect("the held equilibrium is prepared");
-        engine.held_threshold_findings(&bias.circuit, &bias.bias)
+        let models = bias
+            .circuit
+            .xspice_instances
+            .iter()
+            .map(|instance| instance.model_name().to_owned())
+            .collect();
+        (
+            engine.held_threshold_findings(&bias.circuit, &bias.bias),
+            models,
+        )
     }
 
     fn sampler_deck(module: &SourceFile, level: f64) -> String {
@@ -353,6 +367,65 @@ mod tests {
             "{finding}"
         );
         assert!(findings(&sampler_deck(&module, 0.91)).is_empty());
+    }
+
+    /// A converter that tracks its supply is reported in volts, as a static
+    /// one is: its threshold is half of V(vdd) at the solved point, and its
+    /// input is on it within the same `reltol·max(|v|, |θ|) + vntol`.
+    ///
+    /// `din` divides the inferred 1.8 V rail through `r1` and `r2`, so the
+    /// auto A/D is the supply-tracking twin and its threshold is 0.9 V. With
+    /// `.param vcc=1.8` it is the stock bridge at a static 0.9 V. Equal
+    /// resistors put `din` on the threshold; 1000.889 Ω puts it 0.4 mV above,
+    /// inside reltol's 0.9 mV; 1020 Ω puts it 8.9 mV above, outside.
+    #[test]
+    fn a_tracking_converter_on_its_threshold_is_reported_in_volts() {
+        let deck = |r2: &str, declared: &str| {
+            format!(
+                "* tracking converter input near its threshold\n\
+                 {declared}\
+                 vdd vdd 0 dc 1.8\n\
+                 r1 vdd din 1k\n\
+                 r2 din 0 {r2}\n\
+                 abuf [din] [dout] buf\n\
+                 .model buf d_buffer\n\
+                 .end\n"
+            )
+        };
+        for (declared, converter) in [
+            ("", "__rspice_tracking_adc"),
+            (".param vcc=1.8\n", "adc_bridge"),
+        ] {
+            for (r2, reported) in [("1k", true), ("1000.889", true), ("1020", false)] {
+                let (found, models) = held(&deck(r2, declared));
+                assert!(
+                    models.iter().any(|model| model == converter),
+                    "{declared:?} converts through {converter}: {models:?}"
+                );
+                if !reported {
+                    assert!(found.is_empty(), "r2 = {r2} {declared:?}: {found:?}");
+                    continue;
+                }
+                assert_eq!(found.len(), 1, "r2 = {r2} {declared:?}: {found:?}");
+                let finding = &found[0];
+                assert!(finding.net.eq_ignore_ascii_case("din"), "{finding}");
+                let r2: f64 = if r2 == "1k" {
+                    1000.0
+                } else {
+                    r2.parse().unwrap()
+                };
+                let din = 1.8 * r2 / (1000.0 + r2);
+                assert!((finding.voltage - din).abs() < 1.0e-12, "{finding}");
+                assert!(
+                    matches!(
+                        finding.kind,
+                        crate::circuit::ThresholdFindingKind::OnThreshold { threshold }
+                            if (threshold - 0.9).abs() < 1.0e-12
+                    ),
+                    "{declared:?}: {finding}"
+                );
+            }
+        }
     }
 
     /// S5(c), the band: an XSPICE converter with an unknown band and no

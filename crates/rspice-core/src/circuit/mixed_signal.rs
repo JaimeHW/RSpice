@@ -794,22 +794,33 @@ impl CircuitData {
                 let sample =
                     instance.analog_threshold_sample(&threshold.port, threshold.element, *ordinal);
                 *ordinal += 1;
-                let Some(voltage) = sample else {
+                let (Some(crossing), Some(voltage)) = (
+                    sample,
+                    instance.analog_threshold_input(&threshold.port, threshold.element),
+                ) else {
                     continue;
                 };
+                // A converter that tracks a supply declares its threshold as
+                // the zero of a crossing function, `v − r·V(sup)`, and every
+                // crossing function is the input less the level it compares
+                // against. The census speaks in volts: the threshold is the
+                // declared one moved by that level, here `r·V(sup)` at the
+                // solved point, and the input is the input.
+                let level = voltage - crossing;
+                let (low, high) = (threshold.low + level, threshold.high + level);
                 let net = instance
                     .connection(&threshold.port)
                     .map(|connection| analog_input_net(connection, threshold.element, &node_name))
                     .unwrap_or_else(|| threshold.port.clone());
                 let output = self.converter_output_node(instance, threshold.element);
                 let host_port = output.and_then(|node| self.mixed_host_port_on(node));
-                let kind = if let Some(theta) = [threshold.low, threshold.high]
+                let kind = if let Some(theta) = [low, high]
                     .into_iter()
                     .find(|theta| on_threshold(voltage, *theta))
                 {
                     Some(ThresholdFindingKind::OnThreshold { threshold: theta })
-                } else if threshold.low < voltage
-                    && voltage < threshold.high
+                } else if low < voltage
+                    && voltage < high
                     && output.is_some_and(|node| {
                         self.scheduler
                             .xspice_event_values
@@ -820,10 +831,7 @@ impl CircuitData {
                             })
                     })
                 {
-                    Some(ThresholdFindingKind::UndefinedBand {
-                        low: threshold.low,
-                        high: threshold.high,
-                    })
+                    Some(ThresholdFindingKind::UndefinedBand { low, high })
                 } else {
                     None
                 };

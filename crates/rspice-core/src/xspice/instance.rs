@@ -1505,11 +1505,22 @@ impl XspiceInstance {
         element: usize,
         threshold: usize,
     ) -> Option<Value> {
+        let input = self.analog_threshold_input(port, element)?;
+        Some(
+            self.model
+                .analog_threshold_input_at(&self.context, port, element, threshold, input),
+        )
+    }
+
+    /// The present value of the connected input `port[element]` itself, in
+    /// volts, before any crossing function is applied to it.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn analog_threshold_input(&self, port: &str, element: usize) -> Option<Value> {
         let spec = self
             .port_indices
             .get(port)
             .and_then(|index| self.ports.get(*index))?;
-        let input = if spec.is_vector {
+        if spec.is_vector {
             self.context
                 .input_analog_vector_values(port)?
                 .get(element)
@@ -1518,11 +1529,7 @@ impl XspiceInstance {
             (element == 0)
                 .then(|| self.context.input_analog(port))
                 .flatten()
-        }?;
-        Some(
-            self.model
-                .analog_threshold_input_at(&self.context, port, element, threshold, input),
-        )
+        }
     }
 
     /// Whether this instance can be resumed from a transient checkpoint.
