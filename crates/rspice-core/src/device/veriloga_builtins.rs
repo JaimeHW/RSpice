@@ -870,6 +870,13 @@ impl BuiltinVerilogADevices {
         self.operating_point_analysis_override = analysis;
     }
 
+    /// The physical analysis an equilibrium solve currently presents.
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn operating_point_analysis_override(&self) -> Option<GeneratedAnalysisKind> {
+        self.operating_point_analysis_override
+    }
+
     /// Validate every generated instance before an accepted analysis point is
     /// allowed to mutate any runtime or generated Verilog-A state.
     #[doc(hidden)]
@@ -2612,6 +2619,75 @@ mod tests {
     ))]
     use super::instantiate_builtin;
 
+    /// The circuit store as instantiation sees it, reduced to what these
+    /// tests read: nets numbered from 1 in the order they are first named,
+    /// ground at 0, branch ordinals from 1, and the default `$simparam`
+    /// environment. Which nets an instance owns and how far its stamps reach
+    /// is the circuit's bookkeeping, and nothing here reads it.
+    #[cfg(any(
+        feature = "veriloga-model-diode-cmc",
+        feature = "veriloga-model-ekv-va",
+        feature = "veriloga-model-vbic13",
+    ))]
+    #[derive(Default)]
+    struct TestTopology {
+        nodes: std::collections::HashMap<String, crate::NodeId>,
+        branches: usize,
+        simulation_parameters: GeneratedSimulationParameters,
+    }
+
+    #[cfg(feature = "veriloga-model-vbic13")]
+    impl TestTopology {
+        /// The nets other than ground, as `CircuitData::num_nodes` counts them.
+        fn num_nodes(&self) -> usize {
+            self.nodes.len()
+        }
+
+        /// The nets other than ground, then the branch currents: the unknowns
+        /// `CircuitData::matrix_size` counts when there is no hidden state.
+        fn matrix_size(&self) -> usize {
+            self.nodes.len() + self.branches
+        }
+    }
+
+    #[cfg(any(
+        feature = "veriloga-model-diode-cmc",
+        feature = "veriloga-model-ekv-va",
+        feature = "veriloga-model-vbic13",
+    ))]
+    impl super::BuiltinTopology for TestTopology {
+        fn get_or_create_node(&mut self, name: &str) -> crate::NodeId {
+            if crate::naming::is_spice_ground_name(name) {
+                return 0;
+            }
+            let next = self.nodes.len() + 1;
+            *self.nodes.entry(name.to_string()).or_insert(next)
+        }
+
+        fn allocate_branch(&mut self) -> crate::NodeId {
+            self.branches += 1;
+            self.branches
+        }
+
+        fn record_compact_model_stamp_reach(
+            &mut self,
+            _private: &[crate::NodeId],
+            _dc_rows: impl IntoIterator<Item = crate::NodeId>,
+            _read: impl IntoIterator<Item = crate::NodeId>,
+        ) {
+        }
+
+        fn add_compact_model_private_nodes(
+            &mut self,
+            _nodes: impl IntoIterator<Item = crate::NodeId>,
+        ) {
+        }
+
+        fn generated_simulation_parameters(&self) -> &GeneratedSimulationParameters {
+            &self.simulation_parameters
+        }
+    }
+
     /// An `OFF` instance is evaluated at its cut-off state until Newton moves.
     ///
     /// This is the generated-device half of the arm the native ports already
@@ -2623,7 +2699,7 @@ mod tests {
     #[cfg(all(test, feature = "veriloga-model-ekv-va"))]
     #[test]
     fn off_instance_holds_its_cut_off_startup_state_until_newton_moves() {
-        let mut circuit = crate::CircuitData::new();
+        let mut circuit = TestTopology::default();
         let nodes = ["d", "g", "s", "b"].map(str::to_string);
         let mut instance = instantiate_builtin(
             "EKV_VA",
@@ -2687,7 +2763,7 @@ mod tests {
     #[cfg(all(test, feature = "veriloga-model-ekv-va"))]
     #[test]
     fn a_cut_off_instance_whose_terminals_never_move_still_retires_its_startup_state() {
-        let mut circuit = crate::CircuitData::new();
+        let mut circuit = TestTopology::default();
         let nodes = ["d", "g", "s", "b"].map(str::to_string);
         let mut instance = instantiate_builtin(
             "EKV_VA",
@@ -2722,7 +2798,7 @@ mod tests {
     #[cfg(all(test, feature = "veriloga-model-ekv-va"))]
     #[test]
     fn an_unmarked_generated_instance_is_always_evaluated_at_the_solver_iterate() {
-        let mut circuit = crate::CircuitData::new();
+        let mut circuit = TestTopology::default();
         let nodes = ["d", "g", "s", "b"].map(str::to_string);
         let mut instance = instantiate_builtin(
             "EKV_VA",
@@ -2786,7 +2862,7 @@ mod tests {
     /// both, the way the VBIC13 test below names its own.
     #[cfg(feature = "veriloga-model-diode-cmc")]
     fn checkpoint_test_devices() -> BuiltinVerilogADevices {
-        let mut circuit = crate::CircuitData::new();
+        let mut circuit = TestTopology::default();
         let mut devices = BuiltinVerilogADevices::new();
         for (name, node) in [("d1", "n1"), ("d2", "n2")] {
             let instance = instantiate_builtin(
@@ -2969,9 +3045,14 @@ mod tests {
         );
     }
 
+    /// Starting an analysis resets every instance's history and adapter state
+    /// and clears the equilibrium override. The start here is the one
+    /// `CircuitData::begin_veriloga_analysis(2)` makes on a circuit with no
+    /// nets: a transient point with the default `$simparam` environment. That
+    /// the circuit makes it is the circuit's own test.
     #[cfg(feature = "veriloga-model-diode-cmc")]
     #[test]
-    fn circuit_analysis_start_resets_generated_history_and_adapter_state() {
+    fn analysis_start_resets_generated_history_and_adapter_state() {
         let mut devices = checkpoint_test_devices();
         let fresh = devices.capture_rollback_state();
         for device in &mut devices.devices {
@@ -2990,10 +3071,14 @@ mod tests {
             device.initial_off_seed_anchor = Some(vec![0.0]);
         }
         devices.set_operating_point_analysis_override(Some(GeneratedAnalysisKind::Ac));
-        let mut circuit = crate::CircuitData::new();
-        *circuit.generated_veriloga_devices_mut() = devices;
-        circuit.begin_veriloga_analysis(2).unwrap();
-        let devices = circuit.generated_veriloga_devices();
+        devices.set_analysis_phase(rspice_veriloga_runtime::AnalogAnalysisPhase::Point);
+        devices
+            .begin_analysis(
+                GeneratedAnalysisKind::Tran,
+                GeneratedSimulationParameters::default(),
+                0,
+            )
+            .unwrap();
         assert_eq!(devices.capture_rollback_state(), fresh);
         assert!(devices.operating_point_analysis_override.is_none());
         for device in &devices.devices {
@@ -3008,13 +3093,6 @@ mod tests {
             assert_eq!(device.initial_off_seed_evaluations, 0);
             assert!(device.initial_off_seed_anchor.is_none());
         }
-        circuit.begin_veriloga_equilibrium_analysis(3).unwrap();
-        assert!(matches!(
-            circuit
-                .generated_veriloga_devices()
-                .operating_point_analysis_override,
-            Some(GeneratedAnalysisKind::Noise)
-        ));
     }
 
     #[cfg(feature = "veriloga-model-diode-cmc")]
@@ -3135,7 +3213,7 @@ mod tests {
     #[cfg(feature = "veriloga-model-r2-cmc")]
     #[test]
     fn generated_tasks_participate_in_rollback_acceptance_and_checkpoint_boundaries() {
-        let mut circuit = crate::CircuitData::new();
+        let mut circuit = TestTopology::default();
         let mut devices = BuiltinVerilogADevices::new();
         for name in ["r1", "r2"] {
             devices.add(
@@ -3270,7 +3348,7 @@ mod tests {
     #[cfg(feature = "veriloga-model-vbic13")]
     #[test]
     fn generated_static_dae_probe_restores_event_candidate_bitwise() {
-        let mut circuit = crate::CircuitData::new();
+        let mut circuit = TestTopology::default();
         let mut instance = instantiate_builtin(
             "VBIC13",
             "q1",

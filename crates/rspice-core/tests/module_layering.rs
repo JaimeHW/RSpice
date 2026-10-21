@@ -260,12 +260,6 @@ const LAYERS: &[(&str, u32)] = &[
 ///   `StampError` keeps its classification when it widens to
 ///   `crate::SimulationError`. `device/veriloga.rs` moves up with `circuit`
 ///   and `analysis` when the crate is split, so the edge leaves with it.
-/// - `device -> circuit`, 7. Unit tests in `device/veriloga_builtins.rs` that
-///   build a `crate::CircuitData` to instantiate a built-in model into and
-///   then read adapter-private state back. Production reaches the circuit
-///   store only through the `BuiltinTopology` trait, whose one implementation
-///   is in `circuit/builtin_topology.rs`. The tests retire by instantiating
-///   into a test topology instead.
 /// - `circuit -> analysis`, 21. Production: the mixed-signal scheduler
 ///   (`circuit/scheduler.rs`, `circuit/scheduler/trial.rs`), mixed-signal port
 ///   elaboration (`circuit/mixed_signal.rs`) and model acceptance
@@ -288,7 +282,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("circuit", "analysis", 21),
     ("circuit", "engine", 11),
     ("device", "analysis", 3),
-    ("device", "circuit", 7),
     ("device", "engine", 3),
 ];
 

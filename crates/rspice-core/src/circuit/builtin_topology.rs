@@ -38,11 +38,61 @@ impl BuiltinTopology for CircuitData {
     }
 }
 
-#[cfg(all(test, feature = "veriloga-model-vbic13-4t"))]
+#[cfg(all(
+    test,
+    any(
+        feature = "veriloga-model-diode-cmc",
+        feature = "veriloga-model-vbic13-4t"
+    )
+))]
 mod tests {
     use super::CircuitData;
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    use crate::device::veriloga_builtins::{GeneratedAnalysisKind, instantiate_builtin};
+    #[cfg(feature = "veriloga-model-vbic13-4t")]
     use crate::device::veriloga_builtins::{builtins, instantiate_builtin_scoped};
 
+    /// Starting an analysis on the circuit starts it on its generated
+    /// instances, which clears the equilibrium override, and starting an
+    /// equilibrium analysis then presents the physical analysis it names.
+    /// What a start does to each instance is the device module's own test.
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    #[test]
+    fn circuit_analysis_start_reaches_generated_devices_and_sets_the_equilibrium_override() {
+        let mut circuit = CircuitData::new();
+        for (name, node) in [("d1", "n1"), ("d2", "n2")] {
+            let instance = instantiate_builtin(
+                "DIODE_CMC",
+                name,
+                &[node.to_string(), "0".to_string()],
+                &[],
+                &crate::netlist::ParamContext::new(),
+                &mut circuit,
+            )
+            .expect("generated diode instantiates")
+            .expect("DIODE_CMC is registered");
+            circuit.add_generated_veriloga_device(instance);
+        }
+        circuit
+            .generated_veriloga_devices_mut()
+            .set_operating_point_analysis_override(Some(GeneratedAnalysisKind::Ac));
+        circuit.begin_veriloga_analysis(2).unwrap();
+        assert!(
+            circuit
+                .generated_veriloga_devices()
+                .operating_point_analysis_override()
+                .is_none()
+        );
+        circuit.begin_veriloga_equilibrium_analysis(3).unwrap();
+        assert!(matches!(
+            circuit
+                .generated_veriloga_devices()
+                .operating_point_analysis_override(),
+            Some(GeneratedAnalysisKind::Noise)
+        ));
+    }
+
+    #[cfg(feature = "veriloga-model-vbic13-4t")]
     #[test]
     fn optional_internal_connections_preserve_generated_node_slots() {
         let optional = ["dt", "cx", "ci", "bx", "bi", "ei"];
@@ -97,6 +147,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "veriloga-model-vbic13-4t")]
     #[test]
     fn invalid_optional_connections_fail_before_allocating_nodes() {
         for (optional, count) in [

@@ -370,8 +370,12 @@ const MAX_PUBLIC_ITEMS: usize = 5753;
 // and charge plumbing, the switch and TEAM memristor checkpoints, the BJT
 // charge linearization, the line responses and the prescribed integral rates
 // add 86 more for the same move. Their stamp records and charge records keep
-// public fields. The census is 1,311, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1311;
+// public fields.
+// `BuiltinVerilogADevices::operating_point_analysis_override` adds one, under
+// `test-support` as well as `cfg(test)`: the circuit's test that an analysis
+// start reaches its generated instances reads it, from above the device
+// models. The census is 1,312, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1312;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
