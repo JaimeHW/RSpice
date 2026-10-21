@@ -10,13 +10,6 @@ use crate::workbench::app::{
     SelectionBulkEditDialogState, SymbolImportDialogState, SymbolParameterFormDialogState,
 };
 
-mod reviews;
-
-pub(crate) use reviews::{
-    PlanRemovalConsequence, PlanRemovalRefusal, PlanRemovalReview, PlanRemovalTarget,
-    PlanRemovalTone,
-};
-
 /// Governed snap-spacing choices shown by the upgraded schematic toolbar
 /// transaction. `Free` disables snapping without replacing the document's
 /// retained pitch.

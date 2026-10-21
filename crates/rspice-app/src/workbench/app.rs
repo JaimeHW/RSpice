@@ -169,10 +169,12 @@ pub(crate) use dialogs::symbol_definition::{
 
 pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
 
+pub(crate) use dialogs::plan_removal::{
+    PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
+};
 pub use dialogs::state::DialogState;
 pub(crate) use dialogs::state::{
-    DatasetExportPicker, GridSnapSpacingChoice, HelpCenterPage, PlanRemovalConsequence,
-    PlanRemovalTarget, PlanRemovalTone, RunDetailsDialogState,
+    DatasetExportPicker, GridSnapSpacingChoice, HelpCenterPage, RunDetailsDialogState,
 };
 
 /// Test-only: the studio pins this against its own hop label, and the dialog

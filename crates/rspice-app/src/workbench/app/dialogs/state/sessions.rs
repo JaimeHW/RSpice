@@ -178,10 +178,11 @@ pub struct DialogState {
     /// Destructive review for removing one record from the analysis plan —
     /// an analysis, a design variable, a saved output or a capture group —
     /// raised only where removal orphans something.
-    pub(crate) plan_removal_review: PlanRemovalReview,
+    pub(crate) plan_removal_review: crate::workbench::app::dialogs::plan_removal::PlanRemovalReview,
     /// Why a removal the plan will not perform was refused before it was
     /// staged. The review above asks; this one only states.
-    pub(crate) plan_removal_refusal: PlanRemovalRefusal,
+    pub(crate) plan_removal_refusal:
+        crate::workbench::app::dialogs::plan_removal::PlanRemovalRefusal,
     /// The format question "Export dataset…" asks, while it is open.
     pub(crate) dataset_export: Option<DatasetExportPicker>,
     /// A saved-file open found a bound, eligible autosave checkpoint; the
