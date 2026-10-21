@@ -288,9 +288,16 @@ use rspice_core::analysis::harmonic_balance::{
 // no slack.
 // `ResourceLimits::with` adds one: the limits are non-exhaustive, so a crate
 // other than their own cannot override a field with struct-update syntax, and
-// every override in the family spells it this one way. The census is 5,750,
+// every override in the family spells it this one way. The census was 5,750,
 // with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5750;
+// `AnalysisResultKind` moved down into `identity`, beside the `AnalysisKind`
+// whose `result_kind` names the family each analysis produces, so that match
+// stays exhaustive in the enum's own crate. The move adds two:
+// `AnalysisKind::result_kind`, and the re-export that keeps
+// `execution::capability::AnalysisResultKind` and every path through it.
+// `analysis_result_kind` stays and delegates. The census is 5,752, with no
+// slack.
+const MAX_PUBLIC_ITEMS: usize = 5752;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

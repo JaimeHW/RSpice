@@ -132,6 +132,50 @@ impl AnalysisKind {
             | Self::Qpxf => None,
         }
     }
+
+    /// Convert every core analysis identity to the result family it produces,
+    /// or `None` where it produces none.
+    ///
+    /// Port-noise is an optional second result of `SP`, so it has a registry
+    /// row but no distinct `AnalysisKind`. Implicit and authored OP share one
+    /// schema.
+    ///
+    /// `None` means that no shared result-document schema is bound to this
+    /// kind. An engine or Studio entry point may exist without a
+    /// CLI/Python/WASM document projection; a registry row must not claim that
+    /// projection prematurely.
+    pub const fn result_kind(self) -> Option<AnalysisResultKind> {
+        Some(match self {
+            Self::ImplicitOp | Self::Op => AnalysisResultKind::OperatingPoint,
+            Self::Dc => AnalysisResultKind::DcSweep,
+            Self::Ac => AnalysisResultKind::Ac,
+            Self::Tran => AnalysisResultKind::Transient,
+            Self::Noise => AnalysisResultKind::Noise,
+            Self::Sp => AnalysisResultKind::SParameters,
+            Self::Stb => AnalysisResultKind::Stability,
+            Self::Distortion => AnalysisResultKind::Distortion,
+            Self::PoleZero => AnalysisResultKind::PoleZero,
+            Self::Sensitivity => AnalysisResultKind::Sensitivity,
+            Self::TransferFunction => AnalysisResultKind::TransferFunction,
+            Self::Pss => AnalysisResultKind::Pss,
+            Self::Pac => AnalysisResultKind::Pac,
+            Self::Pxf => AnalysisResultKind::Pxf,
+            Self::PNoise => AnalysisResultKind::PNoise,
+            Self::Pstb => AnalysisResultKind::Pstb,
+            Self::HarmonicBalance => AnalysisResultKind::HarmonicBalance,
+            Self::Envelope => AnalysisResultKind::Envelope,
+            Self::MonteCarlo => AnalysisResultKind::MonteCarlo,
+            Self::Fourier => AnalysisResultKind::Fourier,
+            Self::Fft => AnalysisResultKind::Fft,
+            Self::DcMatch => AnalysisResultKind::DcMatch,
+            Self::Qpss => AnalysisResultKind::Qpss,
+            Self::Qpac => AnalysisResultKind::Qpac,
+            Self::Qpxf => AnalysisResultKind::Qpxf,
+            Self::Qpnoise => AnalysisResultKind::Qpnoise,
+            // No shared result-document projection is implemented for these kinds.
+            Self::Soa | Self::Optimize | Self::Psp | Self::Hbsp | Self::HbNoise => return None,
+        })
+    }
 }
 
 /// Declare each kind's tag once: the spelling and its reading back are the
@@ -193,6 +237,107 @@ analysis_kind_tags! {
     Qpnoise => "qpnoise",
     Qpxf => "qpxf",
     DcMatch => "dcmatch",
+}
+
+/// Result families that must be mapped intentionally by every non-UI surface.
+///
+/// Keep this enum exhaustive. In particular, do not add `#[non_exhaustive]`:
+/// the exhaustive matches in `execution::capability` are the compile-time
+/// part of the capability gate. A new core result family cannot compile until
+/// it has a stable tag and a row with four explicit surface declarations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AnalysisResultKind {
+    OperatingPoint,
+    DcSweep,
+    Ac,
+    Transient,
+    Noise,
+    SParameters,
+    PortNoise,
+    Distortion,
+    TransferFunction,
+    Stability,
+    Sensitivity,
+    PoleZero,
+    Fourier,
+    Fft,
+    MonteCarlo,
+    Pss,
+    Pac,
+    Pxf,
+    PNoise,
+    Pstb,
+    HarmonicBalance,
+    Envelope,
+    DcMatch,
+    Qpss,
+    Qpac,
+    Qpxf,
+    Qpnoise,
+}
+
+impl AnalysisResultKind {
+    pub const ALL: [Self; 27] = [
+        Self::OperatingPoint,
+        Self::DcSweep,
+        Self::Ac,
+        Self::Transient,
+        Self::Noise,
+        Self::SParameters,
+        Self::PortNoise,
+        Self::Distortion,
+        Self::TransferFunction,
+        Self::Stability,
+        Self::Sensitivity,
+        Self::PoleZero,
+        Self::Fourier,
+        Self::Fft,
+        Self::MonteCarlo,
+        Self::Pss,
+        Self::Pac,
+        Self::Pxf,
+        Self::PNoise,
+        Self::Pstb,
+        Self::HarmonicBalance,
+        Self::Envelope,
+        Self::DcMatch,
+        Self::Qpss,
+        Self::Qpac,
+        Self::Qpxf,
+        Self::Qpnoise,
+    ];
+
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::OperatingPoint => "op",
+            Self::DcSweep => "dc",
+            Self::Ac => "ac",
+            Self::Transient => "tran",
+            Self::Noise => "noise",
+            Self::SParameters => "sp",
+            Self::PortNoise => "port-noise",
+            Self::Distortion => "distortion",
+            Self::TransferFunction => "tf",
+            Self::Stability => "stb",
+            Self::Sensitivity => "sensitivity",
+            Self::PoleZero => "pole-zero",
+            Self::Fourier => "fourier",
+            Self::Fft => "fft",
+            Self::MonteCarlo => "monte-carlo",
+            Self::Pss => "pss",
+            Self::Pac => "pac",
+            Self::Pxf => "pxf",
+            Self::PNoise => "pnoise",
+            Self::Pstb => "pstb",
+            Self::HarmonicBalance => "hb",
+            Self::Envelope => "envelope",
+            Self::DcMatch => "dcmatch",
+            Self::Qpss => "qpss",
+            Self::Qpac => "qpac",
+            Self::Qpxf => "qpxf",
+            Self::Qpnoise => "qpnoise",
+        }
+    }
 }
 
 /// Stable identity of one authored analysis card.
