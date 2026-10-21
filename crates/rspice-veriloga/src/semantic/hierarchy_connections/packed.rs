@@ -92,6 +92,7 @@ impl Connections<'_> {
                 }),
                 delay: None,
                 strength: None,
+                gate: None,
                 span,
             });
         }
@@ -123,6 +124,7 @@ impl Connections<'_> {
                 value,
                 delay: None,
                 strength: None,
+                gate: None,
                 span: actual.span(),
             });
         }

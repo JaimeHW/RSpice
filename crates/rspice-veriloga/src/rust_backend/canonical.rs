@@ -661,12 +661,18 @@ fn kernel_region_metrics(
                 write!(out, "digital-concat:{}", parts.len())
             }
             CfgValueKind::DigitalSelect { .. } => write!(out, "digital-select"),
-            CfgValueKind::DigitalDriverWrite { driver, target, .. } => {
+            CfgValueKind::DigitalDriverWrite {
+                driver,
+                target,
+                enable,
+                ..
+            } => {
                 write!(
                     out,
-                    "digital-driver-write:{}:{}:{target:?}",
+                    "digital-driver-write:{}:{}:{target:?}{}",
                     usize::from(driver.signal),
-                    driver.index
+                    driver.index,
+                    if enable.is_some() { ":gated" } else { "" }
                 )
             }
             CfgValueKind::DigitalBlockingWrite { target, .. } => {

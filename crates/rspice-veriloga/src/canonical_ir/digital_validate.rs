@@ -1260,7 +1260,23 @@ impl CanonicalDigitalPlan {
                             driver,
                             target,
                             value: rhs,
+                            enable,
                         } => {
+                            let gated = self
+                                .strength
+                                .gates
+                                .iter()
+                                .any(|gate| gate.driver == *driver);
+                            if gated != enable.is_some()
+                                || enable.is_some_and(|enable| {
+                                    function.value(enable).value_type
+                                        != CfgValueType::FourState { width: 1 }
+                                })
+                            {
+                                return Err(error(
+                                    "digital driver write's enable does not match the gate table",
+                                ));
+                            }
                             if drivers.get(driver).is_none_or(|declared| {
                                 process.is_none_or(|process| declared.process != process.id)
                                     || declared.target != *target

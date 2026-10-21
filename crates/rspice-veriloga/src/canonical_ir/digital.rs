@@ -896,6 +896,35 @@ pub struct DigitalDriverStrength {
     pub strength: DigitalDriveStrength,
 }
 
+/// How a gated driver turns its data and enable into a contribution.
+///
+/// The gate's own inversions are already in the operands: `notif` writes the
+/// inverted data and the active-low gates write the inverted control, so an
+/// enable of 1 always means "on".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalGateKind {
+    /// `bufif0`, `bufif1`, `notif0`, `notif1` (IEEE 1364-2005 section 7.5):
+    /// the data at the driver's drive strength, `L`/`H` under an unknown
+    /// enable, and a `z` data bit driving `x`.
+    Tristate,
+    /// `nmos`, `pmos` and their `r` forms (sections 7.6 and 7.12): the data at
+    /// the strength it arrives with, reduced, and `z` passing as `z`.
+    Mos { resistive: bool },
+}
+
+/// One driver written by a gate primitive with an enable.
+///
+/// Its driver write carries the enable (see `CfgValueKind::DigitalDriverWrite`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalGatedDriver {
+    pub driver: DigitalDriverId,
+    pub kind: DigitalGateKind,
+    /// The net bit a MOS switch passes, when its data terminal names one; the
+    /// switch passes that net's strength rather than a strong drive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<DigitalWriteTarget>,
+}
+
 /// What the plan says about strengths and net types beyond `wire`.
 ///
 /// Empty for a design that names neither, which is what keeps every net of such
@@ -906,11 +935,13 @@ pub struct DigitalStrengthPlan {
     pub nets: Vec<DigitalTypedNet>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drivers: Vec<DigitalDriverStrength>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gates: Vec<DigitalGatedDriver>,
 }
 
 impl DigitalStrengthPlan {
     pub fn is_empty(&self) -> bool {
-        self.nets.is_empty() && self.drivers.is_empty()
+        self.nets.is_empty() && self.drivers.is_empty() && self.gates.is_empty()
     }
 }
 

@@ -326,6 +326,8 @@ pub struct DigitalDrive {
     pub driver: DigitalDriverId,
     pub target: DigitalWriteTarget,
     /// Already resized to the target's width, per IEEE 1364-2005 section 5.2.1.
+    /// A gated driver's (`DigitalStrengthPlan::gates`) carries its enable one
+    /// bit above that width.
     pub value: FourStateValue,
 }
 
@@ -3903,8 +3905,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 driver,
                 target,
                 value,
+                enable,
             } => {
-                let (driver, value) = (*driver, *value);
+                let (driver, value, enable) = (*driver, *value, *enable);
                 // One write node for both domains. What the driven net carries
                 // is a property of the net, and the plan already recorded it —
                 // reading it here is what keeps `assign` one construct rather
@@ -3927,11 +3930,17 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     scratch,
                     ..
                 } = self;
-                let value = four_state_in(function, &scratch.table, value)?;
+                let mut value = four_state_in(function, &scratch.table, value)?.resized(width);
+                // A gated driver's enable rides one bit above its data.
+                if let Some(enable) = enable {
+                    let enable = four_state_in(function, &scratch.table, enable)?.bit(0);
+                    value = value.resized(width + 1);
+                    value.set_bit(width, enable);
+                }
                 environment.drive_signal(DigitalDrive {
                     driver,
                     target: target.clone(),
-                    value: value.resized(width),
+                    value,
                 });
                 Ok(DigitalScalar::Effect)
             }

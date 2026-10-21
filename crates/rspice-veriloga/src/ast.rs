@@ -281,6 +281,9 @@ pub struct Module {
     pub digital_variables: Vec<DigitalVariableDecl>,
     /// Continuous assignments (`assign`), in declaration order
     pub continuous_assigns: Vec<ContinuousAssign>,
+    /// Arrays of gate instances, until expansion turns them into continuous
+    /// assignments.
+    pub gate_arrays: Vec<GateInstanceArray>,
     /// Procedural processes (`always`, `initial`), in declaration order.
     ///
     /// Each carries the [`DigitalProcessId`] it was given here, so a later
@@ -416,6 +419,7 @@ impl Module {
             digital_nets: Vec::new(),
             digital_variables: Vec::new(),
             continuous_assigns: Vec::new(),
+            gate_arrays: Vec::new(),
             digital_processes: Vec::new(),
             digital_routines: Vec::new(),
             genvars: Vec::new(),
@@ -2399,6 +2403,28 @@ pub struct ContinuousAssign {
     /// Delay written between `assign` and the target.
     pub delay: Option<Expression>,
     /// Drive strength (IEEE 1364-2005 section 6.1.4); `None` drives strong.
+    pub strength: Option<crate::canonical_ir::digital::DigitalDriveStrength>,
+    /// A three-state gate or MOS switch (sections 7.5 and 7.6). Its `value`
+    /// is then the concatenation `{enable, data}`, so every pass that reads
+    /// the value reads both operands.
+    pub gate: Option<crate::canonical_ir::digital::DigitalGateKind>,
+    pub span: Span,
+}
+
+/// `nand g[3:0] (y, a, b);`: an array of gate instances (IEEE 1364-2005
+/// section 7.1.5).
+///
+/// Kept whole until the module is parsed, because section 7.1.6 shares a
+/// terminal out by its width: a one-bit terminal reaches every instance and a
+/// terminal as wide as the array gives each instance one bit.
+#[derive(Debug, Clone)]
+pub struct GateInstanceArray {
+    /// The gate keyword.
+    pub primitive: SmolStr,
+    pub left: Expression,
+    pub right: Expression,
+    pub terminals: Vec<Expression>,
+    pub delay: Option<Expression>,
     pub strength: Option<crate::canonical_ir::digital::DigitalDriveStrength>,
     pub span: Span,
 }

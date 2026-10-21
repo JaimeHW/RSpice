@@ -180,6 +180,106 @@ impl StrengthBit {
     }
 }
 
+/// How a gated driver's contribution slot reads: its data bits with one
+/// enable bit above them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlotGate {
+    Tristate,
+    /// `switch` indexes the store's switch table when the data terminal names
+    /// a net bit, whose strength the switch then passes.
+    Mos {
+        resistive: bool,
+        switch: Option<usize>,
+    },
+}
+
+/// A MOS switch that passes the strength of `source`'s bit `bit` (a storage
+/// position) onto `target`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Switch {
+    pub(crate) target: rspice_veriloga::canonical_ir::ids::DigitalSignalId,
+    pub(crate) source: rspice_veriloga::canonical_ir::ids::DigitalSignalId,
+    pub(crate) bit: u32,
+}
+
+/// What a three-state gate (`bufif`, `notif`; IEEE 1364-2005 section 7.5)
+/// drives for one bit of data under its enable, at its drive strength.
+///
+/// Off drives nothing; on drives the data, with a `z` data bit driving `x`; an
+/// unknown enable drives `L`, `H` or `x`: the range from nothing to what the
+/// gate would drive if it were on.
+pub(crate) const fn tristate(
+    data: FourStateBit,
+    enable: FourStateBit,
+    strength: DigitalDriveStrength,
+) -> StrengthBit {
+    let data = match data {
+        FourStateBit::HighImpedance => FourStateBit::Unknown,
+        data => data,
+    };
+    let on = StrengthBit::driven(data, strength);
+    match enable {
+        FourStateBit::Zero => StrengthBit::HIGH_Z,
+        FourStateBit::One => on,
+        FourStateBit::Unknown | FourStateBit::HighImpedance => on.toward_high_z(),
+    }
+}
+
+/// What a MOS switch (`nmos`, `pmos` and the `r` forms; sections 7.6 and
+/// 7.12) passes of the strength `data` arrives with, under its enable.
+///
+/// The strength is reduced on the way through: supply to strong, and for a
+/// resistive switch by table 7-14. Off passes nothing, and an unknown enable
+/// passes the range from nothing to what an on switch would pass.
+pub(crate) const fn mos(data: StrengthBit, enable: FourStateBit, resistive: bool) -> StrengthBit {
+    let on = StrengthBit {
+        lo: reduced(data.lo, resistive),
+        hi: reduced(data.hi, resistive),
+    };
+    match enable {
+        FourStateBit::Zero => StrengthBit::HIGH_Z,
+        FourStateBit::One => on,
+        FourStateBit::Unknown | FourStateBit::HighImpedance => on.toward_high_z(),
+    }
+}
+
+/// One end of a range through a switch: section 7.12's supply-to-strong for
+/// `nmos`, `pmos` and `cmos`, and table 7-14 for their resistive forms.
+const fn reduced(point: i8, resistive: bool) -> i8 {
+    let level = point.unsigned_abs();
+    let level = if resistive {
+        // Supply and strong to pull, pull to weak, large and weak to medium,
+        // medium and small to small; high impedance stays.
+        match level {
+            7 | 6 => 5,
+            5 => 3,
+            4 | 3 => 2,
+            2 | 1 => 1,
+            _ => 0,
+        }
+    } else if level == 7 {
+        6
+    } else {
+        level
+    };
+    if point < 0 {
+        -(level as i8)
+    } else {
+        level as i8
+    }
+}
+
+impl StrengthBit {
+    /// The range from `HiZ` to this one: what a driver that may or may not be
+    /// on contributes.
+    const fn toward_high_z(self) -> Self {
+        Self {
+            lo: if self.lo < 0 { self.lo } else { 0 },
+            hi: if self.hi > 0 { self.hi } else { 0 },
+        }
+    }
+}
+
 /// What the plan makes of one net's resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum NetResolution {
@@ -339,5 +439,37 @@ mod tests {
             .flat_map(|&a| order.iter().map(move |&b| wired_bit(false, a, b)))
             .collect();
         assert_eq!(or, [O, I, X, O, I, I, I, I, X, I, X, X, O, I, X, Z]);
+    }
+
+    /// Section 7.5's three-state rows and section 7.12's reductions, end by
+    /// end: a resistive switch steps every level down table 7-14.
+    #[test]
+    fn gates_and_switches_reduce_and_widen_toward_high_impedance() {
+        use DigitalStrengthLevel::{Pull, Strong, Supply, Weak};
+        let pull_weak = DigitalDriveStrength {
+            zero: Pull,
+            one: Weak,
+        };
+        let row = |data| {
+            [O, I, X, Z]
+                .map(|enable| tristate(data, enable, pull_weak).display())
+                .join(" ")
+        };
+        assert_eq!(row(O), "HiZ Pu0 PuL PuL");
+        assert_eq!(row(I), "HiZ We1 WeH WeH");
+        assert_eq!(row(Z), "HiZ 53X 53X 53X");
+        let supply = drive(I, Supply, Supply);
+        assert_eq!(mos(supply, I, false).display(), "St1");
+        assert_eq!(mos(supply, X, false).display(), "StH");
+        let levels: Vec<String> = (0..=7)
+            .map(|level| mos(StrengthBit::point(-level), I, true).display())
+            .collect();
+        assert_eq!(
+            levels,
+            ["HiZ", "Sm0", "Sm0", "Me0", "Me0", "We0", "Pu0", "Pu0"]
+        );
+        let ambiguous = drive(X, Strong, Pull);
+        assert_eq!(mos(ambiguous, Z, true).display(), "53X");
+        assert_eq!(mos(StrengthBit::HIGH_Z, I, false).display(), "HiZ");
     }
 }

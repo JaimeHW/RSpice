@@ -552,13 +552,11 @@ impl DigitalSignalStore {
                     else {
                         return resolved;
                     };
-                    if offset >= value.width() {
+                    let gated = self.slot_gate(slot).is_some();
+                    if offset >= value.width() - u32::from(gated) {
                         return resolved;
                     }
-                    resolved.resolve(StrengthBit::driven(
-                        value.bit(offset),
-                        self.strengths.slots[slot],
-                    ))
+                    resolved.resolve(self.contribution_bit(slot, value, offset))
                 });
         let mut seen = None;
         for member in &net.members {

@@ -33,11 +33,13 @@ enum CompoundOperator {
     ArithmeticShiftRight,
 }
 
-/// The gate primitives of IEEE 1364-2005 section 7.2 this compiler accepts.
+/// The gate and switch primitives of IEEE 1364-2005 section 7 this compiler
+/// accepts.
 ///
-/// The eight combinational ones. The tristate family (`bufif0`, `notif1`, ...),
-/// the MOS switches, and the pull gates are absent, and a design naming one is
-/// refused as an undefined module rather than silently becoming something else.
+/// The eight combinational gates, the three-state gates, the MOS switches and
+/// the pull gates. The bidirectional switches (`tran`, `tranif0`, ...) are
+/// absent, and a design naming one is refused by name at elaboration rather
+/// than silently becoming something else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GatePrimitive {
     And,
@@ -48,6 +50,34 @@ pub(super) enum GatePrimitive {
     Xnor,
     Buf,
     Not,
+    Bufif0,
+    Bufif1,
+    Notif0,
+    Notif1,
+    Nmos,
+    Pmos,
+    Rnmos,
+    Rpmos,
+    Cmos,
+    Rcmos,
+    Pullup,
+    Pulldown,
+}
+
+/// How a primitive's terminals become drivers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GateFamily {
+    /// The eight gates of sections 7.3 and 7.4.
+    Logic,
+    /// Section 7.5: `(out, data, control)`.
+    Tristate { invert: bool, active_low: bool },
+    /// Section 7.6: `(out, data, control)`.
+    Mos { active_low: bool, resistive: bool },
+    /// Section 7.7: `(out, data, ncontrol, pcontrol)`, an `nmos` and a `pmos`
+    /// sharing their data and output.
+    Cmos { resistive: bool },
+    /// Section 7.8: `(out)`, driving the constant at pull strength.
+    Pull { one: bool },
 }
 
 impl GatePrimitive {
@@ -58,18 +88,33 @@ impl GatePrimitive {
     /// does not reserve them — they were identifiers before there was a digital
     /// grammar — which is why the check is here rather than on a token kind.
     pub(super) fn from_name(name: &str) -> Option<Self> {
-        Some(match name {
-            "and" => Self::And,
-            "nand" => Self::Nand,
-            "or" => Self::Or,
-            "nor" => Self::Nor,
-            "xor" => Self::Xor,
-            "xnor" => Self::Xnor,
-            "buf" => Self::Buf,
-            "not" => Self::Not,
-            _ => return None,
-        })
+        Self::ALL
+            .into_iter()
+            .find(|primitive| primitive.keyword() == name)
     }
+
+    const ALL: [Self; 20] = [
+        Self::And,
+        Self::Nand,
+        Self::Or,
+        Self::Nor,
+        Self::Xor,
+        Self::Xnor,
+        Self::Buf,
+        Self::Not,
+        Self::Bufif0,
+        Self::Bufif1,
+        Self::Notif0,
+        Self::Notif1,
+        Self::Nmos,
+        Self::Pmos,
+        Self::Rnmos,
+        Self::Rpmos,
+        Self::Cmos,
+        Self::Rcmos,
+        Self::Pullup,
+        Self::Pulldown,
+    ];
 
     pub(super) const fn keyword(self) -> &'static str {
         match self {
@@ -81,6 +126,68 @@ impl GatePrimitive {
             Self::Xnor => "xnor",
             Self::Buf => "buf",
             Self::Not => "not",
+            Self::Bufif0 => "bufif0",
+            Self::Bufif1 => "bufif1",
+            Self::Notif0 => "notif0",
+            Self::Notif1 => "notif1",
+            Self::Nmos => "nmos",
+            Self::Pmos => "pmos",
+            Self::Rnmos => "rnmos",
+            Self::Rpmos => "rpmos",
+            Self::Cmos => "cmos",
+            Self::Rcmos => "rcmos",
+            Self::Pullup => "pullup",
+            Self::Pulldown => "pulldown",
+        }
+    }
+
+    const fn family(self) -> GateFamily {
+        use GateFamily::{Cmos, Logic, Mos, Pull, Tristate};
+        match self {
+            Self::And
+            | Self::Nand
+            | Self::Or
+            | Self::Nor
+            | Self::Xor
+            | Self::Xnor
+            | Self::Buf
+            | Self::Not => Logic,
+            Self::Bufif0 => Tristate {
+                invert: false,
+                active_low: true,
+            },
+            Self::Bufif1 => Tristate {
+                invert: false,
+                active_low: false,
+            },
+            Self::Notif0 => Tristate {
+                invert: true,
+                active_low: true,
+            },
+            Self::Notif1 => Tristate {
+                invert: true,
+                active_low: false,
+            },
+            Self::Nmos => Mos {
+                active_low: false,
+                resistive: false,
+            },
+            Self::Pmos => Mos {
+                active_low: true,
+                resistive: false,
+            },
+            Self::Rnmos => Mos {
+                active_low: false,
+                resistive: true,
+            },
+            Self::Rpmos => Mos {
+                active_low: true,
+                resistive: true,
+            },
+            Self::Cmos => Cmos { resistive: false },
+            Self::Rcmos => Cmos { resistive: true },
+            Self::Pullup => Pull { one: true },
+            Self::Pulldown => Pull { one: false },
         }
     }
 
@@ -93,13 +200,13 @@ impl GatePrimitive {
     /// The operator that combines two inputs, before any inversion.
     ///
     /// A buffer has one input and never reaches the fold, so its operator is
-    /// never applied; naming AND here keeps the function total rather than
-    /// adding an unreachable arm that a later reader has to check.
+    /// never applied; naming AND for every gate outside the eight keeps the
+    /// function total rather than adding an unreachable arm.
     const fn combining_op(self) -> BinaryOp {
         match self {
-            Self::And | Self::Nand | Self::Buf | Self::Not => BinaryOp::BitAnd,
             Self::Or | Self::Nor => BinaryOp::BitOr,
             Self::Xor | Self::Xnor => BinaryOp::BitXor,
+            _ => BinaryOp::BitAnd,
         }
     }
 
@@ -108,12 +215,30 @@ impl GatePrimitive {
         matches!(self, Self::Nand | Self::Nor | Self::Xnor | Self::Not)
     }
 
-    /// The fewest terminals the gate can be written with.
-    ///
-    /// Two either way: an n-input gate needs an output and at least one input
-    /// to be meaningful, and a buffer needs at least one output and its input.
-    const fn minimum_terminals(self) -> usize {
-        2
+    /// The strength a primitive drives at when the source names none: `pull`
+    /// for a pull gate (section 7.8), and strong for every other gate.
+    const fn implicit_strength(self) -> Option<DigitalDriveStrength> {
+        match self.family() {
+            GateFamily::Pull { .. } => Some(DigitalDriveStrength {
+                zero: DigitalStrengthLevel::Pull,
+                one: DigitalStrengthLevel::Pull,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The terminal counts the primitive can be written with: at least two for
+    /// the eight logic gates (an output and an input), exactly the section's
+    /// count for the switches and three-state gates, and at least one for a
+    /// pull gate, which pulls every terminal it names as Icarus Verilog's
+    /// does (A.3.1 writes one).
+    const fn terminal_counts(self) -> (usize, Option<usize>) {
+        match self.family() {
+            GateFamily::Logic => (2, None),
+            GateFamily::Tristate { .. } | GateFamily::Mos { .. } => (3, Some(3)),
+            GateFamily::Cmos { .. } => (4, Some(4)),
+            GateFamily::Pull { .. } => (1, None),
+        }
     }
 }
 
@@ -309,6 +434,7 @@ impl Parser<'_> {
                     value,
                     delay: None,
                     strength,
+                    gate: None,
                     span: item.span,
                 });
             }
@@ -523,6 +649,7 @@ impl Parser<'_> {
                 value,
                 delay: delay.clone(),
                 strength,
+                gate: None,
                 span: start,
             });
             if !self.match_token(TokenKind::Comma) {
@@ -624,14 +751,31 @@ impl Parser<'_> {
     pub(super) fn parse_gate_instantiation(
         &mut self,
         gate: GatePrimitive,
-    ) -> Result<Vec<ContinuousAssign>, ParseError> {
+        module: &mut Module,
+    ) -> Result<(), ParseError> {
         let start = self.current_span();
         self.advance(); // consume the gate keyword
+        let context = format!("`{}` gate", gate.keyword());
 
         // A drive strength `(strong1, weak0)` (section 7.8) applies to every
-        // instance of the declaration.
+        // instance of the declaration. A pull gate may name only the strength
+        // of the value it drives, and a switch takes none (A.3.1).
         let strength = if self.check(TokenKind::LParen) && self.strength_specification_follows() {
-            Some(self.parse_drive_strength(&format!("`{}` gate", gate.keyword()))?)
+            Some(match gate.family() {
+                GateFamily::Pull { one } => self.parse_pull_strength(one, &context)?,
+                GateFamily::Mos { .. } | GateFamily::Cmos { .. } => {
+                    return Err(ParseError::new(
+                        ParseErrorKind::UnsupportedConstruct {
+                            context,
+                            found: "a drive strength; IEEE 1364-2005 A.3.1 gives a switch \
+                                    none, because it passes the strength of its input"
+                                .to_string(),
+                        },
+                        self.current_span(),
+                    ));
+                }
+                _ => self.parse_drive_strength(&context)?,
+            })
         } else {
             None
         };
@@ -643,6 +787,7 @@ impl Parser<'_> {
         };
 
         let mut assignments = Vec::new();
+        let mut arrays = Vec::new();
         loop {
             // The instance name is optional (section 7.1), so a `(` here opens
             // the terminal list of an unnamed instance.
@@ -650,17 +795,15 @@ impl Parser<'_> {
                 self.expect_identifier("gate instance name")?;
             }
             // An array of instances, `not n[3:0] (y, v);` (section 7.1.5).
-            if self.check(TokenKind::LBracket) {
-                return Err(ParseError::new(
-                    ParseErrorKind::UnsupportedConstruct {
-                        context: format!("`{}` gate", gate.keyword()),
-                        found: "an array of instances; gate instance arrays are not supported, \
-                                so write one instance per bit"
-                            .to_string(),
-                    },
-                    self.current_span(),
-                ));
-            }
+            let range = if self.match_token(TokenKind::LBracket) {
+                let left = self.parse_expression()?;
+                self.expect(TokenKind::Colon)?;
+                let right = self.parse_expression()?;
+                self.expect(TokenKind::RBracket)?;
+                Some((left, right))
+            } else {
+                None
+            };
             let instance_start = self.current_span();
             self.expect(TokenKind::LParen)?;
             let mut terminals = Vec::new();
@@ -672,7 +815,28 @@ impl Parser<'_> {
             }
             self.expect(TokenKind::RParen)?;
             let span = instance_start.extend(self.previous_span());
-            assignments.extend(self.gate_assignments(gate, terminals, delay.clone(), span)?);
+            match range {
+                Some((left, right)) => {
+                    // Checked here, where the instance is, so the expanded
+                    // array cannot fail on a count the source got wrong.
+                    Self::gate_assignments(gate, terminals.clone(), None, span)?;
+                    arrays.push(GateInstanceArray {
+                        primitive: gate.keyword().into(),
+                        left,
+                        right,
+                        terminals,
+                        delay: delay.clone(),
+                        strength: None,
+                        span,
+                    });
+                }
+                None => assignments.extend(Self::gate_assignments(
+                    gate,
+                    terminals,
+                    delay.clone(),
+                    span,
+                )?),
+            }
 
             if !self.match_token(TokenKind::Comma) {
                 break;
@@ -681,11 +845,55 @@ impl Parser<'_> {
         self.expect(TokenKind::Semicolon)?;
 
         let declaration = start.extend(self.previous_span());
+        let strength = strength.or_else(|| gate.implicit_strength());
         for assignment in &mut assignments {
             assignment.span = declaration;
             assignment.strength = strength;
         }
-        Ok(assignments)
+        for array in &mut arrays {
+            array.span = declaration;
+            array.strength = strength;
+        }
+        module.continuous_assigns.extend(assignments);
+        module.gate_arrays.extend(arrays);
+        Ok(())
+    }
+
+    /// A pull gate's strength (A.3.1): a pair, or the strength of the one
+    /// value it drives.
+    fn parse_pull_strength(
+        &mut self,
+        one: bool,
+        context: &str,
+    ) -> Result<DigitalDriveStrength, ParseError> {
+        let follows_pair = self
+            .tokens
+            .get(self.pos + 2)
+            .is_some_and(|token| token.kind == TokenKind::Comma);
+        if follows_pair {
+            return self.parse_drive_strength(context);
+        }
+        let start = self.current_span();
+        self.expect(TokenKind::LParen)?;
+        let (is_one, level) = self.strength_keyword(context)?;
+        self.expect(TokenKind::RParen)?;
+        if is_one != one {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: context.to_string(),
+                    found: format!(
+                        "a strength for {}; IEEE 1364-2005 A.3.1 lets a pull gate name only the \
+                         strength of the value it drives",
+                        if is_one { "1" } else { "0" }
+                    ),
+                },
+                start.extend(self.previous_span()),
+            ));
+        }
+        Ok(DigitalDriveStrength {
+            zero: level,
+            one: level,
+        })
     }
 
     /// Whether the parenthesis under the cursor opens a drive-strength
@@ -702,25 +910,115 @@ impl Parser<'_> {
     }
 
     /// Turn one gate instance's terminal list into its driving assignments.
-    fn gate_assignments(
-        &self,
+    pub(super) fn gate_assignments(
         gate: GatePrimitive,
         terminals: Vec<Expression>,
         delay: Option<Expression>,
         span: crate::source::Span,
     ) -> Result<Vec<ContinuousAssign>, ParseError> {
-        let minimum = gate.minimum_terminals();
-        if terminals.len() < minimum {
+        let (minimum, maximum) = gate.terminal_counts();
+        if terminals.len() < minimum || maximum.is_some_and(|maximum| terminals.len() > maximum) {
+            let required = match maximum {
+                Some(exact) => format!("exactly {exact}"),
+                None => format!("at least {minimum}"),
+            };
             return Err(ParseError::new(
                 ParseErrorKind::UnsupportedConstruct {
                     context: format!("`{}` gate", gate.keyword()),
                     found: format!(
-                        "{} terminal(s); IEEE 1364-2005 section 7.2 requires at least {minimum}",
+                        "{} terminal(s); IEEE 1364-2005 section 7 requires {required}",
                         terminals.len()
                     ),
                 },
                 span,
             ));
+        }
+        let assign = |output: &Expression, value: Expression, gated| {
+            Ok(ContinuousAssign {
+                target: Self::terminal_as_lvalue(output, gate)?,
+                value,
+                delay: delay.clone(),
+                strength: None,
+                gate: gated,
+                span,
+            })
+        };
+        // `{enable, data}`, the operand pair a gated driver writes.
+        let pair = |enable: Expression, data: Expression| {
+            Expression::ArrayLiteral(ArrayLiteralExpr {
+                elements: vec![
+                    ArrayLiteralElement::Value(enable),
+                    ArrayLiteralElement::Value(data),
+                ],
+                assignment_pattern: false,
+                span,
+            })
+        };
+        let invert = |operand: &Expression, invert: bool| {
+            if invert {
+                Expression::Unary(UnaryExpr {
+                    op: UnaryOp::BitNot,
+                    operand: Box::new(operand.clone()),
+                    span,
+                })
+            } else {
+                operand.clone()
+            }
+        };
+        use crate::canonical_ir::digital::DigitalGateKind;
+        match gate.family() {
+            GateFamily::Logic => {}
+            // An inverted control is still `x` for `x` and `z` (table 5-13),
+            // which is all the gates read of it.
+            GateFamily::Tristate {
+                invert: not,
+                active_low,
+            } => {
+                let value = pair(
+                    invert(&terminals[2], active_low),
+                    invert(&terminals[1], not),
+                );
+                return Ok(vec![assign(
+                    &terminals[0],
+                    value,
+                    Some(DigitalGateKind::Tristate),
+                )?]);
+            }
+            GateFamily::Mos {
+                active_low,
+                resistive,
+            } => {
+                let value = pair(invert(&terminals[2], active_low), terminals[1].clone());
+                let kind = DigitalGateKind::Mos { resistive };
+                return Ok(vec![assign(&terminals[0], value, Some(kind))?]);
+            }
+            GateFamily::Cmos { resistive } => {
+                let kind = Some(DigitalGateKind::Mos { resistive });
+                let n = pair(terminals[2].clone(), terminals[1].clone());
+                let p = pair(invert(&terminals[3], true), terminals[1].clone());
+                return Ok(vec![
+                    assign(&terminals[0], n, kind)?,
+                    assign(&terminals[0], p, kind)?,
+                ]);
+            }
+            GateFamily::Pull { one } => {
+                let spelling = if one { "1'b1" } else { "1'b0" };
+                let value = crate::four_state::decode(spelling).map_err(|message| {
+                    ParseError::new(
+                        ParseErrorKind::UnsupportedConstruct {
+                            context: format!("`{}` gate", gate.keyword()),
+                            found: format!("its constant did not decode: {message}"),
+                        },
+                        span,
+                    )
+                })?;
+                let value =
+                    Expression::Digital(DigitalExpr::FourState(FourStateLit { value, span }));
+                return terminals
+                    .iter()
+                    .map(|terminal| assign(terminal, value.clone(), None))
+                    .collect();
+            }
         }
 
         // Sections 7.3 and 7.4 split the eight gates by where the input is: an
@@ -749,19 +1047,25 @@ impl Parser<'_> {
                 operand: Box::new(value),
                 span,
             });
+        } else if gate.is_buffer() {
+            // Section 7.4's `buf` drives `x` for a `z` input, as every other
+            // gate does; an exclusive OR with `1'b0`, read as the source
+            // literal reads, is the identity that does so.
+            value = Expression::Binary(BinaryExpr {
+                op: BinaryOp::BitXor,
+                left: Box::new(value),
+                right: Box::new(Expression::Number(NumberLit {
+                    value: 0.0,
+                    raw: "1'b0".into(),
+                    span,
+                })),
+                span,
+            });
         }
 
         outputs
             .into_iter()
-            .map(|output| {
-                Ok(ContinuousAssign {
-                    target: Self::terminal_as_lvalue(output, gate)?,
-                    value: value.clone(),
-                    delay: delay.clone(),
-                    strength: None,
-                    span,
-                })
-            })
+            .map(|output| assign(output, value.clone(), None))
             .collect()
     }
 

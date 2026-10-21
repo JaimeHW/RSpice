@@ -74,3 +74,120 @@ fn a_uwire_with_two_drivers_is_refused() {
     );
     assert_eq!(stdout(&one), "1\n");
 }
+
+/// The rows a loop over data and control in `0 1 x z` prints.
+const SWEEP: &str = "  integer i, j;\n  reg [3:0] vals;\n";
+
+/// `bufif0`, `bufif1`, `notif0` and `notif1` (section 7.5) over every data and
+/// control value, one at a drive strength.
+///
+/// Icarus prints `StX` for a strong `notif` under an unknown control. Section
+/// 7.5's tables give `H` and `L` there (a 0 data bit inverts to a 1 that the
+/// gate may or may not drive), which is what Icarus itself prints for a `notif`
+/// with unequal strengths; those four cells are the standard's.
+#[test]
+fn three_state_gates_drive_l_and_h_under_an_unknown_control() {
+    let report = bench(
+        &format!(
+            "module top;\n  reg d, c;\n  wire b0, b1, n0, n1;\n\
+             \x20 bufif0 g0 (b0, d, c);\n  bufif1 g1 (b1, d, c);\n  notif0 g2 (n0, d, c);\n\
+             \x20 notif1 (weak1, pull0) g3 (n1, d, c);\n{SWEEP}\
+             \x20 initial begin\n    vals = 4'bzx10;\n\
+             \x20   for (i = 0; i < 4; i = i + 1)\n      for (j = 0; j < 4; j = j + 1) begin\n\
+             \x20       d = vals[i]; c = vals[j];\n\
+             \x20       #1 $display(\"%b %b: %v %v %v %v\", d, c, b0, b1, n0, n1);\n\
+             \x20     end\n  end\nendmodule\n"
+        ),
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "0 0: St0 HiZ St1 HiZ\n0 1: HiZ St0 HiZ We1\n0 x: StL StL StH WeH\n0 z: StL StL StH WeH\n\
+         1 0: St1 HiZ St0 HiZ\n1 1: HiZ St1 HiZ Pu0\n1 x: StH StH StL PuL\n1 z: StH StH StL PuL\n\
+         x 0: StX HiZ StX HiZ\nx 1: HiZ StX HiZ 53X\nx x: StX StX StX 53X\nx z: StX StX StX 53X\n\
+         z 0: StX HiZ StX HiZ\nz 1: HiZ StX HiZ 53X\nz x: StX StX StX 53X\nz z: StX StX StX 53X\n"
+    );
+}
+
+/// `nmos`, `pmos` and `cmos` (sections 7.6 and 7.7) pass the strength their
+/// data arrives with, supply reduced to strong (section 7.12); `pullup` and
+/// `pulldown` drive at pull or the strength given (section 7.8). A switch
+/// follows a strength change of the net it passes that leaves the value alone.
+#[test]
+fn mos_switches_pass_their_input_strength_and_pull_gates_drive_pull() {
+    let report = bench(
+        &format!(
+            "module top;\n  reg d, c, cp, s;\n  wire pu, m1, m2, m5, sp, mp, pw, pd;\n\
+             \x20 supply1 vdd;\n  pullup (pu);\n  assign (strong1, highz0) pu = s;\n\
+             \x20 nmos (m1, d, c);\n  pmos (m2, d, c);\n  cmos (m5, d, c, cp);\n\
+             \x20 nmos (sp, vdd, c);\n  nmos (mp, pu, c);\n\
+             \x20 pullup (weak1) (pw);\n  pulldown (strong0) (pd);\n{SWEEP}\
+             \x20 initial begin\n    vals = 4'bzx10;\n    s = 0; cp = 1;\n\
+             \x20   for (i = 0; i < 4; i = i + 1)\n      for (j = 0; j < 4; j = j + 1) begin\n\
+             \x20       d = vals[i]; c = vals[j];\n\
+             \x20       #1 $display(\"%b %b: %v %v %v %v %v %v %v\", d, c, m1, m2, m5, sp, mp, pw, pd);\n\
+             \x20     end\n\
+             \x20   c = 1; cp = 0;\n    #1 $display(\"%v %v %v\", mp, pu, m5);\n\
+             \x20   s = 1;\n    #1 $display(\"%v %v %v\", mp, pu, m5);\n\
+             \x20   s = 0;\n    #1 $display(\"%v %v %v\", mp, pu, m5);\n\
+             \x20 end\nendmodule\n"
+        ),
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "0 0: HiZ St0 HiZ HiZ HiZ We1 St0\n0 1: St0 HiZ St0 St1 Pu1 We1 St0\n\
+         0 x: StL StL StL StH PuH We1 St0\n0 z: StL StL StL StH PuH We1 St0\n\
+         1 0: HiZ St1 HiZ HiZ HiZ We1 St0\n1 1: St1 HiZ St1 St1 Pu1 We1 St0\n\
+         1 x: StH StH StH StH PuH We1 St0\n1 z: StH StH StH StH PuH We1 St0\n\
+         x 0: HiZ StX HiZ HiZ HiZ We1 St0\nx 1: StX HiZ StX St1 Pu1 We1 St0\n\
+         x x: StX StX StX StH PuH We1 St0\nx z: StX StX StX StH PuH We1 St0\n\
+         z 0: HiZ HiZ HiZ HiZ HiZ We1 St0\nz 1: HiZ HiZ HiZ St1 Pu1 We1 St0\n\
+         z x: HiZ HiZ HiZ StH PuH We1 St0\nz z: HiZ HiZ HiZ StH PuH We1 St0\n\
+         Pu1 Pu1 HiZ\nSt1 St1 HiZ\nPu1 Pu1 HiZ\n"
+    );
+}
+
+/// The resistive switches reduce what they pass by table 7-14 (section 7.12):
+/// supply and strong to pull, pull to weak, weak to medium. Computed from the
+/// table, because Icarus 13 passes these unreduced.
+#[test]
+fn resistive_switches_reduce_strength_by_table_7_14() {
+    let report = bench(
+        "module top;\n  reg d, c;\n  wire pu, r1, r2, r3, r4, r5;\n  supply1 vdd;\n  pullup (pu);\n\
+         \x20 rnmos (r1, d, c);\n  rpmos (r2, d, c);\n  rnmos (r3, vdd, c);\n\
+         \x20 rnmos (r4, pu, c);\n  rcmos (r5, r4, c, 1'b1);\n\
+         \x20 initial begin\n\
+         \x20   d = 0; c = 1;\n    #1 $display(\"%v %v %v %v %v\", r1, r2, r3, r4, r5);\n\
+         \x20   d = 1; c = 1'bx;\n    #1 $display(\"%v %v %v %v %v\", r1, r2, r3, r4, r5);\n\
+         \x20   c = 0;\n    #1 $display(\"%v %v %v %v %v\", r1, r2, r3, r4, r5);\n\
+         \x20 end\nendmodule\n",
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "Pu0 HiZ Pu1 We1 Me1\nPuH PuH PuH WeH MeH\nHiZ Pu1 HiZ HiZ HiZ\n"
+    );
+}
+
+/// Arrays of gate instances (sections 7.1.5 and 7.1.6): a vector terminal
+/// shared out bit by bit, a concatenation, and two instances driving one
+/// scalar.
+#[test]
+fn gate_instance_arrays_share_their_terminals_out_by_width() {
+    let report = bench(
+        "module top;\n  reg [3:0] dv; reg en, d;\n  wire [3:0] bv; wire [1:0] nv; wire w;\n\
+         \x20 bufif1 ba[3:0] (bv, dv, en);\n  nmos na[1:0] (nv, {1'b0, d}, en);\n\
+         \x20 bufif0 (pull1, pull0) bw[1:0] (w, dv[1:0], en);\n\
+         \x20 initial begin\n\
+         \x20   dv = 4'b10xz; en = 1; d = 1;\n    #1 $display(\"%b %b %b %v\", bv, nv, w, w);\n\
+         \x20   en = 0; dv = 4'b0110;\n    #1 $display(\"%b %b %b %v\", bv, nv, w, w);\n\
+         \x20   dv = 4'b0011;\n    #1 $display(\"%b %b %b %v\", bv, nv, w, w);\n\
+         \x20 end\nendmodule\n",
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "10xx 01 z HiZ\nzzzz zz x PuX\nzzzz zz 1 Pu1\n"
+    );
+}

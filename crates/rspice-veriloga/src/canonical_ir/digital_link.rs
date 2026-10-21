@@ -515,6 +515,14 @@ pub fn link_digital_plans(
                     strength: driver.strength,
                 });
         }
+        for gate in &source.strength.gates {
+            let mut linked = gate.clone();
+            linked.driver = drivers[&gate.driver];
+            if let Some(target) = &mut linked.source {
+                relocate_target(target, source, &layout.map);
+            }
+            plan.strength.gates.push(linked);
+        }
         for process in &source.processes {
             check_cancel(control)?;
             let mut process = process.clone();
@@ -960,6 +968,7 @@ fn add_copy_process(
             driver,
             target,
             value,
+            enable: None,
         }
     };
     builder.push(entry, CfgValueType::Effect, write);

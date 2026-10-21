@@ -217,10 +217,12 @@ impl DigitalSignalStore {
                         DigitalScalar::Real(value) if signal.kind.is_real() => {
                             ContributionValue::Real(Some(value))
                         }
+                        // A gated driver's enable rides above its data.
                         DigitalScalar::FourState(value)
                             if !signal.kind.is_real()
                                 && value.width()
-                                    == driver_width(signal, &driver.target.select)? =>
+                                    == driver_width(signal, &driver.target.select)?
+                                        + u32::from(restored.slot_gate(slot).is_some()) =>
                         {
                             ContributionValue::FourState(Some(value))
                         }
@@ -274,6 +276,7 @@ impl DigitalSignalStore {
         if let Some(forces) = forces {
             restored.restore_overrides(forces)?;
         }
+        restored.rederive_passed_strengths();
         restored.validate_checkpoint_resolution()?;
         Ok(restored)
     }

@@ -410,6 +410,10 @@ pub(crate) struct DigitalSignalStore {
     /// How each net resolves, and each contribution's drive strength; see
     /// `store/strength.rs`. Fixed by the plan.
     strengths: Arc<StrengthTables>,
+    /// Per MOS switch of `strengths`, the strength of the net bit it passes,
+    /// as of the last time that net resolved. Derived from the contributions,
+    /// so a checkpoint rebuilds it rather than storing it.
+    passed: Vec<StrengthBit>,
 }
 
 /// The plan's net types and drive strengths, indexed as the store is.
@@ -420,18 +424,77 @@ struct StrengthTables {
     nets: Vec<NetResolution>,
     /// Per contribution slot.
     slots: Vec<rspice_veriloga::canonical_ir::digital::DigitalDriveStrength>,
+    /// Per contribution slot, the gate a gated driver is. Empty for a plan
+    /// without gated drivers.
+    gates: Vec<Option<strength::SlotGate>>,
+    /// The MOS switches that pass a net bit's strength, and for each net they
+    /// read, which of them read it.
+    switches: Vec<strength::Switch>,
+    readers: std::collections::HashMap<DigitalSignalId, Vec<usize>>,
     /// Whether any net resolves by strength.
     any: bool,
 }
 
 impl StrengthTables {
-    fn new(plan: &CanonicalDigitalPlan, spans: &[DriverSpan], slots: usize) -> Self {
-        use rspice_veriloga::canonical_ir::digital::DigitalDriveStrength;
+    fn new(
+        plan: &CanonicalDigitalPlan,
+        spans: &[DriverSpan],
+        contributions: &[Contribution],
+    ) -> Self {
+        use rspice_veriloga::canonical_ir::digital::{DigitalDriveStrength, DigitalGateKind};
         let mut tables = Self {
             nets: vec![NetResolution::Wire; plan.signals.len()],
-            slots: vec![DigitalDriveStrength::STRONG; slots],
+            slots: vec![DigitalDriveStrength::STRONG; contributions.len()],
+            gates: Vec::new(),
+            switches: Vec::new(),
+            readers: std::collections::HashMap::new(),
             any: false,
         };
+        if !plan.strength.gates.is_empty() {
+            tables.gates = vec![None; contributions.len()];
+        }
+        for gate in &plan.strength.gates {
+            let signal = usize::from(gate.driver.signal);
+            let Some(span) = spans.get(signal) else {
+                continue;
+            };
+            let offset = gate.driver.index as usize;
+            if offset >= span.count {
+                continue;
+            }
+            let slot = span.start + offset;
+            tables.gates[slot] = Some(match gate.kind {
+                DigitalGateKind::Tristate => strength::SlotGate::Tristate,
+                DigitalGateKind::Mos { resistive } => {
+                    let switch = gate.source.as_ref().and_then(|source| {
+                        let range = plan
+                            .signals
+                            .get(usize::from(source.signal))?
+                            .declared_range();
+                        let bit = u32::try_from(source.select.low_position(range)).ok()?;
+                        (bit < range.width()).then(|| {
+                            tables.switches.push(strength::Switch {
+                                target: gate.driver.signal,
+                                source: source.signal,
+                                bit,
+                            });
+                            tables.switches.len() - 1
+                        })
+                    });
+                    if let Some(switch) = switch {
+                        let source = tables.switches[switch].source;
+                        tables.readers.entry(source).or_default().push(switch);
+                    }
+                    strength::SlotGate::Mos { resistive, switch }
+                }
+            });
+            // A gated driver's output is a strength (see `store/strength.rs`).
+            if let Some(net) = tables.nets.get_mut(signal)
+                && *net == NetResolution::Wire
+            {
+                *net = NetResolution::Strength(None);
+            }
+        }
         for net in &plan.strength.nets {
             if let Some(entry) = tables.nets.get_mut(usize::from(net.signal)) {
                 *entry = NetResolution::of(net.net_type);
@@ -451,10 +514,11 @@ impl StrengthTables {
                 *net = NetResolution::Strength(None);
             }
         }
-        tables.any = tables
-            .nets
-            .iter()
-            .any(|net| matches!(net, NetResolution::Strength(_)));
+        tables.any = !tables.gates.is_empty()
+            || tables
+                .nets
+                .iter()
+                .any(|net| matches!(net, NetResolution::Strength(_)));
         tables
     }
 }
@@ -652,7 +716,8 @@ impl DigitalSignalStore {
             });
         }
 
-        let strengths = Arc::new(StrengthTables::new(&plan, &spans, contributions.len()));
+        let strengths = Arc::new(StrengthTables::new(&plan, &spans, &contributions));
+        let passed = vec![StrengthBit::HIGH_Z; strengths.switches.len()];
         // A net its type drives (`tri0`, `supply1`, ...) starts at that
         // driver's value, which is the resolution of its drivers before any
         // has run.
@@ -665,6 +730,7 @@ impl DigitalSignalStore {
             (!plan.real_aliases.is_empty()).then(|| Arc::new(RealConnections::new(&plan)));
         let mut store = Self {
             strengths,
+            passed,
             connected_reals,
             values,
             reals,
@@ -1126,20 +1192,57 @@ impl DigitalSignalStore {
                 }
             };
         let mut resolved = FourStateValue::splat(width, FourStateBit::HighImpedance);
-        for contribution in &self.contributions[span.start..span.start + span.count] {
+        for slot in span.start..span.start + span.count {
+            let contribution = &self.contributions[slot];
             let ContributionValue::FourState(Some(value)) = &contribution.value else {
                 continue;
             };
-            for offset in 0..value.width() {
+            // A gated driver on a wired net contributes its strength's value.
+            let gated = self.slot_gate(slot).is_some();
+            for offset in 0..value.width() - u32::from(gated) {
                 let position = contribution.low + i64::from(offset);
                 if position < 0 || position >= i64::from(width) {
                     continue;
                 }
                 let position = position as u32;
-                resolved.set_bit(position, combine(resolved.bit(position), value.bit(offset)));
+                let bit = if gated {
+                    self.contribution_bit(slot, value, offset).value()
+                } else {
+                    value.bit(offset)
+                };
+                resolved.set_bit(position, combine(resolved.bit(position), bit));
             }
         }
         resolved
+    }
+
+    fn slot_gate(&self, slot: usize) -> Option<strength::SlotGate> {
+        self.strengths.gates.get(slot).copied().flatten()
+    }
+
+    /// The strength contribution `slot` makes at bit `offset` of its own
+    /// value: the bit at the driver's drive strength, or for a gated driver
+    /// what its gate makes of the data bit under the enable above the data.
+    fn contribution_bit(&self, slot: usize, value: &FourStateValue, offset: u32) -> StrengthBit {
+        let data = value.bit(offset);
+        match self.slot_gate(slot) {
+            None => StrengthBit::driven(data, self.strengths.slots[slot]),
+            Some(strength::SlotGate::Tristate) => {
+                let enable = value.bit(value.width() - 1);
+                strength::tristate(data, enable, self.strengths.slots[slot])
+            }
+            Some(strength::SlotGate::Mos { resistive, switch }) => {
+                let enable = value.bit(value.width() - 1);
+                // The passed net's strength, while it still carries the value
+                // the switch last read; a strong drive of the data otherwise.
+                let passed = switch
+                    .filter(|_| offset == 0)
+                    .map(|switch| self.passed[switch])
+                    .filter(|passed| passed.value() == data)
+                    .unwrap_or(StrengthBit::strong(data));
+                strength::mos(passed, enable, resistive)
+            }
+        }
     }
 
     /// Fold one strength net's contributions, and the driver its type adds,
@@ -1154,14 +1257,14 @@ impl DigitalSignalStore {
             let ContributionValue::FourState(Some(value)) = &contribution.value else {
                 continue;
             };
-            let drive = self.strengths.slots[slot];
-            for offset in 0..value.width() {
+            let gated = self.slot_gate(slot).is_some();
+            for offset in 0..value.width() - u32::from(gated) {
                 let position = contribution.low + i64::from(offset);
                 if position < 0 || position >= i64::from(width) {
                     continue;
                 }
                 let bit = &mut bits[position as usize];
-                *bit = bit.resolve(StrengthBit::driven(value.bit(offset), drive));
+                *bit = bit.resolve(self.contribution_bit(slot, value, offset));
             }
         }
         if let NetResolution::Strength(Some(implicit)) = self.strengths.nets[index] {
@@ -1192,6 +1295,59 @@ impl DigitalSignalStore {
                 }
             })
             .collect()
+    }
+
+    /// The strength of the net bit MOS switch `switch` passes.
+    fn switch_source(&self, switch: usize) -> StrengthBit {
+        let switch = self.strengths.switches[switch];
+        self.strengths_of(switch.source)
+            .get(switch.bit as usize)
+            .copied()
+            .unwrap_or(StrengthBit::HIGH_Z)
+    }
+
+    /// Re-resolve the nets the MOS switches reading `signal` drive, where the
+    /// strength they pass changed (IEEE 1364-2005 section 7.12): a strength
+    /// can change without the value that wakes the switch changing.
+    ///
+    /// Bounded, because switches can be wired in a loop; each step only
+    /// follows a strength that changed, so a settled loop stops on its own.
+    fn pass_strengths(&mut self, signal: DigitalSignalId, depth: u32) {
+        const MAX_SWITCH_DEPTH: u32 = 64;
+        if self.strengths.readers.is_empty() || depth > MAX_SWITCH_DEPTH {
+            return;
+        }
+        let tables = Arc::clone(&self.strengths);
+        let Some(readers) = tables.readers.get(&signal) else {
+            return;
+        };
+        for &switch in readers {
+            let passed = self.switch_source(switch);
+            if passed == self.passed[switch] {
+                continue;
+            }
+            self.passed[switch] = passed;
+            let target = tables.switches[switch].target;
+            let resolved = self.resolve(target);
+            self.publish_connected(target, resolved);
+            self.pass_strengths(target, depth + 1);
+        }
+    }
+
+    /// Re-read every switch's passed strength from restored contributions,
+    /// until a chain of switches settles.
+    fn rederive_passed_strengths(&mut self) {
+        for _ in 0..=self.passed.len() {
+            let mut changed = false;
+            for switch in 0..self.passed.len() {
+                let passed = self.switch_source(switch);
+                changed |= passed != self.passed[switch];
+                self.passed[switch] = passed;
+            }
+            if !changed {
+                break;
+            }
+        }
     }
 
     /// Combine every contribution to one real net into its resolved value.
@@ -1344,8 +1500,17 @@ impl DigitalEnvironment for DigitalSignalStore {
             return;
         };
         self.contributions[slot].value = ContributionValue::FourState(Some(drive.value));
+        // A MOS switch reads the strength of the net it passes when it runs.
+        if let Some(strength::SlotGate::Mos {
+            switch: Some(switch),
+            ..
+        }) = self.slot_gate(slot)
+        {
+            self.passed[switch] = self.switch_source(switch);
+        }
         let resolved = self.resolve(drive.driver.signal);
         self.publish_connected(drive.driver.signal, resolved);
+        self.pass_strengths(drive.driver.signal, 0);
     }
 
     fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {

@@ -13,6 +13,7 @@ use smol_str::SmolStr;
 mod config;
 mod digital;
 mod digital_routines;
+mod gate_arrays;
 mod generate;
 mod hierarchical_names;
 mod implicit_nets;
@@ -1058,9 +1059,7 @@ impl<'a> Parser<'a> {
         // of a module called `nand`, and IEEE 1364-2005 annex B reserves the
         // word so no such module can exist.
         if let Some(gate) = digital::GatePrimitive::from_name(&first_text) {
-            let assignments = self.parse_gate_instantiation(gate)?;
-            module.continuous_assigns.extend(assignments);
-            return Ok(());
+            return self.parse_gate_instantiation(gate, module);
         }
 
         // Module instance declaration:

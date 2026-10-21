@@ -445,6 +445,9 @@ use super::*;
 // every module that wrote one; rebuilding keeps the record and the schema in
 // step.
 //
+// Version 158 follows the canonical IR's schema to 171, whose digital plan
+// carries gated drivers. A version-157 record refused those sources.
+//
 // Version 157 follows the canonical IR's schema to 170, whose digital plan
 // carries drive strengths and net types. A version-154 record refused those
 // sources or would replay a plan without its strengths.
@@ -452,7 +455,7 @@ use super::*;
 // Version 154 carries VA-SEM-RETAINED-VARIABLE, the finding that names a
 // module's variables read before they are assigned. A version-153 record of
 // such a module was compiled without it and would replay a clean report.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 157;
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 158;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

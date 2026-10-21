@@ -374,12 +374,13 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
 /// Whether the module declares an array of instances outside a generate
 /// region, which expansion must still unroll.
 pub(super) fn declares_instance_arrays(module: &Module) -> bool {
-    module.instances.iter().any(|instance| {
-        matches!(
-            instance.array,
-            Some(crate::ast::InstanceArray::Range { .. })
-        )
-    })
+    !module.gate_arrays.is_empty()
+        || module.instances.iter().any(|instance| {
+            matches!(
+                instance.array,
+                Some(crate::ast::InstanceArray::Range { .. })
+            )
+        })
 }
 
 /// Replace each array of instances with one instance per element (IEEE
@@ -394,6 +395,7 @@ fn expand_instance_arrays(module: &mut Module) -> Result<(), ParseError> {
         return Ok(());
     }
     let constants = module_constants(module);
+    super::gate_arrays::expand(module, &constants)?;
     let bound =
         |expression: &Expression| match crate::canonical_ir::digital_lower::elaboration_constant(
             expression,
@@ -492,6 +494,7 @@ fn absorb(module: &mut Module, expanded: Module) {
     module
         .continuous_assigns
         .extend(expanded.continuous_assigns);
+    module.gate_arrays.extend(expanded.gate_arrays);
     module.digital_processes.extend(expanded.digital_processes);
     for (slot, generated) in [
         (&mut module.analog_block, expanded.analog_block),
@@ -848,6 +851,19 @@ impl Unroller<'_> {
                 self.substitute(delay);
             }
             out.continuous_assigns.push(copy);
+        }
+
+        for array in &items.gate_arrays {
+            let mut copy = array.clone();
+            for expression in copy
+                .terminals
+                .iter_mut()
+                .chain([&mut copy.left, &mut copy.right])
+                .chain(copy.delay.as_mut())
+            {
+                self.substitute(expression);
+            }
+            out.gate_arrays.push(copy);
         }
 
         for process in &items.digital_processes {

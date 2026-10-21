@@ -1292,6 +1292,10 @@ pub enum CfgValueKind {
         /// says *which of its bits*.
         target: DigitalWriteTarget,
         value: ValueId,
+        /// A gated driver's one-bit enable (IEEE 1364-2005 sections 7.5 and
+        /// 7.6); the plan's strength table names the gate.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enable: Option<ValueId>,
     },
     /// A system task enable (IEEE 1364-2005 section 17), ordered like a write
     /// and typed [`CfgValueType::Effect`]. `args` are the site's evaluated
@@ -1861,8 +1865,9 @@ impl CfgValueKind {
             Self::DigitalNonblockingWrite { value, wait, .. } => std::iter::once(*value)
                 .chain(wait.iter().flat_map(DigitalWait::operands))
                 .collect(),
-            Self::DigitalBlockingWrite { value, .. } | Self::DigitalDriverWrite { value, .. } => {
-                vec![*value]
+            Self::DigitalBlockingWrite { value, .. } => vec![*value],
+            Self::DigitalDriverWrite { value, enable, .. } => {
+                std::iter::once(*value).chain(*enable).collect()
             }
             Self::DigitalSystemTask { args, .. }
             | Self::DigitalSystemFunction { args, .. }
@@ -2262,8 +2267,12 @@ impl CfgValueKind {
                     wait.map_operands(&mut map);
                 }
             }
-            Self::DigitalBlockingWrite { value, .. } | Self::DigitalDriverWrite { value, .. } => {
-                *value = map(*value)
+            Self::DigitalBlockingWrite { value, .. } => *value = map(*value),
+            Self::DigitalDriverWrite { value, enable, .. } => {
+                *value = map(*value);
+                if let Some(enable) = enable {
+                    *enable = map(*enable);
+                }
             }
             Self::DigitalSystemTask { args, .. }
             | Self::DigitalSystemFunction { args, .. }

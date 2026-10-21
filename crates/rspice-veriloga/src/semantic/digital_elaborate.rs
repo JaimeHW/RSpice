@@ -1530,6 +1530,7 @@ fn assignment(target: DigitalLValue, value: Expression, span: Span) -> AnalyzedC
             value,
             delay: None,
             strength: None,
+            gate: None,
             span,
         },
         span,
@@ -1611,6 +1612,7 @@ fn implicit_port_assignment(net: &str, source: &str, span: Span) -> AnalyzedCont
             }),
             delay: None,
             strength: None,
+            gate: None,
             span,
         },
         span,
@@ -1638,15 +1640,14 @@ fn semantic_error(kind: SemanticErrorKind, span: Span) -> CompileError {
     SemanticError::new(kind, span).into()
 }
 
-/// An instance of a module nothing defines. A switch, pull or three-state
-/// gate primitive (IEEE 1364-2005 sections 7.1 and 7.6-7.8) is named as the
-/// unsupported construct it is rather than as a missing module, and so is a
-/// `connectmodule` the source declares: Verilog-AMS lets a design
-/// instantiate one by name, and this compiler does not.
+/// An instance of a module nothing defines. A bidirectional switch primitive
+/// (IEEE 1364-2005 section 7.6) is named as the unsupported construct it is
+/// rather than as a missing module, and so is a `connectmodule` the source
+/// declares: Verilog-AMS lets a design instantiate one by name, and this
+/// compiler does not.
 pub(super) fn undefined_module(module: &str, analyzed: &AnalyzedFile) -> SemanticErrorKind {
-    const PRIMITIVES: [&str; 18] = [
-        "cmos", "rcmos", "nmos", "pmos", "rnmos", "rpmos", "tran", "tranif0", "tranif1", "rtran",
-        "rtranif0", "rtranif1", "pullup", "pulldown", "bufif0", "bufif1", "notif0", "notif1",
+    const PRIMITIVES: [&str; 6] = [
+        "tran", "tranif0", "tranif1", "rtran", "rtranif0", "rtranif1",
     ];
     if analyzed.connect_rules.declares_connect_module(module) {
         SemanticErrorKind::UnsupportedFeature(format!(

@@ -82,6 +82,7 @@ pub(super) fn insert(
         value: actual.clone(),
         delay: None,
         strength: None,
+        gate: None,
         span,
     });
     match &mut prepared.instances[instance].connections[port] {

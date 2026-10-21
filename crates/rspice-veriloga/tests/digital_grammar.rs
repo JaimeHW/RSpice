@@ -2729,7 +2729,8 @@ fn a_gate_primitive_lowers_to_the_operator_form_of_itself() {
         ("nor  u (y, a, b);", "assign y = ~(a | b);"),
         ("xor  u (y, a, b);", "assign y = a ^ b;"),
         ("xnor u (y, a, b);", "assign y = ~(a ^ b);"),
-        ("buf  u (y, a);", "assign y = a;"),
+        // Section 7.4: `buf` drives `x` for `z`, as `a ^ 1'b0` does.
+        ("buf  u (y, a);", "assign y = a ^ 1'b0;"),
         ("not  u (y, a);", "assign y = ~a;"),
     ] {
         let source = |body: &str| {
@@ -2869,20 +2870,71 @@ fn an_illegal_drive_strength_pair_is_refused_by_name() {
     }
 }
 
-/// An array of gate instances is refused as one, not as a token mismatch
-/// ("Expected LParen, found LBracket").
+/// An array of gate instances (section 7.1.5) becomes one driver per element,
+/// each taking its bit of a terminal as wide as the array and the whole of a
+/// one-bit terminal (section 7.1.6).
 #[test]
-fn a_gate_instance_array_is_refused_by_name() {
+fn a_gate_instance_array_expands_one_driver_per_element() {
+    let file = parse(
+        "module g(v, e, y);\n\
+         \x20   input [3:0] v; input e;\n     output [3:0] y;\n\
+         \x20   bufif1 n[3:0] (y, v, e);\n\
+         endmodule\n",
+    );
+    let module = parsed_module(&file);
+    let targets: Vec<String> = module
+        .continuous_assigns
+        .iter()
+        .map(|assignment| format!("{:?}", assignment.target))
+        .collect();
+    assert_eq!(targets.len(), 4, "{targets:?}");
+    assert!(
+        module
+            .continuous_assigns
+            .iter()
+            .all(|assignment| assignment.gate.is_some()),
+        "every element is a gated driver"
+    );
+    assert!(
+        targets[0].contains("Number") && targets[0].contains("\"3\""),
+        "{targets:?}"
+    );
+    assert!(targets[3].contains("\"0\""), "{targets:?}");
+}
+
+/// A terminal neither one bit nor one bit per instance wide is refused by the
+/// clause, and so are a switch with a drive strength (A.3.1) and a primitive
+/// with the wrong number of terminals.
+#[test]
+fn gate_and_switch_misuse_is_refused_by_name() {
     let error = parse_error(
         "module g(v, y);\n\
-         \x20   input [3:0] v;\n     output [3:0] y;\n\
+         \x20   input [2:0] v;\n     output [3:0] y;\n\
          \x20   not n[3:0] (y, v);\n\
          endmodule\n",
     );
-    assert!(
-        error.contains("gate instance arrays are not supported") && !error.contains("LBracket"),
-        "{error}"
+    assert!(error.contains("section 7.1.6"), "{error}");
+    let error = parse_error(
+        "module g(a, c, y);\n\
+         \x20   input a, c;\n     output y;\n\
+         \x20   nmos (strong0, strong1) (y, a, c);\n\
+         endmodule\n",
     );
+    assert!(error.contains("A.3.1"), "{error}");
+    let error = parse_error(
+        "module g(a, y);\n\
+         \x20   input a;\n     output y;\n\
+         \x20   bufif1 (y, a);\n\
+         endmodule\n",
+    );
+    assert!(error.contains("exactly 3"), "{error}");
+    let error = parse_error(
+        "module g(y);\n\
+         \x20   output y;\n\
+         \x20   pullup (strong0) (y);\n\
+         endmodule\n",
+    );
+    assert!(error.contains("A.3.1"), "{error}");
 }
 
 // ===========================================================================

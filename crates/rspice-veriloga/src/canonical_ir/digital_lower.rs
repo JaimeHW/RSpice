@@ -761,7 +761,8 @@ fn lower_with_analog_variables(
 
     let mut processes = Vec::new();
     let mut drivers = Vec::new();
-    let mut driver_strengths = Vec::new();
+    // Drive strengths and gated drivers; the net types join them below.
+    let mut driver_strengths = super::digital::DigitalStrengthPlan::default();
     // One probe table for the whole plan, in first-appearance order over the
     // same fixed traversal the process and driver numbering follows, so a
     // probe keeps its id across a recompilation for the reason a driver keeps
@@ -1261,7 +1262,7 @@ fn lower_with_analog_variables(
         overrides: calls.overrides,
         strength: super::digital::DigitalStrengthPlan {
             nets: typed_nets,
-            drivers: driver_strengths,
+            ..driver_strengths
         },
     }
     .seal()
@@ -1360,7 +1361,7 @@ fn lower_continuous_assign(
     id: DigitalProcessId,
     (drivers, strengths): (
         &mut Vec<DigitalDriver>,
-        &mut Vec<super::digital::DigitalDriverStrength>,
+        &mut super::digital::DigitalStrengthPlan,
     ),
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
@@ -1407,23 +1408,68 @@ fn lower_continuous_assign(
     // Except when the net is a `wreal`, which has no width to impose. Then the
     // right-hand side is lowered in the real domain, which is what Verilog-AMS
     // LRM 2.4 section 3.7's `assign wrstim = stim;` means.
-    let value = if lowerer.lvalue_is_real(&assignment.assignment.target) {
-        lowerer.real_expression(entry, &assignment.assignment.value)
+    // A gate with an enable wrote its value as `{enable, data}` (see
+    // `ContinuousAssign::gate`).
+    let gated = assignment.assignment.gate.and_then(|kind| {
+        let Expression::ArrayLiteral(pair) = &assignment.assignment.value else {
+            return None;
+        };
+        match pair.elements.as_slice() {
+            [
+                crate::ast::ArrayLiteralElement::Value(enable),
+                crate::ast::ArrayLiteralElement::Value(data),
+            ] => Some((kind, enable, data)),
+            _ => None,
+        }
+    });
+    let (value, enable) = if let Some((_, enable, data)) = gated {
+        let context = lowerer.lvalue_width(&assignment.assignment.target);
+        let value = lowerer.assigned_value(entry, data, context);
+        (value, Some(lowerer.assigned_value(entry, enable, 1)))
+    } else if lowerer.lvalue_is_real(&assignment.assignment.target) {
+        let value = lowerer.real_expression(entry, &assignment.assignment.value);
+        (value, None)
     } else {
         let context = lowerer.lvalue_width(&assignment.assignment.target);
-        lowerer.assigned_value(entry, &assignment.assignment.value, context)
+        let value = lowerer.assigned_value(entry, &assignment.assignment.value, context);
+        (value, None)
     };
-    lowerer.drive(entry, &assignment.assignment.target, value, id, drivers);
+    lowerer.drive(
+        entry,
+        &assignment.assignment.target,
+        (value, enable),
+        id,
+        drivers,
+    );
     if let Some(strength) = assignment.assignment.strength {
-        strengths.extend(
-            drivers
-                .iter()
-                .filter(|driver| driver.process == id)
-                .map(|driver| super::digital::DigitalDriverStrength {
-                    driver: driver.id,
-                    strength,
-                }),
-        );
+        strengths
+            .drivers
+            .extend(
+                drivers
+                    .iter()
+                    .filter(|driver| driver.process == id)
+                    .map(|driver| super::digital::DigitalDriverStrength {
+                        driver: driver.id,
+                        strength,
+                    }),
+            );
+    }
+    if let Some((kind, _, data)) = gated {
+        let source = matches!(kind, super::digital::DigitalGateKind::Mos { .. })
+            .then(|| lowerer.passed_net_bit(data))
+            .flatten();
+        strengths
+            .gates
+            .extend(
+                drivers
+                    .iter()
+                    .filter(|driver| driver.process == id)
+                    .map(|driver| super::digital::DigitalGatedDriver {
+                        driver: driver.id,
+                        kind,
+                        source: source.clone(),
+                    }),
+            );
     }
 
     let mut reads = BTreeSet::new();
@@ -3569,11 +3615,34 @@ impl ProcessLowerer<'_> {
     /// then distributes — but each element becomes a *separate driver*. That is
     /// what it is: two nets, each driven by one expression, and a resolver
     /// working on `cout` has no business being handed `sum`'s contribution.
+    /// The net bit a MOS switch's data terminal names, when it names one: a
+    /// scalar, or a constant bit select of a vector.
+    fn passed_net_bit(&self, data: &Expression) -> Option<DigitalWriteTarget> {
+        let (name, select) = match data {
+            Expression::Identifier(identifier) => {
+                (identifier.name.as_str(), DigitalWriteSelect::Whole)
+            }
+            Expression::ArrayAccess(access) if access.packed.is_none() => (
+                access.array.as_str(),
+                DigitalWriteSelect::Bit(self.constant(&access.index)?),
+            ),
+            _ => return None,
+        };
+        if self.lookup_local(name).is_some() || self.digital_array(name).is_some() {
+            return None;
+        }
+        let signal = *self.index.get(name)?;
+        let declared = &self.signals[usize::from(signal)];
+        let scalar = declared.declared_range().width() == 1;
+        (!declared.kind.is_real() && (scalar || select != DigitalWriteSelect::Whole))
+            .then_some(DigitalWriteTarget { signal, select })
+    }
+
     fn drive(
         &mut self,
         block: BlockId,
         target: &DigitalLValue,
-        value: ValueId,
+        (value, enable): (ValueId, Option<ValueId>),
         process: DigitalProcessId,
         drivers: &mut Vec<DigitalDriver>,
     ) {
@@ -3600,7 +3669,7 @@ impl ProcessLowerer<'_> {
                             lsb: i64::from(offset),
                         },
                     );
-                    self.drive(block, element, slice, process, drivers);
+                    self.drive(block, element, (slice, enable), process, drivers);
                 }
             }
             _ => {
@@ -3630,6 +3699,7 @@ impl ProcessLowerer<'_> {
                         driver,
                         target: resolved,
                         value,
+                        enable,
                     },
                 );
             }
