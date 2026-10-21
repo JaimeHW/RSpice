@@ -9,8 +9,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+#[cfg(not(test))]
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 
 use crate::product::ContentDigest;
 use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
@@ -64,10 +66,31 @@ struct ActiveExecution {
     receiver: mpsc::Receiver<WorkerEnvelope>,
 }
 
+#[cfg(not(test))]
 static ACTIVE_EXECUTION: OnceLock<Mutex<Option<ActiveExecution>>> = OnceLock::new();
 
+#[cfg(not(test))]
 fn active_execution() -> &'static Mutex<Option<ActiveExecution>> {
     ACTIVE_EXECUTION.get_or_init(|| Mutex::new(None))
+}
+
+/// Under test, every test thread owns its own operation.
+///
+/// libtest runs each test on its own thread in one process, and every app
+/// frame drawn with the hardcopy dialog closed cancels the active operation.
+/// One process-wide owner would let any frame-drawing test cancel or reap the
+/// operation another test is asserting on, and a test that then failed while
+/// holding the lock would poison it for every test after. The worker never
+/// touches the owner, so on its own thread a test meets production's contract.
+#[cfg(test)]
+fn active_execution() -> &'static Mutex<Option<ActiveExecution>> {
+    thread_local! {
+        // Leaked once per test thread, so it lends out as `'static` exactly
+        // as the production owner does.
+        static ACTIVE_EXECUTION: &'static Mutex<Option<ActiveExecution>> =
+            Box::leak(Box::new(Mutex::new(None)));
+    }
+    ACTIVE_EXECUTION.with(|owner| *owner)
 }
 
 /// Start one owned native render operation.
@@ -321,28 +344,6 @@ fn reap_finished_cancellation(active: &mut Option<ActiveExecution>) {
 mod tests {
     use super::*;
 
-    static TEST_RUNTIME_SERIAL: Mutex<()> = Mutex::new(());
-
-    struct RuntimeGuard {
-        _serial: std::sync::MutexGuard<'static, ()>,
-    }
-
-    impl RuntimeGuard {
-        fn acquire() -> Self {
-            let serial = TEST_RUNTIME_SERIAL
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            reset_runtime();
-            Self { _serial: serial }
-        }
-    }
-
-    impl Drop for RuntimeGuard {
-        fn drop(&mut self) {
-            reset_runtime();
-        }
-    }
-
     fn digest(value: u8) -> ContentDigest {
         ContentDigest::from_bytes([value; 32])
     }
@@ -354,13 +355,6 @@ mod tests {
             source_digest: digest(0x22),
             operation,
         }
-    }
-
-    fn reset_runtime() {
-        active_execution()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
     }
 
     fn install_active(
@@ -414,7 +408,6 @@ mod tests {
 
     #[test]
     fn one_active_owner_is_retained_until_terminal_observation() {
-        let _guard = RuntimeGuard::acquire();
         let active_ticket = ticket(11, ExecutionOperation::Publication);
         let (_cancelled, sender) = install_active(active_ticket);
         sender
@@ -436,7 +429,6 @@ mod tests {
 
     #[test]
     fn stale_ticket_cannot_consume_exact_completion() {
-        let _guard = RuntimeGuard::acquire();
         let exact = ticket(21, ExecutionOperation::Publication);
         let (_cancelled, sender) = install_active(exact);
         sender
@@ -458,7 +450,6 @@ mod tests {
 
     #[test]
     fn cancellation_retains_ownership_then_discards_late_completion() {
-        let _guard = RuntimeGuard::acquire();
         let exact = ticket(31, ExecutionOperation::Publication);
         let (cancelled, sender) = install_active(exact);
 
@@ -497,7 +488,6 @@ mod tests {
 
     #[test]
     fn disconnected_worker_is_terminal_and_releases_owner() {
-        let _guard = RuntimeGuard::acquire();
         let exact = ticket(41, ExecutionOperation::Publication);
         let (_cancelled, sender) = install_active(exact);
         drop(sender);
@@ -510,6 +500,27 @@ mod tests {
                     == "Native hardcopy rendering disconnected before returning a result."
         ));
         assert!(!is_active());
+    }
+
+    /// Any app frame drawn with the dialog closed cancels the active operation,
+    /// and another test draws its frames on its own thread.
+    #[test]
+    fn another_test_threads_cancellation_cannot_reach_this_owner() {
+        let exact = ticket(51, ExecutionOperation::Publication);
+        let (cancelled, sender) = install_active(exact);
+        sender
+            .send(envelope(exact, "unobserved completion"))
+            .expect("active receiver must retain the completion");
+
+        std::thread::spawn(cancel)
+            .join()
+            .expect("the other thread's cancellation returns");
+
+        assert!(!cancelled.load(Ordering::Acquire));
+        assert!(matches!(
+            poll(exact),
+            Some(Err(ref error)) if error == "unobserved completion"
+        ));
     }
 
     #[test]

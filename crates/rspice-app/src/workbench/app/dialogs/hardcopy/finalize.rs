@@ -10,8 +10,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+#[cfg(not(test))]
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 
 use sha2::{Digest as _, Sha256};
 
@@ -183,10 +185,25 @@ struct ActiveFinalization {
     receiver: mpsc::Receiver<WorkerEnvelope>,
 }
 
+#[cfg(not(test))]
 static ACTIVE_FINALIZATION: OnceLock<Mutex<Option<ActiveFinalization>>> = OnceLock::new();
 
+#[cfg(not(test))]
 fn active_finalization() -> &'static Mutex<Option<ActiveFinalization>> {
     ACTIVE_FINALIZATION.get_or_init(|| Mutex::new(None))
+}
+
+/// Under test, every test thread owns its own finalization, for the reason
+/// the rendering owner gives: any app frame drawn with the hardcopy dialog
+/// closed cancels the active finalization, and libtest runs each test on its
+/// own thread in one process.
+#[cfg(test)]
+fn active_finalization() -> &'static Mutex<Option<ActiveFinalization>> {
+    thread_local! {
+        static ACTIVE_FINALIZATION: &'static Mutex<Option<ActiveFinalization>> =
+            Box::leak(Box::new(Mutex::new(None)));
+    }
+    ACTIVE_FINALIZATION.with(|owner| *owner)
 }
 
 /// Start one native finalization without blocking the UI thread.
@@ -928,28 +945,7 @@ mod tests {
 
     use super::*;
 
-    static TEST_RUNTIME_SERIAL: Mutex<()> = Mutex::new(());
     static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-
-    struct RuntimeGuard {
-        _serial: std::sync::MutexGuard<'static, ()>,
-    }
-
-    impl RuntimeGuard {
-        fn acquire() -> Self {
-            let serial = TEST_RUNTIME_SERIAL
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            reset_runtime();
-            Self { _serial: serial }
-        }
-    }
-
-    impl Drop for RuntimeGuard {
-        fn drop(&mut self) {
-            reset_runtime();
-        }
-    }
 
     fn digest(value: u8) -> ContentDigest {
         ContentDigest::from_bytes([value; 32])
@@ -983,13 +979,6 @@ mod tests {
             .expect("fixture extent"),
         )
         .expect("fixture plan")
-    }
-
-    fn reset_runtime() {
-        active_finalization()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
     }
 
     fn install_active(
@@ -1049,7 +1038,6 @@ mod tests {
 
     #[test]
     fn one_active_owner_retains_an_unobserved_completion() {
-        let _guard = RuntimeGuard::acquire();
         let exact = ticket(11);
         let (_cancelled, _boundary, sender) = install_active(exact, false);
         sender
@@ -1068,7 +1056,6 @@ mod tests {
 
     #[test]
     fn stale_ticket_cannot_consume_exact_completion() {
-        let _guard = RuntimeGuard::acquire();
         let exact = ticket(21);
         let (_cancelled, _boundary, sender) = install_active(exact, false);
         sender
@@ -1088,7 +1075,6 @@ mod tests {
 
     #[test]
     fn cancellation_discards_only_a_pre_boundary_late_completion() {
-        let _guard = RuntimeGuard::acquire();
         let exact = ticket(31);
         let (cancelled, _boundary, sender) = install_active(exact, false);
 
@@ -1113,7 +1099,6 @@ mod tests {
 
     #[test]
     fn cancellation_preserves_a_post_boundary_completion() {
-        let _guard = RuntimeGuard::acquire();
         let exact = ticket(32);
         let (_cancelled, _boundary, sender) = install_active(exact, true);
 
@@ -1176,7 +1161,6 @@ mod tests {
 
     #[test]
     fn disconnected_worker_is_terminal_and_releases_owner() {
-        let _guard = RuntimeGuard::acquire();
         let exact = ticket(41);
         let (_cancelled, _boundary, sender) = install_active(exact, false);
         drop(sender);
@@ -1188,6 +1172,27 @@ mod tests {
                     == "Native hardcopy finalization disconnected before returning a result."
         ));
         assert!(!is_active());
+    }
+
+    /// Any app frame drawn with the dialog closed cancels the active
+    /// finalization, and another test draws its frames on its own thread.
+    #[test]
+    fn another_test_threads_cancellation_cannot_reach_this_owner() {
+        let exact = ticket(51);
+        let (cancelled, _boundary, sender) = install_active(exact, false);
+        sender
+            .send(envelope(exact, "unobserved completion"))
+            .expect("active receiver must retain completion");
+
+        std::thread::spawn(cancel)
+            .join()
+            .expect("the other thread's cancellation returns");
+
+        assert!(!cancelled.load(Ordering::Acquire));
+        assert!(matches!(
+            poll(exact),
+            Some(Err(ref error)) if error.to_string() == "unobserved completion"
+        ));
     }
 
     #[test]
