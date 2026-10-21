@@ -100,6 +100,60 @@ fn differences_fail_with_verification_exit_code() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// JSON has no infinity, so an infinite error is reported as `null`. The
+/// verdict never rests on that field: the comparison exits 3, the text report
+/// says it failed, and every JSON verdict is false.
+#[test]
+fn infinite_errors_still_fail_in_text_and_json() {
+    let dir = test_dir("infinite_error");
+    let result = dir.join("result.csv");
+    let golden = dir.join("golden.csv");
+    let compare = |flags: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "compare"])
+            .arg(&result)
+            .arg(&golden)
+            .args(flags)
+            .output()
+            .expect("run rspice")
+    };
+    for (result_value, golden_value, infinite) in [
+        // Any difference from a golden zero is infinitely large relative to it.
+        ("1", "0", "rel_diff"),
+        // Finite values of opposite sign overflow their difference.
+        ("1.5e308", "-1.5e308", "abs_diff"),
+    ] {
+        std::fs::write(&result, format!("time,V(x)\n0,{result_value}\n")).unwrap();
+        std::fs::write(&golden, format!("time,V(x)\n0,{golden_value}\n")).unwrap();
+
+        let text = compare(&[]);
+        assert_eq!(text.status.code(), Some(3), "{text:?}");
+        let stdout = String::from_utf8_lossy(&text.stdout);
+        assert!(
+            stdout.contains("Comparison FAILED")
+                && stdout.contains("1 differences found")
+                && stdout.contains("[1] V(x) @ 0:"),
+            "{stdout}"
+        );
+        assert!(
+            String::from_utf8_lossy(&text.stderr).contains("1 value difference(s)"),
+            "{text:?}"
+        );
+
+        let json = compare(&["--json"]);
+        assert_eq!(json.status.code(), Some(3), "{json:?}");
+        let report: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+        for verdict in ["passed", "comparison_passed", "accepted"] {
+            assert_eq!(report[verdict], false, "{report}");
+        }
+        assert_eq!(report["num_differences"], 1, "{report}");
+        assert_eq!(report["differences"][0]["variable"], "V(x)", "{report}");
+        assert!(report["differences"][0][infinite].is_null(), "{report}");
+        assert!(report[format!("max_{infinite}")].is_null(), "{report}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A result file missing trailing points must FAIL against a longer golden
 /// file — a simulation that died mid-run cannot pass regression by matching
 /// on the overlap it did write.
