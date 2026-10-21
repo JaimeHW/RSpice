@@ -1,0 +1,171 @@
+//! Which retained state makes the whole application modal.
+//!
+//! [`AppState::application_modal_open`] is a hand-written OR over the dialog
+//! gate, the workbench's own gate, and five owners of their own. Every row
+//! below sets one term on a default session and nothing else. The dialog
+//! gate's terms each have their row beside `DialogState`; here it is one
+//! term. The browser's file-operation term is set only by an operation a
+//! browser is running, so no native test can open it.
+
+use crate::workbench::app_state::AppState;
+use crate::workbench::state::Workspace;
+use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+
+fn navigate(state: &mut AppState, surface: SurfaceId) {
+    state
+        .workbench
+        .navigate(SurfaceRoute::surface(surface), RouteTransitionSource::User)
+        .unwrap_or_else(|error| panic!("{surface:?} opens: {error}"));
+}
+
+/// One row per term, in the order the two gates list them: the workbench's
+/// first, then the session's own.
+const APPLICATION_GATE: &[(&str, fn(&mut AppState))] = &[
+    ("workbench.project_launcher_open", |state| {
+        state.workbench.project_launcher_open = true;
+    }),
+    ("workbench.examples_selection", |state| {
+        state.workbench.examples_selection = Some(0);
+    }),
+    ("workbench.notification_center_open", |state| {
+        state.workbench.notification_center_open = true;
+    }),
+    ("workbench.model_correlation.dialog", |state| {
+        state.workbench.model_correlation.dialog = Some(
+            crate::workbench::documents::model_correlation::ModelCorrelationDialog::AddMetric(
+                crate::workbench::documents::model_correlation::CorrelationMetricDraft::default(),
+            ),
+        );
+    }),
+    ("workbench.create_result_document", |state| {
+        state.workbench.create_result_document.open = true;
+    }),
+    ("workbench.result_document_dialog", |state| {
+        state.workbench.result_document_dialog = Some(
+            rspice_results_ui::document_dialogs::ResultDocumentDialog::AddPane(
+                rspice_results_ui::document_dialogs::add_pane::AddPaneDraft::default(),
+            ),
+        );
+    }),
+    ("workbench.result_import", |state| {
+        state.workbench.result_import.open = true;
+    }),
+    ("workbench.models_view.dialog", |state| {
+        state.workbench.models_view.dialog = Some(
+            crate::workbench::state::ModelsWorkbenchDialog::SourcePreview {
+                title: "nch".to_owned(),
+                subtitle: "foundation.lib".to_owned(),
+                source: ".model nch nmos".to_owned(),
+                editable: false,
+            },
+        );
+    }),
+    ("workbench.simulation_workflow", |state| {
+        state.workbench.simulation_workflow = Some(
+            crate::workbench::state::SimulationWorkflowDialog::DesignVariable(
+                crate::workbench::state::DesignVariableDraft::default(),
+            ),
+        );
+    }),
+    (
+        "workbench.verification.regression_baseline_picker_open",
+        |state| {
+            state.workbench.verification.regression_baseline_picker_open = true;
+        },
+    ),
+    ("workbench.verification.tuning_review_open", |state| {
+        state.workbench.verification.tuning_review_open = true;
+    }),
+    ("route ProjectLauncher", |state| {
+        navigate(state, SurfaceId::ProjectLauncher);
+    }),
+    ("route Preferences", |state| {
+        navigate(state, SurfaceId::Preferences);
+    }),
+    ("route DesignManagement", |state| {
+        navigate(state, SurfaceId::DesignManagement);
+    }),
+    ("route AccountOrganization", |state| {
+        navigate(state, SurfaceId::AccountOrganization);
+    }),
+    ("route JobsManager", |state| {
+        navigate(state, SurfaceId::JobsManager);
+    }),
+    ("route SpecialistToolBrowser", |state| {
+        navigate(state, SurfaceId::SpecialistToolBrowser);
+    }),
+    ("route NotificationCenter", |state| {
+        navigate(state, SurfaceId::NotificationCenter);
+    }),
+    ("dialogs", |state| state.dialogs.about = true),
+    ("ui.netlist, in the Netlist workspace", |state| {
+        state.workbench.activate(Workspace::Netlist);
+        state.ui.netlist.find.open = true;
+    }),
+    ("sim_setup.session.palette_open", |state| {
+        state.sim_setup.session.palette_open = true;
+    }),
+    ("tabbed_property_dialog", |state| {
+        state.tabbed_property_dialog.open = true;
+    }),
+    ("pdk_settings_dialog", |state| {
+        state.pdk_settings_dialog.open = true;
+    }),
+    ("model_browser_state", |state| {
+        state.model_browser_state.open = true;
+    }),
+];
+
+/// Each term of the application gate makes the application modal on its
+/// own, and a new session is not modal.
+#[test]
+fn each_term_of_the_application_gate_makes_it_modal_on_its_own() {
+    assert!(
+        !AppState::default().application_modal_open(),
+        "a new session is not modal"
+    );
+    for (term, open) in APPLICATION_GATE {
+        let mut state = AppState::default();
+        open(&mut state);
+        assert!(
+            state.application_modal_open(),
+            "`{term}` alone makes the application modal"
+        );
+    }
+}
+
+/// Drawn while open, and not a term of the gate today: a keystroke still
+/// reaches the document beneath. This records the gate as it stands rather
+/// than ruling on each row; changing one is a behaviour change.
+const OUTSIDE_THE_APPLICATION_GATE: &[(&str, fn(&mut AppState))] = &[
+    ("ui.netlist, outside the Netlist workspace", |state| {
+        state.ui.netlist.find.open = true;
+    }),
+    ("ui.code_workspace.source_document_dialog", |state| {
+        state.ui.code_workspace.source_document_dialog = true;
+    }),
+    ("ui.code_workspace.veriloga.import_form", |state| {
+        state.ui.code_workspace.veriloga.import_form = Some(
+            crate::workbench::documents::code_workspace::VerilogAImportFormState {
+                project_id: state.workspace.content.project.id(),
+                file_name: "gain.va".to_owned(),
+                contents: String::new(),
+                library: "behavioral".to_owned(),
+                modules: Ok(Vec::new()),
+                error: None,
+            },
+        );
+    }),
+];
+
+#[test]
+fn what_is_drawn_outside_the_application_gate_leaves_it_modeless() {
+    for (term, open) in OUTSIDE_THE_APPLICATION_GATE {
+        let mut state = AppState::default();
+        open(&mut state);
+        assert!(
+            !state.application_modal_open(),
+            "`{term}` is not a term of the gate today"
+        );
+    }
+}

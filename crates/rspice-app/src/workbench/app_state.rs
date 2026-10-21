@@ -20,6 +20,8 @@ pub(in crate::workbench) mod design_history;
 pub(crate) mod diagnostic_store;
 mod full_screen;
 pub(in crate::workbench) mod interaction_state;
+#[cfg(test)]
+mod modal_gate_tests;
 pub(in crate::workbench) mod problems_view;
 mod rule_deck;
 pub(in crate::workbench) mod run_identity;
