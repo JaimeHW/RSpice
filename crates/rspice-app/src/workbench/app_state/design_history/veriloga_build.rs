@@ -119,7 +119,7 @@ impl VerilogABuildSettingsRecord {
         state: &AppState,
         operation: &str,
     ) -> Result<(), String> {
-        if !state.project_lifecycle.is_open() {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Build settings cannot be {operation} without an open project."
             ));

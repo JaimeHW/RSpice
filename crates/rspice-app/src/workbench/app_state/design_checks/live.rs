@@ -55,7 +55,7 @@ impl AppState {
             self.withdraw_live_checks();
             return None;
         }
-        let drawing = (self.project_lifecycle.is_open()
+        let drawing = (self.project_open.is_open()
             && matches!(
                 self.workspace.content.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench

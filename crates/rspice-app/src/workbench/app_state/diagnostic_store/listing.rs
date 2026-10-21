@@ -619,7 +619,7 @@ fn netlist_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) 
 /// store's digest memo. A surface drawn every frame reads
 /// [`listing_in_pass`] instead, which decides them once per pass.
 pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
-    if !state.project_lifecycle.is_open() {
+    if !state.project_open.is_open() {
         return closed_listing();
     }
     // One scope for the whole list, so the configured hierarchy two owners'
@@ -653,7 +653,7 @@ pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
 /// store's [digest memo](super::digest_memo) while the stamps and revisions
 /// it read stand, so a pass in which nothing was edited digests nothing.
 pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> DiagnosticListing<'_> {
-    if !state.project_lifecycle.is_open() {
+    if !state.project_open.is_open() {
         return closed_listing();
     }
     let generation = state.diagnostics.generation();
@@ -883,7 +883,7 @@ mod tests {
 
     fn open_state() -> AppState {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         state
     }
 
@@ -907,7 +907,7 @@ mod tests {
     #[test]
     fn a_closed_project_has_no_conditions_to_report() {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.close_project();
+        state.close_project_session();
         let listed = listing(&state);
         assert_eq!(listed.len(), 0);
         assert_eq!(*listed.empty_reason(), EmptyReason::NoProject);

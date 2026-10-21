@@ -82,7 +82,7 @@ impl InstanceRemovalRecord {
         state: &AppState,
         operation: &str,
     ) -> Result<(), String> {
-        if !state.project_lifecycle.is_open() {
+        if !state.project_open.is_open() {
             return Err(format!(
                 "Instance removal cannot be {operation} without an open project."
             ));
