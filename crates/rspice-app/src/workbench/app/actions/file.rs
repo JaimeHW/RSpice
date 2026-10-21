@@ -87,7 +87,7 @@ impl RSpiceApp {
                     (pending, pending_recent_kind),
                     (
                         Some(ConfirmationAction::OpenRecent),
-                        Some(crate::workbench::app_state::RecentKind::Project)
+                        Some(crate::services::recent_files::RecentKind::Project)
                     )
                 );
                 if project_action
@@ -272,7 +272,7 @@ impl RSpiceApp {
         &mut self,
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,
-        recent_kind: Option<crate::workbench::app_state::RecentKind>,
+        recent_kind: Option<crate::services::recent_files::RecentKind>,
         example: Option<String>,
     ) {
         self.execute_pending_action_with_project_open(
@@ -288,7 +288,7 @@ impl RSpiceApp {
         &mut self,
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,
-        recent_kind: Option<crate::workbench::app_state::RecentKind>,
+        recent_kind: Option<crate::services::recent_files::RecentKind>,
         _example: Option<String>,
         open_project: impl FnOnce(&mut crate::workbench::app_state::AppState) -> bool,
     ) {
@@ -335,9 +335,9 @@ impl RSpiceApp {
 
     /// Open an entry from the recent-files list, prompting to save first when
     /// the current document has unsaved changes.
-    pub(crate) fn open_recent_file(&mut self, recent: crate::workbench::app_state::RecentFile) {
+    pub(crate) fn open_recent_file(&mut self, recent: crate::services::recent_files::RecentFile) {
         if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state)
-            || (recent.kind == crate::workbench::app_state::RecentKind::Project
+            || (recent.kind == crate::services::recent_files::RecentKind::Project
                 && self.state.workbench.model_editor_has_unsaved_changes())
         {
             self.state
@@ -355,9 +355,9 @@ impl RSpiceApp {
     fn do_open_recent(
         &mut self,
         path: std::path::PathBuf,
-        kind: crate::workbench::app_state::RecentKind,
+        kind: crate::services::recent_files::RecentKind,
     ) {
-        use crate::workbench::app_state::RecentKind;
+        use crate::services::recent_files::RecentKind;
 
         if !path.exists() {
             self.state.recent_files.retain(|r| r.path != path);
@@ -699,7 +699,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::new(7, 3));
         let project_ac_id = insert_ac_analysis(&mut project_source);
         project_source.remember_recent_file(
-            crate::workbench::app_state::RecentKind::Project,
+            crate::services::recent_files::RecentKind::Project,
             &target_project,
         );
         let project_recent = project_source
@@ -723,7 +723,7 @@ mod tests {
                 .dialogs
                 .confirmation_dialog
                 .pending_recent_kind,
-            Some(crate::workbench::app_state::RecentKind::Project)
+            Some(crate::services::recent_files::RecentKind::Project)
         );
         project_app.handle_confirmation_response(ConfirmationResponse::Yes);
 
@@ -777,7 +777,7 @@ mod tests {
             .add_component(ComponentType::Capacitor, Point::new(8, 4));
         let schematic_ac_id = insert_ac_analysis(&mut schematic_source);
         schematic_source.remember_recent_file(
-            crate::workbench::app_state::RecentKind::Schematic,
+            crate::services::recent_files::RecentKind::Schematic,
             &target_schematic,
         );
         let schematic_recent = schematic_source
@@ -801,7 +801,7 @@ mod tests {
                 .dialogs
                 .confirmation_dialog
                 .pending_recent_kind,
-            Some(crate::workbench::app_state::RecentKind::Schematic)
+            Some(crate::services::recent_files::RecentKind::Schematic)
         );
         schematic_app.handle_confirmation_response(ConfirmationResponse::Yes);
 

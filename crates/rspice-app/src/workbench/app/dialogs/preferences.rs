@@ -653,10 +653,6 @@ fn close_preferences(state: &mut AppState) {
     }
 }
 
-/// The autosave interval a fresh session carries, and the one Restore
-/// defaults puts the Projects page back to.
-pub(in crate::workbench) const DEFAULT_AUTOSAVE_MINUTES: u8 = 5;
-
 pub(in crate::workbench) fn normalize_autosave_minutes(minutes: u8) -> u8 {
     match minutes {
         2 | 5 | 10 => minutes,

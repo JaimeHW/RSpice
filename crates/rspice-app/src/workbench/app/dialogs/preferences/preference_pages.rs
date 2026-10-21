@@ -992,7 +992,7 @@ pub(super) fn restore_defaults(
             ],
         ),
         PreferenceCategory::Projects => {
-            state.ui.autosave_minutes = super::DEFAULT_AUTOSAVE_MINUTES;
+            state.ui.autosave_minutes = crate::services::session::DEFAULT_AUTOSAVE_MINUTES;
             preferences.restore_defaults(
                 &[ChoicePreference::StartupProject],
                 &[
@@ -1311,7 +1311,7 @@ mod tests {
             );
             assert_eq!(
                 app.state.ui.autosave_minutes,
-                super::super::DEFAULT_AUTOSAVE_MINUTES,
+                crate::services::session::DEFAULT_AUTOSAVE_MINUTES,
                 "{} left the autosave interval changed",
                 category.label()
             );

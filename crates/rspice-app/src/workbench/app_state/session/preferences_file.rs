@@ -221,7 +221,7 @@ fn decode(value: Value, strict: bool) -> Result<PersonalSettings, String> {
                 .map_err(|error| error.to_string())
         },
     )?
-    .unwrap_or(crate::workbench::lifecycle::session::DEFAULT_AUTOSAVE_MINUTES);
+    .unwrap_or(crate::services::session::DEFAULT_AUTOSAVE_MINUTES);
     let browser_spoken_feedback = read_setting(
         &stored,
         SPOKEN_FEEDBACK,
@@ -572,8 +572,7 @@ impl AppState {
             Ok(backup) => {
                 self.apply_personal_settings(PersonalSettings {
                     theme: Theme::default(),
-                    autosave_minutes:
-                        crate::workbench::lifecycle::session::DEFAULT_AUTOSAVE_MINUTES,
+                    autosave_minutes: crate::services::session::DEFAULT_AUTOSAVE_MINUTES,
                     browser_spoken_feedback: false,
                     preferences: UserPreferences::default(),
                     envelope: Envelope::default(),

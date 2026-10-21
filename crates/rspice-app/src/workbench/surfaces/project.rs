@@ -1518,7 +1518,7 @@ mod tests {
         // The no-project landing: a closed project with recents behind it, so
         // the recents table and its availability column are reviewed too.
         {
-            use crate::workbench::app_state::{RecentFile, RecentKind};
+            use crate::services::recent_files::{RecentFile, RecentKind};
             let mut app = RSpiceApp::test_instance();
             app.state.project_lifecycle.authority.close_project();
             app.state.recent_files = ["C:/Engineering/afe.rspiceproj", "//lab/rf/rf_pa.rspiceproj"]

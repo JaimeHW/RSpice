@@ -248,7 +248,7 @@ pub(crate) fn apply_loaded_schematic(
     replace_active_schematic_document(state, schematic);
     state.clear_design_execution_context();
     if let Some(path) = origin.recent_path() {
-        state.remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
+        state.remember_recent_file(crate::services::recent_files::RecentKind::Schematic, path);
     }
     state.record(
         LogSeverity::Info,
@@ -548,8 +548,10 @@ pub(crate) fn save_schematic_to_path_with_io(
             }
             state.sync_active_schematic_to_workspace();
             if saved_path_is_reopenable {
-                state
-                    .remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
+                state.remember_recent_file(
+                    crate::services::recent_files::RecentKind::Schematic,
+                    path,
+                );
                 state.record(
                     LogSeverity::Info,
                     LogSource::Studio,

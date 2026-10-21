@@ -11,8 +11,8 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::services::session::SessionKept;
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::session::SessionKept;
 
 use super::serialization::WithoutRuns;
 

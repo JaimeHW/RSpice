@@ -10,8 +10,8 @@ use std::io::Write as _;
 
 use super::*;
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::services::recent_files::RecentKind;
 use crate::state::{AnalysisResult, AnalysisType, ComponentType, SchematicState};
-use crate::workbench::app_state::RecentKind;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::preferences::TogglePreference;
 use crate::workbench::state::{ProjectLauncherPage, Workspace};

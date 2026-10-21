@@ -55,7 +55,7 @@
     "framework->hardcopy": 6,
     "framework->project": 7,
     "framework->results": 88,
-    "framework->session": 1006,
+    "framework->session": 1002,
     "framework->settings": 15,
     "framework->sheets": 9,
     "framework->shell": 211,
@@ -74,7 +74,7 @@
     "services->design": 1,
     "services->project": 15,
     "services->results": 2,
-    "services->session": 118,
+    "services->session": 101,
     "services->settings": 1,
     "services->shell": 8
   },

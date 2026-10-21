@@ -133,8 +133,8 @@ pub(super) fn populated_session() -> AppState {
     );
     state
         .recent_files
-        .push(crate::workbench::app_state::RecentFile {
-            kind: crate::workbench::app_state::RecentKind::Project,
+        .push(crate::services::recent_files::RecentFile {
+            kind: crate::services::recent_files::RecentKind::Project,
             path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
             opened_at_unix_ms: 1_760_000_000_000,
             pinned: true,

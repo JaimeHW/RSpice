@@ -242,7 +242,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             #[serde(default)]
             workbench: Box<crate::workbench::WorkbenchState>,
             #[serde(default)]
-            recent_files: Vec<crate::workbench::app_state::RecentFile>,
+            recent_files: Vec<crate::services::recent_files::RecentFile>,
             #[serde(default)]
             license_key: Option<String>,
             #[serde(default)]
@@ -1069,8 +1069,8 @@ mod tests {
         state.ui.theme.density = crate::ui::Density::Relaxed;
         state
             .recent_files
-            .push(crate::workbench::app_state::RecentFile {
-                kind: crate::workbench::app_state::RecentKind::Project,
+            .push(crate::services::recent_files::RecentFile {
+                kind: crate::services::recent_files::RecentKind::Project,
                 path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
                 opened_at_unix_ms: 1_760_000_000_000,
                 pinned: true,

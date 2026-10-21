@@ -9,11 +9,11 @@ use egui::{
     Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
+use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::{RecentFile, RecentKind};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, action_row, centered_content_rect};
 use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity};

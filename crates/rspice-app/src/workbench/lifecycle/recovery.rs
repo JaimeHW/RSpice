@@ -18,13 +18,14 @@ use serde::Serialize;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
+use crate::services::recent_files::RecentKind;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
     Cell, CellViewRef, Library, LibraryManager, OpenCellView, ProjectWorkspace, SchematicState,
     View, ViewType,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::{AppState, RecentKind};
+use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
 use crate::state::write_policy::LocalSafeModeOptions;

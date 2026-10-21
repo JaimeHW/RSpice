@@ -17,6 +17,7 @@ use egui::{
 };
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::write_policy::LocalSafeModeOptions;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -26,7 +27,6 @@ use crate::ui::widgets::{
     problem_line, select,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::{RecentFile, RecentKind};
 
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, painted_label};

@@ -404,8 +404,10 @@ fn save_native_scope(
                 crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state)
                     .unwrap_or_else(|| path.to_path_buf());
             state.browser_project_save_name = None;
-            state
-                .remember_recent_file(crate::workbench::app_state::RecentKind::Project, &canonical);
+            state.remember_recent_file(
+                crate::services::recent_files::RecentKind::Project,
+                &canonical,
+            );
             state.record(
                 LogSeverity::Info,
                 LogSource::Studio,
@@ -1285,7 +1287,7 @@ fn apply_loaded_project_authorized(
     // project no longer retains would draw on nothing.
     crate::workbench::documents::result_document::restore_presentation(state, result_presentation);
     if let Some(path) = origin.recent_path() {
-        state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, path);
+        state.remember_recent_file(crate::services::recent_files::RecentKind::Project, path);
     }
     if let Some(error) = technology_block {
         state.record(
