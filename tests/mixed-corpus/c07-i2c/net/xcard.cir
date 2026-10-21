@@ -1,0 +1,21 @@
+* C7 variant xcard (RSpice-authored): each Verilog port reaches its line
+* through its own explicit ngspice bidi_bridge card, at the levels and
+* thresholds the auto-bridge would give it, instead of through the built-in
+* connect-rule converter. The bidi_bridge is a 20 ohm taper whose current
+* never exceeds drive_low = drive_high = 20 mA, with 1 ns edges.
+* A second bus, scl2/sda2, carries the contention script beside the first.
+rpsda2 sda2 vdd 2.2k
+cbsda2 sda2 0 200p
+rpscl2 scl2 vdd 2.2k
+cbscl2 scl2 0 200p
+.model bidi_bus bidi_bridge(out_high = 3.3 in_low = 1.65 in_high = 1.65)
+abscl_c [scl] [scl_c] null bidi_bus
+absda_c [sda] [sda_c] null bidi_bus
+abscl_a [scl] [scl_a] null bidi_bus
+absda_a [sda] [sda_a] null bidi_bus
+abscl_b [scl] [scl_b] null bidi_bus
+absda_b [sda] [sda_b] null bidi_bus
+abscl2_c [scl2] [scl2_c] null bidi_bus
+absda2_c [sda2] [sda2_c] null bidi_bus
+abscl2_b [scl2] [scl2_b] null bidi_bus
+absda2_b [sda2] [sda2_b] null bidi_bus

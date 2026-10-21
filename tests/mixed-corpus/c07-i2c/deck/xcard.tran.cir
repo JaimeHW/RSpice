@@ -1,0 +1,16 @@
+* C7 open-drain bus, variant xcard (explicit bidi_bridge cards), tran
+* The flat script on scl/sda, and the contention script (the controller holds
+* SDA low over [295, 315] us while i2c_dev51 drives it push-pull high over
+* [300, 310] us) on scl2/sda2. Every port reaches its line through an
+* explicit bidi_bridge card of net/xcard.cir.
+.hdl "../net/i2c_ctrl.v"
+.hdl "../net/i2c_dev.v"
+.include ../net/bus.cir
+.include ../net/xcard.cir
+xctrl scl_c sda_c i2c_ctrl
+xdev2a scl_a sda_a i2c_dev addr=42
+xdev51 scl_b sda_b i2c_dev addr=81
+xctrl2 scl2_c sda2_c i2c_ctrl mode=1
+xdev512 scl2_b sda2_b i2c_dev addr=81 contend=1
+.tran 100n 540u
+.end

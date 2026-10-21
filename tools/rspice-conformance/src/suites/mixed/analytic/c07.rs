@@ -1,12 +1,15 @@
 //! C7 — open-drain bus (design §3 C7).
 //!
 //! SDA and SCL: Rp = 2.2 kΩ to 3.3 V, Cbus = 200 pF. The modules reach the bus
-//! through the built-in bidirectional converter, ngspice's `bidi_bridge` at its
-//! defaults: a driven level is a 20 Ω taper (`r_stl`, `r_sth`) whose current
-//! never exceeds 20 mA (`drive_low`, `drive_high`), and whose open-circuit
-//! drive moves over 1 ns (`t_fall`, `t_rise`). A released line rises through
-//! Rp. The controller (`net/i2c_ctrl.v`) first releases SCL at 20 µs and next
-//! pulls it low at 25 µs.
+//! through the built-in connect-rule bidirectional converter at the
+//! `rspice_builtin` rule set's defaults: a driven 0 or 1 is its level behind
+//! 20 Ω, switched with no edge time, and a released port drives nothing. A
+//! released line rises through Rp. The controller (`net/i2c_ctrl.v`) first
+//! releases SCL at 20 µs and next pulls it low at 25 µs.
+//!
+//! The `xcard` variant reaches the bus through explicit `bidi_bridge` cards
+//! instead, ngspice's current-limited converter, and is measured against
+//! ngspice-46 itself (O1).
 
 use super::{Context, Registry, values};
 use crate::suites::mixed::compare::Expected;
@@ -25,12 +28,8 @@ pub const REGISTRY: Registry = &[
 const VDD: f64 = 3.3;
 const RP: f64 = 2.2e3;
 const CBUS: f64 = 200e-12;
+/// The converter's strong 0 and 1, `rlo` = `rhi`.
 const R_DRIVER: f64 = 20.0;
-/// The converter's current limit, `drive_low` = `drive_high`.
-const I_DRIVER: f64 = 20e-3;
-/// The converter's open-circuit drive moves at 1/`t_fall` of the swing per
-/// second, from mid-swing for a released line.
-const T_FALL: f64 = 1e-9;
 const FIRST_SCL_RELEASE: f64 = 20e-6;
 const FIRST_SCL_FALL: f64 = 25e-6;
 
@@ -70,23 +69,11 @@ fn rise_crossing(level: f64) -> f64 {
 
 /// Crossing of `level` while the converter pulls the line down from VDD.
 ///
-/// The sink current slews up from 0 at (`drive_low` + `drive_high`)/`t_fall`
-/// = 2·I/t_fall, while its limit, I·(0.7 − svoc)/0.7, rises as the
-/// open-circuit drive svoc falls from mid-swing (0.5) at 1/t_fall. The two
-/// meet at the full limit I after t_on = t_fall/2, having taken I·t_fall/4
-/// off the line. From there the converter sinks exactly I for as long as the
-/// line is above 20 Ω·I = 0.4 V, so Cbus·dV/dt = (VDD − V)/Rp − I: an Rp·Cbus
-/// exponential towards VDD − I·Rp = −40.7 V. The pull-up's own current over
-/// the first t_on moves the line by under 30 µV and is left out.
+/// From the edge on, the line sees 0 V behind 20 Ω and VDD behind Rp: an
+/// exponential from VDD towards V_OL with τ = (20 Ω ‖ Rp)·Cbus = 3.964 ns.
 fn fall_crossing(level: f64) -> f64 {
-    debug_assert!(
-        level > R_DRIVER * I_DRIVER,
-        "the converter is current-limited"
-    );
-    let t_on = T_FALL / 2.0;
-    let v_on = VDD - I_DRIVER * T_FALL / 4.0 / CBUS;
-    let v_target = VDD - I_DRIVER * RP;
-    FIRST_SCL_FALL + t_on + RP * CBUS * ((v_on - v_target) / (level - v_target)).ln()
+    let tau = R_DRIVER * RP / (R_DRIVER + RP) * CBUS;
+    FIRST_SCL_FALL + tau * ((VDD - v_ol()) / (level - v_ol())).ln()
 }
 
 fn tr30(_: &Context<'_>) -> Result<Expected, String> {
@@ -109,16 +96,15 @@ fn vol(_: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![v_ol()]))
 }
 
-/// One converter driving 1 and one driving 0, each a 20 Ω taper limited to
-/// 20 mA, with Rp to VDD. The sinking one sits at its limit, the line being
-/// above 20 Ω·I; the sourcing one is below its own, so
-/// (VDD − V)·(1/20 Ω + 1/Rp) = I.
+/// One converter driving 1 and one driving 0, each its level behind 20 Ω,
+/// with Rp to VDD: VDD·(1/20 Ω + 1/Rp)/(2/20 Ω + 1/Rp).
 fn vcont(_: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![contention_level()]))
 }
 
 fn contention_level() -> f64 {
-    VDD - I_DRIVER / (1.0 / R_DRIVER + 1.0 / RP)
+    let g = 1.0 / R_DRIVER;
+    VDD * (g + 1.0 / RP) / (2.0 * g + 1.0 / RP)
 }
 
 /// Every driver released: both lines at VDD.
@@ -144,17 +130,15 @@ mod tests {
         assert!((v_ol() - 0.029730).abs() < 1e-6);
     }
 
-    /// The converter's figures against ngspice-46's own `bidi_bridge` at its
-    /// defaults on this bus (driven from a `d_source`, released, then 0 at
-    /// 25 µs; and one bridge driving 1 against one driving 0): the 70% and 30%
-    /// falls at 25.01026 µs and 25.02398 µs, contention at 2.903604 V.
+    /// The resistive converter's figures: the 70→30% fall is
+    /// (20 Ω ‖ Rp)·Cbus·ln((2.31 − V_OL)/(0.99 − V_OL)) = 3.963964 ns ·
+    /// 0.864784 = 3.428 ns (3.36 ns with the V_OL asymptote taken as 0), and
+    /// contention sits at 1.6575 V.
     #[test]
-    fn converter_figures_match_ngspice_bidi_bridge() {
-        let tf70 = fall_crossing(0.7 * VDD);
-        assert!((tf70 - 25.01026e-6).abs() < 5e-12, "{tf70}");
-        let tf30 = fall_crossing(0.3 * VDD);
-        assert!((tf30 - 25.02398e-6).abs() < 5e-12, "{tf30}");
+    fn converter_figures_match_the_design() {
+        let fall = fall_crossing(0.3 * VDD) - fall_crossing(0.7 * VDD);
+        assert!((fall - 3.428e-9).abs() < 0.001e-9, "{fall}");
         let contention = contention_level();
-        assert!((contention - 2.903604).abs() < 1e-6, "{contention}");
+        assert!((contention - 1.6575).abs() < 1e-4, "{contention}");
     }
 }

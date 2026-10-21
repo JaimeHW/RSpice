@@ -1,0 +1,37 @@
+* C7 variant xcard: ngspice-46's bidi_bridge on the C7 bus, solved by ngspice
+* RSpice-authored. The Verilog ports are replaced by tristate drivers whose
+* data and enable follow the controller's script on the two lines measured:
+*   SCL: driven 0 over [15, 20) us, released over [20, 25) us, 0 from 25 us;
+*   SDA2: one bridge driven 0 over [295, 315) us, one driven 1 over
+*         [300, 310) us (the contention script).
+* Each stimulus edge is a 1 ps step centred 2.5 ps early, so it reaches the
+* bridge after the 1 ps A/D and 1 ps tristate delays within 1 ps of the
+* script's instant.
+* Steps are capped at 0.2 ns: at ngspice's own step the 25 us fall's
+* crossings land 40 ps late (25.01030, 25.02402 us); from 0.2 ns down to
+* 0.05 ns they hold at 25.01026 and 25.02398 us. The fall is kept at that
+* resolution.
+* rspice-full-rows: 24.99e-6 25.05e-6
+vdd vdd 0 3.3
+rpscl scl vdd 2.2k
+cbscl scl 0 200p
+rpsda2 sda2 vdd 2.2k
+cbsda2 sda2 0 200p
+.model bidi_bus bidi_bridge(out_high = 3.3 in_low = 1.65 in_high = 1.65)
+.model stim adc_bridge(in_low = 0.5 in_high = 0.5 rise_delay = 1e-12 fall_delay = 1e-12)
+.model tri d_tristate(delay = 1e-12)
+vzero zero 0 0
+vone one 0 1
+vescl escl 0 pwl(0 0 14.999997u 0 14.999998u 1 19.999997u 1 19.999998u 0 24.999997u 0 24.999998u 1)
+vesda_lo esda_lo 0 pwl(0 0 294.999997u 0 294.999998u 1 314.999997u 1 314.999998u 0)
+vesda_hi esda_hi 0 pwl(0 0 299.999997u 0 299.999998u 1 309.999997u 1 309.999998u 0)
+astim [zero one escl esda_lo esda_hi] [d0 d1 en_scl en_lo en_hi] stim
+atscl d0 en_scl dscl tri
+atlo d0 en_lo dsda_lo tri
+athi d1 en_hi dsda_hi tri
+abscl [scl] [dscl] null bidi_bus
+abslo [sda2] [dsda_lo] null bidi_bus
+abshi [sda2] [dsda_hi] null bidi_bus
+.tran 100n 320u 0 0.2n
+.save v(scl) v(sda2)
+.end
