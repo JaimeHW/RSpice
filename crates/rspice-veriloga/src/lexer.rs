@@ -452,12 +452,12 @@ impl TokenKind {
             // Excluded on purpose:
             //   * `table` / `endtable` and gate-primitive names (`and`, `or`,
             //     `not`, `buf`, `nmos`, `tran`, ...). `table` is only reachable
-            //     inside a `primitive` or `specify` region, both of which
-            //     already fail closed at their opening keyword; a gate
-            //     instantiation already fails closed as
-            //     `Undefined module: 'and'`. Reserving them would buy no
-            //     fail-closed coverage while stealing identifier space from
-            //     plausible model variable names.
+            //     inside a `primitive`, whose parser reads it by its text, or a
+            //     `specify` region, which fails closed at its opening keyword;
+            //     a gate name is recognized by its text in instance position.
+            //     Reserving them would buy no fail-closed coverage while
+            //     stealing identifier space from plausible model variable
+            //     names.
             //   * `disable`, `assign`, `force`, `release`, `wire`, `task`,
             //     `fork`, `casex`, ... — these already have their own token
             //     kinds above and are refused by the parser at the positions

@@ -1456,6 +1456,7 @@ mod overrides;
 mod ports;
 mod strengths;
 mod threads;
+mod udps;
 mod values;
 
 fn testbench(files: &[(&str, &str)], options: &HdlTestbenchOptions) -> HdlTestbenchReport {

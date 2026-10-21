@@ -1791,7 +1791,7 @@ impl Parser<'_> {
 
     /// A delay value or a parenthesized delay expression. A min:typ:max tuple
     /// still requires explicit corner-selection support.
-    fn parse_delay_value(&mut self) -> Result<Expression, ParseError> {
+    pub(super) fn parse_delay_value(&mut self) -> Result<Expression, ParseError> {
         if self.check(TokenKind::LParen) {
             self.advance();
             let expression = self.parse_expression()?;

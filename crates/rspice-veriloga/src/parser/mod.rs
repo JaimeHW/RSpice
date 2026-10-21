@@ -17,6 +17,7 @@ mod gate_arrays;
 mod generate;
 mod hierarchical_names;
 mod implicit_nets;
+mod udp;
 
 pub(crate) use config::WORK_LIBRARY;
 
@@ -169,6 +170,7 @@ impl<'a> Parser<'a> {
         let start_span = self.current_span();
         let mut items = Vec::new();
         let mut configs = Vec::new();
+        let mut primitives = Vec::new();
 
         while !self.at_end() {
             // Skip directives for now (handled by preprocessor)
@@ -267,13 +269,18 @@ impl<'a> Parser<'a> {
                 // often written as `endmodule;`. Both reference simulators
                 // accept it in a `.v` source, and it declares nothing.
                 self.advance();
+            } else if self.at_primitive() {
+                primitives.push(self.parse_primitive()?);
             } else if Self::is_digital_construct_keyword(self.current().kind) {
-                // `connectmodule`, `primitive`, `always`, ... at file scope.
+                // `connectmodule`, `always`, ... at file scope.
                 return Err(self.unsupported_ams_construct());
             } else {
                 return Err(self.error(ParseErrorKind::UnexpectedToken(self.current().describe())));
             }
         }
+
+        // A primitive may be declared after the modules that instantiate it.
+        udp::expand_instances(&mut items, &primitives)?;
 
         let end_span = self.previous_span();
         Ok(SourceFile {
@@ -1065,7 +1072,12 @@ impl<'a> Parser<'a> {
         // Module instance declaration:
         // `model [#(...)] instance (...)[, instance (...)];`
         // The parameter override belongs to every instance in the declaration.
-        if self.peek_is(TokenKind::Identifier) || self.peek_is(TokenKind::Hash) {
+        // A `(` straight after the name opens an unnamed instance, which only
+        // a primitive may be (section 8.6); see `udp::expand_instances`.
+        if self.peek_is(TokenKind::Identifier)
+            || self.peek_is(TokenKind::Hash)
+            || (self.peek_is(TokenKind::LParen) && !first_text.starts_with("__rspice_"))
+        {
             let instances = self.parse_module_instances()?;
             module.instances.extend(instances);
             return Ok(());
@@ -1077,15 +1089,42 @@ impl<'a> Parser<'a> {
     fn parse_module_instances(&mut self) -> Result<Vec<ModuleInstance>, ParseError> {
         let declaration_start = self.current_span();
         let module: SmolStr = self.expect_identifier("instantiated module name")?.into();
+        if self.check(TokenKind::LParen) && self.strength_specification_follows() {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: format!("instance of `{module}`"),
+                    found: "a drive strength on a primitive instance (IEEE 1364-2005 section \
+                            8.6)"
+                        .to_string(),
+                },
+                self.current_span(),
+            ));
+        }
         let parameters = if self.match_token(TokenKind::Hash) {
-            self.parse_instance_parameter_overrides()?
+            if self.check(TokenKind::LParen) {
+                self.parse_instance_parameter_overrides()?
+            } else {
+                // `#5`: a primitive instance's delay (section 8.6), as one
+                // ordered value.
+                let start = self.current_span();
+                let value = self.parse_delay_value()?;
+                vec![ParameterOverride {
+                    name: None,
+                    value,
+                    span: start.extend(self.previous_span()),
+                }]
+            }
         } else {
             Vec::new()
         };
         let mut instances = Vec::new();
         loop {
             let instance_start = self.current_span();
-            let name: SmolStr = self.expect_identifier("module instance name")?.into();
+            let name: SmolStr = if self.check(TokenKind::LParen) {
+                SmolStr::default()
+            } else {
+                self.expect_identifier("module instance name")?.into()
+            };
             // IEEE 1364-2005 section 12.1.2 lets a range after the instance
             // name declare an array of instances; generate expansion makes
             // one instance per element once the bounds are constant.

@@ -251,19 +251,17 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
     // Verilog-AMS LRM 2.4 Syntax 7-4 makes it a `module_keyword` and the
     // parser now reads one, so its refusal moved to the connect specification
     // machinery, where a module that does not bridge two domains is named for
-    // what is wrong with it rather than for its keyword.
-    for (keyword, source) in [
-        (
-            "primitive",
-            "primitive latch(q, clk, d);\n    output q;\nendprimitive\n",
-        ),
-        ("endprimitive", "endprimitive\n"),
-    ] {
-        assert_unsupported(
-            source,
-            &format!("Verilog-AMS digital construct not yet supported: `{keyword}`"),
-        );
-    }
+    // what is wrong with it rather than for its keyword. `primitive` left for
+    // the same reason: user-defined primitives parse (IEEE 1364-2005 section
+    // 8), so a primitive without its table is refused for that.
+    assert_unsupported(
+        "primitive latch(q, clk, d);\n    output q;\nendprimitive\n",
+        "Unsupported primitive `latch`: no `table` (IEEE 1364-2005 section 8.1)",
+    );
+    assert_unsupported(
+        "endprimitive\n",
+        "Verilog-AMS digital construct not yet supported: `endprimitive`",
+    );
 }
 
 /// Reserving the digital keywords must not retract identifier space that

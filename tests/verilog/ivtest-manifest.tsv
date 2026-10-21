@@ -310,8 +310,8 @@ br_gh99t	vlg	passed	L7	pass	PASSED
 br_gh99u	vlg	passed	L7	pass	PASSED
 br_ml20150315	vlg	gold	L1	pass	matches the gold file
 br_ml20150321	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'undeclared'
-br_ml20190806a	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-br_ml20190806b	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+br_ml20190806a	vlg	passed	L7	pass	PASSED
+br_ml20190806b	vlg	passed	L7	racy	passes in reverse order only; no PASSED line (2 output lines)
 br_ml20190814	vlg	gold	-	excluded:sdf-annotate	
 br_mw20171108	vlg	passed	L3	pass	PASSED
 bufif	vlg	passed	L7	pass	PASSED
@@ -572,8 +572,8 @@ landor1	vlg	passed	L1	pass	PASSED
 ldelay1	vlg	passed	L6	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `ok` is not declared in this module or its generated ancestors or enclosing instances
 ldelay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 ldelay3	vlg	passed	L6	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `ok` is not declared in this module or its generated ancestors or enclosing instances
-ldelay4	vlg	passed	L7	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
-ldelay5	vlg	passed	L7	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
+ldelay4	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+ldelay5	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
 lh_catadd	vlg	passed	L1	pass	PASSED
 lh_memcat	vlg	gold	L1	pass	matches the gold file
 lh_memcat2	vlg	passed	L1	pass	PASSED
@@ -875,7 +875,7 @@ pr1746848	vlg	gold	L1	pass	matches the gold file
 pr1752353	vlg	passed	L1	pass	PASSED
 pr1752823a	vlg	gold	L1	pass	matches the gold file
 pr1752823b	vlg	gold	L1	refused:statement	Parse error: Verilog-AMS digital construct not yet supported: `inf`
-pr1755593	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr1755593	vlg	passed	L7	pass	PASSED
 pr1755629	vlg	passed	L1	pass	PASSED
 pr1758122	vlg	gold	-	excluded:flag-g2001-noconfig	
 pr1758135	vlg	gold	L1	pass	matches the gold file
@@ -960,7 +960,7 @@ pr1913918b	vlg	passed	L1	pass	PASSED
 pr1913918c	vlg	passed	L1	pass	PASSED
 pr1913937	vlg	passed	L1	pass	PASSED
 pr1916261	vlg	passed	L1	pass	PASSED
-pr1921332	vlg	co	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr1921332	vlg	co	L7	pass	compiled
 pr1924845	vlg	passed	L1	pass	PASSED
 pr1925356	vlg	passed	L1	pass	PASSED
 pr1925363a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
@@ -1168,7 +1168,7 @@ pr2818823	vlg	passed	L1	pass	PASSED
 pr2823414	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'fail_at_line_10'
 pr2823711	vlg	passed	L1	pass	PASSED
 pr2824189	vlg	passed	-	excluded:systemverilog:var	
-pr2829776	vlg	passed	L6	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
+pr2829776	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
 pr2829776b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 pr2832234	vlg	passed	L7	pass	PASSED
 pr2834340	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
@@ -1217,7 +1217,7 @@ pr2974051	vlg	passed	L1	pass	PASSED
 pr2974216	vlg	passed	L1	pass	PASSED
 pr2974216b	vlg	passed	L1	pass	PASSED
 pr2974294	vlg	passed	L1	pass	PASSED
-pr298	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr298	vlg	gold	L7	pass	matches the gold file
 pr2985542	vlg	passed	L1	pass	PASSED
 pr2986497	vlg	co	-	excluded:systemverilog:var	
 pr2986528	vlg	passed	L1	racy	passes in source order only; no PASSED line (2 output lines)
@@ -1260,7 +1260,7 @@ pr312	vlg	passed	L1	pass	PASSED
 pr3149494	vlg	gold	L1	pass	matches the gold file
 pr3190941	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: port `x` of instance `foo` is connected to an expression; IEEE 1364-2005 section 12.3.9 permits one, and this compiler conn...
 pr3190948	vlg	passed	L1	pass	PASSED
-pr3194155	vlg	gold	L7	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
+pr3194155	vlg	gold	L7	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `x`, which module `foo` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input por...
 pr3197861	vlg	passed	-	excluded:systemverilog:var	
 pr3197917	vlg	passed	L4	fail	compile error: Parse error: Expected RParen, found LBracket
 pr3270320	vlg	ce	L3	pass	language error: Semantic error: Undeclared symbol: 'missing'
@@ -1296,7 +1296,7 @@ pr3561350	vlg	passed	L1	pass	PASSED
 pr3563412	vlg	passed	L1	pass	PASSED
 pr3571573	vlg	gold	L1	pass	matches the gold file
 pr3582052	vlg	passed	L1	pass	PASSED
-pr3587570	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr3587570	vlg	passed	L7	pass	PASSED
 pr3592746	vlg	passed	L3	pass	PASSED
 pr377	vlg	gold	L1	fail	compile error: Parse error: Expected port name, found Dot
 pr434	vlg	gold	L1	pass	matches the gold file
@@ -1355,7 +1355,7 @@ pr693	vlg	gold	L1	pass	matches the gold file
 pr699	vlg	passed	L4	pass	PASSED
 pr699b	vlg	passed	L4	pass	PASSED
 pr704	vlg	passed	L5	racy	passes in source order only; no PASSED line (2 output lines)
-pr707	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr707	vlg	passed	L7	pass	PASSED
 pr708	vlg	passed	L1	refused:$realtobits	Semantic error: Unsupported feature: a real value has no four-state form here: Verilog-AMS LRM 2.4 section 3.7 converts one to bits with the explicit `$realtobi...
 pr710	vlg	passed	L3	pass	PASSED
 pr718	vlg	passed	L3	pass	PASSED
@@ -1383,9 +1383,9 @@ pr905	vlg	gold	L1	pass	matches the gold file
 pr910	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (5 lines against 5)
 pr913	vlg	passed	L3	pass	PASSED
 pr923	vlg	gold	L3	pass	matches the gold file
-pr938	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-pr938b	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-pr938b_std	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr938	vlg	gold	L7	pass	matches the gold file
+pr938b	vlg	gold	L7	pass	matches the gold file
+pr938b_std	vlg	gold	L7	pass	matches the gold file
 pr941	vlg	passed	L3	pass	PASSED
 pr973	vlg	passed	L1	pass	PASSED
 pr978	vlg	passed	L3	pass	PASSED
@@ -1684,18 +1684,18 @@ tri3	vlg	passed	L7	pass	PASSED
 triand	vlg	passed	L7	pass	PASSED
 trior	vlg	passed	L7	pass	PASSED
 types1	vlg	passed	L1	pass	PASSED
-udp_bufg	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_bufg2	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_bx	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_delay_fail	vlg	ce	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_dff	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_dff_std	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_eval_arg	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_jkff	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_output_reg	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_real_delay	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_sched	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_x	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_bufg	vlg	passed	L7	pass	PASSED
+udp_bufg2	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+udp_bx	vlg	gold	L7	pass	matches the gold file
+udp_delay_fail	vlg	ce	L7	refused:instance-of-primitive	Parse error: Unsupported instance `q1` of primitive `mux2`: separate rise and fall delays on a primitive instance (IEEE 1364-2005 section 8.6); write a single d...
+udp_dff	vlg	passed	L7	pass	PASSED
+udp_dff_std	vlg	passed	L7	pass	PASSED
+udp_eval_arg	vlg	passed	L7	pass	PASSED
+udp_jkff	vlg	passed	L7	pass	PASSED
+udp_output_reg	vlg	passed	L7	pass	PASSED
+udp_real_delay	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+udp_sched	vlg	passed	L7	pass	PASSED
+udp_x	vlg	passed	L7	pass	PASSED
 unary_and	vlg	passed	L1	pass	PASSED
 unary_lnot1	vlg	passed	L1	pass	PASSED
 unary_lnot2	vlg	passed	L1	pass	PASSED
@@ -1767,8 +1767,8 @@ writememb2	vlg	passed	-	excluded:nonstandard-systf:$writememb
 writememh1	vlg	passed	-	excluded:nonstandard-systf:$writememh	
 writememh2	vlg	passed	-	excluded:nonstandard-systf:$writememh	
 xnor_test	vlg	passed	L1	pass	PASSED
-z1	vlg	passed	L1	fail	testbench gap: no root selection (-s foo); compile error: Parse error: Expected LParen, found IntegerLiteral
-z2	vlg	passed	L1	fail	testbench gap: no root selection (-s foo); compile error: Parse error: Expected LParen, found IntegerLiteral
+z1	vlg	passed	L1	pass	testbench gap: no root selection (-s foo); PASSED
+z2	vlg	passed	L1	pass	testbench gap: no root selection (-s foo); PASSED
 zero_repl	vlg	passed	L1	pass	PASSED
 zero_repl_fail	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
 basicexpr	synth	passed	L1	pass	PASSED

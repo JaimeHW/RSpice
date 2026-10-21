@@ -2956,6 +2956,69 @@ fn gate_and_switch_misuse_is_refused_by_name() {
     }
 }
 
+/// A user-defined primitive's table and instances are checked against
+/// IEEE 1364-2005 section 8, each misuse refused by name.
+#[test]
+fn primitive_misuse_is_refused_by_name() {
+    let udp = |header: &str, rows: &str| {
+        format!(
+            "primitive p {header}\n  table\n{rows}\n  endtable\nendprimitive\n\
+             module top;\n  reg a, b; wire y;\n  p u (y, a, b);\nendmodule\n"
+        )
+    };
+    for (source, expected) in [
+        (
+            udp("(o, a, b);\n  output o; input a, b;", "    r 0 : 1;"),
+            "a table row of the wrong form",
+        ),
+        (
+            udp(
+                "(o, a, b);\n  output o; reg o; input a, b;",
+                "    r f : ? : 1;",
+            ),
+            "at most one edge",
+        ),
+        (
+            udp("(o, a, b);\n  output o; input a, b;", "    0 : 1;"),
+            "1 input symbols for 2 inputs",
+        ),
+        (
+            udp(
+                "(o, a, b);\n  output o; input a, b;\n  initial o = 1'b0;",
+                "    0 0 : 1;",
+            ),
+            "section 8.5",
+        ),
+        (
+            "primitive p (o, a);\n  output o; input a;\n  table\n    0 : 1;\n  endtable\n\
+             endprimitive\nmodule top;\n  reg a; wire y;\n  p u[1:0] (y, a);\nendmodule\n"
+                .to_string(),
+            "an array of primitive instances",
+        ),
+        (
+            "primitive p (o, a);\n  output o; input a;\n  table\n    0 : 1;\n  endtable\n\
+             endprimitive\nmodule top;\n  reg a; wire y;\n  p u (.o(y), .z(a));\nendmodule\n"
+                .to_string(),
+            "a connection to no port `z`",
+        ),
+        (
+            "primitive p (o, a);\n  output o; input a;\n  table\n    0 : 1;\n  endtable\n\
+             endprimitive\nmodule top;\n  reg a; wire y;\n  p (strong0, weak1) u (y, a);\n\
+             endmodule\n"
+                .to_string(),
+            "a drive strength on a primitive instance",
+        ),
+        (
+            "module m(input a);\nendmodule\nmodule top;\n  reg a;\n  m (a);\nendmodule\n"
+                .to_string(),
+            "no instance name",
+        ),
+    ] {
+        let error = parse_error(&source);
+        assert!(error.contains(expected), "{source}\n{error}");
+    }
+}
+
 /// A bidirectional switch joins two net bits, so a terminal that is an
 /// expression or a whole vector is refused by the clause.
 #[test]
