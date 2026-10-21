@@ -1110,4 +1110,159 @@ mod tests {
         }
         after_open
     }
+
+    /// The places a whole `AppState` is held under the names the crate gives
+    /// it, with the dereference an assignment through `&mut AppState` needs.
+    const WHOLE_STATE: [&str; 6] = [
+        "*state",
+        "*app_state",
+        "state",
+        "app_state",
+        "self.state",
+        "app.state",
+    ];
+
+    /// Whether `line` installs a whole application state built elsewhere:
+    /// an assignment, swap, replace or `clone_from` whose target is the whole
+    /// state and whose value is a local binding.
+    fn writes_back_whole_state(line: &str) -> bool {
+        let line = line.trim();
+        let is_binding = |text: &str| {
+            let text = text
+                .trim()
+                .trim_start_matches("&mut ")
+                .trim_start_matches('&');
+            text.starts_with(|first: char| first.is_ascii_lowercase() || first == '_')
+                && text
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        };
+        let is_whole_state = |text: &str| {
+            let text = text.trim().trim_start_matches("&mut ");
+            WHOLE_STATE.contains(&text)
+        };
+        for target in WHOLE_STATE {
+            let Some(rest) = line.strip_prefix(target) else {
+                continue;
+            };
+            if let Some(value) = rest.trim_start().strip_prefix('=')
+                && !value.starts_with('=')
+                && let Some(value) = value.trim().strip_suffix(';')
+                && target != "state"
+                && target != "app_state"
+                && is_binding(value)
+            {
+                return true;
+            }
+            if rest.starts_with(".clone_from(") {
+                return true;
+            }
+        }
+        ["mem::swap(", "mem::replace("].into_iter().any(|call| {
+            line.find(call).is_some_and(|start| {
+                let arguments = call_arguments(&line[start + call.len()..]);
+                let (first, second) = arguments.split_once(',').unwrap_or((arguments, ""));
+                is_whole_state(first) || is_whole_state(second)
+            })
+        })
+    }
+
+    #[test]
+    fn the_write_back_detector_reads_every_spelling_and_nothing_else() {
+        for spelling in [
+            "*state = candidate;",
+            "    *state = committed;",
+            "self.state = candidate;",
+            "app.state = next;",
+            "*app_state = staged;",
+            "std::mem::swap(state, &mut candidate);",
+            "std::mem::replace(&mut self.state, candidate);",
+            "std::mem::swap(&mut candidate, &mut app.state);",
+            "self.state.clone_from(&candidate);",
+        ] {
+            assert!(writes_back_whole_state(spelling), "missed `{spelling}`");
+        }
+        for spelling in [
+            "*state = None;",
+            "state = candidate;",
+            "*state == candidate;",
+            "self.state.dialogs = candidate;",
+            "self.state_cache = candidate;",
+            "*state = SchematicState::from_document(doc);",
+            "state.commit_candidate(candidate);",
+            "std::mem::swap(&mut state.filter, &mut filter);",
+            "std::mem::take(&mut self.state.shortcut_resolver);",
+        ] {
+            assert!(!writes_back_whole_state(spelling), "misread `{spelling}`");
+        }
+    }
+
+    /// No shipped code installs a project transaction's candidate by hand.
+    ///
+    /// A transaction builds its result in a clone of `AppState`, and a clone
+    /// leaves out the runtime sessions the live state owns: the hardcopy
+    /// session with its in-flight print, export or publish, and the reference
+    /// pickers specification drafts wait on. Assigning the candidate over the
+    /// live state drops them, and the next frame cancels the print or export
+    /// the operator started. `AppState::commit_candidate` carries them across;
+    /// it is the one place a whole state is installed.
+    #[test]
+    fn project_transactions_install_their_candidate_only_through_commit_candidate() {
+        let owner = Path::new("workbench")
+            .join("app_state")
+            .join("transaction.rs");
+        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut paths = Vec::new();
+        rust_sources(&source_root, &mut paths);
+        paths.sort();
+        let sources = paths
+            .iter()
+            .map(|path| {
+                let source = std::fs::read_to_string(path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+                (path.clone(), source)
+            })
+            .collect::<Vec<_>>();
+        let roots = sources
+            .iter()
+            .flat_map(|(path, source)| test_only_roots(path, source))
+            .collect::<Vec<_>>();
+
+        let mut owners = 0_usize;
+        let mut commits = 0_usize;
+        let mut found = Vec::new();
+        for (path, source) in &sources {
+            if !ships(path, &roots) {
+                continue;
+            }
+            if path.ends_with(&owner) {
+                owners += source.matches("fn commit_candidate(").count();
+                continue;
+            }
+            for (number, line) in without_test_items(source).lines().enumerate() {
+                commits += line.matches(".commit_candidate(").count();
+                if writes_back_whole_state(line) {
+                    found.push(format!("{}:{}", path.display(), number + 1));
+                }
+            }
+        }
+
+        assert_eq!(
+            owners,
+            1,
+            "`AppState::commit_candidate` is defined once, in {}",
+            owner.display()
+        );
+        assert!(
+            commits > 10,
+            "the scan found only {commits} transaction commits; a scan that reaches nothing \
+             passes forever"
+        );
+        assert!(
+            found.is_empty(),
+            "these install a whole application state by hand, which drops the runtime \
+             sessions a clone leaves out — commit it with `AppState::commit_candidate`:\n  {}",
+            found.join("\n  ")
+        );
+    }
 }
