@@ -50,6 +50,7 @@ mod mixed;
 mod mosfet;
 #[cfg(test)]
 mod record_limit_tests;
+mod requested;
 mod solver_state;
 mod switch;
 use crate::device::behavioral::BehavioralAcceptedState;
@@ -214,11 +215,13 @@ fn checkpoint_operation_result<T>(
 /// Version 58 carries version 2 HDL host images in that mixed-runtime image.
 /// Version 59 retains accepted voltage- and current-controlled switch state.
 /// Version 60 retains the pending completions of zero-duration edges.
-const FORMAT_VERSION: u32 = edge::FORMAT_VERSION;
+/// Version 61 retains the other breakpoints the code models asked for.
+const FORMAT_VERSION: u32 = requested::FORMAT_VERSION;
 // The newest section's format is the file format; the sections before it
 // were added in order.
 const _: () = assert!(mixed::FORMAT_VERSION < switch::FORMAT_VERSION);
-const _: () = assert!(switch::FORMAT_VERSION < FORMAT_VERSION);
+const _: () = assert!(switch::FORMAT_VERSION < edge::FORMAT_VERSION);
+const _: () = assert!(edge::FORMAT_VERSION < FORMAT_VERSION);
 const CAPACITOR_INCREMENT_FORMAT_VERSION: u32 = 56;
 const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
 const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
@@ -359,6 +362,7 @@ pub(super) struct CheckpointIntegrationState<'a> {
     pub pending_tline_arrivals: &'a [Value],
     pub dynamic_tline_breakpoints_added: usize,
     pub edge_completions: &'a EdgeCompletionSchedule,
+    pub requested_breakpoints: &'a [Value],
 }
 
 /// The accepted-step runtime a resumed run reseeds from.
@@ -661,6 +665,10 @@ pub struct TransientCheckpoint {
     /// being crossed (see `edge.rs`). Empty in files older than format 60,
     /// whose producers never asked for one.
     edge_completions: EdgeCompletionSchedule,
+    /// The other breakpoints the code models asked for that are still ahead
+    /// of `time`, ascending (see `requested.rs`). `None` in files older than
+    /// format 61, which did not record them.
+    requested_breakpoints: Option<Vec<Value>>,
 
     cap_v_prev: Vec<Value>,
     cap_v_prev_prev: Vec<Value>,
@@ -5863,6 +5871,7 @@ impl TransientCheckpoint {
         capacitor_sdt::validate(self.capacitor_sdt_states.as_deref(), self.time, &mut budget)?;
         switch::validate(self.switch_states.as_deref())?;
         edge::validate(&self.edge_completions, self.time)?;
+        requested::validate(self.requested_breakpoints.as_deref(), self.time)?;
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
@@ -6688,6 +6697,7 @@ impl TransientCheckpoint {
                 pending_tline_arrivals: &[],
                 dynamic_tline_breakpoints_added: 0,
                 edge_completions: &EdgeCompletionSchedule::default(),
+                requested_breakpoints: &[],
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: None,
@@ -6731,6 +6741,7 @@ impl TransientCheckpoint {
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             edge_completions,
+            requested_breakpoints,
         } = integration;
         let CheckpointState {
             time,
@@ -6874,6 +6885,7 @@ impl TransientCheckpoint {
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             edge_completions: edge::capture(edge_completions, time),
+            requested_breakpoints: Some(requested::capture(requested_breakpoints, time)),
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
@@ -6948,6 +6960,7 @@ impl TransientCheckpoint {
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             edge_completions,
+            requested_breakpoints,
         } = integration;
         let CheckpointState {
             time,
@@ -6980,6 +6993,7 @@ impl TransientCheckpoint {
                 pending_tline_arrivals,
                 dynamic_tline_breakpoints_added,
                 edge_completions,
+                requested_breakpoints,
             },
             AcceptedTransientRuntime {
                 accepted_solver_state,
@@ -7306,6 +7320,7 @@ impl TransientCheckpoint {
             );
         }
         switch::validate_target(circuit, self.switch_states.as_deref())?;
+        requested::validate_target(circuit, self.requested_breakpoints.as_deref())?;
         // All state families are validated before the first mutation. The
         // restore calls below repeat their local validation defensively, but
         // cannot fail after this point without a violated internal invariant.
@@ -7842,6 +7857,14 @@ impl TransientCheckpoint {
         &self.edge_completions
     }
 
+    /// The other breakpoints the code models asked for that are still ahead
+    /// of the checkpoint, which a resumed run reinstates in its breakpoint
+    /// schedule before it takes a step. Empty for a file older than format 61,
+    /// which resumes only a circuit without a connect-rule converter.
+    pub(crate) fn requested_breakpoints(&self) -> &[Value] {
+        self.requested_breakpoints.as_deref().unwrap_or_default()
+    }
+
     pub(super) fn restore_solver_state(
         &self,
         matrix: &mut crate::solver::StaticMatrix,
@@ -8126,6 +8149,9 @@ impl TransientCheckpoint {
         }
         count = count.saturating_add(switch::retained_values(self.switch_states.as_deref()));
         count = count.saturating_add(edge::retained_values(&self.edge_completions));
+        count = count.saturating_add(requested::retained_values(
+            self.requested_breakpoints.as_deref(),
+        ));
         for instance in &self.xspice_instance_states {
             count = count
                 .saturating_add(2)
@@ -8906,6 +8932,7 @@ impl TransientCheckpoint {
         mixed::write(&mut out, self.mixed_runtime_image.as_ref(), abort)?;
         switch::write(&mut out, self.switch_states.as_deref(), abort)?;
         edge::write(&mut out, &self.edge_completions, abort)?;
+        requested::write(&mut out, self.requested_breakpoints.as_deref(), abort)?;
         check_checkpoint_abort(abort)?;
         Ok(out)
     }
@@ -9750,6 +9777,7 @@ impl TransientCheckpoint {
         let mixed_runtime_image = mixed::read(lines, version, budget)?;
         let switch_states = switch::read(lines, version, budget)?;
         let edge_completions = edge::read(lines, version, budget)?;
+        let requested_breakpoints = requested::read(lines, version, budget)?;
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -9779,6 +9807,7 @@ impl TransientCheckpoint {
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             edge_completions,
+            requested_breakpoints,
             cap_v_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
@@ -11911,6 +11940,54 @@ mod tests {
         }
     }
 
+    /// The breakpoints the code models asked for round-trip bit for bit; a
+    /// file from before the section reads as one that did not record them,
+    /// and so does a current file that says so; and a request that is not
+    /// ahead of the checkpoint, or out of order, is refused.
+    #[test]
+    fn pending_model_breakpoints_round_trip_and_read_unknown_from_older_files() {
+        let mut checkpoint = sample();
+        let deadline = checkpoint.time + 3.0e-11;
+        checkpoint.requested_breakpoints = Some(vec![deadline, 1.0 / 3.0 * 1.0e-5]);
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let bytes = checkpoint.to_bytes(encoding).unwrap();
+            assert_eq!(TransientCheckpoint::from_bytes(&bytes).unwrap(), checkpoint);
+        }
+        assert_eq!(
+            requested::capture(
+                &[3.0e-6, deadline, checkpoint.time, 3.0e-6],
+                checkpoint.time
+            ),
+            vec![deadline, 3.0e-6]
+        );
+
+        let legacy =
+            TransientCheckpoint::from_text(&legacy_text(&checkpoint, edge::FORMAT_VERSION))
+                .unwrap();
+        assert_eq!(legacy.requested_breakpoints, None);
+        assert!(legacy.requested_breakpoints().is_empty());
+        let mut unknown = checkpoint.clone();
+        unknown.requested_breakpoints = None;
+        assert_eq!(
+            TransientCheckpoint::from_text(&unknown.to_text()).unwrap(),
+            unknown
+        );
+
+        for requests in [
+            vec![checkpoint.time],
+            vec![3.0e-6, deadline],
+            vec![deadline, deadline],
+            vec![Value::INFINITY],
+        ] {
+            let mut invalid = checkpoint.clone();
+            invalid.requested_breakpoints = Some(requests);
+            assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
+        }
+    }
+
     fn sample() -> TransientCheckpoint {
         TransientCheckpoint {
             accepted_solver_state: Some(sample_solver_state(rspice_matrix::RealSolverBackend::Klu)),
@@ -11995,6 +12072,7 @@ mod tests {
             pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
             dynamic_tline_breakpoints_added: 3,
             edge_completions: EdgeCompletionSchedule::default(),
+            requested_breakpoints: Some(Vec::new()),
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
             cap_v_prev_prev_prev: vec![0.08, -0.18],
@@ -12294,6 +12372,10 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < requested::FORMAT_VERSION && line.starts_with("pending_model_breakpoints ")
+            {
+                continue;
+            }
             if version < edge::FORMAT_VERSION
                 && (line.starts_with("pending_edge_completions ")
                     || line.starts_with("edge_crossing "))
@@ -14913,7 +14995,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 44] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 45] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -14958,6 +15040,7 @@ mod tests {
         (58, 13),
         (59, 13),
         (60, 13),
+        (61, 13),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -15468,6 +15551,7 @@ mod tests {
                 pending_tline_arrivals: &[],
                 dynamic_tline_breakpoints_added: 0,
                 edge_completions: &EdgeCompletionSchedule::default(),
+                requested_breakpoints: &[],
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: None,

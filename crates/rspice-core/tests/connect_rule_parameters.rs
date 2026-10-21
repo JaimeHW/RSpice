@@ -647,6 +647,268 @@ fn a_checkpoint_across_a_converter_resumes_or_refuses_by_name() {
     }
 }
 
+/// A Verilog buffer between a banded A/D with an X timeout and a delayed,
+/// ramped D/A into 1 kΩ:
+///
+/// * the A/D: `vtlo` 1 V, `vthi` 2 V, `txdel` 1 µs. The input ramps to
+///   1.5 V over 1 µs and enters the band at 2/3 µs; it is still there at the
+///   deadline 5/3 µs, where the A/D publishes X. It rises through `vthi` at
+///   3 µs + 0.5 V / 3.6 V/µs, and the A/D publishes 1.
+/// * the D/A: each change starts `tdelay` = 50 ns after the buffer's event
+///   and takes the full `trise` or `tfall`, 100 ns: 0 → X ramps over
+///   [5/3 µs + 50 ns, + 150 ns], X → 1 over [rise + 50 ns, + 150 ns].
+///
+/// `stock` puts both ports on explicit ngspice cards instead, so no connect
+/// rule reaches them: an `adc_bridge` with the same thresholds, which reads X
+/// as soon as the input is inside them and publishes 1 ns later, and a
+/// `dac_bridge` with 100 ns full-swing edges, so a 0 → X or X → 1 ramp ends
+/// 50 ns after its event.
+fn deadline_deck(directory: &TempDirectory, stock: bool) -> Netlist {
+    let mut source = String::from(
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module buffer(i, o);\n  input i; output o;\n  assign o = i;\nendmodule\n",
+    );
+    for (_, module) in BUILTIN_CONNECT_MODULES {
+        source.push_str(module);
+    }
+    source.push_str(
+        "connectrules deck;\n    connect a2d #(.vtlo(1.0), .vthi(2.0), .txdel(1u));\n    connect d2a #(.trise(100n), .tfall(100n), .tdelay(50n));\nendconnectrules\n",
+    );
+    let path = directory.write("buffer.vams", &source);
+    let ports = if stock {
+        "x1 ind od buffer\n\
+         aadc [in] [ind] stockadc\n\
+         .model stockadc adc_bridge(in_low=1.0 in_high=2.0)\n\
+         adac [od] [out] stockdac\n\
+         .model stockdac dac_bridge(out_low=0 out_high=3.3 out_undef=1.65 t_rise=100n t_fall=100n)\n"
+    } else {
+        "x1 in out buffer\n"
+    };
+    Netlist::parse(&format!(
+        "* banded A/D and ramped D/A\n\
+         .param vcc=3.3\n\
+         .hdl \"{path}\" module=buffer\n\
+         .options connectrules=deck\n\
+         vin in 0 pwl(0 0 1u 1.5 3u 1.5 3.5u 3.3)\n\
+         {ports}\
+         r1 out 0 1k\n\
+         .end\n"
+    ))
+    .expect("deck parses")
+}
+
+/// The run resumed from `stop` against the uninterrupted one: every event
+/// after `stop` at the same instant with the same value, and `out` within
+/// 1e-9 V at every point either run accepted after it. The first difference
+/// is the error.
+fn resumes_onto(
+    whole: &TransientResult,
+    resumed: &TransientResult,
+    stop: f64,
+) -> Result<(), String> {
+    for trace in &whole.digital_traces {
+        let after = |points: &[rspice_core::engine::DigitalTracePoint]| {
+            points
+                .iter()
+                .filter(|point| point.time > stop)
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        let other = resumed
+            .digital_traces
+            .iter()
+            .find(|other| other.node_name == trace.node_name)
+            .ok_or_else(|| format!("the resumed run does not trace {}", trace.node_name))?;
+        let (resumed_events, whole_events) = (after(&other.points), after(&trace.points));
+        if resumed_events != whole_events {
+            return Err(format!(
+                "events on {} resumed from {stop:e}: {resumed_events:?} against {whole_events:?}",
+                trace.node_name
+            ));
+        }
+    }
+    let end = *whole.time.last().expect("a run");
+    for time in whole
+        .time
+        .iter()
+        .chain(&resumed.time)
+        .copied()
+        .filter(|time| *time > stop && *time <= end)
+    {
+        let (a, b) = (value_at(whole, "out", time), value_at(resumed, "out", time));
+        if (a - b).abs() > 1e-9 {
+            return Err(format!(
+                "out resumed from {stop:e} at {time:e}: {b} against {a}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn assert_resumes_onto(whole: &TransientResult, resumed: &TransientResult, stop: f64) {
+    if let Err(difference) = resumes_onto(whole, resumed, stop) {
+        panic!("{difference}");
+    }
+}
+
+/// The instant `node`'s digital trace first takes `value` after `from`.
+fn event_time(
+    result: &TransientResult,
+    node: &str,
+    value: rspice_core::xspice::DigitalValue,
+    from: f64,
+) -> f64 {
+    result
+        .digital_traces
+        .iter()
+        .find(|trace| trace.node_name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("no trace of {node}: {:?}", result.digital_traces))
+        .points
+        .iter()
+        .find(|point| point.time > from && point.value == value)
+        .unwrap_or_else(|| panic!("{node} never reads {value:?} after {from}"))
+        .time
+}
+
+/// A checkpoint taken inside the A/D's band with its X deadline 2/3 µs
+/// ahead, inside the D/A's `tdelay` wait, and inside its ramp resumes onto
+/// the uninterrupted run: the same events at the same instants, and the same
+/// analog output. The A/D's band entry is its own state, and the delayed
+/// start is the buffer's event time plus `tdelay`, which the converter reads
+/// from the event time the image restores.
+#[test]
+fn a_checkpoint_inside_a_pending_deadline_resumes_onto_the_uninterrupted_run() {
+    use rspice_core::xspice::DigitalValue;
+    let directory = TempDirectory::new("deadlines");
+    let netlist = deadline_deck(&directory, false);
+    let engine = Engine::default();
+    let whole = engine
+        .run_tran(&netlist, 4e-6, 10e-9)
+        .expect("the uninterrupted run");
+    let names = whole
+        .digital_traces
+        .iter()
+        .map(|trace| trace.node_name.clone())
+        .collect::<Vec<_>>();
+    let x = event_time(&whole, &names[0], DigitalValue::unknown(), 0.0);
+    assert!(
+        (x - 5.0e-6 / 3.0).abs() <= 1e-12,
+        "X at the deadline: {x} ({names:?})"
+    );
+    let start = x + 50e-9;
+    for stop in [1.0e-6, x + 25e-9, start + 50e-9] {
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&netlist, stop, 10e-9)
+            .expect("checkpoints");
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 4e-6, 10e-9)
+            .expect("resumes");
+        assert_resumes_onto(&whole, &resumed, stop);
+    }
+}
+
+/// The same with the checkpoint 30 ps before each deadline, inside the
+/// 100 ps first step the resumed run takes (a hundredth of the 10 ns step
+/// hint): the X timeout, the delayed start and both ramp ends on the
+/// connect-rule converters, and both ramp ends of a stock `dac_bridge`. A
+/// model asks for each at every accepted point and a resumed run evaluates
+/// none at its first, so only the image can hold them; without it the
+/// resumed run stepped over every one and published the X, started the ramp
+/// or ended it 70 ps late.
+#[test]
+fn a_checkpoint_just_before_a_deadline_resumes_onto_the_uninterrupted_run() {
+    use rspice_core::xspice::DigitalValue;
+    let directory = TempDirectory::new("deadline-edges");
+    let mut failures = Vec::new();
+    for stock in [false, true] {
+        let netlist = deadline_deck(&directory, stock);
+        let engine = Engine::default();
+        let whole = engine
+            .run_tran(&netlist, 4e-6, 10e-9)
+            .expect("the uninterrupted run");
+        let names = whole
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.clone())
+            .collect::<Vec<_>>();
+        let x = event_time(&whole, &names[0], DigitalValue::unknown(), 0.0);
+        let rise = event_time(&whole, &names[0], DigitalValue::one(), x);
+        let stops = if stock {
+            vec![
+                ("stock ramp end", x + 50e-9 - 30e-12),
+                ("stock second ramp end", rise + 50e-9 - 30e-12),
+            ]
+        } else {
+            vec![
+                ("X deadline", x - 30e-12),
+                ("delayed start", x + 50e-9 - 30e-12),
+                ("ramp end", x + 150e-9 - 30e-12),
+                ("second ramp end", rise + 150e-9 - 30e-12),
+            ]
+        };
+        for (what, stop) in stops {
+            let (_, checkpoint) = engine
+                .run_tran_checkpointed(&netlist, stop, 10e-9)
+                .expect("checkpoints");
+            let (resumed, _) = engine
+                .run_tran_resume(&netlist, &checkpoint, 4e-6, 10e-9)
+                .unwrap_or_else(|error| panic!("resumes from {stop:e} (stock {stock}): {error}"));
+            if let Err(difference) = resumes_onto(&whole, &resumed, stop) {
+                failures.push(format!("{what}: {difference}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// An image from before the format that carries those breakpoints is
+/// refused when the circuit holds a connect-rule converter, naming it: one
+/// of its deadlines may have been pending. A circuit on stock XSPICE cards
+/// resumes from one as it always did.
+#[test]
+fn an_image_without_the_model_breakpoints_resumes_only_stock_converters() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    let directory = TempDirectory::new("older-image");
+    let engine = Engine::default();
+    for stock in [false, true] {
+        let netlist = deadline_deck(&directory, stock);
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&netlist, 1e-6, 10e-9)
+            .expect("checkpoints");
+        let text = String::from_utf8(
+            checkpoint
+                .to_bytes(TransientCheckpointEncoding::Unpacked)
+                .expect("serializes"),
+        )
+        .expect("canonical text");
+        let (header, body) = text.split_once('\n').expect("a header line");
+        assert_eq!(header, "RSPICE-CHECKPOINT 61");
+        let mut older = String::from("RSPICE-CHECKPOINT 60\n");
+        for line in body
+            .lines()
+            .filter(|line| !line.starts_with("pending_model_breakpoints "))
+        {
+            older.push_str(line);
+            older.push('\n');
+        }
+        let image = TransientCheckpoint::from_bytes(older.as_bytes()).expect("a format-60 image");
+        let outcome = engine.run_tran_resume(&netlist, &image, 4e-6, 10e-9);
+        if stock {
+            outcome.expect("an image on stock cards resumes");
+        } else {
+            let refusal = match outcome {
+                Ok(_) => panic!("an older image with a connect-rule converter is refused"),
+                Err(error) => error.to_string(),
+            };
+            assert!(
+                refusal.contains("__rspice_auto_") && refusal.contains("(__rspice_connect_"),
+                "the refusal names the converter and its model: {refusal}"
+            );
+        }
+    }
+}
+
 //=============================================================================
 // 7. A driver-sensitive D/A on an XSPICE node
 //=============================================================================

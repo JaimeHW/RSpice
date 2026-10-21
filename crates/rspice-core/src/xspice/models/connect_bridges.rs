@@ -43,6 +43,12 @@ use crate::xspice::{
 #[cfg(test)]
 mod tests;
 
+/// Whether `model` names one of the converters here, in any form: each is
+/// `__rspice_connect_*`.
+pub(crate) fn is_connect_converter(model: &str) -> bool {
+    model.starts_with("__rspice_connect_")
+}
+
 /// The tracked fraction of the supply a threshold left at its default sits at.
 const DEFAULT_THRESHOLD_FRACTION: Value = 0.5;
 /// The tracked fraction of the supply `vhi` left at its default sits at.

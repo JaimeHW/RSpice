@@ -4364,6 +4364,7 @@ impl Engine {
                 pending_tline_arrivals,
                 dynamic_tline_breakpoints_added,
                 edge_completions: &breakpoints.edge_completion_schedule(accepted_time),
+                requested_breakpoints: &breakpoints.model_request_schedule(accepted_time),
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: Some(
@@ -4711,6 +4712,7 @@ impl Engine {
                         dynamic_tline_breakpoints_added: 0,
                         edge_completions:
                             &crate::numerics::integration::EdgeCompletionSchedule::default(),
+                        requested_breakpoints: &[],
                     },
                     AcceptedTransientRuntime {
                         accepted_solver_state: None,
@@ -5341,10 +5343,12 @@ impl Engine {
             )?;
         }
         // A checkpoint taken on a zero-duration edge holds the completion the
-        // edge's model asked for there; no model is evaluated at this first
-        // point to ask again.
+        // edge's model asked for there, and every checkpoint the other
+        // breakpoints its models asked for; no model is evaluated at this
+        // first point to ask again.
         if let Some(checkpoint) = resume {
             breakpoints.restore_edge_completion_schedule(checkpoint.edge_completions(), tstop);
+            breakpoints.restore_model_requests(checkpoint.requested_breakpoints(), tstop);
         }
         let configured_initial_step = self
             .config
@@ -12698,6 +12702,7 @@ impl Engine {
                         pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
                         dynamic_tline_breakpoints_added,
                         edge_completions: &breakpoints.edge_completion_schedule(t),
+                        requested_breakpoints: &breakpoints.model_request_schedule(t),
                     },
                     AcceptedTransientRuntime {
                         accepted_solver_state: Some(

@@ -347,8 +347,12 @@ impl Engine {
             runtime_breakpoints.push(event_time);
         }
         let mut edge_completions = Vec::new();
+        // Every request, the ones past the stop time included: a checkpoint
+        // taken here carries those still ahead of it.
+        let mut model_requests = Vec::new();
         circuit.drain_xspice_requested_breakpoints(
             |time| {
+                model_requests.push(time);
                 if time.is_finite() && time >= 0.0 && time <= tstop {
                     runtime_breakpoints.push(time);
                 }
@@ -370,6 +374,7 @@ impl Engine {
         let _ = read_step_completions;
         breakpoints.replace_runtime_breakpoints(runtime_breakpoints);
         breakpoints.replace_edge_completions(edge_completions);
+        breakpoints.replace_model_requests(model_requests);
         Ok(())
     }
 

@@ -158,6 +158,10 @@ pub struct BreakpointManager {
     /// The runtime breakpoints that complete a zero-duration edge
     /// ([`Self::replace_edge_completions`]).
     edge_completions: BTreeSet<BreakpointTimeKey>,
+    /// Every breakpoint the code models asked for at the last accepted point,
+    /// those past the run's stop time included
+    /// ([`Self::replace_model_requests`]).
+    model_requests: Vec<Value>,
     /// The edge the stepper is crossing, from its landing to its completion.
     edge_crossing: Option<EdgeCrossing>,
     /// The permanent breakpoints a behavioral expression's own clock produced
@@ -222,6 +226,7 @@ impl BreakpointManager {
                 DEFAULT_BREAKPOINT_TOLERANCE
             },
             edge_completions: BTreeSet::new(),
+            model_requests: Vec::new(),
             edge_crossing: None,
             expression_clocks: BTreeSet::new(),
         }
@@ -240,6 +245,7 @@ impl BreakpointManager {
             inclusive_tolerance: self.inclusive_tolerance,
             tolerance: self.tolerance,
             edge_completions: BTreeSet::new(),
+            model_requests: Vec::new(),
             edge_crossing: None,
             expression_clocks: BTreeSet::new(),
         }
@@ -565,6 +571,68 @@ impl BreakpointManager {
         self.edge_crossing = schedule
             .crossing
             .map(|(completion, resume)| EdgeCrossing { completion, resume });
+    }
+
+    /// Replace the breakpoints the code models asked for at the accepted
+    /// point, whether or not they fall before the run's stop time.
+    ///
+    /// A request holds for the next step only: the model asks again at the
+    /// point that step accepts. The runtime schedule keeps the requests the
+    /// run can reach ([`Self::replace_runtime_breakpoints`]), so a run that
+    /// stops at a checkpoint holds none of those past it, and a run resumed
+    /// from the checkpoint evaluates no model at its first point to ask
+    /// again. The checkpoint carries these instead
+    /// ([`Self::model_request_schedule`]).
+    pub(crate) fn replace_model_requests<I>(&mut self, times: I)
+    where
+        I: IntoIterator<Item = Value>,
+    {
+        self.model_requests.clear();
+        self.model_requests.extend(
+            times
+                .into_iter()
+                .filter(|time| time.is_finite() && *time >= 0.0),
+        );
+    }
+
+    /// The model-requested breakpoints still ahead of the accepted point
+    /// `time`, for a checkpoint taken there: every one but the edge
+    /// completions, which [`Self::edge_completion_schedule`] carries with the
+    /// edge being crossed.
+    pub(crate) fn model_request_schedule(&self, time: Value) -> Vec<Value> {
+        self.model_requests
+            .iter()
+            .copied()
+            .filter(|request| *request > time && !self.is_edge_completion(*request))
+            .collect()
+    }
+
+    /// Reinstate a checkpoint's model-requested breakpoints when a run
+    /// resumes: each at or before `stop` is a runtime breakpoint again, as
+    /// [`Self::replace_runtime_breakpoints`] took it from the model's request,
+    /// until the first accepted point asks the models anew.
+    pub(crate) fn restore_model_requests(&mut self, times: &[Value], stop: Value) {
+        for &time in times {
+            if !time.is_finite() || time < 0.0 {
+                continue;
+            }
+            if time <= stop
+                && !Self::contains_sorted_within_tolerance(
+                    &self.breakpoints[self.current_index..],
+                    time,
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                )
+            {
+                Self::insert_runtime_unique(
+                    &mut self.runtime_breakpoints,
+                    time,
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                );
+            }
+            self.model_requests.push(time);
+        }
     }
 
     /// The restart after a landing at `time` that interrupted `approach`.
@@ -940,6 +1008,7 @@ impl BreakpointManager {
         self.current_index = 0;
         self.runtime_breakpoints.clear();
         self.edge_completions.clear();
+        self.model_requests.clear();
         self.edge_crossing = None;
         self.just_passed_breakpoint = false;
     }
