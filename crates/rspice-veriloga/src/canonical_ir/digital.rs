@@ -743,6 +743,10 @@ pub struct CfgDigitalProcess {
     /// question does not have one answer.
     pub static_sensitivity: Option<DigitalStaticSensitivity>,
     pub span: SourceSpanRef,
+    /// Where the process was written, once a source map has resolved the
+    /// span; what a diagnostic naming the process prints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<DigitalSourceLine>,
 }
 
 /// A process's static sensitivity list and where it came from.
@@ -1691,6 +1695,45 @@ pub enum DigitalSystemArgument {
 pub struct DigitalSourceLine {
     pub file: SmolStr,
     pub line: u32,
+}
+
+/// Where a located plan placed its processes and system calls, by the byte
+/// offset of each one's span in the compiled document.
+///
+/// A replay compiles the expanded text an artifact retained, not the
+/// documents that text was expanded from, so it cannot place a site itself;
+/// it places each where the artifact's own plan did, which keeps the
+/// original's lines and the original's identity.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DigitalSourceOrigins(std::collections::BTreeMap<u32, Option<DigitalSourceLine>>);
+
+impl DigitalSourceOrigins {
+    pub(crate) fn of(plan: &CanonicalDigitalPlan) -> Self {
+        let processes = plan
+            .processes
+            .iter()
+            .map(|process| (process.span, &process.origin));
+        let calls = plan
+            .system_calls
+            .iter()
+            .map(|call| (call.span, &call.origin));
+        Self(
+            processes
+                .chain(calls)
+                .filter(|(span, _)| span.source_file_id == 0)
+                .map(|(span, origin)| (span.start, origin.clone()))
+                .collect(),
+        )
+    }
+
+    /// The place the located plan gave a site at `span`, or `None` when it
+    /// had no site there.
+    pub(crate) fn get(&self, span: SourceSpanRef) -> Option<Option<DigitalSourceLine>> {
+        if span.source_file_id != 0 {
+            return None;
+        }
+        self.0.get(&span.start).cloned()
+    }
 }
 
 /// One system task or function call site.

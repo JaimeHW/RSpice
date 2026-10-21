@@ -139,7 +139,7 @@ bitwidth2	vlg	passed	L1	pass	PASSED
 blankport	vlg	passed	L1	pass	testbench gap: no root selection (-s main); PASSED
 block_only_with_var_def	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: generated scope `b` with index None is missing or not source-visible
 bnot	vlg	passed	L1	pass	PASSED
-br1000	vlg	passed	L1	fail	run-time error: event network did not settle at tick 0 within 10000 delta cycles (busiest driver always#0.process fired 5001 times)
+br1000	vlg	passed	L1	fail	run-time error: event network did not settle at tick 0 (0e0 s) within 10000 delta cycles; busiest drivers: always#0 (always, br1000.v:10) driving b, i fired 5001 times; always#...
 br1001	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: analog port 'a' of instance 'topmod.m1' connects discrete net 'x' without a connect module; this compiler inserts connect m...
 br1006	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 br1007	vlg	gold	-	excluded:flag-Wselect-range	

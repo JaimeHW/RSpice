@@ -172,18 +172,22 @@ impl CanonicalDigitalPlan {
         self.seal()
     }
 
-    /// Record where each system call was written, from the byte offset of its
-    /// span in the source the plan was compiled from, then reseal.
+    /// Record where each process and each system call was written, from the
+    /// byte offset of its span in the source the plan was compiled from, then
+    /// reseal.
     ///
     /// The lowering sees only spans; the source map that turns an offset in
     /// the preprocessed text into an original file and line belongs to the
     /// compile that owns the text, which calls this once.
-    pub fn locate_system_calls(
+    pub fn locate_sources(
         mut self,
         locate: impl Fn(super::SourceSpanRef) -> Option<DigitalSourceLine>,
     ) -> Result<Self, Vec<IrDiagnostic>> {
-        if self.system_calls.is_empty() {
+        if self.processes.is_empty() && self.system_calls.is_empty() {
             return Ok(self);
+        }
+        for process in &mut self.processes {
+            process.origin = locate(process.span);
         }
         for site in &mut self.system_calls {
             site.origin = locate(site.span);

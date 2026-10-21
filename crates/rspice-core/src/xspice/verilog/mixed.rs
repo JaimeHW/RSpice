@@ -2973,7 +2973,7 @@ impl MixedSignalHost {
         &self,
         process: &rspice_veriloga::canonical_ir::digital::CfgDigitalProcess,
     ) -> String {
-        let label = super::host::process_label(process.kind, usize::from(process.id));
+        let label = super::host::process_label(process, usize::from(process.id));
         format!("{}.{label}", self.instance)
     }
 

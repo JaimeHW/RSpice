@@ -102,6 +102,7 @@ fn process(function: CfgFunction) -> CfgDigitalProcess {
             start: 0,
             end: 0,
         },
+        origin: None,
     }
 }
 

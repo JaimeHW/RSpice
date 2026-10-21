@@ -1975,6 +1975,7 @@ pub(crate) fn evaluate_constant_expression(
         function,
         static_sensitivity: None,
         span,
+        origin: None,
     };
     // The functions a constant function call reaches (IEEE 1364-2005 section
     // 10.4.5); their loops bound the run as a process's do.
@@ -4076,6 +4077,7 @@ mod tests {
                 start: 0,
                 end: 0,
             },
+            origin: None,
         }
     }
 

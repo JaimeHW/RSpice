@@ -870,6 +870,26 @@ pub fn run_digital_testbench(
         include_paths: options.include_dirs.clone(),
         ..CompilerOptions::default()
     });
+    // A process and a system call are placed in the file they were written
+    // in, not in the unit the files were joined into.
+    let newlines: Vec<usize> = unit
+        .bytes()
+        .enumerate()
+        .filter(|(_, byte)| *byte == b'\n')
+        .map(|(at, _)| at)
+        .collect();
+    let locate = |span: rspice_veriloga::canonical_ir::SourceSpanRef| {
+        let offset = span.start as usize;
+        if span.source_file_id != 0 || offset > unit.len() {
+            return None;
+        }
+        let line = newlines.partition_point(|at| *at < offset) as u32;
+        let (start, file) = starts.iter().rev().find(|(start, _)| *start <= line)?;
+        Some(rspice_veriloga::canonical_ir::digital::DigitalSourceLine {
+            file: file.as_str().into(),
+            line: line - start + 1,
+        })
+    };
     let mut plans = Vec::new();
     let (declared, mut instantiated) = declared_modules(&unit)?;
     // A module the source instantiates is compiled inside its root, never as
@@ -890,7 +910,17 @@ pub fn run_digital_testbench(
                 equations: artifact.mir.equations.len(),
             });
         }
-        plans.push((module, artifact.digital));
+        let digital = artifact
+            .digital
+            .locate_sources(locate)
+            .map_err(|diagnostics| DigitalRunError::Compile {
+                detail: diagnostics
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            })?;
+        plans.push((module, digital));
     }
     // A module some other module instantiates is not a root.
     instantiated.extend(

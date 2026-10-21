@@ -768,6 +768,89 @@ fn files_prepared_as_one_unit_share_directives_and_modules() {
     assert_eq!(diagnostics[0].line, Some(1));
 }
 
+/// A replay compiles the expanded text its artifact retained, not the
+/// documents that text was expanded from, and still places each process and
+/// system call on the file and line it was written on: the replayed plan's
+/// diagnostics and `%l` read the original's lines, and its identity is the
+/// original's.
+#[test]
+fn a_replay_places_processes_and_system_calls_where_they_were_written() {
+    use rspice_veriloga::canonical_ir::digital::{CanonicalDigitalPlan, DigitalSourceLine};
+
+    let files = Sources::new();
+    // The included lines put the design's sites further down the expanded
+    // text than they are in their own file.
+    files.write("spacer.vams", "module spacer;\n  wire unused;\nendmodule\n");
+    let root = files.write(
+        "design.vams",
+        "`include \"spacer.vams\"\n\
+         module inv(input wire a, output wire y);\n\
+         \x20 assign y = ~a;\n\
+         endmodule\n\
+         module top(p);\n\
+         \x20 inout p; electrical p;\n\
+         \x20 reg a;\n\
+         \x20 wire y;\n\
+         \x20 inv u(.a(a), .y(y));\n\
+         \x20 initial begin\n\
+         \x20   a = 0;\n\
+         \x20   $display(\"y=%b\", y);\n\
+         \x20 end\n\
+         \x20 analog V(p) <+ 0;\n\
+         endmodule\n",
+    );
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let original = compiler
+        .prepare_file_runtime_source(&root)
+        .unwrap()
+        .compile_runtime(Some("top"))
+        .unwrap();
+    let replay = compiler
+        .prepare_artifact_runtime_source(&original.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    let placed = |plan: &CanonicalDigitalPlan| {
+        let line = |origin: Option<&DigitalSourceLine>| {
+            let origin = origin.expect("every site of the compiled document is placed");
+            assert!(origin.file.ends_with("design.vams"), "{origin:?}");
+            origin.line
+        };
+        let mut processes: Vec<u32> = plan
+            .processes
+            .iter()
+            .map(|process| line(process.origin.as_ref()))
+            .collect();
+        processes.sort_unstable();
+        let calls: Vec<u32> = plan
+            .system_calls
+            .iter()
+            .map(|call| line(call.origin.as_ref()))
+            .collect();
+        (processes, calls)
+    };
+    let (original, replay) = (&original.canonical_ir.digital, &replay.canonical_ir.digital);
+    assert_eq!(placed(original), (vec![3, 10], vec![12]));
+    assert_eq!(
+        replay
+            .system_calls
+            .iter()
+            .map(|call| &call.origin)
+            .collect::<Vec<_>>(),
+        original
+            .system_calls
+            .iter()
+            .map(|call| &call.origin)
+            .collect::<Vec<_>>(),
+        "a replayed system call keeps the line `%l` prints"
+    );
+    assert_eq!(placed(replay), placed(original));
+    assert_eq!(replay.content_identity, original.content_identity);
+}
+
 #[test]
 fn standalone_connect_library_is_prepared_without_a_device_module() {
     let files = Sources::new();

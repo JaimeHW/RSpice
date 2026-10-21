@@ -378,6 +378,7 @@ impl VerilogACompiler {
                 dependencies,
                 compiler_options: self.options.clone(),
                 metrics: measurements.finish(),
+                replay_origins: Default::default(),
             },
             source_bundle: bundle.clone(),
             source_bundle_identity: virtual_source::source_bundle_identity(bundle),

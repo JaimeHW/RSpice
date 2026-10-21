@@ -1526,6 +1526,7 @@ fn lower_continuous_assign(
         function,
         static_sensitivity,
         span: assignment.span.into(),
+        origin: None,
     })
 }
 
@@ -1834,6 +1835,7 @@ fn lower_process(
         function,
         static_sensitivity,
         span: process.span.into(),
+        origin: None,
     })
 }
 

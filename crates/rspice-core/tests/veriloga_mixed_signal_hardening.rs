@@ -140,6 +140,16 @@ impl ModelFile {
     fn deck_path(&self) -> String {
         self.0.display().to_string().replace('\\', "/")
     }
+
+    /// The file's name without its directory, as a diagnostic places a
+    /// process in it.
+    fn file_name(&self) -> String {
+        self.0
+            .file_name()
+            .expect("a model file has a name")
+            .to_string_lossy()
+            .into_owned()
+    }
 }
 
 impl Drop for ModelFile {
@@ -1759,19 +1769,20 @@ fn an_inverting_loop_through_converters_is_refused_at_the_operating_point() {
         );
         let error = error.to_string();
         let lowered = error.to_lowercase();
+        let file = model.file_name().to_lowercase();
         for expected in [
-            "no coupled t = 0 fixed point exists: mixed verilog-ams instance 'xi'",
-            "net `a` on circuit node",
-            "(deck net `n`; read by the module through converter __rspice_auto_adc_",
-            " (a2d), waking xi.assign#0 (continuous assign))",
-            "net `y` on circuit node",
-            "(deck net `n`; driven by the module through converter __rspice_auto_dac_",
-            " (d2a))",
-            "1 0 1 0",
-            "break the loop with a delay",
+            "no coupled t = 0 fixed point exists: mixed verilog-ams instance 'xi'".to_owned(),
+            "net `a` on circuit node".to_owned(),
+            "(deck net `n`; read by the module through converter __rspice_auto_adc_".to_owned(),
+            format!(" (a2d), waking xi.assign#0 (continuous assign, {file}:6))"),
+            "net `y` on circuit node".to_owned(),
+            "(deck net `n`; driven by the module through converter __rspice_auto_dac_".to_owned(),
+            " (d2a))".to_owned(),
+            "1 0 1 0".to_owned(),
+            "break the loop with a delay".to_owned(),
         ] {
             assert!(
-                lowered.contains(expected),
+                lowered.contains(&expected),
                 "{analysis}: missing `{expected}`: {error}"
             );
         }
@@ -1866,11 +1877,12 @@ fn a_same_tick_zero_delay_loop_surfaces_with_the_instance_that_owns_it() {
     );
     let error = error_for(&deck, 20.0e-9, 0.2e-9);
     let lowered = error.to_lowercase();
-    // Each process is named under the X-card that holds it, by kind, with
-    // the net it drives.
+    // Each process is named under the X-card that holds it, by kind and the
+    // line it is written on, with the net it drives.
+    let file = model.file_name().to_lowercase();
     assert!(
-        lowered.contains("x1.always#3 (always) driving x1.y")
-            && lowered.contains("x1.always#4 (always) driving x1.z"),
+        lowered.contains(&format!("x1.always#3 (always, {file}:13) driving x1.y"))
+            && lowered.contains(&format!("x1.always#4 (always, {file}:14) driving x1.z")),
         "the deck-level context must be the instance: {error}"
     );
     assert!(
@@ -1897,6 +1909,11 @@ fn a_same_tick_zero_delay_loop_surfaces_with_the_instance_that_owns_it() {
 /// `go` rises at 10 ns, through two continuous assignments.
 const ZERO_DELAY_RING: &str = "`include \"disciplines.vams\"
 `timescale 1ns/1ps
+module inv(a, y);
+  input a;
+  output y;
+  assign y = ~a;
+endmodule
 module ring(o);
   output o;
   wire a, b;
@@ -1948,15 +1965,16 @@ fn ring_deck(model: &ModelFile) -> String {
 fn a_zero_delay_loop_names_every_member_and_the_loop_they_close() {
     let model = ModelFile::hdl("zero_delay_ring", ZERO_DELAY_RING);
     let error = error_for(&ring_deck(&model), 100.0e-9, 1.0e-9);
+    let file = model.file_name();
     for expected in [
-        "event network did not settle at tick 10000 (1e-8 s) within 10000 delta cycles",
-        "xr.assign#1 (continuous assign) driving xr.a fired",
-        "xr.assign#2 (continuous assign) driving xr.b fired",
-        "xr.assign#3 (continuous assign) driving port xr.o fired",
-        "xr.initial#0 (initial) driving xr.go fired 1 time",
-        "zero-delay loop: xr.a -> xr.b -> xr.a",
+        "event network did not settle at tick 10000 (1e-8 s) within 10000 delta cycles".to_owned(),
+        format!("xr.assign#1 (continuous assign, {file}:13) driving xr.a fired"),
+        format!("xr.assign#2 (continuous assign, {file}:14) driving xr.b fired"),
+        format!("xr.assign#3 (continuous assign, {file}:15) driving port xr.o fired"),
+        format!("xr.initial#0 (initial, {file}:12) driving xr.go fired 1 time"),
+        "zero-delay loop: xr.a -> xr.b -> xr.a".to_owned(),
     ] {
-        assert!(error.contains(expected), "missing `{expected}`: {error}");
+        assert!(error.contains(&expected), "missing `{expected}`: {error}");
     }
 }
 
@@ -2012,14 +2030,16 @@ fn a_newton_failure_at_an_ideal_dac_edge_names_the_edge_and_the_converter() {
     );
     // Node and instance names print canonically, in upper case.
     let lowered = error.to_lowercase();
+    let file = model.file_name().to_lowercase();
     for expected in [
-        "on net `q` 0s -> 1s at t=1e-8s driven by xs.initial#0 (initial)",
-        "into converter __rspice_auto_dac_",
-        "(d2a: trise=0, tfall=0, tdelay=0, rlo=20, rhi=20)",
+        format!("on net `q` 0s -> 1s at t=1e-8s driven by xs.initial#0 (initial, {file}:5)"),
+        "into converter __rspice_auto_dac_".to_owned(),
+        "(d2a: trise=0, tfall=0, tdelay=0, rlo=20, rhi=20)".to_owned(),
         "the converter's step is ideal, which no solver timestep can resolve: give it a nonzero \
-         trise and tfall",
+         trise and tfall"
+            .to_owned(),
     ] {
-        assert!(lowered.contains(expected), "missing `{expected}`: {error}");
+        assert!(lowered.contains(&expected), "missing `{expected}`: {error}");
     }
     let edge = seconds_after(&error, "1s at t=");
     let failed = seconds_after(&error, "the failed step to t=");

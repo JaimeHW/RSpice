@@ -130,6 +130,7 @@ impl ProcessLowerer<'_> {
                 function,
                 static_sensitivity: None,
                 span: SourceSpanRef::from(span),
+                origin: None,
             },
             result: outputs[0],
             dependencies,

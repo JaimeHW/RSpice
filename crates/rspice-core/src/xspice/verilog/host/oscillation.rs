@@ -53,7 +53,7 @@ impl DigitalHost {
             // diagnostic is keyed by the process, so whoever names the
             // process's owner next finds it.
             target.node_id = index;
-            target.instance = process_label(process.kind, usize::from(process.id));
+            target.instance = process_label(process, usize::from(process.id));
             target.port_name = process_writes(process)
                 .into_iter()
                 .map(|signal| signal_name(&self.plan, signal))
@@ -70,17 +70,34 @@ impl DigitalHost {
 }
 
 /// A process as a diagnostic names it: its keyword and ordinal, then its kind
-/// as an author calls it, `assign#1 (continuous assign)`.
+/// as an author calls it and the file and line it was written on,
+/// `assign#1 (continuous assign, l.vams:13)`.
 ///
 /// The ordinal is the caller's: the plan's own for a design run alone, and
-/// the module's for an instance whose plan was linked into a larger one.
-pub(crate) fn process_label(kind: DigitalProcessKind, ordinal: usize) -> String {
+/// the module's for an instance whose plan was linked into a larger one. The
+/// file is named without its directory, as an author reads it in an editor's
+/// tab; a process with no recorded origin is named without one.
+pub(crate) fn process_label(process: &CfgDigitalProcess, ordinal: usize) -> String {
+    let kind = process.kind;
     let name = match kind {
         DigitalProcessKind::Always => "always",
         DigitalProcessKind::Initial => "initial",
         DigitalProcessKind::ContinuousAssign => "continuous assign",
     };
-    format!("{}#{ordinal} ({name})", kind.keyword())
+    match &process.origin {
+        Some(origin) => {
+            let file = std::path::Path::new(origin.file.as_str())
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(origin.file.as_str());
+            format!(
+                "{}#{ordinal} ({name}, {file}:{})",
+                kind.keyword(),
+                origin.line
+            )
+        }
+        None => format!("{}#{ordinal} ({name})", kind.keyword()),
+    }
 }
 
 /// Every net or variable a process writes, from its lowered body.

@@ -1959,14 +1959,14 @@ endmodule
         error.to_string().contains("within 10000 delta cycles"),
         "{error}"
     );
-    // Both processes are named by kind with the variable each writes, and the
-    // loop between them is closed through what each waits on.
+    // Both processes are named by kind, file and line with the variable each
+    // writes, and the loop between them is closed through what each waits on.
     let text = error.to_string();
     for expected in [
         "at tick 1 (1e-9 s) within",
-        "always#0 (always) driving b fired",
-        "always#1 (always) driving a fired",
-        "initial#2 (initial) driving a fired 1 time",
+        "always#0 (always, tb.v:3) driving b fired",
+        "always#1 (always, tb.v:4) driving a fired",
+        "initial#2 (initial, tb.v:5) driving a fired 1 time",
         "zero-delay loop: b -> a -> b",
     ] {
         assert!(text.contains(expected), "missing `{expected}`: {text}");

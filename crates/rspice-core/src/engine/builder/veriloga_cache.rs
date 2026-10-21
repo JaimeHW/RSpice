@@ -455,7 +455,11 @@ use super::*;
 // Version 154 carries VA-SEM-RETAINED-VARIABLE, the finding that names a
 // module's variables read before they are assigned. A version-153 record of
 // such a module was compiled without it and would replay a clean report.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 158;
+//
+// Version 159 follows the canonical IR's schema to 172, whose digital plan
+// records where each process was written. A version-158 record would replay
+// a plan whose processes a diagnostic cannot place.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 159;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

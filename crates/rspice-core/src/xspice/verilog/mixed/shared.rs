@@ -759,11 +759,7 @@ impl MixedDigitalCoordinator {
                 if self.digital.is_external_target(target) {
                     continue;
                 }
-                let Some(kind) = plan
-                    .processes
-                    .get(target.node_id)
-                    .map(|process| process.kind)
-                else {
+                let Some(process) = plan.processes.get(target.node_id) else {
                     continue;
                 };
                 let is_this = |process: &rspice_veriloga::canonical_ir::ids::DigitalProcessId| {
@@ -773,7 +769,7 @@ impl MixedDigitalCoordinator {
                 // where the link placed it among every instance's processes.
                 let Some((owner, label)) = self.maps.iter().find_map(|map| {
                     if let Some(local) = map.processes.iter().position(is_this) {
-                        Some((map, super::super::host::process_label(kind, local)))
+                        Some((map, super::super::host::process_label(process, local)))
                     } else if map.connection_processes.iter().any(is_this) {
                         Some((map, "port connection".to_string()))
                     } else {

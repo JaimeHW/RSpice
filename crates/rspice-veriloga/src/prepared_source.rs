@@ -37,6 +37,10 @@ pub struct PreparedRuntimeSource {
     pub(crate) source_map: crate::prepared_diagnostics::PreparedSourceMap,
     /// The files of a unit of more than one, in reading order; empty for one.
     pub(crate) unit_files: Vec<UnitFile>,
+    /// Where a replayed artifact's plan placed its processes and system
+    /// calls, which `source_map` cannot recover from the retained text; empty
+    /// for a preparation from source.
+    pub(crate) replay_origins: crate::canonical_ir::digital::DigitalSourceOrigins,
 }
 
 /// One file of a compilation unit of several files, and what it declares.
@@ -591,6 +595,9 @@ impl VerilogACompiler {
             diagnostics,
             source_map,
             unit_files: Vec::new(),
+            replay_origins: crate::canonical_ir::digital::DigitalSourceOrigins::of(
+                &artifact.digital,
+            ),
         })
     }
 }
