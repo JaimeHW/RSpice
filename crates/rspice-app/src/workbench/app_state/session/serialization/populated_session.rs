@@ -29,7 +29,7 @@ use crate::workbench::state::{
 /// The round trips compare the session as a value, so a hash map may hold
 /// any number of entries. A hash set is written as a list in the order it
 /// happens to iterate, so none here holds more than one.
-pub(super) fn populated_session() -> AppState {
+pub(in crate::workbench::app_state::session) fn populated_session() -> AppState {
     let mut state = AppState::default();
 
     // The project, its drawing and its library browser.
@@ -151,7 +151,7 @@ pub(super) fn populated_session() -> AppState {
     state
 }
 
-/// Every field `UiSessionStateSer` writes.
+/// Every field `UiSessionWire` writes.
 fn populate_ui_session(state: &mut AppState) {
     let ui = &mut state.ui;
     ui.theme.density = crate::ui::Density::Relaxed;

@@ -71,7 +71,7 @@ pub use documents::result_document::ResultViewer;
 pub(crate) use lifecycle::session::{SchematicVisibilityRecovery, SymbolInPlaceExit};
 pub use lifecycle::session::{
     SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolGridSpacing,
-    SymbolTool, UiSessionState, UiSessionStateSer,
+    SymbolTool, UiSessionState,
 };
 pub use lifecycle::window_session::ApplicationWindowId;
 pub use localization::UiTextLocale;

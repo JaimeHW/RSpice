@@ -870,19 +870,19 @@ pub struct WorkbenchState {
     /// Version marker used to distinguish sessions that predate canonical
     /// routes from sessions whose current route is intentionally Design.
     #[serde(default)]
-    navigation_schema_version: u8,
+    pub(in crate::workbench) navigation_schema_version: u8,
     /// Version marker for persisted device-local dock geometry. This is kept
     /// independent from navigation because a visual-shell migration must not
     /// rewrite the user's current route or engineering state.
     #[serde(default)]
-    layout_schema_version: u8,
+    pub(in crate::workbench) layout_schema_version: u8,
     /// Canonical current route plus bounded back/forward/recent task history.
     #[serde(default)]
-    navigation: SurfaceNavigation,
+    pub(in crate::workbench) navigation: SurfaceNavigation,
     /// Recovery or deep-link diagnostic awaiting presentation in the activity
     /// stream. It is runtime state, never engineering or preference data.
     #[serde(skip)]
-    route_diagnostic: Option<String>,
+    pub(in crate::workbench) route_diagnostic: Option<String>,
     #[serde(default = "default_true")]
     pub navigator_visible: bool,
     #[serde(default = "default_true")]
@@ -974,7 +974,7 @@ pub struct WorkbenchState {
     pub console_height: f32,
     /// Independent device-local dock snapshots for every visited workspace.
     #[serde(default)]
-    workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
+    pub(in crate::workbench) workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
     /// The composition a workspace with no snapshot above opens with.
     ///
     /// Mirrored from the Workspace preference, because layout reconciliation
@@ -983,7 +983,7 @@ pub struct WorkbenchState {
     /// default and the preference governed only whichever workspace happened
     /// to be active when it was chosen.
     #[serde(default)]
-    workspace_preset: WorkspacePreset,
+    pub(in crate::workbench) workspace_preset: WorkspacePreset,
     #[serde(default)]
     pub console_page: ConsolePage,
     /// The reader's place on the Console page. Transient: a reading position
@@ -1271,11 +1271,11 @@ const fn default_true() -> bool {
     true
 }
 
-const fn default_navigator_width() -> f32 {
+pub(in crate::workbench) const fn default_navigator_width() -> f32 {
     256.0
 }
 
-const fn default_inspector_width() -> f32 {
+pub(in crate::workbench) const fn default_inspector_width() -> f32 {
     312.0
 }
 
@@ -1287,7 +1287,7 @@ pub(crate) const fn default_console_height() -> f32 {
     208.0
 }
 
-const fn default_analysis_index() -> usize {
+pub(in crate::workbench) const fn default_analysis_index() -> usize {
     crate::workbench::simulation_analysis_tabs::TAB_TRANSIENT
 }
 

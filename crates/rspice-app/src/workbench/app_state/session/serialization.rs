@@ -9,6 +9,8 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::AppState;
 
+use super::wire::UiSessionWire;
+
 const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x655d_ae12_6cdd_5971_b7d8_aafe_02b6_b367);
 
@@ -192,10 +194,7 @@ impl AppState {
         };
         state.serialize_field("project_workspace", workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
-        state.serialize_field(
-            "ui_session",
-            &crate::workbench::UiSessionStateSer::from(&*self.ui),
-        )?;
+        state.serialize_field("ui_session", &UiSessionWire::from(&*self.ui))?;
         state.serialize_field("workbench", &self.workbench)?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
@@ -238,7 +237,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             // `shell` is a read-only alias for sessions written before the
             // clean-room workbench migration.
             #[serde(default, rename = "ui_session", alias = "shell")]
-            ui: Box<crate::workbench::UiSessionStateSer>,
+            ui: Box<UiSessionWire>,
             #[serde(default)]
             workbench: Box<crate::workbench::WorkbenchState>,
             #[serde(default)]
@@ -565,7 +564,7 @@ fn canonical_session_identity_value(value: &serde_json::Value) -> serde_json::Va
 }
 
 #[cfg(test)]
-mod populated_session;
+pub(super) mod populated_session;
 
 #[cfg(test)]
 mod tests {
