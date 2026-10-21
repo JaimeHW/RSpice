@@ -739,13 +739,23 @@ endmodule
                 result
                     .digital_trace_named("q")
                     .map_or(0, |trace| trace.len()),
+                result.time.len(),
             )
         };
-        let (runtime, _) = samples("x1 p 0 shaped", &analog, "shaped");
-        let (host, toggles) = samples("x1 p 0 q shaped_mixed", &mixed, "shaped_mixed");
+        let (runtime, _, runtime_points) = samples("x1 p 0 shaped", &analog, "shaped");
+        let (host, toggles, host_points) = samples("x1 p 0 q shaped_mixed", &mixed, "shaped_mixed");
         assert!(
             toggles >= 40,
             "x1 must run as a mixed host: traced {toggles} points"
+        );
+        // A new held sample steps `p` at the first point after its boundary.
+        // The host's deck is on the generic voltage estimate, and history
+        // straddling that step walked each sample's next step down by
+        // halvings: 20350 points against the runtime twin's 10004. The 40
+        // digital edges add a few points each.
+        assert!(
+            2 * host_points < 3 * runtime_points,
+            "the host accepts {host_points} points, the runtime twin {runtime_points}"
         );
         assert!(
             runtime.iter().any(|value| *value != 0.0),

@@ -416,6 +416,17 @@ impl TransientDeviceNoise {
         Some(boundary as usize - 1)
     }
 
+    /// Whether the injected currents step between two accepted times: the
+    /// held sample covering `after` is not the one covering `before`.
+    ///
+    /// A boundary point belongs to the interval it closes, so the step lands
+    /// on the first point after a boundary, not on the boundary itself: the
+    /// point at `k·NT` still carries sample `k - 1`, and the next one carries
+    /// sample `k`.
+    pub(crate) fn held_sample_steps(&self, before: Value, after: Value) -> bool {
+        !self.is_empty() && self.sample_index(before) != self.sample_index(after)
+    }
+
     /// The unit-density draw of one source at a sample index.
     fn unit_sample(source: &InjectedNoiseSource, index: usize) -> Value {
         train_sample(&source.train, index)
@@ -616,6 +627,22 @@ mod tests {
         assert_eq!(plan.sample_index(1.5e-9), Some(1));
         assert_eq!(plan.sample_index(2.0e-9), Some(1));
         assert_eq!(plan.sample_index(1.0e-6), Some(7));
+    }
+
+    /// The injection steps on the first point after a boundary, never on the
+    /// boundary itself, and a plan that injects nothing never steps.
+    #[test]
+    fn the_held_sample_steps_on_the_first_point_past_its_boundary() {
+        let plan = flat_plan(1.0e-9, 8, 1.0);
+        assert!(plan.held_sample_steps(0.0, 0.3e-9), "the noise switches on");
+        assert!(
+            !plan.held_sample_steps(0.3e-9, 1.0e-9),
+            "the boundary closes"
+        );
+        assert!(plan.held_sample_steps(1.0e-9, 1.05e-9), "the next sample");
+        assert!(!plan.held_sample_steps(1.05e-9, 1.5e-9));
+        let silent = TransientDeviceNoise::new(1.0e-9, 8, Vec::new());
+        assert!(!silent.held_sample_steps(1.0e-9, 1.05e-9));
     }
 
     #[test]

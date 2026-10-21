@@ -867,9 +867,12 @@ fn a_force_accepted_point_refreshes_the_injected_densities() {
     let nt = 1.0 / (2.0 * FMAX);
     let tstop = 10.0 * nt;
     let max_step = 1.0e-8;
-    // The behavioral edge sits 0.3 ns past the sample boundary at 5 µs, so no
-    // breakpoint announces it.
-    let threshold = (5.0003 * nt) / tstop;
+    // The behavioral edge sits halfway between the sample boundaries at 5 and
+    // 6 µs, so no breakpoint announces it. It must not fall inside the first
+    // two steps after a boundary: the noise sample steps there, the predictor
+    // restarts from the point it steps on, and the step after carries no
+    // voltage estimate to reject.
+    let threshold = (5.5 * nt) / tstop;
     let deck = format!(
         "force-accepted transient noise\n\
          VX x 0 PWL(0 0 {tstop:e} 1)\n\

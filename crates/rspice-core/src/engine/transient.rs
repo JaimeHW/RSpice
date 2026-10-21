@@ -10872,6 +10872,7 @@ impl Engine {
                     stale_accept_count = 0;
                     force_accepted_rejected_lte_step = true;
 
+                    let accepted_from = t;
                     t = step_time;
                     let scheduled_breakpoint = breakpoints.at_breakpoint(t);
                     let mut hit_breakpoint = accepted_step_hits_breakpoint(
@@ -11407,6 +11408,9 @@ impl Engine {
                         }
                     }
                     lte_estimator.record(&new_solution, dt);
+                    let noise_sample_stepped = circuit
+                        .transient_device_noise()
+                        .is_some_and(|plan| plan.held_sample_steps(accepted_from, t));
                     if hit_breakpoint {
                         // `trapgear.restart_from` just above forgot the
                         // interval this breakpoint ended; the predictor has to
@@ -11429,11 +11433,12 @@ impl Engine {
                         lte_estimator.restart_history_from(&new_solution);
                         xyce_lte_restart_first_step =
                             lte_estimator.uses_accepted_solution_reference();
-                    } else if ideal_switch_stepped
+                    } else if (ideal_switch_stepped || noise_sample_stepped)
                         && !lte_estimator.uses_accepted_solution_reference()
                     {
                         // An ideal switch's change of state steps the solution
-                        // too: see the ordinary acceptance's restart.
+                        // too, and so does a new held noise sample: see the
+                        // ordinary acceptance's restart.
                         lte_estimator.restart_history_from(&new_solution);
                     }
                     lte_estimator.set_method_order(effective_method_order(
@@ -11726,6 +11731,7 @@ impl Engine {
             nonfinite_trial_failure = None;
 
             // Accept this timestep
+            let accepted_from = t;
             t = step_time;
             let mut hit_breakpoint = if let Some(grid) = locked_grid.as_ref() {
                 // Land exactly on reference grid points, but allow pending
@@ -12050,7 +12056,17 @@ impl Engine {
                 // Commit predictor-local history after XSPICE has projected
                 // accepted voltage outputs into the solution vector.
                 lte_estimator.record(&new_solution, dt);
-                if hit_breakpoint || ideal_switch_stepped {
+                // A held noise sample changes at the first point after its
+                // boundary, not at the boundary breakpoint, whose solution
+                // still carries the sample it closes. The history the
+                // breakpoint restarted therefore straddles the step, and the
+                // next estimate extrapolates the jump: every sample of a deck
+                // on the generic voltage estimate walked the step down a dozen
+                // halvings to the femtoseconds.
+                let noise_sample_stepped = circuit
+                    .transient_device_noise()
+                    .is_some_and(|plan| plan.held_sample_steps(accepted_from, t));
+                if hit_breakpoint || ideal_switch_stepped || noise_sample_stepped {
                     // Restart the predictor with the integrator, for the reason
                     // spelled out at the force-accepted acceptance above: history
                     // from before a discontinuity predicts a solution the next
@@ -12058,9 +12074,10 @@ impl Engine {
                     // the candidate width rather than with its cube, so the
                     // controller answers it by shrinking to the solver floor.
                     // An ideal switch's change of state steps the solution the
-                    // same way. It steps no reactive state, whose charges are
-                    // continuous across it, so the integrator runs on through
-                    // it, as ngspice's does.
+                    // same way, and so does a new held noise sample. Neither
+                    // steps a reactive state, whose charges are continuous
+                    // across it, so the integrator runs on through it, as
+                    // ngspice's does.
                     lte_estimator.restart_history_from(&new_solution);
                 }
                 lte_estimator
