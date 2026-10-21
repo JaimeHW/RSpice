@@ -34,7 +34,7 @@ fn plan_binding(app: &RSpiceApp) -> (SimulationPlanId, AnalysisInstanceId) {
 
 /// Which plan a seeded prepared run is sealed against.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RunOrigin {
+pub(super) enum RunOrigin {
     /// The app's own active plan, so the return edge resolves.
     ActivePlan,
     /// A plan that is not the active one — a retained dataset from a plan the
@@ -45,7 +45,7 @@ enum RunOrigin {
 }
 
 /// A project with one retained, prepared run sealed against `origin`.
-fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
+pub(super) fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();
     let (active_plan, analysis_id) = plan_binding(&app);

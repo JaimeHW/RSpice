@@ -17,6 +17,7 @@ mod models;
 mod project;
 mod result_navigation;
 mod results;
+mod rows;
 mod schematic_editing;
 mod schematic_placement;
 mod sheets;
