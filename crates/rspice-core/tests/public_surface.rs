@@ -330,8 +330,11 @@ const MAX_PUBLIC_ITEMS: usize = 5752;
 // census was 370, with no slack.
 // `OpLabel::generated` adds one: the compiled Verilog-A catalog that alone may
 // mint such a label lives in the engine, above the label's crate. The census
-// is 371, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 371;
+// was 371, with no slack.
+// `notice::boundary_supply` adds one: the engine's boundary-converter builder
+// records an inferred or defaulted supply through it, like the other notice
+// writers above it. The census is 372, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 372;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

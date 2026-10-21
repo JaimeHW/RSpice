@@ -451,7 +451,8 @@ pub fn parameter_replaced(
 
 /// Record that the boundary net `boundary` converts against a supply the deck
 /// did not state, as the line `stated` says in prose.
-pub(crate) fn boundary_supply(
+#[doc(hidden)]
+pub fn boundary_supply(
     boundary: &str,
     kind: BoundarySupplyKind,
     level: f64,
