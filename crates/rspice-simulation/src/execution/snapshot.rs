@@ -343,6 +343,10 @@ pub struct PreparedTask {
     /// Cards only this task's deck carries. See [`bound_cards`]: they change
     /// the solve, so they are part of the payload digest.
     bound_observation_cards: Vec<String>,
+    /// The state-card tasks this transient captures states for, one per
+    /// bound state card. Who reads a state does not change the solve; the
+    /// cards do, and they are in `bound_observation_cards`.
+    bound_state_readers: Vec<bound_cards::BoundStateReader>,
     /// Checked selections are routed only after per-point source materialization.
     monte_carlo_resumes: Arc<[PreparedMonteCarloResume]>,
     transient_resumes: Arc<[rspice_results::transient_checkpoint::TransientCheckpointEvidence]>,
@@ -388,6 +392,7 @@ impl PreparedTask {
             execution_environment: None,
             run_at: rspice_simulation_contract::analysis_run_at::AnalysisRunAt::default(),
             bound_observation_cards: Vec::new(),
+            bound_state_readers: Vec::new(),
             monte_carlo_resumes: Arc::from([]),
             transient_resumes: Arc::from([]),
             transient_state: None,
@@ -621,6 +626,7 @@ pub struct AuthorizedTaskDispatch {
     execution_environment: Option<crate::runner::AnalysisExecutionEnvironment>,
     execution_limits: rspice_core::ResourceLimits,
     transient_state: Option<rspice_results::provenance::AnalysisResultTransientState>,
+    bound_state_readers: Vec<bound_cards::BoundStateReader>,
 }
 
 /// A prepared task paired with the exact batch-local artifacts required by
@@ -793,6 +799,17 @@ impl ResolvedTaskDispatch {
     /// The authenticated prerequisites resolved for this task.
     pub fn dependencies(&self) -> &ResolvedExecutionDependencies {
         &self.dependencies
+    }
+
+    /// This task's part in a transient's state hand-off: the transient whose
+    /// state its card reads, and the state cards it captures states for.
+    pub(crate) fn transient_state_role(&self) -> crate::engine_services::TransientStateRole {
+        crate::engine_services::TransientStateRole::new(
+            self.dispatch.snapshot_digest,
+            self.dispatch.instance_id,
+            self.dispatch.transient_state.map(|state| state.parent),
+            self.dispatch.bound_state_readers.clone(),
+        )
     }
 
     pub(crate) fn into_runner_parts(
@@ -1730,6 +1747,7 @@ impl PreparedRunSnapshot {
                     declared_point: prepared.declared_point,
                     execution_environment: prepared.execution_environment,
                     transient_state: prepared.transient_state,
+                    bound_state_readers: prepared.bound_state_readers,
                 }
             })
             .collect();

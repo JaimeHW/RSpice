@@ -67,6 +67,16 @@ pub struct StateLinearizedResult {
     pub result: SmallSignalCardResult,
 }
 
+/// One accepted transient state a small-signal card linearizes around,
+/// captured live by [`Engine::run_tran_capturing_states_to_stop`].
+///
+/// Opaque: it is a clone of the circuit at the accepted point, a state of the
+/// deck whose transient captured it, and only a deck that elaborates the same
+/// circuit may linearize around it
+/// ([`Engine::run_small_signal_at_transient_state`] checks).
+#[derive(Clone, Debug)]
+pub struct TransientState(pub(in crate::engine) CapturedTransientState);
+
 /// The `.TRAN` window a state's transient runs in.
 #[derive(Clone, Copy, Debug)]
 pub(in crate::engine) struct StateTransientWindow {
@@ -395,6 +405,58 @@ impl Engine {
                 })
             })
             .collect()
+    }
+
+    /// Run the small-signal card at `analysis_index` around `state`, which a
+    /// run of the deck's own first `.TRAN` card captured at its card's time.
+    ///
+    /// The card runs as [`Self::run_small_signal_at_transient_times`] runs it
+    /// around the state its own transient captures, so a state the `.TRAN`
+    /// task's run captured on the same deck gives the same result without a
+    /// second transient. A `.SENS` card is refused: its state moves with each
+    /// perturbation, so it reruns the transient for every one.
+    ///
+    /// Called by the simulation service for a card whose `.TRAN` task
+    /// captured its state.
+    pub fn run_small_signal_at_transient_state(
+        &self,
+        netlist: &Netlist,
+        analysis_index: usize,
+        state: &TransientState,
+        abort: &dyn AbortSignal,
+    ) -> Result<StateLinearizedResult, SimulationError> {
+        let card = small_signal_card(netlist, analysis_index)?;
+        if let AnalysisCommand::Sensitivity { ac_sweep, .. } = card {
+            return Err(if ac_sweep.is_none() {
+                dc_sensitivity_at_state_refusal()
+            } else {
+                SimulationError::Netlist(
+                    "a .SENS card reruns its state transient for every perturbation, so it \
+                     cannot linearize around a state another run captured"
+                        .to_owned(),
+                )
+            });
+        }
+        let window = StateTransientWindow::of_first_transient(netlist)?.ok_or_else(|| {
+            SimulationError::Netlist(
+                "ACTIMES= linearizes around the state the deck's .TRAN card reaches, and the \
+                 deck has no .TRAN card"
+                    .to_owned(),
+            )
+        })?;
+        let captured = state.0.clone();
+        let state_time = captured.time;
+        let engine = self.at_transient_state(
+            netlist,
+            TransientStateBias {
+                window,
+                state: HeldTransientState::Captured(Box::new(std::sync::Mutex::new(captured))),
+            },
+        );
+        Ok(StateLinearizedResult {
+            state_time,
+            result: engine.run_small_signal_card(netlist, card, abort)?,
+        })
     }
 
     /// Run the small-signal card at `analysis_index` around the state a

@@ -23,6 +23,7 @@ pub use headless::{
 };
 pub(crate) use headless_tasks::small_signal_state_keyword;
 pub use headless_tasks::{HeadlessTaskRequest, prepare_headless_tasks};
+pub(crate) use snapshot::bound_cards::BoundStateReader;
 pub use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, DeckBuildProgress, EngineRefusal,
     EngineRefusalKind, ExecutionTargetCapabilities, PSS_SPECTRUM_ROLE, PreparationProgress,

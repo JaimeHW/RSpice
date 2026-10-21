@@ -258,7 +258,15 @@ use rspice_core::analysis::harmonic_balance::{
 // record by its `rspice_core` target whichever crate of the family emitted it,
 // so the console and `RUST_LOG` directives keep today's names after the split.
 // The census is 5,738, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5738;
+// One transient for a `.TRAN` card and the `ACTIMES=` cards that share it adds
+// three, each called by rspice-simulation: `TransientState`, the state a
+// `.TRAN` task's run captures and its card's task reads
+// (engine_services/transient_state.rs); `Engine::run_tran_capturing_states_to_stop`,
+// that run (engine_bridge/transient.rs); and
+// `Engine::run_small_signal_at_transient_state`, the card around the captured
+// state (engine_services/transient_state.rs). The census is 5,741, with no
+// slack.
+const MAX_PUBLIC_ITEMS: usize = 5741;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

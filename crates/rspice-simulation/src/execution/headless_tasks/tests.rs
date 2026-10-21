@@ -241,6 +241,41 @@ fn every_small_signal_kind_binds_to_its_transient() {
     );
 }
 
+/// A card at a transient time rides in the deck of the transient it reads,
+/// which lands that run on its time, so the transient's digest moves with it.
+/// A card whose state transient is not that run keeps its own.
+#[test]
+fn a_state_card_rides_in_the_transient_it_shares() {
+    let line = ".ac dec 10 1 1k actimes=0.5";
+    let [parent, task] = state_task(ac(), line);
+    let alone = prepare(vec![parent.clone()]).unwrap()[0].config_digest();
+    let tasks = prepare(vec![parent, task]).unwrap();
+    assert_eq!(tasks[0].bound_observation_cards(), [line]);
+    assert_ne!(tasks[0].config_digest(), alone);
+
+    let [parent, mut options] = state_task(ac(), line);
+    options.analysis.numeric_override = Some(Default::default());
+    let fft = fft(parent.instance_id, 1.0);
+    let [_, mut beside_fft] = state_task(ac(), line);
+    beside_fft.dependencies = vec![parent.instance_id];
+    for (what, tasks) in [
+        ("other options", vec![parent.clone(), options]),
+        (
+            "a transient that samples an FFT",
+            vec![parent, fft, beside_fft],
+        ),
+    ] {
+        let tasks = prepare(tasks).unwrap();
+        assert!(
+            tasks[0]
+                .bound_observation_cards()
+                .iter()
+                .all(|card| card != line && !card.contains("actimes")),
+            "{what}"
+        );
+    }
+}
+
 #[test]
 fn a_card_at_a_transient_state_is_refused_rather_than_run_another_way() {
     for (graph, expected) in [

@@ -150,6 +150,24 @@ fn run_in(
     origin: &Path,
     tasks: Vec<HeadlessTaskRequest>,
 ) -> HashMap<AnalysisInstanceId, SimulationResult> {
+    run_study(circuit, origin, tasks, &[]).results
+}
+
+/// What a study's tasks computed, and how many transients they ran.
+struct Study {
+    results: HashMap<AnalysisInstanceId, SimulationResult>,
+    transient_runs: usize,
+}
+
+/// Run a study's tasks in order on one runner, as the application does,
+/// except the tasks `apart`, which each run on a runner of their own.
+fn run_study(
+    circuit: &str,
+    origin: &Path,
+    tasks: Vec<HeadlessTaskRequest>,
+    apart: &[AnalysisInstanceId],
+) -> Study {
+    forward_engine_records();
     let mut input = HeadlessRunInput::new(circuit, origin, tasks);
     input.resolver = HeadlessSourceResolver::Native {
         include_search_paths: Vec::new(),
@@ -161,10 +179,13 @@ fn run_in(
         .expect("the run is authorized");
     let mut artifacts = HashMap::new();
     let mut results = HashMap::new();
-    let mut runner = SimulationRunner::new();
+    let mut transient_runs = 0;
+    let mut shared_runner = SimulationRunner::new();
     let mut pending = dispatch.into_tasks();
     while let Some(task) = pending.pop_front() {
         let identity = task.instance_id();
+        let mut own_runner = apart.contains(&identity).then(SimulationRunner::new);
+        let runner = own_runner.as_mut().unwrap_or(&mut shared_runner);
         let task = task
             .resolve_dependency_artifacts(&artifacts)
             .expect("dependencies resolve");
@@ -181,12 +202,40 @@ fn run_in(
             );
             std::thread::sleep(Duration::from_millis(2));
         };
+        transient_runs += runner
+            .drain_engine_log()
+            .iter()
+            .filter(|line| line.message.starts_with("Transient complete"))
+            .count();
         if let Some(artifact) = producer.capture(&result, &pending).expect("capture") {
             artifacts.insert(identity, artifact);
         }
         results.insert(identity, result);
     }
-    results
+    Study {
+        results,
+        transient_runs,
+    }
+}
+
+/// Forward the engine's records to the run on the thread that logs them, as
+/// the application's logger does, so each run's log holds its own.
+fn forward_engine_records() {
+    struct Forward;
+    impl log::Log for Forward {
+        fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+            rspice_simulation::engine_log::admits(metadata)
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            rspice_simulation::engine_log::offer(record);
+        }
+        fn flush(&self) {}
+    }
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        log::set_logger(&Forward).expect("install the engine record forwarder");
+        rspice_simulation::engine_log::note_stderr_level(log::LevelFilter::Off);
+    });
 }
 
 fn run(
@@ -664,4 +713,144 @@ fn a_headless_disto_card_at_a_state_equals_the_command_line() {
             &ratio,
         );
     }
+}
+
+/// An AC result as bits: its frequencies, then each waveform by name.
+fn ac_bits(result: &SimulationResult) -> Vec<(String, Vec<u64>)> {
+    let SimulationResult::Ac {
+        frequencies,
+        waveforms,
+        ..
+    } = result
+    else {
+        panic!("an AC result: {result:?}");
+    };
+    let bits = |values: &[f64]| values.iter().map(|value| value.to_bits()).collect();
+    let mut rows = vec![("frequency".to_owned(), bits(frequencies))];
+    for (name, waveform) in waveforms {
+        rows.push((format!("{name} re"), bits(&waveform.y_values)));
+        let imaginary = waveform.y_imag.as_deref().unwrap_or_default();
+        rows.push((format!("{name} im"), bits(imaginary)));
+    }
+    rows.sort();
+    rows
+}
+
+/// A transient result's times and `v(out)`.
+fn transient_out(result: &SimulationResult) -> (Vec<f64>, Vec<f64>) {
+    let SimulationResult::Transient {
+        time, waveforms, ..
+    } = result
+    else {
+        panic!("a transient result: {result:?}");
+    };
+    let out = waveforms
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("v(out)") || name.eq_ignore_ascii_case("out"))
+        .map(|(_, waveform)| waveform.y_values.clone())
+        .unwrap_or_else(|| panic!("v(out) among {:?}", waveforms.keys().collect::<Vec<_>>()));
+    (time.clone(), out)
+}
+
+/// The largest distance between two phasor sets, relative to the larger
+/// magnitude at each point.
+fn largest_relative_deviation(actual: &[(f64, f64)], expected: &[(f64, f64)]) -> f64 {
+    assert_eq!(actual.len(), expected.len());
+    actual
+        .iter()
+        .zip(expected)
+        .map(|((are, aim), (ere, eim))| {
+            (are - ere).hypot(aim - eim) / are.hypot(*aim).max(ere.hypot(*eim))
+        })
+        .fold(0.0, f64::max)
+}
+
+/// A `.TRAN` task and `.AC` cards at `times` that read its states.
+fn shared_study(times: &[&str]) -> (HeadlessTaskRequest, Vec<HeadlessTaskRequest>) {
+    let transient = task(TRAN, &analysis_spec_line(TRAN), Vec::new());
+    let cards = times
+        .iter()
+        .map(|time| {
+            task(
+                AC,
+                &format!("{AC} actimes={time}"),
+                vec![transient.instance_id],
+            )
+        })
+        .collect();
+    (transient, cards)
+}
+
+/// A study whose `.TRAN` task and state card describe one transient runs it
+/// once: the task's run lands on the card's time and hands the card its
+/// state there. The card's result is the one its own transient gives, bit
+/// for bit; the task's run is the `.TRAN`-only run until its approach to the
+/// card's time, which it lands on.
+#[test]
+fn a_study_runs_the_transient_its_state_card_shares_once() {
+    let directory = directory("shared-once");
+    let origin = directory.0.join("circuit.cir");
+    let (transient, cards) = shared_study(&["10u"]);
+    let card = cards[0].instance_id;
+    let parent = transient.instance_id;
+    let mut tasks = vec![transient.clone()];
+    tasks.extend(cards);
+
+    let shared = run_study(CIRCUIT, &origin, tasks.clone(), &[]);
+    assert_eq!(shared.transient_runs, 1, "one transient serves the study");
+    let own = run_study(CIRCUIT, &origin, tasks, &[card]);
+    assert_eq!(
+        own.transient_runs, 2,
+        "a card on a runner of its own runs its own"
+    );
+    assert_eq!(
+        ac_bits(&shared.results[&card]),
+        ac_bits(&own.results[&card]),
+        "the shared state linearizes as the card's own transient's does"
+    );
+
+    let alone = run_study(CIRCUIT, &origin, vec![transient], &[]);
+    assert_eq!(alone.transient_runs, 1);
+    let (time, out) = transient_out(&shared.results[&parent]);
+    let (alone_time, alone_out) = transient_out(&alone.results[&parent]);
+    assert!(time.contains(&10.0e-6), "the run lands on the card's time");
+    assert_eq!(time.last(), alone_time.last(), "and runs on to its stop");
+    // Up to its last step before the card's time, which it shortens to land
+    // there, the run is the `.TRAN`-only run.
+    let before = alone_time.iter().take_while(|&&t| t < 10.0e-6).count() - 1;
+    assert!(before > 2, "the comparison spans accepted points");
+    assert_eq!(time[..before], alone_time[..before]);
+    assert_eq!(out[..before], alone_out[..before]);
+}
+
+/// With several state cards the one run lands on every card's time, so each
+/// card's state comes from a run with the others' breakpoints in it: within
+/// tolerance of its own transient's, and still one transient.
+#[test]
+fn a_study_runs_the_transient_its_state_cards_share_once() {
+    let directory = directory("shared-several");
+    let origin = directory.0.join("circuit.cir");
+    let (transient, cards) = shared_study(&["5u", "15u"]);
+    let parent = transient.instance_id;
+    let ids = cards
+        .iter()
+        .map(|card| card.instance_id)
+        .collect::<Vec<_>>();
+    let mut tasks = vec![transient];
+    tasks.extend(cards);
+
+    let shared = run_study(CIRCUIT, &origin, tasks.clone(), &[]);
+    assert_eq!(shared.transient_runs, 1, "one transient serves the study");
+    let own = run_study(CIRCUIT, &origin, tasks, &ids);
+    assert_eq!(own.transient_runs, 3);
+    let (time, _) = transient_out(&shared.results[&parent]);
+    for bound in [5.0e-6, 15.0e-6] {
+        assert!(time.contains(&bound), "the run lands on {bound:e} s");
+    }
+    let deviation = ids
+        .iter()
+        .map(|id| largest_relative_deviation(&v_out(&shared.results[id]), &v_out(&own.results[id])))
+        .fold(0.0, f64::max);
+    eprintln!("largest relative deviation of a shared card from its own run: {deviation:e}");
+    assert!(deviation <= 1e-6, "{deviation:e}");
 }

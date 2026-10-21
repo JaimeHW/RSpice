@@ -109,6 +109,12 @@ pub struct SimulationRunner {
     monte_carlo_checkpoint: CheckpointQueue,
     transient_checkpoint: crate::transient_checkpoint::CheckpointQueue,
 
+    /// States a transient task captured for the state cards bound to it,
+    /// which their tasks take when this runner starts them. Kept across
+    /// requests: that is the whole of its purpose.
+    #[cfg(not(target_arch = "wasm32"))]
+    transient_states: Arc<crate::engine_services::TransientStateStore>,
+
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
 
@@ -136,6 +142,8 @@ impl SimulationRunner {
             engine_log: Arc::new(Mutex::new(EngineLogQueue::default())),
             monte_carlo_checkpoint: Arc::new(Mutex::new(None)),
             transient_checkpoint: Arc::new(Mutex::new(None)),
+            #[cfg(not(target_arch = "wasm32"))]
+            transient_states: Arc::default(),
             thread_handle: None,
             pending_result: None,
             #[cfg(target_arch = "wasm32")]
@@ -392,6 +400,7 @@ impl SimulationRunner {
         dispatch: ResolvedTaskDispatch,
         stream_transient_samples: bool,
     ) -> Result<(), SimulationError> {
+        let transient_states = dispatch.transient_state_role();
         let (
             task,
             executable_netlist,
@@ -424,6 +433,7 @@ impl SimulationRunner {
                 stream_transient_samples,
                 execution_limits,
             },
+            transient_states,
         )
     }
 
@@ -455,6 +465,7 @@ impl SimulationRunner {
                 stream_transient_samples: false,
                 execution_limits: rspice_core::ResourceLimits::default(),
             },
+            crate::engine_services::TransientStateRole::default(),
         )
     }
 
@@ -462,6 +473,7 @@ impl SimulationRunner {
         &mut self,
         request: SimulationRequest,
         input: NetlistInput,
+        transient_states: crate::engine_services::TransientStateRole,
     ) -> Result<(), SimulationError> {
         if self.is_running() || self.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
@@ -501,6 +513,10 @@ impl SimulationRunner {
                     Arc::clone(&self.engine_log),
                     request_asked_for_verbose(&request),
                 )),
+                transient_states: Some(crate::engine_services::TransientStateHandoff::new(
+                    Arc::clone(&self.transient_states),
+                    transient_states,
+                )),
                 ..RunStreams::default()
             };
             let handle = std::thread::spawn(move || {
@@ -511,9 +527,11 @@ impl SimulationRunner {
         // The worker executes in its own wasm instance, so a queue this side
         // of the boundary is not something its run can write: the worker-side
         // run posts each line across the contract and the UI handler pushes it
-        // onto this runner's queue.
+        // onto this runner's queue. A captured state does not cross it either,
+        // so each state card there runs its own transient.
         #[cfg(target_arch = "wasm32")]
         {
+            let _ = transient_states;
             wasm_worker::start_worker_request(
                 &mut self.worker_handle,
                 request,
@@ -581,6 +599,7 @@ pub(in crate::runner) struct RunStreams {
         Option<crate::transient_checkpoint::CheckpointQueue>,
     pub(in crate::runner) transient_checkpoint_observer:
         Option<crate::transient_checkpoint::CheckpointObserver>,
+    pub(in crate::runner) transient_states: Option<crate::engine_services::TransientStateHandoff>,
 }
 
 fn lock_progress<'a>(
@@ -940,12 +959,16 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         checkpoint_observer,
         transient_checkpoint,
         transient_checkpoint_observer,
+        transient_states,
     } = streams;
 
     // Whatever the engine logs from here on belongs to this run, and only to
     // it: the guard is removed on every exit path below, including a panic
     // unwinding out of the solver.
     let _engine_log = engine_log.map(crate::engine_log::install);
+    // The states this run captures for its state cards, or the one it reads.
+    let _transient_states =
+        transient_states.map(crate::engine_services::install_transient_state_handoff);
 
     // Update status: parsing
     {

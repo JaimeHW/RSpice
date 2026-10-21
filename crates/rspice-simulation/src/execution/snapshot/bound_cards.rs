@@ -7,11 +7,16 @@
 //! thing: a card may only ever be in the deck of the transient it is bound
 //! to, and it is part of that transient's identity.
 //!
-//! This module is the whole of that seam. It attaches each FFT analysis's card
-//! to its bound transient before dependency bindings capture the producer's
-//! digest, splices the cards into that transient's own deck after per-point
-//! expansion has chosen it, and refuses a prepared FFT task whose card its
-//! producer does not carry.
+//! A small-signal card at a transient time (`ACTIMES=`) is the same kind of
+//! card. Spectre runs it on the transient itself: the time is a breakpoint of
+//! the one run, which captures its state there for the card. So the card rides
+//! in its transient's deck too, and is part of that transient's identity.
+//!
+//! This module is the whole of that seam. It attaches each FFT analysis's card,
+//! and each state card that shares its transient, to the bound transient before
+//! dependency bindings capture the producer's digest, splices the cards into
+//! that transient's own deck after per-point expansion has chosen it, and
+//! refuses a prepared FFT task whose card its producer does not carry.
 
 use super::{
     AnalysisSpec, CanonicalWriter, ContentDigest, PreparationError, PreparationStage, PreparedTask,
@@ -91,6 +96,116 @@ pub(crate) fn attach_bound_observation_cards(
         tasks[producer].with_bound_observation_cards(cards);
     }
     Ok(())
+}
+
+/// A small-signal task that reads its state from the run of the transient
+/// it is bound to, at its card's one time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct BoundStateReader {
+    pub(crate) reader: rspice_app_types::product::AnalysisInstanceId,
+    pub(crate) time_s: f64,
+}
+
+/// Bind each state card to the transient whose state it reads, where the two
+/// describe the same transient, so that transient runs once for both.
+///
+/// The card is spliced into the transient's deck, which lands the run on the
+/// card's time; the run captures the state there and hands it to the card's
+/// task (`engine_services::transient_state`). Called after the FFT cards are
+/// attached, for the same reason, and with them known.
+///
+/// The same transient is the same deck under the same options: a card's deck
+/// is its transient's `.TRAN` card followed by its own, so the two runs differ
+/// only where the tasks do. A card keeps its own run when its transient carries
+/// an FFT card, whose sample times are solver stops the card's run never has,
+/// runs a checkpoint schedule, or runs under other options or another
+/// environment; so does a `.SENS` card, whose state moves with each
+/// perturbation, and a `CHECKPOINT=` card, which restores its state without a
+/// transient. A time outside the transient, or one a hair from another card's,
+/// stays the card's own too: the shared run must never fail where the card's
+/// own would not.
+pub(crate) fn attach_bound_state_cards(
+    tasks: &mut [PreparedTask],
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> crate::error::ServiceRunResult<()> {
+    use crate::error::ensure_not_aborted;
+    let transient_positions = tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, task)| matches!(task.task.spec, AnalysisSpec::Transient { .. }))
+        .map(|(index, task)| (task.instance_id(), index))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut carried = std::collections::BTreeMap::<usize, Vec<(String, BoundStateReader)>>::new();
+    for task in tasks.iter() {
+        ensure_not_aborted(abort)?;
+        let Some(state) = task.transient_state else {
+            continue;
+        };
+        if task.task.spec_options.tran_checkpoint.is_some()
+            || matches!(task.task.spec, AnalysisSpec::Sensitivity { .. })
+        {
+            continue;
+        }
+        let Some(&producer) = transient_positions.get(&state.parent) else {
+            continue;
+        };
+        let transient = &tasks[producer];
+        let Some(stop_time) = shared_transient_stop(transient, task, state.time_s) else {
+            continue;
+        };
+        let Some(card) = task
+            .task
+            .analysis_line
+            .trim()
+            .strip_prefix(transient.task.analysis_line.trim())
+            .map(str::trim)
+            .filter(|card| !card.is_empty())
+        else {
+            continue;
+        };
+        // Far wider than any breakpoint merge window, which is a fraction of
+        // the maximum step, so every bound time is landed on as its own.
+        let readers = carried.entry(producer).or_default();
+        if readers.iter().any(|(_, held)| {
+            held.time_s != state.time_s && (held.time_s - state.time_s).abs() <= 1.0e-9 * stop_time
+        }) {
+            continue;
+        }
+        readers.push((
+            card.to_owned(),
+            BoundStateReader {
+                reader: task.instance_id(),
+                time_s: state.time_s,
+            },
+        ));
+    }
+    for (producer, readers) in carried {
+        ensure_not_aborted(abort)?;
+        let mut cards = tasks[producer].bound_observation_cards().to_vec();
+        cards.extend(readers.iter().map(|(card, _)| card.clone()));
+        tasks[producer].with_bound_observation_cards(cards);
+        tasks[producer].bound_state_readers =
+            readers.into_iter().map(|(_, reader)| reader).collect();
+    }
+    Ok(())
+}
+
+/// The stop time of `transient` when `card`'s state transient is its run.
+fn shared_transient_stop(
+    transient: &PreparedTask,
+    card: &PreparedTask,
+    time_s: f64,
+) -> Option<f64> {
+    let AnalysisSpec::Transient { stop_time, .. } = transient.task.spec else {
+        return None;
+    };
+    (transient.bound_observation_cards.is_empty()
+        && transient.task.spec_options.tran_checkpoint.is_none()
+        && transient.task.numeric_override == card.task.numeric_override
+        && transient.execution_environment == card.execution_environment
+        && time_s.is_finite()
+        && (0.0..=stop_time).contains(&time_s))
+    .then_some(stop_time)
 }
 
 /// Splice each carrying task's cards into that task's deck, and give every

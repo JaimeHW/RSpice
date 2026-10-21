@@ -6,14 +6,187 @@
 //! the services for the rest — solves the card here, through the engine's
 //! state entry, and projects the one result as it projects a run at the
 //! operating point.
+//!
+//! An `ACTIMES=` card bound to its `.TRAN` task (`execution::snapshot::
+//! bound_cards`) does not run the transient again: the task's run landed on
+//! the card's time and captured the state there into the runner's
+//! [`TransientStateStore`], and the card linearizes around that. A card that
+//! finds no state there — its transient ran on another runner, or not at all
+//! — runs its own, as an unbound card does.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use rspice_app_types::product::{AnalysisInstanceId, ContentDigest};
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::engine::{Engine, StateLinearizedResult, TransientCheckpoint};
+use rspice_core::engine::{Engine, StateLinearizedResult, TransientCheckpoint, TransientState};
 use rspice_core::netlist::{AnalysisCommand, Netlist, SmallSignalStateSource};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::config::AnalysisConfig;
 
 use super::ServiceRunError;
+use crate::execution::BoundStateReader;
+
+/// States a `.TRAN` task's run captured for the state cards bound to it,
+/// waiting for their tasks.
+///
+/// One per runner. A study runs its tasks one after another on one runner,
+/// each transient before the cards that depend on it, so a card's task finds
+/// the state its transient captured for it here, and takes it. A state is
+/// read only by a task of the prepared run whose transient captured it, and
+/// the store holds one prepared run's states at a time.
+#[derive(Debug, Default)]
+pub(crate) struct TransientStateStore {
+    states: Mutex<HashMap<StateKey, (f64, TransientState)>>,
+}
+
+/// The prepared run, the transient that captured the state, and the task
+/// that reads it.
+type StateKey = (ContentDigest, AnalysisInstanceId, AnalysisInstanceId);
+
+impl TransientStateStore {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<StateKey, (f64, TransientState)>> {
+        self.states
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// The part a task plays in the hand-off: the prepared run it belongs to,
+/// the task itself, the transient whose captured state it reads, and the
+/// tasks it captures states for.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TransientStateRole {
+    run: Option<ContentDigest>,
+    task: Option<AnalysisInstanceId>,
+    transient: Option<AnalysisInstanceId>,
+    readers: Vec<BoundStateReader>,
+}
+
+impl TransientStateRole {
+    pub(crate) const fn new(
+        run: ContentDigest,
+        task: AnalysisInstanceId,
+        transient: Option<AnalysisInstanceId>,
+        readers: Vec<BoundStateReader>,
+    ) -> Self {
+        Self {
+            run: Some(run),
+            task: Some(task),
+            transient,
+            readers,
+        }
+    }
+}
+
+/// A task's role, and the store its runner keeps, for the run on this thread.
+#[derive(Debug)]
+pub(crate) struct TransientStateHandoff {
+    store: Arc<TransientStateStore>,
+    role: TransientStateRole,
+}
+
+impl TransientStateHandoff {
+    pub(crate) const fn new(store: Arc<TransientStateStore>, role: TransientStateRole) -> Self {
+        Self { store, role }
+    }
+}
+
+thread_local! {
+    /// The hand-off of the run executing on this thread. The bridge and the
+    /// services solve a task on the thread the runner started it on.
+    static HANDOFF: RefCell<Option<TransientStateHandoff>> = const { RefCell::new(None) };
+}
+
+/// Install `handoff` for the run on this thread until the guard drops.
+#[must_use]
+pub(crate) fn install_transient_state_handoff(
+    handoff: TransientStateHandoff,
+) -> TransientStateHandoffGuard {
+    let previous = HANDOFF.with(|slot| slot.replace(Some(handoff)));
+    TransientStateHandoffGuard { previous }
+}
+
+/// What removes a run's hand-off, on every exit path.
+pub(crate) struct TransientStateHandoffGuard {
+    previous: Option<TransientStateHandoff>,
+}
+
+impl Drop for TransientStateHandoffGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        HANDOFF.with(|slot| {
+            slot.replace(previous);
+        });
+    }
+}
+
+/// The times a `.TRAN` deck's state cards name, which its run lands on and
+/// captures: in order, once each, and inside the run.
+pub(crate) fn state_capture_times(netlist: &Netlist, tstop: f64) -> Vec<f64> {
+    let mut times = netlist
+        .small_signal_states
+        .iter()
+        .filter_map(|request| match &request.source {
+            SmallSignalStateSource::TransientTimes(times) => Some(times.iter().copied()),
+            SmallSignalStateSource::CheckpointFile(_) => None,
+        })
+        .flatten()
+        .filter(|time| time.is_finite() && (0.0..=tstop).contains(time))
+        .collect::<Vec<_>>();
+    times.sort_by(f64::total_cmp);
+    times.dedup();
+    times
+}
+
+/// Hand the states a transient captured at `times` to the tasks bound to it,
+/// through the store of the run on this thread. A run with no store, or no
+/// readers, drops them; so does the store, for every state another prepared
+/// run left unread.
+pub(crate) fn publish_transient_states(times: &[f64], states: Vec<TransientState>) {
+    HANDOFF.with(|slot| {
+        let slot = slot.borrow();
+        let Some(TransientStateHandoff { store, role }) = slot.as_ref() else {
+            return;
+        };
+        let (Some(run), Some(transient)) = (role.run, role.task) else {
+            return;
+        };
+        let mut held = store.lock();
+        held.retain(|(held_run, held_transient, _), _| {
+            *held_run == run && *held_transient != transient
+        });
+        for reader in &role.readers {
+            if let Some(index) = times
+                .iter()
+                .position(|time| time.to_bits() == reader.time_s.to_bits())
+                && let Some(state) = states.get(index)
+            {
+                held.insert(
+                    (run, transient, reader.reader),
+                    (reader.time_s, state.clone()),
+                );
+            }
+        }
+    });
+}
+
+/// The state the transient this task reads captured for it at `time`.
+fn take_transient_state(time: f64) -> Option<TransientState> {
+    HANDOFF.with(|slot| {
+        let slot = slot.borrow();
+        let TransientStateHandoff { store, role } = slot.as_ref()?;
+        let key = (role.run?, role.transient?, role.task?);
+        let mut held = store.lock();
+        match held.get(&key) {
+            Some((captured, _)) if captured.to_bits() == time.to_bits() => {
+                held.remove(&key).map(|(_, state)| state)
+            }
+            _ => None,
+        }
+    })
+}
 
 /// Where a small-signal service run linearizes the circuit.
 #[derive(Clone, Copy)]
@@ -139,6 +312,15 @@ pub(crate) fn linearize_at_state(
             let [time] = times.as_slice() else {
                 return refuse("is one state, at one time");
             };
+            // The state the card's `.TRAN` task captured for it, when its run
+            // served the card: the same transient, landed on the same time.
+            if card != StateCard::Sensitivity
+                && let Some(state) = take_transient_state(*time)
+            {
+                return engine
+                    .run_small_signal_at_transient_state(netlist, index, &state, abort)
+                    .map_err(StateRunError::Engine);
+            }
             let mut states = engine
                 .run_small_signal_at_transient_times(netlist, index, &[*time], abort)
                 .map_err(StateRunError::Engine)?;

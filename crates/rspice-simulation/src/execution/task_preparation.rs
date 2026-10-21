@@ -359,8 +359,10 @@ pub(crate) fn bind_prepared_task_dependencies(
     // card to a transient changes that transient's payload digest —
     // and the bindings below capture the digest a dependent must see.
     // A `.fft` card makes every requested sample time a solver stop,
-    // so it is part of the solve it rides on, not an observation of it.
+    // so it is part of the solve it rides on, not an observation of it;
+    // so does a state card that reads its transient's own run.
     bound_cards::attach_bound_observation_cards(queue, abort)?;
+    bound_cards::attach_bound_state_cards(queue, abort)?;
     let producer_identities = queue
         .iter()
         .enumerate()

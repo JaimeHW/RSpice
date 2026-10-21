@@ -149,9 +149,29 @@ impl EngineBridge {
             }
             result.map_err(|error| self.translate_error(error))?
         } else {
-            engine
-                .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
-                .map_err(|error| self.translate_error(error))?
+            // The state cards bound to this transient ride in its deck: the
+            // run lands on each card's time and captures the state there for
+            // the card's task, so the transient runs once for both.
+            let capture_times =
+                crate::engine_services::state_capture_times(netlist, config.stop_time);
+            if capture_times.is_empty() {
+                engine
+                    .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
+                    .map_err(|error| self.translate_error(error))?
+            } else {
+                let (result, states) = engine
+                    .run_tran_capturing_states_to_stop(
+                        netlist,
+                        config.stop_time,
+                        max_step,
+                        rspice_core::engine::TransientStartupMode::from_uic(config.uic),
+                        &capture_times,
+                        abort,
+                    )
+                    .map_err(|error| self.translate_error(error))?;
+                crate::engine_services::publish_transient_states(&capture_times, states);
+                result
+            }
         };
         let convergence =
             rspice_results::convergence_quality::TransientConvergenceEvidence::capture(

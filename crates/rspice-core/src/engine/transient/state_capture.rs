@@ -10,8 +10,10 @@
 //! where a mixed circuit's clone is valid.
 //!
 //! The request is a list of times. Each becomes a hard breakpoint, so the
-//! run lands on it; the accepted point that lands there is captured; and the
-//! run stops once the last requested time is captured.
+//! run lands on it, and the accepted point that lands there is captured. A
+//! card's own run stops once the last requested time is captured; a `.TRAN`
+//! task's run lands on the times its state cards name and continues to its
+//! stop time, so one transient serves the task and the cards alike.
 
 use std::cell::RefCell;
 
@@ -40,14 +42,30 @@ pub(in crate::engine) struct CapturedTransientState {
 pub(in crate::engine) struct TransientStateCapture<'a> {
     /// Requested times, finite, non-negative and strictly increasing.
     times: &'a [Value],
+    /// Whether the run stops once the last time is captured.
+    stops_at_last: bool,
     captured: RefCell<Vec<CapturedTransientState>>,
 }
 
 impl<'a> TransientStateCapture<'a> {
-    /// Validate a capture request against the run's stop time.
+    /// Validate a capture request against the run's stop time. The run stops
+    /// once the last requested time is captured.
     pub(in crate::engine) fn new(
         times: &'a [Value],
         tstop: Value,
+    ) -> Result<Self, SimulationError> {
+        Self::with_end(times, tstop, true)
+    }
+
+    /// The same request, for a run that continues to its stop time.
+    fn through_stop(times: &'a [Value], tstop: Value) -> Result<Self, SimulationError> {
+        Self::with_end(times, tstop, false)
+    }
+
+    fn with_end(
+        times: &'a [Value],
+        tstop: Value,
+        stops_at_last: bool,
     ) -> Result<Self, SimulationError> {
         if times.is_empty() {
             return Err(SimulationError::Circuit(
@@ -72,6 +90,7 @@ impl<'a> TransientStateCapture<'a> {
         }
         Ok(Self {
             times,
+            stops_at_last,
             captured: RefCell::new(Vec::with_capacity(times.len())),
         })
     }
@@ -82,8 +101,8 @@ impl<'a> TransientStateCapture<'a> {
     }
 
     /// Offer an accepted point. Captures it when it lands on the next
-    /// requested time, and answers whether every requested time has now been
-    /// captured, which is the run's signal to stop.
+    /// requested time, and answers whether the run should stop: every
+    /// requested time has now been captured, and the run stops at the last.
     ///
     /// A run that passes a requested time without landing on it is refused:
     /// the requested times are breakpoints, so that is a defect, not a
@@ -96,7 +115,7 @@ impl<'a> TransientStateCapture<'a> {
     ) -> Result<bool, SimulationError> {
         let mut captured = self.captured.borrow_mut();
         let Some(&requested) = self.times.get(captured.len()) else {
-            return Ok(true);
+            return Ok(self.stops_at_last);
         };
         let tolerance = XYCE_BREAKPOINT_TOLERANCE.max(requested.abs() * Value::EPSILON * 4.0);
         if (time - requested).abs() <= tolerance {
@@ -111,7 +130,7 @@ impl<'a> TransientStateCapture<'a> {
                  time {requested:e} s"
             )));
         }
-        Ok(captured.len() == self.times.len())
+        Ok(self.stops_at_last && captured.len() == self.times.len())
     }
 
     /// The states captured, in request order.
@@ -139,6 +158,59 @@ impl Engine {
     ) -> Result<(TransientResult, Vec<CapturedTransientState>), SimulationError> {
         validate_transient_window(tstop, max_step)?;
         let capture = TransientStateCapture::new(times, tstop)?;
+        self.run_tran_with_state_capture(netlist, tstop, max_step, startup_mode, capture, abort)
+    }
+
+    /// Run a transient card to `tstop`, landing on each of `times` and
+    /// capturing the state accepted there, for the small-signal cards that
+    /// linearize around them ([`Self::run_small_signal_at_transient_state`]).
+    ///
+    /// Spectre's `actimes` runs on the transient itself: each requested time
+    /// is a breakpoint of the one run, which continues past it. This is
+    /// [`Self::run_tran_with_startup_mode_and_abort`]'s run with those
+    /// breakpoints added, and up to each time it is the run a card's own state
+    /// transient takes.
+    ///
+    /// Called by the simulation service for a `.TRAN` task whose state cards
+    /// are bound to it, and by `rspice run` for a deck's first `.TRAN` card.
+    pub fn run_tran_capturing_states_to_stop(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        times: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, Vec<crate::engine::TransientState>), SimulationError> {
+        validate_transient_window(tstop, max_step)?;
+        let capture = TransientStateCapture::through_stop(times, tstop)?;
+        let (result, captured) = self.run_tran_with_state_capture(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            capture,
+            abort,
+        )?;
+        Ok((
+            result,
+            captured
+                .into_iter()
+                .map(crate::engine::TransientState)
+                .collect(),
+        ))
+    }
+
+    fn run_tran_with_state_capture(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        capture: TransientStateCapture<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, Vec<CapturedTransientState>), SimulationError> {
+        let requested = capture.times().len();
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
@@ -163,11 +235,10 @@ impl Engine {
             },
         )?;
         let captured = capture.into_captured();
-        if captured.len() != times.len() {
+        if captured.len() != requested {
             return Err(SimulationError::Circuit(format!(
-                "the transient captured {} of {} requested states",
+                "the transient captured {} of {requested} requested states",
                 captured.len(),
-                times.len()
             )));
         }
         Ok((result, captured))
@@ -328,6 +399,77 @@ mod tests {
                  {expected} by more than {bound:e}"
             );
         }
+    }
+
+    /// A `.TRAN` task's run that captures its cards' states is, up to the last
+    /// of them, the run a card's own state transient takes: the same accepted
+    /// points and the same states, bit for bit. It then continues to its stop
+    /// time, and away from the requested times it is the uncaptured run.
+    #[test]
+    fn a_run_through_its_stop_captures_what_a_card_run_captures() {
+        let netlist = Netlist::parse(RC_DECK).expect("the deck parses");
+        let engine = Engine::default();
+        let (tstop, max_step) = (5.0e-6, 1.0e-8);
+        let times = [1.0e-6, 3.0e-6];
+        let (card_run, card_states) = engine
+            .run_tran_capturing_states(
+                &netlist,
+                tstop,
+                max_step,
+                TransientStartupMode::OperatingPoint,
+                &times,
+                &NoAbort,
+            )
+            .expect("the card run converges");
+        let (task_run, task_states) = engine
+            .run_tran_capturing_states_to_stop(
+                &netlist,
+                tstop,
+                max_step,
+                TransientStartupMode::OperatingPoint,
+                &times,
+                &NoAbort,
+            )
+            .expect("the task run converges");
+        let plain = engine
+            .run_tran(&netlist, tstop, max_step)
+            .expect("the uncaptured run converges");
+
+        assert_eq!(task_run.time.last().copied(), Some(tstop));
+        let shared = card_run.time.len();
+        assert_eq!(task_run.time[..shared], card_run.time[..]);
+        let out = |result: &TransientResult| {
+            result
+                .try_voltage_waveform_named("out")
+                .expect("out is retained")
+                .to_vec()
+        };
+        assert_eq!(out(&task_run)[..shared], out(&card_run)[..]);
+        assert_eq!(task_states.len(), card_states.len());
+        for (task, card) in task_states.iter().zip(&card_states) {
+            assert_eq!(task.0.time.to_bits(), card.time.to_bits());
+            assert_eq!(
+                task.0
+                    .solution
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+                card.solution
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        // Before the first requested time the breakpoints have not yet
+        // shaped a step: the run is the uncaptured one.
+        let before = plain
+            .time
+            .iter()
+            .take_while(|&&time| time < 0.5 * times[0])
+            .count();
+        assert!(before > 2, "the comparison spans accepted points");
+        assert_eq!(task_run.time[..before], plain.time[..before]);
+        assert_eq!(out(&task_run)[..before], out(&plain)[..before]);
     }
 
     /// A request must be ordered and inside the run.

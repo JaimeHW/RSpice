@@ -47,7 +47,11 @@ mod tf;
 pub(crate) use tf::run_tf_analysis_with_bias;
 mod transient;
 mod transient_state;
-pub(crate) use transient_state::{Bias, StateCard, StateRunError, linearize_at_state};
+pub(crate) use transient_state::{
+    Bias, StateCard, StateRunError, TransientStateHandoff, TransientStateRole, TransientStateStore,
+    install_transient_state_handoff, linearize_at_state, publish_transient_states,
+    state_capture_times,
+};
 // Each analysis re-exports the request types a caller must construct and the
 // entry point it calls. Result types are not re-exported: callers receive them
 // from the entry point and never name them here.
