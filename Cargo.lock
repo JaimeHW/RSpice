@@ -5796,6 +5796,7 @@ dependencies = [
  "once_cell",
  "png",
  "regex",
+ "ron",
  "rspice-core",
  "rspice-design-model",
  "rspice-units",

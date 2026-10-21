@@ -274,6 +274,9 @@ use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results::family_projection::SourceSampleSelection;
+use rspice_results::result_presentation::{
+    ResultArtifactPresentationKey, SourceWaveformPresentationKey,
+};
 use rspice_results_ui::chrome;
 use rspice_results_ui::chrome::bars::viewer_has_sheet_bar;
 #[cfg(test)]
@@ -281,8 +284,7 @@ use rspice_results_ui::chrome::bars::viewer_has_structured_strip;
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
 use rspice_results_ui::presentation::{PlotView, well_hint};
 use rspice_results_ui::selection::{
-    ResultArtifactPresentationKey, ResultBrowserSelectionKey, ResultExpressionPresentationKey,
-    SelectedResultTrace, SourceWaveformPresentationKey,
+    ResultBrowserSelectionKey, ResultExpressionPresentationKey, SelectedResultTrace,
 };
 use rspice_results_ui::session::{
     AxisExtent, DocumentMarker, MarkerSelector, OptimizationSelection, PaneAxis,

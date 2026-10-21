@@ -1,10 +1,13 @@
 //! Generation-bounded waveform projection cache over explicit presentation inputs.
 use super::{FamilyTraceVisibilityKey, ProjectionOptions, StripModel, extent, stable_hash};
-use crate::{selection::SourceWaveformPresentationKey, waveform::WaveformData};
+use crate::waveform::WaveformData;
 use rspice_results::{
-    analysis_result::AnalysisResult, analysis_type::AnalysisType,
-    executed_deck::ExecutedDeckArchive, family_projection::SourceSampleSelection,
-    result_presentation::ResultViewer, run::SimulationRun,
+    analysis_result::AnalysisResult,
+    analysis_type::AnalysisType,
+    executed_deck::ExecutedDeckArchive,
+    family_projection::SourceSampleSelection,
+    result_presentation::{ResultViewer, SourceWaveformPresentationKey},
+    run::SimulationRun,
 };
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::product::DatasetId;

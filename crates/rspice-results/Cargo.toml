@@ -33,6 +33,9 @@ sha2.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 
+[dev-dependencies]
+ron = { version = "0.12.2", features = ["integer128"] }
+
 [build-dependencies]
 serde_json = { workspace = true, features = ["preserve_order"] }
 

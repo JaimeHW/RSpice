@@ -11,7 +11,6 @@ use rspice_results::result_presentation::{
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::plot::sample::SweepShape;
 use rspice_ui_kit::plot::{XScale, fmt_si_significant, fmt_significant};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod cache;
@@ -26,9 +25,7 @@ mod policy;
 mod projection;
 pub mod readout;
 pub mod stack;
-pub use policy::{
-    CursorInterpolation, DisplayedSignificantDigits, ReadoutPolicy, cursor_interpolation,
-};
+pub use policy::{ReadoutPolicy, cursor_interpolation};
 mod units;
 pub use projection::{AcDisplay, ProjectionOptions, build_models, family_color};
 use units::signal_unit;
@@ -36,39 +33,6 @@ pub use units::{
     NOISE_DENSITY_UNIT, analysis_default_unit, browser_signal_is_current, browser_signal_unit,
     fmt_in_unit, fmt_in_unit_readout, unit_carries_its_decade,
 };
-
-/// How a complex quantity is split into traces.
-///
-/// Magnitude and phase draws the phase in degrees; the pane shows it in
-/// whichever angle unit the reader chose, so a separate radians mode would
-/// only say the same thing twice. Sessions that stored that retired mode
-/// read back as magnitude and phase.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ComplexNumberDisplay {
-    #[default]
-    #[serde(alias = "magnitude-phase-radians")]
-    MagnitudePhaseDegrees,
-    RealImaginary,
-}
-
-impl ComplexNumberDisplay {
-    pub const fn index(self) -> usize {
-        match self {
-            Self::MagnitudePhaseDegrees => 0,
-            Self::RealImaginary => 1,
-        }
-    }
-
-    pub fn from_index(index: usize) -> Result<Self, &'static str> {
-        match index {
-            // Index 2 was magnitude and phase in radians.
-            0 | 2 => Ok(Self::MagnitudePhaseDegrees),
-            1 => Ok(Self::RealImaginary),
-            _ => Err("complex-number display index is outside its domain"),
-        }
-    }
-}
 
 /// How a trace's Y values are interpreted.
 #[derive(Clone, Copy, PartialEq, Eq)]

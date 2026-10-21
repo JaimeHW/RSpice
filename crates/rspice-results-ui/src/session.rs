@@ -6,10 +6,7 @@ use crate::{
     eye_diagram::{EyeTimebase, view::EyeTexture},
     fft::view::FftSeries,
     presentation::PlotView,
-    selection::{
-        ResultArtifactPresentationKey, ResultBrowserSelectionKey, SelectedResultTrace,
-        SourceWaveformPresentationKey,
-    },
+    selection::{ResultBrowserSelectionKey, SelectedResultTrace},
     soa::{SoaRuleFilter, SoaRuleSelection},
     specs::editor::SpecDraft,
 };
@@ -17,8 +14,9 @@ use rspice_results::{
     events::projection::BusRadix,
     family_projection::SourceSampleSelection,
     result_presentation::{
-        AnalysisPresentationKey, AnalysisPresentationSource, ExprTrace, MarkerKind, ResultMarker,
-        ResultViewer, WavePanePresentationKey, WaveformPresentationKey, viewer_uses_wave_stack,
+        AnalysisPresentationKey, AnalysisPresentationSource, ExprTrace, MarkerKind,
+        ResultArtifactPresentationKey, ResultMarker, ResultViewer, SourceWaveformPresentationKey,
+        WavePanePresentationKey, WaveformPresentationKey, viewer_uses_wave_stack,
     },
     visualization_document::{MarkerId, PaneId},
 };

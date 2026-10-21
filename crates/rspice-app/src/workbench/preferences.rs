@@ -208,9 +208,9 @@ impl WorkspacePreferencesStorage {
     }
 }
 
-pub use rspice_results_ui::waves::{CursorInterpolation, DisplayedSignificantDigits};
-
-pub use rspice_results_ui::waves::ComplexNumberDisplay;
+pub use rspice_results::display_preferences::{
+    ComplexNumberDisplay, CursorInterpolation, DisplayedSignificantDigits,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

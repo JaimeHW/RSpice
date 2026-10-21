@@ -3,7 +3,7 @@
 use super::*;
 use crate::workbench::documents::result_document::{AnalysisPresentationKey, MarkerKind};
 use crate::workbench::preferences::CursorInterpolation;
-use rspice_results_ui::selection::SourceWaveformPresentationKey;
+use rspice_results::result_presentation::SourceWaveformPresentationKey;
 use rspice_results_ui::session::MarkerView;
 
 pub(super) fn capture_quick_view_overlays(

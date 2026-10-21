@@ -1,14 +1,15 @@
 //! Exact active/overlay source projection into unit-aware waveform strips.
 
 use super::{
-    AnalysisPresentationKey, ComplexNumberDisplay, FamilyTraceStyle, FamilyTraceVisibilityKey,
-    SharedWaveformValues, StripModel, StripTrace, SweepShape, TraceKind, XScale,
-    analysis_default_unit, run_mixed_key, stable_hash,
+    AnalysisPresentationKey, FamilyTraceStyle, FamilyTraceVisibilityKey, SharedWaveformValues,
+    StripModel, StripTrace, SweepShape, TraceKind, XScale, analysis_default_unit, run_mixed_key,
+    stable_hash,
 };
 use crate::derived::DerivedSeries;
 use crate::waveform::{WaveformData, waveform_color};
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
+use rspice_results::display_preferences::ComplexNumberDisplay;
 use rspice_results::executed_deck::ExecutedDeckArchive;
 use rspice_results::family_projection::{
     FamilyRenderGroup, FamilyRenderPlan, SourceSampleSelection,

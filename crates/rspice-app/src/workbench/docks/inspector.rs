@@ -1085,7 +1085,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 fn selected_result_artifact(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    selected: &rspice_results_ui::selection::ResultArtifactPresentationKey,
+    selected: &rspice_results::result_presentation::ResultArtifactPresentationKey,
 ) {
     let Some((run_index, _, analysis)) = selected.resolve(&app.state.simulation.retained.runs)
     else {

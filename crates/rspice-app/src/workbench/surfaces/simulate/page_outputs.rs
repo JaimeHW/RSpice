@@ -1191,7 +1191,8 @@ pub(super) fn open_materialized_traces(
     waveform_indices: &[usize],
 ) {
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
-    use rspice_results_ui::selection::{SelectedResultTrace, SourceWaveformPresentationKey};
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    use rspice_results_ui::selection::SelectedResultTrace;
     let Some(run) = app.state.simulation.active_run() else {
         return;
     };

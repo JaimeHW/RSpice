@@ -22,12 +22,13 @@ use crate::state::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::AnalysisPresentationKey;
 use crate::workbench::state::{SimulationPage, VerificationPage, Workspace};
+use rspice_results::result_presentation::{
+    ResultArtifactPresentationKey, SourceWaveformPresentationKey,
+};
 use rspice_results::yield_analysis::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
 };
-use rspice_results_ui::selection::{
-    ResultArtifactPresentationKey, ResultBrowserSelectionKey, SourceWaveformPresentationKey,
-};
+use rspice_results_ui::selection::ResultBrowserSelectionKey;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 fn result(trail: Vec<bool>) -> YieldResult {

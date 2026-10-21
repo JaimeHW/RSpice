@@ -1,71 +1,14 @@
 //! Stable viewer selections over exact retained result identities.
 use rspice_results::{
     analysis_result::AnalysisResult,
-    result_presentation::{AnalysisPresentationKey, TracePresentationKey, WaveformPresentationKey},
+    result_presentation::{
+        AnalysisPresentationKey, ResultArtifactPresentationKey, SourceWaveformPresentationKey,
+        TracePresentationKey, WaveformPresentationKey,
+    },
     run::SimulationRun,
     waveform::RetainedWaveform,
 };
 use rspice_vocabulary::product::DatasetId;
-
-/// Stable identity of one retained source waveform whose quick-view
-/// visibility has been overridden for this session.
-///
-/// The solver-owned [`WaveformData`](crate::waveform::WaveformData) remains an
-/// immutable result. A visibility click records presentation state against
-/// the dataset, authored analysis, and source name instead of rewriting the
-/// retained run (or its legacy live projection).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SourceWaveformPresentationKey {
-    analysis: AnalysisPresentationKey,
-    source_name: String,
-}
-
-impl SourceWaveformPresentationKey {
-    pub fn new(analysis: AnalysisPresentationKey, source_name: impl Into<String>) -> Self {
-        Self {
-            analysis,
-            source_name: source_name.into(),
-        }
-    }
-
-    pub fn resolve<'a, R, A, W>(&self, runs: &'a [R]) -> Option<(usize, usize, usize, &'a W)>
-    where
-        R: AsRef<SimulationRun<A>>,
-        A: AsRef<AnalysisResult<W>> + 'a,
-        W: AsRef<RetainedWaveform> + 'a,
-    {
-        let (run_index, run) = runs
-            .iter()
-            .enumerate()
-            .find(|(_, run)| run.as_ref().dataset_id == self.analysis.dataset_id())?;
-        let (analysis_index, analysis) = self.analysis.resolve(run.as_ref())?;
-        let mut matches = analysis
-            .as_ref()
-            .waveforms
-            .iter()
-            .enumerate()
-            .filter(|(_, waveform)| waveform.as_ref().name == self.source_name);
-        let (waveform_index, waveform) = matches.next()?;
-        matches
-            .next()
-            .is_none()
-            .then_some((run_index, analysis_index, waveform_index, waveform))
-    }
-
-    pub const fn analysis(&self) -> AnalysisPresentationKey {
-        self.analysis
-    }
-}
-
-/// Stable identity of a non-waveform quantity retained by one immutable
-/// analysis: scalar evidence, an exact array, an event stream, a contribution
-/// table, or family metadata. `canonical_name` is producer-authored inventory
-/// identity, not a translated display label.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ResultArtifactPresentationKey {
-    analysis: AnalysisPresentationKey,
-    canonical_name: String,
-}
 
 /// Stable identity of one user-authored expression within a retained
 /// analysis. Expression text is unique within its analysis and is also the
@@ -90,37 +33,6 @@ impl ResultExpressionPresentationKey {
 
     pub fn text(&self) -> &str {
         &self.text
-    }
-}
-
-impl ResultArtifactPresentationKey {
-    pub fn new(analysis: AnalysisPresentationKey, canonical_name: impl Into<String>) -> Self {
-        Self {
-            analysis,
-            canonical_name: canonical_name.into(),
-        }
-    }
-
-    pub fn analysis(&self) -> AnalysisPresentationKey {
-        self.analysis
-    }
-
-    pub fn canonical_name(&self) -> &str {
-        &self.canonical_name
-    }
-
-    pub fn resolve<'a, R, A, W>(&self, runs: &'a [R]) -> Option<(usize, usize, &'a A)>
-    where
-        R: AsRef<SimulationRun<A>>,
-        A: AsRef<AnalysisResult<W>> + 'a,
-        W: AsRef<RetainedWaveform> + 'a,
-    {
-        let (run_index, run) = runs
-            .iter()
-            .enumerate()
-            .find(|(_, run)| run.as_ref().dataset_id == self.analysis.dataset_id())?;
-        let (analysis_index, analysis) = self.analysis.resolve(run.as_ref())?;
-        Some((run_index, analysis_index, analysis))
     }
 }
 

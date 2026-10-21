@@ -26,10 +26,10 @@ use crate::workbench::documents::result_document::{
     exact_result_artifact_text, exact_result_signal_last_sample, exact_result_signal_tsv,
     retained_evidence_is_valid,
 };
-use rspice_results_ui::selection::{
-    ResultArtifactPresentationKey, ResultBrowserSelectionKey, ResultExpressionPresentationKey,
-    SourceWaveformPresentationKey,
+use rspice_results::result_presentation::{
+    ResultArtifactPresentationKey, SourceWaveformPresentationKey,
 };
+use rspice_results_ui::selection::{ResultBrowserSelectionKey, ResultExpressionPresentationKey};
 
 use super::super::commands::result_navigation::{open_run_log, producing_run};
 use super::super::commands::vocabulary::Command;

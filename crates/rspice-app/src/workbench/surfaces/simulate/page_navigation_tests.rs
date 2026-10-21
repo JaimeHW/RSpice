@@ -463,7 +463,7 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
         DcSweepQuantity, SavedOutputDcMember,
     };
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
-    use rspice_results_ui::selection::SourceWaveformPresentationKey;
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
     let mut app = RSpiceApp::test_instance();
     let output = saved_output();
     let evidence = DcSweepEvidence {
