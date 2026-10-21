@@ -347,9 +347,13 @@ const MAX_PUBLIC_ITEMS: usize = 5752;
 // library and control-protocol modules can move into a crate of their own
 // below it. `Netlist`, `OutputNodeNamespace`, `OutputRequest` and
 // `MeasureExpression` keep their invariant-carrying fields private and add
-// hidden getters and narrow writers in their place. The census is 536, with no
-// slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 536;
+// hidden getters and narrow writers in their place. The census was 536, with
+// no slack.
+// `CircuitData::voltage_source_storage` and `CircuitData::current_source_storage`
+// add two: the parser's checks that read a built circuit's independent sources
+// run from an integration test, outside the crate, so the parser's own unit
+// tests never reach up to the engine. The census is 538, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 538;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

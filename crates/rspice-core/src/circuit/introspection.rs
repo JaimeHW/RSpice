@@ -1215,6 +1215,20 @@ impl CircuitData {
         &self.resistors
     }
 
+    /// Read-only access to independent voltage-source storage, for the
+    /// parser's checks against the built circuit.
+    #[doc(hidden)]
+    pub fn voltage_source_storage(&self) -> &VoltageSources {
+        &self.voltage_sources
+    }
+
+    /// Read-only access to independent current-source storage, for the
+    /// parser's checks against the built circuit.
+    #[doc(hidden)]
+    pub fn current_source_storage(&self) -> &CurrentSources {
+        &self.current_sources
+    }
+
     /// Native diode terminal nodes by instance name, if present.
     pub fn diode_terminal_nodes(&self, name: &str) -> Option<(NodeId, NodeId)> {
         self.diodes

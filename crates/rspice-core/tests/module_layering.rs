@@ -235,23 +235,13 @@ const LAYERS: &[(&str, u32)] = &[
 /// `netlist -> engine` at 13 rather than 5. Each entry below says what retires
 /// it.
 ///
-/// - `netlist -> engine`, 2. Two unit tests in `netlist/flattener.rs`
-///   (`subcircuit_bindings_preserve_complex_scopes_and_physical_values` and
-///   `statistical_parameter_expansion_reaches_the_built_circuit`) that build
-///   the flattened deck through `Engine` and read the built circuit's source
-///   tables and the statistics plan's sampling, which are crate-private. The
-///   rest of this edge retired by moving the physical half of each check into
-///   an integration test under `crates/rspice-core/tests/`
-///   (`netlist_engine_roundtrip.rs`, `netlist_engine_roundtrip_more.rs`),
-///   which is an external crate and therefore not an edge at all; the
-///   parser-internal halves stayed, because they drive
-///   `super::parse_numeric_field_value` and its siblings directly. These two
-///   retire the same way once the items they read are reachable from an
-///   integration test.
-/// - `netlist -> circuit`, 1. One unit test in `netlist/flattener.rs` that
-///   reads a materialized source waveform back through
-///   `circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect`.
-///   Retires the same way.
+/// The `netlist -> engine` and `netlist -> circuit` edges have retired: the
+/// physical half of each check moved into an integration test under
+/// `crates/rspice-core/tests/` (`netlist_engine_roundtrip.rs`,
+/// `netlist_engine_roundtrip_more.rs`), which is an external crate and
+/// therefore not an edge at all, while the parser-internal halves stayed,
+/// because they drive `super::parse_numeric_field_value` and its siblings
+/// directly.
 ///
 /// The rest were found through the crate root's names.
 ///
@@ -264,7 +254,7 @@ const LAYERS: &[(&str, u32)] = &[
 ///   `circuit/xyce_dae.rs`; and in `device/mosfet`, two in
 ///   `bsim4v8/device/charge_tests.rs` and one in `b3soi/dd/derivative_tests.rs`,
 ///   which read the built circuit's crate-private device stores and probes.
-///   They retire as `netlist -> engine` does, by moving the half that needs
+///   They retire as `netlist -> engine` did, by moving the half that needs
 ///   the facade into an integration test.
 /// - `device -> analysis`, 3. Unit tests in `device/veriloga.rs` that check a
 ///   `StampError` keeps its classification when it widens to
@@ -300,8 +290,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("device", "analysis", 3),
     ("device", "circuit", 7),
     ("device", "engine", 3),
-    ("netlist", "circuit", 1),
-    ("netlist", "engine", 2),
 ];
 
 /// `rspice-core`'s own `src/`, whose root re-exports the engine's names.

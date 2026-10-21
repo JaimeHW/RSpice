@@ -5,7 +5,8 @@
 //! The half that needs `Engine` lives here, outside the crate, so `netlist`
 //! never reaches up to the engine to check itself.
 
-use rspice_core::config::ExpressionDialect;
+use rspice_core::circuit::VoltageSources;
+use rspice_core::config::{ExpressionDialect, SpiceDialect};
 use rspice_core::netlist::{
     NetlistParseOptions, RandomState, StatisticalParamMode, source_map_for_editor,
 };
@@ -256,4 +257,289 @@ fn circuit_build_revalidates_programmatically_changed_sidecar_state() {
             .to_string()
             .contains("Cannot set both .IC and .NODESET simultaneously")
     );
+}
+
+/// Complex instance bindings reach every subcircuit scope, and the built
+/// resistors and source carry the physical (real) value each binding
+/// evaluates to, whether the cell is instantiated directly, through a
+/// wrapper, or with its defaults.
+#[test]
+fn subcircuit_bindings_preserve_complex_scopes_and_physical_values() {
+    for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+        let netlist = Netlist::parse_with_options(
+            "Complex instance bindings
+.param z={2+3j}
+Xdirect d 0 cell z={z+1j} next={z+1j}
+Xnested n 0 wrapper z={z}
+Xdefault f 0 cell
+.subckt wrapper a b z=100
+.param local={z+2j}
+Xchild a b cell z={local} next={z+1j}
+.ends
+.subckt cell a b z={1+2j} next={z+1j}
+.param squared={z*z}
+.func part(x) {img(x)}
+R1 a b {1+part(z)}
+R2 a b {1+img(squared)}
+R3 a b 1 M={1+img(next)}
+V1 inside b DC {1+img(next)} AC {1+img(next)}
+.ends
+.end",
+            NetlistParseOptions {
+                expression_dialect: dialect,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let circuit = Engine::default().build_circuit(&netlist).unwrap();
+        for (scope, r1, r2, magnitude) in [
+            ("Xdirect", 5.0, 17.0, 6.0),
+            ("Xnested.Xchild", 6.0, 21.0, 7.0),
+            ("Xdefault", 3.0, 5.0, 4.0),
+        ] {
+            for (name, conductance) in [("R1", 1.0 / r1), ("R2", 1.0 / r2), ("R3", magnitude)] {
+                let name = format!("{scope}.{name}");
+                let index = circuit
+                    .resistor_storage()
+                    .names
+                    .iter()
+                    .position(|actual| actual.eq_ignore_ascii_case(&name))
+                    .unwrap();
+                assert_eq!(
+                    circuit.resistor_storage().conductances[index],
+                    conductance,
+                    "{dialect:?} {name}"
+                );
+            }
+            let name = format!("{scope}.V1");
+            let index = circuit
+                .voltage_source_storage()
+                .names
+                .iter()
+                .position(|actual| actual.eq_ignore_ascii_case(&name))
+                .unwrap();
+            assert_eq!(
+                circuit.voltage_source_storage().dc_values[index],
+                magnitude,
+                "{dialect:?} {name}"
+            );
+            assert_eq!(
+                circuit.voltage_source_storage().ac_magnitudes[index],
+                magnitude,
+                "{dialect:?} {name}"
+            );
+        }
+    }
+}
+
+/// A Spectre statistical parameter reaches every built resistor and source
+/// that reads it, through user functions, aliases, root redefinitions and
+/// shadowing subcircuit parameters, with process and mismatch variation and
+/// with enough user functions to change how the deck is expanded.
+#[test]
+fn statistical_parameter_expansion_reaches_the_built_circuit() {
+    use rspice_core::netlist::{
+        SpectreDistribution, SpectreSpread, SpectreStatisticalCoordinate, SpectreStatisticsPlan,
+        SpectreVariation, SpectreVariationScope,
+    };
+    let mut plan = SpectreStatisticsPlan {
+        variations: vec![SpectreVariation {
+            bounds: None,
+            line: 3,
+            scope: SpectreVariationScope::Process,
+            parameter: "rv".into(),
+            distribution: SpectreDistribution::Gaussian,
+            spread: SpectreSpread::StandardDeviation("5".into()),
+            percent: false,
+        }],
+        correlations: vec![],
+    };
+    let coordinate = SpectreStatisticalCoordinate {
+        seed: 41,
+        monte_carlo_run: 9,
+        temperature_celsius: 27.0,
+        axes: vec![],
+    };
+    for (variation_scope, function_count) in [
+        (SpectreVariationScope::Process, 0),
+        (SpectreVariationScope::Process, 65),
+        (SpectreVariationScope::Mismatch, 0),
+        (SpectreVariationScope::Mismatch, 65),
+    ] {
+        plan.variations[0].scope = variation_scope;
+        let mut definitions = String::new();
+        for index in 0..function_count {
+            definitions.push_str(&format!(".func unused{index}(x) {{x}}\n"));
+        }
+        let mut netlist = Netlist::parse(&format!(
+            "statistical expansion\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n{definitions}\
+             .func hidden(x) {{rv*x}}\n.func nested(x) {{hidden(x)+1}}\n\
+             .param scale=2 top_alias={{scale*rv}} top_bare=top_alias\n\
+             .param doubled={{2*rv}} bare_alias=doubled\n\
+             .param z={{3+4J}}\n.func captured(x) {{scale*x+img(z)}}\n\
+             .param captured_alias={{captured(rv)}} noise_capture={{rv+agauss(0,1,1)}}\n\
+             .param scale=9 top_alias=123 root_nested={{bare_alias+rv}}\n\
+             .param z=0\n.func captured(x) {{9*x}}\n\
+             RROOT in 0 {{hidden(2)}}\nVSTAT stat 0 DC {{nested(1)}}\n\
+             .subckt unit a b\n.param derived={{2*rv}}\n.param indirect={{nested(3)}}\n\
+             R1 a b {{if(rv<1e6,derived,3*rv)}}\n\
+             R2 a b {{hidden(2)}}\nR3 a b {{nested(3)}}\nR4 a b {{indirect}}\n\
+             .model RSTAT R(R={{hidden(2)}})\nR5 a b 1 RSTAT\n\
+             R6 a b {{bare_alias}}\nR7 a b {{root_nested}}\nR8 a b {{top_alias}}\n\
+             R9 a b {{captured_alias}}\nR10 a b {{noise_capture}}\nR11 a b {{top_bare}}\n.ends\n\
+             .subckt shadow a b rv=50\n.param local={{2*rv}}\n\
+             R1 a b {{rv}}\nR2 a b {{local}}\nR3 a b {{bare_alias}}\n\
+             R4 a b {{rv+bare_alias}}\n.model LOCAL R(R={{rv}})\nR5 a b 1 LOCAL\n\
+             VS sv b DC {{rv+bare_alias}} AC rv local SIN(rv {{bare_alias}} 1k)\n\
+             IS a b DC {{rv+bare_alias}} AC rv local PWL(0 rv 1m {{rv+bare_alias}})\n.ends\n\
+             .subckt body_shadow a b\n.param rv=60\n\
+             R1 a b {{rv}}\nR2 a b {{bare_alias}}\n\
+             XCH a b shadow rv=80\n.ends\n\
+             X1 in 0 unit\nX2 in 0 shadow\nX3 in 0 shadow rv=70\n\
+             X4 in 0 body_shadow\nV1 in 0 1\n.end\n",
+            plan.encode_internal()
+        ))
+        .expect("statistical deck parses");
+        let process = plan.sample_process(&netlist.params, &coordinate).unwrap();
+        let sample_for = |identity| {
+            plan.sample_mismatch(&netlist.params, &process, identity, &coordinate)
+                .unwrap()
+                .get("RV")
+                .or_else(|| process.get("RV"))
+                .copied()
+                .unwrap()
+        };
+        let sample = sample_for("X1");
+        let root_sample = sample_for("RROOT");
+        let source_sample = sample_for("VSTAT");
+        let captured_noise = netlist.params.get("noise_capture").unwrap() - 100.0;
+        let expected = if sample < 1e6 {
+            2.0 * sample
+        } else {
+            3.0 * sample
+        };
+        netlist.spectre_statistical_coordinate = Some(coordinate.clone());
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("sampled hierarchical circuit builds");
+        let mut failures = Vec::new();
+        for (name, expected) in [
+            ("RROOT", 2.0 * root_sample),
+            ("X1.R1", expected),
+            ("X1.R2", 2.0 * sample),
+            ("X1.R3", 3.0 * sample + 1.0),
+            ("X1.R4", 3.0 * sample + 1.0),
+            ("X1.R5", 2.0 * sample),
+            ("X1.R6", 2.0 * sample),
+            ("X1.R7", 3.0 * sample),
+            ("X1.R8", 123.0),
+            // Readers of a root parameter that is redefined after them
+            // read the last definition, as in ngspice-46: scale=9 and
+            // z=0 reach captured(rv), and top_bare reads top_alias=123.
+            ("X1.R9", 9.0 * sample),
+            ("X1.R10", sample + captured_noise),
+            ("X1.R11", 123.0),
+            ("X2.R1", 50.0),
+            ("X2.R2", 100.0),
+            ("X2.R3", 2.0 * sample_for("X2")),
+            ("X2.R4", 50.0 + 2.0 * sample_for("X2")),
+            ("X2.R5", 50.0),
+            ("X3.R1", 70.0),
+            ("X3.R2", 140.0),
+            ("X3.R3", 2.0 * sample_for("X3")),
+            ("X3.R4", 70.0 + 2.0 * sample_for("X3")),
+            ("X3.R5", 70.0),
+            ("X4.R1", 60.0),
+            ("X4.R2", 2.0 * sample_for("X4")),
+            ("X4.XCH.R1", 80.0),
+            ("X4.XCH.R2", 160.0),
+            ("X4.XCH.R3", 2.0 * sample_for("X4.XCH")),
+            ("X4.XCH.R4", 80.0 + 2.0 * sample_for("X4.XCH")),
+            ("X4.XCH.R5", 80.0),
+        ] {
+            let index = circuit
+                .resistor_storage()
+                .names
+                .iter()
+                .position(|actual| actual.eq_ignore_ascii_case(name))
+                .expect("resistor exists");
+            let actual = circuit.resistor_storage().conductances[index].recip();
+            let relative = (actual / expected - 1.0).abs();
+            if !relative.is_finite() || relative >= 1e-14 {
+                failures.push(format!(
+                    "{variation_scope:?}, {function_count} extra functions, {name}: sampled resistance {actual}, expected {expected}"
+                ));
+            }
+        }
+        let source_index = circuit
+            .voltage_source_storage()
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("VSTAT"))
+            .expect("source exists");
+        let actual = circuit.voltage_source_storage().dc_values[source_index];
+        let expected = source_sample + 1.0;
+        let relative = (actual / expected - 1.0).abs();
+        if !relative.is_finite() || relative >= 1e-14 {
+            failures.push(format!(
+                "{variation_scope:?}: sampled source {actual}, expected {expected}"
+            ));
+        }
+        let voltage_sources = circuit.voltage_source_storage();
+        let current_sources = circuit.current_source_storage();
+        for (scope, local) in [("X2", 50.0), ("X3", 70.0), ("X4.XCH", 80.0)] {
+            let sampled = sample_for(scope);
+            for (kind, names, dc, magnitudes, phases, specs, peak_time) in [
+                (
+                    "VS",
+                    &voltage_sources.names,
+                    &voltage_sources.dc_values,
+                    &voltage_sources.ac_magnitudes,
+                    &voltage_sources.ac_phases,
+                    &voltage_sources.source_specs,
+                    0.25e-3,
+                ),
+                (
+                    "IS",
+                    &current_sources.names,
+                    &current_sources.dc_values,
+                    &current_sources.ac_magnitudes,
+                    &current_sources.ac_phases,
+                    &current_sources.source_specs,
+                    1e-3,
+                ),
+            ] {
+                let name = format!("{scope}.{kind}");
+                let index = names
+                    .iter()
+                    .position(|actual| actual.eq_ignore_ascii_case(&name))
+                    .unwrap();
+                let spec = specs[index].as_ref().unwrap();
+                let at_time = |time| {
+                    VoltageSources::evaluate_source_spec_at_time_with_dialect(
+                        spec,
+                        time,
+                        1e-9,
+                        1.0,
+                        SpiceDialect::Ngspice,
+                    )
+                };
+                for (field, actual, expected) in [
+                    ("DC", dc[index], local + 2.0 * sampled),
+                    ("AC magnitude", magnitudes[index], local),
+                    ("AC phase", phases[index], (2.0 * local).to_radians()),
+                    ("waveform start", at_time(0.0), local),
+                    ("waveform peak", at_time(peak_time), local + 2.0 * sampled),
+                ] {
+                    let relative = (actual / expected - 1.0).abs();
+                    if !relative.is_finite() || relative >= 1e-14 {
+                        failures.push(format!(
+                            "{variation_scope:?}, {name} {field}: {actual}, expected {expected}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 }
