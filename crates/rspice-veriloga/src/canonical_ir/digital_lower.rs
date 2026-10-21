@@ -1325,7 +1325,8 @@ fn reject_overdriven_real_nets(
                 "cannot contribute to `{}`, which is a `wreal` with {count} drivers; Verilog-AMS LRM 2.4 section \
                  6.5.3 permits a maximum of one driver of a real-valued net, and the standard \
                  defines no resolution to combine two — declare it `wrealsum`, `wrealavg`, \
-                 `wrealmin` or `wrealmax` to say which one you want",
+                 `wrealmin` or `wrealmax`, or resolve every plain `wreal` with `.options \
+                 wreal_resolution=sum|avg|min|max`, to say which one you want",
                 signal.name
             ),
             second.span,

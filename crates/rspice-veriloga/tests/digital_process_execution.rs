@@ -2966,6 +2966,23 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
     }
 }
 
+/// A plain `wreal` with two drivers names both ways to resolve it: a resolved
+/// net type, or the deck's `.options wreal_resolution` for every plain `wreal`.
+#[test]
+fn an_overdriven_plain_wreal_names_the_deck_resolution_option() {
+    let rendered = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    wreal a, b, bus;\n\
+             \x20   assign bus = a;\n\
+             \x20   assign bus = b;",
+        ))
+        .expect_err("two drivers of a plain wreal are refused")
+        .to_string();
+    for expected in ["`wrealsum`", "`.options wreal_resolution=sum|avg|min|max`"] {
+        assert!(rendered.contains(expected), "{expected}: {rendered}");
+    }
+}
+
 /// Fixed part widths still require constant bounds. Dynamic bit reads and
 /// procedural writes carry their selectors as runtime values.
 #[test]
