@@ -10,7 +10,8 @@ mod current;
 use current::PssCurrentBasis;
 mod voltage;
 use voltage::{
-    InitialChargeRates, PssDescriptor, PssVoltageConstraintBuilder, PssVoltageConstraints,
+    InitialChargeRates, PssDescriptor, PssVoltageConstraintAdmission, PssVoltageConstraintBuilder,
+    PssVoltageConstraints,
 };
 mod forcing;
 use forcing::BehavioralForcing;

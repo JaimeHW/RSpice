@@ -49,7 +49,54 @@ fn coefficient_ratio(numerator: &BigInt, denominator: &BigInt) -> Result<Value, 
         .ok_or_else(precision_error)
 }
 
-impl VoltageRow {
+// The numerics layer defines `ExactRow` and `ExactElimination`, and an
+// inherent method belongs to the crate that defines its type, so the PSS
+// operations on them are traits of this module.
+
+/// A reduced row read as a sparse form over the forest values.
+trait VoltageRowForm {
+    fn form(self) -> Result<Vec<(ForestValue, Value)>, SimulationError>;
+}
+
+/// The rows the builder answers for while it is still admitting relations.
+trait VoltageRowQueries {
+    fn compile_row(
+        &mut self,
+        row: VoltageRow,
+    ) -> Result<Vec<(ForestValue, Value)>, SimulationError>;
+
+    fn port_row(
+        &self,
+        pos: usize,
+        neg: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<VoltageRow, SimulationError>;
+}
+
+/// Admitting the circuit's voltage relations and fixing every charge port.
+pub(super) trait PssVoltageConstraintAdmission {
+    fn add(
+        &mut self,
+        nodes: impl IntoIterator<Item = (usize, Value)>,
+        value: ForestValue,
+        abort: &dyn AbortSignal,
+    ) -> Result<bool, SimulationError>;
+
+    fn port(
+        &self,
+        pos: usize,
+        neg: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(ForestValue, Value)>, SimulationError>;
+
+    fn finish(
+        self,
+        circuit: &CircuitData,
+        abort: &dyn AbortSignal,
+    ) -> Result<PssVoltageConstraints, SimulationError>;
+}
+
+impl VoltageRowForm for VoltageRow {
     fn form(self) -> Result<Vec<(ForestValue, Value)>, SimulationError> {
         let mut form = Vec::with_capacity(self.values.len());
         for (key, value) in self.values {
@@ -59,7 +106,7 @@ impl VoltageRow {
     }
 }
 
-impl PssVoltageConstraintBuilder {
+impl VoltageRowQueries for PssVoltageConstraintBuilder {
     /// Compiled mappings remain alive during subsequent elimination queries.
     /// Account for their capacity before converting the next integer row.
     fn compile_row(
@@ -71,42 +118,6 @@ impl PssVoltageConstraintBuilder {
         let form = row.form()?;
         self.reserve_retained_words(words)?;
         Ok(form)
-    }
-
-    pub(super) fn add(
-        &mut self,
-        nodes: impl IntoIterator<Item = (usize, Value)>,
-        value: ForestValue,
-        abort: &dyn AbortSignal,
-    ) -> Result<bool, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        let mut row = VoltageRow::default();
-        for (node, coefficient) in nodes {
-            if node != 0 {
-                Self::add_integer(&mut row.nodes, node, integer_coefficient(coefficient)?);
-            }
-        }
-        if value != ForestValue::Zero {
-            row.values.insert(value, integer_coefficient(1.0)?);
-        }
-        Ok(self.admit(row, 1, abort)?.is_none())
-    }
-
-    pub(super) fn port(
-        &self,
-        pos: usize,
-        neg: usize,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<(ForestValue, Value)>, SimulationError> {
-        let row = self.port_row(pos, neg, abort)?;
-        if !row.nodes.is_empty() {
-            return Err(SimulationError::Circuit(
-                "PSS charge-port voltage is outside its independent state basis".to_owned(),
-            ));
-        }
-        row.form()
     }
 
     fn port_row(
@@ -129,8 +140,44 @@ impl PssVoltageConstraintBuilder {
     }
 }
 
-impl PssVoltageConstraintBuilder {
-    pub(super) fn finish(
+impl PssVoltageConstraintAdmission for PssVoltageConstraintBuilder {
+    fn add(
+        &mut self,
+        nodes: impl IntoIterator<Item = (usize, Value)>,
+        value: ForestValue,
+        abort: &dyn AbortSignal,
+    ) -> Result<bool, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let mut row = VoltageRow::default();
+        for (node, coefficient) in nodes {
+            if node != 0 {
+                Self::add_integer(&mut row.nodes, node, integer_coefficient(coefficient)?);
+            }
+        }
+        if value != ForestValue::Zero {
+            row.values.insert(value, integer_coefficient(1.0)?);
+        }
+        Ok(self.admit(row, 1, abort)?.is_none())
+    }
+
+    fn port(
+        &self,
+        pos: usize,
+        neg: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(ForestValue, Value)>, SimulationError> {
+        let row = self.port_row(pos, neg, abort)?;
+        if !row.nodes.is_empty() {
+            return Err(SimulationError::Circuit(
+                "PSS charge-port voltage is outside its independent state basis".to_owned(),
+            ));
+        }
+        row.form()
+    }
+
+    fn finish(
         mut self,
         circuit: &CircuitData,
         abort: &dyn AbortSignal,
