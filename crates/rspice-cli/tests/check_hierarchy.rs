@@ -235,3 +235,42 @@ fn process_errors_retain_every_validation_issue_and_strict_warning() {
         assert_eq!(diagnostic["error"]["exit_code"], exit_code);
     }
 }
+
+/// A deck that names no node 0 takes the negative net of its first voltage
+/// source as its reference, and the DC-path walk reads that net as ground: a
+/// node with no DC path to it is warned as it would be with plain `0`.
+#[test]
+fn a_node_with_no_dc_path_to_an_automatic_reference_is_warned() {
+    let dir = test_dir("automatic_reference_dc_path");
+    for ground in ["0", "ref"] {
+        let deck = dir.join(format!("deck-{ground}.cir"));
+        std::fs::write(
+            &deck,
+            format!(
+                "* coupled through capacitors only\nV1 in {ground} 1\nR1 in {ground} 1k\n\
+                 C1 in mid 1n\nC2 mid {ground} 1n\n.op\n.end\n"
+            ),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .arg("check")
+            .arg(&deck)
+            .args(["--connectivity", "--json"])
+            .output()
+            .unwrap();
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|error| panic!("{ground}: {error}: {output:?}"));
+        let warned = report["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|warning| warning["code"].as_str() == Some("TOPOLOGY_NO_DC_PATH"))
+            .map(|warning| warning["message"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            warned,
+            ["[base] Voltage Node (MID) does not have a DC path to ground"],
+            "ground {ground}: {report}"
+        );
+    }
+}

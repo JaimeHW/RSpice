@@ -300,10 +300,11 @@ fn validate_netlist(
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
     check_topology(netlist, &flattened.elements, &mut result);
-    check_circuit_build(netlist, &mut result, &engine)?;
+    let built = check_circuit_build(netlist, &mut result, &engine)?;
 
     if args.connectivity {
-        check_connectivity(netlist, &flattened.elements, &mut result);
+        let reference = build_reference(netlist, &flattened.elements, built.as_ref());
+        check_connectivity(netlist, &flattened.elements, reference, &mut result);
     }
 
     if args.models {
@@ -313,7 +314,26 @@ fn validate_netlist(
     Ok(result)
 }
 
-/// Construct every deck so native and external models receive the same checks.
+/// The net a deck that names no node 0 took as its reference when it was
+/// built: the one its elements name that the circuit resolves to node 0
+/// although it is not a ground name. `None` when the deck names ground, or
+/// did not build.
+fn build_reference<'a>(
+    netlist: &Netlist,
+    elements: &'a [rspice_core::netlist::Element],
+    built: Option<&rspice_core::circuit::CircuitData>,
+) -> Option<&'a str> {
+    let built = built?;
+    let ground = netlist.ground_policy();
+    elements
+        .iter()
+        .flat_map(|element| &element.nodes)
+        .map(String::as_str)
+        .find(|node| !ground.is_ground(node) && built.get_node_by_name(node) == Some(0))
+}
+
+/// Construct every deck so native and external models receive the same checks,
+/// and hand back the circuit when it builds.
 ///
 /// External runtimes are stubbed out, while device construction uses the
 /// resolved configuration for this coordinate. Cancellation is propagated as
@@ -322,7 +342,7 @@ fn check_circuit_build(
     netlist: &Netlist,
     result: &mut ValidationResult,
     engine: &Engine,
-) -> Result<(), CliError> {
+) -> Result<Option<rspice_core::circuit::CircuitData>, CliError> {
     let has_xspice = netlist_contains_xspice(netlist);
     let _external_guard = has_xspice.then(XspiceCheckExternalRuntimeGuard::install);
     // A cached runtime still has to satisfy this invocation's source limits.
@@ -345,7 +365,7 @@ fn check_circuit_build(
                 }),
         );
     match build {
-        Ok(_) => Ok(()),
+        Ok(circuit) => Ok(Some(circuit)),
         Err(rspice_core::SimulationError::Aborted) => Err(CliError::Interrupted),
         Err(error @ rspice_core::SimulationError::ResourceLimit(_)) => Err(error.into()),
         Err(rspice_core::SimulationError::Elaboration(error))
@@ -364,7 +384,7 @@ fn check_circuit_build(
                         compiler_diagnostic: Some(diagnostic),
                     }),
             );
-            Ok(())
+            Ok(None)
         }
         Err(error) => {
             let model_kind = if has_xspice {
@@ -381,7 +401,7 @@ fn check_circuit_build(
                 line: None,
                 code: None,
             });
-            Ok(())
+            Ok(None)
         }
     }
 }
@@ -623,6 +643,7 @@ fn add_parser_diagnostics(netlist: &Netlist, result: &mut ValidationResult) {
 fn check_connectivity(
     netlist: &Netlist,
     elements: &[rspice_core::netlist::Element],
+    reference: Option<&str>,
     result: &mut ValidationResult,
 ) {
     if let Ok(diagnostics) = rspice_core::netlist::analyze_xyce_connectivity(elements) {
@@ -638,8 +659,9 @@ fn check_connectivity(
         // The DC-path warning comes from the conduction analysis rather than
         // Xyce's lead groups so that this command agrees with the engine: a
         // node reported here is exactly one that would make an operating point
-        // refuse to run.
-        if let Ok(dc_paths) = rspice_core::netlist::analyze_dc_ground_paths(elements) {
+        // refuse to run. So it walks to the reference the build took: node 0,
+        // or the net a deck that names no node 0 has aliased to it.
+        if let Ok(dc_paths) = rspice_core::netlist::analyze_dc_ground_paths(elements, reference) {
             // A compiled module's equations decide the nodes on its terminals
             // (`V(o) <+ x` drives `o` from ground), which this walk cannot
             // see, so the engine does not warn about them and neither does

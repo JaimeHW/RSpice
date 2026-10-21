@@ -284,14 +284,19 @@ impl DcGroundPathDiagnostics {
 /// from the remaining elements. A post-solve audit must then require numeric
 /// rank evidence for each candidate component rather than trusting the partial
 /// static partition by itself.
+///
+/// Ground is `0` and its aliases, and `reference` when given: the net a deck
+/// that names no node 0 took as its reference when it was built, which the
+/// build aliases to node 0.
 pub fn analyze_dc_ground_paths(
     elements: &[Element],
+    reference: Option<&str>,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
     analyze_dc_ground_paths_with_ic_modes(
         elements,
         CapacitorIcDcMode::EnforcedConstraint,
         false,
-        None,
+        reference,
     )
 }
 
@@ -1437,7 +1442,7 @@ mod tests {
         let flat = flatten_netlist_with_models(&netlist)
             .expect("deck flattens")
             .elements;
-        analyze_dc_ground_paths(&flat)
+        analyze_dc_ground_paths(&flat, None)
             .expect("topology is supported")
             .no_dc_path_nodes
     }
@@ -1447,7 +1452,7 @@ mod tests {
         let flat = flatten_netlist_with_models(&netlist)
             .expect("deck flattens")
             .elements;
-        analyze_dc_ground_paths(&flat).expect("topology is supported")
+        analyze_dc_ground_paths(&flat, None).expect("topology is supported")
     }
 
     fn xspice_test_element(name: &str, ports: Vec<XspicePort>) -> Element {
@@ -1493,7 +1498,8 @@ mod tests {
             }],
         ));
 
-        let diagnostics = analyze_dc_ground_paths(&elements).expect("partial analysis succeeds");
+        let diagnostics =
+            analyze_dc_ground_paths(&elements, None).expect("partial analysis succeeds");
         assert!(!diagnostics.analysis_complete);
         let component = diagnostics
             .floating_components
@@ -1540,7 +1546,8 @@ mod tests {
             provenance: crate::netlist::ElementProvenance::Authored,
         });
 
-        let diagnostics = analyze_dc_ground_paths(&elements).expect("partial analysis succeeds");
+        let diagnostics =
+            analyze_dc_ground_paths(&elements, None).expect("partial analysis succeeds");
         assert_eq!(diagnostics.no_dc_path_nodes, ["MID", "O"]);
         assert_eq!(
             diagnostics.floating_component_has_module_terminal,
@@ -1573,7 +1580,8 @@ mod tests {
             }],
         ));
 
-        let diagnostics = analyze_dc_ground_paths(&elements).expect("partial analysis succeeds");
+        let diagnostics =
+            analyze_dc_ground_paths(&elements, None).expect("partial analysis succeeds");
         assert_eq!(diagnostics.no_dc_path_nodes, ["OUT"]);
         assert!(diagnostics.fatal_nodes().next().is_none());
         assert_eq!(diagnostics.floating_component_is_certain, [false]);

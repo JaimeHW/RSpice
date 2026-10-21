@@ -33,7 +33,7 @@ fn check_current_feedback_bias(feedback: &str) {
     assert!((voltage(&result, "out") - 1.0).abs() < 1e-8);
     let circuit = engine.build_circuit(&netlist).unwrap();
     assert!(circuit.fatal_no_dc_path_nodes().is_empty());
-    let topology = rspice_core::netlist::analyze_dc_ground_paths(&netlist.elements).unwrap();
+    let topology = rspice_core::netlist::analyze_dc_ground_paths(&netlist.elements, None).unwrap();
     assert!(topology.fatal_nodes().next().is_none());
     // Keep the known conduction partition for the post-solve audit. An
     // unresolved source current does not make its output topology unknown.
