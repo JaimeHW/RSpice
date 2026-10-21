@@ -124,6 +124,7 @@ impl CircuitData {
             veriloga_point_time: 0.0,
             analog_task_output: None,
             analog_monitor_values: HashMap::new(),
+            converter_insertions: Vec::new(),
         }
     }
 

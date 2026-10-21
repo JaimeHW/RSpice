@@ -14,8 +14,12 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
+use rspice_core::circuit::{
+    ConverterInsertion, ConverterKind, ConverterParameter, ConverterSource,
+};
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
+use rspice_core::xspice::PortDirection;
 use rspice_veriloga::connect::library::{BUILTIN_CONNECT_MODULES, LEGACY_BUILTIN_CONNECT_MODULES};
 
 //=============================================================================
@@ -555,6 +559,219 @@ set auto_bridge_d_out = ( \".model tdac dac_bridge(out_low = 0 out_high = %g)\" 
         !lines.iter().any(|line| line.contains("bound live")),
         "a template is never bound live: {lines:?}"
     );
+
+    // The record says the same: the template's key, and the inferred 5 V
+    // rail as a static level, not a live net.
+    let records = insertions(&Netlist::parse(deck).expect("deck parses"));
+    assert_eq!(records.len(), 1, "{records:#?}");
+    let record = &records[0];
+    assert!(record.boundary.eq_ignore_ascii_case("mix"), "{record:#?}");
+    assert_eq!(record.kind, ConverterKind::Template);
+    assert_eq!(record.direction, PortDirection::Out);
+    assert_eq!(
+        record.rules,
+        ConverterSource::Template("auto_bridge_d_out".into())
+    );
+    let supply = record
+        .supply
+        .as_ref()
+        .expect("a digital boundary has a supply");
+    assert_eq!((supply.level, supply.net.as_deref()), (5.0, None));
+    assert!(
+        matches!(&supply.source, ConverterSource::Inferred { source, level }
+            if source.eq_ignore_ascii_case("v1") && *level == 5.0),
+        "{supply:#?}"
+    );
+}
+
+//=============================================================================
+// The insertion record, as data
+//=============================================================================
+
+/// A corpus deck, read from its file so its relative includes resolve.
+fn corpus_deck(design: &str, deck: &str) -> Netlist {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/mixed-corpus")
+        .join(design)
+        .join("deck")
+        .join(deck);
+    Netlist::parse_file(&path).unwrap_or_else(|error| panic!("{} parses: {error}", path.display()))
+}
+
+fn insertions(netlist: &Netlist) -> Vec<ConverterInsertion> {
+    Engine::default()
+        .build_circuit(netlist)
+        .unwrap_or_else(|error| panic!("the deck builds: {error}"))
+        .converter_insertions()
+        .to_vec()
+}
+
+/// The one converter on `node`, which `port` of the deck's HDL instance
+/// meets.
+fn only_on<'a>(
+    records: &'a [ConverterInsertion],
+    node: &str,
+    port: &str,
+) -> &'a ConverterInsertion {
+    let here: Vec<_> = records
+        .iter()
+        .filter(|record| {
+            record.boundary.eq_ignore_ascii_case(node)
+                && record
+                    .port
+                    .as_deref()
+                    .is_some_and(|named| named.eq_ignore_ascii_case(port))
+        })
+        .collect();
+    assert_eq!(
+        here.len(),
+        1,
+        "one converter on {node} for {port}: {records:#?}"
+    );
+    here[0]
+}
+
+fn parameter<'a>(record: &'a ConverterInsertion, name: &str) -> &'a ConverterParameter {
+    record
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == name)
+        .unwrap_or_else(|| panic!("{name} in {record:#?}"))
+}
+
+/// C9 `live`: no `.param vcc`, and its rules (`net/por_ctrl_live.vams:54-57`)
+/// give `a2d` and `d2a` the net `vdd` as `vsup`. The controller's inputs `hi`
+/// and `lo_n` each read through one `a2d`, and its outputs `por_n`, `rst_n`
+/// and `tie_hi` each drive through one `d2a`; `clk` is an event net the
+/// XSPICE counter shares, not a boundary. The modules are the earlier
+/// signature's verbatim copies (`vsup` and the two edge times), so the
+/// statement binds the supply live and the built-in rule set gives every
+/// parameter the statement does not: the edge times are its 0, not the copy's
+/// 1 ns. With no rail reaching the boundary (`vdd` is a PWL source) the
+/// nominal level is the 3.3 V default, the thresholds its half, tracking.
+#[test]
+fn c9_live_records_the_statement_binding_vdd_live() {
+    let records = insertions(&corpus_deck("c09-por", "live.tran.cir"));
+    assert_eq!(records.len(), 5, "{records:#?}");
+    let rule_set = ConverterSource::RuleSet("rspice_builtin".into());
+    for (node, kind, direction, line) in [
+        ("hi", ConverterKind::A2d, PortDirection::In, 55),
+        ("lo_n", ConverterKind::A2d, PortDirection::In, 55),
+        ("por_n", ConverterKind::D2a, PortDirection::Out, 56),
+        ("rst_n", ConverterKind::D2a, PortDirection::Out, 56),
+        ("tie_hi", ConverterKind::D2a, PortDirection::Out, 56),
+    ] {
+        let record = only_on(&records, node, &format!("xpor.{node}"));
+        assert_eq!(
+            (record.kind, record.direction),
+            (kind, direction),
+            "{record:#?}"
+        );
+        let module = if kind == ConverterKind::A2d {
+            "a2d"
+        } else {
+            "d2a"
+        };
+        assert_eq!(record.module, module);
+        assert_eq!(
+            record.rules,
+            ConverterSource::ConnectRule {
+                block: "por_live".into(),
+                earlier_signature: true,
+            }
+        );
+        assert!(
+            record
+                .location
+                .as_deref()
+                .is_some_and(|at| at.ends_with(&format!("por_ctrl_live.vams:{line}"))),
+            "{record:#?}"
+        );
+        let supply = record.supply.as_ref().expect("a supply");
+        assert_eq!(supply.net.as_deref(), Some("vdd"));
+        assert_eq!(supply.level, 3.3);
+        assert_eq!(supply.source, ConverterSource::ConnectStatement);
+        assert!(
+            record
+                .parameters
+                .iter()
+                .all(|parameter| parameter.source == rule_set),
+            "the statement gives nothing but vsup: {record:#?}"
+        );
+        if kind == ConverterKind::A2d {
+            let tdrise = parameter(record, "tdrise");
+            assert_eq!((tdrise.value, tdrise.tracks), (0.0, false));
+            let vthi = parameter(record, "vthi");
+            assert_eq!((vthi.value, vthi.tracks), (1.65, true));
+            assert_eq!(vthi.rule.as_deref(), Some("vsup/2"));
+        } else {
+            let vhi = parameter(record, "vhi");
+            assert_eq!((vhi.value, vhi.tracks), (3.3, true));
+            assert_eq!(parameter(record, "trise").value, 0.0);
+            assert_eq!(parameter(record, "rlo").value, 20.0);
+        }
+        assert!(
+            record
+                .to_string()
+                .contains("vsup=net vdd, live (connect statement)"),
+            "{record}"
+        );
+    }
+}
+
+/// C7 `cont`: three Verilog instances on the I2C bus, no connect rules, and
+/// `.param vcc=3.3` (`net/bus.cir`). Every port converts through the built-in
+/// rule set at the deck's static 3.3 V: the controller's `scl` and `sda` and
+/// both targets' `sda` are `inout`, so `bidir`; the targets' `scl` is an
+/// input, so `a2d`. Three converters on each net.
+#[test]
+fn c7_cont_records_three_converters_on_each_bus_net() {
+    let records = insertions(&corpus_deck("c07-i2c", "cont.tran.cir"));
+    assert_eq!(records.len(), 6, "{records:#?}");
+    let rule_set = ConverterSource::RuleSet("rspice_builtin".into());
+    for (node, port, kind) in [
+        ("scl", "xctrl.scl", ConverterKind::Bidir),
+        ("scl", "xdev2a.scl", ConverterKind::A2d),
+        ("scl", "xdev51.scl", ConverterKind::A2d),
+        ("sda", "xctrl.sda", ConverterKind::Bidir),
+        ("sda", "xdev2a.sda", ConverterKind::Bidir),
+        ("sda", "xdev51.sda", ConverterKind::Bidir),
+    ] {
+        let record = only_on(&records, node, port);
+        let (module, direction) = if kind == ConverterKind::A2d {
+            ("a2d", PortDirection::In)
+        } else {
+            ("bidir", PortDirection::InOut)
+        };
+        assert_eq!(
+            (record.kind, record.direction, record.module.as_str()),
+            (kind, direction, module),
+            "{record:#?}"
+        );
+        assert_eq!(record.rules, rule_set);
+        assert_eq!(record.location, None);
+        let supply = record.supply.as_ref().expect("a supply");
+        assert_eq!((supply.level, supply.net.as_deref()), (3.3, None));
+        assert_eq!(supply.source, ConverterSource::Parameter("vcc".into()));
+        assert!(
+            record
+                .parameters
+                .iter()
+                .all(|parameter| parameter.source == rule_set && !parameter.tracks),
+            "{record:#?}"
+        );
+        assert_eq!(parameter(record, "vthi").value, 1.65);
+        assert_eq!(parameter(record, "txdel").value, f64::INFINITY);
+        if kind == ConverterKind::Bidir {
+            assert_eq!(parameter(record, "rlo").value, 20.0);
+            assert_eq!(parameter(record, "vhi").value, 3.3);
+        }
+    }
+    let instances: std::collections::BTreeSet<_> = records
+        .iter()
+        .map(|record| record.instance.as_str())
+        .collect();
+    assert_eq!(instances.len(), 6, "each port has its own converter");
 }
 
 //=============================================================================

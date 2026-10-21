@@ -111,6 +111,7 @@ pub(super) fn plan_conversions(
                     vcc,
                     supply,
                     family: scoped.and_then(|item| item.family.clone()),
+                    port: Some((host.instance_name().to_string(), signal.to_string())),
                     connect_module: selected,
                 },
             ));

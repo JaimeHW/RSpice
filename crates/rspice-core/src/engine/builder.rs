@@ -2569,6 +2569,9 @@ struct PlannedXspiceAutoBridge {
     /// traffic carries a number rather than a logic level.
     supply: Option<boundary_supply::SupplyDerivation>,
     family: Option<String>,
+    /// The instance and port whose discrete side meets the node: an HDL
+    /// instance's port, or the first XSPICE port on it.
+    port: Option<(String, String)>,
     /// The Verilog-AMS connect module selected for this boundary, when the
     /// design has a `connectrules` block that reaches it.
     ///
@@ -3196,6 +3199,7 @@ fn plan_xspice_auto_bridges(
                         .get(&node)
                         .map(|candidate: &XspiceAutoBridgeFamilyCandidate| candidate.family.clone())
                         .or_else(|| metadata.and_then(|metadata| metadata.family.clone())),
+                    port: None,
                     #[cfg(feature = "veriloga")]
                     connect_module: None,
                 }
@@ -3234,6 +3238,7 @@ fn plan_xspice_auto_bridges(
             vcc: 0.0,
             supply: None,
             family: None,
+            port: None,
             // Real-valued event traffic is not a discipline boundary: a
             // `wreal` carries a real number, not a discipline's potential and
             // flow, so clause 7 has nothing to say about it.
@@ -3242,7 +3247,73 @@ fn plan_xspice_auto_bridges(
         })
     }));
 
+    if !planned.is_empty() {
+        let owners = event_port_owners(circuit);
+        for bridge in &mut planned {
+            bridge.port = owners.get(&bridge.node).cloned();
+        }
+    }
     planned
+}
+
+/// The XSPICE instance and port that made each node discrete: the first one
+/// on it, in instance order.
+///
+/// Clause 7's `PortLink` names them, and a converter's insertion record says
+/// which port its boundary is. It is a second walk over the instances rather
+/// than a field on the planner's own traversal so that a deck with no
+/// boundary pays nothing.
+fn event_port_owners(circuit: &CircuitData) -> BTreeMap<usize, (String, String)> {
+    let mut owners: BTreeMap<usize, (String, String)> = BTreeMap::new();
+    for instance in &circuit.xspice_instances {
+        for (port_idx, port) in instance.ports().iter().enumerate() {
+            let Some(connection) = instance.connection_at(port_idx) else {
+                continue;
+            };
+            let mut nodes = BTreeMap::new();
+            register_digital_connection_nodes(&mut nodes, connection, port.direction);
+            let mut real_nodes = BTreeMap::new();
+            register_real_connection_nodes(&mut real_nodes, connection, port.direction);
+            for node in nodes.keys().chain(real_nodes.keys()) {
+                owners
+                    .entry(*node)
+                    .or_insert_with(|| (instance.name.clone(), port.name.clone()));
+            }
+        }
+    }
+    owners
+}
+
+/// The record of a converter about to be inserted for `bridge`: its boundary,
+/// port and direction, before what converts it.
+fn converter_record(
+    boundary: String,
+    bridge: &PlannedXspiceAutoBridge,
+    kind: crate::circuit::ConverterKind,
+    module: String,
+    instance: String,
+    rules: crate::circuit::ConverterSource,
+) -> crate::circuit::ConverterInsertion {
+    use crate::xspice::PortDirection;
+    let direction = match bridge.kind {
+        XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::VToReal => PortDirection::In,
+        XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::RealToV => PortDirection::Out,
+        XspiceAutoBridgeKind::Bidi => PortDirection::InOut,
+        #[cfg(feature = "veriloga")]
+        XspiceAutoBridgeKind::RealBidi => PortDirection::InOut,
+    };
+    crate::circuit::ConverterInsertion::new(
+        boundary,
+        bridge
+            .port
+            .as_ref()
+            .map(|(instance, port)| format!("{instance}.{port}")),
+        direction,
+        kind,
+        module,
+        instance,
+        rules,
+    )
 }
 
 /// Say where each planned bridge's supply came from, or refuse to guess.
@@ -3256,7 +3327,7 @@ fn plan_xspice_auto_bridges(
 ///
 /// A bridge a user auto-bridge template materializes is the template's card,
 /// converting against the static level: it is never bound live, so it is
-/// never reported as live.
+/// never reported as live. Its insertion record says it is static.
 fn report_planned_xspice_auto_bridge_supplies(
     circuit: &CircuitData,
     bridges: &[PlannedXspiceAutoBridge],
@@ -3276,13 +3347,7 @@ fn report_planned_xspice_auto_bridge_supplies(
             continue;
         };
         let node_label = xspice_auto_bridge_node_label(Some(&node_names), bridge.node);
-        if let Some(template) = find_xspice_auto_bridge_template(&templates, bridge, family_enabled)
-        {
-            log::info!(
-                "boundary {node_label}: template {}, static at {} V",
-                template.key,
-                bridge.vcc
-            );
+        if find_xspice_auto_bridge_template(&templates, bridge, family_enabled).is_some() {
             supplies.report(&node_label, derivation, false)?;
             continue;
         }
@@ -4798,15 +4863,41 @@ fn add_template_xspice_auto_bridge(
             template.key, error
         )),
     })?;
+    let card = generated.elements.first();
+    let instance = card.map_or_else(|| template.key.clone(), |element| element.name.clone());
+    let module = match card.map(|element| &element.kind) {
+        Some(crate::netlist::ElementKind::Xspice { model, .. }) => model.clone(),
+        Some(crate::netlist::ElementKind::Subcircuit { subckt_name, .. }) => subckt_name.clone(),
+        _ => template.key.clone(),
+    };
+    // The card converts against the level formatted into it: static, from
+    // wherever the deck's supply came.
+    let records: Vec<_> = bridges
+        .iter()
+        .zip(node_labels)
+        .map(|(bridge, boundary)| {
+            let mut record = converter_record(
+                boundary,
+                bridge,
+                crate::circuit::ConverterKind::Template,
+                module.clone(),
+                instance.clone(),
+                crate::circuit::ConverterSource::Template(template.key.clone()),
+            );
+            record.supply = bridge.supply.as_ref().map(|derivation| {
+                crate::circuit::ConverterSupply::new(
+                    bridge.vcc,
+                    None,
+                    boundary_supply::supply_source(Some(derivation)),
+                )
+            });
+            record
+        })
+        .collect();
     if device_is_subcircuit {
         add_generated_xspice_auto_bridge_subcircuit(circuit, &generated, template, context, abort)?;
-        say_bridge_inserted(format!(
-            "Inserted {} bridge subcircuit for {} {} from bridge template '{}'",
-            xspice_auto_bridge_kind_label(first_bridge.kind),
-            if bridges.len() == 1 { "node" } else { "nodes" },
-            node_list,
-            template.key
-        ));
+        say_bridge_inserted(crate::circuit::record_text(&records));
+        circuit.converter_insertions.extend(records);
         if node_names.is_some() {
             log::debug!("Generated XSPICE auto-bridge card: {}", device_card);
         }
@@ -4829,14 +4920,8 @@ fn add_template_xspice_auto_bridge(
         context,
     )?;
 
-    say_bridge_inserted(format!(
-        "Inserted {} bridge {} for {} {} from bridge template '{}'",
-        xspice_auto_bridge_kind_label(first_bridge.kind),
-        element.name,
-        if bridges.len() == 1 { "node" } else { "nodes" },
-        node_list,
-        template.key
-    ));
+    say_bridge_inserted(crate::circuit::record_text(&records));
+    circuit.converter_insertions.extend(records);
     if node_names.is_some() {
         log::debug!("Generated XSPICE auto-bridge card: {}", device_card);
     }
@@ -5176,14 +5261,57 @@ fn add_planned_xspice_auto_bridge(
         ))
     })?;
 
-    say_bridge_inserted(format!(
-        "Inserted {} bridge {} for node {}",
-        xspice_auto_bridge_kind_label(bridge.kind),
-        instance_name,
+    let mut record = converter_record(
         circuit
             .node_name_by_id(bridge.node)
-            .map_or_else(|| bridge.node.to_string(), str::to_owned)
-    ));
+            .map_or_else(|| bridge.node.to_string(), str::to_owned),
+        bridge,
+        match bridge.kind {
+            XspiceAutoBridgeKind::Adc => crate::circuit::ConverterKind::AdcBridge,
+            XspiceAutoBridgeKind::Dac => crate::circuit::ConverterKind::DacBridge,
+            XspiceAutoBridgeKind::RealToV => crate::circuit::ConverterKind::RealToV,
+            XspiceAutoBridgeKind::VToReal => crate::circuit::ConverterKind::VToReal,
+            _ => crate::circuit::ConverterKind::BidiBridge,
+        },
+        model_name.to_owned(),
+        instance_name.clone(),
+        crate::circuit::ConverterSource::AutoBridge,
+    );
+    record.supply = bridge.supply.as_ref().map(|derivation| {
+        crate::circuit::ConverterSupply::new(
+            bridge.vcc,
+            live_supply.and(boundary_supply::live_supply_net(bridge).map(str::to_owned)),
+            boundary_supply::supply_source(Some(derivation)),
+        )
+    });
+    // The stock bridges' levels are ngspice's defaults for the supply; a
+    // level the bridge reads as a fraction of a live supply tracks it.
+    let tracks = live_supply.is_some();
+    record.parameters = numeric_params
+        .iter()
+        .map(|(name, value)| {
+            let rule = match name.as_str() {
+                "in_low" | "in_high" => Some("vcc/2"),
+                "out_high" => Some("vcc"),
+                _ => None,
+            };
+            let value = if tracks && rule.is_some() {
+                value * bridge.vcc
+            } else {
+                *value
+            };
+            crate::circuit::ConverterParameter::new(
+                name,
+                value,
+                "V",
+                rule,
+                crate::circuit::ConverterSource::AutoBridge,
+                tracks && rule.is_some(),
+            )
+        })
+        .collect();
+    say_bridge_inserted(record.to_string());
+    circuit.converter_insertions.push(record);
     if node_names.is_some() && log::log_enabled!(log::Level::Debug) {
         let node_label = xspice_auto_bridge_node_label(node_names, bridge.node);
         let event_label = xspice_auto_bridge_node_label(node_names, event_node);
@@ -5231,11 +5359,9 @@ fn add_connect_rule_converter(
             .unwrap_or(bridge.vcc),
         net,
         source: if stated {
-            connect_modules::ParameterSource::Statement
+            connect_modules::ParameterSource::ConnectStatement
         } else {
-            connect_modules::ParameterSource::Supply(boundary_supply::supply_sentence(
-                bridge.supply.as_ref(),
-            ))
+            boundary_supply::supply_source(bridge.supply.as_ref())
         },
     };
     let law = connect_modules::converter_law(selected, bridge.kind, supply)?;
@@ -5314,33 +5440,24 @@ fn add_connect_rule_converter(
         ))
     })?;
 
-    let direction = match bridge.kind {
-        XspiceAutoBridgeKind::Adc => "input",
-        XspiceAutoBridgeKind::Dac => "output",
-        _ => "inout",
-    };
     let (module, rules) = match selected {
-        Some(selected) => (
-            selected.name.clone(),
-            match selected.signature() {
-                Some(rspice_veriloga::connect::library::BuiltinSignature::Legacy) => format!(
-                    "connect rule, earlier signature, defaults from rule set {}",
-                    connect_modules::RULE_SET
-                ),
-                _ => "connect rule".to_string(),
-            },
-        ),
+        Some(selected) => (selected.name.clone(), selected.rules()),
         None => (
             connect_modules::module_name(bridge.kind).to_string(),
-            format!("no connect rule, rule set {}", connect_modules::RULE_SET),
+            connect_modules::ParameterSource::RuleSet(crate::circuit::BUILTIN_RULE_SET.into()),
         ),
     };
-    log::info!(
-        "{}",
-        law.record(&format!(
-            "boundary {node_label} ({direction}): {module} as {instance_name} [{rules}]"
-        ))
-    );
+    let kind = match bridge.kind {
+        XspiceAutoBridgeKind::Adc => crate::circuit::ConverterKind::A2d,
+        XspiceAutoBridgeKind::Dac => crate::circuit::ConverterKind::D2a,
+        _ => crate::circuit::ConverterKind::Bidir,
+    };
+    let mut record = converter_record(node_label, bridge, kind, module, instance_name, rules);
+    record.location = selected.and_then(|selected| selected.location.clone());
+    record.parameters = law.record();
+    record.supply = Some(law.supply);
+    log::info!("{record}");
+    circuit.converter_insertions.push(record);
     circuit.add_xspice_instance(instance);
     Ok(())
 }

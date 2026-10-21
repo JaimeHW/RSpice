@@ -188,6 +188,44 @@ pub(super) fn materialize(
     {
         instance_name.push_str(&format!("__{event_node}"));
     }
+    // The body converts against whatever it reads; the supply is the
+    // record's only where the statement states one.
+    let mut record = super::converter_record(
+        continuous,
+        bridge,
+        crate::circuit::ConverterKind::Authored,
+        selected.name.clone(),
+        instance_name.clone(),
+        selected.rules(),
+    );
+    record.location = selected.location.clone();
+    record.supply = match (selected.supply_net(), selected.stated_supply()) {
+        (Some(net), _) => Some(crate::circuit::ConverterSupply::new(
+            selected.stated_supply().unwrap_or(bridge.vcc),
+            Some(net.to_owned()),
+            crate::circuit::ConverterSource::ConnectStatement,
+        )),
+        (None, Some(level)) => Some(crate::circuit::ConverterSupply::new(
+            level,
+            None,
+            crate::circuit::ConverterSource::ConnectStatement,
+        )),
+        (None, None) => None,
+    };
+    record.parameters = selected
+        .parameters
+        .iter()
+        .map(|(name, value)| {
+            crate::circuit::ConverterParameter::new(
+                name,
+                *value,
+                "",
+                None,
+                crate::circuit::ConverterSource::ConnectStatement,
+                false,
+            )
+        })
+        .collect();
     let element = crate::netlist::Element {
         name: instance_name,
         kind: crate::netlist::ElementKind::Subcircuit {
@@ -212,5 +250,7 @@ pub(super) fn materialize(
             "selected connect body has no executable discrete port".into(),
         ));
     }
+    log::info!("{record}");
+    circuit.converter_insertions.push(record);
     Ok(())
 }

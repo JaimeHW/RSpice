@@ -83,11 +83,7 @@ fn law(
     converter_law(
         Some(&selected),
         kind,
-        ConverterSupply {
-            level,
-            net: None,
-            source: ParameterSource::Supply("default".into()),
-        },
+        ConverterSupply::new(level, None, ParameterSource::Default(vcc)),
     )
 }
 

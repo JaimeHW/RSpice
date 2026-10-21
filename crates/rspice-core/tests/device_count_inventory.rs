@@ -58,6 +58,11 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "Xyce's load schedule, indexing devices their own collections count",
     ),
     (
+        "converter_insertions",
+        "the insertion records of the boundary converters, which `xspice_instances` and \
+         `mixed_signal_hosts` already count",
+    ),
+    (
         "xyce_load_plan",
         "the frozen master/instance load order over those same devices",
     ),

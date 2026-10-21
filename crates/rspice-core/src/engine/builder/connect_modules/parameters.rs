@@ -15,36 +15,13 @@
 //! Every value is checked here, before any converter exists, and a refusal
 //! names the parameter.
 
-use std::fmt;
-
 use rspice_veriloga::connect::library::BuiltinSignature;
 
 use super::super::XspiceAutoBridgeKind as Kind;
+use crate::circuit::{ConverterParameter, ConverterSource as Source, ConverterSupply as Supply};
 
 /// The rule set whose defaults stand where no declaration states one.
-pub(in crate::engine::builder) const RULE_SET: &str = "rspice_builtin";
-
-/// Where one parameter's value came from.
-#[derive(Debug, Clone, PartialEq)]
-pub(in crate::engine::builder) enum Source {
-    Statement,
-    ModuleDefault,
-    RuleSet,
-    /// The supply's own derivation, as a sentence: `.param vcc`, `inferred
-    /// from V1 = 3.3 V`, `default 3.3 V`.
-    Supply(String),
-}
-
-impl fmt::Display for Source {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Statement => f.write_str("connect statement"),
-            Self::ModuleDefault => f.write_str("module default"),
-            Self::RuleSet => write!(f, "rule set {RULE_SET}"),
-            Self::Supply(sentence) => f.write_str(sentence),
-        }
-    }
-}
+pub(in crate::engine::builder) const RULE_SET: &str = crate::circuit::BUILTIN_RULE_SET;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Unit {
@@ -82,13 +59,18 @@ pub(in crate::engine::builder) struct Parameter {
     pub(in crate::engine::builder) source: Source,
 }
 
-/// The supply a converter converts against.
-#[derive(Debug, Clone)]
-pub(in crate::engine::builder) struct Supply {
-    pub(in crate::engine::builder) level: f64,
-    /// The net it is bound to live, if it is.
-    pub(in crate::engine::builder) net: Option<String>,
-    pub(in crate::engine::builder) source: Source,
+impl Parameter {
+    /// The parameter as the insertion record keeps it.
+    fn record(&self) -> ConverterParameter {
+        ConverterParameter::new(
+            self.name,
+            self.value,
+            self.unit.symbol(),
+            self.rule,
+            self.source.clone(),
+            self.tracks,
+        )
+    }
 }
 
 /// Everything one built-in converter is instantiated from.
@@ -193,67 +175,6 @@ fn read_statement(
     Ok(given)
 }
 
-fn si(value: f64, unit: Unit) -> String {
-    if value.is_infinite() {
-        return if value > 0.0 {
-            "inf".into()
-        } else {
-            "-inf".into()
-        };
-    }
-    if value == 0.0 {
-        return format!("0 {}", unit.symbol());
-    }
-    const PREFIXES: [(f64, &str); 9] = [
-        (1e9, "G"),
-        (1e6, "M"),
-        (1e3, "k"),
-        (1.0, ""),
-        (1e-3, "m"),
-        (1e-6, "u"),
-        (1e-9, "n"),
-        (1e-12, "p"),
-        (1e-15, "f"),
-    ];
-    let magnitude = value.abs();
-    let (scale, prefix) = PREFIXES
-        .iter()
-        .copied()
-        .find(|(scale, _)| magnitude >= *scale * (1.0 - 1e-12))
-        .unwrap_or((1e-15, "f"));
-    let scaled = format!("{:.6}", value / scale);
-    let scaled = scaled.trim_end_matches('0').trim_end_matches('.');
-    format!("{scaled} {prefix}{}", unit.symbol())
-}
-
-impl fmt::Display for Parameter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}={} (", self.name, si(self.value, self.unit))?;
-        match (&self.source, self.rule) {
-            (Source::Statement, _) | (_, None) => write!(f, "{}", self.source)?,
-            (source, Some(rule)) => write!(f, "{source} {rule}")?,
-        }
-        if self.tracks {
-            f.write_str(", tracks")?;
-        }
-        f.write_str(")")
-    }
-}
-
-impl fmt::Display for Supply {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.net {
-            Some(net) => write!(f, "vsup=net {net}, live ({})", self.source),
-            None => write!(
-                f,
-                "vsup={} ({}, static)",
-                si(self.level, Unit::Volt),
-                self.source
-            ),
-        }
-    }
-}
-
 /// The parameters resolved so far.
 struct Resolver<'a> {
     given: &'a Given,
@@ -283,7 +204,7 @@ impl Resolver<'_> {
                 tracks: false,
                 derived: false,
                 rule: None,
-                source: Source::Statement,
+                source: Source::ConnectStatement,
             },
             None => Parameter {
                 name,
@@ -339,7 +260,7 @@ impl ConverterLaw {
             default_source: if selected.is_some() && signature == BuiltinSignature::Full {
                 Source::ModuleDefault
             } else {
-                Source::RuleSet
+                Source::RuleSet(RULE_SET.into())
             },
             live,
             parameters: Vec::new(),
@@ -507,15 +428,10 @@ impl ConverterLaw {
             .collect()
     }
 
-    /// The insertion record: every parameter with its value and source,
-    /// after `header`.
-    pub(in crate::engine::builder) fn record(&self, header: &str) -> String {
-        let mut line = format!("{header}\n  {}", self.supply);
-        for parameter in &self.parameters {
-            line.push_str("; ");
-            line.push_str(&parameter.to_string());
-        }
-        line
+    /// Every parameter with its value and source, as the insertion record
+    /// keeps them.
+    pub(in crate::engine::builder) fn record(&self) -> Vec<ConverterParameter> {
+        self.parameters.iter().map(Parameter::record).collect()
     }
 }
 

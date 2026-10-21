@@ -36,6 +36,13 @@ mod analog_tasks;
 #[cfg(feature = "veriloga-builtins-base")]
 mod builtin_topology;
 mod construction;
+mod converter_insertion;
+#[cfg(feature = "veriloga")]
+pub(crate) use converter_insertion::BUILTIN_RULE_SET;
+pub(crate) use converter_insertion::record_text;
+pub use converter_insertion::{
+    ConverterInsertion, ConverterKind, ConverterParameter, ConverterSource, ConverterSupply,
+};
 mod model_safety;
 pub use model_safety::{
     BjtModelSafetyFamily, DeviceModelSafety, ModelSafetyValue, MosModelSafety, MosModelSafetyFamily,
@@ -783,6 +790,9 @@ pub struct CircuitData {
     /// site: a monitor prints again only when one of them changes.
     pub(crate) analog_monitor_values:
         HashMap<(String, u32), Box<[rspice_veriloga_runtime::AnalogTaskArgument]>>,
+    /// Every converter the build inserted on a mixed boundary; see
+    /// [`CircuitData::converter_insertions`].
+    pub(crate) converter_insertions: Vec<ConverterInsertion>,
 }
 
 /// Stable probe metadata for inductor-backed branch measurements.

@@ -272,7 +272,13 @@ use rspice_core::analysis::harmonic_balance::{
 // the `family_features!` macro declares at a crate's root. A crate above reads
 // both through the macro, so neither can be restricted. The census is 5,743,
 // with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5743;
+// The converter insertion record adds seven: `ConverterInsertion` and its
+// field types `ConverterKind`, `ConverterSource`, `ConverterSupply` and
+// `ConverterParameter`, the `circuit` re-export that names them, and
+// `CircuitData::converter_insertions`. The CLI's `check --converters`
+// (`rspice-cli` commands/check.rs) lists and emits the records a build
+// inserted. The census is 5,750, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5750;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

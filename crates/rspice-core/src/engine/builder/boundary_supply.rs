@@ -33,6 +33,7 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use crate::SimulationError;
+use crate::circuit::ConverterSource;
 use crate::netlist::{Element, Netlist, analyze_supply_reachability};
 
 /// The level a boundary converts against when the deck names no supply and no
@@ -57,11 +58,8 @@ pub(super) enum SupplyDerivation {
     /// The deck named it: `.param vcc`, the parameter
     /// `.options auto_bridge_parm_d` renames, or a subcircuit-scoped value for
     /// this net. Authoritative and silent, as it has always been. The
-    /// parameter is named in a connect-rule converter's insertion record.
-    Declared {
-        #[cfg_attr(not(feature = "veriloga"), allow(dead_code))]
-        parameter: String,
-    },
+    /// parameter is named in the converter's insertion record.
+    Declared { parameter: String },
     /// Exactly one rail reaches this net. The boundary binds to the rail's
     /// node live: see [`live_supply_net`].
     Derived {
@@ -329,16 +327,21 @@ pub(super) fn with_live_supply(
 
 /// Where a planned converter's supply came from, as its insertion record
 /// says it.
-#[cfg(feature = "veriloga")]
-pub(super) fn supply_sentence(derivation: Option<&SupplyDerivation>) -> String {
+///
+/// Rails that disagree are refused before any converter exists
+/// ([`BoundarySupplies::report`]), so a record never carries them; were one
+/// to, it would say the default it was planned with.
+pub(super) fn supply_source(derivation: Option<&SupplyDerivation>) -> ConverterSource {
     match derivation {
-        Some(SupplyDerivation::Declared { parameter }) => format!(".param {parameter}"),
-        Some(SupplyDerivation::Derived { source, level, .. }) => {
-            format!("inferred from {source} = {level} V")
+        Some(SupplyDerivation::Declared { parameter }) => {
+            ConverterSource::Parameter(parameter.clone())
         }
-        Some(SupplyDerivation::Ambiguous { rails }) => format!("{} rails disagree", rails.len()),
-        Some(SupplyDerivation::Defaulted) | None => {
-            format!("default {DEFAULT_BOUNDARY_SUPPLY} V")
+        Some(SupplyDerivation::Derived { source, level, .. }) => ConverterSource::Inferred {
+            source: source.clone(),
+            level: *level,
+        },
+        Some(SupplyDerivation::Ambiguous { .. } | SupplyDerivation::Defaulted) | None => {
+            ConverterSource::Default(DEFAULT_BOUNDARY_SUPPLY)
         }
     }
 }

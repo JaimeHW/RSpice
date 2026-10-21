@@ -52,9 +52,8 @@ use rspice_veriloga::disciplines::DisciplineDb;
 use crate::{ElaborationError, ElaborationErrorKind, SimulationError};
 
 mod parameters;
-pub(super) use parameters::{
-    ConverterLaw, RULE_SET, Source as ParameterSource, Supply as ConverterSupply, module_name,
-};
+pub(super) use crate::circuit::{ConverterSource as ParameterSource, ConverterSupply};
+pub(super) use parameters::{ConverterLaw, module_name};
 
 /// A clause-7 refusal about the deck's connect rules.
 ///
@@ -148,6 +147,11 @@ pub(super) struct PlannedConnectModule {
     /// voltage, live, rather than against a number.
     pub(super) supply_net: Option<String>,
     pub(super) execution: Option<std::sync::Arc<super::connect_execution::ConnectExecution>>,
+    /// The `connectrules` block the selecting statement is in.
+    pub(super) block: String,
+    /// Where that statement is written, `file:line`, when its source still
+    /// prepares to the text the rules were read from.
+    pub(super) location: Option<String>,
 }
 
 impl PlannedConnectModule {
@@ -185,6 +189,14 @@ impl PlannedConnectModule {
     /// The net this connect statement binds the boundary's supply to.
     pub(super) fn supply_net(&self) -> Option<&str> {
         self.supply_net.as_deref()
+    }
+
+    /// What chose the converter, as its insertion record says it.
+    pub(super) fn rules(&self) -> ParameterSource {
+        ParameterSource::ConnectRule {
+            block: self.block.clone(),
+            earlier_signature: self.signature() == Some(BuiltinSignature::Legacy),
+        }
     }
 }
 
@@ -300,6 +312,12 @@ pub(super) fn select_for_boundary(
         parameters,
         supply_net: rule.supply_net().map(ToString::to_string),
         execution: None,
+        block: table
+            .blocks()
+            .first()
+            .map(|block| block.name.to_string())
+            .unwrap_or_default(),
+        location: None,
     }))
 }
 
@@ -470,6 +488,10 @@ pub(super) struct DesignConnectRules {
             std::sync::Arc<super::connect_execution::ConnectExecution>,
         >,
     >,
+    /// Where each selected statement is written, by its offset in the
+    /// prepared source, so the source is prepared again once per statement
+    /// rather than once per boundary.
+    locations: std::cell::RefCell<std::collections::HashMap<usize, Option<String>>>,
 }
 
 impl DesignConnectRules {
@@ -745,6 +767,17 @@ impl DesignConnectRules {
                 db,
             )
             .map_err(|error| connect_error(node_label, instance_name, &error))?;
+        selected.location = self
+            .locations
+            .borrow_mut()
+            .entry(rule.span.start as usize)
+            .or_insert_with(|| {
+                let path = self.declared_in.as_deref()?;
+                let (file, line, _) = original_coordinates(path, self.source.as_deref()?)?
+                    .locate(rule.span.start as usize)?;
+                Some(format!("{file}:{line}"))
+            })
+            .clone();
         let key = format!(
             "{}:{:?}",
             selected.name,
@@ -787,35 +820,6 @@ impl DesignConnectRules {
     }
 }
 
-/// The XSPICE instance and port that made each node discrete.
-///
-/// Clause 7's [`PortLink`] names them, and this is where a flat deck keeps
-/// them. It is a second walk over the instances rather than a field on the
-/// planner's own traversal so that a deck with no connect rules pays nothing —
-/// the caller runs this only after finding rules.
-fn event_port_owners(
-    circuit: &crate::CircuitData,
-) -> std::collections::BTreeMap<usize, (String, String)> {
-    let mut owners: std::collections::BTreeMap<usize, (String, String)> = Default::default();
-    for instance in &circuit.xspice_instances {
-        for (port_idx, port) in instance.ports().iter().enumerate() {
-            let Some(connection) = instance.connection_at(port_idx) else {
-                continue;
-            };
-            let mut nodes = std::collections::BTreeMap::new();
-            super::register_digital_connection_nodes(&mut nodes, connection, port.direction);
-            let mut real_nodes = std::collections::BTreeMap::new();
-            super::register_real_connection_nodes(&mut real_nodes, connection, port.direction);
-            for node in nodes.keys().chain(real_nodes.keys()) {
-                owners
-                    .entry(*node)
-                    .or_insert_with(|| (instance.name.clone(), port.name.clone()));
-            }
-        }
-    }
-    owners
-}
-
 /// Select a connect module for every boundary the bridge planner found.
 ///
 /// A no-op for a design with no connect rules, which is the path every
@@ -834,13 +838,12 @@ pub(super) fn attach_to_planned_bridges(
     }
 
     let node_names = circuit.node_names_sorted();
-    let owners = event_port_owners(circuit);
 
     for bridge in bridges.iter_mut() {
         let node_label = super::xspice_auto_bridge_node_label(Some(&node_names), bridge.node);
-        let (instance_name, port_name) = owners
-            .get(&bridge.node)
-            .cloned()
+        let (instance_name, port_name) = bridge
+            .port
+            .clone()
             .unwrap_or_else(|| (node_label.clone(), "d".to_string()));
         let Some(selected) =
             rules.select_for_boundary_node(bridge.kind, &node_label, &instance_name, &port_name)?
@@ -848,12 +851,6 @@ pub(super) fn attach_to_planned_bridges(
             continue;
         };
         check_execution(&selected, bridge.kind, &node_label, &instance_name)?;
-        log::info!(
-            "Node '{}' bridges through connect module '{}' as instance '{}'",
-            node_label,
-            selected.name,
-            selected.instance
-        );
         bridge.connect_module = Some(selected);
     }
 
