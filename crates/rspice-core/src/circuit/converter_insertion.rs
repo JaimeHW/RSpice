@@ -12,6 +12,7 @@ use std::fmt;
 
 use super::CircuitData;
 use crate::xspice::PortDirection;
+use crate::xspice::models::connect_rule_parameter;
 
 /// The rule set whose defaults stand where no declaration states one.
 pub(crate) const BUILTIN_RULE_SET: &str = "rspice_builtin";
@@ -410,12 +411,28 @@ pub(crate) fn record_text(group: &[ConverterInsertion]) -> String {
             }
             text
         }
-        _ => format!(
-            "Inserted {} bridge {} for node {}",
-            first.conversion(),
-            first.instance,
-            first.boundary
-        ),
+        _ => {
+            let mut text = format!(
+                "Inserted {} bridge {} for node {}",
+                first.conversion(),
+                first.instance,
+                first.boundary
+            );
+            // A stock bridge's parameters in both vocabularies: its own, and
+            // the connect rule's for the same meaning.
+            let parameters = first
+                .parameters
+                .iter()
+                .map(|parameter| match connect_rule_parameter(&parameter.name) {
+                    Some(rule) => format!("{parameter:#} ({rule})"),
+                    None => format!("{parameter:#}"),
+                })
+                .collect::<Vec<_>>();
+            if !parameters.is_empty() {
+                text.push_str(&format!("\n  {} {}", first.module, parameters.join("; ")));
+            }
+            text
+        }
     }
 }
 
@@ -506,6 +523,76 @@ mod tests {
             "Inserted digital-to-analog bridge atmpl3 for nodes a b from bridge template \
              'auto_bridge_dac_out'\nboundary a: template auto_bridge_dac_out, static at 5 V\n\
              boundary b: template auto_bridge_dac_out, static at 5 V"
+        );
+    }
+
+    /// A stock bridge's record names each parameter in its own vocabulary
+    /// and the connect rule's: `in_low` is `vtlo`, `out_high` is `vhi`.
+    #[test]
+    fn a_stock_record_names_each_parameter_in_both_vocabularies() {
+        let record = |kind, direction, module: &str, parameters: &[(&str, f64, &str)]| {
+            let mut record = ConverterInsertion::new(
+                "din".into(),
+                Some("AINV.in".into()),
+                direction,
+                kind,
+                module.into(),
+                format!("__auto_bridge_{module}_din"),
+                ConverterSource::AutoBridge,
+            );
+            if !parameters.is_empty() {
+                record.supply = Some(ConverterSupply::new(
+                    3.3,
+                    None,
+                    ConverterSource::Default(3.3),
+                ));
+            }
+            record.parameters = parameters
+                .iter()
+                .map(|(name, value, unit)| {
+                    ConverterParameter::new(
+                        name,
+                        *value,
+                        unit,
+                        None,
+                        ConverterSource::AutoBridge,
+                        false,
+                    )
+                })
+                .collect();
+            record
+        };
+        assert_eq!(
+            record(
+                ConverterKind::AdcBridge,
+                PortDirection::In,
+                "adc_bridge",
+                &[("in_low", 1.65, "V"), ("in_high", 1.65, "V")]
+            )
+            .to_string(),
+            "Inserted analog-to-digital bridge __auto_bridge_adc_bridge_din for node din\n  \
+             adc_bridge in_low=1.65 V (vtlo); in_high=1.65 V (vthi)"
+        );
+        // A parameter only XSPICE has is named once.
+        assert_eq!(
+            record(
+                ConverterKind::BidiBridge,
+                PortDirection::InOut,
+                "bidi_bridge",
+                &[
+                    ("out_high", 3.3, "V"),
+                    ("in_low", 1.65, "V"),
+                    ("input_load", 1e-12, "F")
+                ]
+            )
+            .to_string(),
+            "Inserted bidirectional digital/analog bridge __auto_bridge_bidi_bridge_din for node \
+             din\n  bidi_bridge out_high=3.3 V (vhi); in_low=1.65 V (vtlo); input_load=1 pF"
+        );
+        // A record with no parameters is the one sentence.
+        assert_eq!(
+            record(ConverterKind::RealToV, PortDirection::Out, "real_to_v", &[]).to_string(),
+            "Inserted real-to-voltage bridge __auto_bridge_real_to_v_din for node din"
         );
     }
 }

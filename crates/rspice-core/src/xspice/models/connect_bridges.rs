@@ -26,6 +26,29 @@
 //! At their defaults the A/D is bit-identical to the HDL host's built-in
 //! converter with `txdel = inf` and to `adc_bridge` with `txdel = 0`, and the
 //! D/A to the HDL host's built-in D/A; the tests hold them to it.
+//!
+//! # ngspice's stock bridges in this vocabulary
+//!
+//! A connect rule takes only the names above; it accepts no XSPICE spelling.
+//! A stock bridge's parameter is the connect-rule parameter of the same
+//! meaning, and the insertion record of a stock bridge names both
+//! (`bridges::connect_rule_parameter`):
+//!
+//! | `adc_bridge`, `dac_bridge`, `bidi_bridge` | connect rule |
+//! |---|---|
+//! | `in_low`, `in_high` | `vtlo`, `vthi` |
+//! | `rise_delay`, `fall_delay` | `tdrise`, `tdfall` |
+//! | `out_low`, `out_high` | `vlo`, `vhi` |
+//! | `out_undef` | `vx` (and `vz`) |
+//! | `t_rise`, `t_fall` | `trise`, `tfall` |
+//! | `r_stl`, `r_sth` | `rlo`, `rhi` (strong) |
+//! | `r_low`, `r_high` | `rpull` (resistive) |
+//! | `input_load`, `drive_low`, `drive_high`, `smooth`, `direction`, `strength` | none; XSPICE only |
+//!
+//! `adc_bridge` has no X timeout: it is `txdel = 0`. `dac_bridge` is an ideal
+//! source, `rlo = rhi = 0`. In `bidi_bridge`, `in_high < in_low` asks for
+//! hysteresis with `in_low` the upper threshold, the reverse of
+//! `vtlo < vthi`.
 
 use super::bridges::{
     ADC_UNINITIALIZED_STATE, OFFICIAL_BRIDGE_TIMING_MIN, adc_bridge_delay_for_transition,

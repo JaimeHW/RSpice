@@ -184,7 +184,7 @@ pub use analog::{
 #[cfg(feature = "veriloga")]
 pub(crate) use bridges::OFFICIAL_BRIDGE_TIMING_MIN;
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
-pub(crate) use bridges::{TrackingAdcBridge, TrackingDacBridge};
+pub(crate) use bridges::{TrackingAdcBridge, TrackingDacBridge, connect_rule_parameter};
 #[cfg(feature = "veriloga")]
 pub(crate) use connect_bridges::{ConnectAdc, ConnectBidi, ConnectDac, is_connect_converter};
 #[cfg(feature = "veriloga")]

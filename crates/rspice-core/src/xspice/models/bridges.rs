@@ -15,6 +15,27 @@ pub(super) fn held_converter_descriptor() -> CmResult<XspiceSmallSignalDescripto
     Ok(XspiceSmallSignalDescriptor::AffineAc)
 }
 
+/// The connect-rule parameter that means what the stock bridges' parameter
+/// `stock` means, as the connect-rule converters' module docs tabulate it;
+/// `None` for a parameter only XSPICE has.
+pub(crate) fn connect_rule_parameter(stock: &str) -> Option<&'static str> {
+    Some(match stock {
+        "in_low" => "vtlo",
+        "in_high" => "vthi",
+        "rise_delay" => "tdrise",
+        "fall_delay" => "tdfall",
+        "out_low" => "vlo",
+        "out_high" => "vhi",
+        "out_undef" => "vx",
+        "t_rise" => "trise",
+        "t_fall" => "tfall",
+        "r_stl" => "rlo",
+        "r_sth" => "rhi",
+        "r_low" | "r_high" => "rpull",
+        _ => return None,
+    })
+}
+
 /// The shortest transition the stock bridges admit, and the width over which
 /// a zero-duration digital-to-analog step completes — a D/A edge here, and a
 /// discrete value a mixed module's analog block reads
