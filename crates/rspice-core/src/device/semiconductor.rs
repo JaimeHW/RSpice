@@ -6,16 +6,19 @@ mod bjt;
 mod diode;
 mod limiting;
 
-#[cfg(test)]
-pub(crate) use bjt::BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG;
-pub(crate) use bjt::{
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub use bjt::BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG;
+#[doc(hidden)]
+pub use bjt::{
     AcceptedBjtChargeSnapshotCheckpoint, AcceptedBjtNonlinearCheckpoint,
     BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT, BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot, BjtCurrentBranch, VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
 };
 pub use bjt::{Bjt, BjtType};
-pub(crate) use diode::{
+#[doc(hidden)]
+pub use diode::{
     AcceptedDiodeNonlinearCheckpoint, DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG, DiodeNonlinearState,
     ResolvedDiodeJunction,
 };
@@ -26,7 +29,8 @@ pub use diode::{Diode, DiodeLevel};
 /// Its derivative follows that continuation (the reference's 1/(2*sarg)
 /// approximation is not the derivative of its forward-bias threshold).
 #[inline]
-pub(crate) fn mos1_threshold(
+#[doc(hidden)]
+pub fn mos1_threshold(
     vto: crate::Value,
     gamma: crate::Value,
     phi: crate::Value,
@@ -58,7 +62,8 @@ pub(crate) fn mos1_threshold(
 /// Dimensionless NLEV=3 channel-noise shape, to be multiplied by
 /// gamma_noise * GDSNOI * beta * overdrive. Keep the factors separate so a
 /// small model coefficient can compensate a large geometry or bias factor.
-pub(crate) fn mos_nlev3_noise_shape(
+#[doc(hidden)]
+pub fn mos_nlev3_noise_shape(
     overdrive: crate::Value,
     vds: crate::Value,
     vdsat: crate::Value,
@@ -87,7 +92,8 @@ pub(crate) fn mos_nlev3_noise_shape(
 /// Graded-junction depletion charge and its voltage derivative. The forward
 /// continuation is anchored at the knee so both quantities remain continuous.
 /// Callers own model validation and temperature/geometry scaling.
-pub(crate) fn depletion_charge_and_capacitance(
+#[doc(hidden)]
+pub fn depletion_charge_and_capacitance(
     voltage: crate::Value,
     capacitance: crate::Value,
     potential: crate::Value,

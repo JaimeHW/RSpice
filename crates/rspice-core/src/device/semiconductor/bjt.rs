@@ -165,7 +165,8 @@ struct BjtIntrinsicBranches {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct LegacyTransientChargeState {
+#[doc(hidden)]
+pub struct LegacyTransientChargeState {
     pub qbe: Value,
     pub capbe: Value,
     pub capbe_vbc: Value,
@@ -243,14 +244,18 @@ impl BranchLinearization {
     }
 }
 
-pub(crate) const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
-pub(crate) const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
-pub(crate) const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
+#[doc(hidden)]
+pub const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
+#[doc(hidden)]
+pub const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
+#[doc(hidden)]
+pub const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 10;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX: usize = 2;
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct BjtChargeBranch {
+#[doc(hidden)]
+pub struct BjtChargeBranch {
     pub charge: Value,
     pub d_internal: [Value; BJT_INTERNAL_STATE_DIM],
     pub d_external: [Value; EXTERNAL_DIM],
@@ -261,7 +266,8 @@ pub(crate) struct BjtChargeBranch {
 }
 
 impl BjtChargeBranch {
-    pub(crate) fn is_active(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_active(&self) -> bool {
         self.pos_internal.is_some()
             || self.neg_internal.is_some()
             || self.pos_external.is_some()
@@ -318,7 +324,8 @@ impl BjtChargeBranch {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct BjtCurrentBranch {
+#[doc(hidden)]
+pub struct BjtCurrentBranch {
     pub current: Value,
     pub d_internal: [Value; BJT_INTERNAL_STATE_DIM],
     pub d_external: [Value; EXTERNAL_DIM],
@@ -406,7 +413,8 @@ impl BjtCurrentBranch {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct BjtDynamicReduction {
+#[doc(hidden)]
+pub struct BjtDynamicReduction {
     pub internal_voltages: [Value; BJT_INTERNAL_STATE_DIM],
     pub external_voltages: [Value; EXTERNAL_DIM],
     pub g_ii: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
@@ -435,19 +443,22 @@ pub(crate) struct BjtReducedLinearization {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct BjtChargeSnapshot {
+#[doc(hidden)]
+pub struct BjtChargeSnapshot {
     pub reduction: BjtDynamicReduction,
     pub branches: [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
 }
 
-pub(crate) struct BjtExternalBcCharge {
+#[doc(hidden)]
+pub struct BjtExternalBcCharge {
     pub nodes: [NodeId; 2],
     pub voltage: Value,
     pub charge: Value,
     pub capacitance: Value,
 }
 
-pub(crate) const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v2";
+#[doc(hidden)]
+pub const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v2";
 const GP_MNA_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-gummel-poon-v1";
 const VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-vbic-v4";
 const VBIC_DELAY_BRANCH_COUNT: usize = 4;
@@ -473,13 +484,16 @@ const BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT: usize = BJT_INTERNAL_STATE_D
     + EXTERNAL_DIM;
 const BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT: usize =
     1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM + 4;
-pub(crate) const BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT: usize =
+#[doc(hidden)]
+pub const BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT: usize =
     BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT
         + BJT_DYNAMIC_CHARGE_COUNT * BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT;
-pub(crate) const BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED_SCALAR_VALUE_COUNT
+#[doc(hidden)]
+pub const BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED_SCALAR_VALUE_COUNT
     + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
     + BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT;
-pub(crate) const VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED_SCALAR_VALUE_COUNT
+#[doc(hidden)]
+pub const VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED_SCALAR_VALUE_COUNT
     + 2
     + 4
     + EXTERNAL_DIM
@@ -497,8 +511,9 @@ pub(crate) const VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED
 /// private reduction lanes are excluded: the encoder admits only their
 /// canonical zero state and the decoder reconstructs that state directly.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedBjtChargeSnapshotCheckpoint {
-    pub(crate) state_values: Vec<Value>,
+#[doc(hidden)]
+pub struct AcceptedBjtChargeSnapshotCheckpoint {
+    pub state_values: Vec<Value>,
 }
 
 /// Accepted limiter/evaluation state for a private or promoted BJT.
@@ -510,14 +525,15 @@ pub(crate) struct AcceptedBjtChargeSnapshotCheckpoint {
 /// variants remain owned by the live device. The outer flags describe GP
 /// caches; promoted BJT state carries its own cache flags in the tagged numeric image.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedBjtNonlinearCheckpoint {
-    pub(crate) instance_name: String,
-    pub(crate) runtime_tag: String,
-    pub(crate) legacy_junction_limited: bool,
-    pub(crate) reduced_linearization_valid: bool,
-    pub(crate) previous_reduced_linearization_valid: bool,
-    pub(crate) charge_snapshot_valid: bool,
-    pub(crate) state_values: Vec<Value>,
+#[doc(hidden)]
+pub struct AcceptedBjtNonlinearCheckpoint {
+    pub instance_name: String,
+    pub runtime_tag: String,
+    pub legacy_junction_limited: bool,
+    pub reduced_linearization_valid: bool,
+    pub previous_reduced_linearization_valid: bool,
+    pub charge_snapshot_valid: bool,
+    pub state_values: Vec<Value>,
 }
 
 impl AcceptedBjtNonlinearCheckpoint {
@@ -1563,7 +1579,8 @@ impl Bjt {
 
     /// Encode an engine-owned accepted charge snapshot without retaining a
     /// cloned device or any static model/topology data.
-    pub(crate) fn encode_accepted_charge_snapshot_checkpoint(
+    #[doc(hidden)]
+    pub fn encode_accepted_charge_snapshot_checkpoint(
         &self,
         snapshot: &BjtChargeSnapshot,
     ) -> Result<AcceptedBjtChargeSnapshotCheckpoint, String> {
@@ -1718,9 +1735,8 @@ impl Bjt {
     }
 
     /// Capture accepted device evaluation state for private or promoted BJT models.
-    pub(crate) fn accepted_nonlinear_checkpoint(
-        &self,
-    ) -> Result<AcceptedBjtNonlinearCheckpoint, String> {
+    #[doc(hidden)]
+    pub fn accepted_nonlinear_checkpoint(&self) -> Result<AcceptedBjtNonlinearCheckpoint, String> {
         if self.mna_promoted {
             return self.capture_mna_checkpoint();
         }
@@ -1773,7 +1789,8 @@ impl Bjt {
 
     /// Validate provenance and the complete fixed-shape numeric payload before
     /// a live device is mutated.
-    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_nonlinear_checkpoint(
         &self,
         checkpoint: &AcceptedBjtNonlinearCheckpoint,
     ) -> Result<(), String> {
@@ -1823,7 +1840,8 @@ impl Bjt {
 
     /// Restore accepted state into the existing elaborated device. Static
     /// model/topology/linkage fields are deliberately untouched.
-    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_nonlinear_checkpoint(
         &mut self,
         checkpoint: &AcceptedBjtNonlinearCheckpoint,
     ) -> Result<(), String> {
@@ -2270,7 +2288,8 @@ impl Bjt {
     }
 
     #[inline]
-    pub(crate) fn is_initially_off(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_initially_off(&self) -> bool {
         self.initial_off
     }
 
@@ -2284,7 +2303,8 @@ impl Bjt {
     /// ngspice-46 reports the same `V(B) = 7.520859e-01` for `Q1 c b 0 qnpn`
     /// with and without `IC=0.7,3` on an `.op`.
     #[inline]
-    pub(crate) fn transient_initial_condition(&self) -> Option<(Option<Value>, Option<Value>)> {
+    #[doc(hidden)]
+    pub fn transient_initial_condition(&self) -> Option<(Option<Value>, Option<Value>)> {
         if self.initial_condition_vbe.is_none() && self.initial_condition_vce.is_none() {
             return None;
         }
@@ -2293,7 +2313,8 @@ impl Bjt {
 
     /// Temperature used by the accepted electrical state, including the solved
     /// thermal rise and the same VBIC clipping as the constitutive equations.
-    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+    #[doc(hidden)]
+    pub fn operating_temperature_kelvin(&self) -> Value {
         if self.thermal_model_enabled() {
             self.mapped_temperature(self.requested_temperature() + self.vrth)
                 .0
@@ -2514,9 +2535,8 @@ impl Bjt {
     }
 
     #[inline]
-    pub(crate) fn uses_vbic_charge_model(
-        params: &std::collections::HashMap<String, Value>,
-    ) -> bool {
+    #[doc(hidden)]
+    pub fn uses_vbic_charge_model(params: &std::collections::HashMap<String, Value>) -> bool {
         if let Some(level) = params
             .get("LEVEL")
             .copied()
@@ -2739,7 +2759,8 @@ impl Bjt {
     /// Forget Newton/limiter history before a fresh legacy operating-point
     /// startup attempt. Model parameters and accepted transient charge state
     /// are preserved; the next `update` follows the MODEINITJCT seed path.
-    pub(crate) fn reset_legacy_operating_point_history(&mut self) {
+    #[doc(hidden)]
+    pub fn reset_legacy_operating_point_history(&mut self) {
         if self.charge_model != BjtChargeModel::LegacyGummelPoon {
             return;
         }
@@ -2756,14 +2777,16 @@ impl Bjt {
 
     /// Re-linearize promoted native VBIC devices directly at a static
     /// residual/validation candidate.
-    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn update_static_linearization(&mut self, voltages: &[Value]) {
         if self.mna_promoted {
             self.update_mna_static_probe(voltages);
         }
     }
 
     /// Diagnostic accessor for DC iteration tracing.
-    pub(crate) fn legacy_junction_limited_for_trace(&self) -> bool {
+    #[doc(hidden)]
+    pub fn legacy_junction_limited_for_trace(&self) -> bool {
         self.legacy_junction_limited
     }
 
@@ -2772,7 +2795,8 @@ impl Bjt {
     /// take full node steps for these devices: the per-iterate junction
     /// replacement is the globalization, and merit-based step shrinking
     /// fights it (junction turn-on transiently raises the raw residual).
-    pub(crate) fn uses_legacy_gummel_poon(&self) -> bool {
+    #[doc(hidden)]
+    pub fn uses_legacy_gummel_poon(&self) -> bool {
         self.charge_model == BjtChargeModel::LegacyGummelPoon
     }
 }

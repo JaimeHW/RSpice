@@ -26,24 +26,32 @@ mod ekv3;
 mod jfet;
 mod legacy_bsim;
 mod mos_models;
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod oracle_cards;
 mod smooth;
 mod vdmos;
 
 pub use b3soi::{B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode};
-pub(crate) use b3soi::{B3SoiDdNodes, B3SoiPdNodes};
+#[doc(hidden)]
+pub use b3soi::{B3SoiDdNodes, B3SoiPdNodes};
 pub use bsim3v3::{Bsim3v3, Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model};
 pub use bsim4v8::{Bsim4v8, Bsim4v8Device, Bsim4v8Model};
 #[cfg(feature = "parallel")]
-pub(crate) use classic::ClassicMosResidualRowPlan;
-pub(crate) use classic::{AcceptedMosfetNonlinearCheckpoint, MosBodyJunctionModel};
-pub(crate) use classic::{
+#[doc(hidden)]
+pub use classic::ClassicMosResidualRowPlan;
+#[doc(hidden)]
+pub use classic::{AcceptedMosfetNonlinearCheckpoint, MosBodyJunctionModel};
+#[doc(hidden)]
+pub use classic::{
     ClassicMosCachedStaticTerms, ClassicMosStaticStampPlan, ClassicMosTransientConstants,
     MosfetNonlinearState,
 };
 pub use classic::{MosType, Mosfet};
 pub use ekv::EkvMosfet;
 pub use ekv3::{Ekv3Device, Ekv3Op};
-pub(crate) use jfet::{AcceptedJfetNonlinearCheckpoint, JFET_CHECKPOINT_RUNTIME_TAGS};
+#[doc(hidden)]
+pub use jfet::{AcceptedJfetNonlinearCheckpoint, JFET_CHECKPOINT_RUNTIME_TAGS};
 pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
 pub use mos_models::MosParams;
 pub use smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};

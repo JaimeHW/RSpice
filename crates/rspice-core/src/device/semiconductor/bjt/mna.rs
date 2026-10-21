@@ -23,7 +23,8 @@ use super::*;
 /// following the selected native model's thermal conductances and shot/flicker
 /// currents, each with its injection node pair on the internal topology.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct VbicNoiseOperatingModel {
+#[doc(hidden)]
+pub struct VbicNoiseOperatingModel {
     /// Explicit compact-model constants take precedence over dialect defaults.
     pub physical_constants: Option<crate::constants::NoisePhysicalConstants>,
     /// VBIC 1.3 evaluates thermal noise at the local operating temperature.
@@ -69,7 +70,8 @@ impl<S: MatrixStamper> MatrixStamper for PeriodicJacobian<'_, S> {
 /// IS = 1e20 junction's +/-4e21 S leaves nothing of the circuit's own
 /// conductance. The recovered entries carry only the device's unshorted
 /// branches, as the branch form's reduced system does.
-pub(crate) struct TiedTerminalProjection<'a, S: MatrixStamper> {
+#[doc(hidden)]
+pub struct TiedTerminalProjection<'a, S: MatrixStamper> {
     stamper: &'a mut S,
     reference: NodeId,
     /// Every electrical node of the device, its terminals and every internal
@@ -110,11 +112,13 @@ impl<S: MatrixStamper> MatrixStamper for TiedTerminalProjection<'_, S> {
 }
 
 impl Bjt {
-    pub(crate) fn uses_three_terminal_vbic(&self) -> bool {
+    #[doc(hidden)]
+    pub fn uses_three_terminal_vbic(&self) -> bool {
         self.vbic_three_terminal
     }
 
-    pub(crate) fn noise_enabled(&self) -> bool {
+    #[doc(hidden)]
+    pub fn noise_enabled(&self) -> bool {
         !self.uses_vbic_dynamic_charges() || self.vbic_noise_enabled
     }
 
@@ -216,9 +220,8 @@ impl Bjt {
     /// Incidence of all physical storage coordinates. The last three are
     /// temperature rise (K) and two excess-phase transport currents (A),
     /// even though MNA represents them with node unknowns.
-    pub(crate) fn charge_storage_nodes(
-        &self,
-    ) -> [Option<(NodeId, NodeId)>; BJT_DYNAMIC_CHARGE_COUNT] {
+    #[doc(hidden)]
+    pub fn charge_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; BJT_DYNAMIC_CHARGE_COUNT] {
         let electrical = self.electrical_charge_storage_nodes();
         let mut storage = std::array::from_fn(|index| electrical.get(index).copied().flatten());
         if self.uses_vbic_dynamic_charges() && self.mna_promoted() {
@@ -541,23 +544,28 @@ impl Bjt {
     /// True once the builder has promoted this instance's internal states to MNA
     /// unknowns.
     #[inline]
-    pub(crate) fn mna_promoted(&self) -> bool {
+    #[doc(hidden)]
+    pub fn mna_promoted(&self) -> bool {
         self.mna_promoted
     }
 
-    pub(crate) fn needs_mna_rbi_branch(&self) -> bool {
+    #[doc(hidden)]
+    pub fn needs_mna_rbi_branch(&self) -> bool {
         self.mna_promoted() && Self::series_active(self.rbi)
     }
 
-    pub(crate) fn assign_mna_rbi_branch(&mut self, branch: NodeId) {
+    #[doc(hidden)]
+    pub fn assign_mna_rbi_branch(&mut self, branch: NodeId) {
         self.mna_rbi_branch = Some(branch);
     }
 
-    pub(crate) fn mna_rbi_branch_matrix_node(&self, num_nodes: usize) -> Option<NodeId> {
+    #[doc(hidden)]
+    pub fn mna_rbi_branch_matrix_node(&self, num_nodes: usize) -> Option<NodeId> {
         self.mna_rbi_branch.map(|branch| num_nodes + branch)
     }
 
-    pub(crate) fn resolve_mna_rbi_branch(&mut self, num_nodes: usize) {
+    #[doc(hidden)]
+    pub fn resolve_mna_rbi_branch(&mut self, num_nodes: usize) {
         self.mna_rbi_matrix_node = self.mna_rbi_branch_matrix_node(num_nodes).unwrap_or(0);
     }
 
@@ -605,7 +613,8 @@ impl Bjt {
     /// Noise sources at the accepted bias. VBIC 1.3 follows vbic_1p3.va;
     /// older VBIC retains ngspice's emitter injection for RBP and its
     /// omission of RS/Iccp and extrinsic B-E flicker from the total spectrum.
-    pub(crate) fn vbic_noise_operating_model(&self) -> Option<VbicNoiseOperatingModel> {
+    #[doc(hidden)]
+    pub fn vbic_noise_operating_model(&self) -> Option<VbicNoiseOperatingModel> {
         if !self.uses_vbic_dynamic_charges() || !self.mna_promoted() {
             return None;
         }
@@ -776,7 +785,8 @@ impl Bjt {
         self.assign_mna_internal_nodes(alloc);
     }
 
-    pub(crate) fn assign_mna_internal_nodes(&mut self, mut alloc: impl FnMut(&str) -> NodeId) {
+    #[doc(hidden)]
+    pub fn assign_mna_internal_nodes(&mut self, mut alloc: impl FnMut(&str) -> NodeId) {
         self.node_cx = if Self::series_active(self.rcx) {
             alloc("cx")
         } else {
@@ -843,7 +853,8 @@ impl Bjt {
     }
 
     /// Physical GP junction voltages for accepted charge history.
-    pub(crate) fn mna_junction_voltages(&self, solution: &[Value]) -> [Value; 3] {
+    #[doc(hidden)]
+    pub fn mna_junction_voltages(&self, solution: &[Value]) -> [Value; 3] {
         let value = |(internal, external): (Option<usize>, Option<usize>)| {
             let node = internal
                 .map(|index| self.mna_internal_node(index))
@@ -862,7 +873,8 @@ impl Bjt {
     /// Matrix node for a dynamic internal state index (collapsed states alias
     /// their parent node; disabled states map to ground).
     #[inline]
-    pub(crate) fn mna_internal_node(&self, idx: usize) -> NodeId {
+    #[doc(hidden)]
+    pub fn mna_internal_node(&self, idx: usize) -> NodeId {
         match idx {
             IDX_VCX => self.node_cx,
             IDX_VCI => self.node_ci,
@@ -880,7 +892,8 @@ impl Bjt {
 
     /// Attribute an aliased internal endpoint to its physical lead by device
     /// topology. Comparing global node numbers would merge tied C/B/E/S leads.
-    pub(crate) fn mna_external_lead(
+    #[doc(hidden)]
+    pub fn mna_external_lead(
         &self,
         internal: Option<usize>,
         external: Option<usize>,
@@ -941,7 +954,8 @@ impl Bjt {
 
     /// All matrix nodes this device couples once promoted, for sparsity
     /// reservations. Zero entries are ground/disabled and must be skipped.
-    pub(crate) fn mna_coupling_nodes(&self) -> [NodeId; EXTERNAL_DIM + DYNAMIC_INTERNAL_DIM] {
+    #[doc(hidden)]
+    pub fn mna_coupling_nodes(&self) -> [NodeId; EXTERNAL_DIM + DYNAMIC_INTERNAL_DIM] {
         [
             self.node_collector,
             self.node_base,
@@ -1217,13 +1231,15 @@ impl Bjt {
     /// Newton iterations must keep the ngspice limited companion, but residual
     /// probes must evaluate the physical candidate voltage itself so stalled
     /// limiter states are rejected and true operating-point roots are accepted.
-    pub(crate) fn update_mna_static_probe(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn update_mna_static_probe(&mut self, voltages: &[Value]) {
         self.update_mna_from_solution(voltages, false);
     }
 
     /// A retained periodic solution owns the accepted bias, including OFF
     /// instances. Install the unlimited model there before starting Newton.
-    pub(crate) fn seed_accepted_periodic_bias(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn seed_accepted_periodic_bias(&mut self, voltages: &[Value]) {
         if self.mna_promoted() {
             self.update_mna_from_solution(voltages, false);
             self.vbic_startup_load_pending = false;
@@ -1278,7 +1294,8 @@ impl Bjt {
 
     /// Dynamic charge branches plus their linearization-point voltages, for
     /// the engine's transient companion and AC passes. Valid after `update`.
-    pub(crate) fn mna_charge_state(
+    #[doc(hidden)]
+    pub fn mna_charge_state(
         &self,
     ) -> (
         [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
@@ -1295,7 +1312,8 @@ impl Bjt {
         (self.mna_charge_cache.get(), internal, external)
     }
 
-    pub(crate) fn mna_internal_state_at_solution(
+    #[doc(hidden)]
+    pub fn mna_internal_state_at_solution(
         &self,
         voltages: &[Value],
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
@@ -1307,7 +1325,8 @@ impl Bjt {
     /// bias is read raw: aliased states share their parent solution entry,
     /// and accepted/candidate points are evaluated where they stand rather
     /// than at a limited iterate.
-    pub(crate) fn mna_charge_state_at_solution(
+    #[doc(hidden)]
+    pub fn mna_charge_state_at_solution(
         &self,
         voltages: &[Value],
     ) -> (
@@ -1318,7 +1337,8 @@ impl Bjt {
         self.mna_charge_state_at_solution_with_forward_limit(voltages, false)
     }
 
-    pub(crate) fn mna_charge_state_at_solution_with_forward_limit(
+    #[doc(hidden)]
+    pub fn mna_charge_state_at_solution_with_forward_limit(
         &self,
         voltages: &[Value],
         forward_limit: bool,
@@ -1337,10 +1357,8 @@ impl Bjt {
         (branches, internal, external)
     }
 
-    pub(crate) fn mna_terminal_currents_at_solution(
-        &self,
-        solution: &[Value],
-    ) -> [Value; EXTERNAL_DIM] {
+    #[doc(hidden)]
+    pub fn mna_terminal_currents_at_solution(&self, solution: &[Value]) -> [Value; EXTERNAL_DIM] {
         let v = self.mna_solution_bias(solution);
         let eval = self.evaluate_state_with_rbi_current(
             BjtNodeVoltages {
@@ -1401,7 +1419,8 @@ impl Bjt {
 
     /// Authored lead F/Q at the unlimited periodic bias most recently sampled.
     /// Keep terminal identities before global node stamping merges tied leads.
-    pub(crate) fn periodic_lead_fq(
+    #[doc(hidden)]
+    pub fn periodic_lead_fq(
         &self,
         solution: &[Value],
     ) -> Result<([Value; EXTERNAL_DIM], [Value; EXTERNAL_DIM]), String> {
@@ -1440,7 +1459,8 @@ impl Bjt {
 
     /// Prepare the native physical MNA topology for a periodic evaluator.
     /// Netlist construction already allocates every non-collapsed unknown.
-    pub(crate) fn prepare_periodic_mna(&mut self, num_nodes: usize) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn prepare_periodic_mna(&mut self, num_nodes: usize) -> Result<(), String> {
         if !self.mna_promoted() {
             if self.has_intrinsic_state_unknowns() {
                 return Err(format!(
@@ -1460,7 +1480,8 @@ impl Bjt {
     /// RHS values are -F and -Q (not absolute Newton companion sources); both
     /// matrices contain positive derivatives of the physical equations. The
     /// canonical RBI port separately owns its two linear electrical KCL terms.
-    pub(crate) fn stamp_periodic_fq(
+    #[doc(hidden)]
+    pub fn stamp_periodic_fq(
         &mut self,
         solution: &[Value],
         static_part: &mut impl MatrixStamper,
@@ -1469,7 +1490,8 @@ impl Bjt {
         self.stamp_periodic_fq_with_forward_limit(solution, static_part, charge_part, false);
     }
 
-    pub(crate) fn stamp_periodic_fq_with_forward_limit(
+    #[doc(hidden)]
+    pub fn stamp_periodic_fq_with_forward_limit(
         &mut self,
         solution: &[Value],
         static_part: &mut impl MatrixStamper,
@@ -1618,7 +1640,8 @@ impl Bjt {
     /// cached evaluation was junction-limited, retain J*(limited-anchor).
     /// This avoids subtracting large absolute-voltage companions to recover
     /// small physical currents at steep thermal slopes.
-    pub(crate) fn stamp_mna_correction(&self, stamper: &mut impl MatrixStamper, anchor: &[Value]) {
+    #[doc(hidden)]
+    pub fn stamp_mna_correction(&self, stamper: &mut impl MatrixStamper, anchor: &[Value]) {
         self.stamp_mna_at(stamper, Some(anchor), false);
     }
 
@@ -1627,7 +1650,8 @@ impl Bjt {
     /// reference [`Self::project_legacy_tied_terminal_system`] reduces the
     /// branch form onto; a ground reference needs no projection, because
     /// ground's row and column are never stamped.
-    pub(crate) fn promoted_tied_terminal_reference(&self) -> Option<NodeId> {
+    #[doc(hidden)]
+    pub fn promoted_tied_terminal_reference(&self) -> Option<NodeId> {
         if !self.mna_promoted || !self.uses_legacy_gummel_poon() {
             return None;
         }
@@ -1643,7 +1667,8 @@ impl Bjt {
     }
 
     /// `stamper` seen through the tied-terminal projection onto `reference`.
-    pub(crate) fn tied_terminal_projection<'a, S: MatrixStamper>(
+    #[doc(hidden)]
+    pub fn tied_terminal_projection<'a, S: MatrixStamper>(
         &self,
         stamper: &'a mut S,
         reference: NodeId,
@@ -1826,7 +1851,8 @@ impl Bjt {
     /// The ordinary static load freezes RBI; its independent-current equation
     /// needs -I*dR/dV to complete the coherent transient tangent. This does
     /// not alter the resistance current or use VBIC residual row orientations.
-    pub(crate) fn stamp_legacy_mna_phase_correction(
+    #[doc(hidden)]
+    pub fn stamp_legacy_mna_phase_correction(
         &self,
         stamper: &mut impl MatrixStamper,
         correction: &BjtCurrentBranch,

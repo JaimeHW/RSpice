@@ -17,7 +17,8 @@ impl<S: MatrixStamper> MatrixStamper for Derivatives<'_, S> {
 }
 
 impl Bsim4v8Device {
-    pub(crate) fn periodic_coupling_nodes(&self) -> [NodeId; 12] {
+    #[doc(hidden)]
+    pub fn periodic_coupling_nodes(&self) -> [NodeId; 12] {
         [
             self.node_drain_external,
             self.node_drain,
@@ -51,7 +52,8 @@ impl Bsim4v8Device {
 
     /// Noise laws use this raw orbit snapshot without accepting a transient
     /// step or updating the Newton limiter and integration histories.
-    pub(crate) fn update_periodic_noise_probe(&mut self, solution: &[Value]) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn update_periodic_noise_probe(&mut self, solution: &[Value]) -> Result<(), String> {
         self.op = self.periodic_op(solution)?;
         self.bias = self.raw_branch_voltages(solution);
         Ok(())
@@ -192,10 +194,8 @@ impl Bsim4v8Device {
 
     /// Sum each terminal's internal network. Internal resistor currents cancel
     /// within that terminal, while gate/body storage reaches its external lead.
-    pub(crate) fn periodic_lead_fq(
-        &self,
-        solution: &[Value],
-    ) -> Result<([Value; 4], [Value; 4]), String> {
+    #[doc(hidden)]
+    pub fn periodic_lead_fq(&self, solution: &[Value]) -> Result<([Value; 4], [Value; 4]), String> {
         let op = self.periodic_op(solution)?;
         let charge = op.charge.as_ref().unwrap();
         let rate = self.periodic_nqs_rate(charge)?;
@@ -219,7 +219,8 @@ impl Bsim4v8Device {
 
     /// Stamp -F and -Q directly from physical contributions, together with
     /// native analytic derivatives. Raw probes never advance Newton history.
-    pub(crate) fn stamp_periodic_fq(
+    #[doc(hidden)]
+    pub fn stamp_periodic_fq(
         &self,
         solution: &[Value],
         f: &mut impl MatrixStamper,

@@ -103,7 +103,8 @@ impl Bjt {
     }
 
     #[inline]
-    pub(crate) fn has_intrinsic_state_unknowns(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_intrinsic_state_unknowns(&self) -> bool {
         Self::series_active(self.rcx)
             || Self::series_active(self.rci)
             || Self::series_active(self.rbx)

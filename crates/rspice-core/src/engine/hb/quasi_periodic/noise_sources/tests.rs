@@ -227,10 +227,7 @@ fn qpnoise_native_bjt_matches_stationary_noise_and_retains_nonlinear_modulation_
 
 #[test]
 fn bsim3_periodic_noise_qpss_preserves_physical_flicker_and_bias_modulation() {
-    const MODELS: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/device/mosfet/bsim3v3/testdata/models018.lib"
-    ));
+    const MODELS: &str = crate::device::mosfet::oracle_cards::BSIM3V3_MODELS018;
     let engine = Engine::default();
     for driven in [false, true] {
         let amplitude = if driven { 0.03 } else { 0.0 };

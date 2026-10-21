@@ -8358,7 +8358,7 @@ impl Engine {
                     // The physical source temperature is the resolved
                     // instance temperature. TNOM only anchors model-parameter
                     // scaling and must not heat an explicit TEMP a second time.
-                    mosfet.noise_absolute_temperature = explicit_temp_k;
+                    mosfet.set_noise_absolute_temperature(explicit_temp_k);
                     mosfet.noise_temperature_offset = if explicit_temp_k.is_some() {
                         0.0
                     } else {
@@ -8430,7 +8430,7 @@ impl Engine {
                             drain_r,
                         );
                         mosfet.node_drain = dint;
-                        if let Some(temp_k) = mosfet.noise_absolute_temperature {
+                        if let Some(temp_k) = mosfet.noise_absolute_temperature() {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if mosfet.noise_temperature_offset != 0.0 {
                             circuit.set_last_resistor_noise_temperature_offset(
@@ -8450,7 +8450,7 @@ impl Engine {
                             source_r,
                         );
                         mosfet.node_source = sint;
-                        if let Some(temp_k) = mosfet.noise_absolute_temperature {
+                        if let Some(temp_k) = mosfet.noise_absolute_temperature() {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if mosfet.noise_temperature_offset != 0.0 {
                             circuit.set_last_resistor_noise_temperature_offset(
@@ -8586,7 +8586,7 @@ impl Engine {
                         )));
                     }
                     jfet = jfet.with_instance_params(instance_params);
-                    jfet.noise_absolute_temperature = explicit_temp_k;
+                    jfet.set_noise_absolute_temperature(explicit_temp_k);
                     jfet.set_analysis_temperature(self.config.temperature);
                     jfet.set_model_order(model_order);
 
@@ -8623,10 +8623,8 @@ impl Engine {
                             dint,
                             rd,
                         );
-                        jfet.drain = dint;
-                        jfet.params.rd = 0.0;
-                        jfet.external_lead_conductances[0] = 1.0 / rd;
-                        if let Some(temp_k) = jfet.noise_absolute_temperature {
+                        jfet.externalize_drain_resistance(dint, rd);
+                        if let Some(temp_k) = jfet.noise_absolute_temperature() {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if jfet.noise_dtemp != 0.0 {
                             circuit.set_last_resistor_noise_temperature_offset(jfet.noise_dtemp);
@@ -8643,10 +8641,8 @@ impl Engine {
                             sint,
                             rs,
                         );
-                        jfet.source = sint;
-                        jfet.params.rs = 0.0;
-                        jfet.external_lead_conductances[1] = 1.0 / rs;
-                        if let Some(temp_k) = jfet.noise_absolute_temperature {
+                        jfet.externalize_source_resistance(sint, rs);
+                        if let Some(temp_k) = jfet.noise_absolute_temperature() {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if jfet.noise_dtemp != 0.0 {
                             circuit.set_last_resistor_noise_temperature_offset(jfet.noise_dtemp);
@@ -8918,7 +8914,7 @@ impl Engine {
                         )));
                     }
                     jfet = jfet.with_instance_params(instance_params);
-                    jfet.noise_absolute_temperature = explicit_temp_k;
+                    jfet.set_noise_absolute_temperature(explicit_temp_k);
                     jfet.set_analysis_temperature(self.config.temperature);
                     jfet.set_model_order(model_order);
 
@@ -8952,10 +8948,8 @@ impl Engine {
                             dint,
                             rd,
                         );
-                        jfet.drain = dint;
-                        jfet.params.rd = 0.0;
-                        jfet.external_lead_conductances[0] = 1.0 / rd;
-                        if let Some(temp_k) = jfet.noise_absolute_temperature {
+                        jfet.externalize_drain_resistance(dint, rd);
+                        if let Some(temp_k) = jfet.noise_absolute_temperature() {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if jfet.noise_dtemp != 0.0 {
                             circuit.set_last_resistor_noise_temperature_offset(jfet.noise_dtemp);
@@ -8972,10 +8966,8 @@ impl Engine {
                             sint,
                             rs,
                         );
-                        jfet.source = sint;
-                        jfet.params.rs = 0.0;
-                        jfet.external_lead_conductances[1] = 1.0 / rs;
-                        if let Some(temp_k) = jfet.noise_absolute_temperature {
+                        jfet.externalize_source_resistance(sint, rs);
+                        if let Some(temp_k) = jfet.noise_absolute_temperature() {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if jfet.noise_dtemp != 0.0 {
                             circuit.set_last_resistor_noise_temperature_offset(jfet.noise_dtemp);

@@ -1,7 +1,8 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct TlineTransientResponse {
+#[doc(hidden)]
+pub struct TlineTransientResponse {
     self_conductance: Value,
     mutual_conductance: Value,
     mutual_current_coefficient: Value,

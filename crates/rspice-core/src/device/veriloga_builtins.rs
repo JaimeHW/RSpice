@@ -65,7 +65,8 @@ use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOr
 /// limited Newton step. The three travel together through every stamp entry
 /// point.
 #[derive(Clone, Copy)]
-pub(crate) struct GeneratedEvaluationRequest {
+#[doc(hidden)]
+pub struct GeneratedEvaluationRequest {
     pub analysis: GeneratedAnalysisKind,
     pub simparams: GeneratedSimulationParameters,
     pub evaluation_mode: GeneratedEvaluationMode,
@@ -73,7 +74,8 @@ pub(crate) struct GeneratedEvaluationRequest {
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone)]
-pub(crate) struct BuiltinParameterAssignment {
+#[doc(hidden)]
+pub struct BuiltinParameterAssignment {
     pub(crate) name: String,
     pub(crate) value: crate::netlist::ParametricValue,
     pub(crate) origin: GeneratedParameterOrigin,
@@ -81,7 +83,8 @@ pub(crate) struct BuiltinParameterAssignment {
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct GeneratedTerminalCurrentAlias {
+#[doc(hidden)]
+pub struct GeneratedTerminalCurrentAlias {
     /// Conventional SPICE lead-current parameter (for example `id`).
     pub(crate) parameter: &'static str,
     /// Canonical Verilog-A terminal that owns the aliased current.
@@ -275,14 +278,16 @@ pub struct BuiltinEvaluatedNoiseSource {
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct BuiltinEvaluatedNoiseInjection {
+#[doc(hidden)]
+pub struct BuiltinEvaluatedNoiseInjection {
     pub mapped: GeneratedMappedNoiseInjectionDescriptor,
     pub gain: GeneratedNoiseComplex,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct BuiltinEvaluatedNoiseProcess {
+#[doc(hidden)]
+pub struct BuiltinEvaluatedNoiseProcess {
     pub descriptor: GeneratedNoiseProcessDescriptor,
     pub active: bool,
     pub psd: Value,
@@ -356,7 +361,8 @@ impl std::fmt::Debug for BuiltinVerilogAInstance {
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, Default)]
-pub(crate) struct BuiltinVerilogADevices {
+#[doc(hidden)]
+pub struct BuiltinVerilogADevices {
     devices: Vec<BuiltinVerilogAInstance>,
     /// Physical analysis visible to generated models while the numerical DC
     /// operating-point solver assembles their equilibrium equations.
@@ -365,7 +371,8 @@ pub(crate) struct BuiltinVerilogADevices {
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct BuiltinVerilogADevicesRollback {
+#[doc(hidden)]
+pub struct BuiltinVerilogADevicesRollback {
     states: Vec<GeneratedVerilogARollbackState>,
     terminal_currents: Vec<Value>,
 }
@@ -2235,7 +2242,8 @@ impl std::error::Error for BuiltinInstantiationError {}
 /// trait rather than the circuit store: `device` sits below `circuit`, and
 /// `circuit` implements it.
 #[cfg(feature = "veriloga-builtins-base")]
-pub(crate) trait BuiltinTopology {
+#[doc(hidden)]
+pub trait BuiltinTopology {
     /// The node `name` names, created on first use. A ground name is node 0.
     fn get_or_create_node(&mut self, name: &str) -> crate::NodeId;
 
@@ -2262,10 +2270,6 @@ pub(crate) trait BuiltinTopology {
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
-#[expect(
-    private_bounds,
-    reason = "the circuit store is the one topology; callers outside the crate pass a `CircuitData` and cannot implement the trait"
-)]
 pub fn instantiate_builtin(
     model_name: &str,
     instance_name: &str,
@@ -2315,11 +2319,8 @@ pub fn instantiate_builtin(
 ///
 /// `index` names a terminal whose declared name is unknown.
 #[cfg(feature = "veriloga-builtins-base")]
-pub(crate) fn unconnected_terminal_net(
-    instance_name: &str,
-    terminal: &str,
-    index: usize,
-) -> String {
+#[doc(hidden)]
+pub fn unconnected_terminal_net(instance_name: &str, terminal: &str, index: usize) -> String {
     if terminal.is_empty() {
         format!("{instance_name}.__port{}.internal", index + 1)
     } else {
@@ -2335,7 +2336,8 @@ pub(crate) fn unconnected_terminal_net(
 /// letter's syntax ties it there.
 #[cfg(feature = "veriloga-builtins-base")]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn instantiate_builtin_scoped(
+#[doc(hidden)]
+pub fn instantiate_builtin_scoped(
     model_name: &str,
     instance_name: &str,
     node_names: &[String],

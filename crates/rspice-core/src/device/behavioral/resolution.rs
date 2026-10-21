@@ -19,7 +19,8 @@ enum Resolution {
 }
 
 impl BehavioralSources {
-    pub(crate) fn needs_time_resolution(&self, period: Value) -> bool {
+    #[doc(hidden)]
+    pub fn needs_time_resolution(&self, period: Value) -> bool {
         self.voltage_sources.iter().any(|source| {
             super::periodicity::needs_time_features(
                 &source.ast,
@@ -35,7 +36,8 @@ impl BehavioralSources {
         })
     }
 
-    pub(crate) fn refine_time_mesh(
+    #[doc(hidden)]
+    pub fn refine_time_mesh(
         &self,
         times: &[Value],
         criteria: NonlinearConvergenceCriteria,

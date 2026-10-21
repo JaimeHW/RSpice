@@ -6,17 +6,19 @@ pub(crate) const BSIM4_CHECKPOINT_RUNTIME_TAG: &str = "native-bsim4v8-accepted-v
 pub(crate) const BSIM4_CHECKPOINT_VALUE_COUNT: usize = 122;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedBsim4NonlinearCheckpoint {
-    pub(crate) instance_name: String,
-    pub(crate) runtime_tag: String,
-    pub(crate) values: [Value; BSIM4_CHECKPOINT_VALUE_COUNT],
-    pub(crate) flags: [bool; 7],
-    pub(crate) mode: i32,
-    pub(crate) seed_evaluations: u8,
+#[doc(hidden)]
+pub struct AcceptedBsim4NonlinearCheckpoint {
+    pub instance_name: String,
+    pub runtime_tag: String,
+    pub values: [Value; BSIM4_CHECKPOINT_VALUE_COUNT],
+    pub flags: [bool; 7],
+    pub mode: i32,
+    pub seed_evaluations: u8,
 }
 
 impl AcceptedBsim4NonlinearCheckpoint {
-    pub(crate) fn validate_numeric_state(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_numeric_state(&self) -> Result<(), String> {
         if self.runtime_tag != BSIM4_CHECKPOINT_RUNTIME_TAG
             || self.instance_name.is_empty()
             || self.instance_name.chars().any(char::is_whitespace)
@@ -37,7 +39,8 @@ impl AcceptedBsim4NonlinearCheckpoint {
 }
 
 impl Bsim4v8Device {
-    pub(crate) fn accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn accepted_nonlinear_checkpoint(
         &self,
     ) -> Result<AcceptedBsim4NonlinearCheckpoint, String> {
         let charge = self.op.charge.clone().unwrap_or_default();
@@ -189,7 +192,8 @@ impl Bsim4v8Device {
         Ok(state)
     }
 
-    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_nonlinear_checkpoint(
         &self,
         state: &AcceptedBsim4NonlinearCheckpoint,
     ) -> Result<(), String> {
@@ -202,7 +206,8 @@ impl Bsim4v8Device {
         state.validate_numeric_state()
     }
 
-    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_nonlinear_checkpoint(
         &mut self,
         state: &AcceptedBsim4NonlinearCheckpoint,
     ) -> Result<(), String> {

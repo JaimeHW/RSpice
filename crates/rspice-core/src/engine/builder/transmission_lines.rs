@@ -553,8 +553,8 @@ P1 n1 n2 0 f1 f2 0 m
         let branches = tline
             .native_branch_ordinals()
             .expect("native branch ordinals are allocated by default");
-        assert_eq!(branches.b1.len(), 2);
-        assert_eq!(branches.b2.len(), 2);
+        assert_eq!(branches.b1().len(), 2);
+        assert_eq!(branches.b2().len(), 2);
         // Two conductors * two ends = four branch-current unknowns.
         assert_eq!(circuit.num_branches(), 4);
     }
@@ -577,8 +577,8 @@ P1 n1 n2 0 f1 f2 0 m
         let branches = circuit.coupled_tlines[0]
             .native_branch_ordinals()
             .expect("native branch ordinals are present");
-        assert_eq!(branches.b1, vec![1, 3]);
-        assert_eq!(branches.b2, vec![2, 4]);
+        assert_eq!(branches.b1(), [1, 3]);
+        assert_eq!(branches.b2(), [2, 4]);
 
         let matrix = engine.build_matrix(&circuit).expect("matrix builds");
         let n1 = circuit.get_node_by_name("n1").expect("n1 exists");
@@ -636,8 +636,8 @@ P1 n1 n2 0 f1 f2 0 m
         let matrix_branches = circuit.coupled_tlines[0]
             .native_branch_matrix_indices()
             .expect("native branch matrix indices are present");
-        assert_eq!(matrix_branches.b1, vec![5, 7]);
-        assert_eq!(matrix_branches.b2, vec![6, 8]);
+        assert_eq!(matrix_branches.b1(), [5, 7]);
+        assert_eq!(matrix_branches.b2(), [6, 8]);
     }
 
     #[test]

@@ -64,7 +64,8 @@ pub enum StampError {
 
 impl StampError {
     /// Classify a non-finite evaluation at a trial point.
-    pub(crate) fn nonfinite_trial(instance: impl Into<String>, detail: impl Into<String>) -> Self {
+    #[doc(hidden)]
+    pub fn nonfinite_trial(instance: impl Into<String>, detail: impl Into<String>) -> Self {
         Self::NonFiniteTrial(Box::new(NonFiniteTrialError {
             instance: instance.into(),
             detail: detail.into(),

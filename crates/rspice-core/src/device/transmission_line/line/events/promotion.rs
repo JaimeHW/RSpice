@@ -5,7 +5,8 @@ impl TransmissionLine {
     /// Resolve an explicitly owned transition at the newest incoming history
     /// coordinate. The outgoing physical state and rates come from the owner;
     /// the independent incoming history supplies its own same-side rate.
-    pub(crate) fn resolve_history_endpoint_event(
+    #[doc(hidden)]
+    pub fn resolve_history_endpoint_event(
         &mut self,
         outgoing: [Value; 4],
         outgoing_wave_slopes: [Value; 2],
@@ -31,16 +32,15 @@ impl TransmissionLine {
     /// The owner supplies provenance; closeness/equality of samples is never a
     /// declaration. Smooth interpolation on each side supplies finite rates.
     /// The complete replacement is validated before any history is changed.
-    pub(crate) fn promote_sampled_history_events(
-        &mut self,
-        edges: &[[Value; 3]],
-    ) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn promote_sampled_history_events(&mut self, edges: &[[Value; 3]]) -> Result<(), String> {
         self.promote_sampled_history_events_with_endpoint_rates(edges, None)
     }
 
     /// An event at the newest sample has no outgoing interpolation interval.
     /// Its owner must independently solve the finite outgoing wave rates.
-    pub(crate) fn promote_sampled_history_events_with_endpoint_rates(
+    #[doc(hidden)]
+    pub fn promote_sampled_history_events_with_endpoint_rates(
         &mut self,
         edges: &[[Value; 3]],
         endpoint_rates: Option<[Value; 2]>,

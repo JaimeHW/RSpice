@@ -39,7 +39,8 @@ pub use mosfet::{
     Ekv3Device, Ekv3Op, EkvMosfet, Jfet, JfetChannelModel, JfetParams, JfetType, MosParams,
     MosTerminals, MosType, Mosfet, Vdmos, VdmosRegion, VdmosType,
 };
-pub(crate) use mosfet::{B3SoiDdNodes, B3SoiPdNodes, MosBodyJunctionModel};
+#[doc(hidden)]
+pub use mosfet::{B3SoiDdNodes, B3SoiPdNodes, MosBodyJunctionModel};
 pub use passive::{
     Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
     SaturableInductor, SolutionDependentCapacitor, SolutionDependentCapacitorLinearization,
@@ -62,7 +63,8 @@ pub use memristor_pem::{
     XycePemPwlSample, XycePemPwlTable, XycePemPwlTableError,
     parse_xyce_7_10_legacy_two_column_table,
 };
-pub(crate) use memristor_pem::{
+#[doc(hidden)]
+pub use memristor_pem::{
     XYCE_PEM_MAX_TABLE_BYTES, XYCE_PEM_MAX_TABLE_POINTS,
     parse_xyce_7_10_legacy_two_column_table_bounded,
 };
@@ -71,20 +73,22 @@ pub use memristor_team::{
     XyceTeamInstanceParams, XyceTeamMemristor, XyceTeamMemristorCache, XyceTeamMemristorError,
     XyceTeamModelParams, XyceTeamResistanceNoiseParams, XyceTeamStateDrive,
 };
-pub(crate) use memristor_team::{
-    XyceTeamResistanceNoiseCheckpoint, XyceTeamResistanceNoiseRuntime,
-};
+#[doc(hidden)]
+pub use memristor_team::{XyceTeamResistanceNoiseCheckpoint, XyceTeamResistanceNoiseRuntime};
 pub use sources::{CurrentSource, VoltageSource};
 pub use stamp_error::{NonFiniteTrialError, StampError};
-pub(crate) use switch::{AcceptedSwitchCheckpoint, SwitchCheckpointKind};
+#[doc(hidden)]
+pub use switch::{AcceptedSwitchCheckpoint, SwitchCheckpointKind};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
 pub use transmission_line::TransmissionLine;
-pub(crate) use transmission_line::{
+#[doc(hidden)]
+pub use transmission_line::{
     DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT, DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT,
     DistributedRlgc, LtraRgTwoPort, TransmissionLineCheckpoint,
 };
-pub(crate) use transmission_line::{
+#[doc(hidden)]
+pub use transmission_line::{
     TlineTransientResponse, TransmissionLineHistoryEvent, TransmissionLineTimeSide,
     TxlTransientStamp,
 };
@@ -115,7 +119,8 @@ pub struct XyceMemristorCache {
 /// The instance name is added by the stamping loop, which knows it; the device
 /// does not carry one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum MemristorEvaluationFault {
+#[doc(hidden)]
+pub enum MemristorEvaluationFault {
     NonFinite(String),
     Structural(String),
 }
@@ -146,14 +151,16 @@ pub enum XyceMemristor {
 }
 
 impl XyceMemristor {
-    pub(crate) fn family_name(&self) -> &'static str {
+    #[doc(hidden)]
+    pub fn family_name(&self) -> &'static str {
         match self {
             Self::Team(_) => "TEAM",
             Self::Pem(_) => "PEM",
         }
     }
 
-    pub(crate) fn evaluate(
+    #[doc(hidden)]
+    pub fn evaluate(
         &self,
         v_pos: Value,
         v_neg: Value,
@@ -164,7 +171,8 @@ impl XyceMemristor {
             .map_err(|fault| fault.to_string())
     }
 
-    pub(crate) fn evaluate_with_resistance_factor(
+    #[doc(hidden)]
+    pub fn evaluate_with_resistance_factor(
         &self,
         v_pos: Value,
         v_neg: Value,
@@ -236,7 +244,8 @@ impl XyceMemristor {
         }
     }
 
-    pub(crate) fn current_output_with_resistance_factor(
+    #[doc(hidden)]
+    pub fn current_output_with_resistance_factor(
         &self,
         v_pos: Value,
         v_neg: Value,
@@ -261,7 +270,8 @@ impl XyceMemristor {
         }
     }
 
-    pub(crate) fn resistance_output_with_factor(
+    #[doc(hidden)]
+    pub fn resistance_output_with_factor(
         &self,
         v_pos: Value,
         v_neg: Value,

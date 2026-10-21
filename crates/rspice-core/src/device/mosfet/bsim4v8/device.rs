@@ -39,7 +39,8 @@ const TRNQS_SCALING: Value = 1.0e-9;
 mod ac_response;
 #[cfg(test)]
 mod charge_tests;
-pub(crate) mod checkpoint;
+#[doc(hidden)]
+pub mod checkpoint;
 mod continuation;
 mod periodic;
 
@@ -415,7 +416,8 @@ impl Bsim4v8Device {
             .expect("BSIM4 DC eval: no charge model requested")
     }
 
-    pub(crate) fn stamp_static_probe(&self, voltages: &[Value], matrix: &mut impl MatrixStamper) {
+    #[doc(hidden)]
+    pub fn stamp_static_probe(&self, voltages: &[Value], matrix: &mut impl MatrixStamper) {
         let bias = self.raw_branch_voltages(voltages);
         let junction = self.raw_junction_bias(voltages);
         let op = self.eval_dc(bias, junction);
@@ -444,11 +446,8 @@ impl Bsim4v8Device {
         }
     }
 
-    pub(crate) fn charge_at_with_probe(
-        &self,
-        v: &[Value],
-        physical_probe: bool,
-    ) -> (Bsim4v8Charge, i32) {
+    #[doc(hidden)]
+    pub fn charge_at_with_probe(&self, v: &[Value], physical_probe: bool) -> (Bsim4v8Charge, i32) {
         let (bias, junction_bias) = self.evaluation_bias(v, physical_probe);
         let gate_mid_vgs = (self.core.model.rgate_mod == 3).then(|| {
             self.core.mtype
@@ -487,7 +486,8 @@ impl Bsim4v8Device {
         self.trnqs_state_charges_with_probe(charge, voltages, false)
     }
 
-    pub(crate) fn trnqs_state_charges_with_probe(
+    #[doc(hidden)]
+    pub fn trnqs_state_charges_with_probe(
         &self,
         charge: &Bsim4v8Charge,
         voltages: &[Value],
@@ -1105,7 +1105,8 @@ impl Bsim4v8Device {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stamp_charge_companion_with_probe(
+    #[doc(hidden)]
+    pub fn stamp_charge_companion_with_probe(
         &self,
         charge: &Bsim4v8Charge,
         mode: i32,
@@ -1217,7 +1218,8 @@ impl Bsim4v8Device {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stamp_trnqs_charge_companion_with_probe(
+    #[doc(hidden)]
+    pub fn stamp_trnqs_charge_companion_with_probe(
         &self,
         charge: &Bsim4v8Charge,
         mode: i32,

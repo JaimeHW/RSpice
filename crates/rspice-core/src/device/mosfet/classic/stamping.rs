@@ -45,7 +45,8 @@ impl Mosfet {
         ]
     }
 
-    pub(crate) fn reported_currents(&self, channel: Value) -> [Value; 4] {
+    #[doc(hidden)]
+    pub fn reported_currents(&self, channel: Value) -> [Value; 4] {
         // MOS3/9's internal OP table folds channel current into model polarity;
         // terminal reports consistently use current entering the physical pin.
         let channel = if self.uses_mos3_core() {
@@ -56,7 +57,8 @@ impl Mosfet {
         self.report_branch_currents(channel, self.ibs, self.ibd, [0.0; 5])
     }
 
-    pub(crate) fn reported_currents_at(
+    #[doc(hidden)]
+    pub fn reported_currents_at(
         &self,
         solution: &[Value],
         displacement: [Value; 5],
@@ -111,7 +113,8 @@ impl Mosfet {
     /// an existing matrix or residual. Keep device operating-point derivatives
     /// unchanged; only the delivered stamp combines tied columns and rows.
     #[inline]
-    pub(crate) fn channel_stamp_terms(
+    #[doc(hidden)]
+    pub fn channel_stamp_terms(
         [drain, gate, source, bulk]: [NodeId; 4],
         gm: Value,
         gds: Value,
@@ -191,7 +194,8 @@ impl Mosfet {
     /// Capture the immutable sparse locations used by the compact transient
     /// linearization stream. This is performed once after the matrix pattern
     /// is linked, never in a Newton iteration.
-    pub(crate) fn classic_static_stamp_plan(
+    #[doc(hidden)]
+    pub fn classic_static_stamp_plan(
         &self,
         matrix: &StaticMatrix,
     ) -> Option<ClassicMosStaticStampPlan> {
@@ -228,7 +232,8 @@ impl Mosfet {
     /// Export the already-evaluated static terms without repeating any device
     /// law. The arithmetic order matches `stamp_cached_direct` exactly.
     #[inline]
-    pub(crate) fn classic_cached_static_terms(&self) -> ClassicMosCachedStaticTerms {
+    #[doc(hidden)]
+    pub fn classic_cached_static_terms(&self) -> ClassicMosCachedStaticTerms {
         debug_assert!(self.has_branch_history);
         let (_, _, gbs, ieq_bs) =
             self.body_source_junction_linearization_cached(self.eval_vbs, true);
@@ -249,7 +254,8 @@ impl Mosfet {
 
     #[cfg(feature = "parallel")]
     #[inline]
-    pub(crate) fn classic_residual_row_plan(&self) -> ClassicMosResidualRowPlan {
+    #[doc(hidden)]
+    pub fn classic_residual_row_plan(&self) -> ClassicMosResidualRowPlan {
         let (body_source_anode, body_source_cathode) = self.body_source_diode_nodes();
         let (body_drain_anode, body_drain_cathode) = self.body_drain_diode_nodes();
         ClassicMosResidualRowPlan {
@@ -304,7 +310,8 @@ impl Mosfet {
     /// Stamp a compact cached linearization through its prelinked plan.
     /// Contributions retain the canonical per-device ordering exactly.
     #[inline]
-    pub(crate) fn stamp_classic_cached_static_terms(
+    #[doc(hidden)]
+    pub fn stamp_classic_cached_static_terms(
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         plan: &ClassicMosStaticStampPlan,
@@ -422,7 +429,8 @@ impl Mosfet {
     /// slice. Arithmetic and per-device contribution order match
     /// [`Self::stamp_classic_cached_static_terms`] exactly.
     #[inline]
-    pub(crate) fn stamp_classic_cached_static_values(
+    #[doc(hidden)]
+    pub fn stamp_classic_cached_static_values(
         values: &mut [Value],
         rhs: &mut [Value],
         plan: &ClassicMosStaticStampPlan,
@@ -609,12 +617,8 @@ impl Mosfet {
     }
 
     /// Stamp using O(1) direct indexing (call after link).
-    pub(crate) fn stamp_direct(
-        &self,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
+    #[doc(hidden)]
+    pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
         let (op, cache_matches) = self.direct_operating_point_at(voltages);
         self.stamp_direct_operating_point(matrix, rhs, op, cache_matches);
     }
@@ -653,7 +657,8 @@ impl Mosfet {
     /// The transient classic-MOS fast path proves that device state matches
     /// its current iterate before calling this, so reloading terminal voltages,
     /// rerunning limiting, and comparing the cached bias is redundant.
-    pub(crate) fn stamp_cached_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+    #[doc(hidden)]
+    pub fn stamp_cached_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         debug_assert!(self.has_branch_history);
         self.stamp_direct_operating_point(
             matrix,
@@ -676,11 +681,8 @@ impl Mosfet {
     /// [`Self::stamp_cached_direct`] without repeating the matrix-pattern
     /// check for every scalar contribution.
     #[inline]
-    pub(crate) fn stamp_grounded_bulk_cached_values(
-        &self,
-        values: &mut [Value],
-        rhs: &mut [Value],
-    ) {
+    #[doc(hidden)]
+    pub fn stamp_grounded_bulk_cached_values(&self, values: &mut [Value], rhs: &mut [Value]) {
         debug_assert!(self.has_branch_history);
         debug_assert_eq!(self.node_bulk, 0);
 
@@ -764,7 +766,8 @@ impl Mosfet {
     /// Residual acceptance needs physical currents, not the Newton Jacobian.
     /// Keeping this pure avoids mutating limiter history while also avoiding
     /// sparse writes that would only be multiplied back by the same candidate.
-    pub(crate) fn add_physical_static_residual_row_terms_at(
+    #[doc(hidden)]
+    pub fn add_physical_static_residual_row_terms_at(
         &self,
         solution: &[Value],
         constants: &ClassicMosTransientConstants,
@@ -862,7 +865,8 @@ impl Mosfet {
     /// This preserves the full-device residual arithmetic order while keeping
     /// the proof walk on two tightly packed arrays instead of revisiting model
     /// cards and mutable limiter history.
-    pub(crate) fn add_cached_physical_static_residual_terms(
+    #[doc(hidden)]
+    pub fn add_cached_physical_static_residual_terms(
         solution: &[Value],
         plan: &ClassicMosStaticStampPlan,
         terms: &ClassicMosCachedStaticTerms,
@@ -950,7 +954,8 @@ impl Mosfet {
     /// the same as [`Self::add_physical_static_residual_row_terms_at`], while
     /// disjoint row outputs allow deterministic parallel execution.
     #[cfg(feature = "parallel")]
-    pub(crate) fn add_cached_physical_static_residual_row_terms(
+    #[doc(hidden)]
+    pub fn add_cached_physical_static_residual_row_terms(
         solution: &[Value],
         plan: &ClassicMosResidualRowPlan,
         terms: &ClassicMosCachedStaticTerms,
@@ -1110,7 +1115,8 @@ impl Mosfet {
     /// equations. Residual and line-search probes must therefore bypass it or
     /// an otherwise valid operating point can be rejected based on the path
     /// taken to reach it.
-    pub(crate) fn stamp_static_probe_direct(
+    #[doc(hidden)]
+    pub fn stamp_static_probe_direct(
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -1141,7 +1147,8 @@ impl Mosfet {
     }
 
     /// Get polarity multiplier (+1 for NMOS, -1 for PMOS)
-    pub(crate) fn polarity(&self) -> Value {
+    #[doc(hidden)]
+    pub fn polarity(&self) -> Value {
         match self.mos_type {
             MosType::Nmos => 1.0,
             MosType::Pmos => -1.0,

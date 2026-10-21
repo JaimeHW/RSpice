@@ -8,7 +8,8 @@ use std::collections::HashMap;
 
 mod affine;
 mod periodic;
-pub(crate) use periodic::BehavioralFqPoint;
+#[doc(hidden)]
+pub use periodic::BehavioralFqPoint;
 pub(crate) use periodic::{IntegralBindings, PeriodicExpressionSample};
 mod phases;
 mod prescribed;
@@ -318,7 +319,8 @@ integral_source!(BehavioralCurrentSource);
 impl BehavioralSources {
     /// Instantaneous perturbations of dz/dt with every integral held fixed.
     /// State-to-state propagation belongs to the period map, not this injection.
-    pub(crate) fn integral_rate_directions(
+    #[doc(hidden)]
+    pub fn integral_rate_directions(
         &self,
         solution: &[Value],
         direction: &[Value],

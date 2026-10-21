@@ -606,11 +606,13 @@ impl Ekv3Device {
         }
     }
 
-    pub(crate) fn is_validated_nmos150(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_validated_nmos150(&self) -> bool {
         self.model_spec.is_nmos150()
     }
 
-    pub(crate) fn stamp_ac_transadmittance_delta(
+    #[doc(hidden)]
+    pub fn stamp_ac_transadmittance_delta(
         &self,
         frequency_hz: Value,
         mut add_real: impl FnMut(NodeId, NodeId, Value),
@@ -627,7 +629,8 @@ impl Ekv3Device {
         }
     }
 
-    pub(crate) fn noise_current_psd_points(&self) -> Vec<(Value, Value)> {
+    #[doc(hidden)]
+    pub fn noise_current_psd_points(&self) -> Vec<(Value, Value)> {
         VANOISE_ORACLE
             .iter()
             .map(|&point| {
@@ -640,7 +643,8 @@ impl Ekv3Device {
             .collect()
     }
 
-    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+    #[doc(hidden)]
+    pub fn operating_temperature_kelvin(&self) -> Value {
         self.temperature_kelvin
     }
 

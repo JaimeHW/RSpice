@@ -67,7 +67,8 @@ pub(crate) fn prepared<'a>(
 
 /// Source value and physical derivatives at fixed event coordinates. These are
 /// constitutive values, not a Newton affine RHS or accepted device history.
-pub(crate) struct PhysicalSample {
+#[doc(hidden)]
+pub struct PhysicalSample {
     pub value: Value,
     pub time_partial: Value,
     pub partials: Vec<(usize, Value)>,
@@ -76,7 +77,8 @@ pub(crate) struct PhysicalSample {
 macro_rules! physical_source {
     ($source:ty, $branches:literal) => {
         impl $source {
-            pub(crate) fn has_smooth_physical_equation(&self) -> bool {
+            #[doc(hidden)]
+            pub fn has_smooth_physical_equation(&self) -> bool {
                 if self.program.node_map.is_empty() && self.program.branch_map.is_empty() {
                     return self.physical_time_program().is_some();
                 }
@@ -96,7 +98,8 @@ macro_rules! physical_source {
             /// Read-only physical sampling. Numerical-domain failures remain NaNs so
             /// the event Newton owner can backtrack; binding, quota and cancellation
             /// failures are returned before any trial can be accepted.
-            pub(crate) fn physical_sample(
+            #[doc(hidden)]
+            pub fn physical_sample(
                 &self,
                 solution: &[Value],
                 time: Value,
@@ -204,7 +207,8 @@ macro_rules! physical_source {
                     partials,
                 })
             }
-            pub(crate) fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
+            #[doc(hidden)]
+            pub fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
                 prepared(
                     &self.ast,
                     self.prescribed_time_program().map(|(program, context)| {
@@ -213,7 +217,8 @@ macro_rules! physical_source {
                 )
             }
 
-            pub(crate) fn physical_time_is_stationary(&self) -> bool {
+            #[doc(hidden)]
+            pub fn physical_time_is_stationary(&self) -> bool {
                 self.physical_time_program().is_some() && constant_over_time(&self.ast)
             }
         }
@@ -224,7 +229,8 @@ physical_source!(BehavioralVoltageSource, false);
 physical_source!(BehavioralCurrentSource, true);
 
 impl BehavioralSources {
-    pub(crate) fn has_smooth_physical_equations(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_smooth_physical_equations(&self) -> bool {
         self.voltage_sources
             .iter()
             .all(BehavioralVoltageSource::has_smooth_physical_equation)

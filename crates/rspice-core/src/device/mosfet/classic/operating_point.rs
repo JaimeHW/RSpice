@@ -3,7 +3,8 @@ use super::*;
 /// Snapshot of a MOSFET's cached small-signal operating point, for
 /// device operating-point reporting (the Spectre-style OP info table).
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct MosfetOpValues {
+#[doc(hidden)]
+pub struct MosfetOpValues {
     /// Operating region: cutoff, linear or saturation.
     pub region: crate::op_label::OpLabel,
     /// Drain current (A).
@@ -28,7 +29,8 @@ pub(crate) struct MosfetOpValues {
 
 /// A model-selected flicker law whose coefficient need not fit in f64.
 #[derive(Debug)]
-pub(crate) struct FlickerNoiseTerms {
+#[doc(hidden)]
+pub struct FlickerNoiseTerms {
     pub coefficient: Value,
     pub binary_scale: i32,
     pub current: Value,
@@ -38,7 +40,8 @@ pub(crate) struct FlickerNoiseTerms {
 
 impl Mosfet {
     /// Cached operating-point values from the last accepted Newton solution.
-    pub(crate) fn op_values(&self) -> MosfetOpValues {
+    #[doc(hidden)]
+    pub fn op_values(&self) -> MosfetOpValues {
         let (vth, vdsat, gm, gds, gmb) = self.reported_op_values();
         let id = if self.uses_mos3_core() {
             self.polarity() * self.id
@@ -92,10 +95,8 @@ impl Mosfet {
 }
 
 impl Mosfet {
-    pub(crate) fn gate_charge_branch_voltages_at(
-        &self,
-        voltages: &[Value],
-    ) -> (Value, Value, Value) {
+    #[doc(hidden)]
+    pub fn gate_charge_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
         let (vgs, vds, vbs) = self.eval_branch_voltages_at(voltages);
         (vgs, vgs - vds, vgs - vbs)
     }
@@ -134,7 +135,8 @@ impl Mosfet {
     }
 
     /// Conductance multiplying 4*k*T in the channel thermal-noise PSD.
-    pub(crate) fn channel_noise_conductance(
+    #[doc(hidden)]
+    pub fn channel_noise_conductance(
         &self,
         dialect: crate::config::SpiceDialect,
     ) -> Result<Value, &'static str> {
@@ -197,7 +199,8 @@ impl Mosfet {
     /// MOS9 uses that current law with W-2*WD, without XL/XW mask shifts.
     /// Ngspice MOS3 also uses W-2*WD for its width-dependent NLEV laws.
     /// BSIM1/2 keep their own effective geometry and Cox units.
-    pub(crate) fn flicker_noise_source_terms(
+    #[doc(hidden)]
+    pub fn flicker_noise_source_terms(
         &self,
         dialect: crate::config::SpiceDialect,
     ) -> Result<Option<FlickerNoiseTerms>, &'static str> {

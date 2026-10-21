@@ -2,7 +2,8 @@
 
 use super::*;
 
-pub(crate) struct PrescribedIntegralRate<'a> {
+#[doc(hidden)]
+pub struct PrescribedIntegralRate<'a> {
     pub name: String,
     equation: &'a Equation,
     environment: BehavioralEnvironment,
@@ -163,9 +164,8 @@ impl PrescribedIntegralRate<'_> {
 impl BehavioralSources {
     /// Canonical voltage-first compiler-postorder, including coupled rates.
     /// Callers select a rate only after all its integral dependencies qualify.
-    pub(crate) fn prescribed_integral_rates(
-        &self,
-    ) -> Result<Vec<PrescribedIntegralRate<'_>>, String> {
+    #[doc(hidden)]
+    pub fn prescribed_integral_rates(&self) -> Result<Vec<PrescribedIntegralRate<'_>>, String> {
         let mut plans = Vec::new();
         plans
             .try_reserve_exact(self.integral_count())

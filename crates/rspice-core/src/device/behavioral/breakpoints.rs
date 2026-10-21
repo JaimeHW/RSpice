@@ -12,7 +12,8 @@ use std::collections::BTreeSet;
 mod features;
 
 #[derive(Debug, Error)]
-pub(crate) enum BehavioralBreakpointError {
+#[doc(hidden)]
+pub enum BehavioralBreakpointError {
     #[error("behavioral source-event collection was cancelled")]
     Aborted,
     #[error(transparent)]
@@ -394,7 +395,8 @@ impl EventSchedule<'_> {
 }
 
 impl BehavioralSources {
-    pub(crate) fn collect_transient_breakpoints(
+    #[doc(hidden)]
+    pub fn collect_transient_breakpoints(
         &self,
         tstop: Value,
         breakpoints: &mut BreakpointManager,
@@ -420,7 +422,8 @@ impl BehavioralSources {
     }
 }
 
-pub(crate) fn collect_expression_breakpoints<'a>(
+#[doc(hidden)]
+pub fn collect_expression_breakpoints<'a>(
     expressions: impl Iterator<Item = (&'a Expr, Context<'a>)>,
     tstop: Value,
     breakpoints: &mut BreakpointManager,

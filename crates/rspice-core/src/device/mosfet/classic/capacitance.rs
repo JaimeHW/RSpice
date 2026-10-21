@@ -3,13 +3,15 @@ use super::*;
 /// Independent gate-to-source/drain/bulk charge flows. Columns are the
 /// physical Vgs, Vds and Vbs derivatives; intrinsic terminal charge is coupled.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct LegacyBsimGateCharge {
+#[doc(hidden)]
+pub struct LegacyBsimGateCharge {
     pub(crate) charges: [Value; 3],
     pub(crate) derivatives: [[Value; 3]; 3],
 }
 
 impl Mosfet {
-    pub(crate) fn legacy_gate_charge_at(
+    #[doc(hidden)]
+    pub fn legacy_gate_charge_at(
         &self,
         vgs: Value,
         vds: Value,
@@ -50,7 +52,8 @@ impl Mosfet {
 
     /// Stamp a charge-conserving coupled companion. AC uses zero currents and
     /// zero bias with gain=omega; transient uses its integration gain and dQ/dt.
-    pub(crate) fn stamp_legacy_gate_charge(
+    #[doc(hidden)]
+    pub fn stamp_legacy_gate_charge(
         &self,
         charge: &LegacyBsimGateCharge,
         gain: Value,
@@ -145,7 +148,8 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn oxide_capacitance_total(&self) -> Value {
+    #[doc(hidden)]
+    pub fn oxide_capacitance_total(&self) -> Value {
         if let Some(model) = &self.legacy_bsim_sized {
             return model.oxide_capacitance() * self.multiplicity;
         }
@@ -358,7 +362,8 @@ impl Mosfet {
         (mode, von, (vg_active - von).max(0.0))
     }
 
-    pub(crate) fn transient_capacitance_halves_at(
+    #[doc(hidden)]
+    pub fn transient_capacitance_halves_at(
         &self,
         vgs: Value,
         vds: Value,
@@ -413,7 +418,8 @@ impl Mosfet {
     }
 
     /// Reuse setup-invariant geometry and surface potential for MOS1.
-    pub(crate) fn transient_capacitance_halves_with_constants(
+    #[doc(hidden)]
+    pub fn transient_capacitance_halves_with_constants(
         &self,
         vgs: Value,
         vds: Value,
@@ -433,7 +439,8 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn overlap_capacitances_with_constants(
+    #[doc(hidden)]
+    pub fn overlap_capacitances_with_constants(
         &self,
         constants: &ClassicMosTransientConstants,
     ) -> (Value, Value, Value) {
@@ -442,7 +449,8 @@ impl Mosfet {
 
     /// Calculate overlap capacitances for AC analysis
     /// Returns (Cgs_overlap, Cgd_overlap, Cgb_overlap)
-    pub(crate) fn overlap_capacitances(&self) -> (Value, Value, Value) {
+    #[doc(hidden)]
+    pub fn overlap_capacitances(&self) -> (Value, Value, Value) {
         let (width, cgb_length) = self.legacy_bsim_model.as_ref().map_or_else(
             || {
                 (
@@ -463,12 +471,8 @@ impl Mosfet {
 
     /// Total AC Meyer capacitances (Cgs, Cgd, Cgb), including overlap,
     /// at the same evaluated bias used by the current linearization.
-    pub(crate) fn ac_capacitances_at(
-        &self,
-        vgs: Value,
-        vds: Value,
-        vbs: Value,
-    ) -> (Value, Value, Value) {
+    #[doc(hidden)]
+    pub fn ac_capacitances_at(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, Value, Value) {
         let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
         let (cgs, cgd, cgb) = self.transient_capacitance_halves_at(vgs, vds, vbs);
         (2.0 * cgs + cgs_ov, 2.0 * cgd + cgd_ov, 2.0 * cgb + cgb_ov)
@@ -495,7 +499,8 @@ impl Mosfet {
     /// Raw and limited branch voltages for an iterate whose classic-MOS
     /// nonlinear cache has already been verified by the transient engine.
     #[inline]
-    pub(crate) fn verified_cached_transient_branch_voltages(
+    #[doc(hidden)]
+    pub fn verified_cached_transient_branch_voltages(
         &self,
     ) -> ((Value, Value, Value), (Value, Value, Value)) {
         debug_assert!(self.has_branch_history);
@@ -518,12 +523,14 @@ impl Mosfet {
     /// everywhere the deck did not name — folds the vector back toward that
     /// zero and defeats the parameter.
     #[inline]
-    pub(crate) fn unlimited_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
+    #[doc(hidden)]
+    pub fn unlimited_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
         self.branch_voltages(voltages)
     }
 
     #[inline]
-    pub(crate) fn eval_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
+    #[doc(hidden)]
+    pub fn eval_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         if self.has_branch_history
             && self.vgs == vgs

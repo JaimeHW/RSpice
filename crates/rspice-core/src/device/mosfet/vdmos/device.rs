@@ -30,7 +30,8 @@ pub struct VdmosIndices {
 
 /// The quantities ngspice's VDMOS noise sources are evaluated from.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct VdmosNoiseOperatingPoint {
+#[doc(hidden)]
+pub struct VdmosNoiseOperatingPoint {
     /// `(pos, neg, R)` of the series drain resistor, when it is a branch: `RD`,
     /// or the quasi-saturation drift resistance at the bias.
     pub(crate) drain_resistor: Option<(NodeId, NodeId, Value)>,
@@ -1582,7 +1583,8 @@ impl Vdmos {
     /// put them on internal nodes, and the channel's internal terminal pair
     /// with the transconductance and drain current the small-signal stamp
     /// uses there.
-    pub(crate) fn noise_operating_point(&self, solution: &[Value]) -> VdmosNoiseOperatingPoint {
+    #[doc(hidden)]
+    pub fn noise_operating_point(&self, solution: &[Value]) -> VdmosNoiseOperatingPoint {
         let voltage = |node: NodeId| {
             if node == 0 {
                 0.0
@@ -2389,33 +2391,31 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn body_source_transient_charge_and_capacitance_at(
-        &self,
-        vbs: Value,
-    ) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn body_source_transient_charge_and_capacitance_at(&self, vbs: Value) -> (Value, Value) {
         let (charge, capacitance) = self.body_source_charge_and_capacitance_at(vbs);
         let factor = self.body_transient_charge_factor();
         (factor * charge, factor * capacitance)
     }
 
     #[inline]
-    pub(crate) fn body_drain_transient_charge_and_capacitance_at(
-        &self,
-        vbd: Value,
-    ) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn body_drain_transient_charge_and_capacitance_at(&self, vbd: Value) -> (Value, Value) {
         let (charge, capacitance) = self.body_drain_charge_and_capacitance_at(vbd);
         let factor = self.body_transient_charge_factor();
         (factor * charge, factor * capacitance)
     }
 
     #[inline]
-    pub(crate) fn d1_charge_and_capacitance_at(&self, vds: Value) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn d1_charge_and_capacitance_at(&self, vds: Value) -> (Value, Value) {
         let (charge, capacitance) = self.d1_raw_charge_and_capacitance(-vds);
         (-charge, capacitance)
     }
 
     #[inline]
-    pub(crate) fn d1_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn d1_charge_nodes(&self) -> (NodeId, NodeId) {
         let d1p = self.d1_prime_node();
         match self.vdmos_type {
             VdmosType::NVdmos => (self.drain, d1p),
@@ -2424,7 +2424,8 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn d1_charge_branch_voltage_at(&self, voltages: &[Value]) -> Value {
+    #[doc(hidden)]
+    pub fn d1_charge_branch_voltage_at(&self, voltages: &[Value]) -> Value {
         let vd = if self.drain > 0 {
             voltages[self.drain - 1]
         } else {
@@ -2469,7 +2470,8 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn gate_source_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn gate_source_charge_nodes(&self) -> (NodeId, NodeId) {
         let si = self.source_int.unwrap_or(self.source);
         match self.vdmos_type {
             VdmosType::NVdmos => (self.gate, si),
@@ -2478,7 +2480,8 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn gate_drain_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn gate_drain_charge_nodes(&self) -> (NodeId, NodeId) {
         let di = self.drain_int.unwrap_or(self.drain);
         match self.vdmos_type {
             VdmosType::NVdmos => (self.gate, di),
@@ -2487,7 +2490,8 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn gate_bulk_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn gate_bulk_charge_nodes(&self) -> (NodeId, NodeId) {
         match self.vdmos_type {
             VdmosType::NVdmos => (self.gate, self.bulk),
             VdmosType::PVdmos => (self.bulk, self.gate),
@@ -2495,7 +2499,8 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn drain_source_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn drain_source_charge_nodes(&self) -> (NodeId, NodeId) {
         let di = self.drain_int.unwrap_or(self.drain);
         let si = self.source_int.unwrap_or(self.source);
         match self.vdmos_type {
@@ -2505,7 +2510,8 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn body_source_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn body_source_charge_nodes(&self) -> (NodeId, NodeId) {
         let si = self.source_int.unwrap_or(self.source);
         match self.vdmos_type {
             VdmosType::NVdmos => (self.bulk, si),
@@ -2514,7 +2520,8 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn body_drain_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn body_drain_charge_nodes(&self) -> (NodeId, NodeId) {
         let di = self.drain_int.unwrap_or(self.drain);
         match self.vdmos_type {
             VdmosType::NVdmos => (self.bulk, di),
@@ -2523,7 +2530,8 @@ impl Vdmos {
     }
 
     #[inline]
-    pub(crate) fn body_charge_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn body_charge_branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value) {
         let di = self.drain_int.unwrap_or(self.drain);
         let si = self.source_int.unwrap_or(self.source);
         let b = self.bulk;
@@ -2535,7 +2543,8 @@ impl Vdmos {
         (p * (vb - vs), p * (vb - vd))
     }
 
-    pub(crate) fn transient_charge_branch_voltages_at(
+    #[doc(hidden)]
+    pub fn transient_charge_branch_voltages_at(
         &self,
         voltages: &[Value],
     ) -> (Value, Value, Value, Value) {

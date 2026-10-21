@@ -159,7 +159,8 @@ impl XyceTeamResistanceNoiseParams {
 
 /// Accepted-boundary TEAM RTN state stored in transient checkpoints.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct XyceTeamResistanceNoiseCheckpoint {
+#[doc(hidden)]
+pub struct XyceTeamResistanceNoiseCheckpoint {
     pub version: u32,
     pub instance_name: String,
     pub provenance: u64,
@@ -180,7 +181,8 @@ pub(crate) struct XyceTeamResistanceNoiseCheckpoint {
 /// word, dwell interval, level, and factor through the ordinary nonlinear
 /// circuit rollback image.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct XyceTeamResistanceNoiseRuntime {
+#[doc(hidden)]
+pub struct XyceTeamResistanceNoiseRuntime {
     params: XyceTeamResistanceNoiseParams,
     provenance: u64,
     initialized: bool,
@@ -193,7 +195,8 @@ pub(crate) struct XyceTeamResistanceNoiseRuntime {
 }
 
 impl XyceTeamResistanceNoiseRuntime {
-    pub(crate) fn new(params: XyceTeamResistanceNoiseParams, instance_name: &str) -> Self {
+    #[doc(hidden)]
+    pub fn new(params: XyceTeamResistanceNoiseParams, instance_name: &str) -> Self {
         let provenance = params.provenance(instance_name);
         // Stable per-instance streams avoid construction-order coupling while
         // preserving authored RESSEED reproducibility.

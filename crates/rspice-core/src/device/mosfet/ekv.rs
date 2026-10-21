@@ -1326,7 +1326,8 @@ impl EkvMosfet {
         self.setup.terminal_charges(values, self.circuit_temp_k)
     }
 
-    pub(crate) fn noise_psds_at_solution(
+    #[doc(hidden)]
+    pub fn noise_psds_at_solution(
         &self,
         voltages: &[Value],
     ) -> Option<(Value, Option<(Value, Value)>)> {
@@ -1358,14 +1359,13 @@ impl EkvMosfet {
         capacitance
     }
 
-    pub(crate) fn dynamic_charge_vector_at_solution(
-        &self,
-        voltages: &[Value],
-    ) -> [Value; NODE_COUNT] {
+    #[doc(hidden)]
+    pub fn dynamic_charge_vector_at_solution(&self, voltages: &[Value]) -> [Value; NODE_COUNT] {
         self.terminal_charges_at(self.values(voltages))
     }
 
-    pub(crate) fn stamp_dynamic_companion(
+    #[doc(hidden)]
+    pub fn stamp_dynamic_companion(
         &self,
         voltages: &[Value],
         ag0: Value,
@@ -1394,7 +1394,8 @@ impl EkvMosfet {
         }
     }
 
-    pub(crate) fn stamp_ac_quasi_static_charge_matrix(
+    #[doc(hidden)]
+    pub fn stamp_ac_quasi_static_charge_matrix(
         &self,
         voltages: &[Value],
         omega: Value,
@@ -1427,12 +1428,14 @@ impl EkvMosfet {
         self.setup.xd_gmin = self.model_xd_gmin.max(circuit_gmin);
     }
 
-    #[cfg(test)]
-    pub(crate) fn eval_gmin(&self) -> Value {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn eval_gmin(&self) -> Value {
         self.setup.xd_gmin
     }
 
-    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+    #[doc(hidden)]
+    pub fn operating_temperature_kelvin(&self) -> Value {
         self.setup
             .temp_c
             .map(|temp| temp + CELSIUS0)

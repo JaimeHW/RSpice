@@ -78,7 +78,8 @@ pub enum SwitchState {
 /// Device-history rollback may restore electrical state, but it must never
 /// move this solver phase backwards and replay instance `ON`/`OFF`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum SwitchInitialLoadPhase {
+#[doc(hidden)]
+pub enum SwitchInitialLoadPhase {
     Available,
     Pending,
     Consumed,
@@ -419,7 +420,8 @@ fn switch_state_for_normalized_control(state: Value) -> SwitchState {
 
 /// The switch family an accepted checkpoint row belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SwitchCheckpointKind {
+#[doc(hidden)]
+pub enum SwitchCheckpointKind {
     /// A voltage-controlled `S` switch.
     Voltage,
     /// A current-controlled `W` switch.
@@ -450,19 +452,20 @@ impl SwitchCheckpointKind {
 /// committed and pending hysteresis sides, and the one-shot initial-load
 /// phase.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedSwitchCheckpoint {
-    pub(crate) instance_name: String,
-    pub(crate) kind: SwitchCheckpointKind,
+#[doc(hidden)]
+pub struct AcceptedSwitchCheckpoint {
+    pub instance_name: String,
+    pub kind: SwitchCheckpointKind,
     /// `[current_resistance, prev_resistance, d(conductance)/d(control),
     /// curve last state]`; the last is zero for a switch without a Xyce curve.
-    pub(crate) values: [Value; 4],
+    pub values: [Value; 4],
     /// `[state, prev_state, in_hysteresis_band, initial_load_started,
     /// initial_load_pending, curve_present, transition_hold, pending_side,
     /// departing_on, off_departure_bridge_count, pending_departing_on,
     /// pending_off_departure_bridge_count]`. States are 0 off, 1 on,
     /// 2 transitioning; sides 0 none, 1 off, 2 on; the rest booleans or the
     /// bridge counts 0..=2. The curve codes are zero when no curve is present.
-    pub(crate) codes: [u8; 12],
+    pub codes: [u8; 12],
 }
 
 impl AcceptedSwitchCheckpoint {
@@ -873,13 +876,15 @@ impl VoltageSwitch {
     /// initial-junction load. Xyce's `initJctFlag_` and ngspice's
     /// `MODEINITJCT` both keep instance `ON`/`OFF` authoritative for that
     /// first load; the solver's preparatory seed update is not itself a load.
-    pub(crate) fn prime_operating_point_seed(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn prime_operating_point_seed(&mut self, voltages: &[Value]) {
         if !self.initial_load_pending {
             self.update_from_solution(voltages);
         }
     }
 
-    pub(crate) fn begin_initial_junction_load(&mut self) {
+    #[doc(hidden)]
+    pub fn begin_initial_junction_load(&mut self) {
         if self.initial_load_started {
             return;
         }
@@ -888,7 +893,8 @@ impl VoltageSwitch {
         self.install_initial_state(self.authored_initial_state.unwrap_or(SwitchState::Off));
     }
 
-    pub(crate) fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
+    #[doc(hidden)]
+    pub fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
         match (self.initial_load_started, self.initial_load_pending) {
             (false, _) => SwitchInitialLoadPhase::Available,
             (true, true) => SwitchInitialLoadPhase::Pending,
@@ -897,7 +903,8 @@ impl VoltageSwitch {
     }
 
     /// Keep initial-load phase monotonic across nonlinear rollback.
-    pub(crate) fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
+    #[doc(hidden)]
+    pub fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
         if phase <= self.initial_load_phase() {
             return;
         }
@@ -970,7 +977,8 @@ impl VoltageSwitch {
     /// The main-branch conductance the small-signal stamp uses at
     /// `solution`: the switch's present conductance, and so the resistor
     /// whose Johnson noise `.NOISE` and transient noise inject.
-    pub(crate) fn small_signal_conductance(&self, solution: &[Value]) -> Value {
+    #[doc(hidden)]
+    pub fn small_signal_conductance(&self, solution: &[Value]) -> Value {
         let voltage = |node: NodeId| {
             if node == 0 {
                 0.0
@@ -988,7 +996,8 @@ impl VoltageSwitch {
     /// cross by three quarters of the remaining distance plus 50 mV. Only the
     /// ideal switch has an instant to resolve; a smooth or curve switch's
     /// transition is resolved by the truncation error of what it drives.
-    pub(crate) fn threshold_approach_step_limit(
+    #[doc(hidden)]
+    pub fn threshold_approach_step_limit(
         &self,
         accepted: &[Value],
         candidate: &[Value],
@@ -1034,13 +1043,15 @@ impl VoltageSwitch {
     }
 
     /// This switch's accepted transient state, for a checkpoint.
-    pub(crate) fn accepted_checkpoint(&self) -> AcceptedSwitchCheckpoint {
+    #[doc(hidden)]
+    pub fn accepted_checkpoint(&self) -> AcceptedSwitchCheckpoint {
         self.runtime()
             .checkpoint(&self.name, SwitchCheckpointKind::Voltage)
     }
 
     /// Whether `checkpoint` is this switch's state, without restoring it.
-    pub(crate) fn validate_accepted_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_checkpoint(
         &self,
         checkpoint: &AcceptedSwitchCheckpoint,
     ) -> Result<(), String> {
@@ -1050,7 +1061,8 @@ impl VoltageSwitch {
     }
 
     /// Restore the accepted transient state a checkpoint captured.
-    pub(crate) fn restore_accepted_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_checkpoint(
         &mut self,
         checkpoint: &AcceptedSwitchCheckpoint,
     ) -> Result<(), String> {
@@ -1078,7 +1090,8 @@ impl VoltageSwitch {
     /// The steepest smooth-transition conductance derivative must also fit in
     /// a [`Value`], otherwise an otherwise valid endpoint pair can still
     /// produce an infinite Newton Jacobian near the switching threshold.
-    pub(crate) fn physical_parameter_error(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn physical_parameter_error(&self) -> Option<&'static str> {
         if !self.vt.is_finite() {
             return Some("VT must be finite");
         }
@@ -1143,7 +1156,8 @@ impl VoltageSwitch {
     /// Xyce ON/OFF/ONH/OFFH curves are stateful piecewise laws distinct from
     /// the native VT/SMOOTH equation. Exact HB must reject them until that
     /// complete curve is represented in its nonlinear kernel.
-    pub(crate) fn uses_xyce_curve_semantics(&self) -> bool {
+    #[doc(hidden)]
+    pub fn uses_xyce_curve_semantics(&self) -> bool {
         self.xyce_curve.is_some()
     }
 
@@ -1159,7 +1173,8 @@ impl VoltageSwitch {
     /// RON and ROFF inside the step to the present candidate. The step lands
     /// where the candidate does, so the circuit's solution steps there too;
     /// nothing inside the interval passed between the two.
-    pub(crate) fn stepped_since_accepted(&self) -> bool {
+    #[doc(hidden)]
+    pub fn stepped_since_accepted(&self) -> bool {
         self.is_ideal()
             && self
                 .accepted_state
@@ -1604,13 +1619,15 @@ impl CurrentSwitch {
         self.prev_state = self.state;
     }
 
-    pub(crate) fn prime_operating_point_seed(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn prime_operating_point_seed(&mut self, voltages: &[Value]) {
         if !self.initial_load_pending {
             self.update_from_solution(voltages);
         }
     }
 
-    pub(crate) fn begin_initial_junction_load(&mut self) {
+    #[doc(hidden)]
+    pub fn begin_initial_junction_load(&mut self) {
         if self.initial_load_started {
             return;
         }
@@ -1619,7 +1636,8 @@ impl CurrentSwitch {
         self.install_initial_state(self.authored_initial_state.unwrap_or(SwitchState::Off));
     }
 
-    pub(crate) fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
+    #[doc(hidden)]
+    pub fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
         match (self.initial_load_started, self.initial_load_pending) {
             (false, _) => SwitchInitialLoadPhase::Available,
             (true, true) => SwitchInitialLoadPhase::Pending,
@@ -1627,7 +1645,8 @@ impl CurrentSwitch {
         }
     }
 
-    pub(crate) fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
+    #[doc(hidden)]
+    pub fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
         if phase <= self.initial_load_phase() {
             return;
         }
@@ -1653,7 +1672,8 @@ impl CurrentSwitch {
     /// The main-branch conductance the small-signal stamp uses at
     /// `solution`: the switch's present conductance, and so the resistor
     /// whose Johnson noise `.NOISE` and transient noise inject.
-    pub(crate) fn small_signal_conductance(&self, solution: &[Value]) -> Value {
+    #[doc(hidden)]
+    pub fn small_signal_conductance(&self, solution: &[Value]) -> Value {
         self.control_sensitivity(self.control_current(solution)).0
     }
 
@@ -1675,7 +1695,8 @@ impl CurrentSwitch {
     /// the step happens to fall. That is a reference defect; the limit is
     /// applied here as written, so the instant a current switch changes
     /// state is resolved as a voltage switch's is.
-    pub(crate) fn threshold_approach_step_limit(
+    #[doc(hidden)]
+    pub fn threshold_approach_step_limit(
         &self,
         accepted: &[Value],
         candidate: &[Value],
@@ -1711,13 +1732,15 @@ impl CurrentSwitch {
     }
 
     /// This switch's accepted transient state, for a checkpoint.
-    pub(crate) fn accepted_checkpoint(&self) -> AcceptedSwitchCheckpoint {
+    #[doc(hidden)]
+    pub fn accepted_checkpoint(&self) -> AcceptedSwitchCheckpoint {
         self.runtime()
             .checkpoint(&self.name, SwitchCheckpointKind::Current)
     }
 
     /// Whether `checkpoint` is this switch's state, without restoring it.
-    pub(crate) fn validate_accepted_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_checkpoint(
         &self,
         checkpoint: &AcceptedSwitchCheckpoint,
     ) -> Result<(), String> {
@@ -1727,7 +1750,8 @@ impl CurrentSwitch {
     }
 
     /// Restore the accepted transient state a checkpoint captured.
-    pub(crate) fn restore_accepted_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_checkpoint(
         &mut self,
         checkpoint: &AcceptedSwitchCheckpoint,
     ) -> Result<(), String> {
@@ -1756,7 +1780,8 @@ impl CurrentSwitch {
     }
 
     /// See [`VoltageSwitch::stepped_since_accepted`].
-    pub(crate) fn stepped_since_accepted(&self) -> bool {
+    #[doc(hidden)]
+    pub fn stepped_since_accepted(&self) -> bool {
         self.is_ideal()
             && self
                 .accepted_state
@@ -1772,7 +1797,8 @@ impl CurrentSwitch {
 
     /// Why the card's transition width cannot describe a switch, if it
     /// cannot: `SMOOTH` is a width, so it is finite and nonnegative.
-    pub(crate) fn physical_parameter_error(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn physical_parameter_error(&self) -> Option<&'static str> {
         (!self.smooth.is_finite() || self.smooth < 0.0)
             .then_some("SMOOTH must be finite and nonnegative")
     }
@@ -2142,7 +2168,8 @@ impl GenericSwitch {
 
     /// Return the zero-based solution columns which the control expression can
     /// couple into the Newton matrix.
-    pub(crate) fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.node_bindings
             .iter()
             .chain(self.branch_bindings.iter())
@@ -2342,7 +2369,8 @@ impl GenericSwitch {
     /// Whether every scalar required by the Xyce switch law is physical and
     /// directly representable. Values are validated instead of clamped so a
     /// model card can never be simulated with silently altered resistances.
-    pub(crate) fn physical_parameter_error(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn physical_parameter_error(&self) -> Option<&'static str> {
         for (name, resistance) in [("RON", self.ron), ("ROFF", self.roff)] {
             if !resistance.is_finite() || resistance <= 0.0 {
                 return Some(match name {
@@ -2469,7 +2497,8 @@ impl GenericSwitch {
         }
     }
 
-    pub(crate) fn begin_initial_junction_load(&mut self) {
+    #[doc(hidden)]
+    pub fn begin_initial_junction_load(&mut self) {
         if self.initial_load_started {
             return;
         }
@@ -2478,7 +2507,8 @@ impl GenericSwitch {
         self.install_initial_state(self.authored_initial_state.unwrap_or(SwitchState::Off));
     }
 
-    pub(crate) fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
+    #[doc(hidden)]
+    pub fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
         match (self.initial_load_started, self.initial_load_pending) {
             (false, _) => SwitchInitialLoadPhase::Available,
             (true, true) => SwitchInitialLoadPhase::Pending,
@@ -2486,7 +2516,8 @@ impl GenericSwitch {
         }
     }
 
-    pub(crate) fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
+    #[doc(hidden)]
+    pub fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
         if phase <= self.initial_load_phase() {
             return;
         }
@@ -2760,7 +2791,8 @@ impl GenericSwitch {
     /// Advance Xyce's three-level store-vector history after an accepted
     /// transient timepoint. Rejected steps and repeated Newton stamps leave
     /// both accepted history levels untouched.
-    pub(crate) fn accept_transient_step(&mut self) {
+    #[doc(hidden)]
+    pub fn accept_transient_step(&mut self) {
         self.last_state = self.current_state;
         self.current_state = self.trial_state;
     }
@@ -2768,7 +2800,8 @@ impl GenericSwitch {
     /// Seed both accepted store-vector history levels from the operating-point
     /// trial, matching Xyce's `DataStore::setConstantHistory` handoff into
     /// transient analysis.
-    pub(crate) fn initialize_transient_history(&mut self) {
+    #[doc(hidden)]
+    pub fn initialize_transient_history(&mut self) {
         self.last_state = self.trial_state;
         self.current_state = self.trial_state;
     }
@@ -2777,7 +2810,8 @@ impl GenericSwitch {
     /// three entries correspond to Xyce's last/current/next store vectors; the
     /// fourth preserves the accepted-point conductance used by derived-current
     /// traces at a checkpoint seam.
-    pub(crate) fn transient_store_snapshot(&self) -> [Value; 4] {
+    #[doc(hidden)]
+    pub fn transient_store_snapshot(&self) -> [Value; 4] {
         [
             self.last_state,
             self.current_state,
@@ -2787,7 +2821,8 @@ impl GenericSwitch {
     }
 
     /// Restore a previously validated transient store snapshot.
-    pub(crate) fn restore_transient_store_snapshot(&mut self, snapshot: [Value; 4]) {
+    #[doc(hidden)]
+    pub fn restore_transient_store_snapshot(&mut self, snapshot: [Value; 4]) {
         self.last_state = snapshot[0];
         self.current_state = snapshot[1];
         self.trial_state = snapshot[2];

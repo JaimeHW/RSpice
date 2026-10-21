@@ -54,7 +54,8 @@ pub use params::B3SoiDdModel;
 /// terminals are positional in the netlist and easy to transpose; naming them
 /// makes a swapped pair a compile error rather than a wrong answer.
 #[derive(Clone, Copy)]
-pub(crate) struct B3SoiDdNodes {
+#[doc(hidden)]
+pub struct B3SoiDdNodes {
     pub node_drain: NodeId,
     pub node_gate_external: NodeId,
     pub node_gate: NodeId,
@@ -224,7 +225,8 @@ pub struct B3SoiDd {
 
 impl B3SoiDd {
     /// Build an instance from a model card and instance geometry.
-    pub(crate) fn new(
+    #[doc(hidden)]
+    pub fn new(
         name: String,
         nodes: B3SoiDdNodes,
         body_mode: BodyMode,
@@ -373,7 +375,8 @@ impl B3SoiDd {
     }
 
     /// Clear the cached operating-point linearization before a fresh DC path.
-    pub(crate) fn reset_operating_point_history(&mut self) {
+    #[doc(hidden)]
+    pub fn reset_operating_point_history(&mut self) {
         self.op = B3SoiDdOp::default();
         let zero_bias = B3SoiDdBias {
             vbs: 0.0,
@@ -471,18 +474,21 @@ impl B3SoiDd {
         !self.self_heating_startup_disabled.get() && self.has_self_heating_node()
     }
 
-    pub(crate) fn has_self_heating_node(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_self_heating_node(&self) -> bool {
         self.node_temp != 0 && self.sized.rth.is_finite() && self.sized.rth > 0.0
     }
 
-    pub(crate) fn set_self_heating_startup_disabled(&self, disabled: bool) {
+    #[doc(hidden)]
+    pub fn set_self_heating_startup_disabled(&self, disabled: bool) {
         self.self_heating_startup_disabled.set(disabled);
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
         self.last_limited.set(false);
     }
 
-    pub(crate) fn seed_self_heating_temperature_from_power(&self, solution: &mut [Value]) {
+    #[doc(hidden)]
+    pub fn seed_self_heating_temperature_from_power(&self, solution: &mut [Value]) {
         if !self.has_self_heating_node() {
             return;
         }
@@ -499,7 +505,8 @@ impl B3SoiDd {
         }
     }
 
-    pub(crate) fn prime_operating_point_from_solution(&mut self, solution: &[Value]) {
+    #[doc(hidden)]
+    pub fn prime_operating_point_from_solution(&mut self, solution: &[Value]) {
         let bias = self.raw_branch_voltages(solution);
         self.converged_ref = bias;
         self.bias = bias;
@@ -586,7 +593,8 @@ impl B3SoiDd {
     /// Residual and fallback validation probes bypass the per-iteration change
     /// limiters, but retain the DC `B3SOIDDSmartVbs` floor because ngspice uses
     /// that effective body voltage in the converged operating-point load.
-    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn update_static_linearization(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
         let raw_bias = self.raw_branch_voltages(voltages);
         let mut bias = raw_bias;
@@ -713,7 +721,8 @@ impl B3SoiDd {
     }
 
     /// Absolute temperature used by the cached accepted electrical evaluation.
-    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+    #[doc(hidden)]
+    pub fn operating_temperature_kelvin(&self) -> Value {
         if self.self_heating_active() {
             self.base_temp_k + self.bias.del_temp
         } else {
@@ -766,7 +775,8 @@ impl B3SoiDd {
     /// been externalized into the prime nodes. The gate-overlap and
     /// extrinsic-substrate derivatives are already folded into `charge`'s
     /// `gc**` matrix.
-    pub(crate) fn stamp_charge_companion(
+    #[doc(hidden)]
+    pub fn stamp_charge_companion(
         &self,
         charge: &eval::B3SoiDdCharge,
         ag0: Value,

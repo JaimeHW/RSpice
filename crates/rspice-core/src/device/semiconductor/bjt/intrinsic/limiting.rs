@@ -742,7 +742,8 @@ impl Bjt {
     /// their own junction state inside `update` (the VBIC MNA promotion and
     /// the legacy per-iterate junction replacement), so their external nodes
     /// take full Newton steps exactly like ngspice's flat MNA.
-    pub(crate) fn junction_external_step_limit_scale_against_previous(
+    #[doc(hidden)]
+    pub fn junction_external_step_limit_scale_against_previous(
         &self,
         _previous_external: [Value; EXTERNAL_DIM],
         _proposed_external: [Value; EXTERNAL_DIM],

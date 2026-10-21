@@ -7,7 +7,8 @@ use crate::device::behavioral::periodicity;
 use crate::expr::{AcceptedSdtState, Function};
 
 impl SolutionDependentCapacitor {
-    pub(crate) fn lift_quasi_periodic(
+    #[doc(hidden)]
+    pub fn lift_quasi_periodic(
         &mut self,
         grid: &impl crate::device::behavioral::QuasiPeriodicClockBasis,
     ) -> Result<(), String> {
@@ -28,7 +29,8 @@ impl SolutionDependentCapacitor {
         Ok(())
     }
 
-    pub(crate) fn has_quasi_periodic_equation(&self, dimensions: usize) -> bool {
+    #[doc(hidden)]
+    pub fn has_quasi_periodic_equation(&self, dimensions: usize) -> bool {
         self.has_periodic_carrier_frequency_context()
             && self
                 .integral_equations
@@ -36,7 +38,8 @@ impl SolutionDependentCapacitor {
                 .is_some_and(|equations| equations.has_phase_basis(dimensions))
     }
 
-    pub(crate) fn uses_quasi_periodic_phase(&self, phase: usize) -> bool {
+    #[doc(hidden)]
+    pub fn uses_quasi_periodic_phase(&self, phase: usize) -> bool {
         self.integral_equations
             .as_ref()
             .is_some_and(|equations| equations.uses_phase(phase))
@@ -59,11 +62,13 @@ impl SolutionDependentCapacitor {
         }
     }
 
-    pub(crate) fn integral_names(&self) -> impl Iterator<Item = String> + '_ {
+    #[doc(hidden)]
+    pub fn integral_names(&self) -> impl Iterator<Item = String> + '_ {
         (0..self.program.sdt_count).map(|index| format!("C:{}:sdt:{index}", self.name))
     }
 
-    pub(crate) fn append_integral_rate_directions(
+    #[doc(hidden)]
+    pub fn append_integral_rate_directions(
         &self,
         solution: &[Value],
         direction: &[Value],
@@ -83,7 +88,8 @@ impl SolutionDependentCapacitor {
         Ok(())
     }
 
-    pub(crate) fn append_prescribed_integral_rates<'a>(
+    #[doc(hidden)]
+    pub fn append_prescribed_integral_rates<'a>(
         &'a self,
         plans: &mut Vec<PrescribedIntegralRate<'a>>,
     ) -> Result<(), String> {
@@ -93,7 +99,8 @@ impl SolutionDependentCapacitor {
         Ok(())
     }
 
-    pub(crate) fn sample_periodic_capacitance(
+    #[doc(hidden)]
+    pub fn sample_periodic_capacitance(
         &mut self,
         point: BehavioralFqPoint<'_>,
         state_start: usize,
@@ -109,7 +116,8 @@ impl SolutionDependentCapacitor {
         }
     }
 
-    pub(crate) fn stamp_periodic_integrals(
+    #[doc(hidden)]
+    pub fn stamp_periodic_integrals(
         &self,
         point: BehavioralFqPoint<'_>,
         state_start: usize,
@@ -127,7 +135,8 @@ impl SolutionDependentCapacitor {
         Ok(())
     }
 
-    pub(crate) fn periodicity_context(&self) -> Context<'_> {
+    #[doc(hidden)]
+    pub fn periodicity_context(&self) -> Context<'_> {
         Context::transient(&[], &[], 0.0)
             .with_temperature(self.temperature)
             .with_frequency(self.frequency)
@@ -135,7 +144,8 @@ impl SolutionDependentCapacitor {
             .with_expression_dialect(self.expression_dialect)
     }
 
-    pub(crate) fn periodic_expression(&self) -> &Expr {
+    #[doc(hidden)]
+    pub fn periodic_expression(&self) -> &Expr {
         &self.ast
     }
 
@@ -147,7 +157,8 @@ impl SolutionDependentCapacitor {
         )
     }
 
-    pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
+    #[doc(hidden)]
+    pub fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
         self.has_periodic_carrier_frequency_context()
             && periodicity::time_increment_with_state(
                 &self.ast,
@@ -158,29 +169,35 @@ impl SolutionDependentCapacitor {
             ) == Some(0.0)
     }
 
-    pub(crate) fn max_authored_tone_cycles(&self, period: Value) -> Value {
+    #[doc(hidden)]
+    pub fn max_authored_tone_cycles(&self, period: Value) -> Value {
         let context = self.periodicity_context();
         periodicity::max_authored_tone_cycles(&self.ast, period, &context)
             .max(periodicity::finite_fourier_degree(&self.ast, period, &context).unwrap_or(0.0))
     }
 
-    pub(crate) fn minimum_pss_interval(&self) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn minimum_pss_interval(&self) -> Option<Value> {
         periodicity::minimum_pss_interval(&self.ast, &self.periodicity_context(), true)
     }
 
-    pub(crate) fn minimum_periodic_collocation_interval(&self) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn minimum_periodic_collocation_interval(&self) -> Option<Value> {
         periodicity::minimum_pss_interval(&self.ast, &self.periodicity_context(), false)
     }
 
-    pub(crate) fn has_periodic_response_context(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_periodic_response_context(&self) -> bool {
         !crate::device::behavioral::expression_depends_on_frequency(&self.ast)
     }
 
-    pub(crate) fn needs_time_resolution(&self, period: Value) -> bool {
+    #[doc(hidden)]
+    pub fn needs_time_resolution(&self, period: Value) -> bool {
         periodicity::needs_time_features(&self.ast, period, &self.periodicity_context())
     }
 
-    pub(crate) fn validate_periodic_integral_rates(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_periodic_integral_rates(&self) -> Result<(), String> {
         fn check(expr: &Expr, context: &Context<'_>) -> Option<Value> {
             match expr {
                 Expr::Function { func, args } => {
@@ -210,11 +227,13 @@ impl SolutionDependentCapacitor {
         Ok(())
     }
 
-    pub(crate) fn accepted_integrals(&self) -> impl Iterator<Item = Value> + '_ {
+    #[doc(hidden)]
+    pub fn accepted_integrals(&self) -> impl Iterator<Item = Value> + '_ {
         self.vm.accepted_integrals(self.program.sdt_count)
     }
 
-    pub(crate) fn reset_integrals(&mut self, values: &[Value]) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn reset_integrals(&mut self, values: &[Value]) -> Result<(), String> {
         if values.len() != self.program.sdt_count || values.iter().any(|v| !v.is_finite()) {
             return Err(format!(
                 "capacitor '{}' has invalid SDT shooting coordinates",
@@ -233,7 +252,8 @@ impl SolutionDependentCapacitor {
         Ok(())
     }
 
-    pub(crate) fn rebase_accepted_history(&mut self, time: Value) {
+    #[doc(hidden)]
+    pub fn rebase_accepted_history(&mut self, time: Value) {
         let mut history = self.accepted_sdt_history();
         for state in &mut history {
             state.time = time;

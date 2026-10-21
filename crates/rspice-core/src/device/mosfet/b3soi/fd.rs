@@ -339,7 +339,8 @@ impl B3SoiFd {
     /// Regular Newton updates intentionally use the BSIMSOI temperature limiter.
     /// Residual and fallback validation probes must evaluate the true
     /// operating-point equations at the candidate voltage itself.
-    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn update_static_linearization(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
         self.startup_seed_pending.set(false);
         let bias = self.raw_branch_voltages(voltages);
@@ -445,7 +446,8 @@ impl B3SoiFd {
     }
 
     /// Absolute temperature used by the cached accepted electrical evaluation.
-    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+    #[doc(hidden)]
+    pub fn operating_temperature_kelvin(&self) -> Value {
         if self.self_heating_active() {
             self.base_temp_k + self.bias.del_temp
         } else {
@@ -494,7 +496,8 @@ impl B3SoiFd {
     /// floating/contact FD body: the gate, drain-prime, source-prime and back-gate
     /// (E) charge entries — but NO body row/column (FD has no body charge node).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stamp_charge_companion(
+    #[doc(hidden)]
+    pub fn stamp_charge_companion(
         &self,
         charge: &eval::B3SoiFdCharge,
         ag0: Value,

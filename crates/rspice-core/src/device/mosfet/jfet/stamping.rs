@@ -77,7 +77,8 @@ impl Jfet {
     /// updates must continue to use ngspice-style branch limiting, but fallback
     /// candidates are already full operating-point candidates and must be
     /// evaluated at their actual terminal voltages.
-    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn update_static_linearization(&mut self, voltages: &[Value]) {
         let vd = Self::node_voltage(voltages, self.drain);
         let vg = Self::node_voltage(voltages, self.gate);
         let vs = Self::node_voltage(voltages, self.source);
@@ -102,7 +103,8 @@ impl Jfet {
 
     /// A periodic endpoint is already a solved bias, including OFF instances.
     /// Anchor both limiter generations there instead of entering OP startup.
-    pub(crate) fn seed_accepted_periodic_bias(&mut self, voltages: &[Value]) {
+    #[doc(hidden)]
+    pub fn seed_accepted_periodic_bias(&mut self, voltages: &[Value]) {
         self.update_static_linearization(voltages);
         self.vgs_prev = self.vgs;
         self.vds_prev = self.vds;
@@ -152,7 +154,8 @@ impl Jfet {
     /// A tied branch contributes exactly zero, even if its derivative is much
     /// larger than the remaining physical conductances.
     #[inline]
-    pub(crate) fn terminal_jacobian(
+    #[doc(hidden)]
+    pub fn terminal_jacobian(
         [d, g, s]: [NodeId; 3],
         gm: Value,
         gds: Value,
@@ -209,11 +212,13 @@ impl Jfet {
         [id, ig, is, igs, igd]
     }
 
-    pub(crate) fn reported_currents(&self, displacement: [Value; 3]) -> [Value; 5] {
+    #[doc(hidden)]
+    pub fn reported_currents(&self, displacement: [Value; 3]) -> [Value; 5] {
         Self::report_branch_currents([self.eval_ids, self.eval_igs, self.eval_igd], displacement)
     }
 
-    pub(crate) fn authored_reported_currents(
+    #[doc(hidden)]
+    pub fn authored_reported_currents(
         &self,
         solution: &[Value],
         displacement: [Value; 3],
@@ -271,7 +276,8 @@ impl Jfet {
     }
 
     #[inline]
-    pub(crate) fn terminal_current_injections(
+    #[doc(hidden)]
+    pub fn terminal_current_injections(
         [d, g, s]: [NodeId; 3],
         ids: Value,
         igs: Value,

@@ -958,7 +958,8 @@ impl Bjt {
         self.reduced_linearization(vc, vb, ve, vs).g_reduced
     }
 
-    pub(crate) fn stamped_reduced_external_system(
+    #[doc(hidden)]
+    pub fn stamped_reduced_external_system(
         &self,
         vc: Value,
         vb: Value,
@@ -1012,7 +1013,8 @@ impl Bjt {
     /// column must never be summed into an already populated matrix slot.
     /// Keep the independent terminal entries and recover the reference from
     /// KCL and voltage-shift invariance. This also retains a distinct substrate.
-    pub(crate) fn project_legacy_tied_terminal_system<T>(
+    #[doc(hidden)]
+    pub fn project_legacy_tied_terminal_system<T>(
         &self,
         matrix: &mut [[T; EXTERNAL_DIM]; EXTERNAL_DIM],
         rhs: &mut [T; EXTERNAL_DIM],
@@ -1059,11 +1061,8 @@ impl Bjt {
         Some(reference)
     }
 
-    pub(crate) fn stamp_small_signal_ac(
-        &self,
-        voltages: &[Value],
-        matrix: &mut impl MatrixStamper,
-    ) {
+    #[doc(hidden)]
+    pub fn stamp_small_signal_ac(&self, voltages: &[Value], matrix: &mut impl MatrixStamper) {
         if self.mna_promoted() {
             // The promoted static system (terminal rows, internal KCL rows,
             // and excess-phase algebraic rows) is the small-signal real part;

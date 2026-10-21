@@ -3,7 +3,8 @@ use super::*;
 mod promotion;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TransmissionLineTimeSide {
+#[doc(hidden)]
+pub enum TransmissionLineTimeSide {
     Incoming,
     Outgoing,
 }
@@ -12,7 +13,8 @@ pub(crate) enum TransmissionLineTimeSide {
 /// V1, I1, V2, I2; slope arrays are d(V1+Z0*I1)/dt, d(V2+Z0*I2)/dt.
 /// Slopes are finite one-sided derivatives, never jump size divided by dt.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct TransmissionLineHistoryEvent {
+#[doc(hidden)]
+pub struct TransmissionLineHistoryEvent {
     pub time: Value,
     pub incoming: [Value; 4],
     pub outgoing: [Value; 4],
@@ -62,11 +64,13 @@ fn arrival(time: Value, delay: Value) -> Value {
 }
 
 impl TransmissionLine {
-    pub(crate) fn owns_history_event(&self, time: Value) -> bool {
+    #[doc(hidden)]
+    pub fn owns_history_event(&self, time: Value) -> bool {
         self.history_event_at(time).is_some()
     }
 
-    pub(crate) fn supports_sided_history_events(&self) -> bool {
+    #[doc(hidden)]
+    pub fn supports_sided_history_events(&self) -> bool {
         self.td.is_finite()
             && self.td > 0.0
             && self.z0.is_finite()
@@ -155,7 +159,8 @@ impl TransmissionLine {
     /// Commit a solved ideal event without integrating its jump. Existing
     /// accepted history is unchanged on invalid input. Distributed/convolution
     /// lines require their own event equations and are not admitted here.
-    pub(crate) fn accept_history_event(
+    #[doc(hidden)]
+    pub fn accept_history_event(
         &mut self,
         event: TransmissionLineHistoryEvent,
     ) -> Result<(), String> {
@@ -164,18 +169,21 @@ impl TransmissionLine {
         Ok(())
     }
 
-    pub(crate) fn history_revision(&self) -> u64 {
+    #[doc(hidden)]
+    pub fn history_revision(&self) -> u64 {
         self.history_revision
     }
 
-    pub(crate) fn accepted_port_history(&self) -> Option<[Value; 5]> {
+    #[doc(hidden)]
+    pub fn accepted_port_history(&self) -> Option<[Value; 5]> {
         self.state_history
             .back()
             .copied()
             .map(Self::checkpoint_sample)
     }
 
-    pub(crate) fn validate_history_event(
+    #[doc(hidden)]
+    pub fn validate_history_event(
         &self,
         event: &TransmissionLineHistoryEvent,
     ) -> Result<(), String> {
@@ -244,7 +252,8 @@ impl TransmissionLine {
 
     /// Commit a validated event on the same unchanged history. All fallible
     /// preparation, including other devices, must precede this barrier.
-    pub(crate) fn commit_history_event(&mut self, event: TransmissionLineHistoryEvent) {
+    #[doc(hidden)]
+    pub fn commit_history_event(&mut self, event: TransmissionLineHistoryEvent) {
         self.history_revision = self.history_revision.wrapping_add(1);
         let incoming = Self::sample_from_checkpoint([
             event.time,
@@ -301,10 +310,8 @@ impl TransmissionLine {
     }
 
     /// Next exactly owned delayed event, including a slope-only corner.
-    pub(crate) fn next_history_event_arrival_after(
-        &self,
-        time: Value,
-    ) -> Result<Option<Value>, String> {
+    #[doc(hidden)]
+    pub fn next_history_event_arrival_after(&self, time: Value) -> Result<Option<Value>, String> {
         if !time.is_finite() {
             return Err("invalid transmission-line event query clock".into());
         }
@@ -319,7 +326,8 @@ impl TransmissionLine {
     }
 
     /// Native delayed launched wave on one side of its physical arrival.
-    pub(crate) fn lossless_wave_on_side(
+    #[doc(hidden)]
+    pub fn lossless_wave_on_side(
         &self,
         time: Value,
         forward: bool,
@@ -341,7 +349,8 @@ impl TransmissionLine {
 
     /// Preserve the exact side when a history-coordinate translation rounds
     /// onto an event. The selected grid clock may have been rounded outward.
-    pub(crate) fn lossless_shifted_wave_at(
+    #[doc(hidden)]
+    pub fn lossless_shifted_wave_at(
         &self,
         clock: Value,
         origin: Value,
@@ -412,7 +421,8 @@ impl TransmissionLine {
     /// Finite derivative of the same delayed wave used by the native Norton
     /// stamp. Event limits use solved rates; ordinary samples use the selected
     /// native polynomial, never a jump divided by its neighboring clock gap.
-    pub(crate) fn lossless_wave_slope_on_side(
+    #[doc(hidden)]
+    pub fn lossless_wave_slope_on_side(
         &self,
         time: Value,
         forward: bool,

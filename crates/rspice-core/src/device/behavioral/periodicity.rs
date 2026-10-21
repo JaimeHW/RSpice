@@ -20,7 +20,8 @@ pub(crate) fn carrier_frequency_context(
 }
 
 impl BehavioralVoltageSource {
-    pub(crate) fn has_periodic_carrier_frequency_context(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_periodic_carrier_frequency_context(&self) -> bool {
         carrier_frequency_context(
             self.is_frequency_dependent(),
             self.frequency,
@@ -35,22 +36,26 @@ impl BehavioralVoltageSource {
     }
 
     /// At the origin, an SDT value is fixed independently of its input.
-    pub(crate) fn has_frozen_state_voltage(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_frozen_state_voltage(&self) -> bool {
         !instantaneous_solution_dependence(&self.ast)
     }
 
-    pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
+    #[doc(hidden)]
+    pub fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
         (!self.is_solution_dependent() && self.program.sdt_count == 0)
             .then(|| (&*self.program, self.periodicity_context()))
     }
 
-    pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
         minimum_pss_interval(&self.ast, &self.periodicity_context(), events_resolved)
     }
 
     /// Integral values are shooting coordinates. Their input equations must
     /// repeat in time; zero mean is enforced by the solved period map.
-    pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
+    #[doc(hidden)]
+    pub fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
         self.has_periodic_carrier_frequency_context()
             && time_increment_with_state(
                 &self.ast,
@@ -61,11 +66,13 @@ impl BehavioralVoltageSource {
             ) == Some(0.0)
     }
 
-    pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
+    #[doc(hidden)]
+    pub fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
         time_increment(&self.ast, period, &self.periodicity_context(), autonomous) == Some(0.0)
     }
 
-    pub(crate) fn max_authored_tone_cycles(&self, period: Value) -> Value {
+    #[doc(hidden)]
+    pub fn max_authored_tone_cycles(&self, period: Value) -> Value {
         let context = self.periodicity_context();
         max_authored_tone_cycles(&self.ast, period, &context)
             .max(finite_fourier_degree(&self.ast, period, &context).unwrap_or(0.0))
@@ -81,7 +88,8 @@ impl BehavioralVoltageSource {
 }
 
 impl BehavioralCurrentSource {
-    pub(crate) fn has_periodic_carrier_frequency_context(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_periodic_carrier_frequency_context(&self) -> bool {
         carrier_frequency_context(
             self.is_frequency_dependent(),
             self.frequency,
@@ -95,18 +103,21 @@ impl BehavioralCurrentSource {
             && memoryless_equation(&self.ast)
     }
 
-    pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
+    #[doc(hidden)]
+    pub fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
         (!self.is_solution_dependent() && self.program.sdt_count == 0)
             .then(|| (&*self.program, self.periodicity_context()))
     }
 
-    pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
         minimum_pss_interval(&self.ast, &self.periodicity_context(), events_resolved)
     }
 
     /// Integral values are shooting coordinates. Their input equations must
     /// repeat in time; zero mean is enforced by the solved period map.
-    pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
+    #[doc(hidden)]
+    pub fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
         self.has_periodic_carrier_frequency_context()
             && time_increment_with_state(
                 &self.ast,
@@ -117,11 +128,13 @@ impl BehavioralCurrentSource {
             ) == Some(0.0)
     }
 
-    pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
+    #[doc(hidden)]
+    pub fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
         time_increment(&self.ast, period, &self.periodicity_context(), autonomous) == Some(0.0)
     }
 
-    pub(crate) fn max_authored_tone_cycles(&self, period: Value) -> Value {
+    #[doc(hidden)]
+    pub fn max_authored_tone_cycles(&self, period: Value) -> Value {
         let context = self.periodicity_context();
         max_authored_tone_cycles(&self.ast, period, &context)
             .max(finite_fourier_degree(&self.ast, period, &context).unwrap_or(0.0))

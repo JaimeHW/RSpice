@@ -29,7 +29,8 @@ use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, Nonline
 use crate::{Complex64, NodeId, Value};
 
 mod ac_response;
-pub(crate) mod checkpoint;
+#[doc(hidden)]
+pub mod checkpoint;
 mod continuation;
 mod periodic;
 
@@ -226,11 +227,8 @@ impl Bsim3v3Device {
     }
 
     /// Physical residual checks must not inherit OFF startup or Newton limiting.
-    pub(crate) fn charge_at_with_probe(
-        &self,
-        v: &[Value],
-        physical_probe: bool,
-    ) -> (Bsim3v3Charge, i32) {
+    #[doc(hidden)]
+    pub fn charge_at_with_probe(&self, v: &[Value], physical_probe: bool) -> (Bsim3v3Charge, i32) {
         let bias = self.evaluation_bias(v, physical_probe);
         let op = self
             .core
@@ -646,7 +644,8 @@ impl Bsim3v3Device {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stamp_charge_companion_with_probe(
+    #[doc(hidden)]
+    pub fn stamp_charge_companion_with_probe(
         &self,
         charge: &Bsim3v3Charge,
         mode: i32,
@@ -707,7 +706,8 @@ impl Bsim3v3Device {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stamp_trnqs_charge_companion_with_probe(
+    #[doc(hidden)]
+    pub fn stamp_trnqs_charge_companion_with_probe(
         &self,
         charge: &Bsim3v3Charge,
         mode: i32,
@@ -999,7 +999,8 @@ impl Bsim3v3Device {
 
     /// Stamp the linearized DC operating point: matrix/RHS load of
     /// Unlimited static candidate equations; no accepted or trial state changes.
-    pub(crate) fn stamp_static_probe(&self, voltages: &[Value], matrix: &mut impl MatrixStamper) {
+    #[doc(hidden)]
+    pub fn stamp_static_probe(&self, voltages: &[Value], matrix: &mut impl MatrixStamper) {
         let bias = self.raw_branch_voltages(voltages);
         let op = eval::eval_dc(
             &self.core.model,

@@ -13,7 +13,8 @@ impl<S: MatrixStamper> MatrixStamper for JacobianOnly<'_, S> {
 }
 
 impl Bsim3v3Device {
-    pub(crate) fn periodic_coupling_nodes(&self) -> [NodeId; 5] {
+    #[doc(hidden)]
+    pub fn periodic_coupling_nodes(&self) -> [NodeId; 5] {
         [
             self.node_drain,
             self.node_gate,
@@ -30,7 +31,8 @@ impl Bsim3v3Device {
 
     /// Refresh the native noise-law snapshot at an unlimited orbit sample.
     /// This is not an accepted transient step and does not advance its limiter.
-    pub(crate) fn update_periodic_noise_probe(&mut self, solution: &[Value]) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn update_periodic_noise_probe(&mut self, solution: &[Value]) -> Result<(), String> {
         self.op = self.periodic_op(solution)?;
         self.bias = self.raw_branch_voltages(solution);
         Ok(())
@@ -100,10 +102,8 @@ impl Bsim3v3Device {
 
     /// Physical terminal currents/charges, keeping distinct leads even when
     /// their circuit nodes coincide. Series resistors remain external owners.
-    pub(crate) fn periodic_lead_fq(
-        &self,
-        solution: &[Value],
-    ) -> Result<([Value; 4], [Value; 4]), String> {
+    #[doc(hidden)]
+    pub fn periodic_lead_fq(&self, solution: &[Value]) -> Result<([Value; 4], [Value; 4]), String> {
         let op = self.periodic_op(solution)?;
         let mut currents = [0.0; 4];
         for (terminal, current) in self.periodic_current_terms(&op, solution) {
@@ -116,7 +116,8 @@ impl Bsim3v3Device {
     /// Stamp -F, -Q and positive analytic derivatives at the supplied state.
     /// No junction limiting, OFF startup, or previous-sample history enters a
     /// collocation equation. NQS is the same explicit state used by transient.
-    pub(crate) fn stamp_periodic_fq(
+    #[doc(hidden)]
+    pub fn stamp_periodic_fq(
         &self,
         solution: &[Value],
         f: &mut impl MatrixStamper,
@@ -177,7 +178,8 @@ impl Bsim3v3Device {
 
     /// Native NQSMOD charge derivatives, shared by AC and periodic response.
     /// `factor` is one for Q or omega for an imaginary AC stamper.
-    pub(crate) fn stamp_trnqs_charge_matrix(
+    #[doc(hidden)]
+    pub fn stamp_trnqs_charge_matrix(
         &self,
         charge: &Bsim3v3Charge,
         mode: i32,

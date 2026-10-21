@@ -3,19 +3,21 @@ use super::*;
 
 pub(crate) const MOSFET_CHECKPOINT_RUNTIME_TAG: &str = "native-classic-mos-accepted-v1";
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedMosfetNonlinearCheckpoint {
-    pub(crate) instance_name: String,
-    pub(crate) runtime_tag: String,
-    pub(crate) level: i32,
-    pub(crate) junction_model: u8,
-    pub(crate) region: u8,
-    pub(crate) seed_evaluations: u8,
+#[doc(hidden)]
+pub struct AcceptedMosfetNonlinearCheckpoint {
+    pub instance_name: String,
+    pub runtime_tag: String,
+    pub level: i32,
+    pub junction_model: u8,
+    pub region: u8,
+    pub seed_evaluations: u8,
     // Accepted history, valid cache, authored OFF, pending OFF, legacy BSIM.
-    pub(crate) flags: [bool; 5],
-    pub(crate) values: [Value; 32],
+    pub flags: [bool; 5],
+    pub values: [Value; 32],
 }
 impl AcceptedMosfetNonlinearCheckpoint {
-    pub(crate) fn validate_numeric_state(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_numeric_state(&self) -> Result<(), String> {
         if self.runtime_tag != MOSFET_CHECKPOINT_RUNTIME_TAG
             || self.instance_name.is_empty()
             || self.instance_name.chars().any(char::is_whitespace)
@@ -42,7 +44,8 @@ impl Mosfet {
             MosBodyJunctionModel::XyceClassicLinearizedReverse => 1,
         }
     }
-    pub(crate) fn accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn accepted_nonlinear_checkpoint(
         &self,
     ) -> Result<AcceptedMosfetNonlinearCheckpoint, String> {
         let state = AcceptedMosfetNonlinearCheckpoint {
@@ -101,7 +104,8 @@ impl Mosfet {
         self.validate_accepted_nonlinear_checkpoint(&state)?;
         Ok(state)
     }
-    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_nonlinear_checkpoint(
         &self,
         state: &AcceptedMosfetNonlinearCheckpoint,
     ) -> Result<(), String> {
@@ -118,7 +122,8 @@ impl Mosfet {
         }
         state.validate_numeric_state()
     }
-    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_nonlinear_checkpoint(
         &mut self,
         state: &AcceptedMosfetNonlinearCheckpoint,
     ) -> Result<(), String> {

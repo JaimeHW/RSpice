@@ -7,7 +7,8 @@ use crate::device::MatrixStamper;
 /// The solver owns physical MNA coordinates followed by integral coordinates.
 /// Additional scalar inputs, such as torus phases, are read-only parameters.
 #[derive(Clone, Copy)]
-pub(crate) struct BehavioralFqPoint<'a> {
+#[doc(hidden)]
+pub struct BehavioralFqPoint<'a> {
     pub inputs: &'a [Value],
     pub time: Value,
     pub num_nodes: usize,
@@ -18,7 +19,8 @@ pub(crate) struct BehavioralFqPoint<'a> {
     pub prescribed_integrals: &'a [Option<(Value, Value)>],
 }
 
-pub(crate) struct PeriodicExpressionSample {
+#[doc(hidden)]
+pub struct PeriodicExpressionSample {
     pub value: Value,
     pub partials: Vec<(usize, Value)>,
 }
@@ -199,7 +201,8 @@ macro_rules! sample_source {
             /// A constant nonzero rate has no periodic primitive, even when
             /// it is smaller than the nonlinear residual tolerance. Establish
             /// this from the expression, not from aliased waveform samples.
-            pub(crate) fn validate_periodic_integral_rates(&self) -> Result<(), String> {
+            #[doc(hidden)]
+            pub fn validate_periodic_integral_rates(&self) -> Result<(), String> {
                 let Some(equations) = &self.integral_equations else { return Ok(()); };
                 let context = self.periodicity_context();
                 for (index, equation) in equations.rates.iter().enumerate() {
@@ -259,7 +262,8 @@ sample_source!(BehavioralCurrentSource);
 
 impl BehavioralCurrentSource {
     /// Lead-current observation uses the same explicit state as the residual.
-    pub(crate) fn evaluate_periodic_output(
+    #[doc(hidden)]
+    pub fn evaluate_periodic_output(
         &mut self,
         point: BehavioralFqPoint<'_>,
         state_start: usize,
@@ -306,7 +310,8 @@ impl BehavioralCurrentSource {
 }
 
 impl BehavioralSources {
-    pub(crate) fn visit_periodic_output_dependencies(
+    #[doc(hidden)]
+    pub fn visit_periodic_output_dependencies(
         &self,
         num_nodes: usize,
         integral_start: usize,
@@ -342,7 +347,8 @@ impl BehavioralSources {
     /// Stamp continuous source equations and each explicitly allocated SDT
     /// coordinate. The caller must allocate every coordinate; neither a zero
     /// integration constant nor a zero mean is inferred from a periodic input.
-    pub(crate) fn stamp_periodic_fq(
+    #[doc(hidden)]
+    pub fn stamp_periodic_fq(
         &mut self,
         point: BehavioralFqPoint<'_>,
         f: &mut impl MatrixStamper,
@@ -353,7 +359,8 @@ impl BehavioralSources {
 
     /// Sampling a structurally closed subsystem must not evaluate unrelated
     /// sources at fabricated zero biases (their expressions may be undefined).
-    pub(crate) fn stamp_periodic_fq_selected(
+    #[doc(hidden)]
+    pub fn stamp_periodic_fq_selected(
         &mut self,
         point: BehavioralFqPoint<'_>,
         f: &mut impl MatrixStamper,

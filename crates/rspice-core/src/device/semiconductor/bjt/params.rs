@@ -11,7 +11,8 @@ fn model_parameter_alias(
 }
 
 impl Bjt {
-    pub(crate) fn legacy_excess_phase_delay(&self) -> Value {
+    #[doc(hidden)]
+    pub fn legacy_excess_phase_delay(&self) -> Value {
         if !self.uses_legacy_gummel_poon() {
             return 0.0;
         }
@@ -23,7 +24,8 @@ impl Bjt {
             })
     }
 
-    pub(crate) fn validate_legacy_excess_phase(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_legacy_excess_phase(&self) -> Result<(), String> {
         if !self.legacy_excess_phase_delay().is_finite() {
             return Err(format!(
                 "BJT '{}': PTF and nominal TF must define a finite excess-phase delay",
@@ -69,7 +71,8 @@ impl Bjt {
         ["TRM1", "TRM2"],
     ];
 
-    pub(crate) fn legacy_temperature_parameter_names() -> impl Iterator<Item = &'static str> {
+    #[doc(hidden)]
+    pub fn legacy_temperature_parameter_names() -> impl Iterator<Item = &'static str> {
         Self::LEGACY_EMISSION_TEMPERATURE_PARAMS
             .iter()
             .chain(Self::LEGACY_BETA_TEMPERATURE_PARAMS.iter())
@@ -87,7 +90,8 @@ impl Bjt {
         delta_t * (coefficients[0] + delta_t * coefficients[1])
     }
 
-    pub(crate) fn validate_legacy_temperature_parameters(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_legacy_temperature_parameters(&self) -> Result<(), String> {
         let Some(mapping) = self
             .legacy_junction_params
             .as_ref()
@@ -515,7 +519,8 @@ impl Bjt {
     }
 
     #[inline]
-    pub(crate) fn uses_vbic_dynamic_charges(&self) -> bool {
+    #[doc(hidden)]
+    pub fn uses_vbic_dynamic_charges(&self) -> bool {
         self.charge_model == BjtChargeModel::Vbic
     }
 
@@ -639,7 +644,8 @@ impl Bjt {
         }
     }
 
-    pub(crate) fn set_vbic_pnjmaxi(&mut self, value: Value) {
+    #[doc(hidden)]
+    pub fn set_vbic_pnjmaxi(&mut self, value: Value) {
         self.vbic_global_pnjmaxi = value;
         self.refresh_operating_scaling();
     }
@@ -1595,7 +1601,8 @@ impl Bjt {
     /// constants and limiter-only device-convergence flag. A subsequent
     /// temperature refresh applies the constant selection to all
     /// temperature-scaled model quantities.
-    pub(crate) fn set_xyce_compatibility(&mut self, enabled: bool) {
+    #[doc(hidden)]
+    pub fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_compatibility = enabled;
         self.resolve_legacy_leakage_coefficients();
     }
@@ -1659,14 +1666,16 @@ impl Bjt {
 
     /// A subsequent temperature refresh applies ngspice's const.h thermal
     /// constants to every GP temperature-scaled quantity. VBIC owns its pair.
-    pub(crate) fn set_ngspice_compatibility(&mut self, enabled: bool) {
+    #[doc(hidden)]
+    pub fn set_ngspice_compatibility(&mut self, enabled: bool) {
         self.ngspice_compatibility = enabled;
     }
 
     /// Apply Xyce's global nonlinear-device voltage-limiting policy to this
     /// native BJT. Changing the policy invalidates every bias-dependent cache
     /// because the next load may evaluate at a different junction state.
-    pub(crate) fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
         if self.voltage_limiting_enabled != enabled {
             self.voltage_limiting_enabled = enabled;
             self.legacy_junction_limited = false;
@@ -1678,7 +1687,8 @@ impl Bjt {
 
     /// Whether a native legacy Gummel-Poon BJT owns Newton globalization via
     /// its local tVcrit/pnjlim path.
-    pub(crate) fn uses_legacy_junction_limiting(&self) -> bool {
+    #[doc(hidden)]
+    pub fn uses_legacy_junction_limiting(&self) -> bool {
         self.charge_model == BjtChargeModel::LegacyGummelPoon && self.voltage_limiting_enabled
     }
 
@@ -2632,11 +2642,8 @@ impl Bjt {
     /// Move the authored collector lead onto the builder-created series
     /// resistor while retaining enough typed topology to report current at
     /// that external lead during transient analysis.
-    pub(crate) fn externalize_legacy_collector_lead(
-        &mut self,
-        internal_node: NodeId,
-        resistance: Value,
-    ) {
+    #[doc(hidden)]
+    pub fn externalize_legacy_collector_lead(&mut self, internal_node: NodeId, resistance: Value) {
         debug_assert!(resistance.is_finite() && resistance > 0.0);
         self.legacy_collector_lead = Some((self.node_collector, resistance.recip()));
         self.node_collector = internal_node;
@@ -2651,11 +2658,8 @@ impl Bjt {
 
     /// Move the authored emitter lead onto the builder-created series
     /// resistor while retaining its transient-output topology.
-    pub(crate) fn externalize_legacy_emitter_lead(
-        &mut self,
-        internal_node: NodeId,
-        resistance: Value,
-    ) {
+    #[doc(hidden)]
+    pub fn externalize_legacy_emitter_lead(&mut self, internal_node: NodeId, resistance: Value) {
         debug_assert!(resistance.is_finite() && resistance > 0.0);
         self.legacy_emitter_lead = Some((self.node_emitter, resistance.recip()));
         self.node_emitter = internal_node;
@@ -2673,11 +2677,8 @@ impl Bjt {
     /// Move the authored base lead onto the builder-created constant series
     /// resistor while retaining its transient-output topology. Any remaining
     /// bias-dependent base resistance stays inside the BJT.
-    pub(crate) fn externalize_legacy_base_lead(
-        &mut self,
-        internal_node: NodeId,
-        resistance: Value,
-    ) {
+    #[doc(hidden)]
+    pub fn externalize_legacy_base_lead(&mut self, internal_node: NodeId, resistance: Value) {
         debug_assert!(resistance.is_finite() && resistance > 0.0);
         self.legacy_base_lead = Some((self.node_base, resistance.recip()));
         self.node_base = internal_node;
@@ -2706,7 +2707,8 @@ impl Bjt {
     }
 
     /// Cached static terminal currents in the canonical C/B/E/S order.
-    pub(crate) fn operating_point_terminal_currents(&self) -> [Value; 4] {
+    #[doc(hidden)]
+    pub fn operating_point_terminal_currents(&self) -> [Value; 4] {
         [self.ic, self.ib, self.ie, self.isub]
     }
 
@@ -2714,7 +2716,8 @@ impl Bjt {
     /// leads. A builder-externalized RC/RB/RE owns the external lead current;
     /// its positive-to-negative orientation is authored lead to prime node,
     /// exactly matching the SPICE convention of current entering the device.
-    pub(crate) fn authored_transient_lead_currents(
+    #[doc(hidden)]
+    pub fn authored_transient_lead_currents(
         &self,
         solution: &[Value],
         intrinsic: [Value; 4],
@@ -2764,7 +2767,8 @@ impl Bjt {
     /// Map intrinsic charge actions to the authored C/B/E/S leads. An
     /// externalized finite resistor cannot carry a Dirac current. External
     /// base-collector storage bypasses RB but remains behind an external RC.
-    pub(crate) fn authored_transient_lead_impulses(
+    #[doc(hidden)]
+    pub fn authored_transient_lead_impulses(
         &self,
         intrinsic: [Value; 4],
         external_bc_charge: Value,

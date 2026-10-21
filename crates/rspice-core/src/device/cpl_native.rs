@@ -1010,7 +1010,8 @@ struct NativeCplRightConsts {
 ///
 /// Indices `[m][p]` map to (branch-equation conductor `m`, port conductor `p`).
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NativeCplStampPlan {
+#[doc(hidden)]
+pub struct NativeCplStampPlan {
     /// Whether the delayed (`h2`/`h3`) terms are active this step.
     pub(crate) ext: bool,
     /// RHS for the near-end (`ibr1`) branch rows.

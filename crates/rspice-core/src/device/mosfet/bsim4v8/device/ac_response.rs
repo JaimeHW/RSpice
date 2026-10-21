@@ -13,7 +13,8 @@ impl<S: MatrixStamper> MatrixStamper for Derivatives<'_, S> {
 }
 
 impl Bsim4v8Device {
-    pub(crate) fn ac_nqs_response_names(&self) -> impl Iterator<Item = String> + '_ {
+    #[doc(hidden)]
+    pub fn ac_nqs_response_names(&self) -> impl Iterator<Item = String> + '_ {
         ["channel_current", "drain_charge", "source_charge"]
             .into_iter()
             .filter(|_| self.uses_ac_nqs())
@@ -24,7 +25,8 @@ impl Bsim4v8Device {
     /// auxiliary nodes outside the device topology must be registered by the
     /// caller. Gate/body resistance networks, leakage, NF, M and all overlap
     /// and junction charge remain in their native topology.
-    pub(crate) fn stamp_ac_nqs_response(
+    #[doc(hidden)]
+    pub fn stamp_ac_nqs_response(
         &self,
         solution: &[Value],
         auxiliary: [NodeId; 3],

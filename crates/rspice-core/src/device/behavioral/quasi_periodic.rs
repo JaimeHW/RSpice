@@ -11,7 +11,8 @@ mod clock;
 
 /// Only the clock coordinates needed to lift device expressions. The analysis
 /// grid implements this interface without making device models depend on it.
-pub(crate) trait QuasiPeriodicClockBasis {
+#[doc(hidden)]
+pub trait QuasiPeriodicClockBasis {
     fn clock_tuple(&self, frequency: Value) -> Result<Vec<i32>, String>;
     fn dimensions(&self) -> &[usize];
 }
@@ -330,7 +331,8 @@ fn phase_names(grid: &impl QuasiPeriodicClockBasis, program: &CompiledExpr) -> V
 macro_rules! lift_source {
     ($kind:ty) => {
         impl $kind {
-            pub(crate) fn lift_quasi_periodic(
+            #[doc(hidden)]
+            pub fn lift_quasi_periodic(
                 &mut self,
                 grid: &impl QuasiPeriodicClockBasis,
                 unknowns: usize,
@@ -396,7 +398,8 @@ macro_rules! lift_source {
                 Ok(())
             }
 
-            pub(crate) fn has_quasi_periodic_equation(&self, dimensions: usize) -> bool {
+            #[doc(hidden)]
+            pub fn has_quasi_periodic_equation(&self, dimensions: usize) -> bool {
                 self.has_periodic_carrier_frequency_context()
                     && self.integral_equations.as_ref().map_or_else(
                         || self.has_memoryless_carrier_equation(),
@@ -404,7 +407,8 @@ macro_rules! lift_source {
                     )
             }
 
-            pub(crate) fn uses_quasi_periodic_phase(&self, phase: usize, unknowns: usize) -> bool {
+            #[doc(hidden)]
+            pub fn uses_quasi_periodic_phase(&self, phase: usize, unknowns: usize) -> bool {
                 self.integral_equations.as_ref().map_or_else(
                     || {
                         self.node_bindings

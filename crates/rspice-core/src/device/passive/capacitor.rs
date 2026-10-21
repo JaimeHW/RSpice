@@ -65,7 +65,8 @@ pub struct SolutionDependentCapacitor {
 }
 
 impl SolutionDependentCapacitor {
-    pub(crate) fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
         crate::device::behavioral::expression_descriptor_gap(
             &self.ast,
             self.program.sdt_count,
@@ -344,7 +345,8 @@ impl SolutionDependentCapacitor {
         SolutionDependentCapacitorLinearization { value, partials }
     }
 
-    pub(crate) fn accepted_sdt_history(&self) -> Vec<crate::expr::AcceptedSdtState> {
+    #[doc(hidden)]
+    pub fn accepted_sdt_history(&self) -> Vec<crate::expr::AcceptedSdtState> {
         self.vm.accepted_sdt_history(self.program.sdt_count)
     }
 
@@ -365,7 +367,8 @@ impl SolutionDependentCapacitor {
         )
     }
 
-    pub(crate) fn restore_sdt_history(&mut self, history: &[crate::expr::AcceptedSdtState]) {
+    #[doc(hidden)]
+    pub fn restore_sdt_history(&mut self, history: &[crate::expr::AcceptedSdtState]) {
         self.vm.restore_sdt_history(history);
     }
 
@@ -385,7 +388,8 @@ impl SolutionDependentCapacitor {
 
     /// Smooth prescribed C(t) has physical charge C(t)*V. Circuit-controlled
     /// and stateful capacitance laws need their own event coordinates.
-    pub(crate) fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
+    #[doc(hidden)]
+    pub fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
         crate::device::behavioral::prepare_physical_time_program(
             &self.ast,
             (!self.is_solution_dependent() && self.program.sdt_count == 0).then(|| {

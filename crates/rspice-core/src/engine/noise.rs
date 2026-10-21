@@ -118,7 +118,7 @@ impl Engine {
                 &mos.name, "ID",
             ));
             source.temperature_offset = mos.noise_temperature_offset;
-            if let Some(temperature) = mos.noise_absolute_temperature {
+            if let Some(temperature) = mos.noise_absolute_temperature() {
                 absolute_temperatures.insert(source.identity.clone(), temperature);
             }
             noise_sources.push(source);
@@ -2880,7 +2880,7 @@ impl Engine {
                             &jfet.name, "ID",
                         ));
                 source.temperature_offset = jfet.noise_dtemp;
-                if let Some(temperature) = jfet.noise_absolute_temperature {
+                if let Some(temperature) = jfet.noise_absolute_temperature() {
                     absolute_temperatures.insert(source.identity.clone(), temperature);
                 }
                 noise_sources.push(source);
@@ -6215,7 +6215,7 @@ Q1 C B 0 QN
         }
     }
 
-    const BSIM4_MODELS45: &str = include_str!("../device/mosfet/bsim4v8/testdata/models45.lib");
+    const BSIM4_MODELS45: &str = crate::device::mosfet::oracle_cards::BSIM4V8_MODELS45;
     const BSIM4_FNOI1_TNOI0_ORACLE: &str =
         include_str!("../../tests/testdata/bsim4_fnoi1_tnoi0_noise_ngspice46.dat");
     const BSIM4_FNOI0_TNOI0_ORACLE: &str =
@@ -6228,7 +6228,7 @@ Q1 C B 0 QN
         include_str!("../../tests/testdata/bsim4_rdsmod1_tnoi1_noise_ngspice46.dat");
     const BSIM4_RBODYMOD1_ORACLE: &str =
         include_str!("../../tests/testdata/bsim4_rbodymod1_noise_ngspice46.dat");
-    const BSIM3_MODELS018: &str = include_str!("../device/mosfet/bsim3v3/testdata/models018.lib");
+    const BSIM3_MODELS018: &str = crate::device::mosfet::oracle_cards::BSIM3V3_MODELS018;
     const BSIM3_NOIMOD1_ORACLE: &str =
         include_str!("../../tests/testdata/bsim3_noimod1_noise_ngspice46.dat");
     const BSIM3_NOIMOD2_ORACLE: &str =

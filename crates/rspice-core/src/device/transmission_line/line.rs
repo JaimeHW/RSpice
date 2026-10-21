@@ -2,7 +2,8 @@ use super::*;
 
 mod events;
 use events::HistoryEvent;
-pub(crate) use events::{TransmissionLineHistoryEvent, TransmissionLineTimeSide};
+#[doc(hidden)]
+pub use events::{TransmissionLineHistoryEvent, TransmissionLineTimeSide};
 
 #[derive(Debug, Clone, Copy)]
 struct TlineStateSample {
@@ -20,18 +21,19 @@ struct TlineStateSample {
 /// oldest slope can depend on a predecessor that has already aged out, so
 /// recomputing it would not be a bit-exact continuation.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct TransmissionLineCheckpoint {
-    pub(crate) name: String,
-    pub(crate) impedance: Value,
-    pub(crate) initial_state: Option<[Value; 5]>,
-    pub(crate) state_history: Vec<[Value; 5]>,
-    pub(crate) forward_history: Vec<[Value; 3]>,
-    pub(crate) backward_history: Vec<[Value; 3]>,
-    pub(crate) events: Vec<[Value; 9]>,
-    pub(crate) launched_forward: Value,
-    pub(crate) launched_backward: Value,
-    pub(crate) history_initialized: bool,
-    pub(crate) current_time: Value,
+#[doc(hidden)]
+pub struct TransmissionLineCheckpoint {
+    pub name: String,
+    pub impedance: Value,
+    pub initial_state: Option<[Value; 5]>,
+    pub state_history: Vec<[Value; 5]>,
+    pub forward_history: Vec<[Value; 3]>,
+    pub backward_history: Vec<[Value; 3]>,
+    pub events: Vec<[Value; 9]>,
+    pub launched_forward: Value,
+    pub launched_backward: Value,
+    pub history_initialized: bool,
+    pub current_time: Value,
 }
 
 /// Exact two-port coefficients of a finite-length RG line (`R > 0`, `G > 0`,
@@ -43,7 +45,8 @@ pub(crate) struct TransmissionLineCheckpoint {
 /// DC, AC, transient and every periodic analysis. `A = D = cosh(theta)`,
 /// `B = Z0*sinh(theta)` and `C = sinh(theta)/Z0` for `theta = len*sqrt(R*G)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LtraRgTwoPort {
+#[doc(hidden)]
+pub struct LtraRgTwoPort {
     /// `A = D = cosh(theta)`.
     pub(crate) cosh_theta: Value,
     /// `B = Z0*sinh(theta)`, the open-circuit transfer impedance (ohms).
@@ -54,7 +57,8 @@ pub(crate) struct LtraRgTwoPort {
 
 /// The per-unit-length parameters of a distributed RLGC line plus its length.
 #[derive(Clone, Copy)]
-pub(crate) struct DistributedRlgc {
+#[doc(hidden)]
+pub struct DistributedRlgc {
     pub r: Value,
     pub l: Value,
     pub g: Value,
@@ -91,7 +95,8 @@ impl LtraRgTwoPort {
     /// forms are algebraically identical, but the product form never divides
     /// one per-unit-length parameter by the other, so it stays exact for the
     /// extreme `R/G` ratios where ngspice substitutes its `1e-10` cutoff.
-    pub(crate) fn try_new(r: Value, g: Value, len: Value) -> Result<Self, String> {
+    #[doc(hidden)]
+    pub fn try_new(r: Value, g: Value, len: Value) -> Result<Self, String> {
         if !r.is_finite() || r <= 0.0 {
             return Err(format!("RG line requires a finite positive R, got {r}"));
         }
@@ -137,6 +142,24 @@ impl LtraRgTwoPort {
             transfer_impedance,
             transfer_admittance,
         })
+    }
+
+    /// `A = D = cosh(theta)`.
+    #[doc(hidden)]
+    pub fn cosh_theta(&self) -> Value {
+        self.cosh_theta
+    }
+
+    /// `B = Z0*sinh(theta)`, the open-circuit transfer impedance (ohms).
+    #[doc(hidden)]
+    pub fn transfer_impedance(&self) -> Value {
+        self.transfer_impedance
+    }
+
+    /// `C = sinh(theta)/Z0`, the short-circuit transfer admittance (siemens).
+    #[doc(hidden)]
+    pub fn transfer_admittance(&self) -> Value {
+        self.transfer_admittance
     }
 }
 
@@ -271,7 +294,8 @@ impl TransmissionLine {
     /// Distributed LTRA/TXL kernels own additional convolution state and must
     /// not silently resume from an incomplete snapshot.  They fail closed
     /// until their complete native state has a versioned checkpoint contract.
-    pub(crate) fn checkpoint_state(&self) -> Result<TransmissionLineCheckpoint, String> {
+    #[doc(hidden)]
+    pub fn checkpoint_state(&self) -> Result<TransmissionLineCheckpoint, String> {
         if self.txl.is_some() || self.distributed_rlc.is_some() || self.distributed_rc.is_some() {
             return Err(format!(
                 "transmission line '{}': distributed LTRA/TXL convolution state is not checkpointable",
@@ -304,7 +328,8 @@ impl TransmissionLine {
         Ok(checkpoint)
     }
 
-    pub(crate) fn validate_checkpoint_state(
+    #[doc(hidden)]
+    pub fn validate_checkpoint_state(
         checkpoint: &TransmissionLineCheckpoint,
     ) -> Result<(), String> {
         if checkpoint.name.is_empty() || checkpoint.name.chars().any(char::is_whitespace) {
@@ -453,7 +478,8 @@ impl TransmissionLine {
     }
 
     /// Restore an ordinary lossless scalar line from accepted delay history.
-    pub(crate) fn restore_checkpoint_state(
+    #[doc(hidden)]
+    pub fn restore_checkpoint_state(
         &mut self,
         checkpoint: &TransmissionLineCheckpoint,
     ) -> Result<(), String> {
@@ -867,7 +893,8 @@ impl TransmissionLine {
     /// An RG line has no reactance and therefore no propagation history: the
     /// delayed-wave and distributed kernels are cleared so nothing else can
     /// claim this instance.
-    pub(crate) fn set_ltra_rg_two_port(&mut self, two_port: LtraRgTwoPort) {
+    #[doc(hidden)]
+    pub fn set_ltra_rg_two_port(&mut self, two_port: LtraRgTwoPort) {
         self.ltra_rg = Some(two_port);
         self.txl = None;
         self.distributed_rlc = None;
@@ -878,7 +905,8 @@ impl TransmissionLine {
 
     /// The exact RG two-port coefficients, if this line is an RG line.
     #[inline]
-    pub(crate) fn ltra_rg_two_port(&self) -> Option<LtraRgTwoPort> {
+    #[doc(hidden)]
+    pub fn ltra_rg_two_port(&self) -> Option<LtraRgTwoPort> {
         self.ltra_rg
     }
 
@@ -889,32 +917,37 @@ impl TransmissionLine {
     /// must know whether a line contributes retained state: the `LEN=0`
     /// ideal-through special case and the finite-length RG line.
     #[inline]
-    pub(crate) fn is_memoryless_two_port(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_memoryless_two_port(&self) -> bool {
         self.zero_length_pass_through || self.ltra_rg.is_some()
     }
 
     /// Set branch ordinals for the RG two-port.
-    pub(crate) fn set_rg_branch_ordinals(&mut self, branch1: NodeId, branch2: NodeId) {
+    #[doc(hidden)]
+    pub fn set_rg_branch_ordinals(&mut self, branch1: NodeId, branch2: NodeId) {
         self.rg_branch_ordinals = Some((branch1, branch2));
     }
 
     /// Return RG two-port branch ordinals, if configured.
     #[inline]
-    pub(crate) fn rg_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
+    #[doc(hidden)]
+    pub fn rg_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
         self.ltra_rg.as_ref()?;
         self.rg_branch_ordinals
     }
 
     /// Return linked RG two-port branch matrix indices.
     #[inline]
-    pub(crate) fn rg_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
+    #[doc(hidden)]
+    pub fn rg_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
         self.ltra_rg.as_ref()?;
         self.rg_branch_ordinals?;
         Some((self.branch1?, self.branch2?))
     }
 
     /// Configure the ngspice-style TXL runtime for a non-lossless scalar line.
-    pub(crate) fn enable_txl_runtime(&mut self, rlgc: DistributedRlgc) -> bool {
+    #[doc(hidden)]
+    pub fn enable_txl_runtime(&mut self, rlgc: DistributedRlgc) -> bool {
         let DistributedRlgc { r, l, g, c, len } = rlgc;
         if let Some(runtime) = txl::TxlRuntime::setup(r, l, g, c, len) {
             self.txl = Some(runtime);
@@ -934,12 +967,14 @@ impl TransmissionLine {
     }
 
     /// Return the current transient TXL branch stamp.
-    pub(crate) fn txl_transient_stamp(&self, time: Value) -> Option<TxlTransientStamp> {
+    #[doc(hidden)]
+    pub fn txl_transient_stamp(&self, time: Value) -> Option<TxlTransientStamp> {
         self.txl.as_ref()?.transient_stamp(time)
     }
 
     /// Seed native TXL history from the operating point.
-    pub(crate) fn initialize_txl_history(
+    #[doc(hidden)]
+    pub fn initialize_txl_history(
         &mut self,
         time: Value,
         v1: Value,
@@ -953,14 +988,8 @@ impl TransmissionLine {
     }
 
     /// Accept a native TXL transient point.
-    pub(crate) fn accept_txl_history(
-        &mut self,
-        time: Value,
-        v1: Value,
-        i1: Value,
-        v2: Value,
-        i2: Value,
-    ) {
+    #[doc(hidden)]
+    pub fn accept_txl_history(&mut self, time: Value, v1: Value, i1: Value, v2: Value, i2: Value) {
         if let Some(txl) = &mut self.txl {
             txl.accept(time, v1, i1, v2, i2);
         }
@@ -1098,7 +1127,8 @@ impl TransmissionLine {
     ///
     /// Call this only after derivative-breakpoint detection has observed the
     /// un-compacted three-point history.
-    pub(crate) fn compact_ltra_history_if_straight(&mut self) -> bool {
+    #[doc(hidden)]
+    pub fn compact_ltra_history_if_straight(&mut self) -> bool {
         if !self.ltra_history_compaction
             || !self.has_distributed_rlgc()
             || self.state_history.len() < 3
@@ -1203,7 +1233,8 @@ impl TransmissionLine {
 
     /// Configure a distributed-RLC kernel with ngspice-style straight-line
     /// compaction tolerances for its safe-step estimate.
-    pub(crate) fn set_distributed_rlgc_with_compaction(
+    #[doc(hidden)]
+    pub fn set_distributed_rlgc_with_compaction(
         &mut self,
         rlgc: DistributedRlgc,
         compact_reltol: Value,
@@ -1251,7 +1282,8 @@ impl TransmissionLine {
     /// impedance, delay, and kernel attenuation constant: `Ltot = Z0*TD`,
     /// `Ctot = TD/Z0`, `Rtot = 2*alpha*Ltot` (ngspice LTRAtemp, G = 0).
     /// Used by the exact small-signal load (ltraacld.c form).
-    pub(crate) fn ltra_ac_total_rlc(&self) -> Option<(Value, Value, Value)> {
+    #[doc(hidden)]
+    pub fn ltra_ac_total_rlc(&self) -> Option<(Value, Value, Value)> {
         if self.txl.is_some() {
             return None;
         }
@@ -1291,7 +1323,8 @@ impl TransmissionLine {
     /// each launched traveling wave to linear interpolation when consecutive
     /// derivatives indicate a discontinuity. This prevents quadratic ringing
     /// immediately after a propagated source edge.
-    pub(crate) fn set_xyce_tra_interpolation(&mut self) {
+    #[doc(hidden)]
+    pub fn set_xyce_tra_interpolation(&mut self) {
         self.lossless_interpolation_mode = DelayedInterpolationMode::XyceTra;
     }
 
@@ -1352,7 +1385,8 @@ impl TransmissionLine {
     }
 
     /// Return the ngspice LTRA candidate-step truncation limit for scalar RLC lines.
-    pub(crate) fn ltra_candidate_truncation_limit(
+    #[doc(hidden)]
+    pub fn ltra_candidate_truncation_limit(
         &self,
         candidate_time: Value,
         candidate_v1: Value,
@@ -1415,7 +1449,8 @@ impl TransmissionLine {
     }
 
     /// Return the ngspice LTRA derivative breakpoint arrival time, if needed.
-    pub(crate) fn ltra_derivative_breakpoint_arrival(
+    #[doc(hidden)]
+    pub fn ltra_derivative_breakpoint_arrival(
         &self,
         voltage_reltol: Value,
         steady_abstol: Value,
@@ -1655,18 +1690,21 @@ impl TransmissionLine {
         )
     }
 
-    pub(crate) fn accepted_history_time(&self) -> Value {
+    #[doc(hidden)]
+    pub fn accepted_history_time(&self) -> Value {
         self.current_time
     }
 
-    pub(crate) fn history_storage_values(&self) -> usize {
+    #[doc(hidden)]
+    pub fn history_storage_values(&self) -> usize {
         self.state_history
             .len()
             .saturating_mul(11)
             .saturating_add(self.history_events.len().saturating_mul(9))
     }
 
-    pub(crate) fn has_state_dependent_lossless_interpolation(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_state_dependent_lossless_interpolation(&self) -> bool {
         !self.is_memoryless_two_port()
             && matches!(
                 self.lossless_interpolation_mode,
@@ -1677,7 +1715,8 @@ impl TransmissionLine {
     /// Translate accepted lossless history to a new continuation origin.
     /// Slopes, physical samples and launched waves remain unchanged; only the
     /// clock moves. Validate the whole translated snapshot before replacing it.
-    pub(crate) fn rebase_lossless_history(&mut self, time: Value) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn rebase_lossless_history(&mut self, time: Value) -> Result<(), String> {
         if !time.is_finite() || time < 0.0 {
             return Err("transmission-line history origin must be finite and non-negative".into());
         }
@@ -1929,11 +1968,13 @@ impl TransmissionLine {
     }
 
     /// Return the transient companion conductance and equivalent currents.
-    pub(crate) fn transient_port_response(&self, time: Value) -> TlineTransientResponse {
+    #[doc(hidden)]
+    pub fn transient_port_response(&self, time: Value) -> TlineTransientResponse {
         self.transient_port_response_on_side(time, TransmissionLineTimeSide::Outgoing)
     }
 
-    pub(crate) fn transient_port_response_on_side(
+    #[doc(hidden)]
+    pub fn transient_port_response_on_side(
         &self,
         time: Value,
         side: TransmissionLineTimeSide,

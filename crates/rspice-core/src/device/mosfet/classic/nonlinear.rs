@@ -2,7 +2,8 @@ use super::*;
 
 impl Mosfet {
     #[inline]
-    pub(crate) fn update_with_classic_transient_constants(
+    #[doc(hidden)]
+    pub fn update_with_classic_transient_constants(
         &mut self,
         voltages: &[Value],
         constants: &ClassicMosTransientConstants,

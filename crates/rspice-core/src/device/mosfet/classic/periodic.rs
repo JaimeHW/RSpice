@@ -11,7 +11,8 @@ mod tests;
 impl Mosfet {
     pub(crate) const PERIODIC_RATE_TIME_SCALE: Value = RATE_TIME_SCALE;
 
-    pub(crate) fn periodic_coupling_nodes(&self) -> [NodeId; 4] {
+    #[doc(hidden)]
+    pub fn periodic_coupling_nodes(&self) -> [NodeId; 4] {
         [
             self.node_drain,
             self.node_gate,
@@ -20,12 +21,14 @@ impl Mosfet {
         ]
     }
 
-    pub(crate) fn periodic_rate_names(&self) -> Option<[String; 3]> {
+    #[doc(hidden)]
+    pub fn periodic_rate_names(&self) -> Option<[String; 3]> {
         (!self.uses_legacy_bsim())
             .then(|| ["gs", "gd", "gb"].map(|port| format!("{}.__meyer_rate_{port}", self.name)))
     }
 
-    pub(crate) fn update_periodic_noise_probe(&mut self, solution: &[Value]) {
+    #[doc(hidden)]
+    pub fn update_periodic_noise_probe(&mut self, solution: &[Value]) {
         let (vgs, vds, vbs) = self.unlimited_branch_voltages_at(solution);
         let (id, region, gm, gds, gmb, gss, ieq) = self.linearized_operating_point(vgs, vds, vbs);
         self.eval_vgs = vgs;
@@ -65,7 +68,8 @@ impl Mosfet {
 
     /// Stamps -F, -Q on the RHS and their positive derivatives, using raw
     /// physical bias without modifying the transient limiter or history.
-    pub(crate) fn stamp_periodic_physical_fq(
+    #[doc(hidden)]
+    pub fn stamp_periodic_physical_fq(
         &self,
         solution: &[Value],
         rate_nodes: Option<[NodeId; 3]>,
@@ -172,7 +176,8 @@ impl Mosfet {
 
     /// Separate D/G/S/B lead quantities even when authored terminals coincide.
     /// Meyer displacement is in F; only integrable storage is returned in Q.
-    pub(crate) fn periodic_terminal_fq(
+    #[doc(hidden)]
+    pub fn periodic_terminal_fq(
         &self,
         solution: &[Value],
         rate_nodes: Option<[NodeId; 3]>,

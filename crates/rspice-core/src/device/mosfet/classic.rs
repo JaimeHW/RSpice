@@ -17,7 +17,8 @@ use crate::{NodeId, Value};
 mod capacitance;
 mod checkpoint;
 mod continuation;
-pub(crate) use checkpoint::AcceptedMosfetNonlinearCheckpoint;
+#[doc(hidden)]
+pub use checkpoint::AcceptedMosfetNonlinearCheckpoint;
 mod construction;
 mod current;
 mod junctions;
@@ -48,7 +49,8 @@ pub(crate) enum MosRegion {
 
 /// Bulk-junction current law used by native classic MOSFET devices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MosBodyJunctionModel {
+#[doc(hidden)]
+pub enum MosBodyJunctionModel {
     /// ngspice MOS1/2/3/6 reverse-bias clamp: deep reverse bias stamps only
     /// GMIN plus the saturation-current offset.
     NgspiceReverseClamp,
@@ -78,7 +80,8 @@ pub(crate) struct MosfetIndices {
 /// every [`Mosfet`], preserving the hot instance layout for DC/AC and for
 /// model families that do not use this fast path.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ClassicMosTransientConstants {
+#[doc(hidden)]
+pub struct ClassicMosTransientConstants {
     sqrt_phi: Value,
     level1_sqrt_phi: Value,
     level1_beta: Value,
@@ -95,7 +98,8 @@ pub(crate) struct ClassicMosTransientConstants {
 
 impl ClassicMosTransientConstants {
     #[inline]
-    pub(crate) fn overlap_capacitances(&self) -> (Value, Value, Value) {
+    #[doc(hidden)]
+    pub fn overlap_capacitances(&self) -> (Value, Value, Value) {
         self.overlap_capacitances
     }
 }
@@ -104,7 +108,8 @@ impl ClassicMosTransientConstants {
 /// assembler. Keeping these nine scalars contiguous avoids revisiting the
 /// complete model-card-sized [`Mosfet`] object after its evaluation pass.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ClassicMosCachedStaticTerms {
+#[doc(hidden)]
+pub struct ClassicMosCachedStaticTerms {
     gm: Value,
     gds: Value,
     gmb: Value,
@@ -123,7 +128,8 @@ pub(crate) struct ClassicMosCachedStaticTerms {
 /// by the complete circuit and device objects.
 #[cfg(feature = "parallel")]
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ClassicMosResidualRowPlan {
+#[doc(hidden)]
+pub struct ClassicMosResidualRowPlan {
     node_drain: NodeId,
     node_gate: NodeId,
     node_source: NodeId,
@@ -193,7 +199,8 @@ struct ClassicMosDiodeStampPlan {
 
 /// Run-invariant direct-stamp locations for a classic MOS instance.
 #[derive(Debug, Clone)]
-pub(crate) struct ClassicMosStaticStampPlan {
+#[doc(hidden)]
+pub struct ClassicMosStaticStampPlan {
     pattern: CscPatternToken,
     indices: ClassicMosValueIndices,
     node_drain: NodeId,
@@ -511,7 +518,8 @@ pub struct Mosfet {
 /// indices. Keeping a compact state record makes transient checkpoints scale
 /// with the actual mutable solver state instead of the full device model.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct MosfetNonlinearState {
+#[doc(hidden)]
+pub struct MosfetNonlinearState {
     junction_gmin: Value,
     vt: Value,
     vgs: Value,
@@ -553,7 +561,8 @@ pub(crate) struct MosfetNonlinearState {
 }
 
 impl Mosfet {
-    pub(crate) fn nonlinear_state_snapshot(&self) -> MosfetNonlinearState {
+    #[doc(hidden)]
+    pub fn nonlinear_state_snapshot(&self) -> MosfetNonlinearState {
         MosfetNonlinearState {
             junction_gmin: self.junction_gmin,
             vt: self.vt,
@@ -595,7 +604,8 @@ impl Mosfet {
         }
     }
 
-    pub(crate) fn restore_nonlinear_state(&mut self, state: MosfetNonlinearState) {
+    #[doc(hidden)]
+    pub fn restore_nonlinear_state(&mut self, state: MosfetNonlinearState) {
         self.junction_gmin = state.junction_gmin;
         self.vt = state.vt;
         self.vgs = state.vgs;
@@ -655,7 +665,8 @@ impl Mosfet {
     /// `mos1load.c` reads them only through the `MODEINITJCT` chain that
     /// requires `MODEUIC` to keep a non-zero vector (`mos1load.c:398-408`), so
     /// an ordinary operating point must ignore them.
-    pub(crate) fn transient_initial_condition(
+    #[doc(hidden)]
+    pub fn transient_initial_condition(
         &self,
     ) -> Option<(Option<Value>, Option<Value>, Option<Value>)> {
         let ic = self.initial_condition.as_deref()?;
@@ -683,8 +694,22 @@ impl Mosfet {
 
     /// True when this instance runs the legacy BSIM1/BSIM2 equations rather
     /// than the classic level 1/2/3/6 models.
-    pub(crate) fn uses_legacy_bsim(&self) -> bool {
+    #[doc(hidden)]
+    pub fn uses_legacy_bsim(&self) -> bool {
         self.legacy_bsim_model.is_some()
+    }
+
+    /// The authored absolute instance TEMP its noise sources radiate at, or
+    /// `None` for ambient plus the noise temperature offset.
+    #[doc(hidden)]
+    pub fn noise_absolute_temperature(&self) -> Option<Value> {
+        self.noise_absolute_temperature
+    }
+
+    /// Record the authored absolute instance TEMP for the noise sources.
+    #[doc(hidden)]
+    pub fn set_noise_absolute_temperature(&mut self, temperature: Option<Value>) {
+        self.noise_absolute_temperature = temperature;
     }
 }
 

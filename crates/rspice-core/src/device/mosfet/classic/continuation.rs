@@ -5,7 +5,8 @@ impl Mosfet {
     /// Potential storage ports, independent of the current operating region.
     /// Meyer storage is a capacitance law; no fictitious terminal charge is
     /// substituted for it when selecting the shooting voltage coordinates.
-    pub(crate) fn shooting_terminal_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 5] {
+    #[doc(hidden)]
+    pub fn shooting_terminal_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 5] {
         let intrinsic = self.uses_legacy_bsim() || self.oxide_capacitance_total() > 0.0;
         let (gs, gd, gb) = self.overlap_capacitances();
         let junctions = self.body_junction_charge_mask();
@@ -21,7 +22,8 @@ impl Mosfet {
     /// Instantaneous C(v) for the initial charge-rate consistency equations.
     /// Legacy BSIM uses its coupled dQ/dV; classic levels retain native Meyer
     /// capacitances, including their dialect and geometry dependence.
-    pub(crate) fn stamp_shooting_initial_charge(
+    #[doc(hidden)]
+    pub fn stamp_shooting_initial_charge(
         &self,
         solution: &[Value],
         stamper: &mut impl MatrixStamper,
@@ -54,7 +56,8 @@ impl Mosfet {
 
     /// A shooting state is an accepted physical bias, with no preceding
     /// Newton limiter path or pending t=0 OFF seed to replay.
-    pub(crate) fn seed_accepted_periodic_bias(&mut self, solution: &[Value]) {
+    #[doc(hidden)]
+    pub fn seed_accepted_periodic_bias(&mut self, solution: &[Value]) {
         self.has_branch_history = false;
         self.initial_off_seed_pending = false;
         self.initial_off_seed_evaluations = 0;

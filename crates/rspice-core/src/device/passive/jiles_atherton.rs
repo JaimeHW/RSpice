@@ -133,7 +133,8 @@ pub struct JilesAthertonParams {
 /// and whether the step is the second-order one-step variant. The five terms
 /// describe a single step and are meaningless apart.
 #[derive(Clone, Copy)]
-pub(crate) struct XyceCoreStep {
+#[doc(hidden)]
+pub struct XyceCoreStep {
     pub happ: Value,
     pub delta_happ: Value,
     pub voltage: Value,
@@ -180,7 +181,8 @@ pub struct XyceCoreTrial {
 /// stamping has established the matching trial, without advancing magnetic
 /// state a second time.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct XyceCoreDaeEndpoint {
+#[doc(hidden)]
+pub struct XyceCoreDaeEndpoint {
     pub(crate) q: Value,
     pub(crate) f: Value,
 }
@@ -881,7 +883,8 @@ impl JilesAthertonInductor {
     /// `MagVarUpdate` value.  Keeping the carried update as an argument makes
     /// trial assembly pure while allowing the transient assembler to commit
     /// the resulting update transactionally after the evaluation.
-    pub(crate) fn xyce_core_trial_with_update(
+    #[doc(hidden)]
+    pub fn xyce_core_trial_with_update(
         &self,
         current: Value,
         voltage: Value,
@@ -922,7 +925,8 @@ impl JilesAthertonInductor {
 
     /// Evaluate a Core endpoint while preserving the native raw
     /// ampere-turn-difference operation used for `MagVarUpdate`.
-    pub(crate) fn xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
+    #[doc(hidden)]
+    pub fn xyce_core_trial_from_happ_with_update_and_ampere_turn_delta(
         &self,
         happ: Value,
         _delta_happ: Value,
@@ -1229,7 +1233,8 @@ impl JilesAthertonInductor {
     /// `g(M, Happ, V, R)=0` while holding the endpoint M/R fixed for the
     /// electrical derivatives.  The four terms are derivatives with respect
     /// to physical M, applied field, first-winding voltage, and physical R.
-    pub(crate) fn xyce_core_level1_hidden_partials(
+    #[doc(hidden)]
+    pub fn xyce_core_level1_hidden_partials(
         &self,
         trial: XyceCoreTrial,
         voltage: Value,
@@ -1320,7 +1325,8 @@ impl JilesAthertonInductor {
     /// Evaluate LEVEL=1 at explicit hidden-M and hidden-R Newton unknowns.
     /// The supplied rate is physical dS/dt; the returned residual retains the
     /// R equation so the circuit assembler can stamp both coupled rows.
-    pub(crate) fn xyce_core_level1_trial_at_magnetization_and_rate(
+    #[doc(hidden)]
+    pub fn xyce_core_level1_trial_at_magnetization_and_rate(
         &self,
         step: XyceCoreStep,
         magnetization: Value,
@@ -1398,7 +1404,8 @@ impl JilesAthertonInductor {
     /// with respect to the winding current while holding `latestMag` fixed.
     /// This is the exact `dP_dI` path used by `loadDAEdFdx`; the magnetic state
     /// update itself remains explicit in the carried `MagVarUpdate` value.
-    pub(crate) fn xyce_core_dmid_d_current(
+    #[doc(hidden)]
+    pub fn xyce_core_dmid_d_current(
         &self,
         current: Value,
         voltage: Value,
@@ -1417,7 +1424,8 @@ impl JilesAthertonInductor {
     /// to the solved magnetization, holding applied field and voltage fixed.
     /// This is the missing term needed when the hidden Xyce M equation is
     /// eliminated by a Schur complement in the compact Rust stamp.
-    pub(crate) fn xyce_core_dmid_d_magnetization(
+    #[doc(hidden)]
+    pub fn xyce_core_dmid_d_magnetization(
         &self,
         happ: Value,
         voltage: Value,
@@ -1490,7 +1498,8 @@ impl JilesAthertonInductor {
     /// essential for a shared multi-winding Core: every branch sees the same
     /// constitutive state, while each branch's Jacobian column has its own
     /// turns-dependent slope.
-    pub(crate) fn xyce_core_dmid_d_happ(
+    #[doc(hidden)]
+    pub fn xyce_core_dmid_d_happ(
         &self,
         happ: Value,
         voltage: Value,
@@ -1571,7 +1580,8 @@ impl JilesAthertonInductor {
     /// because its irreversible direction uses the adaptive
     /// `DELVSCALING/maxVoltageDrop` normalization.  LEVEL=2 deliberately
     /// omits the voltage partial in Xyce's `loadDAEdFdx` path.
-    pub(crate) fn xyce_core_dmid_d_voltage(
+    #[doc(hidden)]
+    pub fn xyce_core_dmid_d_voltage(
         &self,
         happ: Value,
         voltage: Value,
@@ -2080,7 +2090,8 @@ impl JilesAthertonInductor {
     }
 
     /// Magnetic M value published by Xyce's accepted output store.
-    pub(crate) fn xyce_core_reported_magnetization(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_reported_magnetization(&self) -> Value {
         if self.params.xyce_core {
             self.xyce_reported_magnetization
         } else {
@@ -2088,17 +2099,20 @@ impl JilesAthertonInductor {
         }
     }
 
-    pub(crate) fn xyce_core_mag_update(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_mag_update(&self) -> Value {
         self.xyce_mag_update
     }
 
     #[inline]
-    pub(crate) fn xyce_core_m_eq_scaling(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_m_eq_scaling(&self) -> Value {
         self.params.m_eq_scaling
     }
 
     #[inline]
-    pub(crate) fn xyce_core_r_eq_scaling(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_r_eq_scaling(&self) -> Value {
         self.params.r_eq_scaling
     }
 
@@ -2106,7 +2120,8 @@ impl JilesAthertonInductor {
     /// FACTORMS stores M normalized by Ms, so restore that factor before the
     /// constitutive equations consume the hidden coordinate.
     #[inline]
-    pub(crate) fn xyce_core_m_var_scaling(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_m_var_scaling(&self) -> Value {
         let factor = if self.params.factor_ms {
             self.params.ms
         } else {
@@ -2117,14 +2132,16 @@ impl JilesAthertonInductor {
 
     /// Physical scale of the hidden R variable in Xyce's solver coordinate.
     #[inline]
-    pub(crate) fn xyce_core_r_var_scaling(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_r_var_scaling(&self) -> Value {
         self.params.r_var_scaling
     }
 
     /// Commit the `MagVarUpdate` produced by the current Newton evaluation.
     /// Xyce updates this evaluation member after computing `P` and its
     /// derivatives; callers must not invoke it for static residual probes.
-    pub(crate) fn advance_xyce_core_mag_update(&mut self, update: Value) {
+    #[doc(hidden)]
+    pub fn advance_xyce_core_mag_update(&mut self, update: Value) {
         if self.params.xyce_core_level2 && update.is_finite() {
             self.xyce_mag_update = update;
         }
@@ -2141,11 +2158,13 @@ impl JilesAthertonInductor {
     }
 
     #[doc(hidden)]
-    pub(crate) fn xyce_core_level1_rate_debug(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_level1_rate_debug(&self) -> Value {
         self.xyce_level1_rate
     }
 
-    pub(crate) fn xyce_core_accepted_mid(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_accepted_mid(&self) -> Value {
         self.xyce_accepted_mid
     }
 
@@ -2154,7 +2173,8 @@ impl JilesAthertonInductor {
     /// OneStep `qHistory[2]` stores the static vector assembled before
     /// `acceptStep()` mutates the Core state, so an accepted-history probe must
     /// retain that pre-commit factor.
-    pub(crate) fn xyce_core_static_mid(&self, current: Value, voltage: Value) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_static_mid(&self, current: Value, voltage: Value) -> Value {
         let cached_mid = if let Some((trial_current, trial_voltage, trial)) =
             self.xyce_trial.as_ref()
             && Self::xyce_endpoint_matches(*trial_current, current)
@@ -2172,12 +2192,8 @@ impl JilesAthertonInductor {
     /// Cache the pure endpoint used by the current Newton stamp. The
     /// transient commit consumes this cache only when the accepted solution
     /// has the same branch current and winding voltage.
-    pub(crate) fn cache_xyce_core_trial(
-        &mut self,
-        current: Value,
-        voltage: Value,
-        trial: XyceCoreTrial,
-    ) {
+    #[doc(hidden)]
+    pub fn cache_xyce_core_trial(&mut self, current: Value, voltage: Value, trial: XyceCoreTrial) {
         if self.params.xyce_core_level2 {
             self.xyce_mag_update = trial.magnetization_update;
         }
@@ -2189,7 +2205,8 @@ impl JilesAthertonInductor {
     /// every Newton endpoint, while the carried update is advanced only by
     /// the accepted-state evaluation.  Keeping those lifecycles separate is
     /// required for the subsequent static F-history probe.
-    pub(crate) fn cache_xyce_core_trial_endpoint(
+    #[doc(hidden)]
+    pub fn cache_xyce_core_trial_endpoint(
         &mut self,
         current: Value,
         voltage: Value,
@@ -2203,11 +2220,8 @@ impl JilesAthertonInductor {
     /// computes `P` and its derivatives during `updateIntermediateVars()` and
     /// the following Jacobian load consumes those cached quantities; it does
     /// not recompute them from the newly advanced `MagVarUpdate`.
-    pub(crate) fn xyce_core_cached_trial(
-        &self,
-        current: Value,
-        voltage: Value,
-    ) -> Option<XyceCoreTrial> {
+    #[doc(hidden)]
+    pub fn xyce_core_cached_trial(&self, current: Value, voltage: Value) -> Option<XyceCoreTrial> {
         self.xyce_trial
             .as_ref()
             .and_then(|(trial_current, trial_voltage, trial)| {
@@ -2223,7 +2237,8 @@ impl JilesAthertonInductor {
     /// Falling back to the last accepted constitutive factor would form a
     /// residual for a different state.  The direct loader therefore fails
     /// closed when the cached trial is absent, stale, singular, or non-finite.
-    pub(crate) fn xyce_core_cached_dae_endpoint(
+    #[doc(hidden)]
+    pub fn xyce_core_cached_dae_endpoint(
         &self,
         current: Value,
         voltage: Value,
@@ -2243,7 +2258,8 @@ impl JilesAthertonInductor {
     /// units the same device threshold applies to M and R. LEVEL=2 has no
     /// hidden equations, but its forward-Euler limiter is still an active
     /// device-convergence veto through MutIndNonLin2's `origFlag`.
-    pub(crate) fn xyce_core_trial_converged(&self) -> bool {
+    #[doc(hidden)]
+    pub fn xyce_core_trial_converged(&self) -> bool {
         if !self.params.xyce_core {
             return true;
         }
@@ -2331,7 +2347,8 @@ impl JilesAthertonInductor {
     /// uses this geometry-only matrix and applies the constitutive `mid`
     /// factor separately.  `turns_i` and `turns_j` may therefore differ from
     /// the representative winding stored in this device instance.
-    pub(crate) fn xyce_core_vacuum_mutual_inductance(
+    #[doc(hidden)]
+    pub fn xyce_core_vacuum_mutual_inductance(
         &self,
         turns_i: Value,
         turns_j: Value,
@@ -2341,11 +2358,13 @@ impl JilesAthertonInductor {
     }
 
     /// Convert aggregate ampere-turns to Xyce's applied magnetic field.
-    pub(crate) fn xyce_core_happ_from_ampere_turns(&self, ampere_turns: Value) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_happ_from_ampere_turns(&self, ampere_turns: Value) -> Value {
         ampere_turns / self.params.length
     }
 
-    pub(crate) fn xyce_core_happ_from_current(&self, current: Value) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_happ_from_current(&self, current: Value) -> Value {
         self.xyce_core_happ_from_ampere_turns(current * self.params.n_turns)
     }
 
@@ -2355,35 +2374,41 @@ impl JilesAthertonInductor {
     /// the next source-ordered branch-current sum.  Shared K-card devices
     /// must use the same boundary value rather than reconstructing it from a
     /// representative winding current.
-    pub(crate) fn xyce_core_old_ampere_turns(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_old_ampere_turns(&self) -> Value {
         self.xyce_old_branch_current_sum
     }
 
-    pub(crate) fn n_turns_for_xyce_core(&self) -> Value {
+    #[doc(hidden)]
+    pub fn n_turns_for_xyce_core(&self) -> Value {
         self.params.n_turns
     }
 
     /// Return the applied-field slope contributed by one winding current.
-    pub(crate) fn xyce_core_happ_slope_for_turns(&self, turns: Value) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_happ_slope_for_turns(&self, turns: Value) -> Value {
         turns / self.params.length
     }
 
     /// Form the single-winding MutIndNonLin2 charge entry in the same
     /// source order as Xyce's `LOI[i] += LO[i][j] * I[j]` operation.
-    pub(crate) fn xyce_core_q_from_current(&self, current: Value) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_q_from_current(&self, current: Value) -> Value {
         self.xyce_core_vacuum_mutual_inductance(self.params.n_turns, self.params.n_turns, 1.0)
             * current
     }
 
     /// Return the accepted charge-vector entry used by the transient
     /// integrator's `qHistory[0]` subtraction.
-    pub(crate) fn xyce_core_q_history(&self) -> Value {
+    #[doc(hidden)]
+    pub fn xyce_core_q_history(&self) -> Value {
         self.xyce_q_history
     }
 
     /// Initialize the accepted charge-vector entry from the accepted
     /// inductor current at transient startup or a checkpoint seam.
-    pub(crate) fn initialize_xyce_core_q_history(&mut self, current: Value) {
+    #[doc(hidden)]
+    pub fn initialize_xyce_core_q_history(&mut self, current: Value) {
         if self.params.xyce_core {
             self.xyce_q_history = self.xyce_core_q_from_current(current);
         }
@@ -2394,7 +2419,8 @@ impl JilesAthertonInductor {
     /// boundary, after Newton has selected the electrical solution; keeping
     /// this operation separate from the dt-free `NonlinearDevice::update`
     /// hook prevents rejected probes from advancing the output filter.
-    pub(crate) fn commit_xyce_core_solution(
+    #[doc(hidden)]
+    pub fn commit_xyce_core_solution(
         &mut self,
         voltages: &[Value],
         hidden_state: Option<(Value, Value)>,
@@ -2461,7 +2487,8 @@ impl JilesAthertonInductor {
     /// by this device is only a state-bookkeeping coordinate used to match a
     /// cached Newton endpoint and to expose the same current-based APIs as a
     /// single-winding device.
-    pub(crate) fn commit_xyce_core_group_solution(
+    #[doc(hidden)]
+    pub fn commit_xyce_core_group_solution(
         &mut self,
         step: XyceCoreStep,
         hidden_state: Option<(Value, Value)>,

@@ -5,7 +5,8 @@ use super::*;
 impl Bsim4v8Device {
     /// DC anchors the otherwise unused deficit node. A dynamic load owns its
     /// physical relaxation/storage equation and must remove that DC anchor.
-    pub(crate) fn remove_trnqs_dc_anchor(&self, matrix: &mut impl MatrixStamper) {
+    #[doc(hidden)]
+    pub fn remove_trnqs_dc_anchor(&self, matrix: &mut impl MatrixStamper) {
         if self.uses_trnqs() {
             matrix.stamp(
                 self.node_charge_deficit,
@@ -17,7 +18,8 @@ impl Bsim4v8Device {
 
     /// Stored channel charge divided by M*1n. The electrical terminals may
     /// move algebraically while this storage coordinate remains constrained.
-    pub(crate) fn shooting_nqs_state(&self, solution: &[Value]) -> (Value, [Value; 12]) {
+    #[doc(hidden)]
+    pub fn shooting_nqs_state(&self, solution: &[Value]) -> (Value, [Value; 12]) {
         let (charge, mode) = self.charge_at_with_probe(solution, true);
         let gate = -(charge.cggb + charge.cbgb);
         let drain = -(charge.cgdb + charge.cbdb);
@@ -41,12 +43,14 @@ impl Bsim4v8Device {
         )
     }
 
-    pub(crate) fn shooting_nqs_seed(&self, state: Value, solution: &[Value]) -> Value {
+    #[doc(hidden)]
+    pub fn shooting_nqs_seed(&self, state: Value, solution: &[Value]) -> Value {
         Self::node_voltage(solution, self.node_charge_deficit) + state
             - self.shooting_nqs_state(solution).0
     }
 
-    pub(crate) fn stamp_shooting_initial_charge(
+    #[doc(hidden)]
+    pub fn stamp_shooting_initial_charge(
         &self,
         solution: &[Value],
         matrix: &mut impl MatrixStamper,
@@ -65,7 +69,8 @@ impl Bsim4v8Device {
         }
     }
 
-    pub(crate) fn stamp_shooting_initial_relaxation(
+    #[doc(hidden)]
+    pub fn stamp_shooting_initial_relaxation(
         &self,
         solution: &[Value],
         matrix: &mut impl MatrixStamper,
@@ -95,7 +100,8 @@ impl Bsim4v8Device {
 
     /// Storage dependencies, not a reciprocal-capacitor decomposition. Split
     /// gate/body nodes retain independent coordinates only when they store Q.
-    pub(crate) fn shooting_terminal_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 8] {
+    #[doc(hidden)]
+    pub fn shooting_terminal_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 8] {
         let p = &self.core.size;
         let t = &self.core.model_temp;
         let inst = &self.core.inst;
@@ -135,7 +141,8 @@ impl Bsim4v8Device {
 
     /// Per-instance, device-polarity native states: Qg, Qgmid, Qb, Qd,
     /// Qbs, Qbd, equilibrium channel charge, stored charge deficit.
-    pub(crate) fn periodic_history_sample(
+    #[doc(hidden)]
+    pub fn periodic_history_sample(
         &self,
         solution: &[Value],
         rates: &[Value],
@@ -212,7 +219,8 @@ impl Bsim4v8Device {
         Ok((charges, currents))
     }
 
-    pub(crate) fn seed_accepted_periodic_bias(&mut self, solution: &[Value]) {
+    #[doc(hidden)]
+    pub fn seed_accepted_periodic_bias(&mut self, solution: &[Value]) {
         let bias = self.raw_branch_voltages(solution);
         let junction = self.raw_junction_bias(solution);
         self.op = self.eval_dc(bias, junction);

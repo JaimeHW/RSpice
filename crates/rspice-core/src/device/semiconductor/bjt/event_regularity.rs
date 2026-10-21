@@ -10,7 +10,8 @@ impl Bjt {
     /// Select the analytic outgoing diffusion-charge tangent at the VBE=0
     /// join. The finite rate solve must agree with the selected chart; this
     /// is not a higher-order smoothness certificate.
-    pub(crate) fn legacy_event_forward_charge_limit(
+    #[doc(hidden)]
+    pub fn legacy_event_forward_charge_limit(
         &self,
         solution: &[Value],
         rates: &[Option<Value>],
@@ -45,7 +46,8 @@ impl Bjt {
         })
     }
 
-    pub(crate) fn legacy_event_locally_c1(&self, solution: &[Value]) -> bool {
+    #[doc(hidden)]
+    pub fn legacy_event_locally_c1(&self, solution: &[Value]) -> bool {
         // The quasi-saturation epi branch switches law at Vrci = 0
         // (bjtload.c:508), which this chart does not certify.
         if !self.uses_legacy_gummel_poon()
@@ -194,7 +196,8 @@ impl Bjt {
         true
     }
 
-    pub(crate) fn legacy_event_locally_c2(&self, solution: &[Value]) -> bool {
+    #[doc(hidden)]
+    pub fn legacy_event_locally_c2(&self, solution: &[Value]) -> bool {
         if !self.legacy_event_locally_c1(solution) {
             return false;
         }

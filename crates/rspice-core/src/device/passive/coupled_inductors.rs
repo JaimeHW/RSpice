@@ -62,7 +62,8 @@ pub struct InductorCoupling {
 /// positional arguments, where swapping a node between windings changed the
 /// mutual sign without any type error.
 #[derive(Clone, Copy)]
-pub(crate) struct CoupledWinding {
+#[doc(hidden)]
+pub struct CoupledWinding {
     pub node_pos: NodeId,
     pub node_neg: NodeId,
     pub inductance: Value,
@@ -148,12 +149,8 @@ pub struct CoupledInductorPair {
 
 impl CoupledInductorPair {
     /// Create a new coupled inductor pair
-    pub(crate) fn new(
-        name: String,
-        first: CoupledWinding,
-        second: CoupledWinding,
-        k: Value,
-    ) -> Self {
+    #[doc(hidden)]
+    pub fn new(name: String, first: CoupledWinding, second: CoupledWinding, k: Value) -> Self {
         let CoupledWinding {
             node_pos: node1_pos,
             node_neg: node1_neg,
@@ -200,14 +197,16 @@ impl CoupledInductorPair {
 
     /// Restore the mutual overlay from the already retained physical winding
     /// histories: latest accepted current, then the previous accepted current.
-    pub(crate) fn restore_current_history(&mut self, first: [Value; 2], second: [Value; 2]) {
+    #[doc(hidden)]
+    pub fn restore_current_history(&mut self, first: [Value; 2], second: [Value; 2]) {
         [self.current1_prev, self.current1_prev_prev] = first;
         [self.current2_prev, self.current2_prev_prev] = second;
     }
 
     /// Discard the incoming integration epoch while retaining outgoing current
     /// and finite terminal voltage. Self and mutual flux must use one stencil.
-    pub(crate) fn restart_current_history(&mut self) {
+    #[doc(hidden)]
+    pub fn restart_current_history(&mut self) {
         self.current1_prev_prev = self.current1_prev;
         self.current2_prev_prev = self.current2_prev;
     }
@@ -290,7 +289,8 @@ impl CoupledInductorPair {
     }
 
     /// Use the same current-coordinate map as the standalone flux residual.
-    pub(crate) fn add_transient_mutual_correction_rhs_with_current_map(
+    #[doc(hidden)]
+    pub fn add_transient_mutual_correction_rhs_with_current_map(
         &self,
         branches: [NodeId; 2],
         correction_rhs: &mut [Value],
@@ -341,7 +341,8 @@ impl CoupledInductorPair {
     /// Start a new trajectory at a supplied bias, discarding the previous
     /// trajectory's multistep history. Branch indices use the same one-based
     /// MNA convention as accepted-step updates.
-    pub(crate) fn reset_state_with_branches(
+    #[doc(hidden)]
+    pub fn reset_state_with_branches(
         &mut self,
         solution: &[Value],
         branch1: NodeId,
@@ -514,17 +515,20 @@ impl MultiWindingTransformer {
     }
 
     /// Number of windings.
-    pub(crate) fn num_windings(&self) -> usize {
+    #[doc(hidden)]
+    pub fn num_windings(&self) -> usize {
         self.inductances.len()
     }
 
     /// Terminal pairs in winding order.
-    pub(crate) fn nodes(&self) -> &[(NodeId, NodeId)] {
+    #[doc(hidden)]
+    pub fn nodes(&self) -> &[(NodeId, NodeId)] {
         &self.nodes
     }
 
     /// Self-inductances in winding order.
-    pub(crate) fn inductances(&self) -> &[Value] {
+    #[doc(hidden)]
+    pub fn inductances(&self) -> &[Value] {
         &self.inductances
     }
 
@@ -534,7 +538,8 @@ impl MultiWindingTransformer {
     }
 
     /// One-based MNA branch indices, absent until assigned.
-    pub(crate) fn branches(&self) -> &[Option<NodeId>] {
+    #[doc(hidden)]
+    pub fn branches(&self) -> &[Option<NodeId>] {
         &self.branches
     }
 

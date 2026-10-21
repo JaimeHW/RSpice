@@ -356,8 +356,17 @@ const MAX_PUBLIC_ITEMS: usize = 5753;
 // `CircuitData::voltage_source_storage` and `CircuitData::current_source_storage`
 // add two: the parser's checks that read a built circuit's independent sources
 // run from an integration test, outside the crate, so the parser's own unit
-// tests never reach up to the engine. The census is 538, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 538;
+// tests never reach up to the engine. The census was 538, with no slack.
+// The circuit store, engine and analyses reach the device models' stamping,
+// charge, noise, checkpoint, periodic and continuation plumbing through hidden
+// items so that the device models can move into a crate of their own below
+// them. Checkpoint carriers and computed records keep public fields; device
+// instances, `CplBranchCurrents` and `LtraRgTwoPort` keep theirs private and
+// add hidden getters and narrow writers in their place. Five test helpers and
+// the two BSIM oracle model cards compile under `test-support` as well as
+// `cfg(test)`, for the engine's tests above them. The census is 1,225, with no
+// slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1225;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

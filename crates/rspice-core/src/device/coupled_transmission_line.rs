@@ -14,7 +14,8 @@ use super::cpl_native::{
 const MODAL_RELATIVE_EIGEN_TOL: Value = 1e-12;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CplBranchCurrents {
+#[doc(hidden)]
+pub struct CplBranchCurrents {
     pub(crate) b1: Vec<NodeId>,
     pub(crate) b2: Vec<NodeId>,
 }
@@ -37,12 +38,32 @@ impl CplBranchCurrents {
         Ok(Self { b1, b2 })
     }
 
+    /// The near-end branch currents, one per conductor.
+    #[doc(hidden)]
+    pub fn b1(&self) -> &[NodeId] {
+        &self.b1
+    }
+
+    /// The far-end branch currents, one per conductor.
+    #[doc(hidden)]
+    pub fn b2(&self) -> &[NodeId] {
+        &self.b2
+    }
+
+    /// The near-end and far-end branch currents, by value.
+    #[doc(hidden)]
+    pub fn into_parts(self) -> (Vec<NodeId>, Vec<NodeId>) {
+        (self.b1, self.b2)
+    }
+
     #[inline]
-    pub(crate) fn conductor(&self, conductor: usize) -> Option<(NodeId, NodeId)> {
+    #[doc(hidden)]
+    pub fn conductor(&self, conductor: usize) -> Option<(NodeId, NodeId)> {
         Some((*self.b1.get(conductor)?, *self.b2.get(conductor)?))
     }
 
-    pub(crate) fn matrix_indices_from_ordinals(&self, num_nodes: usize) -> Self {
+    #[doc(hidden)]
+    pub fn matrix_indices_from_ordinals(&self, num_nodes: usize) -> Self {
         Self {
             b1: self.b1.iter().map(|branch| num_nodes + *branch).collect(),
             b2: self.b2.iter().map(|branch| num_nodes + *branch).collect(),
@@ -111,11 +132,12 @@ pub struct CoupledTransmissionLine {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LosslessCplFrequencyData {
-    pub(crate) voltage_transform: Vec<Vec<Value>>,
-    pub(crate) current_transform: Vec<Vec<Value>>,
-    pub(crate) modal_impedances: Vec<Value>,
-    pub(crate) modal_delays: Vec<Value>,
+#[doc(hidden)]
+pub struct LosslessCplFrequencyData {
+    pub voltage_transform: Vec<Vec<Value>>,
+    pub current_transform: Vec<Vec<Value>>,
+    pub modal_impedances: Vec<Value>,
+    pub modal_delays: Vec<Value>,
 }
 
 impl CoupledTransmissionLine {
@@ -309,7 +331,8 @@ impl CoupledTransmissionLine {
         self.modes.iter().map(TransmissionLine::delay)
     }
 
-    pub(crate) fn lossless_frequency_data(&self) -> Option<LosslessCplFrequencyData> {
+    #[doc(hidden)]
+    pub fn lossless_frequency_data(&self) -> Option<LosslessCplFrequencyData> {
         self.exact_lossless_frequency_model
             .then(|| LosslessCplFrequencyData {
                 voltage_transform: self.modal_from_physical_voltage.clone(),
@@ -321,13 +344,15 @@ impl CoupledTransmissionLine {
 
     /// Preserve the authored lossless classification when the native
     /// transient CPL setup has introduced its private numerical R floor.
-    pub(crate) fn set_exact_lossless_frequency_model(&mut self) {
+    #[doc(hidden)]
+    pub fn set_exact_lossless_frequency_model(&mut self) {
         self.exact_lossless_frequency_model = true;
     }
 
     /// Grant the history interpolation estimate the transient's truncation
     /// budget multiplier.
-    pub(crate) fn set_interpolation_truncation_factor(&mut self, factor: Value) {
+    #[doc(hidden)]
+    pub fn set_interpolation_truncation_factor(&mut self, factor: Value) {
         if factor.is_finite() && factor > 0.0 {
             self.interpolation_truncation_factor = factor;
         }
@@ -355,11 +380,13 @@ impl CoupledTransmissionLine {
     }
 
     #[inline]
-    pub(crate) fn has_grounded_references(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_grounded_references(&self) -> bool {
         self.near_ref == 0 && self.far_ref == 0
     }
 
-    pub(crate) fn set_native_branch_ordinals(
+    #[doc(hidden)]
+    pub fn set_native_branch_ordinals(
         &mut self,
         b1: Vec<NodeId>,
         b2: Vec<NodeId>,
@@ -384,7 +411,8 @@ impl CoupledTransmissionLine {
     /// Whether the ngspice-faithful native convolution runtime is available for
     /// this line (grounded references and a successful setup).
     #[inline]
-    pub(crate) fn native_runtime_available(&self) -> bool {
+    #[doc(hidden)]
+    pub fn native_runtime_available(&self) -> bool {
         self.native_runtime_template.is_some()
     }
 
@@ -394,7 +422,8 @@ impl CoupledTransmissionLine {
     /// convolution. This is a causality cap; the accepted-history interpolation
     /// error provides a separate accuracy limit.
     #[inline]
-    pub(crate) fn native_min_taul_seconds(&self) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn native_min_taul_seconds(&self) -> Option<Value> {
         let runtime = self.native_runtime_template.as_ref()?;
         runtime
             .taul_ps
@@ -410,16 +439,19 @@ impl CoupledTransmissionLine {
     /// Whether the active native convolution runtime drives this line's
     /// transient stamp (branch currents allocated and runtime present).
     #[inline]
-    pub(crate) fn uses_native_runtime(&self) -> bool {
+    #[doc(hidden)]
+    pub fn uses_native_runtime(&self) -> bool {
         self.native_branch_matrix_indices.is_some() && self.native_runtime_template.is_some()
     }
 
     #[inline]
-    pub(crate) fn native_branch_ordinals(&self) -> Option<&CplBranchCurrents> {
+    #[doc(hidden)]
+    pub fn native_branch_ordinals(&self) -> Option<&CplBranchCurrents> {
         self.native_branch_ordinals.as_ref()
     }
 
-    pub(crate) fn set_native_branch_matrix_indices(
+    #[doc(hidden)]
+    pub fn set_native_branch_matrix_indices(
         &mut self,
         b1: Vec<NodeId>,
         b2: Vec<NodeId>,
@@ -430,7 +462,8 @@ impl CoupledTransmissionLine {
     }
 
     #[inline]
-    pub(crate) fn native_branch_matrix_indices(&self) -> Option<&CplBranchCurrents> {
+    #[doc(hidden)]
+    pub fn native_branch_matrix_indices(&self) -> Option<&CplBranchCurrents> {
         self.native_branch_matrix_indices.as_ref()
     }
 
@@ -440,11 +473,8 @@ impl CoupledTransmissionLine {
     /// Builds the VI history (with the DC sample at t=0), zeroes/initializes the
     /// per-pole convolution accumulators, and records the DC port voltages as
     /// the latest accepted state. No-op when the native runtime is inactive.
-    pub(crate) fn native_seed_dc(
-        &mut self,
-        near_dc: &[Value],
-        far_dc: &[Value],
-    ) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn native_seed_dc(&mut self, near_dc: &[Value], far_dc: &[Value]) -> Result<(), String> {
         if !self.uses_native_runtime() {
             return Ok(());
         }
@@ -490,7 +520,8 @@ impl CoupledTransmissionLine {
     /// Returns `None` when the native runtime is inactive or not yet seeded, or
     /// when the step is degenerate (non-positive dt). Errors from the underlying
     /// convolution math are surfaced so the caller can fall back gracefully.
-    pub(crate) fn native_step_plan(
+    #[doc(hidden)]
+    pub fn native_step_plan(
         &self,
         t2_seconds: Value,
         dt_seconds: Value,
@@ -529,7 +560,8 @@ impl CoupledTransmissionLine {
     /// The engine's current tolerance does not enter: a port current is
     /// judged by the voltage it carries along the line (see
     /// [`NativeCplViHistory::interpolation_step_limit_ps`]).
-    pub(crate) fn native_interpolation_step_limit(
+    #[doc(hidden)]
+    pub fn native_interpolation_step_limit(
         &self,
         candidate_solution: &[Value],
         candidate_time: Value,
@@ -576,7 +608,8 @@ impl CoupledTransmissionLine {
     ///
     /// `near_v`/`far_v`/`near_i`/`far_i` are the accepted near/far port voltages
     /// and branch currents at `accepted_time_seconds`.
-    pub(crate) fn native_commit_accepted(
+    #[doc(hidden)]
+    pub fn native_commit_accepted(
         &mut self,
         accepted_time_seconds: Value,
         near_v: &[Value],

@@ -25,19 +25,27 @@ use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 
-pub(crate) mod breakpoints;
+#[doc(hidden)]
+pub mod breakpoints;
 mod history;
-pub(crate) mod integrals;
+#[doc(hidden)]
+pub mod integrals;
 mod partials;
 mod physical;
-pub(crate) use history::BehavioralAcceptedState;
-pub(crate) use integrals::BehavioralFqPoint;
-pub(crate) use physical::{PhysicalSample, prepared as prepare_physical_time_program};
+#[doc(hidden)]
+pub use history::BehavioralAcceptedState;
+#[doc(hidden)]
+pub use integrals::BehavioralFqPoint;
+#[doc(hidden)]
+pub use physical::PhysicalSample;
+pub(crate) use physical::prepared as prepare_physical_time_program;
 pub(crate) mod periodicity;
 mod quasi_periodic;
-pub(crate) use quasi_periodic::QuasiPeriodicClockBasis;
+#[doc(hidden)]
+pub use quasi_periodic::QuasiPeriodicClockBasis;
 mod resolution;
-pub(crate) use breakpoints::BehavioralBreakpointError;
+#[doc(hidden)]
+pub use breakpoints::BehavioralBreakpointError;
 #[cfg(test)]
 use breakpoints::expression_transient_breakpoints;
 
@@ -362,7 +370,8 @@ impl Clone for BehavioralVoltageSource {
 }
 
 impl BehavioralVoltageSource {
-    pub(crate) fn explicit_time_derivative(&self, time: Value) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn explicit_time_derivative(&self, time: Value) -> Option<Value> {
         if self.is_solution_dependent() {
             return None;
         }
@@ -617,7 +626,8 @@ impl BehavioralVoltageSource {
     }
 
     #[inline]
-    pub(crate) fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.node_bindings
             .iter()
             .chain(self.branch_bindings.iter())
@@ -625,7 +635,8 @@ impl BehavioralVoltageSource {
     }
 
     #[inline]
-    pub(crate) fn excludes_output_from_transient_voltage_lte(&self) -> bool {
+    #[doc(hidden)]
+    pub fn excludes_output_from_transient_voltage_lte(&self) -> bool {
         self.transient_voltage_lte_excluded
     }
 
@@ -641,7 +652,8 @@ impl BehavioralVoltageSource {
     /// Return the exact voltage constraint cached by a finite linearization at
     /// this exact transient time. Solution-dependent expressions remain Newton
     /// equations and must never be projected as prescribed voltages.
-    pub(crate) fn cached_exact_constraint_at(&self, time: Value) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn cached_exact_constraint_at(&self, time: Value) -> Option<Value> {
         if self.is_solution_dependent() {
             return None;
         }
@@ -674,11 +686,13 @@ impl BehavioralVoltageSource {
 
     /// Whether this source's resolved expression depends on `FREQ`/`HERTZ`.
     #[inline]
-    pub(crate) fn is_frequency_dependent(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_frequency_dependent(&self) -> bool {
         self.frequency_dependent
     }
 
-    pub(crate) fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
         expression_descriptor_gap(
             &self.ast,
             self.program.sdt_count,
@@ -879,10 +893,8 @@ impl BehavioralVoltageSource {
     /// Refresh the linearization (value and partials) at the given
     /// operating point for small-signal assembly. AC has no time axis;
     /// expressions see t = 0.
-    pub(crate) fn linearize_at(
-        &mut self,
-        solution: &[Value],
-    ) -> Result<(), BehavioralEvaluationError> {
+    #[doc(hidden)]
+    pub fn linearize_at(&mut self, solution: &[Value]) -> Result<(), BehavioralEvaluationError> {
         self.linearize_at_time(solution, 0.0)
     }
 
@@ -897,7 +909,8 @@ impl BehavioralVoltageSource {
         Ok(())
     }
 
-    pub(crate) fn linearize_at_frequency(
+    #[doc(hidden)]
+    pub fn linearize_at_frequency(
         &mut self,
         solution: &[Value],
         frequency: Value,
@@ -913,7 +926,8 @@ impl BehavioralVoltageSource {
     /// Linearize at an arbitrary state and frequency. Unlike
     /// [`Self::linearize_at_frequency`], this always refreshes the Jacobian
     /// because the supplied state may have changed.
-    pub(crate) fn linearize_at_state_and_frequency(
+    #[doc(hidden)]
+    pub fn linearize_at_state_and_frequency(
         &mut self,
         solution: &[Value],
         frequency: Value,
@@ -925,7 +939,8 @@ impl BehavioralVoltageSource {
 
     /// Visit the cached linearized partials as `(solution_index, df/dx)`
     /// pairs. Valid after `linearize_at` (or any stamp call).
-    pub(crate) fn linearized_partials(&self) -> impl Iterator<Item = (usize, Value)> + '_ {
+    #[doc(hidden)]
+    pub fn linearized_partials(&self) -> impl Iterator<Item = (usize, Value)> + '_ {
         self.node_bindings
             .iter()
             .zip(&self.node_partials)
@@ -1861,7 +1876,8 @@ impl BehavioralCurrentSource {
     }
 
     #[inline]
-    pub(crate) fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.node_bindings
             .iter()
             .chain(self.branch_bindings.iter())
@@ -1894,11 +1910,13 @@ impl BehavioralCurrentSource {
 
     /// Whether this source's resolved expression depends on `FREQ`/`HERTZ`.
     #[inline]
-    pub(crate) fn is_frequency_dependent(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_frequency_dependent(&self) -> bool {
         self.frequency_dependent
     }
 
-    pub(crate) fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
         expression_descriptor_gap(
             &self.ast,
             self.program.sdt_count,
@@ -1919,11 +1937,13 @@ impl BehavioralCurrentSource {
     /// Mark this current expression as the constitutive law of a two-terminal
     /// device (currently a solution-dependent resistor), rather than an
     /// independent behavioral current source.
-    pub(crate) fn enable_two_terminal_observables(&mut self) {
+    #[doc(hidden)]
+    pub fn enable_two_terminal_observables(&mut self) {
         self.two_terminal_observables = true;
     }
 
-    pub(crate) fn has_two_terminal_observables(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_two_terminal_observables(&self) -> bool {
         self.two_terminal_observables
     }
 
@@ -2106,10 +2126,8 @@ impl BehavioralCurrentSource {
     /// Refresh the linearization (value and partials) at the given
     /// operating point for small-signal assembly. AC has no time axis;
     /// expressions see t = 0.
-    pub(crate) fn linearize_at(
-        &mut self,
-        solution: &[Value],
-    ) -> Result<(), BehavioralEvaluationError> {
+    #[doc(hidden)]
+    pub fn linearize_at(&mut self, solution: &[Value]) -> Result<(), BehavioralEvaluationError> {
         self.linearize_at_time(solution, 0.0)
     }
 
@@ -2124,7 +2142,8 @@ impl BehavioralCurrentSource {
         Ok(())
     }
 
-    pub(crate) fn linearize_at_frequency(
+    #[doc(hidden)]
+    pub fn linearize_at_frequency(
         &mut self,
         solution: &[Value],
         frequency: Value,
@@ -2140,7 +2159,8 @@ impl BehavioralCurrentSource {
     /// Linearize at an arbitrary state and frequency. Unlike
     /// [`Self::linearize_at_frequency`], this always refreshes the Jacobian
     /// because the supplied state may have changed.
-    pub(crate) fn linearize_at_state_and_frequency(
+    #[doc(hidden)]
+    pub fn linearize_at_state_and_frequency(
         &mut self,
         solution: &[Value],
         frequency: Value,
@@ -2152,7 +2172,8 @@ impl BehavioralCurrentSource {
 
     /// Visit the cached linearized partials as `(solution_index, df/dx)`
     /// pairs. Valid after `linearize_at` (or any stamp call).
-    pub(crate) fn linearized_partials(&self) -> impl Iterator<Item = (usize, Value)> + '_ {
+    #[doc(hidden)]
+    pub fn linearized_partials(&self) -> impl Iterator<Item = (usize, Value)> + '_ {
         self.node_bindings
             .iter()
             .zip(&self.node_partials)
@@ -2350,7 +2371,8 @@ impl Clone for BehavioralSources {
 /// Evaluated operator frames for an unchanged behavioral-source topology.
 /// Dropping the candidate leaves every source's accepted VM state intact.
 #[must_use]
-pub(crate) struct PreparedBehavioralStep {
+#[doc(hidden)]
+pub struct PreparedBehavioralStep {
     voltage: Vec<Vm>,
     current: Vec<Vm>,
 }
@@ -2406,7 +2428,8 @@ impl BehavioralSources {
         self.voltage_sources.len() + self.current_sources.len()
     }
 
-    pub(crate) fn has_solution_dependent_sources(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_solution_dependent_sources(&self) -> bool {
         self.voltage_sources
             .iter()
             .any(BehavioralVoltageSource::is_solution_dependent)
@@ -2416,7 +2439,8 @@ impl BehavioralSources {
                 .any(BehavioralCurrentSource::is_solution_dependent)
     }
 
-    pub(crate) fn linearizations_converged(
+    #[doc(hidden)]
+    pub fn linearizations_converged(
         &mut self,
         solution: &[Value],
         time: Value,
@@ -2438,7 +2462,8 @@ impl BehavioralSources {
     }
 
     /// Commit stateful expression operators once at a successful timestep.
-    pub(crate) fn accept_transient_step(
+    #[doc(hidden)]
+    pub fn accept_transient_step(
         &mut self,
         solution: &[Value],
         time: Value,
@@ -2448,7 +2473,8 @@ impl BehavioralSources {
         Ok(())
     }
 
-    pub(crate) fn prepare_transient_step(
+    #[doc(hidden)]
+    pub fn prepare_transient_step(
         &mut self,
         solution: &[Value],
         time: Value,
@@ -2467,7 +2493,8 @@ impl BehavioralSources {
     }
 
     /// Promote already evaluated frames; no expression is executed here.
-    pub(crate) fn commit_transient_step(&mut self, prepared: PreparedBehavioralStep) {
+    #[doc(hidden)]
+    pub fn commit_transient_step(&mut self, prepared: PreparedBehavioralStep) {
         debug_assert_eq!(self.voltage_sources.len(), prepared.voltage.len());
         debug_assert_eq!(self.current_sources.len(), prepared.current.len());
         for (source, vm) in self.voltage_sources.iter_mut().zip(prepared.voltage) {

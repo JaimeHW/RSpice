@@ -581,14 +581,14 @@ impl Engine {
 
         add(br1, tline.node1_pos, 1.0);
         add(br1, tline.node1_neg, -1.0);
-        add(br1, tline.node2_pos, -two_port.cosh_theta);
-        add(br1, tline.node2_neg, two_port.cosh_theta);
-        add(br1, br2, two_port.transfer_impedance);
+        add(br1, tline.node2_pos, -two_port.cosh_theta());
+        add(br1, tline.node2_neg, two_port.cosh_theta());
+        add(br1, br2, two_port.transfer_impedance());
 
-        add(br2, tline.node2_pos, -two_port.transfer_admittance);
-        add(br2, tline.node2_neg, two_port.transfer_admittance);
+        add(br2, tline.node2_pos, -two_port.transfer_admittance());
+        add(br2, tline.node2_neg, two_port.transfer_admittance());
         add(br2, br1, 1.0);
-        add(br2, br2, two_port.cosh_theta);
+        add(br2, br2, two_port.cosh_theta());
     }
 
     /// Native TXL small-signal load. ngspice registers the regular TXLload

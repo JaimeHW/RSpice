@@ -101,7 +101,8 @@ impl Jfet {
     }
 
     #[inline]
-    pub(crate) fn set_analysis_temperature(&mut self, temp: Value) {
+    #[doc(hidden)]
+    pub fn set_analysis_temperature(&mut self, temp: Value) {
         if temp.is_finite() && temp > 0.0 {
             self.analysis_temp = temp;
             self.eval_valid = false;
@@ -109,7 +110,8 @@ impl Jfet {
     }
 
     #[inline]
-    pub(crate) fn analysis_temperature(&self) -> Value {
+    #[doc(hidden)]
+    pub fn analysis_temperature(&self) -> Value {
         if self.analysis_temp.is_finite() && self.analysis_temp > 0.0 {
             self.analysis_temp
         } else if self.params.tnom.is_finite() && self.params.tnom > 0.0 {
@@ -122,7 +124,8 @@ impl Jfet {
     /// Builder-resolved absolute instance temperature used by analyses that
     /// construct a compact JFET representation outside this device runtime.
     #[inline]
-    pub(crate) fn resolved_instance_temperature(&self) -> Value {
+    #[doc(hidden)]
+    pub fn resolved_instance_temperature(&self) -> Value {
         self.resolved_temperatures(self.analysis_temperature()).0
     }
 
@@ -624,26 +627,30 @@ impl Jfet {
     /// identically) reads them only under
     /// `MODEINITJCT && MODETRANOP && MODEUIC`, so an ordinary operating point
     /// must ignore them.
-    pub(crate) fn transient_initial_condition(&self) -> Option<(Option<Value>, Option<Value>)> {
+    #[doc(hidden)]
+    pub fn transient_initial_condition(&self) -> Option<(Option<Value>, Option<Value>)> {
         if self.initial_condition_vds.is_none() && self.initial_condition_vgs.is_none() {
             return None;
         }
         Some((self.initial_condition_vds, self.initial_condition_vgs))
     }
 
-    pub(crate) fn uses_hfet_legacy_inverse_mode(&self) -> bool {
+    #[doc(hidden)]
+    pub fn uses_hfet_legacy_inverse_mode(&self) -> bool {
         self.hfet_legacy_inverse_mode
             && matches!(self.params.channel_model, JfetChannelModel::Hfet1)
             && self.params.hfet_level >= 5
     }
 
     #[inline]
-    pub(crate) fn internal_vds_limited_state(&self) -> Value {
+    #[doc(hidden)]
+    pub fn internal_vds_limited_state(&self) -> Value {
         self.jfet_type.polarity() * self.vds
     }
 
     #[inline]
-    pub(crate) fn internal_branch_state_voltages(&self) -> Option<(Value, Value, Value)> {
+    #[doc(hidden)]
+    pub fn internal_branch_state_voltages(&self) -> Option<(Value, Value, Value)> {
         if self.vgs.is_finite() && self.vds.is_finite() {
             let vgs = self.vgs;
             let vds = self.vds;
@@ -669,7 +676,8 @@ impl Jfet {
         )
     }
 
-    pub(crate) fn set_hfet_legacy_inverse_active(&mut self, active: bool) {
+    #[doc(hidden)]
+    pub fn set_hfet_legacy_inverse_active(&mut self, active: bool) {
         let active = self.uses_hfet_legacy_inverse_mode() && active;
         if self.hfet_legacy_inverse_active != active {
             self.hfet_legacy_inverse_active = active;
@@ -682,17 +690,20 @@ impl Jfet {
     }
 
     #[inline]
-    pub(crate) fn set_model_order(&mut self, order: usize) {
+    #[doc(hidden)]
+    pub fn set_model_order(&mut self, order: usize) {
         self.model_order = order;
     }
 
     #[inline]
-    pub(crate) fn model_order(&self) -> usize {
+    #[doc(hidden)]
+    pub fn model_order(&self) -> usize {
         self.model_order
     }
 
     #[inline]
-    pub(crate) fn set_junction_gmin(&mut self, gmin: Value) {
+    #[doc(hidden)]
+    pub fn set_junction_gmin(&mut self, gmin: Value) {
         let gmin = if gmin.is_finite() && gmin > 0.0 {
             gmin
         } else {
@@ -709,7 +720,8 @@ impl Jfet {
     }
 
     #[inline]
-    pub(crate) fn has_gate_generation_branch(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_gate_generation_branch(&self) -> bool {
         let gate_model_active =
             matches!(self.params.hfet_level, 2..=4) || self.params.hfet_level >= 5;
         matches!(self.params.channel_model, JfetChannelModel::Hfet1)
@@ -719,7 +731,8 @@ impl Jfet {
     }
 
     #[inline]
-    pub(crate) fn set_gate_generation_scale(&mut self, scale: Value) {
+    #[doc(hidden)]
+    pub fn set_gate_generation_scale(&mut self, scale: Value) {
         let scale = if scale.is_finite() {
             scale.clamp(0.0, 1.0)
         } else {

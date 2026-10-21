@@ -5,7 +5,8 @@ const DEFAULT_MOS_CHANNEL_WIDTH: Value = 1.0e-4;
 
 impl Mosfet {
     /// Create a new NMOS with default parameters
-    pub(crate) fn new_nmos(
+    #[doc(hidden)]
+    pub fn new_nmos(
         name: String,
         drain: NodeId,
         gate: NodeId,
@@ -16,7 +17,8 @@ impl Mosfet {
     }
 
     /// Create a new PMOS with default parameters
-    pub(crate) fn new_pmos(
+    #[doc(hidden)]
+    pub fn new_pmos(
         name: String,
         drain: NodeId,
         gate: NodeId,
@@ -237,7 +239,8 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn set_junction_gmin(&mut self, gmin: Value) {
+    #[doc(hidden)]
+    pub fn set_junction_gmin(&mut self, gmin: Value) {
         let gmin = gmin.max(0.0);
         if gmin.to_bits() != self.junction_gmin.to_bits() {
             self.junction_gmin = gmin;
@@ -321,7 +324,8 @@ impl Mosfet {
     /// evaluation of this classic MOS instance.  The arithmetic expressions
     /// intentionally match the canonical helpers exactly so cached and
     /// fallback evaluation remain bit-identical.
-    pub(crate) fn classic_transient_constants(&self) -> ClassicMosTransientConstants {
+    #[doc(hidden)]
+    pub fn classic_transient_constants(&self) -> ClassicMosTransientConstants {
         let phi = if self.level == 1 {
             self.phi
         } else {
@@ -635,7 +639,8 @@ impl Mosfet {
     /// An exact-residual probe at that same candidate may reuse the cached
     /// linearization because its raw and evaluated branch biases coincide.
     #[inline]
-    pub(crate) fn cached_linearization_is_physical(&self) -> bool {
+    #[doc(hidden)]
+    pub fn cached_linearization_is_physical(&self) -> bool {
         self.has_branch_history
             && self.vgs.is_finite()
             && self.vds.is_finite()
@@ -650,8 +655,9 @@ impl Mosfet {
 
     /// Set model parameters from a DeviceModel, deriving NSUB-dependent
     /// parameters at the card's TNOM (27 C when the card names none).
-    #[cfg(test)]
-    pub(crate) fn with_params(self, params: &std::collections::HashMap<String, Value>) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn with_params(self, params: &std::collections::HashMap<String, Value>) -> Self {
         let tnom_kelvin = params
             .get("TNOM")
             .copied()
@@ -665,7 +671,8 @@ impl Mosfet {
     /// `tnom_kelvin` (the model TNOM, else `.options tnom`). Berkeley MOS
     /// derives PHI, GAMMA and VTO from NSUB at that temperature
     /// (`mos1temp.c`/`mos2temp.c`/`mos3temp.c`/`mos6temp.c`/`mos9temp.c`).
-    pub(crate) fn with_params_at_tnom(
+    #[doc(hidden)]
+    pub fn with_params_at_tnom(
         mut self,
         params: &std::collections::HashMap<String, Value>,
         tnom_kelvin: Value,
@@ -1216,7 +1223,8 @@ impl Mosfet {
     }
 
     /// Set SPICE MOS model level.
-    pub(crate) fn with_level(mut self, level: i32) -> Self {
+    #[doc(hidden)]
+    pub fn with_level(mut self, level: i32) -> Self {
         if matches!(level, 3 | 9) {
             self = self.with_mos3_defaults(level);
         } else {
@@ -1230,7 +1238,8 @@ impl Mosfet {
     }
 
     /// Set the native classic-MOS bulk-junction current compatibility model.
-    pub(crate) fn set_body_junction_model(&mut self, model: MosBodyJunctionModel) {
+    #[doc(hidden)]
+    pub fn set_body_junction_model(&mut self, model: MosBodyJunctionModel) {
         if self.body_junction_model != model {
             self.body_junction_model = model;
             self.linearization_cache_valid = false;
@@ -1249,7 +1258,8 @@ impl Mosfet {
     /// the thermal-voltage update.
     ///
     /// Call once, after model and instance parameters are applied.
-    pub(crate) fn set_temperature(&mut self, temp_kelvin: Value, tnom_kelvin: Value) {
+    #[doc(hidden)]
+    pub fn set_temperature(&mut self, temp_kelvin: Value, tnom_kelvin: Value) {
         use crate::constants::{TEMP_REFERENCE, VT_REFERENCE, thermal_voltage};
 
         let temp = temp_kelvin;
@@ -1347,7 +1357,8 @@ impl Mosfet {
 
     /// Reject invalid sizing and unrepresentable parallel contributions before
     /// the device laws can turn them into missing current or charge.
-    pub(crate) fn resolved_parameter_error(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn resolved_parameter_error(&self) -> Option<&'static str> {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Some("resolved M*NF product must be finite and positive");
         }
@@ -1442,7 +1453,8 @@ impl Mosfet {
     /// equations. Circuit construction calls this after geometry and
     /// temperature resolution; exact HB calls it again defensively for
     /// programmatically assembled circuits.
-    pub(crate) fn level1_physical_parameter_error(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn level1_physical_parameter_error(&self) -> Option<&'static str> {
         if self.level != 1 {
             return None;
         }
@@ -1525,7 +1537,8 @@ impl Mosfet {
         self.resolved_parameter_error()
     }
 
-    pub(crate) fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
+    #[doc(hidden)]
+    pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
         let mut multiplier = 1.0;
         let mut nf = 1.0;
 

@@ -6,17 +6,19 @@ pub(crate) const BSIM3_CHECKPOINT_RUNTIME_TAG: &str = "native-bsim3v3-accepted-v
 pub(crate) const BSIM3_CHECKPOINT_VALUE_COUNT: usize = 61;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedBsim3NonlinearCheckpoint {
-    pub(crate) instance_name: String,
-    pub(crate) runtime_tag: String,
-    pub(crate) values: [Value; BSIM3_CHECKPOINT_VALUE_COUNT],
-    pub(crate) flags: [bool; 7],
-    pub(crate) mode: i32,
-    pub(crate) seed_evaluations: u8,
+#[doc(hidden)]
+pub struct AcceptedBsim3NonlinearCheckpoint {
+    pub instance_name: String,
+    pub runtime_tag: String,
+    pub values: [Value; BSIM3_CHECKPOINT_VALUE_COUNT],
+    pub flags: [bool; 7],
+    pub mode: i32,
+    pub seed_evaluations: u8,
 }
 
 impl AcceptedBsim3NonlinearCheckpoint {
-    pub(crate) fn validate_numeric_state(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_numeric_state(&self) -> Result<(), String> {
         if self.runtime_tag != BSIM3_CHECKPOINT_RUNTIME_TAG
             || self.instance_name.is_empty()
             || self.instance_name.chars().any(char::is_whitespace)
@@ -37,7 +39,8 @@ impl AcceptedBsim3NonlinearCheckpoint {
 }
 
 impl Bsim3v3Device {
-    pub(crate) fn accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn accepted_nonlinear_checkpoint(
         &self,
     ) -> Result<AcceptedBsim3NonlinearCheckpoint, String> {
         let charge = self.op.charge.clone().unwrap_or_default();
@@ -128,7 +131,8 @@ impl Bsim3v3Device {
         Ok(state)
     }
 
-    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_nonlinear_checkpoint(
         &self,
         state: &AcceptedBsim3NonlinearCheckpoint,
     ) -> Result<(), String> {
@@ -141,7 +145,8 @@ impl Bsim3v3Device {
         state.validate_numeric_state()
     }
 
-    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_nonlinear_checkpoint(
         &mut self,
         state: &AcceptedBsim3NonlinearCheckpoint,
     ) -> Result<(), String> {

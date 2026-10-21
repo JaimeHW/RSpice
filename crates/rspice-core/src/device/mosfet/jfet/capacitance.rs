@@ -273,12 +273,8 @@ impl Jfet {
     /// reverse-biased gate it is typically far larger than the junction's own
     /// leakage, and counting it would overstate the gate's current noise by
     /// the same factor.
-    pub(crate) fn gate_shot_noise_currents(
-        &self,
-        vgs: Value,
-        vgd: Value,
-        temp: Value,
-    ) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn gate_shot_noise_currents(&self, vgs: Value, vgd: Value, temp: Value) -> (Value, Value) {
         if self.junction_gmin == 0.0 {
             return self.gate_current(vgs, vgd, temp);
         }
@@ -648,12 +644,8 @@ impl Jfet {
         (cgs, cgd)
     }
 
-    pub(crate) fn ac_capacitances(
-        &self,
-        vgs: Value,
-        vgd: Value,
-        temp: Value,
-    ) -> (Value, Value, Value) {
+    #[doc(hidden)]
+    pub fn ac_capacitances(&self, vgs: Value, vgd: Value, temp: Value) -> (Value, Value, Value) {
         let cds = if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
             && self.params.hfet_level >= 5
         {
@@ -691,7 +683,8 @@ impl Jfet {
         }
     }
 
-    pub(crate) fn transient_drain_source_capacitance(&self) -> Value {
+    #[doc(hidden)]
+    pub fn transient_drain_source_capacitance(&self) -> Value {
         if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
             && self.params.hfet_level >= 5
         {
@@ -798,7 +791,8 @@ impl Jfet {
         Ok((gm, gds, ggs, ggd))
     }
 
-    pub(crate) fn ac_imag_feedback_terms_at_frequency(
+    #[doc(hidden)]
+    pub fn ac_imag_feedback_terms_at_frequency(
         &self,
         voltages: &[Value],
         frequency_hz: Value,
@@ -821,7 +815,8 @@ impl Jfet {
         Ok(Some((xgm, xgds)))
     }
 
-    pub(crate) fn stamp_small_signal_ac(
+    #[doc(hidden)]
+    pub fn stamp_small_signal_ac(
         &self,
         voltages: &[Value],
         frequency_hz: Value,
@@ -859,7 +854,8 @@ impl Jfet {
     /// Electrical coordinates for the classic model's conservative charges.
     /// Tied terminals and explicitly absent junction capacitances carry no
     /// independent charge; other JFET-family models need their own adapters.
-    pub(crate) fn classic_charge_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 2] {
+    #[doc(hidden)]
+    pub fn classic_charge_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 2] {
         if self.params.channel_model != JfetChannelModel::ShichmanHodges
             || self.junction_scale() == 0.0
         {

@@ -5,14 +5,16 @@ use rspice_veriloga_runtime::arithmetic::{ArithmeticError, sum_products};
 impl Vccs {
     /// One-based MNA nodes; zero terminals are omitted by each matrix adapter.
     #[inline]
-    pub(crate) fn conductance_entries(&self, index: usize) -> [(NodeId, NodeId, Value); 4] {
+    #[doc(hidden)]
+    pub fn conductance_entries(&self, index: usize) -> [(NodeId, NodeId, Value); 4] {
         let (p, n) = (self.node_pos[index], self.node_neg[index]);
         let (cp, cn) = (self.ctrl_pos[index], self.ctrl_neg[index]);
         let gm = self.transconductances[index];
         [(p, cp, gm), (p, cn, -gm), (n, cp, -gm), (n, cn, gm)]
     }
 
-    pub(crate) fn current_at_control_voltage(
+    #[doc(hidden)]
+    pub fn current_at_control_voltage(
         &self,
         index: usize,
         positive: Value,
@@ -22,7 +24,8 @@ impl Vccs {
         sum_products([(positive, gm), (negative, -gm)].into_iter())
     }
 
-    pub(crate) fn stamp_physical_current(
+    #[doc(hidden)]
+    pub fn stamp_physical_current(
         &self,
         index: usize,
         positive: Value,
@@ -40,7 +43,8 @@ impl Vccs {
 }
 
 impl Cccs {
-    pub(crate) fn current_at_control_current(
+    #[doc(hidden)]
+    pub fn current_at_control_current(
         &self,
         index: usize,
         control: Value,
@@ -48,7 +52,8 @@ impl Cccs {
         sum_products([(control, self.gains[index])].into_iter())
     }
 
-    pub(crate) fn stamp_physical_current(
+    #[doc(hidden)]
+    pub fn stamp_physical_current(
         &self,
         index: usize,
         control: Value,

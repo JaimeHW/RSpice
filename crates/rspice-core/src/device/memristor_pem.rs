@@ -31,10 +31,12 @@ pub const XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE: &str = "filep.dat";
 pub const XYCE_PEM_DEFAULT_NEGATIVE_TABLE_FILE: &str = "filem.dat";
 
 /// Hard byte budget for one externally supplied PEM state table.
-pub(crate) const XYCE_PEM_MAX_TABLE_BYTES: usize = 64 * 1024 * 1024;
+#[doc(hidden)]
+pub const XYCE_PEM_MAX_TABLE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Hard point-count budget for one externally supplied PEM state table.
-pub(crate) const XYCE_PEM_MAX_TABLE_POINTS: usize = 1_000_000;
+#[doc(hidden)]
+pub const XYCE_PEM_MAX_TABLE_POINTS: usize = 1_000_000;
 
 /// Parameters on a Xyce `.MODEL ... MEMRISTOR LEVEL=4` card.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -251,8 +253,9 @@ impl XycePemPwlTable {
     }
 
     #[inline]
-    #[cfg(test)]
-    pub(crate) fn shares_storage_with(&self, other: &Self) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn shares_storage_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.points, &other.points)
     }
 
@@ -422,7 +425,8 @@ pub fn parse_xyce_7_10_legacy_two_column_table(
 /// Parse a PEM table while enforcing a hard point-count budget before each
 /// allocation. This is the resource-safe entry point used for external model
 /// data; the limit is independent from the byte cap applied by the loader.
-pub(crate) fn parse_xyce_7_10_legacy_two_column_table_bounded(
+#[doc(hidden)]
+pub fn parse_xyce_7_10_legacy_two_column_table_bounded(
     source_name: &str,
     text: &str,
     max_points: usize,

@@ -96,7 +96,8 @@ pub enum JfetChannelModel {
 /// error.  Keeping failure distinct from a zero-valued term prevents invalid
 /// model arithmetic from silently removing authored device physics.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum JfetAcError {
+#[doc(hidden)]
+pub enum JfetAcError {
     InvalidValue {
         quantity: &'static str,
         value: Value,
@@ -181,7 +182,8 @@ impl MesaLevel2Linearization {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Jfet2ChargeState {
+#[doc(hidden)]
+pub struct Jfet2ChargeState {
     pub qgs: Value,
     pub qgd: Value,
     pub cgs: Value,
@@ -507,17 +509,19 @@ pub struct JfetIndices {
 /// Compact accepted nonlinear state; topology and resolved model parameters
 /// remain owned by the freshly elaborated target.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedJfetNonlinearCheckpoint {
-    pub(crate) instance_name: String,
-    pub(crate) runtime_tag: String,
-    pub(crate) values: [Value; 24],
-    pub(crate) flags: [bool; 4],
+#[doc(hidden)]
+pub struct AcceptedJfetNonlinearCheckpoint {
+    pub instance_name: String,
+    pub runtime_tag: String,
+    pub values: [Value; 24],
+    pub flags: [bool; 4],
     /// The first eight bias/history lanes use NaN only as an uninitialized
     /// startup marker. Encode that state explicitly, with zero wire values.
-    pub(crate) uninitialized_biases: u8,
+    pub uninitialized_biases: u8,
 }
 
-pub(crate) const JFET_CHECKPOINT_RUNTIME_TAGS: [&str; 6] = [
+#[doc(hidden)]
+pub const JFET_CHECKPOINT_RUNTIME_TAGS: [&str; 6] = [
     "jfet-shichman-hodges-v1",
     "jfet-xyce-sydney-v1",
     "jfet-parker-skellern-v1",
@@ -527,7 +531,8 @@ pub(crate) const JFET_CHECKPOINT_RUNTIME_TAGS: [&str; 6] = [
 ];
 
 impl AcceptedJfetNonlinearCheckpoint {
-    pub(crate) fn validate_numeric_state(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_numeric_state(&self) -> Result<(), String> {
         let [.., junction_gmin, gate_generation_scale] = self.values;
         if self.values.iter().any(|value| !value.is_finite())
             || junction_gmin < 0.0
@@ -547,7 +552,41 @@ impl AcceptedJfetNonlinearCheckpoint {
 }
 
 impl Jfet {
-    pub(crate) fn checkpoint_runtime_tag(&self) -> &'static str {
+    /// The authored absolute instance TEMP its noise sources radiate at, or
+    /// `None` for ambient plus `noise_dtemp`.
+    #[doc(hidden)]
+    pub fn noise_absolute_temperature(&self) -> Option<Value> {
+        self.noise_absolute_temperature
+    }
+
+    /// Record the authored absolute instance TEMP for the noise sources.
+    #[doc(hidden)]
+    pub fn set_noise_absolute_temperature(&mut self, temperature: Option<Value>) {
+        self.noise_absolute_temperature = temperature;
+    }
+
+    /// Move the model's drain resistance out of the device: the drain becomes
+    /// the internal node the builder's series resistor ends on, the model RD
+    /// is zeroed so the device does not stamp it twice, and the lead keeps
+    /// its conductance for terminal-current reports.
+    #[doc(hidden)]
+    pub fn externalize_drain_resistance(&mut self, internal_drain: NodeId, rd: Value) {
+        self.drain = internal_drain;
+        self.params.rd = 0.0;
+        self.external_lead_conductances[0] = 1.0 / rd;
+    }
+
+    /// The source-side counterpart of
+    /// [`externalize_drain_resistance`](Self::externalize_drain_resistance).
+    #[doc(hidden)]
+    pub fn externalize_source_resistance(&mut self, internal_source: NodeId, rs: Value) {
+        self.source = internal_source;
+        self.params.rs = 0.0;
+        self.external_lead_conductances[1] = 1.0 / rs;
+    }
+
+    #[doc(hidden)]
+    pub fn checkpoint_runtime_tag(&self) -> &'static str {
         match self.params.channel_model {
             JfetChannelModel::ShichmanHodges => JFET_CHECKPOINT_RUNTIME_TAGS[0],
             JfetChannelModel::XyceSydney => JFET_CHECKPOINT_RUNTIME_TAGS[1],
@@ -558,9 +597,8 @@ impl Jfet {
         }
     }
 
-    pub(crate) fn accepted_nonlinear_checkpoint(
-        &self,
-    ) -> Result<AcceptedJfetNonlinearCheckpoint, String> {
+    #[doc(hidden)]
+    pub fn accepted_nonlinear_checkpoint(&self) -> Result<AcceptedJfetNonlinearCheckpoint, String> {
         let mut checkpoint = AcceptedJfetNonlinearCheckpoint {
             instance_name: self.name.clone(),
             runtime_tag: self.checkpoint_runtime_tag().to_string(),
@@ -608,7 +646,8 @@ impl Jfet {
         Ok(checkpoint)
     }
 
-    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_nonlinear_checkpoint(
         &self,
         checkpoint: &AcceptedJfetNonlinearCheckpoint,
     ) -> Result<(), String> {
@@ -629,7 +668,8 @@ impl Jfet {
         checkpoint.validate_numeric_state()
     }
 
-    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_nonlinear_checkpoint(
         &mut self,
         checkpoint: &AcceptedJfetNonlinearCheckpoint,
     ) -> Result<(), String> {

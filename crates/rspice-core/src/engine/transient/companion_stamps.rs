@@ -510,18 +510,18 @@ impl Engine {
             br1,
             tl.node2_pos,
             tl.node2_neg,
-            -two_port.cosh_theta,
+            -two_port.cosh_theta(),
         );
-        matrix.add(br1 - 1, br2 - 1, two_port.transfer_impedance);
+        matrix.add(br1 - 1, br2 - 1, two_port.transfer_impedance());
         Self::stamp_txl_voltage_row(
             matrix,
             br2,
             tl.node2_pos,
             tl.node2_neg,
-            -two_port.transfer_admittance,
+            -two_port.transfer_admittance(),
         );
         matrix.add(br2 - 1, br1 - 1, 1.0);
-        matrix.add(br2 - 1, br2 - 1, two_port.cosh_theta);
+        matrix.add(br2 - 1, br2 - 1, two_port.cosh_theta());
         rhs[br1 - 1] = 0.0;
         rhs[br2 - 1] = 0.0;
     }

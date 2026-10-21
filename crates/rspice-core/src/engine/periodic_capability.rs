@@ -736,10 +736,10 @@ fn diode_has_exact_periodic_residual_form(diode: &crate::device::Diode) -> bool 
         && diode.recombination_saturation_current == 0.0
         && diode.sidewall_saturation_current == 0.0
         && diode.sidewall_cj0 == 0.0
-        && !diode.tunneling.bottom_given
-        && !diode.tunneling.sidewall_given
-        && diode.tunneling.bottom == 0.0
-        && diode.tunneling.sidewall == 0.0
+        && !diode.tunneling().bottom_given
+        && !diode.tunneling().sidewall_given
+        && diode.tunneling().bottom == 0.0
+        && diode.tunneling().sidewall == 0.0
         && diode.overlap_capacitance == 0.0
 }
 
@@ -774,7 +774,7 @@ fn mos_has_exact_periodic_residual_form(mos: &crate::device::Mosfet) -> bool {
 /// Whether a JFET reduces exactly to the unscaled Shichman-Hodges form.
 fn jfet_has_exact_periodic_residual_form(jfet: &crate::device::Jfet) -> bool {
     jfet.params.channel_model == crate::device::JfetChannelModel::ShichmanHodges
-        && jfet.params.doping_tail == 1.0
+        && jfet.params.doping_tail() == 1.0
         && jfet.m == 1.0
         && jfet.area == 1.0
         && jfet.params.fc == 0.5

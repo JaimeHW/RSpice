@@ -13,7 +13,8 @@ impl JilesAthertonInductor {
     /// This is the converged constitutive initialization, not a reproduction
     /// of Xyce 7.10's incidental DC evaluation count. Accepted history and
     /// transient candidate caches are never modified.
-    pub(crate) fn xyce_core_level2_dc_mid(&self, happ: Value) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn xyce_core_level2_dc_mid(&self, happ: Value) -> Option<Value> {
         if !self.is_xyce_core_level2() || !happ.is_finite() {
             return None;
         }

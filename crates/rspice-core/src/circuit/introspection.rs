@@ -1555,9 +1555,11 @@ impl CircuitData {
         }
         for tline in &mut self.coupled_tlines {
             if let Some(branches) = tline.native_branch_ordinals() {
-                let matrix_indices = branches.matrix_indices_from_ordinals(self.num_nodes);
+                let (b1, b2) = branches
+                    .matrix_indices_from_ordinals(self.num_nodes)
+                    .into_parts();
                 tline
-                    .set_native_branch_matrix_indices(matrix_indices.b1, matrix_indices.b2)
+                    .set_native_branch_matrix_indices(b1, b2)
                     .expect("validated CPL native branch ordinals resolve to matrix indices");
             }
         }

@@ -332,22 +332,26 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn body_source_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn body_source_charge_nodes(&self) -> (NodeId, NodeId) {
         self.body_source_diode_nodes()
     }
 
     #[inline]
-    pub(crate) fn body_drain_charge_nodes(&self) -> (NodeId, NodeId) {
+    #[doc(hidden)]
+    pub fn body_drain_charge_nodes(&self) -> (NodeId, NodeId) {
         self.body_drain_diode_nodes()
     }
 
     #[inline]
-    pub(crate) fn body_source_charge_branch_voltage(&self, vbs: Value) -> Value {
+    #[doc(hidden)]
+    pub fn body_source_charge_branch_voltage(&self, vbs: Value) -> Value {
         self.body_source_diode_voltage(vbs)
     }
 
     #[inline]
-    pub(crate) fn body_drain_charge_branch_voltage(&self, vds: Value, vbs: Value) -> Value {
+    #[doc(hidden)]
+    pub fn body_drain_charge_branch_voltage(&self, vds: Value, vbs: Value) -> Value {
         self.body_drain_diode_voltage(vds, vbs)
     }
 
@@ -358,7 +362,8 @@ impl Mosfet {
     /// left out of the transient hot path.  Bit 0 denotes source-body charge;
     /// bit 1 denotes drain-body charge.
     #[inline]
-    pub(crate) fn body_junction_charge_mask(&self) -> u8 {
+    #[doc(hidden)]
+    pub fn body_junction_charge_mask(&self) -> u8 {
         let source_active = self.source_zero_bias_bottom_junction_capacitance() > 0.0
             || self.source_zero_bias_sidewall_junction_capacitance() > 0.0;
         let drain_active = self.drain_zero_bias_bottom_junction_capacitance() > 0.0
@@ -367,7 +372,8 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn body_junction_charge_mask_with_constants(
+    #[doc(hidden)]
+    pub fn body_junction_charge_mask_with_constants(
         &self,
         constants: &ClassicMosTransientConstants,
     ) -> u8 {
@@ -489,10 +495,8 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn body_source_junction_charge_and_capacitance_at(
-        &self,
-        vbs: Value,
-    ) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn body_source_junction_charge_and_capacitance_at(&self, vbs: Value) -> (Value, Value) {
         self.body_junction_charge_and_capacitance(
             self.body_source_diode_voltage(vbs),
             self.source_zero_bias_bottom_junction_capacitance(),
@@ -501,7 +505,8 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn body_drain_junction_charge_and_capacitance_at(
+    #[doc(hidden)]
+    pub fn body_drain_junction_charge_and_capacitance_at(
         &self,
         vds: Value,
         vbs: Value,

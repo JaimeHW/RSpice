@@ -155,7 +155,8 @@ impl DiodeTemperatureModel {
 /// breakdown but not tunneling is not merely imprecise in reverse, it is
 /// wrong by orders of magnitude.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct DiodeTunneling {
+#[doc(hidden)]
+pub struct DiodeTunneling {
     /// Bottom tunneling saturation current, scaled by AREA (JTUN).
     pub bottom: Value,
     /// Sidewall tunneling saturation current, scaled by PJ (JTUNSW).
@@ -204,7 +205,8 @@ pub struct DiodeIndices {
 /// breakdown voltage is the already temperature-adjusted, IBV-matched value,
 /// not the raw value authored on the model card.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ResolvedDiodeJunction {
+#[doc(hidden)]
+pub struct ResolvedDiodeJunction {
     saturation_current: Value,
     emission_voltage: Value,
     breakdown: Option<(Value, Value)>,
@@ -227,7 +229,8 @@ impl ResolvedDiodeJunction {
     /// Physical current from anode to cathode and its exact voltage
     /// derivative.  The three regions are Xyce/ngspice's forward
     /// exponential, cubic reverse continuation, and avalanche breakdown.
-    pub(crate) fn current_and_conductance(self, voltage: Value) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn current_and_conductance(self, voltage: Value) -> (Value, Value) {
         let isat = self.saturation_current;
         let nvt = self.emission_voltage;
         if !(isat.is_finite() && isat > 0.0 && nvt.is_finite() && nvt > 0.0) {
@@ -254,7 +257,8 @@ impl ResolvedDiodeJunction {
         (-isat * (1.0 + argument), isat * 3.0 * argument / voltage)
     }
 
-    pub(crate) fn physical_parameter_error(self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn physical_parameter_error(self) -> Option<&'static str> {
         if !self.saturation_current.is_finite() || self.saturation_current < 0.0 {
             return Some("diode saturation current must be finite and nonnegative");
         }
@@ -274,8 +278,9 @@ impl ResolvedDiodeJunction {
         None
     }
 
-    #[cfg(test)]
-    pub(crate) fn breakdown_voltage(self) -> Option<Value> {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn breakdown_voltage(self) -> Option<Value> {
         self.breakdown.map(|(voltage, _)| voltage)
     }
 }
@@ -485,22 +490,24 @@ pub struct Diode {
 /// Static model, topology, temperature, and linked-index fields remain on the
 /// live device and are not recopied for every transient timestep.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct DiodeNonlinearState {
-    pub(crate) prev_vd: Value,
-    pub(crate) prev_vd_old: Value,
-    pub(crate) prev_id: Value,
-    pub(crate) prev_gd: Value,
-    pub(crate) candidate_eval_valid: bool,
-    pub(crate) junction_gmin: Value,
-    pub(crate) junction_history_valid: bool,
-    pub(crate) last_limited_vd: Value,
-    pub(crate) limited: bool,
-    pub(crate) last_stamp_vd: Value,
-    pub(crate) last_stamp_id: Value,
-    pub(crate) last_stamp_gd: Value,
+#[doc(hidden)]
+pub struct DiodeNonlinearState {
+    pub prev_vd: Value,
+    pub prev_vd_old: Value,
+    pub prev_id: Value,
+    pub prev_gd: Value,
+    pub candidate_eval_valid: bool,
+    pub junction_gmin: Value,
+    pub junction_history_valid: bool,
+    pub last_limited_vd: Value,
+    pub limited: bool,
+    pub last_stamp_vd: Value,
+    pub last_stamp_id: Value,
+    pub last_stamp_gd: Value,
 }
 
-pub(crate) const DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "native-diode-v1";
+#[doc(hidden)]
+pub const DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "native-diode-v1";
 
 /// Accepted native-diode Newton/limiter state carried across a transient seam.
 ///
@@ -510,17 +517,25 @@ pub(crate) const DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "native-diode-v1";
 /// by rejected-trial rollback; model parameters, topology and linked matrix
 /// indices remain owned by the freshly elaborated live device.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedDiodeNonlinearCheckpoint {
-    pub(crate) instance_name: String,
-    pub(crate) runtime_tag: String,
-    pub(crate) state: DiodeNonlinearState,
+#[doc(hidden)]
+pub struct AcceptedDiodeNonlinearCheckpoint {
+    pub instance_name: String,
+    pub runtime_tag: String,
+    pub state: DiodeNonlinearState,
 }
 
 impl Diode {
+    /// The band-to-band tunneling branch as the model card resolved it.
+    #[doc(hidden)]
+    pub fn tunneling(&self) -> &DiodeTunneling {
+        &self.tunneling
+    }
+
     /// Install a solved periodic bias as the accepted Newton anchor. It is
     /// already a physical solution, so the next load must not use OFF/vcrit
     /// operating-point startup or a fabricated zero-voltage limiter history.
-    pub(crate) fn seed_accepted_periodic_bias(&mut self, voltage: Value) {
+    #[doc(hidden)]
+    pub fn seed_accepted_periodic_bias(&mut self, voltage: Value) {
         let (current, conductance) = self.current_and_conductance(voltage);
         self.prev_vd = voltage;
         self.prev_vd_old = voltage;
@@ -536,7 +551,8 @@ impl Diode {
         self.last_stamp_gd.set(stamped_conductance);
     }
 
-    pub(crate) fn nonlinear_state_snapshot(&self) -> DiodeNonlinearState {
+    #[doc(hidden)]
+    pub fn nonlinear_state_snapshot(&self) -> DiodeNonlinearState {
         DiodeNonlinearState {
             prev_vd: self.prev_vd,
             prev_vd_old: self.prev_vd_old,
@@ -553,7 +569,8 @@ impl Diode {
         }
     }
 
-    pub(crate) fn restore_nonlinear_state(&mut self, state: DiodeNonlinearState) {
+    #[doc(hidden)]
+    pub fn restore_nonlinear_state(&mut self, state: DiodeNonlinearState) {
         self.prev_vd = state.prev_vd;
         self.prev_vd_old = state.prev_vd_old;
         self.prev_id = state.prev_id;
@@ -569,7 +586,8 @@ impl Diode {
         self.last_stamp_gd.set(state.last_stamp_gd);
     }
 
-    pub(crate) fn accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn accepted_nonlinear_checkpoint(
         &self,
     ) -> Result<AcceptedDiodeNonlinearCheckpoint, String> {
         let checkpoint = AcceptedDiodeNonlinearCheckpoint {
@@ -581,7 +599,8 @@ impl Diode {
         Ok(checkpoint)
     }
 
-    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_nonlinear_checkpoint(
         &self,
         checkpoint: &AcceptedDiodeNonlinearCheckpoint,
     ) -> Result<(), String> {
@@ -626,7 +645,8 @@ impl Diode {
         Ok(())
     }
 
-    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_nonlinear_checkpoint(
         &mut self,
         checkpoint: &AcceptedDiodeNonlinearCheckpoint,
     ) -> Result<(), String> {
@@ -721,7 +741,8 @@ impl Diode {
     /// anode. Call after temperature processing, so both keep the breakdown
     /// voltage diotemp.c matches against the total saturation current. The
     /// twin carries no series resistance of its own.
-    pub(crate) fn split_rsw_sidewall(&mut self, name: String, sidewall_node: NodeId) -> Diode {
+    #[doc(hidden)]
+    pub fn split_rsw_sidewall(&mut self, name: String, sidewall_node: NodeId) -> Diode {
         let mut sidewall = self.clone();
         sidewall.name = name;
         sidewall.node_anode = sidewall_node;
@@ -737,14 +758,16 @@ impl Diode {
     /// The authored diode this instance is the split RSW sidewall of. Its
     /// currents, power and operating point belong to that device in every
     /// user-facing report.
-    pub(crate) fn split_sidewall_owner(&self) -> Option<&str> {
+    #[doc(hidden)]
+    pub fn split_sidewall_owner(&self) -> Option<&str> {
         self.sidewall_owner.as_deref()
     }
 
     /// The device a user knows this instance as: the authored diode, and for
     /// a split RSW sidewall, its owner's sidewall (`D1 sidewall`). Messages
     /// name this rather than the builder's `D1.__sw` twin.
-    pub(crate) fn reported_label(&self) -> std::borrow::Cow<'_, str> {
+    #[doc(hidden)]
+    pub fn reported_label(&self) -> std::borrow::Cow<'_, str> {
         match self.split_sidewall_owner() {
             Some(owner) => std::borrow::Cow::Owned(format!("{owner} sidewall")),
             None => std::borrow::Cow::Borrowed(&self.name),
@@ -754,7 +777,8 @@ impl Diode {
     /// Operating RSW of a split sidewall: ngspice scales its conductance by
     /// PJ·M and divides by the RS temperature polynomial (diotemp.c:262-268).
     /// Call after temperature processing and perimeter scaling.
-    pub(crate) fn rsw_resistance(&self, rsw: Value) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn rsw_resistance(&self, rsw: Value) -> Option<Value> {
         let factor = DiodeTemperatureModel::quadratic_factor(
             self.temperature_model.trs1,
             self.temperature_model.trs2,
@@ -783,7 +807,8 @@ impl Diode {
     /// The instance `IC=` junction voltage, read only by the `UIC` transient
     /// startup: `dioload.c:153-157` requires
     /// `MODEINITJCT && MODETRANOP && MODEUIC`.
-    pub(crate) fn transient_initial_condition(&self) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn transient_initial_condition(&self) -> Option<Value> {
         self.initial_condition
     }
 
@@ -1364,7 +1389,8 @@ impl Diode {
     }
 
     /// Select ngspice's native diode extension semantics.
-    pub(crate) fn set_ngspice_compatibility(&mut self, enabled: bool) {
+    #[doc(hidden)]
+    pub fn set_ngspice_compatibility(&mut self, enabled: bool) {
         self.ngspice_dialect = enabled;
         if enabled && !self.breakdown_emission_given {
             self.breakdown_emission_coefficient = self.n;
@@ -1378,7 +1404,8 @@ impl Diode {
     /// Select Xyce's native transient device-convergence status policy for
     /// this run.  This is deliberately separate from the dialect selector so
     /// DC startup and explicit `ENFORCEDEVICECONV=1` remain strict.
-    pub(crate) fn set_native_xyce_transient_convergence(&mut self, enabled: bool) {
+    #[doc(hidden)]
+    pub fn set_native_xyce_transient_convergence(&mut self, enabled: bool) {
         self.native_xyce_transient_convergence = enabled;
     }
 
@@ -1421,7 +1448,8 @@ impl Diode {
     /// conduction Jacobian during a Newton load; other dialects retain the
     /// raw companion voltage used by their existing transient contract.
     #[inline]
-    pub(crate) fn transient_charge_voltage(&self, vd_raw: Value) -> Value {
+    #[doc(hidden)]
+    pub fn transient_charge_voltage(&self, vd_raw: Value) -> Value {
         if self.xyce_dialect {
             self.limited_junction_voltage_for(vd_raw)
         } else {
@@ -1721,7 +1749,8 @@ impl Diode {
     /// multiplicity at LEVEL=3. IBV feeds the forward/reverse matching loop
     /// that sets the effective breakdown voltage, so getting this wrong moves
     /// the knee rather than just its height.
-    pub(crate) fn apply_instance_scaling(&mut self, area: Value, multiplicity: Value) {
+    #[doc(hidden)]
+    pub fn apply_instance_scaling(&mut self, area: Value, multiplicity: Value) {
         let scale = area * multiplicity;
         self.candidate_eval_valid = false;
         self.multiplicity *= multiplicity;
@@ -1759,7 +1788,8 @@ impl Diode {
     }
 
     /// Whether this instance can store junction, diffusion, or overlap charge.
-    pub(crate) fn has_charge_storage(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_charge_storage(&self) -> bool {
         self.cj0 != 0.0
             || self.tt != 0.0
             || self.sidewall_cj0 != 0.0
@@ -1769,7 +1799,8 @@ impl Diode {
     // Xyce Model::processParams caps bottom M at .9. Preserve the authored
     // value for the other dialects and use this same coefficient for charge,
     // recombination, temperature mapping and physical-event regularity.
-    pub(crate) fn bottom_grading_coefficient(&self) -> Value {
+    #[doc(hidden)]
+    pub fn bottom_grading_coefficient(&self) -> Value {
         if self.xyce_dialect && self.m > 0.9 {
             0.9
         } else {
@@ -1779,7 +1810,8 @@ impl Diode {
 
     /// Resolved bottom-junction continuation boundary, shared with periodic
     /// projection so every analysis uses the native diode's clipped law.
-    pub(crate) fn bottom_depletion_coefficient(&self) -> Value {
+    #[doc(hidden)]
+    pub fn bottom_depletion_coefficient(&self) -> Value {
         self.fc.clamp(0.0, 0.95)
     }
 
@@ -1860,7 +1892,8 @@ impl Diode {
     ///
     /// Returns `(area, perimeter)` — both still un-multiplied by `M`, which
     /// `apply_instance_scaling` and `set_sidewall_perimeter` apply.
-    pub(crate) fn geometric_area_and_perimeter(
+    #[doc(hidden)]
+    pub fn geometric_area_and_perimeter(
         width: Value,
         length: Value,
         multiplicity: Value,
@@ -1882,7 +1915,8 @@ impl Diode {
     /// overlaps between the diode's routing and the bulk, so they add a fixed
     /// capacitance rather than a junction one.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn set_overlap_capacitance(
+    #[doc(hidden)]
+    pub fn set_overlap_capacitance(
         &mut self,
         multiplicity: Value,
         width_metal: Value,
@@ -1962,7 +1996,8 @@ impl Diode {
     /// Discretized Q contribution shared by ordinary TRAN and shooting PSS.
     /// Accepted history is borrowed; Newton loads never commit it. Reuse the
     /// device's linked matrix indices instead of allocating a second stamp map.
-    pub(crate) fn stamp_charge_companion(
+    #[doc(hidden)]
+    pub fn stamp_charge_companion(
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -1986,7 +2021,8 @@ impl Diode {
     /// Residual validation must instead rebuild the companion at the actual
     /// candidate bias, otherwise a limiter companion can masquerade as a
     /// converged nonlinear solution.
-    pub(crate) fn stamp_static_probe_direct(
+    #[doc(hidden)]
+    pub fn stamp_static_probe_direct(
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -1997,7 +2033,8 @@ impl Diode {
         self.stamp_linearized_direct(matrix, rhs, vd, stamped_id, stamped_gd);
     }
 
-    pub(crate) fn terminal_voltage(&self, voltages: &[Value]) -> Value {
+    #[doc(hidden)]
+    pub fn terminal_voltage(&self, voltages: &[Value]) -> Value {
         let va = if self.node_anode == 0 {
             0.0
         } else {
@@ -2062,12 +2099,14 @@ impl Diode {
     /// publication must therefore retain it alongside the model conduction
     /// current before the integration-owned dQ/dt term is added.
     #[inline]
-    pub(crate) fn stamped_conduction_current(&self, vd: Value) -> Value {
+    #[doc(hidden)]
+    pub fn stamped_conduction_current(&self, vd: Value) -> Value {
         self.stamped_current_and_conductance(vd).0
     }
 
     /// Physical F and dF/dV at an arbitrary bias, without Newton limiting.
-    pub(crate) fn stamped_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn stamped_current_and_conductance(&self, vd: Value) -> (Value, Value) {
         self.current_and_conductance_with_gmin(vd, self.stamped_junction_gmin())
     }
 
@@ -2085,7 +2124,8 @@ impl Diode {
     /// by implicit algebraic PSS islands. Breakdown matching and recombination
     /// have dialect-specific joins; injection knees need a separate proof.
     /// This predicate does not alter the model law for any analysis.
-    pub(crate) fn has_monotone_c1_conduction(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_monotone_c1_conduction(&self) -> bool {
         let finite_nonnegative = |value: Value| value.is_finite() && value >= 0.0;
         !self.has_charge_storage()
             && self.bv.is_none()
@@ -2443,7 +2483,8 @@ impl Diode {
     /// deliberately outside this base characteristic and remain guarded by
     /// HB capability admission.  Breakdown belongs to the base Level-1
     /// junction and is therefore retained here.
-    pub(crate) fn resolved_level_one_junction(&self) -> ResolvedDiodeJunction {
+    #[doc(hidden)]
+    pub fn resolved_level_one_junction(&self) -> ResolvedDiodeJunction {
         self.resolved_bottom_junction(self.bottom_saturation_current(), self.n)
     }
 
@@ -2451,7 +2492,8 @@ impl Diode {
     /// projection is admitted.  Model parsing normally guarantees these
     /// invariants, but the circuit/device APIs remain programmatically
     /// constructible and must fail closed rather than silently drop BV.
-    pub(crate) fn exact_hb_breakdown_parameter_error(&self) -> Option<&'static str> {
+    #[doc(hidden)]
+    pub fn exact_hb_breakdown_parameter_error(&self) -> Option<&'static str> {
         let bv = self.bv?;
         if !bv.is_finite() || bv < 0.0 {
             return Some("diode BV must be finite and nonnegative");

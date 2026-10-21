@@ -419,10 +419,10 @@ impl CircuitData {
                 p2: tl.node2_pos,
                 n2: tl.node2_neg,
                 c1: 1.0,
-                c2: -two_port.cosh_theta,
+                c2: -two_port.cosh_theta(),
             },
         );
-        matrix.add(br1 - 1, br2 - 1, two_port.transfer_impedance);
+        matrix.add(br1 - 1, br2 - 1, two_port.transfer_impedance());
         Self::stamp_branch_voltage_row_direct(
             matrix,
             br2,
@@ -431,12 +431,12 @@ impl CircuitData {
                 n1: tl.node2_neg,
                 p2: 0,
                 n2: 0,
-                c1: -two_port.transfer_admittance,
+                c1: -two_port.transfer_admittance(),
                 c2: 0.0,
             },
         );
         matrix.add(br2 - 1, br1 - 1, 1.0);
-        matrix.add(br2 - 1, br2 - 1, two_port.cosh_theta);
+        matrix.add(br2 - 1, br2 - 1, two_port.cosh_theta());
     }
 
     #[inline]
@@ -464,10 +464,10 @@ impl CircuitData {
                 p2: tl.node2_pos,
                 n2: tl.node2_neg,
                 c1: 1.0,
-                c2: -two_port.cosh_theta,
+                c2: -two_port.cosh_theta(),
             },
         );
-        matrix.push(br1 - 1, br2 - 1, two_port.transfer_impedance);
+        matrix.push(br1 - 1, br2 - 1, two_port.transfer_impedance());
         Self::stamp_branch_voltage_row_triplet(
             matrix,
             br2,
@@ -476,12 +476,12 @@ impl CircuitData {
                 n1: tl.node2_neg,
                 p2: 0,
                 n2: 0,
-                c1: -two_port.transfer_admittance,
+                c1: -two_port.transfer_admittance(),
                 c2: 0.0,
             },
         );
         matrix.push(br2 - 1, br1 - 1, 1.0);
-        matrix.push(br2 - 1, br2 - 1, two_port.cosh_theta);
+        matrix.push(br2 - 1, br2 - 1, two_port.cosh_theta());
     }
 
     #[inline]

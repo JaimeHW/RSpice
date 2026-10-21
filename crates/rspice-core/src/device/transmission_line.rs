@@ -37,9 +37,11 @@ const TLINE_DC_SHORT_RESISTANCE: Value = 1e-3;
 /// full history convolution rather than a lossy tail truncation.
 const DISTRIBUTED_RLC_CHOP_RELTOL: Value = 0.0;
 /// Default relative tolerance for ngspice-style LTRA straight-line compaction.
-pub(crate) const DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT: Value = 1e-3;
+#[doc(hidden)]
+pub const DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT: Value = 1e-3;
 /// Default absolute tolerance for ngspice-style LTRA straight-line compaction.
-pub(crate) const DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT: Value = 1e-12;
+#[doc(hidden)]
+pub const DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT: Value = 1e-12;
 
 mod delay;
 mod distributed;
@@ -53,12 +55,15 @@ use distributed::{
     distributed_rlc_coefficients, distributed_rlc_max_safe_step,
 };
 pub use line::TransmissionLine;
-pub(crate) use line::{
+#[doc(hidden)]
+pub use line::{
     DistributedRlgc, LtraRgTwoPort, TransmissionLineCheckpoint, TransmissionLineHistoryEvent,
     TransmissionLineTimeSide,
 };
-pub(crate) use response::TlineTransientResponse;
-pub(crate) use txl::TxlTransientStamp;
+#[doc(hidden)]
+pub use response::TlineTransientResponse;
+#[doc(hidden)]
+pub use txl::TxlTransientStamp;
 
 #[cfg(test)]
 mod ltra_oracle_replay {

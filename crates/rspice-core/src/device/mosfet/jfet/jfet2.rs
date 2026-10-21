@@ -478,7 +478,8 @@ impl Jfet {
         }
     }
 
-    pub(crate) fn jfet2_next_transient_memory(
+    #[doc(hidden)]
+    pub fn jfet2_next_transient_memory(
         &self,
         vgs: Value,
         vgd: Value,
@@ -511,7 +512,8 @@ impl Jfet {
         (vgstrap, vgdtrap, terms.power)
     }
 
-    pub(crate) fn refresh_jfet2_transient_operating_terms(
+    #[doc(hidden)]
+    pub fn refresh_jfet2_transient_operating_terms(
         &mut self,
         voltages: &[Value],
         prev_vgstrap: Value,
@@ -984,7 +986,8 @@ impl Jfet {
         }
     }
 
-    pub(crate) fn analytic_gate_charge_state(
+    #[doc(hidden)]
+    pub fn analytic_gate_charge_state(
         &self,
         vgs: Value,
         vgd: Value,

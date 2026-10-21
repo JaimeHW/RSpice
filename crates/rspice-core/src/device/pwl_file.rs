@@ -152,7 +152,8 @@ impl PwlWaveform {
 
     /// Physical one-sided value at a repeat seam. Negative time scaling
     /// reverses which raw-clock side belongs to the outgoing physical interval.
-    pub(crate) fn limit_at_repeating(
+    #[doc(hidden)]
+    pub fn limit_at_repeating(
         &self,
         time: Value,
         repeat_from: Option<Value>,
@@ -184,10 +185,8 @@ impl PwlWaveform {
         self.value_at_repeating(time - source_delay, repeat_from)
     }
 
-    pub(crate) fn physical_repeat_geometry(
-        &self,
-        repeat_from: Option<Value>,
-    ) -> Option<(Value, Value)> {
+    #[doc(hidden)]
+    pub fn physical_repeat_geometry(&self, repeat_from: Option<Value>) -> Option<(Value, Value)> {
         crate::numerics::pwl_repeat_geometry(
             self.times[0],
             self.times[self.times.len() - 1],
@@ -204,7 +203,8 @@ impl PwlWaveform {
     /// Regular slope on a physical event side, excluding any impulse at a
     /// repeat seam. Select by forward event clocks; inverse time scaling can
     /// move an exact knot to the wrong segment after rounding.
-    pub(crate) fn derivative_limit_at_repeating(
+    #[doc(hidden)]
+    pub fn derivative_limit_at_repeating(
         &self,
         time: Value,
         repeat_from: Option<Value>,
@@ -298,11 +298,8 @@ impl PwlWaveform {
 
     /// Right-hand source slope in output units per second. A repeat boundary
     /// with a value jump has no finite slope at its published value.
-    pub(crate) fn right_derivative_at_repeating(
-        &self,
-        time: Value,
-        repeat_from: Option<Value>,
-    ) -> Value {
+    #[doc(hidden)]
+    pub fn right_derivative_at_repeating(&self, time: Value, repeat_from: Option<Value>) -> Value {
         let mut mapped = self.repeated_time(time, repeat_from);
         if self.time_scale.is_finite()
             && self.time_scale > 0.0
@@ -444,7 +441,8 @@ impl PwlWaveform {
         self.times.len()
     }
 
-    pub(crate) fn retained_bytes(&self) -> usize {
+    #[doc(hidden)]
+    pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             .saturating_add(
                 self.times
@@ -466,7 +464,8 @@ impl PwlWaveform {
     /// Smallest physical knot interval without subtracting rounded offsets.
     /// Preserve an underflowed scaled interval as zero so the caller cannot
     /// silently certify a waveform whose features are unrepresentable.
-    pub(crate) fn minimum_segment_duration(&self) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn minimum_segment_duration(&self) -> Option<Value> {
         if self.value_scale == 0.0 {
             return None;
         }
@@ -479,7 +478,8 @@ impl PwlWaveform {
     /// A regular prescribed winding current needs finite physical slopes.
     /// Small but nonzero time intervals are valid; machine epsilon is a
     /// relative precision, not a duration below which a ramp becomes a hold.
-    pub(crate) fn has_finite_segment_slopes(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_finite_segment_slopes(&self) -> bool {
         self.times
             .windows(2)
             .zip(self.values.windows(2))
@@ -515,7 +515,8 @@ impl PwlWaveform {
             .map(|t| t * self.time_scale + self.time_offset)
     }
 
-    pub(crate) fn scaled_event_knot_times(
+    #[doc(hidden)]
+    pub fn scaled_event_knot_times(
         &self,
         retain_flat_knots: bool,
     ) -> impl Iterator<Item = Value> + '_ {

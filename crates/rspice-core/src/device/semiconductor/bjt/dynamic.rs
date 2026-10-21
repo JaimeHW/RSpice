@@ -4,7 +4,8 @@ use super::*;
 
 /// A thermal source on the private GP network. Endpoints use the same
 /// internal/external coordinates as the charge and residual operators.
-pub(crate) struct LegacyBjtThermalNoise {
+#[doc(hidden)]
+pub struct LegacyBjtThermalNoise {
     pub mechanism: &'static str,
     pub conductance: Value,
     pub terminals: [(Option<usize>, Option<usize>); 2],
@@ -14,7 +15,8 @@ impl Bjt {
     /// Physical incidence of GP forward transport, without evaluating its
     /// value or Jacobian at a particular bias. Private terminals must have
     /// been promoted before they can identify global equation nodes.
-    pub(crate) fn legacy_forward_transport_nodes(&self) -> Option<(NodeId, NodeId)> {
+    #[doc(hidden)]
+    pub fn legacy_forward_transport_nodes(&self) -> Option<(NodeId, NodeId)> {
         if !self.uses_legacy_gummel_poon() {
             return None;
         }
@@ -34,7 +36,8 @@ impl Bjt {
     /// Nonlinear forward transport in physical collector-to-emitter
     /// orientation. Both junction partials belong to the delayed signal;
     /// this is distinct from the legacy AC compatibility gm+go correction.
-    pub(crate) fn legacy_forward_transport_branch(
+    #[doc(hidden)]
+    pub fn legacy_forward_transport_branch(
         &self,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Option<BjtCurrentBranch> {
@@ -69,7 +72,8 @@ impl Bjt {
     /// voltage, so an error in the one is an error of `|di| / gm` in the
     /// other. The base-collector partial only raises the current a voltage
     /// error moves, so leaving it out keeps that conversion conservative.
-    pub(crate) fn legacy_forward_transport_input(
+    #[doc(hidden)]
+    pub fn legacy_forward_transport_input(
         branch: &BjtCurrentBranch,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> (Value, Value) {
@@ -82,7 +86,8 @@ impl Bjt {
     /// Complete the derivative of the physical base-spreading resistance
     /// for a coherent transient operator. Legacy SPICE Newton/AC freezes R
     /// at each bias; this correction changes its tangent, not its current.
-    pub(crate) fn legacy_base_resistance_jacobian_correction(
+    #[doc(hidden)]
+    pub fn legacy_base_resistance_jacobian_correction(
         &self,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Option<BjtCurrentBranch> {
@@ -117,7 +122,8 @@ impl Bjt {
     /// Forward transconductance affected by GP PTF, before private-node
     /// elimination. ngspice bjtacld.c rotates gm+go, which is dIc/dVbe;
     /// reverse transport, output conductance and charge are not rotated.
-    pub(crate) fn legacy_excess_phase_branch(
+    #[doc(hidden)]
+    pub fn legacy_excess_phase_branch(
         &self,
         internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Option<(Value, BjtCurrentBranch)> {
@@ -148,7 +154,8 @@ impl Bjt {
     /// Convert model-oriented VBIC charge and its voltage gradients to a
     /// physical branch current. Thermal and delay states are polarity independent.
     #[inline]
-    pub(crate) fn charge_branch_polarity(&self, branch: usize) -> Value {
+    #[doc(hidden)]
+    pub fn charge_branch_polarity(&self, branch: usize) -> Value {
         if self.uses_vbic_dynamic_charges() && branch < IDX_QCTH {
             self.polarity()
         } else {
@@ -832,7 +839,8 @@ impl Bjt {
     /// The four-terminal reduction must retain the authored base when an
     /// external BC charge connects it to a privately solved collector. Moving
     /// RBX outside would require a fifth external terminal in that reduction.
-    pub(crate) fn can_externalize_legacy_base_lead(&self) -> bool {
+    #[doc(hidden)]
+    pub fn can_externalize_legacy_base_lead(&self) -> bool {
         !(Self::series_active(self.rci) && self.cjc != 0.0 && self.xcjc != 1.0)
     }
 
@@ -845,15 +853,14 @@ impl Bjt {
             .map(|(node, _)| node)
     }
 
-    pub(crate) fn legacy_external_bc_charge_nodes(&self) -> Option<[NodeId; 2]> {
+    #[doc(hidden)]
+    pub fn legacy_external_bc_charge_nodes(&self) -> Option<[NodeId; 2]> {
         let base = self.legacy_external_bc_base_node()?;
         (self.cjc != 0.0 && self.xcjc != 1.0).then_some([base, self.node_collector])
     }
 
-    pub(crate) fn legacy_external_bc_charge(
-        &self,
-        solution: &[Value],
-    ) -> Option<BjtExternalBcCharge> {
+    #[doc(hidden)]
+    pub fn legacy_external_bc_charge(&self, solution: &[Value]) -> Option<BjtExternalBcCharge> {
         let nodes = self.legacy_external_bc_charge_nodes()?;
         let capacitance = self.cjc - self.cjc * self.xcjc;
         let voltage = |node: NodeId| {
@@ -1052,7 +1059,8 @@ impl Bjt {
     }
 
     /// Frozen-time shot and flicker currents follow the private transient bias.
-    pub(crate) fn legacy_noise_branch_currents_at_state(
+    #[doc(hidden)]
+    pub fn legacy_noise_branch_currents_at_state(
         &self,
         v: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> (Value, Value, Value) {
@@ -1065,7 +1073,8 @@ impl Bjt {
     }
 
     /// Native noise sources use the same physical intrinsic nodes as charge.
-    pub(crate) fn legacy_noise_terminals(&self) -> [(Option<usize>, Option<usize>); 3] {
+    #[doc(hidden)]
+    pub fn legacy_noise_terminals(&self) -> [(Option<usize>, Option<usize>); 3] {
         [
             self.legacy_charge_collector_terminal(),
             self.legacy_charge_base_terminal(),
@@ -1073,7 +1082,8 @@ impl Bjt {
         ]
     }
 
-    pub(crate) fn legacy_private_resistance_noise(
+    #[doc(hidden)]
+    pub fn legacy_private_resistance_noise(
         &self,
         v: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> [LegacyBjtThermalNoise; 7] {
@@ -1290,7 +1300,8 @@ impl Bjt {
         self.build_dynamic_reduction_from_transport(reduction, base_inputs.transport, d_itzf_d_vrth)
     }
 
-    pub(crate) fn charge_snapshot_for_dynamic_state(
+    #[doc(hidden)]
+    pub fn charge_snapshot_for_dynamic_state(
         &self,
         vc: Value,
         vb: Value,
@@ -1327,7 +1338,8 @@ impl Bjt {
     /// approximate cache-key agreement cannot certify an accepted history.
     /// The private solve imposes exact alias constraints and uses any cached
     /// state only as a starting guess for actual internal unknowns.
-    pub(crate) fn physical_charge_snapshot(
+    #[doc(hidden)]
+    pub fn physical_charge_snapshot(
         &self,
         vc: Value,
         vb: Value,
@@ -1356,13 +1368,8 @@ impl Bjt {
         )
     }
 
-    pub(crate) fn charge_snapshot(
-        &self,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-    ) -> BjtChargeSnapshot {
+    #[doc(hidden)]
+    pub fn charge_snapshot(&self, vc: Value, vb: Value, ve: Value, vs: Value) -> BjtChargeSnapshot {
         if self.charge_snapshot_cache_valid.get()
             && self.cache_matches_external_biases(vc, vb, ve, vs)
         {
@@ -1377,7 +1384,8 @@ impl Bjt {
         snapshot
     }
 
-    pub(crate) fn dynamic_internal_state_seed(
+    #[doc(hidden)]
+    pub fn dynamic_internal_state_seed(
         &self,
         vc: Value,
         vb: Value,
@@ -1411,7 +1419,8 @@ impl Bjt {
             .internal_voltages
     }
 
-    pub(crate) fn external_terminal_currents_at_bias(
+    #[doc(hidden)]
+    pub fn external_terminal_currents_at_bias(
         &self,
         vc: Value,
         vb: Value,

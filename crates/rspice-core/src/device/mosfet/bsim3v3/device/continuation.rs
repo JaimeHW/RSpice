@@ -5,7 +5,8 @@ impl Bsim3v3Device {
     /// The NQS storage coordinate is Q/(M*1e-9), not the raw deficit unknown.
     /// Holding it fixed still permits algebraic terminal voltages to change.
     /// Derivatives follow periodic_coupling_nodes, including the hidden node.
-    pub(crate) fn shooting_nqs_state(&self, solution: &[Value]) -> (Value, [Value; 5]) {
+    #[doc(hidden)]
+    pub fn shooting_nqs_state(&self, solution: &[Value]) -> (Value, [Value; 5]) {
         let op = self
             .core
             .eval(self.raw_branch_voltages(solution), self.gmin, true)
@@ -29,7 +30,8 @@ impl Bsim3v3Device {
         )
     }
 
-    pub(crate) fn shooting_nqs_seed(&self, state: Value, solution: &[Value]) -> Value {
+    #[doc(hidden)]
+    pub fn shooting_nqs_seed(&self, state: Value, solution: &[Value]) -> Value {
         let (current, _) = self.shooting_nqs_state(solution);
         Self::node_voltage(solution, self.node_charge_deficit) + state - current
     }
@@ -38,7 +40,8 @@ impl Bsim3v3Device {
     /// terminal overlap/junction charge remains, and the hidden row is exactly
     /// M*1e-9*w'. Its equilibrium-charge coupling belongs to the nonlinear
     /// storage constraint, not a second terminal charge state.
-    pub(crate) fn stamp_shooting_initial_charge(
+    #[doc(hidden)]
+    pub fn stamp_shooting_initial_charge(
         &self,
         solution: &[Value],
         matrix: &mut impl MatrixStamper,
@@ -70,7 +73,8 @@ impl Bsim3v3Device {
         );
     }
 
-    pub(crate) fn stamp_shooting_initial_relaxation(
+    #[doc(hidden)]
+    pub fn stamp_shooting_initial_relaxation(
         &self,
         solution: &[Value],
         matrix: &mut impl MatrixStamper,
@@ -98,7 +102,8 @@ impl Bsim3v3Device {
     /// edges, not a decomposition into reciprocal two-terminal capacitors.
     /// Suppressed intrinsic charge and zero overlap/junction parameters must
     /// not create artificial shooting states.
-    pub(crate) fn shooting_terminal_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 5] {
+    #[doc(hidden)]
+    pub fn shooting_terminal_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 5] {
         let p = &self.core.size;
         let intrinsic = self.core.model.xpart >= 0.0 && !self.uses_trnqs();
         let overlap_extension = self.core.model.cap_mod != 0;
@@ -130,7 +135,8 @@ impl Bsim3v3Device {
     /// Per-instance, device-polarity CKTstate charges and their physical time
     /// derivatives. NQS keeps equilibrium channel charge and stored deficit
     /// separate, just as the native transient integration does.
-    pub(crate) fn periodic_history_sample(
+    #[doc(hidden)]
+    pub fn periodic_history_sample(
         &self,
         solution: &[Value],
         node_rates: &[Value],
@@ -195,7 +201,8 @@ impl Bsim3v3Device {
 
     /// The solved periodic origin is already an accepted operating point:
     /// retire OFF startup and seed the native limiter without clipping it.
-    pub(crate) fn seed_accepted_periodic_bias(&mut self, solution: &[Value]) {
+    #[doc(hidden)]
+    pub fn seed_accepted_periodic_bias(&mut self, solution: &[Value]) {
         let bias = self.raw_branch_voltages(solution);
         self.op = eval::eval_dc(
             &self.core.model,

@@ -148,7 +148,7 @@ impl Engine {
                 DepletionCap::new(jfet.params.cgd, jfet.params.pb, jfet.params.m, 0.5),
                 0.0,
             );
-            if let Some(temp_k) = jfet.noise_absolute_temperature {
+            if let Some(temp_k) = jfet.noise_absolute_temperature() {
                 solver.add_named_nonlinear_device_with_absolute_noise_temperature(
                     jfet.name.clone(),
                     instance,
@@ -1070,24 +1070,24 @@ impl Engine {
                 for (column, value) in [
                     (node(line.node1_pos), 1.0),
                     (node(line.node1_neg), -1.0),
-                    (node(line.node2_pos), -two_port.cosh_theta),
-                    (node(line.node2_neg), two_port.cosh_theta),
+                    (node(line.node2_pos), -two_port.cosh_theta()),
+                    (node(line.node2_neg), two_port.cosh_theta()),
                 ] {
                     if let Some(column) = column {
                         entry(row1, column, value)?;
                     }
                 }
-                entry(row1, row2, two_port.transfer_impedance)?;
+                entry(row1, row2, two_port.transfer_impedance())?;
                 for (column, value) in [
-                    (node(line.node2_pos), -two_port.transfer_admittance),
-                    (node(line.node2_neg), two_port.transfer_admittance),
+                    (node(line.node2_pos), -two_port.transfer_admittance()),
+                    (node(line.node2_neg), two_port.transfer_admittance()),
                 ] {
                     if let Some(column) = column {
                         entry(row2, column, value)?;
                     }
                 }
                 entry(row2, row1, 1.0)?;
-                entry(row2, row2, two_port.cosh_theta)?;
+                entry(row2, row2, two_port.cosh_theta())?;
                 continue;
             }
             let network = if line.is_zero_length_pass_through() {

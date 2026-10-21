@@ -13,7 +13,8 @@ impl Diode {
     /// continuity. False retains the event; it never changes device equations
     /// or admits an unstamped term. No equality of sampled tangents establishes
     /// continuity across a piecewise constitutive join.
-    pub(crate) fn physical_event_locally_c2(&self, vd: Value) -> bool {
+    #[doc(hidden)]
+    pub fn physical_event_locally_c2(&self, vd: Value) -> bool {
         if !vd.is_finite()
             || !self.junction_locally_c2(vd, self.bottom_saturation_current(), self.n, true)
         {

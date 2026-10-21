@@ -13,7 +13,8 @@ impl<S: MatrixStamper> MatrixStamper for Derivatives<'_, S> {
 }
 
 impl Bsim3v3Device {
-    pub(crate) fn ac_nqs_response_names(&self) -> impl Iterator<Item = String> + '_ {
+    #[doc(hidden)]
+    pub fn ac_nqs_response_names(&self) -> impl Iterator<Item = String> + '_ {
         ["channel_current", "drain_charge", "source_charge"]
             .into_iter()
             .filter(|_| self.uses_ac_nqs())
@@ -31,7 +32,8 @@ impl Bsim3v3Device {
     /// This operator is for response linearization only; it does not change
     /// carrier equations or advance accepted device state. A caller must
     /// register distinct auxiliary coordinates outside the physical circuit.
-    pub(crate) fn stamp_ac_nqs_response(
+    #[doc(hidden)]
+    pub fn stamp_ac_nqs_response(
         &self,
         solution: &[Value],
         auxiliary: [NodeId; 3],

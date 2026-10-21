@@ -145,4 +145,11 @@ impl JfetParams {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// ngspice level-1 Sydney doping-tail parameter `B`; 1 is the plain
+    /// Shichman-Hodges channel.
+    #[doc(hidden)]
+    pub fn doping_tail(&self) -> Value {
+        self.doping_tail
+    }
 }
