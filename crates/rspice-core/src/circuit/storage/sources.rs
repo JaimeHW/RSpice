@@ -2771,10 +2771,8 @@ mod tests {
         let path = std::env::temp_dir().join(format!("rspice-pwl-cache-{unique}.csv"));
         std::fs::write(&path, "0 0\n1 1\n").expect("write PWL cache fixture");
         let path_text = path.to_string_lossy().into_owned();
-        let limits = crate::resource::ResourceLimits {
-            max_shared_cache_bytes: 0,
-            ..Default::default()
-        };
+        let limits = crate::resource::ResourceLimits::default()
+            .with(|limits| limits.max_shared_cache_bytes = 0);
 
         let waveform = VoltageSources::load_pwl_waveform_cached_with_limits(
             &path_text, 1.0, 1.0, 0.0, 0.0, limits,

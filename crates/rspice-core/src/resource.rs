@@ -562,13 +562,6 @@ where
     }
 }
 
-/// Configurable limits applied at parsing, construction, and analysis
-/// boundaries.
-///
-/// Defaults are deliberately generous for desktop simulation while bounding
-/// accidental or hostile amplification. Services with a known memory budget
-/// should start from [`Default`] and lower individual fields. Setting a field
-/// to `usize::MAX` effectively disables that specific limit.
 /// Default nesting depth allowed while expanding `.INCLUDE` and `.LIB`.
 ///
 /// Foundry PDKs have substantially deeper include trees than hand-written
@@ -578,6 +571,14 @@ where
 /// default.
 pub const DEFAULT_MAX_INCLUDE_DEPTH: usize = 64;
 
+/// Configurable limits applied at parsing, construction, and analysis
+/// boundaries.
+///
+/// Defaults are deliberately generous for desktop simulation while bounding
+/// accidental or hostile amplification. Services with a known memory budget
+/// should start from [`Default`] and lower individual fields, or override a
+/// few with [`Self::with`]. Setting a field to `usize::MAX` effectively
+/// disables that specific limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -675,6 +676,18 @@ impl ResourceLimits {
             max_parallel_workers: usize::MAX,
             max_batch_runs: usize::MAX,
         }
+    }
+
+    /// This policy with `adjust` applied to it, for one-off overrides such as
+    /// `ResourceLimits::default().with(|limits| limits.max_circuit_nodes = 8)`.
+    ///
+    /// The type is `#[non_exhaustive]`, so code outside its crate cannot
+    /// build it with struct-update syntax (`..ResourceLimits::default()`);
+    /// this is the spelling for an override there and here alike.
+    #[must_use]
+    pub fn with(mut self, adjust: impl FnOnce(&mut Self)) -> Self {
+        adjust(&mut self);
+        self
     }
 }
 

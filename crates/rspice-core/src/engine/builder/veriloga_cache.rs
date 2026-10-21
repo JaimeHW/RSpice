@@ -3207,26 +3207,17 @@ endmodule
         .unwrap();
         for (limits, resource, limit) in [
             (
-                ResourceLimits {
-                    max_include_depth: 1,
-                    ..ResourceLimits::default()
-                },
+                ResourceLimits::default().with(|limits| limits.max_include_depth = 1),
                 ResourceKind::IncludeDepth,
                 1,
             ),
             (
-                ResourceLimits {
-                    max_expanded_source_bytes: 256,
-                    ..ResourceLimits::default()
-                },
+                ResourceLimits::default().with(|limits| limits.max_expanded_source_bytes = 256),
                 ResourceKind::ExpandedSourceBytes,
                 256,
             ),
             (
-                ResourceLimits {
-                    max_dependency_source_bytes: 256,
-                    ..ResourceLimits::default()
-                },
+                ResourceLimits::default().with(|limits| limits.max_dependency_source_bytes = 256),
                 ResourceKind::DependencySourceBytes,
                 256,
             ),
@@ -3561,10 +3552,8 @@ endmodule
                 .len(),
         )
         .expect("cache record fits usize");
-        let limits = ResourceLimits {
-            max_shared_cache_bytes: cache_bytes.saturating_sub(1),
-            ..ResourceLimits::default()
-        };
+        let limits = ResourceLimits::default()
+            .with(|limits| limits.max_shared_cache_bytes = cache_bytes.saturating_sub(1));
 
         assert!(
             load_model_from_disk_locked_with_limits(
@@ -3593,10 +3582,7 @@ endmodule
         let cache_root = root.join("cache");
         let cache_path =
             cache_record_path_with_root(&VerilogASourceKey::new(&source_path, None), &cache_root);
-        let limits = ResourceLimits {
-            max_shared_cache_bytes: 1,
-            ..ResourceLimits::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_shared_cache_bytes = 1);
 
         let error = persist_model_to_disk_locked_with_limits(
             &VerilogASourceKey::new(&source_path, None),
@@ -3625,10 +3611,8 @@ endmodule
         let second = root.join("second.va");
         std::fs::write(&first, b"0123456789").expect("write first dependency");
         std::fs::write(&second, b"abcdefghij").expect("write second dependency");
-        let limits = ResourceLimits {
-            max_dependency_source_bytes: 15,
-            ..ResourceLimits::default()
-        };
+        let limits =
+            ResourceLimits::default().with(|limits| limits.max_dependency_source_bytes = 15);
 
         let error = fingerprint_paths_with_limits(&[first, second], limits)
             .expect_err("aggregate dependency bytes must be bounded");
@@ -3872,10 +3856,8 @@ endmodule
         .expect("size candidate runtime");
         let error = hold_project_veriloga_sources_for_session(
             [ProjectVerilogASourceRegistration::Runtime(candidate)],
-            ResourceLimits {
-                max_shared_cache_bytes: required.saturating_sub(1),
-                ..ResourceLimits::default()
-            },
+            ResourceLimits::default()
+                .with(|limits| limits.max_shared_cache_bytes = required.saturating_sub(1)),
         )
         .expect_err("an undersized aggregate budget must reject the whole batch");
         assert!(

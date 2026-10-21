@@ -1192,10 +1192,7 @@ mod tests {
             ),
             Err(SimulationError::Aborted)
         ));
-        let limits = crate::ResourceLimits {
-            max_analysis_points: 1,
-            ..crate::ResourceLimits::default()
-        };
+        let limits = crate::ResourceLimits::default().with(|limits| limits.max_analysis_points = 1);
         assert!(matches!(
             refined.pending_sampled_edges(2.25, 1.0, limits, &NoAbort),
             Err(SimulationError::ResourceLimit(_))

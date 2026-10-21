@@ -385,14 +385,8 @@ mod tests {
         );
         let sources = source("exp(-1000000*(cos(8*pi*time)-0.25)^2)");
         for limits in [
-            ResourceLimits {
-                max_analysis_points: 2,
-                ..ResourceLimits::default()
-            },
-            ResourceLimits {
-                max_result_values: 4,
-                ..ResourceLimits::default()
-            },
+            ResourceLimits::default().with(|limits| limits.max_analysis_points = 2),
+            ResourceLimits::default().with(|limits| limits.max_result_values = 4),
         ] {
             assert!(matches!(
                 sources.refine_time_mesh(
@@ -449,10 +443,8 @@ mod tests {
         sources
             .current_sources
             .push(sources.current_sources[0].clone());
-        let limits = ResourceLimits {
-            max_analysis_points: first.len() - 1,
-            ..ResourceLimits::default()
-        };
+        let limits =
+            ResourceLimits::default().with(|limits| limits.max_analysis_points = first.len() - 1);
         let repeated = sources
             .refine_time_mesh(&original, criteria, &limits, &NoAbort)
             .unwrap()

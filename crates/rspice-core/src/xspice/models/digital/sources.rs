@@ -2232,10 +2232,8 @@ mod tests {
         data_file::register_data_file(input_file, "0 0s\n1n 1s\n")
             .expect("register virtual d_source data");
         let mut ctx = CmContext::new();
-        let limits = crate::resource::ResourceLimits {
-            max_external_data_values: 3,
-            ..Default::default()
-        };
+        let limits = crate::resource::ResourceLimits::default()
+            .with(|limits| limits.max_external_data_values = 3);
         ctx.set_resource_limits(limits);
 
         let error = load_d_source_rows_for_context(&mut ctx, input_file, 1)
@@ -2261,10 +2259,8 @@ mod tests {
             .expect("register virtual d_source data");
         data_file::register_data_file(state_file, "0 0s 0 -> 0\n")
             .expect("register virtual d_state data");
-        let limits = crate::resource::ResourceLimits {
-            max_shared_cache_bytes: 0,
-            ..Default::default()
-        };
+        let limits = crate::resource::ResourceLimits::default()
+            .with(|limits| limits.max_shared_cache_bytes = 0);
 
         let (_, rows) = load_d_source_rows_limited(input_file, 1, limits);
         assert!(

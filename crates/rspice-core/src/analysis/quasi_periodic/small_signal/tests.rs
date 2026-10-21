@@ -155,10 +155,7 @@ fn qpac_refuses_singular_unexcited_operator_and_honors_abort_and_budget() {
             work.solve(&circuit, 0.3, &sources, &abort),
             Err(Error::Aborted)
         ));
-        let limits = ResourceLimits {
-            max_result_values: 10,
-            ..Default::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 10);
         assert!(matches!(
             Linearization::prepare(
                 &mut circuit,

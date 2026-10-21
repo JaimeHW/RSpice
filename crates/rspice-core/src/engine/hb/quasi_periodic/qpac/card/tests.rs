@@ -101,10 +101,7 @@ fn qpac_card_rejects_dropped_options_invalid_grids_and_resource_overruns() {
         assert!(parse(&format!(".QPAC LIST=(1) SOURCE=V1 OUT=V(out) {tuples}")).is_err());
     }
     let card = parse(&format!(".QPAC DEC 100 1 1e100 {PATH}")).unwrap();
-    let limits = ResourceLimits {
-        max_analysis_points: 10,
-        ..Default::default()
-    };
+    let limits = ResourceLimits::default().with(|limits| limits.max_analysis_points = 10);
     assert!(matches!(
         QpacRequest::from_qpac_card_with_abort(&card, &limits, &NoAbort),
         Err(SimulationError::ResourceLimit(_))

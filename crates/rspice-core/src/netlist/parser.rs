@@ -5078,10 +5078,8 @@ mod cancellation_tests {
         let value_error = parse_netlist_with_options(
             source,
             NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits {
-                    max_result_values: 3,
-                    ..crate::resource::ResourceLimits::default()
-                },
+                resource_limits: crate::resource::ResourceLimits::default()
+                    .with(|limits| limits.max_result_values = 3),
                 ..NetlistParseOptions::default()
             },
         )
@@ -5098,10 +5096,8 @@ mod cancellation_tests {
         let point_error = parse_netlist_with_options(
             source,
             NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits {
-                    max_analysis_points: 1,
-                    ..crate::resource::ResourceLimits::default()
-                },
+                resource_limits: crate::resource::ResourceLimits::default()
+                    .with(|limits| limits.max_analysis_points = 1),
                 ..NetlistParseOptions::default()
             },
         )

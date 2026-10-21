@@ -7049,10 +7049,8 @@ mod tests {
         let error = Netlist::parse_with_options(
             &deck_with_options(".options output initial_interval=1u 2u 1u 4u 1u"),
             crate::netlist::NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits {
-                    max_analysis_points: 1,
-                    ..crate::resource::ResourceLimits::default()
-                },
+                resource_limits: crate::resource::ResourceLimits::default()
+                    .with(|limits| limits.max_analysis_points = 1),
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )
@@ -7264,10 +7262,8 @@ mod tests {
         let error = Netlist::parse_with_options(
             &deck_with_options(".options restart initial_interval=1n 10n 2n 20n 4n"),
             crate::netlist::NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits {
-                    max_analysis_points: 1,
-                    ..crate::resource::ResourceLimits::default()
-                },
+                resource_limits: crate::resource::ResourceLimits::default()
+                    .with(|limits| limits.max_analysis_points = 1),
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )
@@ -7291,10 +7287,8 @@ mod tests {
             let error = Netlist::parse_with_options(
                 &deck_with_options(options),
                 crate::netlist::NetlistParseOptions {
-                    resource_limits: crate::resource::ResourceLimits {
-                        max_analysis_points: 1,
-                        ..crate::resource::ResourceLimits::default()
-                    },
+                    resource_limits: crate::resource::ResourceLimits::default()
+                        .with(|limits| limits.max_analysis_points = 1),
                     ..crate::netlist::NetlistParseOptions::default()
                 },
             )
@@ -7490,10 +7484,8 @@ mod tests {
                  .options timeint breakpoints=3ms,4ms",
             ),
             crate::netlist::NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits {
-                    max_analysis_points: 3,
-                    ..crate::resource::ResourceLimits::default()
-                },
+                resource_limits: crate::resource::ResourceLimits::default()
+                    .with(|limits| limits.max_analysis_points = 3),
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )

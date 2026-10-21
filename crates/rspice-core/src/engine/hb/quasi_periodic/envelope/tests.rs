@@ -384,10 +384,8 @@ fn netlist_spectral_envelope_modulation_events_bound_steps_without_enumerating_r
     let netlist = Netlist::parse(&deck).unwrap();
     let settings = SimulationConfig {
         spice_dialect: crate::config::SpiceDialect::Ngspice,
-        resource_limits: crate::ResourceLimits {
-            max_analysis_points: 64,
-            ..crate::ResourceLimits::default()
-        },
+        resource_limits: crate::ResourceLimits::default()
+            .with(|limits| limits.max_analysis_points = 64),
         ..SimulationConfig::default()
     };
     let mut request = config(&["vmod", "VNEAR", "Imod", "Vdefault"]);

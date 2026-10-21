@@ -245,10 +245,7 @@ mod tests {
                 Err(Error::Aborted)
             ));
             assert_eq!(abort.count(), 3);
-            let limits = ResourceLimits {
-                max_result_values: 1,
-                ..ResourceLimits::default()
-            };
+            let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 1);
             assert!(matches!(
                 transform.to_complete_real_spectrum_with_abort(&samples, &limits, &NoAbort),
                 Err(Error::ResourceLimit(_))

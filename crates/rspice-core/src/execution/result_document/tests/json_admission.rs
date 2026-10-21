@@ -1,11 +1,10 @@
 use super::*;
 
 fn admitted(json: &str, count: usize) {
-    let limits = crate::ResourceLimits {
-        max_result_values: count,
-        max_external_data_values: count,
-        ..Default::default()
-    };
+    let limits = crate::ResourceLimits::default().with(|limits| {
+        limits.max_result_values = count;
+        limits.max_external_data_values = count;
+    });
     assert_eq!(
         super::super::json_admission::check(json, &limits, &NoAbort).unwrap(),
         count
@@ -44,11 +43,10 @@ fn every_family_admission_matches_its_exact_retained_value_budget() {
         let count = document.total_value_count();
         let json = document.to_json().unwrap();
         admitted(&json, count);
-        let limits = crate::ResourceLimits {
-            max_result_values: count,
-            max_external_data_values: count,
-            ..Default::default()
-        };
+        let limits = crate::ResourceLimits::default().with(|limits| {
+            limits.max_result_values = count;
+            limits.max_external_data_values = count;
+        });
         let decoded = AnalysisResultDocument::from_json_with_limits_and_abort(
             &json,
             &limits,

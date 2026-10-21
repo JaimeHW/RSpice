@@ -119,10 +119,8 @@ impl HbSolver {
             .saturating_add(known_inputs.len())
             .saturating_add(signed_values);
         ensure(retained)?;
-        let mut limits = ResourceLimits {
-            max_result_values: max_values.saturating_sub(retained),
-            ..ResourceLimits::unlimited()
-        };
+        let mut limits = ResourceLimits::unlimited()
+            .with(|limits| limits.max_result_values = max_values.saturating_sub(retained));
         let grid = Arc::new(
             QuasiPeriodicGrid::periodic_with_abort(
                 self.config.fundamental_freq,

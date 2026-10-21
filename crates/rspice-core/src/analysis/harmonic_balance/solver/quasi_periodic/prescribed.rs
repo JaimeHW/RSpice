@@ -685,10 +685,7 @@ mod tests {
         solver
             .set_quasi_periodic_behavioral_sources(&sources, &grid)
             .unwrap();
-        let limited = ResourceLimits {
-            max_result_values: 8 * grid.sample_count() + 10,
-            ..limits
-        };
+        let limited = limits.with(|limits| limits.max_result_values = 8 * grid.sample_count() + 10);
         assert!(matches!(
             solver.prepare_quasi_periodic_integrals(
                 grid.clone(),

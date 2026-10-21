@@ -284,9 +284,13 @@ use rspice_core::analysis::harmonic_balance::{
 // was inferred, defaulted or held static by a template, naming the net. The
 // census was 5,751, with no slack.
 // Hidden items now count apart, under `MAX_HIDDEN_FAMILY_ITEMS`, so the two
-// `family_features` statements leave this census. The census is 5,749, with
+// `family_features` statements leave this census. The census was 5,749, with
 // no slack.
-const MAX_PUBLIC_ITEMS: usize = 5749;
+// `ResourceLimits::with` adds one: the limits are non-exhaustive, so a crate
+// other than their own cannot override a field with struct-update syntax, and
+// every override in the family spells it this one way. The census is 5,750,
+// with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5750;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

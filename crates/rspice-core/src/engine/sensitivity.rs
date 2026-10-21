@@ -4188,10 +4188,7 @@ mod tests {
                 netlist.source_text = None;
             }
             let bytes = netlist.retained_source_bytes() + "P".len() + std::mem::size_of::<Value>();
-            let limits = ResourceLimits {
-                max_netlist_bytes: bytes,
-                ..Default::default()
-            };
+            let limits = ResourceLimits::default().with(|limits| limits.max_netlist_bytes = bytes);
             let (perturbed, _) = Engine::create_perturbed_netlist_multi_with_limits_and_abort(
                 &netlist,
                 &[("p".into(), 2.0)],

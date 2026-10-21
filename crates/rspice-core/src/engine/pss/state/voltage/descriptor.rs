@@ -1002,10 +1002,8 @@ mod tests {
         assert!(matches!(
             PssStateBasis::new(
                 &circuit,
-                crate::resource::ResourceLimits {
-                    max_result_values: descriptor.solution.retained_words,
-                    ..Default::default()
-                },
+                crate::resource::ResourceLimits::default()
+                    .with(|limits| limits.max_result_values = descriptor.solution.retained_words),
                 &NoAbort
             ),
             Err(SimulationError::ResourceLimit(_))
@@ -1062,10 +1060,8 @@ mod tests {
         assert!(matches!(
             PssStateBasis::new(
                 &circuit,
-                crate::resource::ResourceLimits {
-                    max_result_values: 128,
-                    ..Default::default()
-                },
+                crate::resource::ResourceLimits::default()
+                    .with(|limits| limits.max_result_values = 128),
                 &NoAbort
             ),
             Err(SimulationError::ResourceLimit(_))
@@ -1348,10 +1344,8 @@ mod tests {
         let budget = descriptor.solution.retained_words;
         let error = PssStateBasis::new(
             &circuit,
-            crate::resource::ResourceLimits {
-                max_result_values: budget,
-                ..Default::default()
-            },
+            crate::resource::ResourceLimits::default()
+                .with(|limits| limits.max_result_values = budget),
             &NoAbort,
         )
         .unwrap_err();

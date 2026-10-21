@@ -342,10 +342,7 @@ fn quasi_periodic_solver_refuses_singular_malformed_unbounded_and_cancelled_work
         Err(Error::LinearSolve(_))
     ));
     solver.add_conductance(0, 0, 1e-3);
-    let restricted = ResourceLimits {
-        max_matrix_unknowns: 8,
-        ..limits
-    };
+    let restricted = limits.with(|limits| limits.max_matrix_unknowns = 8);
     assert!(matches!(
         solver.solve_quasi_periodic_with_abort(
             grid.clone(),
@@ -357,10 +354,7 @@ fn quasi_periodic_solver_refuses_singular_malformed_unbounded_and_cancelled_work
         ),
         Err(Error::ResourceLimit(_))
     ));
-    let restricted = ResourceLimits {
-        max_result_values: 100,
-        ..limits
-    };
+    let restricted = limits.with(|limits| limits.max_result_values = 100);
     assert!(matches!(
         solver.solve_quasi_periodic_with_abort(
             grid.clone(),
@@ -567,10 +561,8 @@ fn qpnoise_stream_propagates_consumer_errors_and_preflights_combined_workspaces(
     assert_eq!(abort.count(), 6);
     // Enough room for the projector alone, but not its simultaneously retained
     // adjoints and circuit linearization. Charge the complete live workspace.
-    let limits = ResourceLimits {
-        max_result_values: grid.sample_count() * 10 + 200,
-        ..ResourceLimits::default()
-    };
+    let limits = ResourceLimits::default()
+        .with(|limits| limits.max_result_values = grid.sample_count() * 10 + 200);
     let result = solver.visit_quasi_periodic_noise_with_abort(
         grid,
         &config,
@@ -662,10 +654,7 @@ fn qpnoise_compact_sources_follow_independent_phases_temperature_and_ground() {
         Err(Error::Aborted)
     ));
     assert_eq!(abort.count(), 11);
-    let limits = ResourceLimits {
-        max_result_values: 1,
-        ..ResourceLimits::default()
-    };
+    let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 1);
     assert!(matches!(
         solver.quasi_periodic_device_noise_sources_with_abort(
             grid, &orbit, 300.0, constants, &limits, &NoAbort

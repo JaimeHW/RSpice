@@ -287,10 +287,7 @@ fn qpxf_adjoint_refuses_compatible_singular_systems_and_observes_abort_and_budge
             work.solve_adjoint(&circuit, 0.3, &observation, &CountingAbort::new(2)),
             Err(Error::Aborted)
         ));
-        let limits = ResourceLimits {
-            max_result_values: 10,
-            ..Default::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 10);
         assert!(matches!(
             Linearization::prepare_adjoint(
                 &mut circuit,

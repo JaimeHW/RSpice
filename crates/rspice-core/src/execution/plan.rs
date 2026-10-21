@@ -1914,11 +1914,10 @@ mod tests {
     use crate::abort_signal::ImmediateAbort;
 
     fn coordinate_limits(maximum_coordinates: usize, maximum_assignments: usize) -> ResourceLimits {
-        ResourceLimits {
-            max_batch_runs: maximum_coordinates,
-            max_result_values: maximum_assignments,
-            ..Default::default()
-        }
+        ResourceLimits::default().with(|limits| {
+            limits.max_batch_runs = maximum_coordinates;
+            limits.max_result_values = maximum_assignments;
+        })
     }
 
     fn numeric_coordinate_ids(
@@ -2480,10 +2479,7 @@ mod tests {
              .end\n",
         )
         .expect("bounded axis deck parses");
-        let mut limits = ResourceLimits {
-            max_batch_runs: 5,
-            ..Default::default()
-        };
+        let mut limits = ResourceLimits::default().with(|limits| limits.max_batch_runs = 5);
         assert!(matches!(
             DeckPlan::from_netlist(&netlist, &limits),
             Err(DeckPlanError::ResourceLimit(ResourceLimitError {

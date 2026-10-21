@@ -726,10 +726,7 @@ mod tests {
                 &sources,
                 None,
                 &[true, false],
-                &ResourceLimits {
-                    max_result_values: 1,
-                    ..limits
-                },
+                &limits.with(|limits| limits.max_result_values = 1),
                 &NoAbort
             ),
             Err(Error::ResourceLimit(_))

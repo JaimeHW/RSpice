@@ -953,10 +953,8 @@ fn quasiperiodic_documents_validate_evidence_primary_series_and_budgets() {
         };
         *identity = serde_json::json!("0".repeat(64));
         assert!(AnalysisResultDocument::from_json(&changed.to_string()).is_err());
-        let limits = crate::ResourceLimits {
-            max_result_values: document.total_value_count() - 1,
-            ..Default::default()
-        };
+        let limits = crate::ResourceLimits::default()
+            .with(|limits| limits.max_result_values = document.total_value_count() - 1);
         assert!(matches!(
             document.validate_with_limits_and_abort(&limits, &NoAbort),
             Err(ResultDocumentError::ResourceLimit(_))

@@ -1194,10 +1194,8 @@ mod tests {
         let _ = data_file::unregister_data_file(file);
         data_file::register_data_file(file, contents).expect("register filesource data");
         let mut ctx = filesource_context(file);
-        let limits = crate::resource::ResourceLimits {
-            max_external_data_bytes: contents.len() - 1,
-            ..Default::default()
-        };
+        let limits = crate::resource::ResourceLimits::default()
+            .with(|limits| limits.max_external_data_bytes = contents.len() - 1);
         ctx.set_resource_limits(limits);
 
         let error = FileSource
@@ -1218,10 +1216,8 @@ mod tests {
         let file = "virtual://filesource/zero-cache-retention";
         let _ = data_file::unregister_data_file(file);
         data_file::register_data_file(file, "0 1\n1 2\n").expect("register filesource data");
-        let limits = crate::resource::ResourceLimits {
-            max_shared_cache_bytes: 0,
-            ..Default::default()
-        };
+        let limits = crate::resource::ResourceLimits::default()
+            .with(|limits| limits.max_shared_cache_bytes = 0);
 
         let (fields, _) = load_filesource_limited(file, 1, limits)
             .expect("zero-retention policy still returns parsed fields");

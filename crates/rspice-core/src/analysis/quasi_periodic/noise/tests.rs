@@ -442,10 +442,7 @@ fn qpnoise_rejects_invalid_evidence_and_bounds_work_and_cancellation() {
             .is_err()
         );
     }
-    let limits = ResourceLimits {
-        max_result_values: 1,
-        ..ResourceLimits::default()
-    };
+    let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 1);
     assert!(
         QuasiPeriodicNoiseProjector::new_with_abort(
             grid.clone(),

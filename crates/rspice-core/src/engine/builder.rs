@@ -10978,10 +10978,8 @@ mod tests {
     #[test]
     fn generated_auto_bridge_decks_inherit_resource_limits() {
         let generated = "generated bridge\n.model adc adc_bridge\n.end\n";
-        let limits = ResourceLimits {
-            max_netlist_bytes: generated.len() - 1,
-            ..Default::default()
-        };
+        let limits =
+            ResourceLimits::default().with(|limits| limits.max_netlist_bytes = generated.len() - 1);
 
         assert!(matches!(
             parse_generated_xspice_auto_bridge_deck(

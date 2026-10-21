@@ -608,18 +608,12 @@ mod tests {
             constraints.add([(1, 1.0)], ForestValue::State(0), &abort),
             Err(SimulationError::Aborted)
         ));
-        let limits = ResourceLimits {
-            max_result_values: 1,
-            ..ResourceLimits::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 1);
         assert!(matches!(
             PssVoltageConstraintBuilder::new(4, limits).map_err(SimulationError::from),
             Err(SimulationError::ResourceLimit(_))
         ));
-        let limits = ResourceLimits {
-            max_result_values: 128,
-            ..ResourceLimits::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 128);
         let mut constraints = PssVoltageConstraintBuilder::new(4, limits).unwrap();
         assert!(matches!(
             constraints.add(

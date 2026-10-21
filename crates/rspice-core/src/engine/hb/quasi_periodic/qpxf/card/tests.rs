@@ -125,10 +125,7 @@ fn qpxf_card_rejects_dropped_options_and_preflights_large_sweeps() {
         );
     }
     let card = parse(".QPXF DEC 1000000000 1 1e100 OUT=V(out) OUTLATTICE=(0,0)").unwrap();
-    let limits = ResourceLimits {
-        max_analysis_points: 100,
-        ..Default::default()
-    };
+    let limits = ResourceLimits::default().with(|limits| limits.max_analysis_points = 100);
     assert!(matches!(
         QpxfRequest::validate_qpxf_card(&card, &limits),
         Err(SimulationError::ResourceLimit(_))

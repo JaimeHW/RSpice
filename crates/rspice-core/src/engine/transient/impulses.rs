@@ -512,10 +512,8 @@ mod tests {
         let mut output = result();
         let before = output.current_impulses.clone();
         let retained = Engine::transient_result_value_count(&output);
-        let tight = crate::resource::ResourceLimits {
-            max_result_values: retained + 1,
-            ..Default::default()
-        };
+        let tight = crate::resource::ResourceLimits::default()
+            .with(|limits| limits.max_result_values = retained + 1);
         assert!(matches!(
             charges(&mut output, 0.0, &[(0, 1.0)], retained, &tight, &NoAbort),
             Err(SimulationError::ResourceLimit(_))

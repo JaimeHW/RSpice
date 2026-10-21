@@ -830,10 +830,8 @@ fn linear_descriptor_observations_prepare_atomically_and_refuse_replay() {
             (&before.0, &before.1)
         );
     }
-    let tight = crate::resource::ResourceLimits {
-        max_result_values: 1,
-        ..Default::default()
-    };
+    let tight =
+        crate::resource::ResourceLimits::default().with(|limits| limits.max_result_values = 1);
     assert!(matches!(
         plan.prepare(&mut result, &point, 0, &tight, &NoAbort),
         Err(SimulationError::ResourceLimit(_))

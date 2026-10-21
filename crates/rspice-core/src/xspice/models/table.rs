@@ -2758,10 +2758,8 @@ mod tests {
 ",
         )
         .expect("register virtual table2d data");
-        let limits = crate::resource::ResourceLimits {
-            max_shared_cache_bytes: 0,
-            ..Default::default()
-        };
+        let limits = crate::resource::ResourceLimits::default()
+            .with(|limits| limits.max_shared_cache_bytes = 0);
 
         let (table, _) = load_table2d_limited(file, limits)
             .expect("zero-retention policy still returns parsed table data");

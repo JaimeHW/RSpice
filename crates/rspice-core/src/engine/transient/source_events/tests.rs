@@ -409,10 +409,7 @@ fn physical_source_events_refuse_context_mismatch_limits_and_cancellation() {
         "source schedule limits\nV1 a 0 SIN(0 1 1 .25)\nI1 0 n SIN(0 1 1 .25)\nR1 n 0 1k\n.end\n",
         SpiceDialect::Xyce,
     );
-    let mut limits = ResourceLimits {
-        max_analysis_points: 1,
-        ..Default::default()
-    };
+    let mut limits = ResourceLimits::default().with(|limits| limits.max_analysis_points = 1);
     assert!(
         Engine::collect_physical_source_events(&circuit, 1.0, &limits, &NoAbort).is_err(),
         "two source owners must not share one record budget"

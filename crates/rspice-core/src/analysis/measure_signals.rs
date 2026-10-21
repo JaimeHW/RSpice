@@ -7237,10 +7237,7 @@ mod tests {
         .unwrap();
         let axis: Vec<_> = (0..10_001).map(|row| row as Value).collect();
         let result = tran_waveform(axis.clone(), axis);
-        let mut limits = ResourceLimits {
-            max_result_values: 10_000,
-            ..ResourceLimits::default()
-        };
+        let mut limits = ResourceLimits::default().with(|limits| limits.max_result_values = 10_000);
         assert!(
             matches!(evaluate_tran_continuous_measurements_with_limits_and_abort(&netlist, &result, &limits, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error.resource == ResourceKind::ResultValues && error.requested == 10_001)
         );
@@ -7273,10 +7270,7 @@ mod tests {
     fn continuous_ac_and_noise_projection_limits_precede_series_allocation() {
         use crate::abort_signal::CountingAbort;
         let netlist = Netlist::parse("* sweep projection\n.MEAS AC_CONT a FIND TIME AT=1.5\n.MEAS NOISE_CONT n FIND TIME AT=1.5\n.END\n").unwrap();
-        let mut limits = ResourceLimits {
-            max_result_values: 13,
-            ..ResourceLimits::default()
-        };
+        let mut limits = ResourceLimits::default().with(|limits| limits.max_result_values = 13);
         let point = |frequency| AcResult {
             frequency,
             node_names: vec!["out".into()],
@@ -7595,10 +7589,7 @@ mod tests {
         result.num_nodes = 2;
         result.node_names = vec!["a".into(), "b".into()];
         result.voltages = vec![vec![0.0; 4], vec![1.0; 4]];
-        let limits = ResourceLimits {
-            max_result_values: 11,
-            ..Default::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 11);
         let error = evaluate_tran_output_requests_with_abort(&netlist, &result, limits, &NoAbort)
             .expect_err("axis plus two expanded columns require twelve values");
         assert!(matches!(
@@ -7737,10 +7728,7 @@ mod tests {
              .END\n",
         )
         .expect("bounded output deck parses");
-        let limits = ResourceLimits {
-            max_result_values: 11,
-            ..Default::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 11);
         let error =
             evaluate_tran_output_requests_with_abort(&netlist, &tran_result(), limits, &NoAbort)
                 .expect_err("axis plus two columns require twelve values");
@@ -7809,10 +7797,7 @@ mod tests {
             .map(|value| (Value::from(value), point(Value::from(value))))
             .collect::<Vec<_>>();
 
-        let limits = ResourceLimits {
-            max_result_values: 8,
-            ..Default::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 8);
         let error = evaluate_dc_output_requests_with_abort(&netlist, &sweep, limits, &NoAbort)
             .expect_err("intermediate DC projection storage must share the result-value budget");
         assert!(matches!(

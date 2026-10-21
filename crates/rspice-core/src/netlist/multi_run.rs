@@ -1682,10 +1682,7 @@ mod tests {
             .enddata\n\
             .dc data=tbl\n\
             .end\n";
-        let limits = ResourceLimits {
-            max_batch_runs: 2,
-            ..ResourceLimits::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_batch_runs = 2);
 
         let error = try_expand_multi_run_with_limits(source, limits)
             .expect_err("three rows must exceed the two-run policy");
@@ -1713,10 +1710,8 @@ mod tests {
             .end\n";
         let expanded = try_expand_multi_run(source).expect("fixture expands");
         let retained_bytes = expanded.iter().map(|deck| deck.source.len()).sum::<usize>();
-        let limits = ResourceLimits {
-            max_expanded_source_bytes: retained_bytes - 1,
-            ..ResourceLimits::default()
-        };
+        let limits = ResourceLimits::default()
+            .with(|limits| limits.max_expanded_source_bytes = retained_bytes - 1);
 
         let error = try_expand_multi_run_with_limits(source, limits)
             .expect_err("aggregate concrete deck bytes must be bounded");
@@ -1731,10 +1726,7 @@ mod tests {
     #[test]
     fn alter_variants_are_preflighted_against_batch_limit() {
         let source = "t\nR1 a 0 1k\n.alter one\nR1 a 0 2k\n.alter two\nR1 a 0 3k\n.end\n";
-        let limits = ResourceLimits {
-            max_batch_runs: 2,
-            ..ResourceLimits::default()
-        };
+        let limits = ResourceLimits::default().with(|limits| limits.max_batch_runs = 2);
 
         let error = try_expand_multi_run_with_limits(source, limits)
             .expect_err("base plus two alters must exceed a two-run policy");

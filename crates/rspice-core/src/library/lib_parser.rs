@@ -2827,10 +2827,7 @@ mod tests {
         let root = directory.join("root.lib");
         std::fs::write(&root, ".include device.inc\n").expect("root library source is written");
 
-        let root_limits = ResourceLimits {
-            max_netlist_bytes: 8,
-            ..Default::default()
-        };
+        let root_limits = ResourceLimits::default().with(|limits| limits.max_netlist_bytes = 8);
         let root_error = LibParser::new(&directory)
             .with_resource_limits(root_limits)
             .parse_file(&root)
@@ -2846,10 +2843,8 @@ mod tests {
             root_bytes < include_bytes,
             "fixture must isolate include limit"
         );
-        let include_limits = ResourceLimits {
-            max_netlist_bytes: root_bytes,
-            ..Default::default()
-        };
+        let include_limits =
+            ResourceLimits::default().with(|limits| limits.max_netlist_bytes = root_bytes);
         let include_result = LibParser::new(&directory)
             .with_resource_limits(include_limits)
             .parse_file(&root)
@@ -2865,10 +2860,8 @@ mod tests {
         );
         assert!(include_result.find_model("bounded_n").is_none());
 
-        let closure_limits = ResourceLimits {
-            max_dependency_source_bytes: root_bytes,
-            ..Default::default()
-        };
+        let closure_limits = ResourceLimits::default()
+            .with(|limits| limits.max_dependency_source_bytes = root_bytes);
         let result = LibParser::new(&directory)
             .with_resource_limits(closure_limits)
             .parse_file(&root)
@@ -2947,10 +2940,8 @@ mod tests {
         let include_bytes = std::fs::metadata(&included)
             .expect("include metadata")
             .len() as usize;
-        let limits = ResourceLimits {
-            max_expanded_source_bytes: root_bytes + include_bytes,
-            ..Default::default()
-        };
+        let limits = ResourceLimits::default()
+            .with(|limits| limits.max_expanded_source_bytes = root_bytes + include_bytes);
         let result = LibParser::new(&directory)
             .with_resource_limits(limits)
             .parse_file(&root)

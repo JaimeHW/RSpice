@@ -1,10 +1,7 @@
 use super::*;
 
 fn result_limit(document: &AnalysisResultDocument, count: usize) {
-    let limits = crate::ResourceLimits {
-        max_result_values: count,
-        ..Default::default()
-    };
+    let limits = crate::ResourceLimits::default().with(|limits| limits.max_result_values = count);
     document
         .validate_with_limits_and_abort(&limits, &NoAbort)
         .unwrap();
@@ -15,10 +12,7 @@ fn result_limit(document: &AnalysisResultDocument, count: usize) {
         u64::MAX,
     )
     .unwrap();
-    let lower = crate::ResourceLimits {
-        max_result_values: count - 1,
-        ..limits
-    };
+    let lower = limits.with(|limits| limits.max_result_values = count - 1);
     let error = document
         .validate_with_limits_and_abort(&lower, &NoAbort)
         .unwrap_err();
@@ -136,10 +130,7 @@ fn malformed_primary_and_pac_series_cannot_hide_allocated_values() {
         }
         let error = document
             .validate_with_limits_and_abort(
-                &crate::ResourceLimits {
-                    max_result_values: 20,
-                    ..Default::default()
-                },
+                &crate::ResourceLimits::default().with(|limits| limits.max_result_values = 20),
                 &NoAbort,
             )
             .unwrap_err();
@@ -157,10 +148,7 @@ fn malformed_primary_and_pac_series_cannot_hide_allocated_values() {
     assert_eq!(document.total_value_count(), original + 100);
     let error = document
         .validate_with_limits_and_abort(
-            &crate::ResourceLimits {
-                max_result_values: original,
-                ..Default::default()
-            },
+            &crate::ResourceLimits::default().with(|limits| limits.max_result_values = original),
             &NoAbort,
         )
         .unwrap_err();
