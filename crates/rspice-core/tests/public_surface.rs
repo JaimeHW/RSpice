@@ -336,8 +336,12 @@ const MAX_PUBLIC_ITEMS: usize = 5752;
 // writers above it. The census was 372, with no slack.
 // `DcMatchCard::voltage_probe` adds one: the engine's `.DCMATCH` tests state a
 // card through it, and they sit above the parser's crate, so it compiles under
-// `test-support` as well as `cfg(test)`. The census is 373, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 373;
+// `test-support` as well as `cfg(test)`. The census was 373, with no slack.
+// `SweepPointGenerationError::fold` adds one: the sweep failure is
+// non-exhaustive and moves with the parser below the engine, so the match
+// that names each failure moved beside its enum, and the DC sweep, `.STEP`
+// and the deck planner convert through it. The census is 374, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 374;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

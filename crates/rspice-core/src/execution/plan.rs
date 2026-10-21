@@ -362,20 +362,20 @@ impl RunAxis {
         let generated = command
             .sweep
             .values_bounded_with_abort(limits.max_batch_runs, abort)
-            .map_err(|error| match error {
-                crate::netlist::SweepPointGenerationError::Aborted => DeckPlanError::Aborted,
-                crate::netlist::SweepPointGenerationError::UnrepresentableSpacing => {
-                    DeckPlanError::UnrepresentableSweep {
+            .map_err(|error| {
+                error.fold(
+                    || DeckPlanError::Aborted,
+                    |requested, limit| {
+                        DeckPlanError::ResourceLimit(ResourceLimitError {
+                            resource: ResourceKind::BatchRuns,
+                            requested,
+                            limit,
+                        })
+                    },
+                    || DeckPlanError::UnrepresentableSweep {
                         axis: target.axis_name(),
-                    }
-                }
-                crate::netlist::SweepPointGenerationError::LimitExceeded { requested, limit } => {
-                    DeckPlanError::ResourceLimit(ResourceLimitError {
-                        resource: ResourceKind::BatchRuns,
-                        requested,
-                        limit,
-                    })
-                }
+                    },
+                )
             })?;
         let mut values = try_vec_with_capacity(generated.len(), "STEP run-axis values")?;
         values.extend(generated.into_iter().map(RunAxisValue::Numeric));

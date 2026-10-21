@@ -1388,6 +1388,28 @@ pub enum SweepPointGenerationError {
     UnrepresentableSpacing,
 }
 
+impl SweepPointGenerationError {
+    /// Hand the failure's fields to the constructor of its own name.
+    ///
+    /// Each sweep consumer converts the failure into its own error; the match
+    /// is exhaustive only here, so a failure added later fails to compile
+    /// until it is named, and then each conversion until it says what the
+    /// failure becomes.
+    #[doc(hidden)]
+    pub fn fold<T>(
+        self,
+        aborted: impl FnOnce() -> T,
+        limit_exceeded: impl FnOnce(usize, usize) -> T,
+        unrepresentable_spacing: impl FnOnce() -> T,
+    ) -> T {
+        match self {
+            Self::Aborted => aborted(),
+            Self::LimitExceeded { requested, limit } => limit_exceeded(requested, limit),
+            Self::UnrepresentableSpacing => unrepresentable_spacing(),
+        }
+    }
+}
+
 fn poll_sweep_abort(
     abort: &dyn AbortSignal,
     index: usize,

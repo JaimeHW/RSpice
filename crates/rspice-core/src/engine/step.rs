@@ -353,20 +353,18 @@ impl Engine {
                     let values = step
                         .sweep
                         .values_bounded_with_abort(remaining_values, abort)
-                        .map_err(|error| match error {
-                            crate::netlist::SweepPointGenerationError::UnrepresentableSpacing => {
-                                SimulationError::Circuit(format!(".STEP dimension {}: {error}", dimension_index + 1))
-                            }
-                            crate::netlist::SweepPointGenerationError::Aborted => {
-                                SimulationError::Aborted
-                            }
-                            crate::netlist::SweepPointGenerationError::LimitExceeded {
-                                requested,
-                                limit,
-                            } => SimulationError::Circuit(format!(
-                                ".STEP dimension {} requests {requested} stored value(s), exceeding remaining max_stored_values {limit}",
-                                dimension_index + 1
-                            )),
+                        .map_err(|error| {
+                            error.fold(
+                                || SimulationError::Aborted,
+                                |requested, limit| SimulationError::Circuit(format!(
+                                    ".STEP dimension {} requests {requested} stored value(s), exceeding remaining max_stored_values {limit}",
+                                    dimension_index + 1
+                                )),
+                                || SimulationError::Circuit(format!(
+                                    ".STEP dimension {}: {error}",
+                                    dimension_index + 1
+                                )),
+                            )
                         })?;
                     validate_step_values(&values)?;
                     stored_values = checked_step_resource_sum(

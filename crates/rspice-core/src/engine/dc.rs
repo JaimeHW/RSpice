@@ -50,19 +50,19 @@ pub fn bounded_dc_sweep_points(
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, SimulationError> {
     spec.points_bounded_with_abort(engine.config.resource_limits.max_analysis_points, abort)
-        .map_err(|error| match error {
-            crate::netlist::SweepPointGenerationError::Aborted => SimulationError::Aborted,
-            crate::netlist::SweepPointGenerationError::UnrepresentableSpacing => {
-                SimulationError::Circuit(error.to_string())
-            }
-            crate::netlist::SweepPointGenerationError::LimitExceeded { requested, limit } => {
-                ResourceLimitError {
-                    resource: ResourceKind::AnalysisPoints,
-                    requested,
-                    limit,
-                }
-                .into()
-            }
+        .map_err(|error| {
+            error.fold(
+                || SimulationError::Aborted,
+                |requested, limit| {
+                    ResourceLimitError {
+                        resource: ResourceKind::AnalysisPoints,
+                        requested,
+                        limit,
+                    }
+                    .into()
+                },
+                || SimulationError::Circuit(error.to_string()),
+            )
         })
 }
 
