@@ -565,6 +565,9 @@ fn canonical_session_identity_value(value: &serde_json::Value) -> serde_json::Va
 }
 
 #[cfg(test)]
+mod populated_session;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -953,7 +956,7 @@ mod tests {
     /// eframe's storage, held in memory, so a session is saved by
     /// `eframe::set_value` exactly as the app saves it on exit.
     #[derive(Default)]
-    struct MemoryStorage(std::collections::HashMap<String, String>);
+    pub(super) struct MemoryStorage(std::collections::HashMap<String, String>);
 
     impl eframe::Storage for MemoryStorage {
         fn get_string(&self, key: &str) -> Option<String> {
@@ -980,7 +983,7 @@ mod tests {
             .expect("eframe stores the session")
     }
 
-    fn relaunch(session: String) -> AppState {
+    pub(super) fn relaunch(session: String) -> AppState {
         let mut storage = MemoryStorage::default();
         eframe::Storage::set_string(&mut storage, eframe::APP_KEY, session);
         let restored = AppState::restore_eframe_session(&storage).expect("a stored session");
