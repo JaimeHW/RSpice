@@ -51,8 +51,9 @@ use super::page::{
 use super::{
     AutomationArtifactStore, AutomationDebugPhase, AutomationDispatchSnapshot,
     AutomationExecutionState, AutomationRuntimeLaunchMode, AutomationValidationReceipt,
-    CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, SourceOperationToken,
+    CodeEditorDiagnostic, CodeEditorSeverity, SourceOperationToken,
 };
+use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
 pub(crate) const MAX_AUTOMATION_TASKS: usize = 10_000_000;
 

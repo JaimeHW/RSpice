@@ -21,9 +21,9 @@ use rspice_vocabulary::diagnostics::{
 };
 
 use super::{BatchStanding, DiagnosticBatch, DiagnosticLevel, DiagnosticRoute};
+use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::code_workspace::CodeDiagnosticCollection;
 
 /// Where one finding stands against the design in front of the reader.
 ///

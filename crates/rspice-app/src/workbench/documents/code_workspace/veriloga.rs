@@ -18,10 +18,11 @@ use crate::workbench::RSpiceApp;
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::{
-    CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile,
-    VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState,
-    VerilogAReplaceReview, VerilogAReplaceTarget,
+    CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile, VerilogACompileOutcome,
+    VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
+    VerilogAReplaceTarget,
 };
+use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]

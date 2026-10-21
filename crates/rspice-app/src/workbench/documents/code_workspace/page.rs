@@ -140,7 +140,7 @@ pub use rspice_simulation::project_veriloga::compile_service::VerilogACompileOut
 pub struct VerilogACompileReceipt {
     pub compilation: rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt,
     pub bytecode_available: bool,
-    pub diagnostics: Arc<super::CodeDiagnosticCollection>,
+    pub diagnostics: Arc<crate::state::code_diagnostics::CodeDiagnosticCollection>,
     /// What this compile did to its cell's interface. `None` for a compile
     /// that was not a cell view's published result.
     pub interface: Option<super::veriloga_interface::VerilogAInterfaceOutcome>,
@@ -188,7 +188,7 @@ pub struct VerilogAWorkbenchState {
     pub(crate) viewed_header: Option<VerilogAHeaderView>,
     pub pending: Option<PendingVerilogACompile>,
     pub receipt: Option<VerilogACompileReceipt>,
-    pub last_failure: Arc<super::CodeDiagnosticCollection>,
+    pub last_failure: Arc<crate::state::code_diagnostics::CodeDiagnosticCollection>,
     pub last_failure_token: Option<VerilogASourceOperationToken>,
     /// Where the open view's cell symbol stands against its interface.
     pub symbol_standing: super::veriloga_interface::VerilogASymbolStanding,
@@ -301,7 +301,7 @@ pub struct AutomationWorkbenchState {
     /// Handles in this ledger are host-issued, request-scoped identities; they
     /// are never inferred from script variables or UI labels.
     pub runtime_execution: Option<PendingAutomationRuntimeExecution>,
-    pub diagnostics: Arc<super::CodeDiagnosticCollection>,
+    pub diagnostics: Arc<crate::state::code_diagnostics::CodeDiagnosticCollection>,
     pub diagnostic_token: Option<SourceOperationToken>,
     pub execution: AutomationExecutionState,
     pub cancel_requested: bool,

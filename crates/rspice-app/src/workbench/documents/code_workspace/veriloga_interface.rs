@@ -47,9 +47,8 @@ use crate::state::{
 };
 
 use super::page::VerilogAWorkbenchState;
-use super::{
-    CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, VerilogACompileReceipt,
-};
+use super::{CodeEditorDiagnostic, CodeEditorSeverity, VerilogACompileReceipt};
+use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
 /// The view whose ports define a cell when it has one.
 const SCHEMATIC_VIEW: &str = "schematic";

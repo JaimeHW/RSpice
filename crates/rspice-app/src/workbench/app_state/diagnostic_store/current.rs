@@ -13,9 +13,9 @@
 use std::sync::Arc;
 
 use super::FindingKey;
+use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::code_workspace::CodeDiagnosticCollection;
 
 /// One source editor's collection of findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

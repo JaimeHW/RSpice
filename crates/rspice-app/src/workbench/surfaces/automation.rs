@@ -16,8 +16,9 @@ use super::super::design_system::{
     panel_body, panel_inset, property_row, property_row_height, section_block_gap,
     subsection_header, workspace_title_row,
 };
+use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::workbench::documents::code_workspace::{
-    AutomationExecutionState, CodeDiagnosticCollection, CodeEditorLanguage, CodeWorkspacePage,
+    AutomationExecutionState, CodeEditorLanguage, CodeWorkspacePage,
     show_code_document_with_debug_versioned,
 };
 

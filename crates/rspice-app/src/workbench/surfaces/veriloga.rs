@@ -16,8 +16,9 @@ use crate::workbench::{MessageId, RSpiceApp};
 
 use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_problem_mark};
 
+use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::workbench::documents::code_workspace::{
-    CodeDiagnosticCollection, CodeEditorLanguage, show_code_document_interaction_versioned,
+    CodeEditorLanguage, show_code_document_interaction_versioned,
 };
 
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;

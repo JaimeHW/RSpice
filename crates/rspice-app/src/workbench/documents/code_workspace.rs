@@ -32,7 +32,7 @@ pub use automation::{
     sync_automation_debugger, toggle_automation_breakpoint, validate_automation_workspace,
 };
 pub use editor::{
-    CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity,
+    CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity,
     show_code_document_interaction_versioned, show_code_document_with_debug_versioned,
 };
 pub(crate) use language_services::{

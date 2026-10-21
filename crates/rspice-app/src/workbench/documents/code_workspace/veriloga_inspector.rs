@@ -29,9 +29,9 @@ use super::veriloga_interface::{
     VerilogACellSymbol, VerilogAInterfaceOutcome, VerilogASymbolDrift, compiled_parameters,
 };
 use super::{
-    CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource,
-    VerilogACompileReceipt,
+    CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource, VerilogACompileReceipt,
 };
+use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
 /// The compile receipt for exactly this source, if the last compile was of it.
 pub(crate) fn veriloga_receipt<'a>(

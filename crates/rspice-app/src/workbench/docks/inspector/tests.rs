@@ -1365,7 +1365,8 @@ fn veriloga_inspector_app() -> RSpiceApp {
     };
     let veriloga = &mut app.state.ui.code_workspace.veriloga;
     veriloga.last_failure = std::sync::Arc::new(
-        code_workspace::CodeDiagnosticCollection::try_new(diagnostics).expect("few findings"),
+        crate::state::code_diagnostics::CodeDiagnosticCollection::try_new(diagnostics)
+            .expect("few findings"),
     );
     veriloga.last_failure_token = Some(
         rspice_simulation::project_veriloga::VerilogASourceOperationToken::capture(

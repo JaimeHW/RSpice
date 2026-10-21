@@ -4,6 +4,7 @@
 //! Core data structures that are shared across multiple modules.
 
 use rspice_design::configuration_set;
+pub(crate) mod code_diagnostics;
 use rspice_design::connectivity_contract;
 pub(crate) mod engineering_table;
 pub(crate) mod library_browser;
