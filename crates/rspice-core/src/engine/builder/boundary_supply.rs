@@ -72,6 +72,20 @@ pub(super) enum SupplyDerivation {
     Defaulted,
     /// More than one rail reaches this net, at different levels.
     Ambiguous { rails: Vec<(String, crate::Value)> },
+    /// The bridged HDL port's `attribute` (`supplySensitivity`) names `net`,
+    /// the circuit's own name for it. The built-in converter binds to it
+    /// live, above `.param vcc` and a connect statement's numeric `vsup`;
+    /// only a statement naming a net outranks it.
+    #[cfg(feature = "veriloga")]
+    Attribute { attribute: String, net: String },
+}
+
+#[cfg(feature = "veriloga")]
+impl SupplyDerivation {
+    /// Whether an HDL port's attribute named the supply.
+    pub(super) fn is_attribute(&self) -> bool {
+        matches!(self, Self::Attribute { .. })
+    }
 }
 
 /// One boundary net's supply, and where it came from.
@@ -238,6 +252,14 @@ impl BoundarySupplies {
             SupplyDerivation::Declared { .. } | SupplyDerivation::Ambiguous { .. } => {
                 return Ok(());
             }
+            #[cfg(feature = "veriloga")]
+            SupplyDerivation::Attribute { attribute, net } => {
+                log::info!(
+                    "supply for boundary net '{node_label}' is net '{net}', bound live (named by \
+                     the {attribute} attribute of the HDL port it bridges)"
+                );
+                return Ok(());
+            }
             SupplyDerivation::Derived {
                 source,
                 level,
@@ -307,12 +329,20 @@ pub(super) fn live_supply_net(bridge: &super::PlannedXspiceAutoBridge) -> Option
         if let Some(net) = selected.supply_net() {
             return Some(net);
         }
-        if selected.states_supply() {
+        // An HDL port's supplySensitivity outranks a numeric vsup.
+        if selected.states_supply()
+            && !bridge
+                .supply
+                .as_ref()
+                .is_some_and(SupplyDerivation::is_attribute)
+        {
             return None;
         }
     }
     match bridge.supply.as_ref()? {
         SupplyDerivation::Derived { node, .. } => Some(node),
+        #[cfg(feature = "veriloga")]
+        SupplyDerivation::Attribute { net, .. } => Some(net),
         SupplyDerivation::Declared { .. }
         | SupplyDerivation::Defaulted
         | SupplyDerivation::Ambiguous { .. } => None,
@@ -391,6 +421,10 @@ pub(super) fn supply_source(derivation: Option<&SupplyDerivation>) -> ConverterS
             source: source.clone(),
             level: *level,
         },
+        #[cfg(feature = "veriloga")]
+        Some(SupplyDerivation::Attribute { attribute, .. }) => {
+            ConverterSource::PortAttribute(attribute.clone())
+        }
         Some(SupplyDerivation::Ambiguous { .. } | SupplyDerivation::Defaulted) | None => {
             ConverterSource::Default(DEFAULT_BOUNDARY_SUPPLY)
         }

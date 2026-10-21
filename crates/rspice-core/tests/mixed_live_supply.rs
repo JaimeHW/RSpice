@@ -121,6 +121,19 @@ fn rise_through(result: &TransientResult, node: &str, level: f64) -> f64 {
     panic!("{node} never rises through {level}")
 }
 
+/// The first time `node` falls through `level`, linearly interpolated.
+fn fall_through(result: &TransientResult, node: &str, level: f64) -> f64 {
+    let values = series(result, node);
+    for index in 1..values.len() {
+        let (before, after) = (values[index - 1], values[index]);
+        if before > level && after <= level {
+            let (t0, t1) = (result.time[index - 1], result.time[index]);
+            return t0 + (t1 - t0) * (before - level) / (before - after);
+        }
+    }
+    panic!("{node} never falls through {level}")
+}
+
 /// The Verilog-AMS route: a held 1 through the built-in D/A, unloaded.
 fn vams_hold_deck(module: &SourceFile, rules: Option<&SourceFile>, extra: &str) -> Netlist {
     let rules = rules.map_or(String::new(), |rules| {
@@ -272,6 +285,68 @@ fn a_crossing_the_supply_causes_is_dated_at_the_analytic_instant() {
     assert!(
         (edge - expected).abs() < 2.0e-12,
         "the supply-caused crossing is dated at {expected:e}, got {edge:e}"
+    );
+}
+
+/// The built-in A/D of an HDL input whose `supplySensitivity` names `vddl`, a
+/// 1.2 V rail, converts against V(vddl) although the deck says
+/// `.param vcc=3.3`: the triangle 0 -> 1.2 -> 0 V over 2 us crosses
+/// V(vddl)/2 = 0.6 V at 0.5 us and 1.5 us, so the buffered output (a D/A at
+/// vcc = 3.3 V, unloaded) passes 1.65 V at exactly those instants. Against
+/// vcc/2 = 1.65 V the input would never cross at all.
+#[test]
+fn a_supply_sensitivity_attribute_outranks_the_deck_supply() {
+    use rspice_core::circuit::ConverterSource;
+
+    let module = SourceFile::new(
+        "v",
+        &BUFFER.replace(" input a;", " (* supplySensitivity = \"vddl\" *) input a;"),
+    );
+    let deck = parse(&format!(
+        "* supplySensitivity on a built-in A/D\n\
+         .param vcc=3.3\n\
+         vddl vddl 0 1.2\n\
+         vin a 0 pwl(0 0 1u 1.2 2u 0)\n\
+         xb a y buf1\n\
+         .hdl \"{}\"\n\
+         .end\n",
+        module.path()
+    ));
+    let result = tran(&deck, 2.0e-6, 10.0e-9);
+    let rise = rise_through(&result, "y", 1.65);
+    let fall = fall_through(&result, "y", 1.65);
+    for (label, edge, expected) in [("rise", rise, 0.5e-6), ("fall", fall, 1.5e-6)] {
+        println!("ATTRIBUTE {label}={edge:e} expected={expected:e}");
+        assert!(
+            (edge - expected).abs() < 2.0e-12,
+            "the {label} is dated at {expected:e}, got {edge:e}"
+        );
+    }
+
+    let circuit = Engine::default()
+        .build_circuit(&deck)
+        .expect("the deck builds");
+    let supplies: Vec<_> = circuit
+        .converter_insertions()
+        .iter()
+        .filter_map(|record| record.supply.as_ref())
+        .collect();
+    assert!(
+        supplies.iter().any(|supply| {
+            supply.source == ConverterSource::PortAttribute("supplySensitivity".into())
+                && supply
+                    .net
+                    .as_deref()
+                    .is_some_and(|net| net.eq_ignore_ascii_case("vddl"))
+                && supply.level == 1.2
+        }),
+        "the A/D's record names the attribute and its net: {supplies:?}"
+    );
+    assert!(
+        supplies.iter().any(|supply| {
+            supply.source == ConverterSource::Parameter("vcc".into()) && supply.net.is_none()
+        }),
+        "the output's D/A keeps .param vcc: {supplies:?}"
     );
 }
 

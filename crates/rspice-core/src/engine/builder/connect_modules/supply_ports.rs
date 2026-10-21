@@ -217,6 +217,37 @@ pub(in crate::engine::builder) fn bind(
     Ok(bindings)
 }
 
+/// The net the bridged HDL port's `supplySensitivity` attribute names, for a
+/// built-in converter at `node_label`: the circuit's own name for it, looked
+/// up in `instance`'s enclosing subcircuit first. `None` when the port has no
+/// such attribute. A net the circuit does not have, or ground, is refused
+/// naming the instance, the port and the net.
+pub(in crate::engine::builder) fn sensitivity_net(
+    circuit: &CircuitData,
+    node_label: &str,
+    instance: &str,
+    port: &str,
+) -> Result<Option<String>, SimulationError> {
+    let Some(net) = circuit
+        .port_sensitivities
+        .iter()
+        .find(|attributes| attributes.instance == instance && attributes.port == port)
+        .and_then(|attributes| attributes.supply.as_deref())
+    else {
+        return Ok(None);
+    };
+    match resolve(circuit, instance, net, true) {
+        Some((node, label)) if node > 0 => Ok(Some(label)),
+        _ => Err(connect_refusal(format!(
+            "node '{node_label}' at port '{port}' of instance '{instance}' converts against the \
+             net its supplySensitivity attribute names, '{net}', which is not a net of this \
+             circuit (or is ground); name the net that powers the port"
+        ))
+        .instance(instance)
+        .into()),
+    }
+}
+
 /// The node `net` names: ground for `0` or `gnd`, else in `instance`'s
 /// enclosing subcircuit when `scoped`, else in the deck.
 fn resolve(

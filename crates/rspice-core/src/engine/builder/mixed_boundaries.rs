@@ -89,8 +89,43 @@ pub(super) fn plan_conversions(
                 )?;
             }
             let scoped = metadata.get(&port.node);
+            // A built-in converter binds live to the net the HDL port's
+            // supplySensitivity names, above `.param vcc` and a numeric
+            // `vsup`; a connect statement naming a net outranks it, and an
+            // authored module's supply ports bind it themselves.
+            let attributed = if port.bit.is_some()
+                && selected.as_ref().is_none_or(|selected| {
+                    selected.signature().is_some() && selected.supply_net().is_none()
+                }) {
+                connect_modules::supply_ports::sensitivity_net(
+                    circuit,
+                    &node_label,
+                    host.instance_name(),
+                    signal,
+                )?
+            } else {
+                None
+            };
             let (vcc, supply) = if port.bit.is_some() {
-                if let Some(level) = selected
+                if let Some(net) = attributed {
+                    let level = supplies.rail_level(&net).unwrap_or_else(|| {
+                        selected
+                            .as_ref()
+                            .and_then(connect_modules::PlannedConnectModule::stated_supply)
+                            .unwrap_or_else(|| {
+                                supplies
+                                    .resolve(&node_label, scoped.and_then(|item| item.vcc))
+                                    .level
+                            })
+                    });
+                    (
+                        level,
+                        Some(boundary_supply::SupplyDerivation::Attribute {
+                            attribute: "supplySensitivity".to_string(),
+                            net,
+                        }),
+                    )
+                } else if let Some(level) = selected
                     .as_ref()
                     .and_then(connect_modules::PlannedConnectModule::stated_supply)
                 {

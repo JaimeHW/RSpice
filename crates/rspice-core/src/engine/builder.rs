@@ -3376,7 +3376,7 @@ fn report_planned_xspice_auto_bridge_supplies(
                 boundary_supply::report_declared_live(&node_label, net);
                 continue;
             }
-            if selected.states_supply() {
+            if selected.states_supply() && !derivation.is_attribute() {
                 continue;
             }
         }
@@ -5396,11 +5396,18 @@ fn add_connect_rule_converter(
         .unwrap_or_else(|| circuit.node_names_sorted());
     let node_label = xspice_auto_bridge_node_label(Some(&names), bridge.node);
     let net = boundary_supply::live_supply_net(bridge).map(str::to_string);
-    let stated = selected
-        .is_some_and(|selected| selected.supply_net().is_some() || selected.states_supply());
+    // An HDL port's supplySensitivity outranks a numeric vsup.
+    let attributed = bridge
+        .supply
+        .as_ref()
+        .is_some_and(boundary_supply::SupplyDerivation::is_attribute);
+    let stated = !attributed
+        && selected
+            .is_some_and(|selected| selected.supply_net().is_some() || selected.states_supply());
     let supply = connect_modules::ConverterSupply::new(
         selected
             .and_then(connect_modules::PlannedConnectModule::stated_supply)
+            .filter(|_| !attributed)
             .unwrap_or(bridge.vcc),
         net,
         if stated {
