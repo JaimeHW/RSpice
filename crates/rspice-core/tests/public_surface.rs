@@ -17,6 +17,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[path = "common/family_src.rs"]
+mod family_src;
+
+use family_src::{family_relative, family_src_roots, read_family_src};
 use rspice_core::analysis::harmonic_balance::{
     DepletionCap, HbConfig, HbError, HbSolver, HbSolverState, HbSwitchNodes, HbVoltageSwitchModel,
     NonlinearDeviceInstance,
@@ -257,10 +261,6 @@ const MAX_PUBLIC_ITEMS: usize = 5737;
 /// gap quietly becomes headroom for regrowth.
 const STALE_CEILING_SLACK: usize = 100;
 
-fn src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
-}
-
 fn rust_sources(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
@@ -314,28 +314,32 @@ fn is_public_item(line: &str) -> bool {
         .any(|keyword| rest.starts_with(keyword))
 }
 
+/// The count over every crate of the `rspice-core` family, and each file's
+/// share of it. Every crate declares something public, so a root that counts
+/// nothing was not read and fails here.
 fn count_public_items() -> (usize, Vec<(String, usize)>) {
-    let root = src_dir();
     let mut total = 0;
     let mut per_file = Vec::new();
-    for path in rust_sources(&root) {
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-        let count = source
-            .lines()
-            .filter(|line| is_public_item(line.trim_start()))
-            .count();
-        if count > 0 {
-            total += count;
-            per_file.push((
-                path.strip_prefix(&root)
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string()
-                    .replace('\\', "/"),
-                count,
-            ));
+    for root in family_src_roots() {
+        let mut root_total = 0;
+        for path in rust_sources(&root) {
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            let count = source
+                .lines()
+                .filter(|line| is_public_item(line.trim_start()))
+                .count();
+            if count > 0 {
+                root_total += count;
+                per_file.push((family_relative(&path), count));
+            }
         }
+        assert!(
+            root_total > 0,
+            "{} declares no public item; the scan read nothing there",
+            root.display()
+        );
+        total += root_total;
     }
     per_file.sort_by(|a, b| b.1.cmp(&a.1));
     (total, per_file)
@@ -349,7 +353,7 @@ fn public_surface_does_not_grow() {
         let worst: Vec<String> = per_file
             .iter()
             .take(10)
-            .map(|(path, count)| format!("  {count:>5}  src/{path}"))
+            .map(|(path, count)| format!("  {count:>5}  {path}"))
             .collect();
         panic!(
             "public surface grew: {total} items, ceiling is {MAX_PUBLIC_ITEMS}.\n\n\
@@ -470,12 +474,9 @@ fn public_hb_solver_rejects_invalid_charge_parameters_before_evaluation() {
 
 #[test]
 fn public_hb_surface_does_not_advertise_rejected_approximate_kernels() {
-    let solver_root = src_dir().join("analysis/harmonic_balance");
-    let solver_source = fs::read_to_string(solver_root.join("solver.rs")).expect("read solver.rs");
-    let device_source =
-        fs::read_to_string(solver_root.join("solver/devices.rs")).expect("read solver/devices.rs");
-    let api_source = fs::read_to_string(solver_root.join("solver/nonlinear_api.rs"))
-        .expect("read solver/nonlinear_api.rs");
+    let solver_source = read_family_src("analysis/harmonic_balance/solver.rs");
+    let device_source = read_family_src("analysis/harmonic_balance/solver/devices.rs");
+    let api_source = read_family_src("analysis/harmonic_balance/solver/nonlinear_api.rs");
     let combined = format!("{solver_source}\n{device_source}\n{api_source}");
 
     for stale_name in [

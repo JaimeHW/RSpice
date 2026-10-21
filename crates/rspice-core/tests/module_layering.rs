@@ -63,9 +63,14 @@
 //! `instantiate_builtin` returns a device-level error now and `engine` converts,
 //! so the directory is measured like every other.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[path = "common/family_src.rs"]
+mod family_src;
+
+use family_src::family_src_roots;
 
 /// Intended layer order, lowest first.
 ///
@@ -73,8 +78,9 @@ use std::path::{Path, PathBuf};
 /// same rank or a higher one is a violation.
 ///
 /// The ordering encodes the target architecture, not today's reality —
-/// [`ALLOWED_VIOLATIONS`] carries the gap between the two. Several ranks name
-/// a module that does not exist yet; the comments say what will occupy them.
+/// [`ALLOWED_VIOLATIONS`] carries the gap between the two. Every entry names a
+/// module some crate of the `rspice-core` family holds, so a module the scan
+/// stops finding fails rather than leaving its edges uncounted.
 const LAYERS: &[(&str, u32)] = &[
     // Framework-independent leaves. These reference nothing above them, so
     // they may share a rank without concealing an edge.
@@ -295,11 +301,12 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("netlist", "engine", 2),
 ];
 
+/// `rspice-core`'s own `src/`, whose root re-exports the engine's names.
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-/// Every `.rs` file under `src/`.
+/// Every `.rs` file under `root`.
 fn rust_sources(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
@@ -638,36 +645,40 @@ fn crate_root_names(source: ModuleSource<'_>) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Reference counts between top-level modules, keyed `(from, to)`.
+/// Reference counts between top-level modules, keyed `(from, to)`, over every
+/// crate of the family.
 fn edge_counts() -> BTreeMap<(String, String), usize> {
-    let root = src_dir();
     let modules: Vec<&str> = LAYERS.iter().map(|(name, _)| *name).collect();
-    let root_names = crate_root_names(&|path| module_source(&root, path));
     let mut edges: BTreeMap<(String, String), usize> = BTreeMap::new();
 
-    for file in rust_sources(&root) {
-        let Some(from) = owning_module(&root, &file) else {
-            continue;
-        };
-        let source = fs::read_to_string(&file)
-            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        let code = expand_grouped_paths(&strip_line_comments(&source));
-        for to in &modules {
-            if *to == from {
+    for root in family_src_roots() {
+        // `crate::` is the crate a file is in, so each root's own `lib.rs`
+        // says what its root names stand for.
+        let root_names = crate_root_names(&|path| module_source(&root, path));
+        for file in rust_sources(&root) {
+            let Some(from) = owning_module(&root, &file) else {
                 continue;
+            };
+            let source = fs::read_to_string(&file)
+                .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+            let code = expand_grouped_paths(&strip_line_comments(&source));
+            for to in &modules {
+                if *to == from {
+                    continue;
+                }
+                let count = count_occurrences(&code, &format!("crate::{to}"));
+                if count > 0 {
+                    *edges.entry((from.clone(), (*to).to_owned())).or_default() += count;
+                }
             }
-            let count = count_occurrences(&code, &format!("crate::{to}"));
-            if count > 0 {
-                *edges.entry((from.clone(), (*to).to_owned())).or_default() += count;
-            }
-        }
-        for (name, to) in &root_names {
-            if *to == from {
-                continue;
-            }
-            let count = count_occurrences(&code, &format!("crate::{name}"));
-            if count > 0 {
-                *edges.entry((from.clone(), to.clone())).or_default() += count;
+            for (name, to) in &root_names {
+                if *to == from {
+                    continue;
+                }
+                let count = count_occurrences(&code, &format!("crate::{name}"));
+                if count > 0 {
+                    *edges.entry((from.clone(), to.clone())).or_default() += count;
+                }
             }
         }
     }
@@ -787,40 +798,69 @@ fn the_crate_roots_own_names_are_read() {
     );
 }
 
-#[test]
-fn every_top_level_module_declares_a_layer() {
-    let root = src_dir();
-    let entries = fs::read_dir(&root).expect("read src/");
-    let mut undeclared = Vec::new();
-    for entry in entries {
-        let path = entry.expect("directory entry").path();
-        let name = if path.is_dir() {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .expect("module directory name")
-                .to_owned()
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            let stem = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .expect("module file name");
-            if stem == "lib" {
+/// The top-level modules of every crate of the family: each directory, and
+/// each `.rs` file but `lib.rs`, directly under a crate's `src/`.
+fn top_level_modules() -> BTreeSet<String> {
+    let mut modules = BTreeSet::new();
+    for root in family_src_roots() {
+        let entries =
+            fs::read_dir(&root).unwrap_or_else(|error| panic!("read {}: {error}", root.display()));
+        for entry in entries {
+            let path = entry.expect("directory entry").path();
+            let name = if path.is_dir() {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("module directory name")
+                    .to_owned()
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let stem = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .expect("module file name");
+                if stem == "lib" {
+                    continue;
+                }
+                stem.to_owned()
+            } else {
                 continue;
-            }
-            stem.to_owned()
-        } else {
-            continue;
-        };
-        if !LAYERS.iter().any(|(declared, _)| *declared == name) && !undeclared.contains(&name) {
-            undeclared.push(name);
+            };
+            modules.insert(name);
         }
     }
+    modules
+}
+
+#[test]
+fn every_top_level_module_declares_a_layer() {
+    let undeclared: Vec<String> = top_level_modules()
+        .into_iter()
+        .filter(|name| !LAYERS.iter().any(|(declared, _)| declared == name))
+        .collect();
     assert!(
         undeclared.is_empty(),
         "new top-level modules without a declared layer: {undeclared:?}\n\
          Add them to LAYERS in tests/module_layering.rs. A module with no \
          declared position in the architecture is a module nobody decided \
          the position of."
+    );
+}
+
+/// The scan reads every module the order ranks. A module whose files left the
+/// scanned roots would otherwise drop out of the edge count, and every
+/// ceiling it carries would pass on nothing.
+#[test]
+fn every_layer_names_a_module_the_family_holds() {
+    let found = top_level_modules();
+    let missing: Vec<&str> = LAYERS
+        .iter()
+        .map(|(name, _)| *name)
+        .filter(|name| !found.contains(*name))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "LAYERS ranks modules that no crate of the rspice-core family holds: {missing:?}\n\
+         Every crates/rspice-core*/src is scanned. Delete the entry of a module \
+         that is gone; a module that moved must sit in one of those trees."
     );
 }
 

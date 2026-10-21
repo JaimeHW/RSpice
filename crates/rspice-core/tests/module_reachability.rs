@@ -27,8 +27,26 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+#[path = "common/family_src.rs"]
+mod family_src;
+
+use family_src::{family_relative, family_src_roots};
+
+/// Every `.rs` file of the `rspice-core` family, with the `src/` it sits
+/// under. Each crate's root must hold a module beside its `lib.rs`: a root
+/// read as empty would let every check below pass on it unread.
+fn family_sources() -> Vec<(PathBuf, PathBuf)> {
+    let mut found = Vec::new();
+    for root in family_src_roots() {
+        let files = rust_sources(&root);
+        assert!(
+            files.iter().any(|file| *file != root.join("lib.rs")),
+            "{} holds no source file besides lib.rs",
+            root.display()
+        );
+        found.extend(files.into_iter().map(|file| (root.clone(), file)));
+    }
+    found
 }
 
 fn rust_sources(root: &Path) -> Vec<PathBuf> {
@@ -129,10 +147,9 @@ fn possible_parents(root: &Path, path: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn every_source_file_is_reachable_from_a_mod_declaration() {
-    let root = src_dir();
     let mut orphans = Vec::new();
 
-    for path in rust_sources(&root) {
+    for (root, path) in family_sources() {
         let stem = path
             .file_stem()
             .and_then(|stem| stem.to_str())
@@ -149,13 +166,7 @@ fn every_source_file_is_reachable_from_a_mod_declaration() {
         });
 
         if !declared {
-            orphans.push(
-                path.strip_prefix(&root)
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string()
-                    .replace('\\', "/"),
-            );
+            orphans.push(family_relative(&path));
         }
     }
 
@@ -167,7 +178,7 @@ fn every_source_file_is_reachable_from_a_mod_declaration() {
          the `mod` declaration that makes them real, or delete them.",
         orphans
             .iter()
-            .map(|path| format!("  src/{path}"))
+            .map(|path| format!("  {path}"))
             .collect::<Vec<_>>()
             .join("\n")
     );
@@ -225,10 +236,9 @@ mod inline_with_brace { }
 /// to `engine` is closed.
 #[test]
 fn module_files_use_sibling_style_not_mod_rs() {
-    let root = src_dir();
     let mut offenders = Vec::new();
 
-    for path in rust_sources(&root) {
+    for (root, path) in family_sources() {
         if path.file_name().is_some_and(|name| name != "mod.rs") {
             continue;
         }
@@ -242,7 +252,7 @@ fn module_files_use_sibling_style_not_mod_rs() {
             .and_then(|dir| dir.to_str())
             .unwrap_or_default()
             .replace('\\', "/");
-        offenders.push(format!("  {display}  ->  {directory}.rs"));
+        offenders.push(format!("  {}  ->  {directory}.rs", family_relative(&path)));
     }
 
     assert!(
@@ -268,19 +278,19 @@ fn module_files_use_sibling_style_not_mod_rs() {
 /// way.
 #[test]
 fn glob_imports_stay_within_their_own_module() {
-    let root = src_dir();
     let mut offenders = Vec::new();
 
-    for path in rust_sources(&root) {
-        let display = path
+    for (root, path) in family_sources() {
+        let relative = path
             .strip_prefix(&root)
             .unwrap_or(&path)
             .display()
             .to_string()
             .replace('\\', "/");
-        if display.starts_with("device/veriloga_builtins/") {
+        if relative.starts_with("device/veriloga_builtins/") {
             continue;
         }
+        let display = family_relative(&path);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
         let children = declared_submodules(&source);
