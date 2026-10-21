@@ -27,13 +27,97 @@ use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
-use crate::workbench::app::dialogs::state::{CreateHierarchyDialogState, CreateHierarchyPortDraft};
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_history::{
     HierarchyExtractionHistoryEntry, validate_hierarchy_target_unreferenced,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CreateHierarchyPortDraft {
+    pub(crate) name: String,
+    pub(crate) direction: crate::state::PortDirection,
+    pub(crate) discipline: crate::state::PortDiscipline,
+    pub(crate) source_net: String,
+}
+
+/// Isolated draft and complete source authority for Create hierarchy from
+/// selection. The live parent, library, and workspace remain untouched until
+/// the primary action validates and swaps a complete project candidate.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CreateHierarchyDialogState {
+    pub(crate) open: bool,
+    pub(crate) cell_name: String,
+    pub(crate) target_view: crate::state::ViewType,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) plan: Option<crate::state::HierarchyExtractionPlan>,
+    pub(crate) ports: Vec<CreateHierarchyPortDraft>,
+    pub(crate) library_revision: u64,
+    pub(crate) initial_cell_name: String,
+    pub(crate) initial_target_view: crate::state::ViewType,
+    pub(crate) initial_ports: Vec<CreateHierarchyPortDraft>,
+    pub(crate) validation_error: Option<String>,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+impl CreateHierarchyDialogState {
+    pub(crate) fn open(
+        &mut self,
+        authority: SchematicEditAuthority,
+        plan: crate::state::HierarchyExtractionPlan,
+        library_revision: u64,
+    ) {
+        let ports = plan
+            .ports
+            .iter()
+            .map(|port| CreateHierarchyPortDraft {
+                name: port.name.clone(),
+                direction: port.direction,
+                discipline: port.discipline,
+                source_net: port.source_net.clone(),
+            })
+            .collect::<Vec<_>>();
+        *self = Self {
+            open: true,
+            cell_name: "sensor_frontend".to_owned(),
+            target_view: crate::state::ViewType::Schematic,
+            authority: Some(authority),
+            plan: Some(plan),
+            ports: ports.clone(),
+            library_revision,
+            initial_cell_name: "sensor_frontend".to_owned(),
+            initial_target_view: crate::state::ViewType::Schematic,
+            initial_ports: ports,
+            validation_error: None,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = self.cell_name != self.initial_cell_name
+            || self.target_view != self.initial_target_view
+            || self.ports != self.initial_ports;
+        self.discard_confirm = false;
+        self.validation_error = None;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
 
 const TITLE: &str = "Create hierarchical cell";
 const PRIMARY: &str = "Create and descend";

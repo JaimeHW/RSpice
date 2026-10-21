@@ -12,8 +12,60 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
 
-use crate::workbench::app::{HierarchyDescendEditMode, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum HierarchyDescendEditMode {
+    #[default]
+    EditInPlace,
+    OpenIsolated,
+    ReadOnlyReference,
+    /// Edit the instance's symbol master on the parent, through the
+    /// instance's transform.
+    EditSymbolInPlace,
+}
+
+/// Isolated task draft for Design ▸ Descend into selected instance.
+///
+/// Direct toolbar, inspector, double-click, and Shift+E gestures use the
+/// user's hierarchy preference. The menu workflow owns the explicit
+/// edit-context choices defined by the upgraded mockup.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DescendHierarchyDialogState {
+    pub(crate) open: bool,
+    pub(crate) instance_name: String,
+    pub(crate) reference: Option<crate::state::CellViewRef>,
+    pub(crate) edit_mode: HierarchyDescendEditMode,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) parent_dirty: bool,
+    pub(crate) validation_error: Option<String>,
+}
+
+impl DescendHierarchyDialogState {
+    pub(crate) fn open(
+        &mut self,
+        instance_name: String,
+        reference: crate::state::CellViewRef,
+        authority: SchematicEditAuthority,
+        parent_dirty: bool,
+        preferred_edit_mode: HierarchyDescendEditMode,
+    ) {
+        *self = Self {
+            open: true,
+            instance_name,
+            reference: Some(reference),
+            edit_mode: preferred_edit_mode,
+            authority: Some(authority),
+            parent_dirty,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
 
 const TITLE: &str = "Descend into hierarchy";
 const PRIMARY: &str = "Open edit context";
@@ -157,7 +209,7 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
 
 fn descend_body(
     ui: &mut Ui,
-    draft: &mut crate::workbench::app::DescendHierarchyDialogState,
+    draft: &mut DescendHierarchyDialogState,
     occurrence_path: &str,
     target: &str,
 ) -> egui::Id {

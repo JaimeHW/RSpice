@@ -14,11 +14,114 @@ use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
 };
 
-use crate::workbench::app::{
-    EngineeringTableDialogPage, EngineeringTableExportFormat, EngineeringTableExportScope,
-    RSpiceApp,
-};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub(crate) enum EngineeringTableDialogPage {
+    #[default]
+    Manager,
+    SaveView,
+    SavedViews,
+    Export,
+    RowDetails,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum EngineeringTableExportScope {
+    #[default]
+    CurrentView,
+    SelectedRows,
+    CompleteDataset,
+}
+
+impl EngineeringTableExportScope {
+    pub(crate) const ALL: [Self; 3] =
+        [Self::CurrentView, Self::SelectedRows, Self::CompleteDataset];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::CurrentView => "Current view · filters, sort, visible columns",
+            Self::SelectedRows => "Selected rows · current visible columns",
+            Self::CompleteDataset => "Complete dataset · all logical rows and columns",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum EngineeringTableExportFormat {
+    #[default]
+    CsvSchema,
+    Tsv,
+    Xlsx,
+    Parquet,
+}
+
+impl EngineeringTableExportFormat {
+    pub(crate) const ALL: [Self; 4] = [Self::CsvSchema, Self::Tsv, Self::Xlsx, Self::Parquet];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::CsvSchema => "CSV + schema JSON",
+            Self::Tsv => "TSV",
+            Self::Xlsx => "XLSX · frozen headers and filters",
+            Self::Parquet => "Parquet",
+        }
+    }
+}
+
+/// Transactional universal data-grid manager. The active dataset is rebuilt
+/// from its owning source at open/commit time; the dialog retains only a view
+/// definition and source revision, never a duplicate engineering dataset.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct EngineeringTableDialogState {
+    pub(crate) open: bool,
+    pub(crate) page: EngineeringTableDialogPage,
+    pub(crate) draft: Option<crate::state::EngineeringTableView>,
+    pub(crate) source_revision: u64,
+    pub(crate) selected_saved_id: Option<String>,
+    pub(crate) save_name: String,
+    pub(crate) save_scope: crate::state::EngineeringViewScope,
+    pub(crate) save_as_default: bool,
+    pub(crate) saved_query: String,
+    pub(crate) export_scope: EngineeringTableExportScope,
+    pub(crate) export_format: EngineeringTableExportFormat,
+    pub(crate) export_headers: bool,
+    pub(crate) export_units: bool,
+    pub(crate) export_metadata: bool,
+    pub(crate) export_hidden_columns: bool,
+    pub(crate) selected_row_ids: std::collections::BTreeSet<String>,
+    pub(crate) active_cell: Option<(usize, usize)>,
+    pub(crate) focus_cell: Option<(usize, usize)>,
+    pub(crate) row_details_id: Option<String>,
+    pub(crate) saved_edit_id: Option<String>,
+    pub(crate) saved_edit_name: String,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) saved_import_token: Option<crate::workbench::browser::file_import::TextImportToken>,
+    pub(crate) error: Option<String>,
+}
+
+impl EngineeringTableDialogState {
+    pub(crate) fn open(&mut self, view: crate::state::EngineeringTableView, source_revision: u64) {
+        *self = Self {
+            open: true,
+            draft: Some(view),
+            source_revision,
+            export_headers: true,
+            export_units: true,
+            export_metadata: true,
+            ..Self::default()
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(token) = self.saved_import_token.take() {
+            let _ = crate::workbench::browser::file_import::finish_text_import(token);
+        }
+        *self = Self::default();
+    }
+}
 
 #[derive(Debug, Clone)]
 enum BodyAction {
@@ -926,7 +1029,7 @@ impl RSpiceApp {
 fn manager_body(
     ui: &mut Ui,
     dataset: &EngineeringDataset,
-    state: &mut crate::workbench::app::EngineeringTableDialogState,
+    state: &mut EngineeringTableDialogState,
     personal: &[crate::state::SavedEngineeringTableView],
     project: &[crate::state::SavedEngineeringTableView],
 ) -> Option<BodyAction> {
@@ -1403,10 +1506,7 @@ fn engineering_grid_preview(
     action
 }
 
-fn save_view_body(
-    ui: &mut Ui,
-    state: &mut crate::workbench::app::EngineeringTableDialogState,
-) -> Option<BodyAction> {
+fn save_view_body(ui: &mut Ui, state: &mut EngineeringTableDialogState) -> Option<BodyAction> {
     ui.label("Name");
     ui.add(
         TextEdit::singleline(&mut state.save_name)
@@ -1441,7 +1541,7 @@ fn save_view_body(
 fn saved_views_body(
     ui: &mut Ui,
     dataset: &EngineeringDataset,
-    state: &mut crate::workbench::app::EngineeringTableDialogState,
+    state: &mut EngineeringTableDialogState,
     personal: &[crate::state::SavedEngineeringTableView],
     project: &[crate::state::SavedEngineeringTableView],
 ) -> Option<BodyAction> {
@@ -1550,7 +1650,7 @@ fn saved_views_body(
 fn export_body(
     ui: &mut Ui,
     dataset: &EngineeringDataset,
-    state: &mut crate::workbench::app::EngineeringTableDialogState,
+    state: &mut EngineeringTableDialogState,
 ) -> Option<BodyAction> {
     ComboBox::from_label("Scope")
         .selected_text(state.export_scope.label())
@@ -1609,7 +1709,7 @@ fn export_body(
 fn row_details_body(
     ui: &mut Ui,
     dataset: &EngineeringDataset,
-    state: &mut crate::workbench::app::EngineeringTableDialogState,
+    state: &mut EngineeringTableDialogState,
 ) -> Option<BodyAction> {
     let row = state
         .row_details_id

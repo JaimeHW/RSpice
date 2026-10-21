@@ -20,6 +20,38 @@ use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
+/// Isolated draft for Display options.
+///
+/// The draft is device-local presentation state. Apply publishes every
+/// control atomically; Cancel discards them without touching schematic
+/// history, topology, project serialization, or retained result data.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SchematicVisibilityDialogState {
+    pub(crate) open: bool,
+    pub(crate) draft: crate::state::SchematicVisibilityPolicy,
+    /// The drawing-sheet layers, edited beside the visibility policy and
+    /// applied with it.
+    pub(crate) layers_draft: crate::state::DrawingSheetLayerVisibility,
+}
+
+impl SchematicVisibilityDialogState {
+    pub(crate) fn open(
+        &mut self,
+        policy: crate::state::SchematicVisibilityPolicy,
+        layers: crate::state::DrawingSheetLayerVisibility,
+    ) {
+        *self = Self {
+            open: true,
+            draft: policy,
+            layers_draft: layers,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 const TITLE: &str = "Display options";
 const PRIMARY: &str = "Apply";
 const DESCRIPTION: &str = "Choose what the schematic canvas shows on this device. The design, printing and export are unchanged.";

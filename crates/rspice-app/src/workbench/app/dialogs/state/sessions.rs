@@ -398,7 +398,8 @@ pub struct DialogState {
 
     /// Display options: device-local schematic visibility and drawing-sheet
     /// layers, neither of which modifies project-owned design data.
-    pub(crate) schematic_visibility: SchematicVisibilityDialogState,
+    pub(crate) schematic_visibility:
+        crate::workbench::app::dialogs::visibility_options::SchematicVisibilityDialogState,
 
     /// Live advisory review of printable objects outside the authored drawing
     /// area or overlapping the title block.
@@ -406,14 +407,17 @@ pub struct DialogState {
 
     /// Transactional grid display, exact snapping, and conductor-routing
     /// configuration.
-    pub(crate) grid_snap_routing: GridSnapRoutingDialogState,
+    pub(crate) grid_snap_routing:
+        crate::workbench::app::dialogs::grid_snap_routing::GridSnapRoutingDialogState,
 
     /// Explicit menu-owned hierarchy edit-context transaction.
-    pub(crate) descend_hierarchy: DescendHierarchyDialogState,
+    pub(crate) descend_hierarchy:
+        crate::workbench::app::dialogs::hierarchy::descend::DescendHierarchyDialogState,
 
     /// Universal engineering data-grid view, named-view, copy, and export
     /// transaction.
-    pub(crate) engineering_table: EngineeringTableDialogState,
+    pub(crate) engineering_table:
+        crate::workbench::app::dialogs::engineering_table::EngineeringTableDialogState,
 
     /// Typed interface-port placement transaction.
     pub(crate) pin_port: PinPortDialogState,
@@ -447,7 +451,8 @@ pub struct DialogState {
         crate::workbench::app::dialogs::stimulus_link::StimulusLinkDialogState,
 
     /// Multi-document selected-instance extraction transaction.
-    pub(crate) create_hierarchy: CreateHierarchyDialogState,
+    pub(crate) create_hierarchy:
+        crate::workbench::app::dialogs::hierarchy::create::CreateHierarchyDialogState,
 
     /// Validated active-document save revision transaction.
     pub(crate) check_and_save: CheckAndSaveDialogState,

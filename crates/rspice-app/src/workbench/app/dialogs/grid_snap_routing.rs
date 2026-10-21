@@ -9,11 +9,61 @@ use egui::Context;
 
 use crate::state::{GridStyle, SchematicWireRoutingStyle, WireRoutingMode};
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
-use crate::workbench::app::{
-    GridSnapRoutingDialogState, GridSnapRoutingDraft, GridSnapRoutingFocusTarget,
-    GridSnapSpacingChoice, RSpiceApp, SchematicEditAuthority,
-};
+use crate::workbench::app::{GridSnapSpacingChoice, RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
+
+/// Complete isolated candidate published by Grid, snap and wire routing.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GridSnapRoutingDraft {
+    pub(crate) grid_style: crate::state::GridStyle,
+    pub(crate) snap_spacing: GridSnapSpacingChoice,
+    pub(crate) snap_engine: crate::state::SnapEngine,
+    pub(crate) wire_routing: crate::state::WireRoutingMode,
+}
+
+impl Default for GridSnapRoutingDraft {
+    fn default() -> Self {
+        Self {
+            grid_style: crate::state::GridStyle::Dots,
+            snap_spacing: GridSnapSpacingChoice::Mil50,
+            snap_engine: crate::state::SnapEngine::default(),
+            wire_routing: crate::state::WireRoutingMode::HorizontalFirst,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GridSnapRoutingFocusTarget {
+    SnapSpacing,
+    SnapTargets,
+}
+
+/// Application-modal transactional owner for the schematic canvas settings
+/// popover. The original and draft are kept separately so Cancel is exact.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GridSnapRoutingDialogState {
+    pub(crate) open: bool,
+    pub(crate) draft: GridSnapRoutingDraft,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) validation_error: Option<String>,
+    pub(crate) focus_target: Option<GridSnapRoutingFocusTarget>,
+}
+
+impl GridSnapRoutingDialogState {
+    pub(crate) fn open(&mut self, draft: GridSnapRoutingDraft, authority: SchematicEditAuthority) {
+        *self = Self {
+            open: true,
+            draft,
+            authority: Some(authority),
+            validation_error: None,
+            focus_target: None,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
 
 const TITLE: &str = "Grid, snap and wire routing";
 const PRIMARY: &str = "Apply canvas settings";
