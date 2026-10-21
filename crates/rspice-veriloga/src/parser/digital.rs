@@ -12,6 +12,7 @@
 
 use super::Parser;
 use crate::ast::*;
+use crate::canonical_ir::digital::{DigitalDriveStrength, DigitalStrengthLevel};
 use crate::error::{ParseError, ParseErrorKind};
 use crate::lexer::TokenKind;
 use crate::source::Span;
@@ -114,6 +115,25 @@ impl GatePrimitive {
     const fn minimum_terminals(self) -> usize {
         2
     }
+}
+
+/// A drive-strength keyword (IEEE 1364-2005 A.2.2.2): whether it is a `1`
+/// strength, and its level.
+pub(super) fn strength_level(text: &str) -> Option<(bool, DigitalStrengthLevel)> {
+    use DigitalStrengthLevel::{HighZ, Pull, Strong, Supply, Weak};
+    Some(match text {
+        "supply0" => (false, Supply),
+        "strong0" => (false, Strong),
+        "pull0" => (false, Pull),
+        "weak0" => (false, Weak),
+        "highz0" => (false, HighZ),
+        "supply1" => (true, Supply),
+        "strong1" => (true, Strong),
+        "pull1" => (true, Pull),
+        "weak1" => (true, Weak),
+        "highz1" => (true, HighZ),
+        _ => return None,
+    })
 }
 
 impl Parser<'_> {
@@ -230,7 +250,20 @@ impl Parser<'_> {
         if self.check(TokenKind::Wreal) {
             return self.parse_wreal_net_decl(module);
         }
+        let kind = self
+            .current()
+            .text
+            .as_deref()
+            .and_then(DigitalNetKind::from_keyword)
+            .unwrap_or(DigitalNetKind::Wire);
         self.expect(TokenKind::Wire)?;
+        // `wire (weak1, weak0) w = a;` (section 6.1.4): the strength of the
+        // declaration assignment.
+        let strength = if self.check(TokenKind::LParen) && self.strength_specification_follows() {
+            Some(self.parse_drive_strength("net declaration")?)
+        } else {
+            None
+        };
         let discipline = self.parse_discrete_discipline(true)?;
         // IEEE 1364-2005 section 4.3.2: `vectored` and `scalared` say whether
         // a tool may expand a vector net into bits. Neither changes what the
@@ -252,7 +285,7 @@ impl Parser<'_> {
                  section 4.3.2)"
             ))));
         }
-        let items = self.parse_digital_decl_items()?;
+        let mut items = self.parse_digital_decl_items()?;
         Self::retain_discrete_discipline(
             module,
             discipline,
@@ -260,8 +293,28 @@ impl Parser<'_> {
             &items,
             start.extend(self.previous_span()),
         );
+        // A strength belongs to the declaration assignment, which section
+        // 6.1.2 makes a continuous assignment; it becomes one here so that it
+        // carries the strength.
+        if strength.is_some() {
+            for item in &mut items {
+                let Some(value) = item.init.take() else {
+                    continue;
+                };
+                module.continuous_assigns.push(ContinuousAssign {
+                    target: DigitalLValue::Identifier {
+                        name: item.name.clone(),
+                        span: item.span,
+                    },
+                    value,
+                    delay: None,
+                    strength,
+                    span: item.span,
+                });
+            }
+        }
         Ok(DigitalNetDecl {
-            kind: DigitalNetKind::Wire,
+            kind,
             signedness,
             range,
             items,
@@ -426,55 +479,128 @@ impl Parser<'_> {
         })
     }
 
-    /// `assign [#delay] lvalue = expression;`
-    pub(super) fn parse_continuous_assign(&mut self) -> Result<ContinuousAssign, ParseError> {
+    /// `assign [strength] [#delay] lvalue = expression [, lvalue = expression]* ;`
+    ///
+    /// IEEE 1364-2005 A.6.1: one strength and delay apply to every assignment
+    /// of the list.
+    pub(super) fn parse_continuous_assign(&mut self) -> Result<Vec<ContinuousAssign>, ParseError> {
         let start = self.current_span();
         self.expect(TokenKind::Assign)?;
-        // `assign (strong1, weak0) y = a;` (section 6.1.2): refused as a gate's
-        // strength is, and for the same reason.
-        if self.check(TokenKind::LParen) && self.strength_specification_follows() {
-            return Err(ParseError::new(
-                ParseErrorKind::UnsupportedConstruct {
-                    context: "continuous assignment".to_string(),
-                    found: "a drive-strength specification; this compiler resolves nets at one \
-                            strength, so a strength that changes the resolution cannot be \
-                            honoured"
-                        .to_string(),
-                },
-                self.current_span(),
-            ));
-        }
+        // `assign (strong1, weak0) y = a;` (section 6.1.4).
+        let strength = if self.check(TokenKind::LParen) && self.strength_specification_follows() {
+            Some(self.parse_drive_strength("continuous assignment")?)
+        } else {
+            None
+        };
         let delay = if self.match_token(TokenKind::Hash) {
             Some(self.parse_delay_value()?)
         } else {
             None
         };
-        let target = self.parse_digital_lvalue()?;
-        // IEEE 1364-2005 section 6.1: a continuous assignment is a driver on a
-        // net and uses `=`. `<=` is the procedural nonblocking assignment and
-        // exists only inside a process, so say that rather than reporting a
-        // token mismatch.
-        if self.check(TokenKind::Le) {
+        let mut assignments = Vec::new();
+        loop {
+            let target = self.parse_digital_lvalue()?;
+            // IEEE 1364-2005 section 6.1: a continuous assignment is a driver
+            // on a net and uses `=`. `<=` is the procedural nonblocking
+            // assignment and exists only inside a process, so say that rather
+            // than reporting a token mismatch.
+            if self.check(TokenKind::Le) {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: "continuous assignment".to_string(),
+                        found: "`<=`; a nonblocking assignment is only legal inside \
+                                an `always` or `initial` process, and a continuous \
+                                `assign` uses `=`"
+                            .to_string(),
+                    },
+                    self.current_span(),
+                ));
+            }
+            self.expect(TokenKind::Assign_)?;
+            let value = self.parse_expression()?;
+            assignments.push(ContinuousAssign {
+                target,
+                value,
+                delay: delay.clone(),
+                strength,
+                span: start,
+            });
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::Semicolon)?;
+        let span = start.extend(self.previous_span());
+        for assignment in &mut assignments {
+            assignment.span = span;
+        }
+        Ok(assignments)
+    }
+
+    /// `( strength0 , strength1 )` in either order (IEEE 1364-2005 A.2.2.2).
+    ///
+    /// Section 6.1.4 forbids `(highz0, highz1)` and `(highz1, highz0)`, and a
+    /// pair must name one strength for each value.
+    pub(super) fn parse_drive_strength(
+        &mut self,
+        context: &str,
+    ) -> Result<DigitalDriveStrength, ParseError> {
+        let start = self.current_span();
+        self.expect(TokenKind::LParen)?;
+        let first = self.strength_keyword(context)?;
+        self.expect(TokenKind::Comma)?;
+        let second = self.strength_keyword(context)?;
+        self.expect(TokenKind::RParen)?;
+        let span = start.extend(self.previous_span());
+        let (zero, one) = match (first, second) {
+            ((false, zero), (true, one)) | ((true, one), (false, zero)) => (zero, one),
+            _ => {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: context.to_string(),
+                        found: "a drive strength that does not name one strength for 0 and one \
+                                for 1 (IEEE 1364-2005 section 6.1.4)"
+                            .to_string(),
+                    },
+                    span,
+                ));
+            }
+        };
+        if zero == DigitalStrengthLevel::HighZ && one == DigitalStrengthLevel::HighZ {
             return Err(ParseError::new(
                 ParseErrorKind::UnsupportedConstruct {
-                    context: "continuous assignment".to_string(),
-                    found: "`<=`; a nonblocking assignment is only legal inside \
-                            an `always` or `initial` process, and a continuous \
-                            `assign` uses `=`"
+                    context: context.to_string(),
+                    found: "`(highz0, highz1)`; IEEE 1364-2005 section 6.1.4 makes a driver \
+                            that drives neither value illegal"
+                        .to_string(),
+                },
+                span,
+            ));
+        }
+        Ok(DigitalDriveStrength { zero, one })
+    }
+
+    /// One strength keyword: whether it is a `1` strength, and its level.
+    pub(super) fn strength_keyword(
+        &mut self,
+        context: &str,
+    ) -> Result<(bool, DigitalStrengthLevel), ParseError> {
+        let parsed = self.current().text.as_deref().and_then(strength_level);
+        match parsed {
+            Some(parsed) => {
+                self.advance();
+                Ok(parsed)
+            }
+            None => Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: context.to_string(),
+                    found: "a word that is not a drive strength (supply, strong, pull, weak or \
+                            highz, with 0 or 1)"
                         .to_string(),
                 },
                 self.current_span(),
-            ));
+            )),
         }
-        self.expect(TokenKind::Assign_)?;
-        let value = self.parse_expression()?;
-        self.expect(TokenKind::Semicolon)?;
-        Ok(ContinuousAssign {
-            target,
-            value,
-            delay,
-            span: start.extend(self.previous_span()),
-        })
     }
 
     // ------------------------------------------------------------------
@@ -502,22 +628,13 @@ impl Parser<'_> {
         let start = self.current_span();
         self.advance(); // consume the gate keyword
 
-        // A drive-strength specification `(strong1, weak0)` selects between
-        // strengths this compiler's one-strength resolution cannot represent,
-        // so it is refused rather than ignored: ignoring it would silently
-        // resolve a contention the design meant to decide.
-        if self.check(TokenKind::LParen) && self.strength_specification_follows() {
-            return Err(ParseError::new(
-                ParseErrorKind::UnsupportedConstruct {
-                    context: format!("`{}` gate", gate.keyword()),
-                    found: "a drive-strength specification; this compiler resolves nets at one \
-                            strength, so a strength that changes the resolution cannot be \
-                            honoured"
-                        .to_string(),
-                },
-                self.current_span(),
-            ));
-        }
+        // A drive strength `(strong1, weak0)` (section 7.8) applies to every
+        // instance of the declaration.
+        let strength = if self.check(TokenKind::LParen) && self.strength_specification_follows() {
+            Some(self.parse_drive_strength(&format!("`{}` gate", gate.keyword()))?)
+        } else {
+            None
+        };
 
         let delay = if self.match_token(TokenKind::Hash) {
             Some(self.parse_delay_value()?)
@@ -566,6 +683,7 @@ impl Parser<'_> {
         let declaration = start.extend(self.previous_span());
         for assignment in &mut assignments {
             assignment.span = declaration;
+            assignment.strength = strength;
         }
         Ok(assignments)
     }
@@ -576,14 +694,11 @@ impl Parser<'_> {
     /// A strength spec is two strength keywords separated by a comma, and every
     /// one of those words is an identifier to this lexer. Looking for the first
     /// one is enough: no terminal expression can begin with `supply0`.
-    fn strength_specification_follows(&self) -> bool {
-        const STRENGTHS: [&str; 8] = [
-            "supply0", "supply1", "strong0", "strong1", "pull0", "pull1", "weak0", "weak1",
-        ];
+    pub(super) fn strength_specification_follows(&self) -> bool {
         self.tokens
             .get(self.pos + 1)
             .and_then(|token| token.text.as_deref())
-            .is_some_and(|text| STRENGTHS.contains(&text))
+            .is_some_and(|text| strength_level(text).is_some())
     }
 
     /// Turn one gate instance's terminal list into its driving assignments.
@@ -643,6 +758,7 @@ impl Parser<'_> {
                     target: Self::terminal_as_lvalue(output, gate)?,
                     value: value.clone(),
                     delay: delay.clone(),
+                    strength: None,
                     span,
                 })
             })

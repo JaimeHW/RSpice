@@ -164,7 +164,7 @@ impl HdlEffects {
                 let Some(descriptor) = self.descriptor_or_warn(plan, site, args, clock) else {
                     return Ok(outcome);
                 };
-                let mut text = self.format(plan, site, args, 1, radix)?;
+                let mut text = self.format(plan, site, args, 1, (radix, store))?;
                 if matches!(site.kind, Kind::Fdisplay(_)) {
                     text.push('\n');
                 }
@@ -189,7 +189,7 @@ impl HdlEffects {
                         self.warn(plan, site, clock, "the file descriptor is unknown (x or z)");
                         return Ok(outcome);
                     };
-                    let mut text = self.format(plan, site, args, 1, radix)?;
+                    let mut text = self.format(plan, site, args, 1, (radix, store))?;
                     text.push('\n');
                     self.write_descriptor(plan, site, clock, descriptor, &text);
                 }
@@ -253,13 +253,20 @@ impl HdlEffects {
                         _ => string_argument(site, args, 1)
                             .ok_or_else(|| failed(site, "the format must be a string"))?,
                     };
-                    self.format_with(plan, site, args, 2, DigitalRadix::Decimal, Some(&format))?
+                    self.format_with(
+                        plan,
+                        site,
+                        args,
+                        2,
+                        (DigitalRadix::Decimal, store),
+                        Some(&format),
+                    )?
                 } else {
                     let radix = match site.kind {
                         Kind::Swrite(radix) => radix,
                         _ => DigitalRadix::Decimal,
                     };
-                    self.format(plan, site, args, 1, radix)?
+                    self.format(plan, site, args, 1, (radix, store))?
                 };
                 outcome.outputs = vec![string_value(class, &text_bytes(&text))];
             }

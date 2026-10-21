@@ -2824,34 +2824,49 @@ fn a_gate_delay_is_refused_by_name() {
     assert!(error.contains("delay"), "{error}");
 }
 
-/// A drive-strength specification selects between strengths this compiler's
-/// one-strength resolution cannot represent. Ignoring it would silently resolve
-/// a contention the design meant to decide.
+/// A drive strength (IEEE 1364-2005 sections 6.1.4 and 7.8) on a gate, a
+/// continuous assignment and a net declaration assignment, in either order;
+/// a net type keyword names its net type.
 #[test]
-fn a_gate_drive_strength_is_refused_by_name() {
-    let error = parse_error(
-        "module g(a, b, y);\n\
-         \x20   input a, b;\n     output y;\n\
+fn drive_strengths_and_net_types_parse() {
+    use rspice_veriloga::canonical_ir::digital::{DigitalDriveStrength, DigitalStrengthLevel};
+    let file = parse(
+        "module g(a, b, y, z);\n\
+         \x20   input a, b;\n     output y, z;\n     tri1 t;\n     supply0 s;\n\
          \x20   nand (strong1, weak0) u (y, a, b);\n\
+         \x20   assign (pull0, highz1) z = a;\n\
+         \x20   wire (weak1, supply0) w = b;\n\
          endmodule\n",
     );
-    assert!(error.contains("strength"), "{error}");
+    let module = parsed_module(&file);
+    let strengths: Vec<_> = module
+        .continuous_assigns
+        .iter()
+        .map(|assign| assign.strength)
+        .collect();
+    use DigitalStrengthLevel::*;
+    let pair = |zero, one| Some(DigitalDriveStrength { zero, one });
+    assert_eq!(
+        strengths,
+        [pair(Weak, Strong), pair(Pull, HighZ), pair(Supply, Weak)]
+    );
+    let kinds: Vec<_> = module.digital_nets.iter().map(|net| net.kind).collect();
+    assert!(kinds.contains(&DigitalNetKind::Tri1) && kinds.contains(&DigitalNetKind::Supply0));
 }
 
-/// `assign (strong1, weak0) y = a;` is refused for its strength, as a gate's
-/// is, not as "Expected assignment target, found LParen".
+/// Section 6.1.4: `(highz0, highz1)` drives nothing and is illegal, and a pair
+/// must give one strength to each value.
 #[test]
-fn a_continuous_assignment_drive_strength_is_refused_by_name() {
-    let error = parse_error(
-        "module g(a, y);\n\
-         \x20   input a;\n     output y;\n\
-         \x20   assign (strong1, weak0) y = a;\n\
-         endmodule\n",
-    );
-    assert!(
-        error.contains("drive-strength") && !error.contains("assignment target"),
-        "{error}"
-    );
+fn an_illegal_drive_strength_pair_is_refused_by_name() {
+    for pair in ["(highz1, highz0)", "(strong0, weak0)"] {
+        let error = parse_error(&format!(
+            "module g(a, y);\n\
+             \x20   input a;\n     output y;\n\
+             \x20   assign {pair} y = a;\n\
+             endmodule\n"
+        ));
+        assert!(error.contains("section 6.1.4"), "{error}");
+    }
 }
 
 /// An array of gate instances is refused as one, not as a token mismatch

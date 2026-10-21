@@ -14,6 +14,11 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 170 lowers drive strengths and the IEEE 1364-2005 section 4.6 net
+/// types: the plan's strength table and a call site's whole-net operands.
+/// Earlier artifacts refused these sources or dropped the strengths `%v`
+/// prints, and must be rebuilt.
+///
 /// Version 167 lowers `force`/`release` and procedural `assign`/`deassign`:
 /// the plan's override table and the `DigitalOverride` node. Earlier
 /// artifacts refused every such statement and carry neither.
@@ -178,7 +183,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 167;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 170;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

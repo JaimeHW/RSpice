@@ -619,6 +619,7 @@ fn prepare_boundaries(
                     target,
                     value,
                     delay: None,
+                    strength: None,
                     span,
                 });
                 tap_expression

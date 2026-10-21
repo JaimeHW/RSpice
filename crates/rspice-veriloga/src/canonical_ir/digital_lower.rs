@@ -594,6 +594,64 @@ fn lower_with_analog_variables(
         frame_signal_ids.push(ids);
     }
     references::bind(digital, &mut root_signal_ids, &mut frame_signal_ids)?;
+    // Net types other than `wire` (IEEE 1364-2005 section 4.6), by the signal
+    // each declaration lowered to; `uwire`s are checked once drivers exist.
+    let mut typed_nets = Vec::new();
+    let mut uwires = Vec::new();
+    for (declared, id) in digital
+        .signals
+        .iter()
+        .zip(&root_signal_ids)
+        .filter(|(declared, _)| !references::is_reference(root_references, &declared.name))
+        .chain(
+            digital
+                .instances
+                .iter()
+                .zip(&frame_signal_ids)
+                .flat_map(|(instance, ids)| {
+                    instance
+                        .signals
+                        .iter()
+                        .map(|signal| &signal.declared)
+                        .zip(ids)
+                        .filter(|(declared, _)| declared.element_alias.is_none())
+                }),
+        )
+    {
+        let crate::semantic::DigitalSignalClass::Net(kind) = declared.class else {
+            continue;
+        };
+        use super::digital::DigitalNetType;
+        let net_type = match kind {
+            crate::ast::DigitalNetKind::Wand => DigitalNetType::Wand,
+            crate::ast::DigitalNetKind::Wor => DigitalNetType::Wor,
+            crate::ast::DigitalNetKind::Tri0 => DigitalNetType::Tri0,
+            crate::ast::DigitalNetKind::Tri1 => DigitalNetType::Tri1,
+            crate::ast::DigitalNetKind::Supply0 => DigitalNetType::Supply0,
+            crate::ast::DigitalNetKind::Supply1 => DigitalNetType::Supply1,
+            crate::ast::DigitalNetKind::Uwire => {
+                uwires.push(*id);
+                continue;
+            }
+            _ => continue,
+        };
+        if declared.unpacked.is_some() {
+            diagnostics.push(DigitalLoweringDiagnostic::refusal(
+                format!(
+                    "`{}` is an array of `{}` nets, which has no lowered form; declare each \
+                     element as its own net",
+                    declared.name,
+                    kind.keyword()
+                ),
+                declared.span.into(),
+            ));
+            continue;
+        }
+        typed_nets.push(super::digital::DigitalTypedNet {
+            signal: *id,
+            net_type,
+        });
+    }
 
     for (declared, id) in digital.signals.iter().zip(&root_signal_ids) {
         if references::is_reference(root_references, &declared.name) {
@@ -703,6 +761,7 @@ fn lower_with_analog_variables(
 
     let mut processes = Vec::new();
     let mut drivers = Vec::new();
+    let mut driver_strengths = Vec::new();
     // One probe table for the whole plan, in first-appearance order over the
     // same fixed traversal the process and driver numbering follows, so a
     // probe keeps its id across a recompilation for the reason a driver keeps
@@ -826,7 +885,7 @@ fn lower_with_analog_variables(
             &module_constants,
             analog_variables,
             allocate(),
-            &mut drivers,
+            (&mut drivers, &mut driver_strengths),
             &mut probes,
             digital.time_scale,
             &root_routines,
@@ -919,7 +978,7 @@ fn lower_with_analog_variables(
                 constants,
                 &frame_variables,
                 allocate(),
-                &mut drivers,
+                (&mut drivers, &mut driver_strengths),
                 &mut probes,
                 instance.time_scale,
                 frame_routines,
@@ -938,7 +997,7 @@ fn lower_with_analog_variables(
                 &no_constants,
                 &no_analog_variables,
                 allocate(),
-                &mut drivers,
+                (&mut drivers, &mut driver_strengths),
                 &mut probes,
                 instance.time_scale,
                 &routines::NO_ROUTINES,
@@ -1122,6 +1181,34 @@ fn lower_with_analog_variables(
         );
     }
     diagnostics.extend(reject_overdriven_real_nets(&signals, &drivers));
+    // IEEE 1364-2005 section 4.6.2: a `uwire` admits one driver per bit, so
+    // two drivers of different bits are legal.
+    for uwire in uwires {
+        let range = signals[usize::from(uwire)].declared_range();
+        let mut driven = BTreeSet::new();
+        let second = drivers
+            .iter()
+            .filter(|driver| driver.id.signal == uwire)
+            .find(|driver| {
+                let low = driver.target.select.low_position(range);
+                let width = driver.target.select.checked_width(range).unwrap_or(0);
+                (low..low + i64::from(width))
+                    .map(|bit| driven.insert(bit))
+                    .fold(false, |clash, inserted| clash | !inserted)
+            });
+        if let Some(second) = second {
+            diagnostics.push(DigitalLoweringDiagnostic::refusal_with_kind(
+                DigitalRefusalKind::InvalidContribution,
+                format!(
+                    "`{}` is a `uwire` with more than one driver; IEEE 1364-2005 section 4.6.2 \
+                     permits a `uwire` one driver of each bit, so declare it `wire` to resolve \
+                     several",
+                    signals[usize::from(uwire)].name
+                ),
+                second.span,
+            ));
+        }
+    }
 
     if !diagnostics.is_empty() {
         return Err(diagnostics);
@@ -1172,6 +1259,10 @@ fn lower_with_analog_variables(
         observers: calls.observers,
         routines: plan_routines,
         overrides: calls.overrides,
+        strength: super::digital::DigitalStrengthPlan {
+            nets: typed_nets,
+            drivers: driver_strengths,
+        },
     }
     .seal()
     // Structural validation of the plan this pass just built, reached only
@@ -1267,7 +1358,10 @@ fn lower_continuous_assign(
     constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
     id: DigitalProcessId,
-    drivers: &mut Vec<DigitalDriver>,
+    (drivers, strengths): (
+        &mut Vec<DigitalDriver>,
+        &mut Vec<super::digital::DigitalDriverStrength>,
+    ),
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
     routines: &routines::RoutineTable,
@@ -1320,6 +1414,17 @@ fn lower_continuous_assign(
         lowerer.assigned_value(entry, &assignment.assignment.value, context)
     };
     lowerer.drive(entry, &assignment.assignment.target, value, id, drivers);
+    if let Some(strength) = assignment.assignment.strength {
+        strengths.extend(
+            drivers
+                .iter()
+                .filter(|driver| driver.process == id)
+                .map(|driver| super::digital::DigitalDriverStrength {
+                    driver: driver.id,
+                    strength,
+                }),
+        );
+    }
 
     let mut reads = BTreeSet::new();
     collect_expression_reads(&assignment.assignment.value, &mut reads);

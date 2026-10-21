@@ -1,6 +1,7 @@
 //! Bit-level net identities over the compiled signal view.
 //! Only wires are collapsed here. Variable ports first receive the linker's
 //! explicit continuous connection process, preserving HDL scheduling semantics.
+use super::strength::{NetResolution, StrengthBit};
 use super::*;
 use crate::xspice::event_scheduler::EventTarget;
 use crate::xspice::{DigitalState, DigitalValue};
@@ -510,9 +511,24 @@ impl DigitalSignalStore {
         net_index: usize,
     ) -> Option<DigitalValue> {
         let net = &connected.topology.nets[net_index];
-        let hdl = net.contributions.iter().fold(
-            FourStateBit::HighImpedance,
-            |resolved, &(slot, offset)| {
+        let hdl = if self.strengths.any {
+            self.connected_strength(net).value()
+        } else {
+            self.connected_four_state(net)
+        };
+        match hdl {
+            FourStateBit::Zero => Some(DigitalValue::zero()),
+            FourStateBit::One => Some(DigitalValue::one()),
+            FourStateBit::Unknown => Some(DigitalValue::unknown()),
+            FourStateBit::HighImpedance => None,
+        }
+    }
+
+    /// A connected net's contributions under IEEE 1364-2005 table 4-1.
+    fn connected_four_state(&self, net: &BitNet) -> FourStateBit {
+        net.contributions
+            .iter()
+            .fold(FourStateBit::HighImpedance, |resolved, &(slot, offset)| {
                 let ContributionValue::FourState(Some(value)) = &self.contributions[slot].value
                 else {
                     return resolved;
@@ -521,14 +537,42 @@ impl DigitalSignalStore {
                     return resolved;
                 }
                 resolve_bit(resolved, value.bit(offset))
-            },
-        );
-        match hdl {
-            FourStateBit::Zero => Some(DigitalValue::zero()),
-            FourStateBit::One => Some(DigitalValue::one()),
-            FourStateBit::Unknown => Some(DigitalValue::unknown()),
-            FourStateBit::HighImpedance => None,
+            })
+    }
+
+    /// A connected net's contributions at their drive strengths, with the
+    /// driver each member's net type adds (section 7.10): the members are one
+    /// net, so a `tri0` port pulls the net it is connected to.
+    fn connected_strength(&self, net: &BitNet) -> StrengthBit {
+        let mut resolved =
+            net.contributions
+                .iter()
+                .fold(StrengthBit::HIGH_Z, |resolved, &(slot, offset)| {
+                    let ContributionValue::FourState(Some(value)) = &self.contributions[slot].value
+                    else {
+                        return resolved;
+                    };
+                    if offset >= value.width() {
+                        return resolved;
+                    }
+                    resolved.resolve(StrengthBit::driven(
+                        value.bit(offset),
+                        self.strengths.slots[slot],
+                    ))
+                });
+        let mut seen = None;
+        for member in &net.members {
+            if seen == Some(member.signal) {
+                continue;
+            }
+            seen = Some(member.signal);
+            if let NetResolution::Strength(Some(implicit)) =
+                self.strengths.nets[usize::from(member.signal)]
+            {
+                resolved = resolved.resolve(implicit);
+            }
         }
+        resolved
     }
 
     fn connected_external_value(

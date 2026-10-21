@@ -834,6 +834,93 @@ pub struct DigitalDriver {
     pub span: SourceSpanRef,
 }
 
+/// A strength level of IEEE 1364-2005 section 7.9, weakest first.
+///
+/// The discriminants are the levels' positions on one side of the section
+/// 7.10 scale, which is what the store's strength arithmetic counts in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum DigitalStrengthLevel {
+    HighZ = 0,
+    Small = 1,
+    Medium = 2,
+    Weak = 3,
+    Large = 4,
+    Pull = 5,
+    Strong = 6,
+    Supply = 7,
+}
+
+/// A drive strength (section 7.9): the strength a driver gives a 0 and a 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DigitalDriveStrength {
+    pub zero: DigitalStrengthLevel,
+    pub one: DigitalStrengthLevel,
+}
+
+impl DigitalDriveStrength {
+    /// What a driver without a strength specification drives (section 7.9).
+    pub const STRONG: Self = Self {
+        zero: DigitalStrengthLevel::Strong,
+        one: DigitalStrengthLevel::Strong,
+    };
+}
+
+/// A net type other than `wire`/`tri` (IEEE 1364-2005 section 4.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalNetType {
+    /// `wand` and `triand`: wired AND (table 4-2).
+    Wand,
+    /// `wor` and `trior`: wired OR (table 4-3).
+    Wor,
+    /// `tri0`: a pull-down at pull strength (section 4.6.4).
+    Tri0,
+    /// `tri1`: a pull-up at pull strength.
+    Tri1,
+    /// `supply0`: a constant 0 at supply strength (section 4.6.6).
+    Supply0,
+    /// `supply1`: a constant 1 at supply strength.
+    Supply1,
+}
+
+/// One net whose type is not `wire`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalTypedNet {
+    pub signal: DigitalSignalId,
+    pub net_type: DigitalNetType,
+}
+
+/// One driver written with a drive strength.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalDriverStrength {
+    pub driver: DigitalDriverId,
+    pub strength: DigitalDriveStrength,
+}
+
+/// What the plan says about strengths and net types beyond `wire`.
+///
+/// Empty for a design that names neither, which is what keeps every net of such
+/// a design on the store's four-state resolution.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DigitalStrengthPlan {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nets: Vec<DigitalTypedNet>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drivers: Vec<DigitalDriverStrength>,
+}
+
+impl DigitalStrengthPlan {
+    pub fn is_empty(&self) -> bool {
+        self.nets.is_empty() && self.drivers.is_empty()
+    }
+}
+
+/// A `%v` operand that names a whole net, so its strengths can be printed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalOperandNet {
+    pub operand: u32,
+    pub signal: DigitalSignalId,
+}
+
 /// Exact elaboration value for a scalar parameter outside the analog numeric ABI.
 /// Changing it requires source specialization, including all shapes and processes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -939,6 +1026,9 @@ pub struct CanonicalDigitalPlan {
     /// node names its entry here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overrides: Vec<DigitalOverride>,
+    /// Net types and drive strengths (IEEE 1364-2005 sections 4.6 and 7.9).
+    #[serde(default, skip_serializing_if = "DigitalStrengthPlan::is_empty")]
+    pub strength: DigitalStrengthPlan,
 }
 
 /// Dense identity of one procedural continuous assignment statement.
@@ -1600,6 +1690,10 @@ pub struct DigitalSystemCall {
     /// Where the call was written, once a source map has resolved the span.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<DigitalSourceLine>,
+    /// Value operands that name a whole net, whose strengths `%v` prints
+    /// (IEEE 1364-2005 section 17.1.1.5).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nets: Vec<DigitalOperandNet>,
 }
 
 /// The argument function of a `$strobe` or `$monitor` site.

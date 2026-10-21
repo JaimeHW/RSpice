@@ -375,7 +375,10 @@ impl TokenKind {
             "continuous" => TokenKind::Continuous,
 
             // Nets
-            "wire" | "tri" => TokenKind::Wire,
+            // The IEEE 1364-2005 section 4.6 net types share one kind; the
+            // parser reads which one back off the token's text.
+            "wire" | "tri" | "wand" | "triand" | "wor" | "trior" | "tri0" | "tri1" | "supply0"
+            | "supply1" | "uwire" => TokenKind::Wire,
             "reg" => TokenKind::Reg,
             // Verilog-AMS LRM 2.4 section 3.7's real net, and the four
             // resolved spellings RSpice implements beside it as a named
@@ -470,18 +473,10 @@ impl TokenKind {
             "endprimitive" => TokenKind::AmsDigital,
             "realtime" => TokenKind::AmsDigital,
             "scalared" => TokenKind::AmsDigital,
-            "supply0" => TokenKind::AmsDigital,
-            "supply1" => TokenKind::AmsDigital,
             "time" => TokenKind::AmsDigital,
-            "tri0" => TokenKind::AmsDigital,
-            "tri1" => TokenKind::AmsDigital,
-            "triand" => TokenKind::AmsDigital,
-            "trior" => TokenKind::AmsDigital,
             "trireg" => TokenKind::AmsDigital,
             "vectored" => TokenKind::AmsDigital,
             "wait" => TokenKind::AmsDigital,
-            "wand" => TokenKind::AmsDigital,
-            "wor" => TokenKind::AmsDigital,
             // A four-state real net: a real value that can also be `x` or `z`.
             // Not a resolution of `wreal` but a different type, with no
             // Accellera definition to implement, so it is refused by name

@@ -767,6 +767,7 @@ impl SemanticAnalyzer {
                     },
                     value: init.clone(),
                     delay: None,
+                    strength: None,
                     span: item.span,
                 };
                 if let Some(analyzed) =

@@ -93,6 +93,8 @@ mod real_alias_tests;
 mod real_bindings;
 pub(crate) use real_bindings::{ExternalNetChange, ExternalRealDriverId};
 use real_bindings::{ExternalReals, RealConnections};
+pub(crate) mod strength;
+use strength::{NetResolution, StrengthBit};
 
 use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{
@@ -405,6 +407,56 @@ pub(crate) struct DigitalSignalStore {
     /// `force` and procedural `assign` in effect (IEEE 1364-2005 section
     /// 9.3); see `store/overrides.rs`.
     overrides: overrides::Overrides,
+    /// How each net resolves, and each contribution's drive strength; see
+    /// `store/strength.rs`. Fixed by the plan.
+    strengths: Arc<StrengthTables>,
+}
+
+/// The plan's net types and drive strengths, indexed as the store is.
+#[derive(Debug, Default)]
+struct StrengthTables {
+    /// Per signal. Every entry is [`NetResolution::Wire`] for a plan without
+    /// net types or strengths.
+    nets: Vec<NetResolution>,
+    /// Per contribution slot.
+    slots: Vec<rspice_veriloga::canonical_ir::digital::DigitalDriveStrength>,
+    /// Whether any net resolves by strength.
+    any: bool,
+}
+
+impl StrengthTables {
+    fn new(plan: &CanonicalDigitalPlan, spans: &[DriverSpan], slots: usize) -> Self {
+        use rspice_veriloga::canonical_ir::digital::DigitalDriveStrength;
+        let mut tables = Self {
+            nets: vec![NetResolution::Wire; plan.signals.len()],
+            slots: vec![DigitalDriveStrength::STRONG; slots],
+            any: false,
+        };
+        for net in &plan.strength.nets {
+            if let Some(entry) = tables.nets.get_mut(usize::from(net.signal)) {
+                *entry = NetResolution::of(net.net_type);
+            }
+        }
+        for driver in &plan.strength.drivers {
+            let signal = usize::from(driver.driver.signal);
+            let (Some(span), Some(net)) = (spans.get(signal), tables.nets.get_mut(signal)) else {
+                continue;
+            };
+            let offset = driver.driver.index as usize;
+            if offset < span.count {
+                tables.slots[span.start + offset] = driver.strength;
+            }
+            // A wired net carries no strength (see `store/strength.rs`).
+            if *net == NetResolution::Wire {
+                *net = NetResolution::Strength(None);
+            }
+        }
+        tables.any = tables
+            .nets
+            .iter()
+            .any(|net| matches!(net, NetResolution::Strength(_)));
+        tables
+    }
 }
 
 impl DigitalSignalStore {
@@ -600,9 +652,19 @@ impl DigitalSignalStore {
             });
         }
 
+        let strengths = Arc::new(StrengthTables::new(&plan, &spans, contributions.len()));
+        // A net its type drives (`tri0`, `supply1`, ...) starts at that
+        // driver's value, which is the resolution of its drivers before any
+        // has run.
+        for (index, net) in strengths.nets.iter().enumerate() {
+            if let NetResolution::Strength(Some(implicit)) = net {
+                values[index] = FourStateValue::splat(widths[index], implicit.value());
+            }
+        }
         let connected_reals =
             (!plan.real_aliases.is_empty()).then(|| Arc::new(RealConnections::new(&plan)));
         let mut store = Self {
+            strengths,
             connected_reals,
             values,
             reals,
@@ -1049,6 +1111,20 @@ impl DigitalSignalStore {
         let index = usize::from(signal);
         let width = self.widths[index];
         let span = self.spans[index];
+        let combine: fn(FourStateBit, FourStateBit) -> FourStateBit =
+            match self.strengths.nets[index] {
+                NetResolution::Wire => resolve_bit,
+                NetResolution::WiredAnd => |a, b| strength::wired_bit(true, a, b),
+                NetResolution::WiredOr => |a, b| strength::wired_bit(false, a, b),
+                NetResolution::Strength(_) => {
+                    let bits = self.resolve_strengths(signal);
+                    let mut resolved = FourStateValue::splat(width, FourStateBit::HighImpedance);
+                    for (position, bit) in bits.into_iter().enumerate() {
+                        resolved.set_bit(position as u32, bit.value());
+                    }
+                    return resolved;
+                }
+            };
         let mut resolved = FourStateValue::splat(width, FourStateBit::HighImpedance);
         for contribution in &self.contributions[span.start..span.start + span.count] {
             let ContributionValue::FourState(Some(value)) = &contribution.value else {
@@ -1060,13 +1136,62 @@ impl DigitalSignalStore {
                     continue;
                 }
                 let position = position as u32;
-                resolved.set_bit(
-                    position,
-                    resolve_bit(resolved.bit(position), value.bit(offset)),
-                );
+                resolved.set_bit(position, combine(resolved.bit(position), value.bit(offset)));
             }
         }
         resolved
+    }
+
+    /// Fold one strength net's contributions, and the driver its type adds,
+    /// into a strength range per bit (IEEE 1364-2005 section 7.10).
+    fn resolve_strengths(&self, signal: DigitalSignalId) -> Vec<StrengthBit> {
+        let index = usize::from(signal);
+        let width = self.widths[index];
+        let span = self.spans[index];
+        let mut bits = vec![StrengthBit::HIGH_Z; width as usize];
+        for slot in span.start..span.start + span.count {
+            let contribution = &self.contributions[slot];
+            let ContributionValue::FourState(Some(value)) = &contribution.value else {
+                continue;
+            };
+            let drive = self.strengths.slots[slot];
+            for offset in 0..value.width() {
+                let position = contribution.low + i64::from(offset);
+                if position < 0 || position >= i64::from(width) {
+                    continue;
+                }
+                let bit = &mut bits[position as usize];
+                *bit = bit.resolve(StrengthBit::driven(value.bit(offset), drive));
+            }
+        }
+        if let NetResolution::Strength(Some(implicit)) = self.strengths.nets[index] {
+            for bit in &mut bits {
+                *bit = bit.resolve(implicit);
+            }
+        }
+        bits
+    }
+
+    /// The strength of every bit of `signal`, least significant first, for
+    /// `%v`: a strength net's resolved ranges, and a strong drive of the value
+    /// everywhere else. A bit whose value a `force` or a connection decides
+    /// prints that value at strong.
+    pub(crate) fn strengths_of(&self, signal: DigitalSignalId) -> Vec<StrengthBit> {
+        let index = usize::from(signal);
+        let Some(value) = self.values.get(index) else {
+            return Vec::new();
+        };
+        let resolved = matches!(self.strengths.nets[index], NetResolution::Strength(_))
+            .then(|| self.resolve_strengths(signal));
+        (0..value.width())
+            .map(|bit| {
+                let current = value.bit(bit);
+                match &resolved {
+                    Some(bits) if bits[bit as usize].value() == current => bits[bit as usize],
+                    _ => StrengthBit::strong(current),
+                }
+            })
+            .collect()
     }
 
     /// Combine every contribution to one real net into its resolved value.

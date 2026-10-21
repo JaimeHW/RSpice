@@ -871,8 +871,8 @@ impl<'a> Parser<'a> {
                 module.digital_variables.push(variable);
             }
             TokenKind::Assign => {
-                let assignment = self.parse_continuous_assign()?;
-                module.continuous_assigns.push(assignment);
+                let assignments = self.parse_continuous_assign()?;
+                module.continuous_assigns.extend(assignments);
             }
             TokenKind::Always => {
                 let process = self.parse_digital_process(DigitalProcessKind::Always)?;
@@ -1454,7 +1454,13 @@ impl<'a> Parser<'a> {
 
     fn parse_port_storage_type(&mut self) -> Option<PortNetType> {
         let result = match self.current().kind {
-            TokenKind::Wire => PortNetType::Wire,
+            TokenKind::Wire => PortNetType::Wire(
+                self.current()
+                    .text
+                    .as_deref()
+                    .and_then(DigitalNetKind::from_keyword)
+                    .unwrap_or(DigitalNetKind::Wire),
+            ),
             TokenKind::Reg => PortNetType::Reg,
             TokenKind::Integer => PortNetType::Integer,
             TokenKind::AmsDigital if self.digital_keyword_is("time") => PortNetType::Time,
@@ -1578,8 +1584,8 @@ impl<'a> Parser<'a> {
             })
             .collect();
         match net_type {
-            PortNetType::Wire => module.digital_nets.push(DigitalNetDecl {
-                kind: DigitalNetKind::Wire,
+            PortNetType::Wire(kind) => module.digital_nets.push(DigitalNetDecl {
+                kind,
                 signedness: declaration.signedness,
                 range: declaration.range.clone(),
                 items,

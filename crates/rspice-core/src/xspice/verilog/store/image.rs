@@ -39,8 +39,10 @@ impl Clone for DigitalSignalStore {
             traces,
             analog_edges,
             overrides,
+            strengths,
         } = self;
         Self {
+            strengths: Arc::clone(strengths),
             plan: Arc::clone(plan),
             connected: connected.clone(),
             external_reals: external_reals.clone(),
@@ -112,6 +114,7 @@ impl Clone for DigitalSignalStore {
             traces,
             analog_edges,
             overrides,
+            strengths,
         } = self;
         let Self {
             plan: source_plan,
@@ -145,7 +148,9 @@ impl Clone for DigitalSignalStore {
             traces: source_traces,
             analog_edges: source_analog_edges,
             overrides: source_overrides,
+            strengths: source_strengths,
         } = source;
+        *strengths = Arc::clone(source_strengths);
         plan.clone_from(source_plan);
         connected.clone_from(source_connected);
         external_reals.clone_from(source_external_reals);

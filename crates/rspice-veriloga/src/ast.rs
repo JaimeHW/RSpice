@@ -727,8 +727,8 @@ pub struct PortDeclaration {
 /// A net or variable type written on a port declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortNetType {
-    /// `output wire y;`
-    Wire,
+    /// `output wire y;`, or another four-state net type (`inout tri1 b;`).
+    Wire(DigitalNetKind),
     /// `output reg [3:0] q;`
     Reg,
     /// `output integer q;` — a signed 32-bit variable (VAMS-2023 A.2.2.1).
@@ -2262,12 +2262,22 @@ impl WrealResolution {
 
 /// Net type keyword.
 ///
-/// `wire` / `tri` are IEEE 1364-2005's; [`Self::Wreal`] is Verilog-AMS LRM 2.4 section
-/// 3.7's real net. The remaining IEEE 1364 net types are still refused by name
-/// at the keyword.
+/// `wire` / `tri` and the other IEEE 1364-2005 section 4.6 net types;
+/// [`Self::Wreal`] is Verilog-AMS LRM 2.4 section 3.7's real net. `trireg` is
+/// still refused by name at the keyword.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigitalNetKind {
     Wire,
+    /// `wand` / `triand`.
+    Wand,
+    /// `wor` / `trior`.
+    Wor,
+    Tri0,
+    Tri1,
+    Supply0,
+    Supply1,
+    /// `uwire`: a wire that admits one driver (section 4.6.2).
+    Uwire,
     /// A real-valued net: `wreal`, and the four resolved spellings.
     Wreal(WrealResolution),
 }
@@ -2276,8 +2286,30 @@ impl DigitalNetKind {
     pub const fn keyword(self) -> &'static str {
         match self {
             Self::Wire => "wire",
+            Self::Wand => "wand",
+            Self::Wor => "wor",
+            Self::Tri0 => "tri0",
+            Self::Tri1 => "tri1",
+            Self::Supply0 => "supply0",
+            Self::Supply1 => "supply1",
+            Self::Uwire => "uwire",
             Self::Wreal(resolution) => resolution.keyword(),
         }
+    }
+
+    /// The four-state net type a net-type keyword names, if it names one.
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        Some(match keyword {
+            "wire" | "tri" => Self::Wire,
+            "wand" | "triand" => Self::Wand,
+            "wor" | "trior" => Self::Wor,
+            "tri0" => Self::Tri0,
+            "tri1" => Self::Tri1,
+            "supply0" => Self::Supply0,
+            "supply1" => Self::Supply1,
+            "uwire" => Self::Uwire,
+            _ => return None,
+        })
     }
 
     /// Whether the net carries a real value rather than four-state bits.
@@ -2288,8 +2320,8 @@ impl DigitalNetKind {
     /// How the net combines its drivers, for a real net.
     pub const fn resolution(self) -> Option<WrealResolution> {
         match self {
-            Self::Wire => None,
             Self::Wreal(resolution) => Some(resolution),
+            _ => None,
         }
     }
 }
@@ -2366,6 +2398,8 @@ pub struct ContinuousAssign {
     pub value: Expression,
     /// Delay written between `assign` and the target.
     pub delay: Option<Expression>,
+    /// Drive strength (IEEE 1364-2005 section 6.1.4); `None` drives strong.
+    pub strength: Option<crate::canonical_ir::digital::DigitalDriveStrength>,
     pub span: Span,
 }
 

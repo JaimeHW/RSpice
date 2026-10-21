@@ -411,9 +411,9 @@ impl HdlEffects {
         site: &DigitalSystemCall,
         args: &[DigitalScalar],
         first: usize,
-        radix: DigitalRadix,
+        (radix, store): (DigitalRadix, &DigitalSignalStore),
     ) -> Result<String, DigitalEvalError> {
-        self.format_with(plan, site, args, first, radix, None)
+        self.format_with(plan, site, args, first, (radix, store), None)
     }
 
     /// Format arguments from `first`, led by `leading`, a format string
@@ -424,9 +424,26 @@ impl HdlEffects {
         site: &DigitalSystemCall,
         args: &[DigitalScalar],
         first: usize,
-        radix: DigitalRadix,
+        (radix, store): (DigitalRadix, &DigitalSignalStore),
         leading: Option<&str>,
     ) -> Result<String, DigitalEvalError> {
+        // The `%v` text of each whole-net operand, read now: a strength is
+        // the net's, not the value the operand evaluated to.
+        let strengths: Vec<(u32, String)> = site
+            .nets
+            .iter()
+            .map(|net| {
+                let text = store
+                    .strengths_of(net.signal)
+                    .iter()
+                    .rev()
+                    .map(|bit| bit.display())
+                    .collect::<Vec<_>>()
+                    // Icarus Verilog joins a vector's bits with `_`.
+                    .join("_");
+                (net.operand, text)
+            })
+            .collect();
         let mut arguments = Vec::with_capacity(site.arguments.len() + 1);
         if let Some(leading) = leading {
             arguments.push(FormatArgument::Literal(leading));
@@ -443,7 +460,10 @@ impl HdlEffects {
                         }
                     })?;
                     let signed = matches!(class, DigitalValueClass::FourState { signed: true, .. });
-                    FormatArgument::Value(value, signed)
+                    match strengths.iter().find(|(net, _)| net == operand) {
+                        Some((_, text)) => FormatArgument::Net(value, signed, text),
+                        None => FormatArgument::Value(value, signed),
+                    }
                 }
                 DigitalSystemArgument::RealTime { operand } => {
                     let value = args.get(*operand as usize).ok_or_else(|| {
@@ -501,7 +521,7 @@ impl HdlEffects {
         let mut outcome = DigitalTaskOutcome::CONTINUE;
         match site.kind {
             DigitalSystemCallKind::Display(radix) | DigitalSystemCallKind::Write(radix) => {
-                let mut text = self.format(plan, site, args, 0, radix)?;
+                let mut text = self.format(plan, site, args, 0, (radix, store))?;
                 if matches!(site.kind, DigitalSystemCallKind::Display(_)) {
                     text.push('\n');
                 }
@@ -510,7 +530,7 @@ impl HdlEffects {
             DigitalSystemCallKind::Strobe(radix) | DigitalSystemCallKind::Monitor(radix) => {
                 match origin {
                     CallOrigin::Observer => {
-                        let mut text = self.format(plan, site, args, 0, radix)?;
+                        let mut text = self.format(plan, site, args, 0, (radix, store))?;
                         text.push('\n');
                         self.record(plan, site, clock, HdlStream::Stdout, text);
                     }
@@ -591,7 +611,7 @@ impl HdlEffects {
                         HdlSeverity::Fatal
                     }
                 };
-                let text = self.format(plan, site, args, 0, DigitalRadix::Decimal)?;
+                let text = self.format(plan, site, args, 0, (DigitalRadix::Decimal, store))?;
                 self.record(plan, site, clock, HdlStream::Diagnostic { severity }, text);
                 if site.kind == DigitalSystemCallKind::Fatal {
                     self.halt(site, clock, HdlFinishKind::Fatal, site.level.unwrap_or(1));

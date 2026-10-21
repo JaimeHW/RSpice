@@ -91,6 +91,7 @@ impl Connections<'_> {
                     span,
                 }),
                 delay: None,
+                strength: None,
                 span,
             });
         }
@@ -121,6 +122,7 @@ impl Connections<'_> {
                 },
                 value,
                 delay: None,
+                strength: None,
                 span: actual.span(),
             });
         }

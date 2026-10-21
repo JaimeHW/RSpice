@@ -49,6 +49,9 @@ pub(crate) enum FormatArgument<'a> {
     Literal(&'a str),
     /// An evaluated value and whether it is signed.
     Value(&'a DigitalScalar, bool),
+    /// A value that names a whole net, with the text `%v` prints for its
+    /// strengths (IEEE 1364-2005 section 17.1.1.5).
+    Net(&'a DigitalScalar, bool, &'a str),
     /// A bare `$realtime` and the decimals it prints with when no
     /// specification consumes it; a specification reads it as a real.
     RealTime(&'a DigitalScalar, u8),
@@ -80,7 +83,7 @@ pub(crate) fn format(arguments: &[FormatArgument<'_>], context: &FormatContext<'
                 next = interpret(text, arguments, next, &mut out, context);
             }
             FormatArgument::Empty => out.push(' '),
-            FormatArgument::Value(value, signed) => {
+            FormatArgument::Value(value, signed) | FormatArgument::Net(value, signed, _) => {
                 let spec = Spec::natural(match context.radix {
                     DigitalRadix::Decimal => 'd',
                     DigitalRadix::Binary => 'b',
@@ -311,7 +314,13 @@ fn render(
             render_value(spec, &value, false, out, context);
             return;
         }
-        FormatArgument::Value(value, signed) => (value, signed),
+        FormatArgument::Net(_, _, strengths) if spec.conversion == 'v' => {
+            pad(out, strengths, spec, 0);
+            return;
+        }
+        FormatArgument::Value(value, signed) | FormatArgument::Net(value, signed, _) => {
+            (value, signed)
+        }
         FormatArgument::RealTime(value, _) => (value, true),
     };
     render_value(spec, value, signed, out, context);
@@ -364,7 +373,7 @@ fn render_value(
                     FourStateBit::HighImpedance => "HiZ",
                 })
                 .collect::<Vec<_>>()
-                .join(" ");
+                .join("_");
             pad(out, &text, spec, 0);
         }
         _ => {

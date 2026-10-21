@@ -55,6 +55,8 @@ pub(super) struct CallTables {
     /// named blocks around the statement being lowered, and the routine
     /// being lowered.
     pub threads: super::disable::ThreadTables,
+    /// The whole-net operands of the call whose arguments are being lowered.
+    pub pending_nets: Vec<super::super::digital::DigitalOperandNet>,
 }
 
 /// The plan-level tables the processes' calls collect into.
@@ -236,6 +238,7 @@ impl ProcessLowerer<'_> {
             observer: None,
             span: span.into(),
             origin: None,
+            nets: Vec::new(),
         });
         (id, local)
     }
@@ -355,10 +358,20 @@ impl ProcessLowerer<'_> {
                     )
                 };
                 operands.push(value);
-                DigitalSystemArgument::Value {
-                    operand: (operands.len() - 1) as u32,
-                    class,
+                let operand = (operands.len() - 1) as u32;
+                // A bare net name: `%v` prints that net's strengths.
+                if formats
+                    && let Expression::Identifier(identifier) = argument
+                    && let Some(signal) = self.resolved_signal(&identifier.name)
+                    && self.signals.get(usize::from(signal)).is_some_and(|signal| {
+                        !signal.procedurally_assignable && !signal.kind.is_real()
+                    })
+                {
+                    self.calls
+                        .pending_nets
+                        .push(super::super::digital::DigitalOperandNet { operand, signal });
                 }
+                DigitalSystemArgument::Value { operand, class }
             }
         }
     }
@@ -498,6 +511,7 @@ impl ProcessLowerer<'_> {
         }
         let mut arguments = Vec::with_capacity(call.args.len());
         let mut operands = Vec::new();
+        let enclosing_nets = std::mem::take(&mut self.calls.pending_nets);
         let mut outputs: Vec<(DigitalLValue, DigitalValueClass)> = Vec::new();
         for (position, argument) in call.args.iter().enumerate().skip(skip) {
             let usage = match kind.argument_use(position) {
@@ -594,8 +608,10 @@ impl ProcessLowerer<'_> {
             signed: kind.result_signed(),
         });
         {
+            let nets = std::mem::replace(&mut self.calls.pending_nets, enclosing_nets);
             let entry = &mut self.calls.sites[local];
             entry.arguments = arguments;
+            entry.nets = nets;
             entry.outputs = outputs.len() as u32;
             entry.result = result;
             entry.level = level;
@@ -666,6 +682,7 @@ impl ProcessLowerer<'_> {
         let entry = self.builder.create_block();
         self.builder.seal_block(entry);
         let mut operands = Vec::new();
+        let enclosing_nets = std::mem::take(&mut self.calls.pending_nets);
         let mut arguments = Vec::with_capacity(task.args.len());
         for argument in &task.args {
             let argument = self.input_argument(entry, argument, &mut operands, kind.formats());
@@ -715,8 +732,10 @@ impl ProcessLowerer<'_> {
             dependencies,
         });
         {
+            let nets = std::mem::replace(&mut self.calls.pending_nets, enclosing_nets);
             let entry = &mut self.calls.sites[local];
             entry.arguments = arguments;
+            entry.nets = nets;
             entry.observer = Some(observer);
         }
         self.builder.push(

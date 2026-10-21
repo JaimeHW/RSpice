@@ -501,6 +501,20 @@ pub fn link_digital_plans(
             drivers.insert(driver.id, linked.id);
             plan.drivers.push(linked);
         }
+        for net in &source.strength.nets {
+            plan.strength.nets.push(super::digital::DigitalTypedNet {
+                signal: layout.map.signals[usize::from(net.signal)],
+                net_type: net.net_type,
+            });
+        }
+        for driver in &source.strength.drivers {
+            plan.strength
+                .drivers
+                .push(super::digital::DigitalDriverStrength {
+                    driver: drivers[&driver.driver],
+                    strength: driver.strength,
+                });
+        }
         for process in &source.processes {
             check_cancel(control)?;
             let mut process = process.clone();
@@ -558,6 +572,9 @@ pub fn link_digital_plans(
             site.scope = DigitalScopeId(site.scope.0 + layout.tables.scopes);
             site.observer = site.observer.map(|index| index + layout.tables.observers);
             relocate_span(&mut site.span, &layout.map);
+            for net in &mut site.nets {
+                net.signal = layout.map.signals[usize::from(net.signal)];
+            }
             for argument in &mut site.arguments {
                 match argument {
                     DigitalSystemArgument::Array { array, .. } => {
