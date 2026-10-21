@@ -601,9 +601,17 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // Contracts, routes, and policy. These describe the shell without
     // operating it.
     "platform",
+    // The documents module's own vocabulary: which Code page is showing and
+    // what a source-file action is. Each document engine has its own entry;
+    // a document file without one is owned here, where its first reach into
+    // the shell fails the order.
+    "documents",
     // The browser's notification permission and the reader's choice about
     // it: a host channel like `platform`, reaching nothing of the shell's.
     "browser/background_alerts",
+    // Read-only observation of the browser workbench for qualification
+    // builds. It reaches nothing of the shell's; the application starts it.
+    "browser/qualification",
     "state",
     "routing/surface_route",
     "routing/surface_catalog",
@@ -616,9 +624,17 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // artifact writers name a command without reaching the dispatcher that
     // runs it, which is up at `commands`.
     "commands/vocabulary",
+    // The interface text catalog and its locales. It names a command only to
+    // label it; the editors, docks and surfaces read it.
+    "localization",
     "shortcuts",
     "preferences",
     "design_system",
+    // The text model and editing commands the source editors share, and the
+    // virtualized editor drawn over them.
+    "documents/text_document_model",
+    "documents/text_editor_commands",
+    "documents/virtual_text_editor",
     // Document engines and the interaction session they hang off.
     "lifecycle/session",
     "documents/netlist_document",
@@ -637,6 +653,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "shortcuts/artifacts",
     // Application hardcopy source resolution and host printing adapters.
     "hardcopy_adapters/sources",
+    // Test fixtures that render resolved sources; the tests of the session
+    // and the dialogs above read them.
+    "hardcopy_adapters/tests",
     "hardcopy_adapters/print",
     // The session aggregate: the design, the simulation, the document engines'
     // session state, and the dialogs' visibility. It sits directly below the
@@ -644,6 +663,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // needs one part of it should take that part as a parameter, which is what
     // retires the `-> app_state` entries below.
     "app_state",
+    // The live-session engine the application pumps each frame, and result
+    // import. Both take the session aggregate, not the application root.
+    "live_session",
+    "workflows/result_import_workflow",
+    "workflows/result_import_adapters",
     // The publication snapshot builder: reads the session aggregate and the
     // hardcopy adapters' resolved scenes to produce the sealed interchange
     // snapshot. It mutates nothing, but it reads the whole session.
@@ -682,6 +706,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "tools/specialist_tool_browser",
     "tools/jobs_manager",
     "tools/calculator_tool",
+    "tools/expression_diagnostics",
     "preflight",
     "cross_probe",
     "account_organization",
@@ -763,6 +788,9 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "workflows/netlist_workflow", 3),
     ("app", "cross_probe", 1),
     ("app", "tools/calculator_tool", 1),
+    // The expression diagnostics tool reads `RSpiceApp` back, so no rank
+    // clears both directions of this one.
+    ("app", "tools/expression_diagnostics", 1),
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.
     //
@@ -845,7 +873,17 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
     ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
     ("lifecycle/recovery", "workflows/project_workflow", 2),
+    // The live-session engine closes the project through the project
+    // workflow, which ranks above the application that owns the engine.
+    ("live_session", "workflows/project_workflow", 5),
     ("browser/file_import", "shortcuts/profile_workflow", 1),
+    // The browser import reads result import's size limit, as it reads the
+    // shortcut profile's above, while result import picks its file through
+    // the browser import.
+    ("browser/file_import", "workflows/result_import_workflow", 1),
+    // Result import opens the imported result's tab through the document
+    // bar, and the dispatcher that starts an import ranks below the bar.
+    ("workflows/result_import_workflow", "chrome", 1),
     ("shortcuts/library_persistence", "shortcuts/artifacts", 1),
     ("documents/code_workspace", "workflows/export_workflow", 1),
     // Presentation reaching sideways into a peer surface.
@@ -1049,26 +1087,52 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
     edges
 }
 
+/// Whether `file` is the module file of a directory beside it that does
+/// nothing but declare that directory's modules. Such a file holds no code to
+/// rank; each module it declares is ranked on its own.
+fn declares_only_submodules(file: &Path) -> bool {
+    if !file.with_extension("").is_dir() {
+        return false;
+    }
+    let source =
+        fs::read_to_string(file).unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+    strip_line_comments(&source)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .all(|line| line.starts_with("#[") || is_module_declaration(line))
+}
+
+/// `mod x;` behind any visibility: `pub`, `pub(crate)`, `pub(in path)`.
+fn is_module_declaration(line: &str) -> bool {
+    let Some(declaration) = line.strip_suffix(';') else {
+        return false;
+    };
+    let words = declaration.split_whitespace().collect::<Vec<_>>();
+    let [visibility @ .., "mod", _] = words.as_slice() else {
+        return false;
+    };
+    visibility
+        .iter()
+        .all(|word| word.starts_with("pub") || word.ends_with(')'))
+}
+
+/// A file the order cannot place is a file whose references nothing counts:
+/// [`workbench_edge_counts`] skips every file with no owning module. So every
+/// source file under `src/workbench/` must have one, at any depth, other than
+/// a directory's module file that only declares the directory's modules.
 #[test]
 fn every_workbench_module_declares_a_layer() {
-    let entries = fs::read_dir(workbench_dir()).expect("read src/workbench/");
     let mut undeclared = Vec::new();
-    let mut checked = 0_usize;
-    for entry in entries {
-        let path = entry.expect("directory entry").path();
-        let Some(name) = workbench_owning_module(&path) else {
-            continue;
-        };
-        checked += 1;
-        if !WORKBENCH_LAYERS.contains(&name.as_str()) {
-            undeclared.push(name);
+    for file in rust_sources(&workbench_dir()) {
+        if workbench_owning_module(&file).is_none() && !declares_only_submodules(&file) {
+            let relative = file
+                .strip_prefix(workbench_dir())
+                .expect("a source under src/workbench/")
+                .with_extension("");
+            undeclared.push(relative.to_string_lossy().replace('\\', "/"));
         }
     }
-    assert!(
-        checked > 0,
-        "{} holds no module; a scan that reaches nothing passes forever",
-        workbench_dir().display()
-    );
     undeclared.sort();
     undeclared.dedup();
     assert!(
