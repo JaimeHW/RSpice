@@ -469,6 +469,54 @@ fn an_xspice_node_and_a_verilog_port_convert_by_one_law() {
     }
 }
 
+/// An HDL driver's strength reaches the converter: a pull drive of 1 into a
+/// 1 kΩ load settles at `vsup·1k/(1k + rpull)` and a strong one at
+/// `vsup·1k/(1k + rhi)`, at the `d2a` defaults (`vsup` 3.3 V, `rpull` 10 kΩ,
+/// `rhi` 20 Ω).
+#[test]
+fn an_hdl_drive_strength_picks_the_converter_resistance() {
+    let directory = TempDirectory::new("hdl-strength");
+    let pulled = 3.3 * 1e3 / (1e3 + 10e3);
+    let strong = 3.3 * 1e3 / (1e3 + 20.0);
+    for (index, (body, expected)) in [
+        ("pullup (o);", pulled),
+        ("assign (pull1, pull0) o = 1'b1;", pulled),
+        ("assign o = 1'b1;", strong),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut hdl_source = format!(
+            "`include \"disciplines.vams\"\n\
+             `timescale 1ns/1ps\n\
+             module drv(o);\n  output o;\n  wire o;\n  {body}\nendmodule\n"
+        );
+        for (_, module) in BUILTIN_CONNECT_MODULES {
+            hdl_source.push_str(module);
+        }
+        hdl_source
+            .push_str("connectrules deck;\n    connect a2d;\n    connect d2a;\nendconnectrules\n");
+        let hdl_path = directory.write(&format!("drv{index}.vams"), &hdl_source);
+        let result = run(
+            &format!(
+                "* HDL drive strength at a converter\n\
+                 .hdl \"{hdl_path}\" module=drv\n\
+                 .options connectrules=deck\n\
+                 x1 out drv\n\
+                 r1 out 0 1k\n\
+                 .end\n"
+            ),
+            20e-9,
+            0.1e-9,
+        );
+        let settled = value_at(&result, "out", 10e-9);
+        assert!(
+            (settled - expected).abs() <= 1e-6 * 3.3,
+            "{body}: {settled} V, expected {expected} V"
+        );
+    }
+}
+
 //=============================================================================
 // 5. A live bidirectional converter
 //=============================================================================

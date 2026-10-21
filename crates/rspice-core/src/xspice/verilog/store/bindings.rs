@@ -283,6 +283,37 @@ impl DigitalSignalStore {
         self.external_reals = source.external_reals.as_ref().map(ExternalReals::fresh);
     }
 
+    /// What the design drives onto bit `bit` (a storage position) of
+    /// `signal`, at its strengths (IEEE 1364-2005 section 7.10): the connected
+    /// net's drivers when the bit is a member of one, and the signal's own
+    /// otherwise.
+    pub(crate) fn boundary_drive(
+        &self,
+        signal: DigitalSignalId,
+        bit: u32,
+    ) -> Option<super::strength::BitDrive> {
+        if let Some(connected) = &self.connected {
+            let topology = &connected.topology;
+            let member = topology
+                .by_signal
+                .get(usize::from(signal))
+                .into_iter()
+                .flatten()
+                .map(|&index| &topology.nets[index])
+                .find(|net| {
+                    net.members
+                        .iter()
+                        .any(|member| member.signal == signal && member.bit == bit)
+                });
+            if let Some(net) = member {
+                return Some(self.connected_strength(net).drive());
+            }
+        }
+        self.strengths_of(signal)
+            .get(bit as usize)
+            .map(|strength| strength.drive())
+    }
+
     pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
         let bits = self.connected.as_ref()?;
         bits.resolved
@@ -511,12 +542,11 @@ impl DigitalSignalStore {
         net_index: usize,
     ) -> Option<DigitalValue> {
         let net = &connected.topology.nets[net_index];
-        let hdl = if self.strengths.any {
-            self.connected_strength(net).value()
-        } else {
-            self.connected_four_state(net)
-        };
-        match hdl {
+        // A design with strengths hands the converters its drive strength.
+        if self.strengths.any {
+            return self.connected_strength(net).drive().digital_value();
+        }
+        match self.connected_four_state(net) {
             FourStateBit::Zero => Some(DigitalValue::zero()),
             FourStateBit::One => Some(DigitalValue::one()),
             FourStateBit::Unknown => Some(DigitalValue::unknown()),

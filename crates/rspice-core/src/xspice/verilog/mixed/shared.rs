@@ -902,6 +902,24 @@ impl MixedDigitalCoordinator {
         self.digital.external_contributions()
     }
 
+    /// What the design drives onto bit `bit` of the linked signal `signal`
+    /// at the analog boundary: its value and the strongest 0-side and 1-side
+    /// strengths (IEEE 1364-2005 section 7.10). The converters read the XSPICE
+    /// strength this maps to through [`Self::event_values`]; a strength-to-
+    /// resistance table reads the levels themselves.
+    #[expect(
+        dead_code,
+        reason = "the converters read the mapped XSPICE strength today; the per-level \
+                  output-resistance table is this query's first caller"
+    )]
+    pub(crate) fn boundary_drive(
+        &self,
+        signal: DigitalSignalId,
+        bit: u32,
+    ) -> Option<crate::xspice::verilog::store::BitDrive> {
+        self.digital.boundary_drive(signal, bit)
+    }
+
     pub(crate) fn event_values(
         &self,
     ) -> impl Iterator<Item = (usize, crate::xspice::DigitalValue)> + '_ {

@@ -88,6 +88,7 @@ pub(crate) use traces::TraceSource;
 mod bindings;
 use bindings::ConnectedBits;
 pub(crate) use bindings::{DigitalBitChange, DigitalBitConnection, ExternalBitDriverId};
+pub(crate) use strength::BitDrive;
 #[cfg(test)]
 mod real_alias_tests;
 mod real_bindings;
@@ -2090,5 +2091,106 @@ mod tests {
             .force_real(DigitalSignalId::from(0usize), 1.5, &plan)
             .expect("an undriven real net is the stimulus generator's to write");
         assert_eq!(store.real_value(DigitalSignalId::from(0usize)), Some(1.5));
+    }
+
+    /// The boundary reads a bit's strongest 0-side and 1-side strengths, and
+    /// the converters the XSPICE strength they map to.
+    #[test]
+    fn the_boundary_drive_carries_the_strongest_component_of_each_value() {
+        use crate::xspice::{DigitalState, DigitalStrength};
+        use rspice_veriloga::canonical_ir::digital::{
+            DigitalDriveStrength, DigitalDriverStrength, DigitalStrengthLevel as L,
+            DigitalStrengthPlan,
+        };
+        let y = DigitalSignalId::from(0usize);
+        let pull = DigitalDriverId {
+            signal: y,
+            index: 0,
+        };
+        let plan = CanonicalDigitalPlan {
+            signals: vec![signal(0, "y", 1, false)],
+            drivers: vec![
+                driver(0, 0, DigitalWriteSelect::Whole),
+                driver(0, 1, DigitalWriteSelect::Whole),
+            ],
+            strength: DigitalStrengthPlan {
+                drivers: vec![DigitalDriverStrength {
+                    driver: pull,
+                    strength: DigitalDriveStrength {
+                        zero: L::Pull,
+                        one: L::Pull,
+                    },
+                }],
+                ..DigitalStrengthPlan::default()
+            },
+            ..CanonicalDigitalPlan::default()
+        };
+        let mut store = DigitalSignalStore::new(&plan);
+        let mut drive = |index, spelling| {
+            store.drive_signal(DigitalDrive {
+                driver: DigitalDriverId { signal: y, index },
+                target: DigitalWriteTarget {
+                    signal: y,
+                    select: DigitalWriteSelect::Whole,
+                },
+                value: value(spelling),
+            });
+        };
+        drive(0, "1");
+        let mut reads = Vec::new();
+        reads.push(store.boundary_drive(y, 0).unwrap());
+        let mut drive = |index, spelling| {
+            store.drive_signal(DigitalDrive {
+                driver: DigitalDriverId { signal: y, index },
+                target: DigitalWriteTarget {
+                    signal: y,
+                    select: DigitalWriteSelect::Whole,
+                },
+                value: value(spelling),
+            });
+            store.boundary_drive(y, 0).unwrap()
+        };
+        reads.push(drive(1, "0"));
+        reads.push(drive(1, "z"));
+        reads.push(drive(0, "x"));
+        let shown: Vec<_> = reads
+            .iter()
+            .map(|read| {
+                let value = read
+                    .digital_value()
+                    .map(|value| (value.state, value.strength));
+                (read.value, read.zero, read.one, value)
+            })
+            .collect();
+        use FourStateBit::{One as I, Unknown as X, Zero as O};
+        assert_eq!(
+            shown,
+            [
+                (
+                    I,
+                    L::HighZ,
+                    L::Pull,
+                    Some((DigitalState::One, DigitalStrength::Resistive))
+                ),
+                (
+                    O,
+                    L::Strong,
+                    L::HighZ,
+                    Some((DigitalState::Zero, DigitalStrength::Strong))
+                ),
+                (
+                    I,
+                    L::HighZ,
+                    L::Pull,
+                    Some((DigitalState::One, DigitalStrength::Resistive))
+                ),
+                (
+                    X,
+                    L::Pull,
+                    L::Pull,
+                    Some((DigitalState::Unknown, DigitalStrength::Undetermined))
+                ),
+            ]
+        );
     }
 }

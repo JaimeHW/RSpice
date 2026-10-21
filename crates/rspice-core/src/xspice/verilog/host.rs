@@ -812,6 +812,14 @@ impl DigitalHost {
         self.store.connected_value(net)
     }
 
+    pub(crate) fn boundary_drive(
+        &self,
+        signal: DigitalSignalId,
+        bit: u32,
+    ) -> Option<super::store::BitDrive> {
+        self.store.boundary_drive(signal, bit)
+    }
+
     pub(crate) fn plan(&self) -> &Arc<CanonicalDigitalPlan> {
         &self.plan
     }

@@ -278,6 +278,73 @@ impl StrengthBit {
             hi: if self.hi > 0 { self.hi } else { 0 },
         }
     }
+
+    /// The bit as the analog boundary reads it: its value and the strongest
+    /// 0-side and 1-side components.
+    pub(crate) const fn drive(self) -> BitDrive {
+        const LEVELS: [DigitalStrengthLevel; 8] = [
+            DigitalStrengthLevel::HighZ,
+            DigitalStrengthLevel::Small,
+            DigitalStrengthLevel::Medium,
+            DigitalStrengthLevel::Weak,
+            DigitalStrengthLevel::Large,
+            DigitalStrengthLevel::Pull,
+            DigitalStrengthLevel::Strong,
+            DigitalStrengthLevel::Supply,
+        ];
+        BitDrive {
+            value: self.value(),
+            zero: LEVELS[if self.lo < 0 {
+                self.lo.unsigned_abs()
+            } else {
+                0
+            } as usize],
+            one: LEVELS[if self.hi > 0 {
+                self.hi.unsigned_abs()
+            } else {
+                0
+            } as usize],
+        }
+    }
+}
+
+/// What the HDL drives onto one bit at the analog boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BitDrive {
+    pub(crate) value: FourStateBit,
+    /// The strongest component driving 0, `HighZ` for none.
+    pub(crate) zero: DigitalStrengthLevel,
+    /// The strongest component driving 1, `HighZ` for none.
+    pub(crate) one: DigitalStrengthLevel,
+}
+
+impl BitDrive {
+    /// The XSPICE value a converter reads, or `None` when the HDL drives
+    /// nothing: supply and strong are `Strong`; pull, large, weak, medium and
+    /// small are `Resistive`; and a value with components on both sides is
+    /// `Undetermined`. An `L` or `H` takes its one side's strength.
+    pub(crate) fn digital_value(self) -> Option<crate::xspice::DigitalValue> {
+        use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
+        let class = |level: DigitalStrengthLevel| {
+            if level >= DigitalStrengthLevel::Strong {
+                DigitalStrength::Strong
+            } else {
+                DigitalStrength::Resistive
+            }
+        };
+        let none = DigitalStrengthLevel::HighZ;
+        Some(match (self.value, self.zero, self.one) {
+            (FourStateBit::HighImpedance, _, _) => return None,
+            (FourStateBit::Zero, zero, _) => DigitalValue::new(DigitalState::Zero, class(zero)),
+            (FourStateBit::One, _, one) => DigitalValue::new(DigitalState::One, class(one)),
+            (FourStateBit::Unknown, zero, one) if zero != none && one != none => {
+                DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined)
+            }
+            (FourStateBit::Unknown, zero, one) => {
+                DigitalValue::new(DigitalState::Unknown, class(zero.max(one)))
+            }
+        })
+    }
 }
 
 /// What the plan makes of one net's resolution.
