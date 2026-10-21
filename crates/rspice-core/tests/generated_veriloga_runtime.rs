@@ -10,6 +10,9 @@ use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 #[cfg(feature = "veriloga-builtins")]
 use rspice_core::{CircuitData, netlist::ParamContext};
 
+#[path = "common/family_src.rs"]
+mod family_src;
+
 #[cfg(feature = "veriloga-model-pspnqs104va")]
 #[test]
 fn generated_nqs_integrators_stamp_inverse_frequency_on_potential_rows() {
@@ -458,7 +461,7 @@ fn generated_dense_stamper_abi_is_slice_based() {
 fn generated_stamper_uses_linked_static_stamp_slots() {
     let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let runtime_path = manifest_root.join("../rspice-veriloga-runtime/src/lib.rs");
-    let introspection_path = manifest_root.join("src/circuit/introspection.rs");
+    let introspection_path = family_src::family_src("circuit/introspection.rs");
 
     let runtime = std::fs::read_to_string(&runtime_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
@@ -489,9 +492,9 @@ fn generated_stamper_uses_linked_static_stamp_slots() {
 #[test]
 fn generated_runtime_snapshots_only_mutable_evaluation_state() {
     let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let runtime_path = manifest_root.join("src/device/veriloga_builtins.rs");
+    let runtime_path = family_src::family_src("device/veriloga_builtins.rs");
     let registry_path = manifest_root.join("../rspice-veriloga-models/src/registry.rs");
-    let nonlinear_path = manifest_root.join("src/circuit/nonlinear.rs");
+    let nonlinear_path = family_src::family_src("circuit/nonlinear.rs");
 
     let runtime = std::fs::read_to_string(&runtime_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));

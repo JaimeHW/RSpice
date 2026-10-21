@@ -4,7 +4,7 @@
 //! The JSON ledger keeps numerical test-development obligations open.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value as Json, json};
 
@@ -13,7 +13,20 @@ use super::periodic_capability::{
 };
 use crate::netlist::AnalysisCommand;
 
+#[path = "../../tests/common/family_src.rs"]
+mod family_src;
+
 const LEDGER: &str = include_str!("../../tests/testdata/qualification/core-requirements-v1.json");
+
+/// A path the ledger cites. `src/...` names a module by its path from a crate
+/// root, in whichever crate of the `rspice-core` family holds it; any other
+/// path, such as a `tests/` suite, is this crate's own.
+fn ledger_path(path: &str) -> PathBuf {
+    match path.strip_prefix("src/") {
+        Some(relative) => family_src::family_src(relative),
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
+    }
+}
 
 fn variant(command: &AnalysisCommand) -> &'static str {
     use AnalysisCommand as A;
@@ -253,7 +266,6 @@ fn analysis_inventory_parses_and_matches_control_execution() {
     use crate::netlist::ParamContext;
 
     let ledger: Json = serde_json::from_str(LEDGER).unwrap();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut variants = BTreeSet::new();
     for row in ledger["analyses"].as_array().unwrap() {
         let name = row["variant"].as_str().unwrap();
@@ -303,7 +315,7 @@ fn analysis_inventory_parses_and_matches_control_execution() {
         );
         let route = &row["route"];
         let implementation =
-            std::fs::read_to_string(root.join(route["path"].as_str().unwrap())).unwrap();
+            std::fs::read_to_string(ledger_path(route["path"].as_str().unwrap())).unwrap();
         assert!(
             implementation.contains(&format!("pub fn {}(", route["symbol"].as_str().unwrap())),
             "{name}: stale public route reference"
@@ -368,12 +380,11 @@ fn every_requirement_has_an_owner_and_qualification_task() {
             Some("open" | "in_progress" | "qualified")
         ));
     }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for section in ["analyses", "guards", "ignored_tests"] {
         for row in ledger[section].as_array().unwrap() {
             assert!(packages.contains(row["owner"].as_str().unwrap()));
             if let Some(path) = row["path"].as_str() {
-                let source = std::fs::read_to_string(root.join(path)).unwrap();
+                let source = std::fs::read_to_string(ledger_path(path)).unwrap();
                 assert!(
                     source.contains(row["symbol"].as_str().unwrap()),
                     "stale {section} reference {path}"
@@ -382,6 +393,6 @@ fn every_requirement_has_an_owner_and_qualification_task() {
         }
     }
     for path in ledger["existing_evidence"].as_array().unwrap() {
-        assert!(root.join(path.as_str().unwrap()).is_file());
+        assert!(ledger_path(path.as_str().unwrap()).is_file());
     }
 }

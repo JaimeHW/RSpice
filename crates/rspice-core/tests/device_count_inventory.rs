@@ -12,8 +12,10 @@
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
-const CIRCUIT_SOURCE: &str = include_str!("../src/circuit.rs");
-const INTROSPECTION_SOURCE: &str = include_str!("../src/circuit/introspection.rs");
+#[path = "common/family_src.rs"]
+mod family_src;
+
+use family_src::{family_src, read_family_src};
 
 /// The `CircuitData` collections `device_count()` deliberately leaves out,
 /// each with the reason it holds no device of its own.
@@ -166,7 +168,8 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
 /// structure to scan, so losing the boundary is a red test rather than a
 /// silent one.
 fn circuit_data_fields() -> Vec<(String, String)> {
-    let mut lines = CIRCUIT_SOURCE.lines();
+    let source = read_family_src("circuit.rs");
+    let mut lines = source.lines();
     lines
         .by_ref()
         .find(|line| line.trim() == "pub struct CircuitData {")
@@ -249,7 +252,8 @@ fn is_device_collection(field_type: &str) -> bool {
 /// Dropping whitespace is what lets the field search survive a `self` and its
 /// field landing on different lines, which is how a long term wraps.
 fn device_count_code() -> String {
-    let mut lines = INTROSPECTION_SOURCE
+    let source = read_family_src("circuit/introspection.rs");
+    let mut lines = source
         .lines()
         .map(str::trim)
         .filter(|line| !line.starts_with("//"));
@@ -338,12 +342,12 @@ fn every_circuit_data_device_collection_is_counted_or_excused() {
                  `device_count()` neither sums nor excuses.\n\
                  `device_count()` is the whole inventory of devices in a circuit, so do one \
                  of two things:\n  \
-                 - count `self.{name}` in `device_inventory()` in \
-                 crates/rspice-core/src/circuit/introspection.rs, if it holds authored device \
-                 instances; or\n  \
+                 - count `self.{name}` in `device_inventory()` in {}, if it holds \
+                 authored device instances; or\n  \
                  - add (\"{name}\", \"<why it is not a device of its own>\") to \
                  EXCLUDED_FROM_DEVICE_COUNT in this file, if it only re-describes elements \
-                 another collection already counts, or holds no device at all."
+                 another collection already counts, or holds no device at all.",
+                family_src("circuit/introspection.rs").display()
             ),
         }
     }
