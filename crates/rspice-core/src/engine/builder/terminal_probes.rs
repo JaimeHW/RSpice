@@ -9,7 +9,7 @@ pub(super) fn materialize(
     max_elements: usize,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<(String, String)>, SimulationError> {
-    let probes = &netlist.ast_overlay.terminal_current_probes;
+    let probes = &netlist.ast_overlay().terminal_current_probes;
     if probes.is_empty() {
         return Ok(Vec::new());
     }

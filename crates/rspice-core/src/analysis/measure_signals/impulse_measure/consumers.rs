@@ -124,7 +124,7 @@ pub(in super::super) fn bind(
         if let MeasureType::Equation { expression, .. } | MeasureType::Param { expression } =
             &program.statement.measure_type
             && matches!(
-                expression.kind,
+                expression.kind(),
                 crate::netlist::measure::MeasureExpressionKind::Expression
             )
         {

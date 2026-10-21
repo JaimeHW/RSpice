@@ -66,7 +66,8 @@ pub(crate) fn evaluate_instance_expression(
 /// Resolve scalar instance fields in dependency order, publishing each
 /// successful value for sibling expressions. An unresolved attempt must not
 /// consume statistical samples before a later pass can resolve its bindings.
-pub(crate) fn resolve_real_instance_expressions(
+#[doc(hidden)]
+pub fn resolve_real_instance_expressions(
     context: &ParamContext,
     expressions: &[(String, String)],
     non_scalar_fields: &HashSet<String>,
@@ -154,7 +155,8 @@ pub(crate) fn resolve_real_instance_expressions(
     Ok(resolved)
 }
 
-pub(crate) struct ModelEvaluationContext<'a> {
+#[doc(hidden)]
+pub struct ModelEvaluationContext<'a> {
     context: ParamContext,
     abort: &'a dyn AbortSignal,
     resolved_expressions: HashMap<String, ComplexValue>,
@@ -162,7 +164,8 @@ pub(crate) struct ModelEvaluationContext<'a> {
 }
 
 impl<'a> ModelEvaluationContext<'a> {
-    pub(crate) fn new(context: ParamContext, abort: &'a dyn AbortSignal) -> Self {
+    #[doc(hidden)]
+    pub fn new(context: ParamContext, abort: &'a dyn AbortSignal) -> Self {
         Self {
             context,
             abort,
@@ -171,14 +174,16 @@ impl<'a> ModelEvaluationContext<'a> {
         }
     }
 
-    pub(crate) fn evaluate(&self, expression: &str) -> Result<Value, ExpressionEvaluationError> {
+    #[doc(hidden)]
+    pub fn evaluate(&self, expression: &str) -> Result<Value, ExpressionEvaluationError> {
         eval_expression_complex_with_abort(expression, &self.context, self.abort)
             .and_then(|value| require_real(value).map_err(Into::into))
     }
 
     /// Model construction materializes its defaults. Instance overrides must
     /// still see the enclosing symbolic graph after those defaults are bound.
-    pub(crate) fn retain_instance_expressions(&mut self, enclosing: &ParamContext) {
+    #[doc(hidden)]
+    pub fn retain_instance_expressions(&mut self, enclosing: &ParamContext) {
         for (name, expression) in enclosing.all_parameter_expressions() {
             let value = self.context.get_complex(&name);
             self.context
@@ -191,7 +196,8 @@ impl<'a> ModelEvaluationContext<'a> {
         }
     }
 
-    pub(crate) fn real_model_expression(
+    #[doc(hidden)]
+    pub fn real_model_expression(
         &self,
         name: &str,
         expression: &str,
@@ -222,13 +228,15 @@ impl std::ops::DerefMut for ModelEvaluationContext<'_> {
 /// A model's nominal temperature is evaluated at construction and retained
 /// unchanged while a thermal device updates its operating temperature.
 #[derive(Clone, Copy)]
-pub(crate) enum ModelNominalTemperature {
+#[doc(hidden)]
+pub enum ModelNominalTemperature {
     Default(Value),
     Resolved(Value),
 }
 
 impl<'a> ModelEvaluationContext<'a> {
-    pub(crate) fn resolve(
+    #[doc(hidden)]
+    pub fn resolve(
         enclosing: &ParamContext,
         mut params: ParamContext,
         model_params: &[(String, Value)],
@@ -368,7 +376,8 @@ fn check_abort(abort: &dyn AbortSignal) -> Result<(), ParameterResolutionError> 
     }
 }
 
-pub(crate) fn set_model_temperature_scalars(ctx: &mut ParamContext, temp_c: Value, tnom_c: Value) {
+#[doc(hidden)]
+pub fn set_model_temperature_scalars(ctx: &mut ParamContext, temp_c: Value, tnom_c: Value) {
     ctx.set("TEMP", temp_c);
     ctx.set("TEMPER", temp_c);
     ctx.set("TNOM", tnom_c);

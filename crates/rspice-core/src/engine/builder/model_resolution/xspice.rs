@@ -1100,7 +1100,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         })?;
     let instance = materialized
         .as_ref()
-        .map(|value| value.as_ref())
+        .map(|value| value.as_params())
         .unwrap_or(instance);
     let non_scalar_fields = instance.non_scalar_fields();
     let XspiceInstanceParams {

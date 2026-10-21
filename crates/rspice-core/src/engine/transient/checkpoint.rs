@@ -1167,11 +1167,11 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
     hash_field(&mut hasher, "native_bjt_junction_area_law", 13_u8);
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
-    if !netlist.ast_overlay.terminal_current_probes.is_empty() {
+    if !netlist.ast_overlay().terminal_current_probes.is_empty() {
         hash_field(
             &mut hasher,
             "terminal_current_probes",
-            &netlist.ast_overlay.terminal_current_probes,
+            &netlist.ast_overlay().terminal_current_probes,
         );
     }
     hash_field(&mut hasher, "analyses", &netlist.analyses);
@@ -1208,7 +1208,7 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
                     request.name.as_deref(),
                     request.print_delimiter.as_ref(),
                     request.operands.as_slice(),
-                    request.operand_kinds.as_slice(),
+                    request.operand_kinds(),
                     request.expressions.as_slice(),
                     request.dependencies.as_slice(),
                 )

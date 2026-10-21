@@ -242,7 +242,8 @@ impl DcGroundPathDiagnostics {
     /// The no-path nodes worth a warning, in deck order: every one except
     /// those in a component a compiled module's terminal decides
     /// ([`Self::floating_component_has_module_terminal`]).
-    pub(crate) fn reported_no_dc_path_nodes(&self) -> impl Iterator<Item = &str> {
+    #[doc(hidden)]
+    pub fn reported_no_dc_path_nodes(&self) -> impl Iterator<Item = &str> {
         let module_decided = self
             .floating_components
             .iter()
@@ -303,7 +304,8 @@ pub fn analyze_dc_ground_paths(
 /// [`analyze_dc_ground_paths`] under the build's own initial-condition
 /// contract, against the build's reference: `0` and its aliases, and
 /// `reference`, the net a deck that names no node 0 has aliased to it.
-pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
+#[doc(hidden)]
+pub fn analyze_dc_ground_paths_with_ic_modes(
     elements: &[Element],
     capacitor_ic_mode: CapacitorIcDcMode,
     inductor_ic_enforced: bool,
@@ -549,7 +551,8 @@ fn independent_current_is_zero_at_dc(spec: &super::SourceSpec) -> bool {
 /// A constant supply rail: one node a `V` card holds at a DC level above
 /// ground, and the card that holds it.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SupplyRail {
+#[doc(hidden)]
+pub struct SupplyRail {
     /// The source card, upper-cased, so a diagnostic names what the author
     /// wrote rather than an index.
     pub source: String,
@@ -563,7 +566,8 @@ pub(crate) struct SupplyRail {
 
 /// Which supply rails reach each node through the passive network.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SupplyReachability {
+#[doc(hidden)]
+pub struct SupplyReachability {
     rails_by_component: BTreeMap<usize, Vec<SupplyRail>>,
     component_by_node: HashMap<String, usize>,
 }
@@ -575,7 +579,8 @@ impl SupplyReachability {
     /// A node this circuit never mentions reaches nothing, which is the same
     /// answer as a node no rail reaches: the caller that has to pick a supply
     /// treats both as "the deck did not say".
-    pub(crate) fn rails_reaching(&self, node: &str) -> &[SupplyRail] {
+    #[doc(hidden)]
+    pub fn rails_reaching(&self, node: &str) -> &[SupplyRail] {
         self.component_by_node
             .get(&node_key(node))
             .and_then(|component| self.rails_by_component.get(component))
@@ -606,7 +611,8 @@ impl SupplyReachability {
 /// Ground is the build's reference: `0` and its aliases, and `reference`, the
 /// net a deck that names no node 0 has aliased to it. A rail stated against
 /// that net is a rail exactly as one stated against `0` is.
-pub(crate) fn analyze_supply_reachability(
+#[doc(hidden)]
+pub fn analyze_supply_reachability(
     elements: &[Element],
     reference: Option<&str>,
 ) -> SupplyReachability {

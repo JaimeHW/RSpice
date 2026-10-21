@@ -647,7 +647,7 @@ impl Engine {
         }
 
         let mut perturbed = netlist.clone();
-        let mut retained_parameters = netlist.ast_overlay.parameters.clone();
+        let mut retained_parameters = netlist.ast_overlay().parameters.clone();
         retained_parameters.extend(param_overrides.iter().cloned());
         let effective_overrides: Vec<_> = retained_parameters
             .iter()
@@ -671,7 +671,7 @@ impl Engine {
                 perturbed.params.set(&parameter.name, parameter.value);
             }
         }
-        perturbed.ast_overlay.parameters = retained_parameters.clone();
+        perturbed.retain_overlay_parameters(retained_parameters.clone());
         crate::resource::ResourceLimitError::ensure(
             crate::resource::ResourceKind::NetlistBytes,
             perturbed.retained_source_bytes(),
@@ -697,7 +697,7 @@ impl Engine {
             statistical_mode: netlist.params.statistical_mode(),
             statistical_seed: Some(netlist.params.random().seed()),
             expression_dialect: netlist.params.expression_dialect(),
-            spice_dialect: Some(netlist.parse_dialect),
+            spice_dialect: Some(netlist.parse_dialect()),
             parameter_redefinition_policy: netlist.params.parameter_redefinition_policy(),
             parameter_redefinition_diagnostic_policy: netlist
                 .params
@@ -723,8 +723,8 @@ impl Engine {
                     ))
                 }
             })?;
-        Self::reapply_ast_overlay_with_abort(&mut reparsed, &netlist.ast_overlay, abort)?;
-        reparsed.ast_overlay.parameters = retained_parameters;
+        Self::reapply_ast_overlay_with_abort(&mut reparsed, netlist.ast_overlay(), abort)?;
+        reparsed.retain_overlay_parameters(retained_parameters);
         // Parameter replay changes this trial's equations, not its random coordinate.
         reparsed.spectre_statistical_coordinate = netlist.spectre_statistical_coordinate.clone();
         let applied_device_overrides = Self::apply_device_parameter_overrides_with_abort(
@@ -767,13 +767,11 @@ impl Engine {
             let canonical_parameter =
                 Self::canonical_device_parameter(&element.kind, Some(param_name));
             Self::apply_device_step_value(&mut element.kind, Some(&canonical_parameter), *value)?;
-            netlist.ast_overlay.device_parameters.insert(
-                (
-                    element.name.to_ascii_uppercase(),
-                    canonical_parameter.to_ascii_uppercase(),
-                ),
-                *value,
+            let key = (
+                element.name.to_ascii_uppercase(),
+                canonical_parameter.to_ascii_uppercase(),
             );
+            netlist.retain_device_parameter(key, *value);
             applied += 1;
         }
         Ok(applied)
@@ -808,7 +806,7 @@ impl Engine {
                 })?;
             Self::apply_device_step_value(&mut element.kind, Some(parameter_name), *value)?;
         }
-        netlist.ast_overlay = overlay.clone();
+        netlist.replace_ast_overlay(overlay.clone());
         Ok(())
     }
 

@@ -1958,7 +1958,8 @@ pub enum SourceSpec {
 impl SourceSpec {
     /// An authored constant transient waveform, independently of its value
     /// or derivative at any sampled time. RF annotations may add a tone.
-    pub(crate) fn is_constant_in_transient(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_constant_in_transient(&self) -> bool {
         match self {
             Self::Dc(_) | Self::Ac { .. } | Self::DcAc { .. } => true,
             Self::Distortion { inner, .. } => inner.is_constant_in_transient(),
@@ -1973,7 +1974,8 @@ impl SourceSpec {
     /// describe this source's direction for the requested analysis. An AC-only
     /// wrapper uses its waveform's initial value for DC bias; that waveform
     /// derivative is not captured, so it remains on the DC refinement path.
-    pub(crate) fn supports_parameter_direction(&self, ac: bool) -> bool {
+    #[doc(hidden)]
+    pub fn supports_parameter_direction(&self, ac: bool) -> bool {
         match self {
             Self::Dc(_)
             | Self::Ac { .. }
@@ -2289,7 +2291,8 @@ pub enum SmallSignalStateSource {
 
 impl SmallSignalStateSource {
     /// The card keyword this source is spelled with.
-    pub(crate) const fn keyword(&self) -> &'static str {
+    #[doc(hidden)]
+    pub const fn keyword(&self) -> &'static str {
         match self {
             Self::TransientTimes(_) => "ACTIMES",
             Self::CheckpointFile(_) => "CHECKPOINT",
@@ -2300,7 +2303,8 @@ impl SmallSignalStateSource {
 impl AnalysisCommand {
     /// Whether this is a small-signal card that may linearize around a
     /// transient state (`ACTIMES=`/`CHECKPOINT=`).
-    pub(crate) const fn takes_small_signal_state(&self) -> bool {
+    #[doc(hidden)]
+    pub const fn takes_small_signal_state(&self) -> bool {
         matches!(
             self,
             Self::Ac { .. }
@@ -2766,17 +2770,23 @@ pub struct PacCard {
 
 impl PacCard {
     /// Lowest sideband index when the card does not say.
-    pub(crate) const DEFAULT_SIDEBAND_MIN: i32 = -5;
+    #[doc(hidden)]
+    pub const DEFAULT_SIDEBAND_MIN: i32 = -5;
     /// Highest sideband index when the card does not say.
-    pub(crate) const DEFAULT_SIDEBAND_MAX: i32 = 5;
+    #[doc(hidden)]
+    pub const DEFAULT_SIDEBAND_MAX: i32 = 5;
     /// Relative tolerance when the card does not say.
-    pub(crate) const DEFAULT_RELTOL: Value = 1e-3;
+    #[doc(hidden)]
+    pub const DEFAULT_RELTOL: Value = 1e-3;
     /// Absolute tolerance when the card does not say.
-    pub(crate) const DEFAULT_ABSTOL: Value = 1e-12;
+    #[doc(hidden)]
+    pub const DEFAULT_ABSTOL: Value = 1e-12;
     /// Small-signal drive amplitude when the card does not say.
-    pub(crate) const DEFAULT_PAC_MAGNITUDE: Value = 1.0;
+    #[doc(hidden)]
+    pub const DEFAULT_PAC_MAGNITUDE: Value = 1.0;
     /// Whether sideband zero is published when the card does not say.
-    pub(crate) const DEFAULT_INCLUDE_DC: bool = true;
+    #[doc(hidden)]
+    pub const DEFAULT_INCLUDE_DC: bool = true;
 }
 
 /// Authored `.PXF` card: the periodic transfer function from one small-signal
@@ -4153,10 +4163,11 @@ pub struct XyceOutputIntervalSchedule {
 /// One ordered Xyce interval-output event and the accepted step that supplies
 /// its solution state.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct XyceOutputEvent {
-    pub(crate) output_time: Value,
-    pub(crate) accepted_index: usize,
-    pub(crate) interpolation_time: Option<Value>,
+#[doc(hidden)]
+pub struct XyceOutputEvent {
+    pub output_time: Value,
+    pub accepted_index: usize,
+    pub interpolation_time: Option<Value>,
 }
 
 /// Output-grid validation and policy failures retain distinct typed causes.
@@ -4190,7 +4201,8 @@ impl XyceOutputIntervalSchedule {
     /// accepted grid here preserves those IEEE-754 details. The first accepted
     /// step at or after `output_start_time` is emitted without interpolation,
     /// matching Xyce's TSTART handling.
-    pub(crate) fn output_events(
+    #[doc(hidden)]
+    pub fn output_events(
         &self,
         accepted_times: &[Value],
         output_start_time: Value,
@@ -4494,7 +4506,8 @@ pub enum XyceHbTimeDomainMode {
 
 impl XyceHbTimeDomainMode {
     /// Integer spelling accepted by Xyce 7.10's `TAHB` option.
-    pub(crate) const fn xyce_value(self) -> usize {
+    #[doc(hidden)]
+    pub const fn xyce_value(self) -> usize {
         match self {
             Self::Direct => 0,
             Self::TransientAssisted => 1,
@@ -4517,7 +4530,8 @@ pub enum XyceFftMode {
 
 impl XyceFftMode {
     /// Effective `.FFT FORMAT` when the directive does not specify one.
-    pub(crate) const fn default_format(self) -> FftFormat {
+    #[doc(hidden)]
+    pub const fn default_format(self) -> FftFormat {
         match self {
             Self::HspiceCompatible => FftFormat::Normalized,
             Self::SpectreCompatible => FftFormat::Unnormalized,
@@ -4526,7 +4540,8 @@ impl XyceFftMode {
 
     /// Whether window functions use the periodic denominator `N` rather than
     /// the symmetric denominator `N-1`.
-    pub(crate) const fn uses_periodic_windows(self) -> bool {
+    #[doc(hidden)]
+    pub const fn uses_periodic_windows(self) -> bool {
         matches!(self, Self::SpectreCompatible)
     }
 }
@@ -4557,7 +4572,8 @@ impl TransientNoiseConfig {
     pub(crate) const FMAX_KEYWORD: &'static str = "NOISEFMAX";
 
     /// Validate the authored combination, naming the field that is wrong.
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate(&self) -> Result<(), String> {
         if !self.fmax.is_finite() || self.fmax <= 0.0 {
             return Err(format!(
                 "NOISEFMAX must be a positive finite frequency, found {}",
@@ -4997,7 +5013,8 @@ impl SimulationOptions {
     }
 
     /// Effective Xyce legacy TRIG/TARG compatibility policy.
-    pub(crate) fn measure_use_lttm(&self) -> bool {
+    #[doc(hidden)]
+    pub fn measure_use_lttm(&self) -> bool {
         self.measure_use_lttm.unwrap_or(false)
     }
 

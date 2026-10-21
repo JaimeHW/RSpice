@@ -340,8 +340,16 @@ const MAX_PUBLIC_ITEMS: usize = 5752;
 // `SweepPointGenerationError::fold` adds one: the sweep failure is
 // non-exhaustive and moves with the parser below the engine, so the match
 // that names each failure moved beside its enum, and the DC sweep, `.STEP`
-// and the deck planner convert through it. The census is 374, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 374;
+// and the deck planner convert through it. The census was 374, with no slack.
+// The engine reaches its parser, expression-context, output-request,
+// measurement, Spectre-statistics, topology and XSPICE-parameter plumbing,
+// and the control protocol, through hidden items so that the netlist,
+// library and control-protocol modules can move into a crate of their own
+// below it. `Netlist`, `OutputNodeNamespace`, `OutputRequest` and
+// `MeasureExpression` keep their invariant-carrying fields private and add
+// hidden getters and narrow writers in their place. The census is 536, with no
+// slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 536;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

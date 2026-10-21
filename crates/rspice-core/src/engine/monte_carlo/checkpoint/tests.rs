@@ -178,12 +178,11 @@ fn monte_carlo_checkpoint_resumes_and_pools_exact_trial_populations() {
             match changed {
                 0 => request.seed += 1,
                 1 => request.measurements.swap(0, 1),
-                2 => circuit
-                    .ast_overlay
-                    .parameters
-                    .insert("R".into(), 1700.0)
-                    .map(|_| ())
-                    .unwrap_or(()),
+                2 => {
+                    let mut parameters = circuit.ast_overlay().parameters.clone();
+                    parameters.insert("R".into(), 1700.0);
+                    circuit.retain_overlay_parameters(parameters);
+                }
                 _ => contract[0] = 2,
             }
             let result = serial.run_monte_carlo_measurements_checkpointed_with_abort(

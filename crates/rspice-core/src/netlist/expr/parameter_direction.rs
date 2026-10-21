@@ -13,13 +13,15 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Both components keep their exponent until an owning consumer projects them.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ComplexDirection {
-    pub(crate) re: Derivative,
-    pub(crate) im: Derivative,
+#[doc(hidden)]
+pub struct ComplexDirection {
+    pub re: Derivative,
+    pub im: Derivative,
 }
 
 impl ComplexDirection {
-    pub(crate) fn zero() -> Self {
+    #[doc(hidden)]
+    pub fn zero() -> Self {
         Self::from(0.0)
     }
 
@@ -42,7 +44,8 @@ impl ComplexDirection {
         self.re == 0.0 && self.im == 0.0
     }
 
-    pub(crate) fn binary64(self) -> ComplexValue {
+    #[doc(hidden)]
+    pub fn binary64(self) -> ComplexValue {
         ComplexValue::new(self.re.binary64(), self.im.binary64())
     }
 

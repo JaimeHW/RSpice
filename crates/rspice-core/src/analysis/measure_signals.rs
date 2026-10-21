@@ -1681,7 +1681,7 @@ fn ordered_wildcard_voltage_nodes(
             continue;
         }
         let canonical = canonical_symbol(name);
-        if !namespace.external.contains(&canonical) {
+        if !namespace.external().contains(&canonical) {
             continue;
         }
         if !seen.insert(canonical.clone()) {
@@ -1691,7 +1691,7 @@ fn ordered_wildcard_voltage_nodes(
         }
         nodes.push(WildcardVoltageNode {
             lookup_name: name.clone(),
-            display_name: if namespace.authored_top_level.contains(&canonical) {
+            display_name: if namespace.authored_top_level().contains(&canonical) {
                 canonical
             } else {
                 canonical.replace('.', ":")
@@ -1721,20 +1721,20 @@ fn preflight_real_output_requests(
     let mut wildcard_voltage_nodes = None;
     let mut column_count = 0usize;
     for request in requests {
-        if request.operands.len() != request.operand_kinds.len() {
+        if request.operands.len() != request.operand_kinds().len() {
             return Err(output_request_error(
                 request,
                 analysis,
-                request.operands.len().min(request.operand_kinds.len()),
+                request.operands.len().min(request.operand_kinds().len()),
                 None,
                 format!(
                     "authored operand count {} does not match typed operand count {}",
                     request.operands.len(),
-                    request.operand_kinds.len()
+                    request.operand_kinds().len()
                 ),
             ));
         }
-        for (operand_index, kind) in request.operand_kinds.iter().enumerate() {
+        for (operand_index, kind) in request.operand_kinds().iter().enumerate() {
             let OutputOperandKind::Probe(signal) = kind else {
                 column_count = column_count.saturating_add(1);
                 continue;
@@ -2373,7 +2373,7 @@ fn evaluate_real_output_requests(
         for (operand_index, (authored, kind)) in request
             .operands
             .iter()
-            .zip(&request.operand_kinds)
+            .zip(request.operand_kinds())
             .enumerate()
         {
             if abort.is_aborted() {
@@ -3328,7 +3328,7 @@ fn compile_live_equation_source(
     params: &crate::netlist::ParamContext,
 ) -> Result<(LiveEquationSource, Vec<String>), String> {
     let mut dependencies = Vec::new();
-    let source = match expression.kind {
+    let source = match expression.kind() {
         crate::netlist::measure::MeasureExpressionKind::Expression => {
             let parsed =
                 crate::netlist::expr::parse_expression(&expression.text).map_err(|error| {

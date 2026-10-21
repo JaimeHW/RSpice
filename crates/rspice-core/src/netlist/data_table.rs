@@ -159,7 +159,8 @@ impl DataTable {
 
     // The engine validates borrowed rows before it allocates result storage.
     // Keep the same schema and value rules as the public materializing API.
-    pub(crate) fn frequency_column(&self) -> Result<usize, FrequencyDataTableError> {
+    #[doc(hidden)]
+    pub fn frequency_column(&self) -> Result<usize, FrequencyDataTableError> {
         if self.params.is_empty() {
             return Err(FrequencyDataTableError::EmptyColumns {
                 table_name: self.name.clone(),
@@ -207,7 +208,8 @@ impl DataTable {
         Ok(frequency_column)
     }
 
-    pub(crate) fn validate_frequency_row(
+    #[doc(hidden)]
+    pub fn validate_frequency_row(
         &self,
         row_index: usize,
         row: &[Value],

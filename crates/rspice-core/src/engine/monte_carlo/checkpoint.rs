@@ -361,7 +361,7 @@ impl Engine {
         ));
         field(format!("{:?}", netlist.spectre_statistics).as_bytes());
         field(format!("{:?}", netlist.spectre_statistical_coordinate).as_bytes());
-        field(format!("{:?}", netlist.ast_overlay).as_bytes());
+        field(format!("{:?}", netlist.ast_overlay()).as_bytes());
         let mut config = self.config.clone();
         config.resource_limits = ResourceLimits::default();
         field(format!("{config:?}").as_bytes());

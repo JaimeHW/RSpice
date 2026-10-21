@@ -13,7 +13,8 @@ use std::collections::HashSet;
 /// A resolver reads all eight to decide what a parameter means, so they are
 /// one card rather than eight lists.
 #[derive(Clone, Copy)]
-pub(crate) struct XspiceInstanceParams<'a> {
+#[doc(hidden)]
+pub struct XspiceInstanceParams<'a> {
     pub params: &'a [(String, f64)],
     pub expr_params: &'a [(String, String)],
     pub string_params: &'a [(String, String)],
@@ -26,7 +27,8 @@ pub(crate) struct XspiceInstanceParams<'a> {
 
 /// Allocate a replacement only for a deferred vector literal or bound string alias.
 /// The common numeric-only path continues to borrow the authored slices.
-pub(crate) struct MaterializedXspiceParams {
+#[doc(hidden)]
+pub struct MaterializedXspiceParams {
     params: Vec<(String, f64)>,
     expr_params: Vec<(String, String)>,
     string_params: Vec<(String, String)>,
@@ -51,7 +53,8 @@ impl MaterializedXspiceParams {
         }
     }
 
-    pub(crate) fn as_ref(&self) -> XspiceInstanceParams<'_> {
+    #[doc(hidden)]
+    pub fn as_params(&self) -> XspiceInstanceParams<'_> {
         XspiceInstanceParams {
             params: &self.params,
             expr_params: &self.expr_params,
@@ -107,13 +110,15 @@ impl MaterializedXspiceParams {
 /// Numeric consumers retain the enclosing values for self-references while
 /// explicit non-scalar siblings mask every path to an enclosing numeric value.
 #[derive(Clone, Copy)]
-pub(crate) struct XspiceNumericScope<'a> {
+#[doc(hidden)]
+pub struct XspiceNumericScope<'a> {
     pub parameters: &'a ParamContext,
     pub non_scalar_fields: &'a HashSet<String>,
 }
 
 impl XspiceNumericScope<'_> {
-    pub(crate) fn evaluate_real(
+    #[doc(hidden)]
+    pub fn evaluate_real(
         self,
         field: &str,
         expression: &str,
@@ -132,7 +137,8 @@ impl XspiceNumericScope<'_> {
 }
 
 impl XspiceInstanceParams<'_> {
-    pub(crate) fn non_scalar_fields(self) -> HashSet<String> {
+    #[doc(hidden)]
+    pub fn non_scalar_fields(self) -> HashSet<String> {
         self.string_params
             .iter()
             .chain(self.string_expr_params)
@@ -148,7 +154,8 @@ impl XspiceInstanceParams<'_> {
     /// Classify ambiguous literals and string bindings. Retain numeric expressions
     /// for the ordinary instance resolver, so it cannot sample or freeze a
     /// sibling/model binding before the complete numeric context is available.
-    pub(crate) fn materialize_deferred_values(
+    #[doc(hidden)]
+    pub fn materialize_deferred_values(
         self,
         scope: &ParamContext,
         model: Option<&ModelDef>,

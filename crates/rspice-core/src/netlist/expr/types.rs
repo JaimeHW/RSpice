@@ -67,7 +67,8 @@ pub enum Expr {
 impl Expr {
     /// Check before retaining a parser- or substitution-produced tree. Cloning
     /// and dropping this public boxed AST still use the native call stack.
-    pub(crate) fn ensure_stack_safe_depth(&self) -> Result<(), ExprError> {
+    #[doc(hidden)]
+    pub fn ensure_stack_safe_depth(&self) -> Result<(), ExprError> {
         let mut pending = vec![(self, 1)];
         while let Some((node, depth)) = pending.pop() {
             if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {

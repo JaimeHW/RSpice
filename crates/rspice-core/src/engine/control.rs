@@ -577,11 +577,10 @@ impl ControlCircuit {
         // Publish only after every field has validated and applied to a private
         // candidate. The overlay keeps changes through later source replay.
         element.kind = candidate;
+        let element_name = element.name.to_ascii_uppercase();
         for (parameter, value) in changes {
             self.netlist
-                .ast_overlay
-                .device_parameters
-                .insert((element.name.to_ascii_uppercase(), parameter), value);
+                .retain_device_parameter((element_name.clone(), parameter), value);
         }
         Ok(())
     }

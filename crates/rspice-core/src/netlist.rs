@@ -25,7 +25,8 @@ pub mod include;
 mod initcond;
 pub mod lexer;
 pub mod measure;
-pub(crate) mod model_bin;
+#[doc(hidden)]
+pub mod model_bin;
 mod model_resolution;
 pub mod multi_run;
 mod mutual_inductor;
@@ -53,7 +54,8 @@ mod startup;
 mod topology;
 mod xspice_params;
 mod xspice_parser;
-pub(crate) use xspice_params::{XspiceInstanceParams, XspiceNumericScope};
+#[doc(hidden)]
+pub use xspice_params::{XspiceInstanceParams, XspiceNumericScope};
 
 pub use add_resistors::*;
 pub use ast::*;
@@ -69,7 +71,8 @@ pub use flattener::{
     flatten_netlist, flatten_netlist_with_models, flatten_netlist_with_models_config_with_abort,
     flatten_netlist_with_models_with_abort,
 };
-pub(crate) use flattener::{
+#[doc(hidden)]
+pub use flattener::{
     flatten_netlist_with_parameter_direction, materialize_passive_initial_condition,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
@@ -86,7 +89,8 @@ pub use initcond::{
 pub use model_resolution::{UnresolvedDeviceModelReference, unresolved_device_model_references};
 pub use mutual_inductor::validate_mutual_inductor_references;
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
-pub(crate) use output_symbols::hierarchy_pattern_matches;
+#[doc(hidden)]
+pub use output_symbols::hierarchy_pattern_matches;
 pub use output_symbols::{
     InterfaceNodeAliases, OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
     OutputExpressionValidationError, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
@@ -96,18 +100,22 @@ pub use output_symbols::{
     validate_output_requests_with_abort, validate_output_symbols,
     validate_output_symbols_with_abort,
 };
-pub(crate) use output_symbols::{
-    OutputNodeNamespace, OutputOperand, OutputOperandKind, canonical_symbol,
-    collect_output_node_namespace_from_elements_with_abort,
+#[doc(hidden)]
+pub use output_symbols::{
+    OutputNodeNamespace, OutputOperandKind, canonical_symbol,
     collect_output_node_namespace_with_limits_and_abort, is_current_output_accessor,
     is_current_projection_accessor, is_device_lead_current_accessor, measure_output_dependencies,
     probe_specification_error,
+};
+pub(crate) use output_symbols::{
+    OutputOperand, collect_output_node_namespace_from_elements_with_abort,
 };
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
 pub use spectre_statistics::*;
-pub(crate) use startup::unresolved_module_startup_warnings;
+#[doc(hidden)]
+pub use startup::unresolved_module_startup_warnings;
 pub use startup::{validate_startup_directives, validate_startup_directives_with_abort};
 pub use topology::{
     CapacitorIcDcMode, ConnectivityAnalysisError, ConnectivityDiagnostics, DcGroundPathDiagnostics,
@@ -115,15 +123,19 @@ pub use topology::{
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL, analyze_dc_ground_paths, analyze_xyce_connectivity,
     reduce_supernode_topology,
 };
-pub(crate) use topology::{
+#[doc(hidden)]
+pub use topology::{
     SupplyRail, SupplyReachability, analyze_dc_ground_paths_with_ic_modes,
     analyze_supply_reachability,
 };
+#[doc(hidden)]
+pub use xspice_parser::{
+    DeferredXspiceStringVectorEntry, parse_deferred_xspice_complex,
+    parse_deferred_xspice_complex_vector, xspice_param_preserves_numeric_string,
+};
 pub(crate) use xspice_parser::{
-    DeferredXspiceStringVectorEntry, encode_deferred_xspice_complex,
-    encode_deferred_xspice_complex_vector, parse_deferred_xspice_complex,
-    parse_deferred_xspice_complex_vector, xspice_model_param_accepts_bare_string,
-    xspice_param_prefers_string_vector, xspice_param_preserves_numeric_string,
+    encode_deferred_xspice_complex, encode_deferred_xspice_complex_vector,
+    xspice_model_param_accepts_bare_string, xspice_param_prefers_string_vector,
 };
 
 impl crate::io::xyce_prn::XycePrnDelimiterSource for PrintDelimiter {
@@ -771,19 +783,21 @@ pub(crate) enum NetlistReplayContext {
 /// Derivatives recorded by the owning field reader during a selected root replay.
 /// Missing entries mean that an element has not yet been qualified for this path.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ParameterDirectionCapture {
-    pub(crate) elements: std::collections::BTreeMap<String, ElementParameterDirection>,
+#[doc(hidden)]
+pub struct ParameterDirectionCapture {
+    pub elements: std::collections::BTreeMap<String, ElementParameterDirection>,
     /// Flat electrical owners, moved from the builder after instantiation.
-    pub(crate) owners: Vec<Element>,
-    pub(crate) rshunt: Option<crate::expr::Derivative>,
-    pub(crate) cshunt: Option<crate::expr::Derivative>,
+    pub owners: Vec<Element>,
+    pub rshunt: Option<crate::expr::Derivative>,
+    pub cshunt: Option<crate::expr::Derivative>,
     /// Matrix rows receiving the builder's generated CSHUNT capacitors.
-    pub(crate) cshunt_rows: Vec<usize>,
-    pub(crate) has_uncaptured_dependencies: bool,
+    pub cshunt_rows: Vec<usize>,
+    pub has_uncaptured_dependencies: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ElementParameterDirection {
+#[doc(hidden)]
+pub enum ElementParameterDirection {
     Gain(crate::expr::Derivative),
     Passive {
         value: Value,
@@ -802,18 +816,19 @@ pub(crate) enum ElementParameterDirection {
 /// Keeping the overlay on the netlist makes a later reparse compositional: no
 /// previously applied electrical change can disappear behind stale source.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NetlistAstOverlay {
+#[doc(hidden)]
+pub struct NetlistAstOverlay {
     /// Root parameter values retained across nested studies and source replay.
     pub parameters: BTreeMap<String, Value>,
-    pub(crate) device_parameters: BTreeMap<(String, String), crate::Value>,
+    pub device_parameters: BTreeMap<(String, String), crate::Value>,
     /// Only options explicitly changed by executed control commands. Replay
     /// overlays these on freshly evaluated authored options, so unrelated
     /// parameter-dependent bindings remain live.
-    pub(crate) control_options: Option<SimulationOptions>,
+    pub control_options: Option<SimulationOptions>,
     /// Frontend probe selection, retained when a study reparses the source.
-    pub(crate) output_selection: Option<(SaveSet, Vec<OutputRequest>)>,
+    pub output_selection: Option<(SaveSet, Vec<OutputRequest>)>,
     /// Ideal current meters inserted at flattened authored device terminals.
-    pub(crate) terminal_current_probes: Vec<TerminalCurrentProbe>,
+    pub terminal_current_probes: Vec<TerminalCurrentProbe>,
 }
 
 /// A zero-volt current meter at one authored terminal of a flattened device.
@@ -1166,6 +1181,73 @@ impl Netlist {
             .filter(|region| region.source == self.source_path)
     }
 
+    /// The canonical electrical overrides layered over the parsed source.
+    #[doc(hidden)]
+    pub fn ast_overlay(&self) -> &NetlistAstOverlay {
+        &self.ast_overlay
+    }
+
+    /// Replace the whole overlay, once the engine has re-applied it to a
+    /// freshly parsed copy of this deck.
+    #[doc(hidden)]
+    pub fn replace_ast_overlay(&mut self, overlay: NetlistAstOverlay) {
+        self.ast_overlay = overlay;
+    }
+
+    /// Retain the root parameter values a study applied, so a later replay of
+    /// the source applies them again.
+    #[doc(hidden)]
+    pub fn retain_overlay_parameters(&mut self, parameters: BTreeMap<String, Value>) {
+        self.ast_overlay.parameters = parameters;
+    }
+
+    /// Retain one device parameter value the engine has applied to the
+    /// element named by `key.0`.
+    #[doc(hidden)]
+    pub fn retain_device_parameter(&mut self, key: (String, String), value: Value) {
+        self.ast_overlay.device_parameters.insert(key, value);
+    }
+
+    /// Retain the options a control script changed, so a replay overlays them
+    /// on freshly evaluated authored options.
+    #[doc(hidden)]
+    pub fn retain_control_options(&mut self, options: SimulationOptions) {
+        self.ast_overlay.control_options = Some(options);
+    }
+
+    /// The derivatives captured while this deck was replayed for one root
+    /// parameter, if it was.
+    #[doc(hidden)]
+    pub fn parameter_direction(&self) -> Option<&ParameterDirectionCapture> {
+        self.parameter_direction.as_deref()
+    }
+
+    /// The compatibility dialect the deck was read in.
+    #[doc(hidden)]
+    pub fn parse_dialect(&self) -> crate::config::SpiceDialect {
+        self.parse_dialect
+    }
+
+    /// The deterministic mismatch displacement replacing the sampler's draw,
+    /// if one is set.
+    #[doc(hidden)]
+    pub fn spectre_mismatch_override(&self) -> Option<&SpectreMismatchOverride> {
+        self.spectre_mismatch_override.as_ref()
+    }
+
+    /// Set or clear the mismatch displacement. The build refuses a deck that
+    /// carries one together with a statistical coordinate.
+    #[doc(hidden)]
+    pub fn set_spectre_mismatch_override(&mut self, displacement: Option<SpectreMismatchOverride>) {
+        self.spectre_mismatch_override = displacement;
+    }
+
+    /// Whether any card of the deck carries startup-directive provenance.
+    #[doc(hidden)]
+    pub fn has_startup_directives(&self) -> bool {
+        !self.startup_directives.is_empty()
+    }
+
     fn retain_included_source_paths(
         &mut self,
         processor: &IncludeProcessor,
@@ -1223,10 +1305,8 @@ impl Netlist {
     /// the card, and keep every small-signal state request with its card: a
     /// request whose card is dropped goes with it, and the rest follow their
     /// cards to their new positions.
-    pub(crate) fn retain_analyses(
-        &mut self,
-        mut keep: impl FnMut(usize, &AnalysisCommand) -> bool,
-    ) {
+    #[doc(hidden)]
+    pub fn retain_analyses(&mut self, mut keep: impl FnMut(usize, &AnalysisCommand) -> bool) {
         let mut positions = Vec::with_capacity(self.analyses.len());
         let mut kept_count = 0usize;
         for (index, analysis) in self.analyses.iter().enumerate() {
@@ -1265,7 +1345,8 @@ impl Netlist {
 
     /// Ordinal, among this deck's authored `.TRAN` cards, of the transient
     /// every `.FFT` card post-processes.
-    pub(crate) const FFT_TRANSIENT_ORDINAL: usize = 0;
+    #[doc(hidden)]
+    pub const FFT_TRANSIENT_ORDINAL: usize = 0;
 
     /// Which authored transient each `.FOUR` card post-processes, as a
     /// zero-based ordinal among this deck's `.TRAN` cards, in `.FOUR` card
@@ -1279,7 +1360,8 @@ impl Netlist {
     /// This is the one statement of the binding: the deck planner mints
     /// post-process identities from it, and the control-script host selects
     /// with it the cards each authored transient it runs carries.
-    pub(crate) fn fourier_transient_ordinals(&self) -> Vec<usize> {
+    #[doc(hidden)]
+    pub fn fourier_transient_ordinals(&self) -> Vec<usize> {
         let mut seen_transients = 0usize;
         let mut ordinals = Vec::new();
         for command in &self.analyses {
@@ -1293,7 +1375,8 @@ impl Netlist {
     }
 
     /// Retained root input, including parameter values materialized by a study.
-    pub(crate) fn retained_source_bytes(&self) -> usize {
+    #[doc(hidden)]
+    pub fn retained_source_bytes(&self) -> usize {
         self.ast_overlay.parameters.iter().fold(
             self.source_text.as_ref().map_or(0, String::len),
             |bytes, (name, _)| {
@@ -1510,7 +1593,8 @@ pub struct VerilogAInclude {
 
 impl VerilogAInclude {
     /// Names known before compilation, shared by flattening and diagnostics.
-    pub(crate) fn declared_model_names(&self) -> impl Iterator<Item = &str> {
+    #[doc(hidden)]
+    pub fn declared_model_names(&self) -> impl Iterator<Item = &str> {
         self.model_name
             .as_deref()
             .into_iter()
@@ -1962,10 +2046,11 @@ impl Netlist {
     /// Reparse a rewritten root source through the same resolver contract that
     /// produced this netlist.
     ///
-    /// This is intentionally crate-private: callers must layer any AST-only
+    /// This is intentionally not API: callers must layer any AST-only
     /// overrides back onto the returned netlist before exposing it as a
     /// materialized analysis row.
-    pub(crate) fn replay_root_source_with_parameter_overrides_and_abort(
+    #[doc(hidden)]
+    pub fn replay_root_source_with_parameter_overrides_and_abort(
         &self,
         input: &str,
         mut options: NetlistParseOptions,

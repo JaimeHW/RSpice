@@ -18,12 +18,14 @@ pub fn parse_expression(input: &str) -> Result<Expr, ExprError> {
 }
 
 #[derive(Debug)]
-pub(crate) enum ParseExpressionWithAbortError {
+#[doc(hidden)]
+pub enum ParseExpressionWithAbortError {
     Aborted,
     Parse(ExprError),
 }
 
-pub(crate) fn parse_expression_with_abort(
+#[doc(hidden)]
+pub fn parse_expression_with_abort(
     input: &str,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<Expr, ParseExpressionWithAbortError> {
@@ -36,7 +38,8 @@ pub(crate) fn parse_expression_with_abort(
     }
 }
 
-pub(crate) fn parse_control_expression_prefix_with_abort(
+#[doc(hidden)]
+pub fn parse_control_expression_prefix_with_abort(
     input: &str,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<(Expr, usize), ParseExpressionWithAbortError> {
@@ -49,7 +52,8 @@ pub(crate) fn parse_control_expression_prefix_with_abort(
     }
 }
 
-pub(crate) fn parse_control_expression_with_abort(
+#[doc(hidden)]
+pub fn parse_control_expression_with_abort(
     input: &str,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<Expr, ParseExpressionWithAbortError> {
@@ -84,7 +88,8 @@ impl From<ParseExpressionWithAbortError> for ExpressionEvaluationError {
     }
 }
 
-pub(crate) fn eval_expression_complex_with_abort(
+#[doc(hidden)]
+pub fn eval_expression_complex_with_abort(
     input: &str,
     ctx: &ParamContext,
     abort: &dyn crate::abort_signal::AbortSignal,

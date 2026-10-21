@@ -78,7 +78,8 @@ pub use commands::{option_package_key_is_known, parse_save_probe};
 /// Apply an ordered control `option` command using the ordinary option grammar.
 /// A private candidate prevents a late invalid assignment from publishing the
 /// earlier assignments on the same command line.
-pub(crate) fn control_options(
+#[doc(hidden)]
+pub fn control_options(
     arguments: &str,
     line: usize,
     params: &ParamContext,
@@ -179,7 +180,8 @@ mod elements;
 mod hb_card;
 mod laplace_synthesis;
 mod line;
-pub(crate) mod monte_carlo_identity;
+#[doc(hidden)]
+pub mod monte_carlo_identity;
 mod periodic_cards;
 mod pspice_stim;
 mod qpac_card;
@@ -346,7 +348,8 @@ impl Default for NetlistParseOptions {
 /// A study override of a root-scope binding, applied before its dependents
 /// are evaluated. It is separate from authored redefinition policy.
 #[derive(Debug, Clone)]
-pub(crate) struct ParameterOverride {
+#[doc(hidden)]
+pub struct ParameterOverride {
     pub name: String,
     pub value: Value,
     pub global: bool,

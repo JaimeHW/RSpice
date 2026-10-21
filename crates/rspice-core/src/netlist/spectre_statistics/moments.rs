@@ -54,7 +54,8 @@ impl StatisticalMomentOptions {
 }
 
 #[derive(Default)]
-pub(crate) struct SpectreScopeMoments {
+#[doc(hidden)]
+pub struct SpectreScopeMoments {
     pub sigmas: Vec<SpectreVariationSigma>,
     pub correlation: Option<SpectreCorrelationMatrix>,
     pub evaluated_points: usize,
@@ -70,7 +71,8 @@ fn check_abort(abort: &dyn AbortSignal) -> Result<(), SpectreStatisticsError> {
 }
 
 impl SpectreStatisticsPlan {
-    pub(crate) fn scope_moments_with_abort(
+    #[doc(hidden)]
+    pub fn scope_moments_with_abort(
         &self,
         scope: SpectreVariationScope,
         params: &ParamContext,

@@ -5,7 +5,8 @@ use crate::abort_signal::AbortSignal;
 use std::collections::HashSet;
 
 #[derive(Debug)]
-pub(crate) enum ParameterResolutionError {
+#[doc(hidden)]
+pub enum ParameterResolutionError {
     Aborted,
     IncompleteScope(usize),
     Definition(String),

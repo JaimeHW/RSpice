@@ -1167,7 +1167,8 @@ enum XspiceStringVectorEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DeferredXspiceStringVectorEntry {
+#[doc(hidden)]
+pub enum DeferredXspiceStringVectorEntry {
     Resolved(String),
     Complex { real: String, imag: String },
 }
@@ -2347,7 +2348,8 @@ pub(crate) fn encode_deferred_xspice_complex(real: &str, imag: &str) -> String {
     encoded
 }
 
-pub(crate) fn parse_deferred_xspice_complex(value: &str) -> Option<(String, String)> {
+#[doc(hidden)]
+pub fn parse_deferred_xspice_complex(value: &str) -> Option<(String, String)> {
     let mut tail = value.strip_prefix(DEFERRED_XSPICE_COMPLEX_PREFIX)?;
     let real = decode_len_segment(&mut tail)?;
     let imag = decode_len_segment(&mut tail)?;
@@ -2378,7 +2380,8 @@ pub(crate) fn encode_deferred_xspice_complex_vector(
     encoded
 }
 
-pub(crate) fn parse_deferred_xspice_complex_vector(
+#[doc(hidden)]
+pub fn parse_deferred_xspice_complex_vector(
     value: &str,
 ) -> Option<Vec<DeferredXspiceStringVectorEntry>> {
     let mut tail = value.strip_prefix(DEFERRED_XSPICE_COMPLEX_VECTOR_PREFIX)?;
@@ -2471,7 +2474,8 @@ pub(crate) fn xspice_model_param_accepts_bare_string(name: &str) -> bool {
         || normalized.ends_with("path")
 }
 
-pub(crate) fn xspice_param_preserves_numeric_string(name: &str) -> bool {
+#[doc(hidden)]
+pub fn xspice_param_preserves_numeric_string(name: &str) -> bool {
     matches!(name.trim().to_ascii_lowercase().as_str(), "table_values")
 }
 

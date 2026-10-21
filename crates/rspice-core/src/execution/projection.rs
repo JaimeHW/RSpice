@@ -469,16 +469,16 @@ impl SignalProjection {
             ) {
                 continue;
             }
-            if request.operands.len() != request.operand_kinds.len() {
+            if request.operands.len() != request.operand_kinds().len() {
                 return Err(SimulationError::Netlist(format!(
                     "{} card at {} has {} authored operand(s) and {} typed operand(s)",
                     request.directive,
                     request.origin,
                     request.operands.len(),
-                    request.operand_kinds.len()
+                    request.operand_kinds().len()
                 )));
             }
-            for kind in &request.operand_kinds {
+            for kind in request.operand_kinds() {
                 if let OutputOperandKind::Probe(signal) = kind {
                     card_owned.push(signal.clone());
                 }
@@ -491,7 +491,7 @@ impl SignalProjection {
                     .operands
                     .iter()
                     .cloned()
-                    .zip(request.operand_kinds.iter().cloned())
+                    .zip(request.operand_kinds().iter().cloned())
                     .collect(),
             });
         }

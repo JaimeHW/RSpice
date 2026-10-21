@@ -314,7 +314,8 @@ pub(crate) fn prepare_behavioral_expression_preserving_spelling_with_abort(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BehavioralPreparationError {
+#[doc(hidden)]
+pub enum BehavioralPreparationError {
     Aborted,
     Semantic(String),
 }
@@ -325,7 +326,8 @@ impl From<String> for BehavioralPreparationError {
     }
 }
 
-pub(crate) fn prepare_behavioral_expression_with_abort(
+#[doc(hidden)]
+pub fn prepare_behavioral_expression_with_abort(
     expression: &str,
     params: &ParamContext,
     abort: &dyn AbortSignal,
@@ -381,7 +383,8 @@ pub fn expand_output_user_functions(
     }
 }
 
-pub(crate) fn expand_output_user_functions_with_abort(
+#[doc(hidden)]
+pub fn expand_output_user_functions_with_abort(
     expression: &str,
     params: &ParamContext,
     protected_identifiers: &HashSet<String>,
@@ -773,7 +776,8 @@ pub fn materialize_available_parameter_expressions(params: &mut ParamContext) ->
         .expect("NoAbort cannot cancel parameter materialization")
 }
 
-pub(crate) fn materialize_available_parameter_expressions_with_abort(
+#[doc(hidden)]
+pub fn materialize_available_parameter_expressions_with_abort(
     params: &mut ParamContext,
     abort: &dyn AbortSignal,
 ) -> Result<usize, ParameterResolutionError> {

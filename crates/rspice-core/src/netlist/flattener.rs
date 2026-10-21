@@ -2443,7 +2443,7 @@ impl<'a> Flattener<'a> {
                 )?;
                 let instance = materialized
                     .as_ref()
-                    .map(|value| value.as_ref())
+                    .map(|value| value.as_params())
                     .unwrap_or(instance);
                 let non_scalar_fields = instance.non_scalar_fields();
                 let super::XspiceInstanceParams {
@@ -4336,9 +4336,8 @@ fn canonical_device_initial_condition_name(name: &str) -> String {
 
 /// Move a resolved deferred IC into the physical passive's canonical field.
 /// Statistical fields stay deferred until their instance draw is materialized.
-pub(crate) fn materialize_passive_initial_condition(
-    element: &mut Element,
-) -> Result<(), ParseError> {
+#[doc(hidden)]
+pub fn materialize_passive_initial_condition(element: &mut Element) -> Result<(), ParseError> {
     let (initial, numeric, deferred) = match &mut element.kind {
         ElementKind::Capacitor {
             initial_voltage,
@@ -5491,7 +5490,8 @@ pub fn flatten_netlist_with_models_config_with_abort(
     flatten_netlist_with_parameter_direction(netlist, config, abort).map(|(flattened, _)| flattened)
 }
 
-pub(crate) fn flatten_netlist_with_parameter_direction(
+#[doc(hidden)]
+pub fn flatten_netlist_with_parameter_direction(
     netlist: &Netlist,
     config: FlattenerConfig,
     abort: &dyn AbortSignal,

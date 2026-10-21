@@ -72,7 +72,8 @@ pub enum MeasureOperand {
 }
 
 /// Xyce's default absolute equality tolerance for conditional measurements.
-pub(crate) const XYCE_DEFAULT_MEASURE_MINVAL: Value = 1.0e-12;
+#[doc(hidden)]
+pub const XYCE_DEFAULT_MEASURE_MINVAL: Value = 1.0e-12;
 
 /// Complete Xyce 7.10 `.MEASURE` type-keyword vocabulary.
 pub(crate) const XYCE_MEASURE_TYPE_KEYWORDS: &[&str] = &[
@@ -223,7 +224,8 @@ pub struct MeasureExpression {
 }
 
 impl MeasureExpression {
-    pub(crate) fn raw_reference(text: impl Into<String>) -> Self {
+    #[doc(hidden)]
+    pub fn raw_reference(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             kind: MeasureExpressionKind::RawReference,
@@ -237,20 +239,29 @@ impl MeasureExpression {
         }
     }
 
-    pub(crate) fn expression(text: impl Into<String>) -> Self {
+    #[doc(hidden)]
+    pub fn expression(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             kind: MeasureExpressionKind::Expression,
         }
     }
 
-    pub(crate) fn is_expression(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_expression(&self) -> bool {
         self.kind == MeasureExpressionKind::Expression
+    }
+
+    /// Which route the authored source takes, fixed by the constructor.
+    #[doc(hidden)]
+    pub fn kind(&self) -> MeasureExpressionKind {
+        self.kind
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MeasureExpressionKind {
+#[doc(hidden)]
+pub enum MeasureExpressionKind {
     RawReference,
     RawOutputOperator,
     Expression,
@@ -271,7 +282,8 @@ impl MeasurementFileReference {
     pub fn contents(&self) -> Option<&str> {
         self.contents.as_deref()
     }
-    pub(crate) fn bind_contents(&mut self, contents: std::sync::Arc<str>) {
+    #[doc(hidden)]
+    pub fn bind_contents(&mut self, contents: std::sync::Arc<str>) {
         self.contents = Some(contents);
     }
     pub(crate) fn resolve_path(&mut self, name: String) {

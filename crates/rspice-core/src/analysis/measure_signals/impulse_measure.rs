@@ -360,7 +360,7 @@ pub(super) fn compile<'a>(
                 &statement.measure_type
             {
                 let spec = if matches!(
-                    expression.kind,
+                    expression.kind(),
                     crate::netlist::measure::MeasureExpressionKind::Expression
                 ) {
                     format!("{{{}}}", expression.text)

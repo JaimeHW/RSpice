@@ -430,7 +430,8 @@ fn compiled_module_instances(elements: &[super::Element]) -> HashSet<String> {
 /// startup node kept as the internal node of a compiled-module instance (see
 /// [`startup_node_may_exist`]) that the built circuit, which has compiled the
 /// module, does not have (`resolves` is false), one warning per directive.
-pub(crate) fn unresolved_module_startup_warnings(
+#[doc(hidden)]
+pub fn unresolved_module_startup_warnings(
     netlist: &Netlist,
     elements: &[super::Element],
     resolves: impl Fn(&str) -> bool,

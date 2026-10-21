@@ -259,9 +259,9 @@ impl Engine {
     ) -> Result<Option<LinearParameterResponse>, SimulationError> {
         if netlist.source_text.is_none()
             || !netlist.params.has_any_parameter_binding(parameter)
-            || !netlist.ast_overlay.device_parameters.is_empty()
-            || !netlist.ast_overlay.terminal_current_probes.is_empty()
-            || netlist.ast_overlay.control_options.is_some()
+            || !netlist.ast_overlay().device_parameters.is_empty()
+            || !netlist.ast_overlay().terminal_current_probes.is_empty()
+            || netlist.ast_overlay().control_options.is_some()
             || !netlist.spectre_statistics.variations.is_empty()
             || !netlist.elements.iter().all(|element| {
                 linear_element(&element.kind, frequencies.is_some())
@@ -277,7 +277,7 @@ impl Engine {
             self.config.resource_limits,
             abort,
         )?;
-        let Some(capture) = &directed.parameter_direction else {
+        let Some(capture) = directed.parameter_direction() else {
             return Ok(None);
         };
         if capture.has_uncaptured_dependencies {
@@ -352,7 +352,7 @@ impl Engine {
             // connections. Until they capture native field directions, use the
             // constructed-circuit refinement path, as design replay does.
             || netlist.options.topology_supernode.unwrap_or(false)
-            || !netlist.ast_overlay.terminal_current_probes.is_empty()
+            || !netlist.ast_overlay().terminal_current_probes.is_empty()
             || !netlist.elements.iter().all(|element| {
                 linear_element(&element.kind, frequencies.is_some())
                     && !matches!(

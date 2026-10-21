@@ -5688,7 +5688,7 @@ impl Engine {
                         format!("V(*) external-node namespace could not be elaborated: {error}"),
                     ),
                 })?
-                .external,
+                .into_external(),
             )
         } else {
             None
@@ -14862,8 +14862,8 @@ D1 D 0 DMOD
             &NoAbort,
         )
         .expect("TEAM public-node namespace elaborates");
-        assert!(namespace.external.contains("IN"));
-        assert!(!namespace.external.contains("YMEMRISTOR!MR1_X"));
+        assert!(namespace.external().contains("IN"));
+        assert!(!namespace.external().contains("YMEMRISTOR!MR1_X"));
         Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
             .run_tran(&netlist, 4.0e-9, 1.0e-9)
             .expect("TEAM wildcard transient solves")

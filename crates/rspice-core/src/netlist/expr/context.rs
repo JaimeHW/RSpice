@@ -624,7 +624,8 @@ impl ParamContext {
     }
 
     /// Whether expression expansion is needed to resolve symbolic bindings.
-    pub(crate) fn has_retained_parameter_expressions(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_retained_parameter_expressions(&self) -> bool {
         !self.parameter_expressions.is_empty() || !self.global_expressions.is_empty()
     }
 
@@ -763,7 +764,8 @@ impl ParamContext {
 
     /// Evaluate once at the actual binding site. Both ordinary/global shadowing
     /// and random draws are owned by this context, not reconstructed later.
-    pub(crate) fn evaluate_parameter_binding(
+    #[doc(hidden)]
+    pub fn evaluate_parameter_binding(
         &self,
         expression: &str,
     ) -> Result<(ComplexValue, Option<Result<ComplexDirection, ExprError>>), ExprError> {
@@ -922,7 +924,8 @@ impl ParamContext {
     }
 
     /// Rewind the statistical stream to draw zero. See [`RandomState::restart`].
-    pub(crate) fn restart_statistical_stream(&self) {
+    #[doc(hidden)]
+    pub fn restart_statistical_stream(&self) {
         self.random.restart();
     }
 
@@ -981,7 +984,8 @@ impl ParamContext {
     /// each reachable function once without evaluating it or consuming random
     /// draws. Formals shadow parameter leaves in their own function body, but
     /// do not shadow a called function's free parameters.
-    pub(crate) fn expression_references_parameters(
+    #[doc(hidden)]
+    pub fn expression_references_parameters(
         &self,
         expression: &str,
         matches_parameter: impl Fn(&str) -> bool,
@@ -1119,7 +1123,8 @@ impl ParamContext {
             .cloned()
     }
 
-    pub(crate) fn materialize_statistical_parameter_captures(&mut self) -> Result<(), ExprError> {
+    #[doc(hidden)]
+    pub fn materialize_statistical_parameter_captures(&mut self) -> Result<(), ExprError> {
         let mut memo = HashMap::new();
         let mut names = self
             .statistical_captures
@@ -1317,7 +1322,8 @@ impl ParamContext {
     /// Visit cached real and complex numeric bindings without evaluating
     /// retained expressions or consuming random samples. Names shadowed across
     /// scopes may occur more than once, with their effective resolved value.
-    pub(crate) fn resolved_numeric_parameters(&self) -> impl Iterator<Item = (&str, ComplexValue)> {
+    #[doc(hidden)]
+    pub fn resolved_numeric_parameters(&self) -> impl Iterator<Item = (&str, ComplexValue)> {
         self.params
             .keys()
             .chain(self.complex_params.keys())
@@ -1329,7 +1335,8 @@ impl ParamContext {
     /// Deterministic semantic snapshot used to bind transient checkpoints to
     /// the elaborated parameter environment. Map iteration order and runtime
     /// allocation addresses are deliberately excluded.
-    pub(crate) fn checkpoint_semantic_snapshot(&self) -> String {
+    #[doc(hidden)]
+    pub fn checkpoint_semantic_snapshot(&self) -> String {
         let mut numeric = self
             .params
             .iter()
@@ -1403,7 +1410,8 @@ impl ParamContext {
     /// draw counter. Checkpoint provenance may elaborate a circuit to discover
     /// dependencies, but that read-only operation must not perturb the live
     /// simulation's deterministic statistical stream.
-    pub(crate) fn isolated_random_clone(&self) -> Self {
+    #[doc(hidden)]
+    pub fn isolated_random_clone(&self) -> Self {
         let mut cloned = self.clone();
         cloned.random = RandomState {
             seed: self.random.seed,
@@ -1414,7 +1422,8 @@ impl ParamContext {
 
     /// Clone this context for checkpoint provenance without sharing the live
     /// statistical draw counter.
-    pub(crate) fn checkpoint_isolated_clone(&self) -> Self {
+    #[doc(hidden)]
+    pub fn checkpoint_isolated_clone(&self) -> Self {
         self.isolated_random_clone()
     }
 

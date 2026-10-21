@@ -44,7 +44,8 @@ pub(crate) fn evaluate_complex_with_functions(
     })
 }
 
-pub(crate) fn evaluate_complex_with_functions_and_abort(
+#[doc(hidden)]
+pub fn evaluate_complex_with_functions_and_abort(
     expr: &Expr,
     ctx: &ParamContext,
     resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
@@ -77,10 +78,8 @@ pub(crate) fn evaluate_complex_with_functions_and_abort(
 /// execution is the exception: Xyce distinguishes a raw `MeasureOp` getter
 /// from an authored `ExpressionOp` root, so that layer applies normalization
 /// only when the parsed measure operand carries expression provenance.
-pub(crate) fn evaluate_complex_raw(
-    expr: &Expr,
-    ctx: &ParamContext,
-) -> Result<ComplexValue, ExprError> {
+#[doc(hidden)]
+pub fn evaluate_complex_raw(expr: &Expr, ctx: &ParamContext) -> Result<ComplexValue, ExprError> {
     ExpressionEvaluator::new(ctx).evaluate(expr)
 }
 
@@ -96,7 +95,8 @@ pub(crate) enum PreparedProgress {
 }
 
 #[derive(Debug)]
-pub(crate) enum ExpressionEvaluationError {
+#[doc(hidden)]
+pub enum ExpressionEvaluationError {
     Aborted,
     Expression(ExprError),
 }
@@ -115,7 +115,8 @@ fn uninterrupted<T>(progress: ControlFlow<Infallible, T>) -> T {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PreparedExpression {
+#[doc(hidden)]
+pub struct PreparedExpression {
     programs: std::sync::Arc<[PreparedProgram]>,
     root: PreparedNodeRef,
     frames: Vec<PreparedEvalFrame>,
@@ -270,11 +271,13 @@ where
 }
 
 impl PreparedExpression {
-    pub(crate) fn compile(expr: &Expr, ctx: &ParamContext) -> Result<Self, ExprError> {
+    #[doc(hidden)]
+    pub fn compile(expr: &Expr, ctx: &ParamContext) -> Result<Self, ExprError> {
         Self::compile_with_bindings(expr, ctx, &HashSet::new(), &mut |_| Ok(None))
     }
 
-    pub(crate) fn compile_with_abort(
+    #[doc(hidden)]
+    pub fn compile_with_abort(
         expr: &Expr,
         ctx: &ParamContext,
         abort: &dyn crate::abort_signal::AbortSignal,
@@ -309,7 +312,8 @@ impl PreparedExpression {
     /// Bind host-owned symbolic operands in the root and every reachable user
     /// function. Bindings become typed external nodes, preserving lazy reads
     /// and function argument scope without rewriting or expanding call bodies.
-    pub(crate) fn compile_with_bindings(
+    #[doc(hidden)]
+    pub fn compile_with_bindings(
         expr: &Expr,
         ctx: &ParamContext,
         external_parameters: &HashSet<String>,
@@ -364,7 +368,8 @@ impl PreparedExpression {
 
     /// Poll inside the instruction loop, including calls with only literal or
     /// formal arguments. Parameter-read callbacks alone cannot bound the work.
-    pub(crate) fn evaluate_with_abort(
+    #[doc(hidden)]
+    pub fn evaluate_with_abort(
         &mut self,
         ctx: &ParamContext,
         resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
@@ -398,7 +403,8 @@ impl PreparedExpression {
     /// Evaluate with the real scalar derivative kernel used by behavioral
     /// and output expressions. This does not project complex parameter
     /// arithmetic into a real tangent; non-real leaves are rejected.
-    pub(crate) fn evaluate_scalar_direction_with(
+    #[doc(hidden)]
+    pub fn evaluate_scalar_direction_with(
         &mut self,
         ctx: &ParamContext,
         resolver: &mut impl FnMut(
@@ -786,7 +792,8 @@ impl PreparedExpression {
         }
     }
 
-    pub(crate) fn visit_runtime_parameters(&self, mut visit: impl FnMut(&str)) {
+    #[doc(hidden)]
+    pub fn visit_runtime_parameters(&self, mut visit: impl FnMut(&str)) {
         for program in self.programs.iter() {
             for node in &program.nodes {
                 if let PreparedNode::Param {
@@ -944,7 +951,8 @@ impl<'a> PreparedExpressionBuilder<'a> {
 /// Match Xyce's public expression-evaluation boundary, which replaces each
 /// non-finite result component with a finite sentinel before consumers
 /// compare, print, or reuse the value.
-pub(crate) fn normalize_xyce_expression_result(value: ComplexValue) -> ComplexValue {
+#[doc(hidden)]
+pub fn normalize_xyce_expression_result(value: ComplexValue) -> ComplexValue {
     ComplexValue::new(
         normalize_xyce_expression_component(value.re),
         normalize_xyce_expression_component(value.im),
@@ -977,7 +985,8 @@ pub(crate) fn normalize_xyce_expression_result(value: ComplexValue) -> ComplexVa
 /// reported `1e50` from a Windows build and `-1e50` from a Linux one, through
 /// `.MEASURE` output, which is a user-visible disagreement and not merely a
 /// test artifact.
-pub(crate) fn normalize_xyce_expression_component(component: Value) -> Value {
+#[doc(hidden)]
+pub fn normalize_xyce_expression_component(component: Value) -> Value {
     if component.is_finite() {
         component
     } else if component.is_nan() {

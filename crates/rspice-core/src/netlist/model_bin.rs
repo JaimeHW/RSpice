@@ -129,7 +129,8 @@ impl ModelBinCardGeometry {
 /// matches no bin at all and the whole family fails to resolve.
 const BIN_BOUND_TOLERANCE: f64 = 1e-9;
 
-pub(crate) fn bin_bound_equal(left: f64, right: f64) -> bool {
+#[doc(hidden)]
+pub fn bin_bound_equal(left: f64, right: f64) -> bool {
     (left - right).abs() < BIN_BOUND_TOLERANCE
 }
 

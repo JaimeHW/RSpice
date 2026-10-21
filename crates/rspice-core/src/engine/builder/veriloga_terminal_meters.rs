@@ -110,7 +110,7 @@ impl CurrentRequests {
             netlist
                 .output_requests
                 .iter()
-                .flat_map(|request| request.operand_kinds.iter())
+                .flat_map(|request| request.operand_kinds().iter())
                 .filter_map(|kind| match kind {
                     crate::netlist::OutputOperandKind::Probe(signal) => Some(signal),
                     crate::netlist::OutputOperandKind::Expression { .. } => None,

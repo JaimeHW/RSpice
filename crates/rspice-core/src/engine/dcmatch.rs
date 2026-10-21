@@ -151,7 +151,7 @@ impl Engine {
         // value the deterministic run uses.
         let mut base = netlist.clone();
         base.spectre_statistical_coordinate = None;
-        base.spectre_mismatch_override = None;
+        base.set_spectre_mismatch_override(None);
 
         let nominal_process = BTreeMap::new();
         let compute_moments = |scope| {
@@ -308,9 +308,9 @@ impl Engine {
                     }
                     let displaced = |value: Value| {
                         let mut perturbed = base.clone();
-                        perturbed.spectre_mismatch_override = Some(
+                        perturbed.set_spectre_mismatch_override(Some(
                             SpectreMismatchOverride::single(&instance, &sigma.parameter, value),
-                        );
+                        ));
                         perturbed
                     };
                     let up = self.displaced_output(

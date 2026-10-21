@@ -26,7 +26,8 @@ pub struct ControlError {
 }
 
 impl ControlError {
-    pub(crate) fn evaluation(line: usize, error: ExpressionEvaluationError) -> Self {
+    #[doc(hidden)]
+    pub fn evaluation(line: usize, error: ExpressionEvaluationError) -> Self {
         match error {
             ExpressionEvaluationError::Aborted => {
                 Self::new(line, ControlErrorKind::Aborted, "control execution aborted")
@@ -37,7 +38,8 @@ impl ControlError {
         }
     }
 
-    pub(crate) fn new(line: usize, kind: ControlErrorKind, message: impl Into<String>) -> Self {
+    #[doc(hidden)]
+    pub fn new(line: usize, kind: ControlErrorKind, message: impl Into<String>) -> Self {
         Self {
             line,
             kind,

@@ -39,7 +39,8 @@ mod bounds;
 mod moments;
 pub use bounds::SpectreVariationBounds;
 use bounds::{ResolvedBounds, bounded_groups, retry_stream};
-pub(crate) use moments::SpectreScopeMoments;
+#[doc(hidden)]
+pub use moments::SpectreScopeMoments;
 pub use moments::StatisticalMomentOptions;
 const PSD_TOLERANCE: Value = 1.0e-10;
 
@@ -84,7 +85,8 @@ pub struct SpectreVariation {
 /// One statistical variable's nominal value and standard deviation,
 /// evaluated in the sampler's own parameter context.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SpectreVariationSigma {
+#[doc(hidden)]
+pub struct SpectreVariationSigma {
     /// Canonical (upper-case) parameter name.
     pub parameter: String,
     /// The value the deterministic run uses.
@@ -103,7 +105,8 @@ pub(crate) struct SpectreVariationSigma {
 /// elaborator hook the sampled draw feeds. There is one mismatch materializer,
 /// and this is how a caller addresses it.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct SpectreMismatchOverride {
+#[doc(hidden)]
+pub struct SpectreMismatchOverride {
     /// Canonical instance identity to canonical parameter name to the
     /// absolute value that instance reads. An identity absent from this map
     /// keeps every statistical variable at its nominal.
@@ -112,7 +115,8 @@ pub(crate) struct SpectreMismatchOverride {
 
 impl SpectreMismatchOverride {
     /// Displace exactly one instance's one variable.
-    pub(crate) fn single(instance: &str, parameter: &str, value: Value) -> Self {
+    #[doc(hidden)]
+    pub fn single(instance: &str, parameter: &str, value: Value) -> Self {
         Self {
             values: BTreeMap::from([(
                 instance.to_ascii_uppercase(),
@@ -122,7 +126,8 @@ impl SpectreMismatchOverride {
     }
 
     /// What one instance reads, or `None` when it is at nominal.
-    pub(crate) fn for_instance(&self, instance: &str) -> Option<&BTreeMap<String, Value>> {
+    #[doc(hidden)]
+    pub fn for_instance(&self, instance: &str) -> Option<&BTreeMap<String, Value>> {
         self.values.get(instance)
     }
 }
@@ -341,7 +346,8 @@ impl SpectreStatisticsPlan {
         Ok(())
     }
 
-    pub(crate) fn references_parameter(&self, expression: &str, params: &ParamContext) -> bool {
+    #[doc(hidden)]
+    pub fn references_parameter(&self, expression: &str, params: &ParamContext) -> bool {
         !self.variations.is_empty()
             && params.expression_references_parameters(expression, |identifier| {
                 self.variations
@@ -350,7 +356,8 @@ impl SpectreStatisticsPlan {
             })
     }
 
-    pub(crate) fn sample_process(
+    #[doc(hidden)]
+    pub fn sample_process(
         &self,
         params: &ParamContext,
         coordinate: &SpectreStatisticalCoordinate,
@@ -364,7 +371,8 @@ impl SpectreStatisticsPlan {
         )
     }
 
-    pub(crate) fn sample_mismatch(
+    #[doc(hidden)]
+    pub fn sample_mismatch(
         &self,
         params: &ParamContext,
         process: &BTreeMap<String, Value>,
@@ -679,7 +687,8 @@ impl SpectreStatisticsPlan {
     /// Compact, whitespace-free representation used only between the Spectre
     /// adapter and the canonical parser.  It is versioned and decoded
     /// strictly so malformed or future payloads cannot become inert metadata.
-    pub(crate) fn encode_internal(&self) -> String {
+    #[doc(hidden)]
+    pub fn encode_internal(&self) -> String {
         let version = if self.variations.iter().any(|row| row.bounds.is_some()) {
             "S2"
         } else {

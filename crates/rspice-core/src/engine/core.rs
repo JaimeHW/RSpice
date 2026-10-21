@@ -122,7 +122,7 @@ impl CachedStartupDirectives {
         Some(StartupDirectives {
             netlist: match &self.validated {
                 Some(validated) => validated,
-                None if netlist.startup_directives.is_empty() => netlist,
+                None if !netlist.has_startup_directives() => netlist,
                 None => return None,
             },
             scoped_initial_conditions: &self.scoped_initial_conditions,
@@ -189,7 +189,7 @@ impl Engine {
     }
 
     fn build_startup_directives(&self, netlist: &Netlist) -> CachedStartupDirectives {
-        let validated = if netlist.startup_directives.is_empty() {
+        let validated = if !netlist.has_startup_directives() {
             None
         } else {
             let mut candidate = netlist.clone();

@@ -92,7 +92,8 @@ pub enum OutputAnalysisKind {
 }
 
 impl OutputAnalysisKind {
-    pub(crate) fn from_keyword(keyword: &str) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
         match keyword.trim().to_ascii_uppercase().as_str() {
             "TR" | "TRAN" | "TRAN_CONT" => Some(Self::Tran),
             "AC" | "AC_CONT" => Some(Self::Ac),
@@ -180,7 +181,8 @@ pub(crate) struct OutputOperand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum OutputOperandKind {
+#[doc(hidden)]
+pub enum OutputOperandKind {
     Probe(super::SaveSignal),
     Expression { body: String },
 }
@@ -227,7 +229,14 @@ pub struct OutputRequest {
 }
 
 impl OutputRequest {
-    pub(crate) fn has_complete_transient_voltage_wildcard(&self) -> bool {
+    /// The typed semantics of `operands`, one per operand.
+    #[doc(hidden)]
+    pub fn operand_kinds(&self) -> &[OutputOperandKind] {
+        &self.operand_kinds
+    }
+
+    #[doc(hidden)]
+    pub fn has_complete_transient_voltage_wildcard(&self) -> bool {
         self.directive == OutputDirectiveKind::Print
             && self
                 .analysis
@@ -237,7 +246,8 @@ impl OutputRequest {
             )
     }
 
-    pub(crate) fn has_complete_transient_save_voltage_wildcard(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_complete_transient_save_voltage_wildcard(&self) -> bool {
         self.directive == OutputDirectiveKind::Save
             && self
                 .analysis
@@ -253,7 +263,8 @@ impl OutputRequest {
     }
 
     /// Whether this request needs any transient device-current operand.
-    pub(crate) fn requires_transient_device_current_operand(&self) -> bool {
+    #[doc(hidden)]
+    pub fn requires_transient_device_current_operand(&self) -> bool {
         self.analysis
             .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
             && self.dependencies.iter().any(|dependency| {
@@ -268,7 +279,8 @@ impl OutputRequest {
     /// but current and power accessors nested inside output expressions are
     /// represented only by this typed dependency sidecar. Result retention
     /// must honor both representations before integration starts.
-    pub(crate) fn selects_transient_device_current(&self, device: &str) -> bool {
+    #[doc(hidden)]
+    pub fn selects_transient_device_current(&self, device: &str) -> bool {
         if !self.requires_transient_device_current_operand() {
             return false;
         }
@@ -298,7 +310,8 @@ impl OutputRequest {
     /// named node.  Node dependencies are recorded for direct voltage probes
     /// and for voltage operands nested inside expressions; device-current
     /// dependencies are intentionally excluded.
-    pub(crate) fn selects_transient_node_voltage(&self, node: &str) -> bool {
+    #[doc(hidden)]
+    pub fn selects_transient_node_voltage(&self, node: &str) -> bool {
         self.selects_transient_node_voltage_impl(node, true)
     }
 
@@ -306,10 +319,8 @@ impl OutputRequest {
     /// selector is projected through the authoritative external namespace.
     /// Other explicit probes and partial patterns remain independently
     /// meaningful, including intentional probes of model-private nodes.
-    pub(crate) fn selects_transient_node_voltage_except_complete_wildcard(
-        &self,
-        node: &str,
-    ) -> bool {
+    #[doc(hidden)]
+    pub fn selects_transient_node_voltage_except_complete_wildcard(&self, node: &str) -> bool {
         self.selects_transient_node_voltage_impl(node, false)
     }
 
@@ -318,10 +329,8 @@ impl OutputRequest {
     /// language is owned by [`SaveSet`](super::SaveSet), whose `*` is one
     /// hierarchy level. Expressions and typed accessors such as Xyce's
     /// `N(device_state)` remain request-owned so exact private probes work.
-    pub(crate) fn selects_transient_node_voltage_outside_direct_save_voltage(
-        &self,
-        node: &str,
-    ) -> bool {
+    #[doc(hidden)]
+    pub fn selects_transient_node_voltage_outside_direct_save_voltage(&self, node: &str) -> bool {
         if self
             .analysis
             .is_some_and(|analysis| analysis != OutputAnalysisKind::Tran)
@@ -592,20 +601,23 @@ impl OutputRequest {
 }
 
 /// Canonical current-projection output operators supported by Xyce.
-pub(crate) fn is_current_projection_accessor(operator: &str) -> bool {
+#[doc(hidden)]
+pub fn is_current_projection_accessor(operator: &str) -> bool {
     matches!(operator, "I" | "IR" | "II" | "IM" | "IP" | "IDB")
 }
 
 /// Xyce's device-lead syntax is `I?`, where `?` is an arbitrary one-byte
 /// terminal designator (`ID`, `IT`, `I1`, and so on). The caller must already
 /// have canonicalized the operator.
-pub(crate) fn is_device_lead_current_accessor(operator: &str) -> bool {
+#[doc(hidden)]
+pub fn is_device_lead_current_accessor(operator: &str) -> bool {
     operator.len() == 2 && operator.starts_with('I')
 }
 
 /// Direct/raw Xyce current-output grammar. Expression callers must reserve
 /// builtin function names such as `IF` using their expression context.
-pub(crate) fn is_current_output_accessor(operator: &str) -> bool {
+#[doc(hidden)]
+pub fn is_current_output_accessor(operator: &str) -> bool {
     is_current_projection_accessor(operator) || is_device_lead_current_accessor(operator)
 }
 
@@ -1588,9 +1600,31 @@ fn collect_output_element_nodes(element: &Element, nodes: &mut HashSet<String>) 
 /// directly at the top level.  Keeping these namespaces separate lets output
 /// formatting distinguish a literal dotted top-level node from the dot used
 /// internally by the flattener as a hierarchy separator.
-pub(crate) struct OutputNodeNamespace {
+#[doc(hidden)]
+pub struct OutputNodeNamespace {
     pub(crate) external: HashSet<String>,
     pub(crate) authored_top_level: HashSet<String>,
+}
+
+impl OutputNodeNamespace {
+    /// Every output-visible node, canonical.
+    #[doc(hidden)]
+    pub fn external(&self) -> &HashSet<String> {
+        &self.external
+    }
+
+    /// The output-visible nodes whose spelling was authored at the top level,
+    /// a subset of [`Self::external`].
+    #[doc(hidden)]
+    pub fn authored_top_level(&self) -> &HashSet<String> {
+        &self.authored_top_level
+    }
+
+    /// Every output-visible node, keeping the set.
+    #[doc(hidden)]
+    pub fn into_external(self) -> HashSet<String> {
+        self.external
+    }
 }
 
 /// Rebuild the parser-certified external node namespace for output expansion.
@@ -1599,7 +1633,8 @@ pub(crate) struct OutputNodeNamespace {
 /// interface-alias collector as semantic validation. Solver result names are
 /// not authoritative here because device construction may append private
 /// prime, charge, or model-state nodes to that namespace.
-pub(crate) fn collect_output_node_namespace_with_limits_and_abort(
+#[doc(hidden)]
+pub fn collect_output_node_namespace_with_limits_and_abort(
     netlist: &Netlist,
     limits: crate::resource::ResourceLimits,
     abort: &dyn AbortSignal,
@@ -1802,7 +1837,8 @@ fn canonical_dependency_symbol(
     }
 }
 
-pub(crate) fn canonical_symbol(symbol: &str) -> String {
+#[doc(hidden)]
+pub fn canonical_symbol(symbol: &str) -> String {
     symbol
         .trim()
         .chars()
@@ -1834,7 +1870,8 @@ impl InterfaceNodeAliases {
         self.targets.get(&canonical).map(String::as_str)
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+    #[doc(hidden)]
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.targets
             .iter()
             .map(|(alias, target)| (alias.as_str(), target.as_str()))
@@ -2240,7 +2277,8 @@ fn resolved_alias_exists(
         .is_some_and(|target| namespace.contains(target))
 }
 
-pub(crate) fn hierarchy_pattern_matches(pattern: &str, candidate: &str) -> bool {
+#[doc(hidden)]
+pub fn hierarchy_pattern_matches(pattern: &str, candidate: &str) -> bool {
     let candidate = candidate.chars().collect::<Vec<_>>();
     // `reachable[i]` is true when the pattern consumed so far can end just
     // before `candidate[i]`; the trailing slot is the full-match position.
@@ -3182,9 +3220,8 @@ enum MeasureDependencySource<'a> {
 /// capture planning. Keeping one collector prevents result retention from
 /// depending on whether a frontend constructed the statement from source or
 /// inserted an already parsed [`MeasureStatement`] directly.
-pub(crate) fn measure_output_dependencies(
-    statement: &MeasureStatement,
-) -> Vec<OutputSymbolDependency> {
+#[doc(hidden)]
+pub fn measure_output_dependencies(statement: &MeasureStatement) -> Vec<OutputSymbolDependency> {
     let mut sources = Vec::new();
     collect_measure_sources(statement, &mut sources);
     let mut dependencies = Vec::new();
@@ -3280,7 +3317,8 @@ fn collect_measure_sources<'a>(
 /// `execution` check a spelling before they try to resolve it, so the contract
 /// lives below both of them; `execution::projection` re-exports it under the
 /// path callers already use.
-pub(crate) fn probe_specification_error(spec: &str) -> Option<String> {
+#[doc(hidden)]
+pub fn probe_specification_error(spec: &str) -> Option<String> {
     let trimmed = spec.trim();
     if trimmed.is_empty() {
         return Some("output specification must not be empty".to_string());

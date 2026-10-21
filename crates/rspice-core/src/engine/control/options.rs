@@ -89,7 +89,8 @@ impl ControlCircuit {
             })?;
         apply_runtime_options(&mut self.netlist.options, &candidate);
         self.runtime_options = candidate;
-        self.netlist.ast_overlay.control_options = Some(self.runtime_options.clone());
+        self.netlist
+            .retain_control_options(self.runtime_options.clone());
         Ok(())
     }
 

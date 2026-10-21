@@ -17,11 +17,8 @@ fn monte_carlo_temperature_precedes_replay_and_preserves_trial_state() {
             "MC thermal replay\n.param R={r} OFFSET=10\nV1 in 0 DC 1\nRS in out {{R*(1+TEMP/100)+OFFSET}}\n.if (TEMP>30)\nRHOT out 0 2k\n.else\nRCOLD out 0 1k\n.endif\nVKEEP keep 0 1\nRKEEP keep 0 1k\n.options TEMP=12 GMIN=0\n.end\n"
         );
         let mut nominal = Netlist::parse(&source).unwrap();
-        nominal.ast_overlay.parameters.insert("OFFSET".into(), 15.0);
-        nominal
-            .ast_overlay
-            .device_parameters
-            .insert(("RKEEP".into(), "R".into()), 1234.0);
+        nominal.retain_overlay_parameters([("OFFSET".into(), 15.0)].into());
+        nominal.retain_device_parameter(("RKEEP".into(), "R".into()), 1234.0);
         nominal.spectre_statistical_coordinate =
             Some(crate::netlist::SpectreStatisticalCoordinate {
                 axes: vec![("outer".into(), 7.0)],

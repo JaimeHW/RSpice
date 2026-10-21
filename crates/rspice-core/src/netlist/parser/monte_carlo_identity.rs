@@ -68,7 +68,8 @@ fn field(hash: &mut blake3::Hasher, bytes: &[u8]) {
 /// confidence fields. This does not rewrite source used by statistical replay.
 /// Physical assembly reuses the parser's dialect/comment rules and must match
 /// the exact logical card it accepted; otherwise the original bytes are hashed.
-pub(crate) fn source_identity(netlist: &Netlist) -> [u8; 32] {
+#[doc(hidden)]
+pub fn source_identity(netlist: &Netlist) -> [u8; 32] {
     let source = netlist.source_text.as_deref().unwrap_or("");
     let mut hash = blake3::Hasher::new();
     hash.update(b"rspice-mc-root-source-v1\0");

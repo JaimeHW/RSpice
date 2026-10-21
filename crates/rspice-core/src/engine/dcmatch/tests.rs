@@ -959,8 +959,9 @@ fn a_displaced_operating_point_warm_starts_from_the_nominal_solution() {
     let cold = engine.convergence_quality().total_iterations;
 
     let mut displaced = netlist.clone();
-    displaced.spectre_mismatch_override =
-        Some(SpectreMismatchOverride::single("M1", "DVTH", 3.162e-3));
+    displaced.set_spectre_mismatch_override(Some(SpectreMismatchOverride::single(
+        "M1", "DVTH", 3.162e-3,
+    )));
     engine
         .run_dc_op_state_with_startup_and_abort(
             &displaced,

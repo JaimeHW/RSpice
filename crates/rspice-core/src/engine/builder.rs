@@ -1069,7 +1069,7 @@ fn materialize_spectre_statistics_after_flattening(
 ) -> Result<(), SimulationError> {
     check_build_abort(abort)?;
     let plan = netlist.spectre_statistics.clone();
-    let displacement = netlist.spectre_mismatch_override.clone();
+    let displacement = netlist.spectre_mismatch_override().cloned();
     if displacement.is_some() && coordinate.is_some() {
         return Err(SimulationError::Circuit(
             "a Spectre mismatch displacement and a statistical coordinate cannot both be active: \
@@ -5877,7 +5877,7 @@ impl Engine {
     ) -> Result<BuiltRfCircuit, SimulationError> {
         // Expressions elaborated here are read in the deck's dialect.
         let _suffixes = crate::spice_number::read_suffixes_as_ngspice(
-            netlist.parse_dialect == crate::config::SpiceDialect::Ngspice,
+            netlist.parse_dialect() == crate::config::SpiceDialect::Ngspice,
         );
         // An engine holding a transient state elaborates the transient's own
         // topology, so the circuit a small-signal analysis builds and the
@@ -5965,7 +5965,7 @@ impl Engine {
         // sampler and re-elaborate per run.
         netlist.params.restart_statistical_stream();
         let mut startup_validated;
-        let netlist = if netlist.startup_directives.is_empty() {
+        let netlist = if !netlist.has_startup_directives() {
             netlist
         } else {
             startup_validated = netlist.clone();
@@ -6166,7 +6166,7 @@ impl Engine {
         }
         circuit.terminal_probe_source_names.extend(
             netlist
-                .ast_overlay
+                .ast_overlay()
                 .terminal_current_probes
                 .iter()
                 .map(|probe| probe.source_name.to_ascii_uppercase()),
