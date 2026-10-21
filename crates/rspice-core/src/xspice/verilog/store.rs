@@ -81,6 +81,7 @@
 
 pub(crate) mod checkpoint;
 mod image;
+mod islands;
 mod overrides;
 pub(crate) use overrides::OverridesImage;
 mod traces;
@@ -415,6 +416,9 @@ pub(crate) struct DigitalSignalStore {
     /// as of the last time that net resolved. Derived from the contributions,
     /// so a checkpoint rebuilds it rather than storing it.
     passed: Vec<StrengthBit>,
+    /// Per bidirectional switch direction, what its island passes through it
+    /// (`store/islands.rs`). Derived like `passed`.
+    bridged: Vec<StrengthBit>,
 }
 
 /// The plan's net types and drive strengths, indexed as the store is.
@@ -432,6 +436,8 @@ struct StrengthTables {
     /// read, which of them read it.
     switches: Vec<strength::Switch>,
     readers: std::collections::HashMap<DigitalSignalId, Vec<usize>>,
+    /// The bidirectional switches' islands.
+    islands: islands::Islands,
     /// Whether any net resolves by strength.
     any: bool,
 }
@@ -449,11 +455,23 @@ impl StrengthTables {
             gates: Vec::new(),
             switches: Vec::new(),
             readers: std::collections::HashMap::new(),
+            islands: islands::Islands::default(),
             any: false,
         };
         if !plan.strength.gates.is_empty() {
             tables.gates = vec![None; contributions.len()];
         }
+        // A plan's net bit as `(signal, storage position)`, if in range.
+        let net_bit = |signal: DigitalSignalId, low: i64| {
+            let width = plan
+                .signals
+                .get(usize::from(signal))?
+                .declared_range()
+                .width();
+            let bit = u32::try_from(low).ok()?;
+            (bit < width).then_some((signal, bit))
+        };
+        let mut bridges = Vec::new();
         for gate in &plan.strength.gates {
             let signal = usize::from(gate.driver.signal);
             let Some(span) = spans.get(signal) else {
@@ -488,6 +506,26 @@ impl StrengthTables {
                     }
                     strength::SlotGate::Mos { resistive, switch }
                 }
+                DigitalGateKind::Tran { resistive } => {
+                    let source = gate.source.as_ref().and_then(|source| {
+                        let range = plan
+                            .signals
+                            .get(usize::from(source.signal))?
+                            .declared_range();
+                        net_bit(source.signal, source.select.low_position(range))
+                    });
+                    let target = net_bit(gate.driver.signal, contributions[slot].low);
+                    let bridge = source.zip(target).map(|(source, target)| {
+                        bridges.push(islands::BridgeEnd {
+                            slot,
+                            resistive,
+                            target,
+                            source,
+                        });
+                        bridges.len() - 1
+                    });
+                    strength::SlotGate::Tran { bridge }
+                }
             });
             // A gated driver's output is a strength (see `store/strength.rs`).
             if let Some(net) = tables.nets.get_mut(signal)
@@ -496,6 +534,7 @@ impl StrengthTables {
                 *net = NetResolution::Strength(None);
             }
         }
+        tables.islands = islands::Islands::new(&bridges);
         for net in &plan.strength.nets {
             if let Some(entry) = tables.nets.get_mut(usize::from(net.signal)) {
                 *entry = NetResolution::of(net.net_type);
@@ -719,6 +758,7 @@ impl DigitalSignalStore {
 
         let strengths = Arc::new(StrengthTables::new(&plan, &spans, &contributions));
         let passed = vec![StrengthBit::HIGH_Z; strengths.switches.len()];
+        let bridged = vec![StrengthBit::HIGH_Z; strengths.islands.bridge_count()];
         // A net its type drives (`tri0`, `supply1`, ...) starts at that
         // driver's value, which is the resolution of its drivers before any
         // has run.
@@ -732,6 +772,7 @@ impl DigitalSignalStore {
         let mut store = Self {
             strengths,
             passed,
+            bridged,
             connected_reals,
             values,
             reals,
@@ -1243,6 +1284,9 @@ impl DigitalSignalStore {
                     .unwrap_or(StrengthBit::strong(data));
                 strength::mos(passed, enable, resistive)
             }
+            Some(strength::SlotGate::Tran { bridge }) => bridge
+                .filter(|_| offset == 0)
+                .map_or(StrengthBit::HIGH_Z, |bridge| self.bridged(bridge)),
         }
     }
 
@@ -1291,7 +1335,12 @@ impl DigitalSignalStore {
             .map(|bit| {
                 let current = value.bit(bit);
                 match &resolved {
-                    Some(bits) if bits[bit as usize].value() == current => bits[bit as usize],
+                    Some(bits)
+                        if bits[bit as usize].value() == current
+                            && self.forced_bit(signal, bit).is_none() =>
+                    {
+                        bits[bit as usize]
+                    }
                     _ => StrengthBit::strong(current),
                 }
             })
@@ -1328,18 +1377,27 @@ impl DigitalSignalStore {
                 continue;
             }
             self.passed[switch] = passed;
-            let target = tables.switches[switch].target;
-            let resolved = self.resolve(target);
-            self.publish_connected(target, resolved);
-            self.pass_strengths(target, depth + 1);
+            self.settle(tables.switches[switch].target, depth + 1);
         }
+    }
+
+    /// Re-resolve and publish `signal` after one of its contributions changed,
+    /// with every switch island it belongs to, and pass the strengths it now
+    /// has on through the MOS switches reading it.
+    fn settle(&mut self, signal: DigitalSignalId, depth: u32) {
+        if self.settle_islands(signal, depth) {
+            return;
+        }
+        let resolved = self.resolve(signal);
+        self.publish_connected(signal, resolved);
+        self.pass_strengths(signal, depth);
     }
 
     /// Re-read every switch's passed strength from restored contributions,
     /// until a chain of switches settles.
     fn rederive_passed_strengths(&mut self) {
-        for _ in 0..=self.passed.len() {
-            let mut changed = false;
+        for _ in 0..=self.passed.len() + self.strengths.islands.len() {
+            let mut changed = self.solve_islands();
             for switch in 0..self.passed.len() {
                 let passed = self.switch_source(switch);
                 changed |= passed != self.passed[switch];
@@ -1513,9 +1571,7 @@ impl DigitalEnvironment for DigitalSignalStore {
         {
             self.passed[switch] = self.switch_source(switch);
         }
-        let resolved = self.resolve(drive.driver.signal);
-        self.publish_connected(drive.driver.signal, resolved);
-        self.pass_strengths(drive.driver.signal, 0);
+        self.settle(drive.driver.signal, 0);
     }
 
     fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {

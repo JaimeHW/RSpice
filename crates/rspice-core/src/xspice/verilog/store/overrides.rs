@@ -392,6 +392,9 @@ impl DigitalSignalStore {
             OverrideValue::FourState(value) => self.publish_effective(signal, value),
             OverrideValue::Real(value) => self.publish_real_member_unadmitted(signal, value),
         }
+        // A forced net bit drives the switch island it is in, and a released
+        // one rejoins it.
+        self.settle_islands(signal, 0);
     }
 
     /// A write is arriving at an overridden signal: record it beneath the

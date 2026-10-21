@@ -289,7 +289,7 @@ br_gh827	vlg	gold	L1	pass	matches the gold file
 br_gh889	vlg	gold	-	excluded:sdf-annotate	
 br_gh9	vlg	passed	L1	pass	PASSED
 br_gh956a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: analog port 'o' of instance 'top.i1.i' connects discrete net 'x' without a connect module
-br_gh956b	vlg	ce	L7	refused:tranif1	Parse error: Unsupported module item: tranif1
+br_gh956b	vlg	ce	L7	pass	language error: Semantic error: Invalid contribution: cannot contribute to `y`, which is a `reg`; a continuous `assign` drives a net, so declare it `wire` or write it from an `...
 br_gh99a	vlg	passed	L1	pass	PASSED
 br_gh99b	vlg	passed	L1	pass	PASSED
 br_gh99d	vlg	passed	L1	pass	PASSED
@@ -911,7 +911,7 @@ pr1830834	vlg	gold	L4	fail	differs from the gold file at line 1 (4 lines against
 pr1831724	vlg	gold	L1	pass	matches the gold file
 pr1832097a	vlg	passed	L4	pass	PASSED
 pr1832097b	vlg	passed	L4	refused:force	Semantic error: Unsupported feature: a `force` names a bit- or part-select of the variable `bus`; IEEE 1364-2005 section 9.3 allows a select of a net only
-pr1833024	vlg	ce	L7	refused:tran	Parse error: Unsupported module item: tran
+pr1833024	vlg	ce	L7	refused:tran	Parse error: Unsupported `tran` gate output: an expression; a gate drives a net, so its output terminal must be a name or a bit select of one
 pr1833754	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
 pr1841300	vlg	gold	-	excluded:flag-gno-io-range-error	
 pr1845683	vlg	gold	L1	pass	matches the gold file
@@ -1122,7 +1122,7 @@ pr2470181b	vlg	passed	-	excluded:systemverilog:bit
 pr2503208	vlg	passed	L1	pass	PASSED
 pr2528915	vlg	ce	L5	pass	language error: Semantic error: Undeclared symbol: 'out_usb_stream'
 pr2533175	vlg	passed	L3	refused:feature	Semantic error: Unsupported feature: an array declared inside a task or function has no executable form yet
-pr2579479	vlg	passed	L7	refused:tranif1	Semantic error: Unsupported feature: the gate primitive `tranif1` (IEEE 1364-2005 section 7) has no executable form yet
+pr2579479	vlg	passed	L7	pass	PASSED
 pr2580730	vlg	gold	L1	pass	matches the gold file
 pr2593733	vlg	passed	L1	pass	PASSED
 pr2597278	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
@@ -1170,7 +1170,7 @@ pr2823711	vlg	passed	L1	pass	PASSED
 pr2824189	vlg	passed	-	excluded:systemverilog:var	
 pr2829776	vlg	passed	L6	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
 pr2829776b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-pr2832234	vlg	passed	L7	refused:tranif0	Semantic error: Unsupported feature: the gate primitive `tranif0` (IEEE 1364-2005 section 7) has no executable form yet
+pr2832234	vlg	passed	L7	pass	PASSED
 pr2834340	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
 pr2834340b	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
 pr2835632a	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
@@ -1203,10 +1203,10 @@ pr2922063b	vlg	passed	L3	pass	PASSED
 pr2924354	vlg	gold	L1	refused:for	Parse error: Unsupported module item: for
 pr2929913	vlg	passed	L3	pass	PASSED
 pr2930506	vlg	passed	-	excluded:systemverilog:string	
-pr2937417	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
-pr2937417b	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
-pr2937417c	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
-pr2941939	vlg	passed	L6	refused:tranif1	Semantic error: Unsupported feature: the gate primitive `tranif1` (IEEE 1364-2005 section 7) has no executable form yet
+pr2937417	vlg	passed	L7	pass	PASSED
+pr2937417b	vlg	passed	L7	pass	PASSED
+pr2937417c	vlg	passed	L7	pass	PASSED
+pr2941939	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
 pr2943394	vlg	passed	L4	refused:release	Semantic error: Unsupported feature: a `release` names a bit- or part-select of the variable `pv_val`; IEEE 1364-2005 section 9.3 allows a select of a net only
 pr2951657	vlg	passed	L1	pass	PASSED
 pr2969724	vlg	passed	L1	pass	PASSED
@@ -1266,10 +1266,10 @@ pr3197917	vlg	passed	L4	fail	compile error: Parse error: Expected RParen, found 
 pr3270320	vlg	ce	L3	pass	language error: Semantic error: Undeclared symbol: 'missing'
 pr3284821	vlg	passed	L5	pass	PASSED
 pr3292735	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found LParen
-pr3296466a	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
-pr3296466b	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
-pr3296466c	vlg	passed	L7	refused:tran	Semantic error: Unsupported feature: the gate primitive `tran` (IEEE 1364-2005 section 7) has no executable form yet
-pr3296466d	vlg	passed	L7	refused:tran	Semantic error: Unsupported feature: the gate primitive `tran` (IEEE 1364-2005 section 7) has no executable form yet
+pr3296466a	vlg	passed	L7	pass	PASSED
+pr3296466b	vlg	passed	L7	refused:module-item	Parse error: Unsupported module item: connect
+pr3296466c	vlg	passed	L7	pass	PASSED
+pr3296466d	vlg	passed	L7	pass	PASSED
 pr3306516	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 pr3309391	vlg	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
 pr3368642	vlg	passed	L4	pass	PASSED
@@ -1283,7 +1283,7 @@ pr3445452	vlg	passed	L3	pass	PASSED
 pr3452808	vlg	passed	L6	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'u_d1.pp' is declared with no net or variable of its own, in a module that declares no discret...
 pr3465541	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
 pr3477107	vlg	passed	L5	pass	PASSED
-pr3499807	vlg	gold	L6	refused:tranif0	Semantic error: Unsupported feature: the gate primitive `tranif0` (IEEE 1364-2005 section 7) has no executable form yet
+pr3499807	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
 pr3522653	vlg	gold	L1	pass	matches the gold file
 pr3527022	vlg	passed	L1	pass	PASSED
 pr3527694	vlg	gold	L5	racy	passes in source order only; differs from the gold file at line 1 (9 lines against 9)
@@ -1471,15 +1471,15 @@ rise_fall_decay1	vlg	passed	L6	refused:delay-control	Parse error: Unsupported de
 rise_fall_decay2	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 rise_fall_delay1	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 rise_fall_delay2	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
-rise_fall_delay3	vlg	passed	L6	refused:tranif1	Semantic error: Unsupported feature: the gate primitive `tranif1` (IEEE 1364-2005 section 7) has no executable form yet
+rise_fall_delay3	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 rl_pow	vlg	passed	L1	pass	PASSED
 rnpmos	vlg	passed	L7	pass	PASSED
 rnpmos2	vlg	passed	L7	pass	PASSED
 rop	vlg	passed	L1	pass	PASSED
 rptconcat	vlg	passed	L1	pass	PASSED
-rtran	vlg	gold	L7	refused:rtran	Semantic error: Unsupported feature: the gate primitive `rtran` (IEEE 1364-2005 section 7) has no executable form yet
-rtranif0	vlg	gold	L7	refused:rtranif0	Semantic error: Unsupported feature: the gate primitive `rtranif0` (IEEE 1364-2005 section 7) has no executable form yet
-rtranif1	vlg	gold	L7	refused:rtranif1	Semantic error: Unsupported feature: the gate primitive `rtranif1` (IEEE 1364-2005 section 7) has no executable form yet
+rtran	vlg	gold	L7	pass	matches the gold file
+rtranif0	vlg	gold	L7	pass	matches the gold file
+rtranif1	vlg	gold	L7	pass	matches the gold file
 scanf	vlg	passed	L5	pass	PASSED
 scanf2	vlg	passed	L5	pass	PASSED
 scanf3	vlg	passed	L5	pass	PASSED
@@ -1591,7 +1591,7 @@ string8	vlg	gold	L1	pass	matches the gold file
 string9	vlg	gold	L1	pass	matches the gold file
 supply1	vlg	passed	L7	pass	PASSED
 supply2	vlg	passed	L7	pass	PASSED
-switch_primitives	vlg	gold	L7	refused:tranif0	Parse error: Unsupported module item: tranif0
+switch_primitives	vlg	gold	L7	pass	matches the gold file
 sys_func_task_error	vlg	re	-	excluded:nonstandard-systf:$this_icarus_call_should_not_exist	
 talu	vlg	passed	L1	pass	PASSED
 task-scope	vlg	passed	L4	pass	PASSED
@@ -1672,10 +1672,10 @@ timeform2	vlg	gold	L3	pass	matches the gold file
 timescale1	vlg	passed	L1	pass	PASSED
 timescale2	vlg	passed	L1	pass	PASSED
 timescale3	vlg	ce	L1	fail	compiled without error; nothing to run: module `ivltests/timescale3.v` declares no digital nets, processes or drivers
-tran	vlg	gold	L7	refused:tran	Semantic error: Unsupported feature: the gate primitive `tran` (IEEE 1364-2005 section 7) has no executable form yet
-tran-keeper	vlg	passed	L7	refused:tranif1	Parse error: Unsupported module item: tranif1
-tranif0	vlg	gold	L7	refused:tranif0	Semantic error: Unsupported feature: the gate primitive `tranif0` (IEEE 1364-2005 section 7) has no executable form yet
-tranif1	vlg	gold	L7	refused:tranif1	Semantic error: Unsupported feature: the gate primitive `tranif1` (IEEE 1364-2005 section 7) has no executable form yet
+tran	vlg	gold	L7	pass	matches the gold file
+tran-keeper	vlg	passed	L7	pass	PASSED
+tranif0	vlg	gold	L7	pass	matches the gold file
+tranif1	vlg	gold	L7	pass	matches the gold file
 tri0	vlg	passed	L7	pass	PASSED
 tri0b	vlg	passed	L7	pass	PASSED
 tri1	vlg	passed	L7	pass	PASSED
@@ -1863,7 +1863,7 @@ br_gh1099a	vvp	passed	L1	pass	PASSED
 br_gh1099b	vvp	passed	L1	pass	PASSED
 br_gh1099c	vvp	passed	L1	pass	PASSED
 br_gh1104	vvp	ce	L1	fail	compiled without error; nothing to run: module `ivltests/br_gh1104_src2.v` declares no digital nets, processes or drivers
-br_gh1122	vvp	passed	L7	refused:tranif0	Parse error: Unsupported module item: tranif0
+br_gh1122	vvp	passed	L7	pass	PASSED
 br_gh1143a	vvp	passed	-	excluded:flag-g2012	
 br_gh1143b	vvp	passed	-	excluded:flag-g2012	
 br_gh1143c	vvp	passed	-	excluded:flag-g2012	

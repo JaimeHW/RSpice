@@ -1455,10 +1455,25 @@ fn lower_continuous_assign(
                     }),
             );
     }
+    let bidirectional = matches!(
+        gated,
+        Some((super::digital::DigitalGateKind::Tran { .. }, _, _))
+    );
     if let Some((kind, _, data)) = gated {
-        let source = matches!(kind, super::digital::DigitalGateKind::Mos { .. })
-            .then(|| lowerer.passed_net_bit(data))
-            .flatten();
+        let source = matches!(
+            kind,
+            super::digital::DigitalGateKind::Mos { .. }
+                | super::digital::DigitalGateKind::Tran { .. }
+        )
+        .then(|| lowerer.passed_net_bit(data))
+        .flatten();
+        if bidirectional && source.is_none() {
+            lowerer.error(
+                "a bidirectional switch terminal must be a scalar net or a bit select of a \
+                 vector net (IEEE 1364-2005 section 7.6)",
+                data.span(),
+            );
+        }
         strengths
             .gates
             .extend(
@@ -1474,7 +1489,12 @@ fn lower_continuous_assign(
     }
 
     let mut reads = BTreeSet::new();
-    collect_expression_reads(&assignment.assignment.value, &mut reads);
+    // A bidirectional switch's driver wakes on its control alone: the store
+    // resolves the island whenever one of its nets changes.
+    match gated {
+        Some((_, enable, _)) if bidirectional => collect_expression_reads(enable, &mut reads),
+        _ => collect_expression_reads(&assignment.assignment.value, &mut reads),
+    }
     lowerer.validate_analog_event_reads(&assignment.assignment.value);
     let terms: Vec<DigitalSensitivityTerm> = reads
         .into_iter()
@@ -3629,6 +3649,12 @@ impl ProcessLowerer<'_> {
                 access.array.as_str(),
                 DigitalWriteSelect::Bit(self.constant(&access.index)?),
             ),
+            // A one-bit constant part select names one bit too.
+            Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
+                let msb = self.constant(&select.msb)?;
+                (msb == self.constant(&select.lsb)?)
+                    .then_some((select.name.as_str(), DigitalWriteSelect::Bit(msb)))?
+            }
             _ => return None,
         };
         if self.lookup_local(name).is_some() || self.digital_array(name).is_some() {

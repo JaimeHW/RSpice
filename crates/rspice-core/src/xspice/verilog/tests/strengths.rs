@@ -170,6 +170,149 @@ fn resistive_switches_reduce_strength_by_table_7_14() {
     );
 }
 
+/// Bidirectional switches (sections 7.6 and 7.12) resolve the island they
+/// join to a fixed point: supply passes `tran` as strong and each `rtran`
+/// reduces by table 7-14, a chain joins and splits under its controls, an
+/// unknown control passes an ambiguous strength, and a driver released from
+/// the island leaves nothing behind.
+#[test]
+fn bidirectional_switches_resolve_their_islands() {
+    let report = bench(
+        r#"module top;
+  reg a, c, d;
+  supply0 s0;
+  wire w1, w2, w3, w4, w5, r1, r2, x1, x2, k1, k2;
+  tran (s0, w1);
+  rtran (w1, r1);
+  rtran (r1, r2);
+  assign (weak1, weak0) w2 = a;
+  tranif1 (w2, w3, c);
+  tranif0 (w3, w4, d);
+  assign w4 = d ? 1'bz : 1'b1;
+  assign w5 = c ? a : 1'bz;
+  tran (w5, x1);
+  rtranif1 (x1, x2, d);
+  pullup (k1);
+  tran (k1, k2);
+  initial begin
+    a = 0; c = 0; d = 0;
+    #1 $display("%v %v %v | %v %v %v | %v %v %v | %v %v", w1, r1, r2, w2, w3, w4, w5, x1, x2, k1, k2);
+    c = 1;
+    #1 $display("%v %v %v | %v %v %v | %v %v %v | %v %v", w1, r1, r2, w2, w3, w4, w5, x1, x2, k1, k2);
+    d = 1;
+    #1 $display("%v %v %v | %v %v %v | %v %v %v | %v %v", w1, r1, r2, w2, w3, w4, w5, x1, x2, k1, k2);
+    c = 1'bx; a = 1;
+    #1 $display("%v %v %v | %v %v %v | %v %v %v | %v %v", w1, r1, r2, w2, w3, w4, w5, x1, x2, k1, k2);
+    c = 0; d = 1'bx;
+    #1 $display("%v %v %v | %v %v %v | %v %v %v | %v %v", w1, r1, r2, w2, w3, w4, w5, x1, x2, k1, k2);
+    c = 1; d = 1'bz; a = 1'bx;
+    #1 $display("%v %v %v | %v %v %v | %v %v %v | %v %v", w1, r1, r2, w2, w3, w4, w5, x1, x2, k1, k2);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "St0 Pu0 We0 | We0 St1 St1 | HiZ HiZ HiZ | Pu1 Pu1\n\
+         St0 Pu0 We0 | St1 St1 St1 | St0 St0 HiZ | Pu1 Pu1\n\
+         St0 Pu0 We0 | We0 We0 HiZ | St0 St0 Pu0 | Pu1 Pu1\n\
+         St0 Pu0 We0 | We1 WeH HiZ | StX StX PuX | Pu1 Pu1\n\
+         St0 Pu0 We0 | We1 StX StX | HiZ HiZ HiZ | Pu1 Pu1\n\
+         St0 Pu0 We0 | StX StX StX | StX StX PuX | Pu1 Pu1\n"
+    );
+}
+
+/// A keeper whose switches the pin itself controls holds the pin's last value
+/// at weak strength once its driver lets go; a `tran` array shares vectors out
+/// bit by bit; and a switch inside a module joins the nets its inout ports
+/// collapse with.
+#[test]
+fn switch_keepers_arrays_and_ports_join_islands() {
+    let report = bench(
+        r#"module sw(inout p, inout q, input en);
+  rtranif0 (p, q, en);
+endmodule
+module top;
+  reg value, enable, en;
+  wire pin;
+  pullup (weak1) (keep1);
+  pulldown (weak0) (keep0);
+  tranif1 (pin, keep1, pin);
+  tranif0 (pin, keep0, pin);
+  bufif1 (pin, value, enable);
+  reg [1:0] v;
+  wire [1:0] a, b;
+  assign a = v;
+  tran t[1:0] (a, b);
+  wire p, q;
+  assign (pull1, pull0) p = value;
+  sw s (p, q, en);
+  initial begin
+    value = 0; enable = 1; v = 2'b1z; en = 0;
+    #1 $display("%v %v %v %v %v %v", pin, b[1], b[0], p, q, keep0);
+    enable = 0; v = 2'bz0; en = 1;
+    #1 $display("%v %v %v %v %v %v", pin, b[1], b[0], p, q, keep0);
+    value = 1; enable = 1; en = 1'bx;
+    #1 $display("%v %v %v %v %v %v", pin, b[1], b[0], p, q, keep0);
+    enable = 0;
+    #1 $display("%v %v %v %v %v %v", pin, b[1], b[0], p, q, keep0);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "St0 St1 HiZ Pu0 We0 St0\n\
+         We0 HiZ St0 Pu0 HiZ We0\n\
+         St1 HiZ St0 Pu1 WeH We0\n\
+         We1 HiZ St0 Pu1 WeH We0\n"
+    );
+}
+
+/// A forced net bit (section 9.3.2) drives its island at strong whatever the
+/// island passes it, and rejoins the island when released; a `tran` array
+/// joins part selects bit by bit.
+#[test]
+fn a_forced_bit_drives_its_island() {
+    let report = bench(
+        r#"module top;
+  reg a, b;
+  wire x, y, z;
+  wire [3:0] c;
+  assign (weak1, weak0) x = a;
+  assign y = b;
+  tran (x, y);
+  rtran (y, z);
+  tran t[1:0] (c[1:0], c[3:2]);
+  assign c[0] = a;
+  assign (pull1, pull0) c[3] = b;
+  initial begin
+    a = 0; b = 1'bz;
+    #1 $display("%v %v %v %b", x, y, z, c);
+    force x = 1'b1;
+    #1 $display("%v %v %v %b", x, y, z, c);
+    b = 0;
+    #1 $display("%v %v %v %b", x, y, z, c);
+    release x;
+    #1 $display("%v %v %v %b", x, y, z, c);
+    force z = 1'bx; b = 1'bz;
+    #1 $display("%v %v %v %b", x, y, z, c);
+    release z;
+    #1 $display("%v %v %v %b", x, y, z, c);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "We0 We0 Me0 z0z0\nSt1 St1 Pu1 z0z0\nSt1 StX PuX 0000\n\
+         St0 St0 Pu0 0000\nPuX PuX StX z0z0\nWe0 We0 Me0 z0z0\n"
+    );
+}
+
 /// Arrays of gate instances (sections 7.1.5 and 7.1.6): a vector terminal
 /// shared out bit by bit, a concatenation, and two instances driving one
 /// scalar.

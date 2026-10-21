@@ -2935,6 +2935,45 @@ fn gate_and_switch_misuse_is_refused_by_name() {
          endmodule\n",
     );
     assert!(error.contains("A.3.1"), "{error}");
+    let error = parse_error(
+        "module g(a, y);\n\
+         \x20   inout a, y;\n\
+         \x20   tran (strong0, strong1) (y, a);\n\
+         endmodule\n",
+    );
+    assert!(error.contains("A.3.1"), "{error}");
+    for (switch, terminals, count) in [
+        ("tran", "(y, a, c)", "exactly 2"),
+        ("rtranif1", "(y, a)", "exactly 3"),
+    ] {
+        let error = parse_error(&format!(
+            "module g(a, c, y);\n\
+             \x20   inout a, y; input c;\n\
+             \x20   {switch} {terminals};\n\
+             endmodule\n"
+        ));
+        assert!(error.contains(count), "{switch}: {error}");
+    }
+}
+
+/// A bidirectional switch joins two net bits, so a terminal that is an
+/// expression or a whole vector is refused by the clause.
+#[test]
+fn a_bidirectional_switch_terminal_must_be_a_net_bit() {
+    for (terminals, expected) in [
+        (
+            "v, w",
+            "a scalar net or a bit select of a vector net (IEEE 1364-2005 section 7.6)",
+        ),
+        ("w[0], v[0] & w[1]", "a gate drives a net"),
+    ] {
+        let source = format!("module top;\n  wire [1:0] v, w;\n  tran ({terminals});\nendmodule\n");
+        let message = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir_module(&source, Some("top"))
+            .expect_err(terminals)
+            .to_string();
+        assert!(message.contains(expected), "{terminals}: {message}");
+    }
 }
 
 // ===========================================================================

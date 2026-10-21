@@ -465,7 +465,10 @@ use super::*;
 // declarations. The compiler's options were not part of the key, so a
 // version-159 record names no resolution and one compiled under another
 // would read as this deck's.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 160;
+//
+// Version 161 follows the canonical IR's schema to 173, whose digital plan
+// carries the bidirectional switches. A version-160 record refused them.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 161;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

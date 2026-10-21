@@ -14,6 +14,10 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 173 lowers the bidirectional switches: a gated driver of the
+/// strength table may be one direction of a `tran` (`DigitalGateKind::Tran`).
+/// Earlier artifacts refused those sources.
+///
 /// Version 172 records where each digital process was written
 /// (`CfgDigitalProcess::origin`), which a diagnostic naming the process
 /// prints. Earlier artifacts carry no process origins and must be rebuilt.
@@ -191,7 +195,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 172;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 173;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

@@ -1640,24 +1640,16 @@ fn semantic_error(kind: SemanticErrorKind, span: Span) -> CompileError {
     SemanticError::new(kind, span).into()
 }
 
-/// An instance of a module nothing defines. A bidirectional switch primitive
-/// (IEEE 1364-2005 section 7.6) is named as the unsupported construct it is
-/// rather than as a missing module, and so is a `connectmodule` the source
-/// declares: Verilog-AMS lets a design instantiate one by name, and this
+/// An instance of a module nothing defines. A `connectmodule` the source
+/// declares is named as the unsupported construct it is rather than as a
+/// missing module: Verilog-AMS lets a design instantiate one by name, and this
 /// compiler does not.
 pub(super) fn undefined_module(module: &str, analyzed: &AnalyzedFile) -> SemanticErrorKind {
-    const PRIMITIVES: [&str; 6] = [
-        "tran", "tranif0", "tranif1", "rtran", "rtranif0", "rtranif1",
-    ];
     if analyzed.connect_rules.declares_connect_module(module) {
         SemanticErrorKind::UnsupportedFeature(format!(
             "`{module}` is a connectmodule, and instantiating a connect module by name inside \
              a design is not supported; connect modules are inserted at the deck's discipline \
              boundaries by the selected `connectrules`"
-        ))
-    } else if PRIMITIVES.contains(&module) {
-        SemanticErrorKind::UnsupportedFeature(format!(
-            "the gate primitive `{module}` (IEEE 1364-2005 section 7) has no executable form yet"
         ))
     } else {
         SemanticErrorKind::UndefinedModule(module.to_string())

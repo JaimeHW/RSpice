@@ -36,10 +36,9 @@ enum CompoundOperator {
 /// The gate and switch primitives of IEEE 1364-2005 section 7 this compiler
 /// accepts.
 ///
-/// The eight combinational gates, the three-state gates, the MOS switches and
-/// the pull gates. The bidirectional switches (`tran`, `tranif0`, ...) are
-/// absent, and a design naming one is refused by name at elaboration rather
-/// than silently becoming something else.
+/// The eight combinational gates, the three-state gates, the MOS switches,
+/// the pull gates and the bidirectional switches: every primitive of the
+/// section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GatePrimitive {
     And,
@@ -62,6 +61,12 @@ pub(super) enum GatePrimitive {
     Rcmos,
     Pullup,
     Pulldown,
+    Tran,
+    Rtran,
+    Tranif0,
+    Tranif1,
+    Rtranif0,
+    Rtranif1,
 }
 
 /// How a primitive's terminals become drivers.
@@ -78,6 +83,14 @@ enum GateFamily {
     Cmos { resistive: bool },
     /// Section 7.8: `(out)`, driving the constant at pull strength.
     Pull { one: bool },
+    /// Section 7.6: `(inout, inout)` for `tran`, and `(inout, inout,
+    /// control)` for `tranif0`/`tranif1`, whose control is active low for the
+    /// `0` form. Each terminal is driven from the other, which the store
+    /// resolves as one switch island rather than as two drivers.
+    Bidirectional {
+        control: Option<bool>,
+        resistive: bool,
+    },
 }
 
 impl GatePrimitive {
@@ -93,7 +106,7 @@ impl GatePrimitive {
             .find(|primitive| primitive.keyword() == name)
     }
 
-    const ALL: [Self; 20] = [
+    const ALL: [Self; 26] = [
         Self::And,
         Self::Nand,
         Self::Or,
@@ -114,6 +127,12 @@ impl GatePrimitive {
         Self::Rcmos,
         Self::Pullup,
         Self::Pulldown,
+        Self::Tran,
+        Self::Rtran,
+        Self::Tranif0,
+        Self::Tranif1,
+        Self::Rtranif0,
+        Self::Rtranif1,
     ];
 
     pub(super) const fn keyword(self) -> &'static str {
@@ -138,11 +157,17 @@ impl GatePrimitive {
             Self::Rcmos => "rcmos",
             Self::Pullup => "pullup",
             Self::Pulldown => "pulldown",
+            Self::Tran => "tran",
+            Self::Rtran => "rtran",
+            Self::Tranif0 => "tranif0",
+            Self::Tranif1 => "tranif1",
+            Self::Rtranif0 => "rtranif0",
+            Self::Rtranif1 => "rtranif1",
         }
     }
 
     const fn family(self) -> GateFamily {
-        use GateFamily::{Cmos, Logic, Mos, Pull, Tristate};
+        use GateFamily::{Bidirectional, Cmos, Logic, Mos, Pull, Tristate};
         match self {
             Self::And
             | Self::Nand
@@ -188,6 +213,18 @@ impl GatePrimitive {
             Self::Rcmos => Cmos { resistive: true },
             Self::Pullup => Pull { one: true },
             Self::Pulldown => Pull { one: false },
+            Self::Tran | Self::Rtran => Bidirectional {
+                control: None,
+                resistive: matches!(self, Self::Rtran),
+            },
+            Self::Tranif0 | Self::Rtranif0 => Bidirectional {
+                control: Some(true),
+                resistive: matches!(self, Self::Rtranif0),
+            },
+            Self::Tranif1 | Self::Rtranif1 => Bidirectional {
+                control: Some(false),
+                resistive: matches!(self, Self::Rtranif1),
+            },
         }
     }
 
@@ -238,6 +275,8 @@ impl GatePrimitive {
             GateFamily::Tristate { .. } | GateFamily::Mos { .. } => (3, Some(3)),
             GateFamily::Cmos { .. } => (4, Some(4)),
             GateFamily::Pull { .. } => (1, None),
+            GateFamily::Bidirectional { control: None, .. } => (2, Some(2)),
+            GateFamily::Bidirectional { .. } => (3, Some(3)),
         }
     }
 }
@@ -763,7 +802,9 @@ impl Parser<'_> {
         let strength = if self.check(TokenKind::LParen) && self.strength_specification_follows() {
             Some(match gate.family() {
                 GateFamily::Pull { one } => self.parse_pull_strength(one, &context)?,
-                GateFamily::Mos { .. } | GateFamily::Cmos { .. } => {
+                GateFamily::Mos { .. }
+                | GateFamily::Cmos { .. }
+                | GateFamily::Bidirectional { .. } => {
                     return Err(ParseError::new(
                         ParseErrorKind::UnsupportedConstruct {
                             context,
@@ -1002,22 +1043,30 @@ impl Parser<'_> {
                 ]);
             }
             GateFamily::Pull { one } => {
-                let spelling = if one { "1'b1" } else { "1'b0" };
-                let value = crate::four_state::decode(spelling).map_err(|message| {
-                    ParseError::new(
-                        ParseErrorKind::UnsupportedConstruct {
-                            context: format!("`{}` gate", gate.keyword()),
-                            found: format!("its constant did not decode: {message}"),
-                        },
-                        span,
-                    )
-                })?;
-                let value =
-                    Expression::Digital(DigitalExpr::FourState(FourStateLit { value, span }));
+                let value = Self::gate_constant(gate, one, span)?;
                 return terminals
                     .iter()
                     .map(|terminal| assign(terminal, value.clone(), None))
                     .collect();
+            }
+            // Each terminal is driven from the other under the control, a
+            // `tran` being always on. The store reads these two drivers as one
+            // switch between two net bits and resolves the island they join,
+            // so neither drives the value it wrote.
+            GateFamily::Bidirectional { control, resistive } => {
+                let enable = match control {
+                    Some(active_low) => invert(&terminals[2], active_low),
+                    None => Self::gate_constant(gate, true, span)?,
+                };
+                let kind = Some(DigitalGateKind::Tran { resistive });
+                return Ok(vec![
+                    assign(
+                        &terminals[0],
+                        pair(enable.clone(), terminals[1].clone()),
+                        kind,
+                    )?,
+                    assign(&terminals[1], pair(enable, terminals[0].clone()), kind)?,
+                ]);
             }
         }
 
@@ -1069,6 +1118,28 @@ impl Parser<'_> {
             .collect()
     }
 
+    /// The one-bit constant `1'b1` or `1'b0` a gate drives or is enabled by.
+    fn gate_constant(
+        gate: GatePrimitive,
+        one: bool,
+        span: crate::source::Span,
+    ) -> Result<Expression, ParseError> {
+        let spelling = if one { "1'b1" } else { "1'b0" };
+        let value = crate::four_state::decode(spelling).map_err(|message| {
+            ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: format!("`{}` gate", gate.keyword()),
+                    found: format!("its constant did not decode: {message}"),
+                },
+                span,
+            )
+        })?;
+        Ok(Expression::Digital(DigitalExpr::FourState(FourStateLit {
+            value,
+            span,
+        })))
+    }
+
     /// A gate's output terminal, as an assignment target.
     fn terminal_as_lvalue(
         terminal: &Expression,
@@ -1083,6 +1154,14 @@ impl Parser<'_> {
                 name: access.array.clone(),
                 index: access.index.clone(),
                 span: access.span,
+            }),
+            // A constant part select, as an array of instances shares a
+            // terminal out, and as a bidirectional switch's other terminal is.
+            Expression::Digital(DigitalExpr::PartSelect(select)) => Ok(DigitalLValue::PartSelect {
+                name: select.name.clone(),
+                msb: select.msb.clone(),
+                lsb: select.lsb.clone(),
+                span: select.span,
             }),
             other => Err(ParseError::new(
                 ParseErrorKind::UnsupportedConstruct {

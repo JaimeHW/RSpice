@@ -191,6 +191,12 @@ pub(crate) enum SlotGate {
         resistive: bool,
         switch: Option<usize>,
     },
+    /// One direction of a bidirectional switch; `bridge` indexes the store's
+    /// switch islands (see `store/islands.rs`), and is `None` when a terminal
+    /// lies outside its net, which passes nothing.
+    Tran {
+        bridge: Option<usize>,
+    },
 }
 
 /// A MOS switch that passes the strength of `source`'s bit `bit` (a storage

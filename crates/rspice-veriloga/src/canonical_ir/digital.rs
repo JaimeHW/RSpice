@@ -914,6 +914,12 @@ pub enum DigitalGateKind {
     /// `nmos`, `pmos` and their `r` forms (sections 7.6 and 7.12): the data at
     /// the strength it arrives with, reduced, and `z` passing as `z`.
     Mos { resistive: bool },
+    /// One direction of `tran`, `tranif0`, `tranif1` and their `r` forms
+    /// (sections 7.6 and 7.12). The two drivers of one switch join their net
+    /// bits into a switch island, which the store resolves as a whole: each
+    /// driver contributes what the island passes through it from its `source`,
+    /// never the data it wrote.
+    Tran { resistive: bool },
 }
 
 /// One driver written by a gate primitive with an enable.
@@ -924,7 +930,8 @@ pub struct DigitalGatedDriver {
     pub driver: DigitalDriverId,
     pub kind: DigitalGateKind,
     /// The net bit a MOS switch passes, when its data terminal names one; the
-    /// switch passes that net's strength rather than a strong drive.
+    /// switch passes that net's strength rather than a strong drive. Always
+    /// present for a bidirectional switch, whose terminals are net bits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<DigitalWriteTarget>,
 }
