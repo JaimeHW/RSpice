@@ -298,9 +298,12 @@ const MAX_PUBLIC_ITEMS: usize = 5749;
 // The engine reaches its numerics, expression, notice, log-scope, resource
 // and result-scalar plumbing through hidden items so that those modules can
 // move into a crate of their own below it, and every crate of the family
-// reads the two `family_features` statements. The census is 349, with no
+// reads the two `family_features` statements. The census was 349, with no
 // slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 349;
+// `log_scope::warn_line` adds one: the macro is exported so that every crate
+// of the family logs through the one definition. The census is 350, with no
+// slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 350;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

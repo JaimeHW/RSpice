@@ -175,12 +175,18 @@ pub fn stating(log: impl FnOnce()) -> LogLine {
 ///
 /// A macro and not a function, so the record keeps its own call site: the
 /// host limits how many warnings each site shows in a run.
-macro_rules! warn_line {
+///
+/// Exported so that every crate of the engine family logs through the one
+/// definition; callers name it as `log_scope::warn_line!`.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __rspice_warn_line {
     ($($arg:tt)+) => {
         $crate::log_scope::stating(|| ::log::warn!($($arg)+))
     };
 }
-pub(crate) use warn_line;
+#[doc(hidden)]
+pub use __rspice_warn_line as warn_line;
 
 /// Execute in `scope` on this thread until the guard drops.
 ///
