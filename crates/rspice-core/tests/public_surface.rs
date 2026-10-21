@@ -333,8 +333,11 @@ const MAX_PUBLIC_ITEMS: usize = 5752;
 // was 371, with no slack.
 // `notice::boundary_supply` adds one: the engine's boundary-converter builder
 // records an inferred or defaulted supply through it, like the other notice
-// writers above it. The census is 372, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 372;
+// writers above it. The census was 372, with no slack.
+// `DcMatchCard::voltage_probe` adds one: the engine's `.DCMATCH` tests state a
+// card through it, and they sit above the parser's crate, so it compiles under
+// `test-support` as well as `cfg(test)`. The census is 373, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 373;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

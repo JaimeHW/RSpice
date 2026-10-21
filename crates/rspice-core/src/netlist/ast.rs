@@ -2562,11 +2562,12 @@ impl DcMatchCard {
 
     /// A card probing `V(output)` with every other field defaulted.
     ///
-    /// This is how this crate's own tests state one `.DCMATCH` request at a
-    /// time; every frontend reads cards the parser produced instead of
-    /// building them, so it is not API.
-    #[cfg(test)]
-    pub(crate) fn voltage_probe(output_node: impl Into<String>) -> Self {
+    /// This is how the parser's and the engine's tests state one `.DCMATCH`
+    /// request at a time; every frontend reads cards the parser produced
+    /// instead of building them, so it is not API.
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn voltage_probe(output_node: impl Into<String>) -> Self {
         Self {
             moments: Default::default(),
             output_node: output_node.into(),
