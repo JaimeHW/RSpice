@@ -44,7 +44,7 @@
 //!   chosen so the check is far cheaper than the work between two checks
 //!   while still bounding latency by a countable number of iterations.
 //!
-//! [`CountingAbort`](crate::abort_signal::CountingAbort) exists to hold this
+//! [`CountingAbort`] exists to hold this
 //! to an exact number: a test sets a poll threshold, runs the analysis, and
 //! asserts both that the analysis stopped and at which poll it did so.
 
@@ -213,7 +213,7 @@ pub struct TransientSample<'a> {
 /// codes, exception classes, and wire failure codes.
 ///
 /// The reason is not published as its own wire string: it selects which
-/// [`crate::SimulationError`] variant a stop becomes, and that error's code
+/// `SimulationError` variant a stop becomes, and that error's code
 /// and category are what every surface reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

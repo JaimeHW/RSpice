@@ -203,7 +203,7 @@ pub struct ConvergenceSite {
 /// The named circuit objects one failed solve fell on.
 ///
 /// This is recorded beside the failure, never instead of it: the prose in
-/// [`crate::SimulationError`] is unchanged, and [`Self::failure_message`]
+/// `SimulationError` is unchanged, and [`Self::failure_message`]
 /// holds the exact rendering it was built for. A consumer must check
 /// [`Self::describes`] against the error it actually received before using
 /// the sites, because the engine records an attribution at the moment a

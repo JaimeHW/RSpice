@@ -279,7 +279,7 @@ impl TimestepController {
     /// engine calls it only after the LTE verdict on a converged candidate came
     /// back negative, so the proposal it leaves behind has to be a width the
     /// estimate would accept, not the boundary the estimate sits on. See
-    /// [`LTE_REJECT_SHRINK_MARGIN`] for why aiming at the tolerance itself
+    /// `LTE_REJECT_SHRINK_MARGIN` for why aiming at the tolerance itself
     /// converges onto it from above instead.
     pub fn adjust(&mut self, lte_estimate: Value) -> Value {
         // Calculate new timestep using LTE estimate

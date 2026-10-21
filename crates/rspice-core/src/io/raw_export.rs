@@ -30,7 +30,7 @@
 //! the analysis reads the first plot and stops exactly where it stopped
 //! before. [`crate::io::parse_raw_plots_file_with_limits`] is the reader that
 //! returns all of them, and
-//! [`crate::execution::decode_event_plots`] turns the appended ones back into
+//! `execution::decode_event_plots` turns the appended ones back into
 //! event histories.
 //!
 //! Those plots declare their version in their *name* rather than in a header
@@ -98,7 +98,7 @@ impl VariableType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawEventKind {
     /// XSPICE digital events. Values are the event codes
-    /// [`crate::xspice::DigitalValue::event_code`] produces, `0..=12`, which
+    /// `xspice::DigitalValue::event_code` produces, `0..=12`, which
     /// name the resolved state and drive strength exactly.
     Digital,
     /// XSPICE real-valued events. Values are the event values themselves.

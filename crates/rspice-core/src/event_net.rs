@@ -11,7 +11,7 @@
 //! `circuit` both need them, and both sit far below `analysis`, where the two
 //! enums used to live -- so naming them there was the solver reaching seven
 //! ranks up the architecture for two field-less enums and a `format!`.
-//! [`crate::analysis::transient`] re-exports all three, which is where every
+//! `analysis::transient` re-exports all three, which is where every
 //! frontend still spells them.
 
 /// Which event domain resolves a net that the analog system does not.
@@ -60,7 +60,7 @@ impl EventOnlyNetKind {
     /// The column label an exported table gives this net's event trace.
     ///
     /// `D(..)` for digital is what the flattened projection writes
-    /// ([`crate::execution::transient_projection_signals`]) and what the
+    /// (`execution::transient_projection_signals`) and what the
     /// rawfile event plot declares; `E(..)` for real is the rawfile event
     /// plot's spelling, which the workbench event sheet reads back. Neither
     /// depends on which result object was asked.

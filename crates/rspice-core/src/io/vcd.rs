@@ -17,7 +17,7 @@
 //! Strength is the other half of RSpice's twelve-state digital value, and VCD
 //! cannot express it: the format has four bit states and no drive strength.
 //! The projection that drops it lives beside the engine's result types in
-//! [`crate::execution::event_vcd_document`], not here, because a format
+//! `execution::event_vcd_document`, not here, because a format
 //! module never names a result type.
 //!
 //! ## What the reader accepts

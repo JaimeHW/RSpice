@@ -131,8 +131,8 @@ pub enum SimulationConfigError {
     },
     /// A well-formed setting this build deliberately refuses: an HDL run
     /// option whose behaviour a later P2 lane implements, set away from its
-    /// default. Converting into [`crate::SimulationError`] yields
-    /// [`crate::SimulationError::UnsupportedCapability`], so the refusal stays
+    /// default. Converting into `SimulationError` yields
+    /// `SimulationError::UnsupportedCapability`, so the refusal stays
     /// typed rather than reading as an invalid configuration. The token names
     /// the option; the text names the feature, never the lane.
     #[error("{0}")]
@@ -756,7 +756,7 @@ impl SimulationConfig {
     ///
     /// Frontends that accept configuration from files, users, or remote jobs
     /// should call this directly or construct the engine with
-    /// [`crate::Engine::try_new`] before starting simulation work.
+    /// `Engine::try_new` before starting simulation work.
     pub fn validate(&self) -> Result<(), SimulationConfigError> {
         self.hdl.validate()?;
         validate_positive("tolerance", self.tolerance)?;

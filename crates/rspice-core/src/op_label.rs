@@ -1,6 +1,6 @@
 //! The vocabulary of labels a device operating-point report may carry.
 //!
-//! A [`DeviceOpEntry`](crate::circuit::DeviceOpEntry) names its device family,
+//! A `circuit::DeviceOpEntry` names its device family,
 //! its operating region and each reported quantity with a `&'static str`.
 //! Frontends persist those reports and read them back by interning the stored
 //! text into the same `&'static str`, so a reader can only restore a label it
@@ -16,7 +16,7 @@
 //! A vocabulary of names is data, so this is a leaf: the device families that
 //! emit a label and the circuit store that assembles the report both read
 //! down into it. The reader's half lives in
-//! [`crate::circuit::resolve_op_label`] instead, because it also answers for
+//! `circuit::resolve_op_label` instead, because it also answers for
 //! the labels a compiled Verilog-A catalog contributes and so has to reach the
 //! device layer this module sits below.
 

@@ -4,7 +4,7 @@
 //! the run. A notice is the same event in a shape a reader can act on: the
 //! element, the parameter, the value asked for and the value used. The host
 //! that runs an analysis keeps a [`NoticeCollector`] in the run's
-//! [`log_scope`](crate::log_scope), which the engine enters on every thread it
+//! [`log_scope`], which the engine enters on every thread it
 //! hands part of the run to; where no run collects, recording a notice costs
 //! one thread-local read.
 //!

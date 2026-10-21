@@ -10,7 +10,7 @@
 //! read limits. [`vcd`] carries the event-driven half — irregular four-state
 //! timelines rather than a sampled table — and needs the same read limits and
 //! nothing else. [`xyce_prn`] deliberately consumes the typed `.PRINT` layout
-//! and simulation output policy retained by [`crate::netlist`], but no format
+//! and simulation output policy retained by `netlist`, but no format
 //! module reaches for a circuit or analysis-result type. Callers still provide
 //! names and columns of [`crate::Value`], keeping serialization independent of
 //! solver internals.
@@ -21,7 +21,7 @@
 //!
 //! Waveform *compression* is not here. `TransientResultCompressed` is a shape
 //! of transient result rather than a file format, so it lives beside the
-//! uncompressed one in [`crate::engine`].
+//! uncompressed one in `engine`.
 
 pub mod hdf5;
 pub mod json;
