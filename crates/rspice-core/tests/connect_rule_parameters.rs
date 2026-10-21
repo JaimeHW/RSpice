@@ -55,6 +55,11 @@ static LOGGER: CapturingLogger = CapturingLogger;
 
 /// Run `body` with the boundary lines it logs collected.
 fn boundary_lines_of<T>(body: impl FnOnce() -> T) -> (T, Vec<String>) {
+    lines_of("boundary", body)
+}
+
+/// Run `body` with the lines it logs that contain `needle` collected.
+fn lines_of<T>(needle: &str, body: impl FnOnce() -> T) -> (T, Vec<String>) {
     LOG_INIT.call_once(|| {
         log::set_logger(&LOGGER).expect("the capture logger installs");
         log::set_max_level(log::LevelFilter::Info);
@@ -65,7 +70,7 @@ fn boundary_lines_of<T>(body: impl FnOnce() -> T) -> (T, Vec<String>) {
         .with(|captured| captured.borrow_mut().take())
         .unwrap_or_default()
         .into_iter()
-        .filter(|line| line.contains("boundary"))
+        .filter(|line| line.contains(needle))
         .collect();
     (value, lines)
 }
@@ -949,5 +954,53 @@ fn a_weak_one_and_a_strong_zero_divide_on_an_xspice_node() {
     assert!(
         (observed - expected).abs() <= 1e-6,
         "driver-sensitive divider: {observed} against {expected}"
+    );
+}
+
+//=============================================================================
+// 8. A tracking A/D's band in the operating point's census
+//=============================================================================
+
+/// A supply-tracking A/D declares each band edge as the zero of its own
+/// crossing function. With V(vdd) = 4 V, `vtlo` = vsup/2 tracks to 2 V and
+/// `vthi` = 3 V, and an input held at 2.5 V lies inside the band: the
+/// operating point's census reports the band in volts, (2 V, 3 V), as it does
+/// a static converter's.
+#[test]
+fn a_tracking_converter_inside_its_band_is_reported_in_volts() {
+    let directory = TempDirectory::new("tracking-band");
+    let mut source = String::from(
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module probe(din, q);\n  input din; output q; reg q;\n  initial q = 1'b0;\n  always @(din) q = din;\nendmodule\n",
+    );
+    for (_, module) in BUILTIN_CONNECT_MODULES {
+        source.push_str(module);
+    }
+    source.push_str(
+        "connectrules track;\n    connect a2d #(.vsup(vdd), .vthi(3.0));\n    connect d2a #(.vsup(vdd));\nendconnectrules\n",
+    );
+    let path = directory.write("probe.vams", &source);
+    let netlist = Netlist::parse(&format!(
+        "* tracking A/D inside its band\n\
+         .hdl \"{path}\" module=probe\n\
+         .options connectrules=track\n\
+         vdd vdd 0 4\n\
+         vin din 0 2.5\n\
+         x1 din q probe\n\
+         rq q 0 1k\n\
+         .end\n"
+    ))
+    .unwrap_or_else(|error| panic!("deck parses: {error}"));
+    let (solved, lines) = lines_of("[mixed.threshold]", || {
+        Engine::default().run_dc_op(&netlist)
+    });
+    solved.unwrap_or_else(|error| panic!("the operating point solves: {error}"));
+    assert_eq!(lines.len(), 1, "one finding: {lines:?}");
+    assert!(
+        lines[0].contains("lies inside its undefined band (2e0 V, 3e0 V)")
+            && lines[0].contains("(v = 2.5e0 V)"),
+        "{}",
+        lines[0]
     );
 }

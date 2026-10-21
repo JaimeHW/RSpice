@@ -787,6 +787,9 @@ impl CircuitData {
                 continue;
             };
             let mut declared = std::collections::BTreeMap::<(String, usize), usize>::new();
+            // Each input element's input and its declared edges in volts, in
+            // declaration order: `(port, element, input, edges)`.
+            let mut elements = Vec::<(String, usize, Value, Vec<Value>)>::new();
             for threshold in thresholds {
                 let ordinal = declared
                     .entry((threshold.port.clone(), threshold.element))
@@ -807,15 +810,33 @@ impl CircuitData {
                 // declared one moved by that level, here `r·V(sup)` at the
                 // solved point, and the input is the input.
                 let level = voltage - crossing;
-                let (low, high) = (threshold.low + level, threshold.high + level);
+                let edges = [threshold.low + level, threshold.high + level];
+                match elements.iter_mut().find(|(port, element, ..)| {
+                    *port == threshold.port && *element == threshold.element
+                }) {
+                    Some((.., declared_edges)) => declared_edges.extend(edges),
+                    None => {
+                        elements.push((threshold.port, threshold.element, voltage, edges.to_vec()))
+                    }
+                }
+            }
+            // An element's undefined band runs from its lowest edge to its
+            // highest. A static converter declares its band once; one that
+            // tracks a supply declares each edge as the zero of its own
+            // crossing function, so each declaration is a single level and
+            // only their hull is the band.
+            for (port, element, voltage, edges) in elements {
+                let low = edges.iter().copied().fold(Value::INFINITY, Value::min);
+                let high = edges.iter().copied().fold(Value::NEG_INFINITY, Value::max);
                 let net = instance
-                    .connection(&threshold.port)
-                    .map(|connection| analog_input_net(connection, threshold.element, &node_name))
-                    .unwrap_or_else(|| threshold.port.clone());
-                let output = self.converter_output_node(instance, threshold.element);
+                    .connection(&port)
+                    .map(|connection| analog_input_net(connection, element, &node_name))
+                    .unwrap_or(port);
+                let output = self.converter_output_node(instance, element);
                 let host_port = output.and_then(|node| self.mixed_host_port_on(node));
-                let kind = if let Some(theta) = [low, high]
-                    .into_iter()
+                let kind = if let Some(theta) = edges
+                    .iter()
+                    .copied()
                     .find(|theta| on_threshold(voltage, *theta))
                 {
                     Some(ThresholdFindingKind::OnThreshold { threshold: theta })
