@@ -563,7 +563,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
 
     for change in ["navigation", "revision", "replacement", "close", "window"] {
         let mut state = open_symbol();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         let symbol = state.workspace.content.active_view.clone();
         let before = state.load_active_symbol_document().unwrap();
         let points = vec![Point::origin(), Point::new(20, 10)];

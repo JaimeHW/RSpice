@@ -1837,7 +1837,7 @@ mod tests {
         use crate::state::CellViewRef;
 
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
         let library = app.state.workspace.content.project.root_library.clone();
         for index in 0..extra {

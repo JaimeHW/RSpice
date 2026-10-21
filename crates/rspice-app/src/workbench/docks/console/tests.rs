@@ -24,7 +24,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
 
     for owner in DiagnosticOwner::ALL {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         match owner {
             DiagnosticOwner::DesignRules => {
                 // A finding about an object the drawing carries, so the row's
@@ -202,7 +202,7 @@ fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
         "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
          .model nch nmos level=54 version=4.8 pbs=0.05\n.op\n.end\n",
     );
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
 
     let batch = state
         .diagnostics
@@ -274,7 +274,7 @@ fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
         "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
          .model nch nmos level=54 version=4.8 pbs=0.05 pbsws=0.05\n.op\n.end\n",
     );
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let run_sequence = app.state.simulation.retained.runs[0].id;
 
     for parameter in ["pbs", "pbsws"] {
@@ -537,7 +537,7 @@ fn console_rows_paint_no_coloured_text() {
 #[test]
 fn the_problem_badge_counts_records_and_not_log_entries() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
@@ -1085,7 +1085,7 @@ fn the_open_tabs_underline_spans_its_tab_on_the_strips_foot() {
 #[test]
 fn a_pages_toolbar_stands_on_the_panel_fill_above_the_well() {
     let mut app = busy_console();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.ui.netlist.diagnostics = std::sync::Arc::new(
         crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
             vec![crate::state::netlist_diagnostics::Diagnostic::error(

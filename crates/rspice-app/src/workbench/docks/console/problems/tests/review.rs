@@ -111,7 +111,7 @@ fn unreadable_symbol_finding(state: &mut AppState) {
 
 fn dock_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.console_visible = true;
     app.state.workbench.console_page = ConsolePage::Problems;
     app

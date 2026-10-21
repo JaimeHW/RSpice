@@ -1079,7 +1079,7 @@ mod tests {
             let ctx = egui::Context::default();
             crate::ui::Theme::default().apply(&ctx);
             let mut app = RSpiceApp::test_instance();
-            app.state.project_lifecycle.authority.close_project();
+            app.state.close_project_session();
             app.state.workbench.project_launcher_recovery = Default::default();
 
             let output = ctx.run_ui(

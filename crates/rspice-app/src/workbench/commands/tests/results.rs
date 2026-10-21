@@ -241,7 +241,7 @@ fn result_dataset_import_has_mockup_authoritative_command_identity_and_gates() {
     assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ImportResultDataset));
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     assert!(Command::ImportResultDataset.is_enabled(&app));
     app.state.simulation.execution.is_running = true;
     assert!(!Command::ImportResultDataset.is_enabled(&app));
@@ -259,7 +259,7 @@ fn exporting_the_dataset_requires_an_open_result_document() {
     use crate::workbench::state::WorkspaceDocumentId;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     assert!(!Command::ExportWaveformsCsv.is_enabled(&app));
     assert_eq!(
         Command::ExportWaveformsCsv.availability(&app),

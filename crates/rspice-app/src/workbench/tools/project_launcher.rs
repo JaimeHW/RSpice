@@ -2027,7 +2027,7 @@ mod tests {
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Push(_))
         ));
-        app.state.project_lifecycle.authority.close_project();
+        app.state.close_project_session();
 
         dismiss_launcher(&mut app);
 

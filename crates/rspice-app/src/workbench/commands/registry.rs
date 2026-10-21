@@ -1763,7 +1763,7 @@ mod tests {
     fn the_off_sheet_connector_arms_a_tool_the_label_command_does_not() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Design);
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         assert!(Command::PlaceOffSheetConnector.is_enabled(&app));
 
         Command::PlaceOffSheetConnector.execute(&mut app);
@@ -1791,7 +1791,7 @@ mod tests {
 
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state
             .schematic
             .document_mut_for_test()

@@ -49,7 +49,7 @@ struct Fixture {
 fn fixture() -> Fixture {
     let reference = hierarchy_reference::build();
     let mut state = reference.state;
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
 
     let spare = CellViewRef::new(USER_LIBRARY, "spare", "schematic");
     let mut cell = Cell::new(&spare.cell);
@@ -483,7 +483,7 @@ fn an_edit_settling_as_its_view_is_left_is_checked_without_a_warning() {
 
     let reference = hierarchy_reference::build();
     let mut state = reference.state;
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     let amp = reference.amp_schematic;
     state.open_workspace_view(amp.clone());
     let start = crate::time_compat::Instant::now();

@@ -46,7 +46,7 @@ fn seeded_app() -> RSpiceApp {
         .ui
         .preferences
         .set_toggle(TogglePreference::ReducedMotion, true);
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
     load_ungrounded_rc(&mut app.state.schematic);
 

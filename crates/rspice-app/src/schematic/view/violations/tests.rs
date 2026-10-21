@@ -103,7 +103,7 @@ pub(crate) fn loop_finding(state: &AppState, subject: &CellViewRef) -> uuid::Uui
 #[test]
 fn every_source_in_the_current_loop_is_marked() {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     let (top, _, sources) = draw_source_loop(&mut state);
     assert_eq!(related_marks(&state), None, "no finding is current");
 

@@ -20,7 +20,7 @@ fn context() -> Context {
 #[test]
 fn a_requested_route_is_applied_once() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
@@ -54,7 +54,7 @@ fn a_requested_route_is_applied_once() {
 #[test]
 fn a_source_route_to_a_departed_bundle_states_its_refusal() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let before = app.state.workbench.workspace;
     app.state
         .diagnostics
@@ -83,7 +83,7 @@ fn a_source_route_to_a_departed_bundle_states_its_refusal() {
 #[test]
 fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
     let owner = crate::state::ProjectSourceOwner::code_workspace(
         crate::state::ProjectSourceLanguage::RSpiceAutomation,
@@ -132,7 +132,7 @@ fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
 #[test]
 fn a_netlist_route_to_a_retired_record_states_its_refusal() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state
         .diagnostics
         .request_route(DiagnosticRoute::NetlistDiagnostic(uuid::Uuid::nil()));
@@ -155,7 +155,7 @@ fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
     use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let mut library = Library::new("work");
     for name in ["top", "aux"] {
         let mut cell = Cell::new(name);
@@ -242,7 +242,7 @@ fn every_source_in_a_loop_is_named_and_followed_into_its_view() {
     use crate::schematic::view::violations::tests::draw_source_loop;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let (top, aux, sources) = draw_source_loop(&mut app.state);
     let code = rspice_design::drc::DrcViolationType::SourceToSource.rule_code();
     let places = app
@@ -315,7 +315,7 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
     use rspice_design::drc::DrcViolationType;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let subject = app.state.workspace.content.active_schematic_reference();
     let ids = [Point::new(0, 0), Point::new(400, 0)].map(|at| {
         app.state
@@ -430,7 +430,7 @@ fn a_rule_finding_about_a_view_that_is_not_open_keeps_its_route() {
     use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let root = app.state.workspace.content.simulation_root_reference();
     let resistor = app
         .state

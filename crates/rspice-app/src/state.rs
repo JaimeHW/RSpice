@@ -21,6 +21,7 @@ pub(crate) use rspice_design::parameters as params_string;
 pub(crate) mod pdk_config;
 use rspice_design::physical_layout;
 mod preflight_report;
+mod project_open;
 pub(crate) use rspice_design::project_sources;
 pub(crate) use rspice_design::properties as property_types;
 pub(crate) use rspice_results::result_presentation;
@@ -103,6 +104,7 @@ pub use preflight_report::{
     DrawnObject, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
     PreflightReport, PreparedPreflightContract,
 };
+pub(crate) use project_open::ProjectOpenFact;
 #[cfg(not(target_arch = "wasm32"))]
 pub use project_sources::MAX_PROJECT_SOURCE_DEPENDENCIES;
 #[cfg(not(target_arch = "wasm32"))]

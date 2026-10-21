@@ -1447,7 +1447,7 @@ mod tests {
             .automation
             .pending_runtime_validation = None;
 
-        app.state.project_lifecycle.authority.close_project();
+        app.state.close_project_session();
         assert!(!source_document_is_editable(
             &app,
             ProjectSourceLanguage::VerilogA,
@@ -1459,7 +1459,7 @@ mod tests {
             &automation_root
         ));
 
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state.workbench.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,

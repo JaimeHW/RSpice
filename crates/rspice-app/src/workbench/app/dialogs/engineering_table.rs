@@ -1787,7 +1787,7 @@ mod tests {
     #[test]
     fn project_scope_is_versioned_while_personal_scope_is_not() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         let dataset = active_schematic_dataset(&app.state.schematic);
         app.state.dialogs.engineering_table.open(
             EngineeringTableView::for_dataset(&dataset),

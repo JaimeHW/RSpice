@@ -1496,7 +1496,7 @@ mod tests {
     /// `source`.
     fn module_source_with(module: &str, source: &str) -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         let reference = add_module_view(&mut app, "legacy", "legacy.va", module, source);
         app.state.workspace.open_view(reference, ViewType::VerilogA);
         app

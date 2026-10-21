@@ -982,7 +982,7 @@ mod tests {
     #[test]
     fn every_status_rule_stands_between_two_items() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
         let size = egui::vec2(1440.0, 900.0);
         let canvas = crate::ui::raster::render(size, |ui, _| {
@@ -1027,7 +1027,7 @@ mod tests {
     #[test]
     fn the_bar_draws_the_prompt_and_drops_it_once_it_expires() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
         app.state.prompt("The schematic is read-only.");
 
@@ -1089,7 +1089,7 @@ mod tests {
     #[test]
     fn the_checks_segment_counts_every_producer_from_one_list() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state.workbench.activate(Workspace::Netlist);
         let diagnostics = vec![
             crate::state::netlist_diagnostics::Diagnostic::error("bad card"),
@@ -1154,11 +1154,11 @@ mod tests {
         };
 
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.close_project();
+        app.state.close_project_session();
         assert_eq!(check_summary(counts(&app)), None);
         assert_eq!(check_problem(counts(&app)), None);
 
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
         assert_eq!(
             check_summary(counts(&app)),
@@ -1251,7 +1251,7 @@ mod tests {
     fn adjacent_result_segments_never_print_the_same_sentence() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Results);
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
 
         let coordinates = results_view_summary(&app, None);
         let selection = selection_summary(&app);
@@ -1430,7 +1430,7 @@ mod tests {
         use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         let key = app
             .state
             .workspace

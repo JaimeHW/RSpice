@@ -374,7 +374,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
         };
         de.workbench.scatter(&mut state.workbench);
         if de.no_project_open {
-            state.project_lifecycle.authority.close_project();
+            state
+                .project_lifecycle
+                .close_restored_session(&mut state.project_open);
         }
         let annotation_outcome = match annotation_restoration {
             Ok(0) => None,
@@ -891,10 +893,11 @@ mod tests {
     #[test]
     fn the_session_records_whether_a_project_is_open() {
         let mut closed = AppState::default();
-        closed.project_lifecycle.authority.close_project();
+        closed.close_project_session();
         let ron = ron::to_string(&closed).expect("eframe RON session serializes");
         let restored = ron::from_str::<Box<AppState>>(&ron).expect("the session restores");
         assert!(!restored.project_lifecycle.is_open());
+        restored.assert_project_open_fact();
 
         let mut session = serde_json::to_value(AppState::default()).expect("session serializes");
         let field = session
@@ -908,6 +911,7 @@ mod tests {
             older.project_lifecycle.is_open(),
             "sessions written before the field always had a project open"
         );
+        older.assert_project_open_fact();
     }
 
     /// An eframe session written before every sheet took its standard's

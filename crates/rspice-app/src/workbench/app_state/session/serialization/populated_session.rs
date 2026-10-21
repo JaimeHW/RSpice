@@ -147,7 +147,7 @@ pub(super) fn populated_session() -> AppState {
     populate_workbench(&mut state, operating_point);
 
     // Closed last: Close Project keeps the documents it closed over.
-    state.project_lifecycle.authority.close_project();
+    state.close_project_session();
     state
 }
 

@@ -30,7 +30,7 @@ fn desktop_and_compact_title_contexts_have_distinct_mockup_ownership() {
 fn closed_project_title_context_does_not_leak_the_previous_document_identity() {
     let mut app = title_test_app();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
 
     assert_eq!(title_context_text(&app, false), "RSpice Workbench");
     assert_eq!(title_context_text(&app, true), "No project open");
@@ -49,7 +49,7 @@ fn the_painted_desktop_title_names_no_project_when_none_is_open() {
         let mut app = title_test_app();
         app.state.workbench.workspace = Workspace::Design;
         if !project_open {
-            app.state.project_lifecycle.authority.close_project();
+            app.state.close_project_session();
         }
         let bounds = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(640.0, 32.0));
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
@@ -112,7 +112,7 @@ fn unsaved_project_changes_put_a_star_after_the_painted_title() {
         painted(&app, 90.0)
     );
 
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     assert_eq!(painted(&app, 640.0), "RSpice Workbench");
 }
 
@@ -254,7 +254,7 @@ fn rendered_simulate_menu_rows(
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     if !stable_analysis_plan {
         app.state.sim_setup.analysis_plan = None;
     }
@@ -1445,7 +1445,7 @@ fn a_menu_of_greyed_rows_still_answers_its_keys() {
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     let (menu, shown) = ALL_MENUS
         .into_iter()
         .map(|menu| (menu, shown_rows(menu, &app)))

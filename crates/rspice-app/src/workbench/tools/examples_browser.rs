@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn an_example_does_not_replace_unsaved_work() {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         load_example("Voltage Divider", &mut state.schematic);
         state.sync_active_schematic_to_workspace();
         assert!(open_refusal(&state).is_some());

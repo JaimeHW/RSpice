@@ -187,6 +187,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         library_edit_locks: crate::state::ProjectLibraryLockAuthority::default(),
         workspace,
         project_lifecycle: Box::default(),
+        project_open: Default::default(),
         pending_delete_cell: None,
         pending_delete_view: None,
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),

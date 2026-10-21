@@ -861,7 +861,7 @@ fn qualified_pspice_import_persists_exact_versioned_profile() {
 fn quarantined_owned_ngspice_state() -> AppState {
     let source = "* retained declarative source\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     assert!(apply_imported_netlist(
         &mut state,
         source.to_owned(),

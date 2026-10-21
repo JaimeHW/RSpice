@@ -340,7 +340,7 @@ fn dc_inspector_names_its_sources_and_primary_traversal() {
 
 fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.split_with_results = split;
     app.state.workbench.activate(Workspace::Results);
     let project_revision = app.state.workspace.content.project.revision();
@@ -1022,7 +1022,7 @@ fn waves_details_app() -> RSpiceApp {
     use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, TransientConvergenceEvidence};
     let quality = rspice_core::diagnostics::ConvergenceQuality::default();
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
     let time: Vec<f64> = (0..=200).map(|step| f64::from(step) * 5.0e-6).collect();
     let volts: Vec<f64> = time
@@ -1304,7 +1304,7 @@ fn the_waves_details_panel_states_ranges_and_method_as_rows_and_meta() {
 /// A diode bound to its catalog model, selected on the Design sheet.
 fn design_component_app() -> RSpiceApp {
     let (mut app, id) = catalog_test_diode("model=junction");
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
     app.state
         .schematic
@@ -1325,7 +1325,7 @@ fn veriloga_inspector_app() -> RSpiceApp {
     use crate::workbench::documents::code_workspace;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let reference = CellViewRef::new("behavioral", "gain_cell", "veriloga");
     let mut view = View::new("veriloga", ViewType::VerilogA);
     view.metadata
@@ -1382,7 +1382,7 @@ fn veriloga_inspector_app() -> RSpiceApp {
 /// selected.
 fn cmos_inverter_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
     app.state.schematic.clear_undo_history();
     app.state.sync_active_schematic_to_workspace();

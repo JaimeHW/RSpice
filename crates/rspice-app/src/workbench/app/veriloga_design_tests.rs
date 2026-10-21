@@ -70,7 +70,7 @@ fn module_source(module: &str, extra: &str) -> String {
 
 pub(super) fn open_project_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app
 }
 

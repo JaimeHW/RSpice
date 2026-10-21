@@ -45,7 +45,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         Command::CreateHierarchy,
     ];
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
 
     for command in authoring_commands {
@@ -82,7 +82,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     assert_eq!(
         Command::OpenWorkspace(Workspace::Design).availability(&app),
         CommandAvailability::Disabled("no project is open")
@@ -128,7 +128,7 @@ fn the_check_commands_name_their_reach_and_keep_the_check_family_keys() {
 #[test]
 fn check_design_is_offered_wherever_a_project_is_open() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
     assert!(Command::CheckDesign.is_enabled(&app));
     assert!(!Command::CheckCellview.is_enabled(&app));
@@ -136,7 +136,7 @@ fn check_design_is_offered_wherever_a_project_is_open() {
     app.state.workbench.activate(Workspace::Design);
     assert!(Command::CheckCellview.is_enabled(&app));
 
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     assert!(!Command::CheckDesign.is_enabled(&app));
 }
 
@@ -186,7 +186,7 @@ fn configuration_sets_has_mockup_identity_and_opens_the_owned_workflow() {
     assert!(app.state.dialogs.application_modal_open());
 
     app.state.dialogs.configuration_sets.open = false;
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     assert!(!Command::ConfigurationSets.is_enabled(&app));
 }
 
@@ -234,7 +234,7 @@ fn design_management_has_mockup_identity_authority_and_owned_workflow() {
     assert!(!Command::DesignManagement.is_enabled(&app));
 
     app.state.schematic.session.read_only = false;
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     assert!(!Command::DesignManagement.is_enabled(&app));
 }
 
@@ -277,7 +277,7 @@ fn connectivity_manager_has_mockup_identity_and_supports_read_only_inspection() 
     assert!(app.state.dialogs.application_modal_open());
 
     app.state.dialogs.connectivity_manager.open = false;
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     assert!(!Command::ConnectivityManager.is_enabled(&app));
 }
 
@@ -317,6 +317,6 @@ fn selection_bulk_edit_has_mockup_identity_order_and_read_only_inspection() {
     assert!(app.state.dialogs.application_modal_open());
 
     app.state.dialogs.selection_bulk_edit.open = false;
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     assert!(!Command::SelectionBulkEdit.is_enabled(&app));
 }

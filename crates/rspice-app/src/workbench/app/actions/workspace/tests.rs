@@ -984,7 +984,7 @@ fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
     use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
 
     let mut state = state_with_amp_symbol_pin("IN", None);
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
 
     state.run_active_symbol_pin_checks();
 

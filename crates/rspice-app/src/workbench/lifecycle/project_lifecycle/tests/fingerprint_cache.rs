@@ -78,6 +78,7 @@ fn accepted_snapshot_clones_share_content_and_edits_cannot_change_their_fingerpr
 
     let replacement = snapshot(&state).unwrap();
     accept_loaded_project(&mut state, replacement, None);
+    state.assert_project_open_fact();
     assert!(!has_unsaved_changes(&state));
     let current = state.project_lifecycle.accepted().unwrap();
     assert!(!std::ptr::eq(

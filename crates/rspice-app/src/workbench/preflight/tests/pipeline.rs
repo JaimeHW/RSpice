@@ -611,7 +611,7 @@ fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
 /// that finishes in moments.
 fn rc_lowpass() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     enable_only(&mut app.state, &[]);
     crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
     app
@@ -967,7 +967,7 @@ fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
 #[test]
 fn a_run_prepared_off_the_ui_thread_is_the_one_the_frame_would_have_prepared() {
     let mut lowpass = RSpiceApp::test_instance();
-    lowpass.state.project_lifecycle.authority.open_session();
+    lowpass.state.open_project_session();
     enable_only(&mut lowpass.state, &[]);
     crate::workbench::examples::load_example("RC Lowpass Filter", &mut lowpass.state.schematic);
     add_operating_point(&mut lowpass.state);

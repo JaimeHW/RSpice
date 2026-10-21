@@ -1409,7 +1409,7 @@ mod tests {
                         crate::workbench::preferences::TogglePreference::ReducedMotion,
                         true,
                     );
-                    app.state.project_lifecycle.authority.open_session();
+                    app.state.open_project_session();
                     app.state.workbench.coarse_pointer = coarse;
                     let preset = DrawingSheetPreset {
                         id: "lab-documentation-panel".to_owned(),

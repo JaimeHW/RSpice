@@ -18,7 +18,7 @@ const REASON: &str = "sense is tied to SENSE on purpose";
 /// node.
 fn colliding_state() -> AppState {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     add_collision(&mut state, "sense", 600);
     state
 }
@@ -195,7 +195,7 @@ fn numbered_net(finding: &DrcViolation) -> &str {
 #[test]
 fn a_waiver_on_an_unnamed_node_survives_a_recheck_after_its_node_is_renumbered() {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     let first = stub_a_resistor(&mut state, 400);
     let waived = stub_a_resistor(&mut state, 800);
     let result = state

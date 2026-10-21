@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn import_action_opens_an_isolated_draft_in_the_writable_project_library() {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
 
         open_symbol_import_dialog(&mut state);
 
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn form_action_loads_the_selected_typed_definition_as_the_next_revision() {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         let library_name = state.workspace.content.active_view.library.clone();
         let cell_name = "review_form";
         let template = ModelBoundSymbolDefinition::review_only(&library_name, cell_name);

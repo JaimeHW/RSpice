@@ -39,7 +39,7 @@ fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
 #[test]
 fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
     let mut app = app_with_selected_authored_symbol();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state
         .open_workspace_view(crate::state::CellViewRef::new(
             "command_test",
@@ -70,7 +70,7 @@ fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
 #[test]
 fn sheet_properties_open_the_inspector_on_the_sheet() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
     app.state.select_all_schematic_objects();
     app.state.workbench.inspector_visible = false;
@@ -86,7 +86,7 @@ fn sheet_properties_open_the_inspector_on_the_sheet() {
 #[test]
 fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.workspace = Workspace::Design;
     let key = app.state.workspace.content.active_key();
     app.state
@@ -112,7 +112,7 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
     assert!(app.state.dialogs.drawing_sheet_defaults.open);
 
     let mut results = RSpiceApp::test_instance();
-    results.state.project_lifecycle.authority.open_session();
+    results.state.open_project_session();
     results.state.workbench.workspace = Workspace::Results;
     assert!(!Command::SheetProperties.is_enabled(&results));
     assert!(!Command::SheetFormatManager.is_enabled(&results));
@@ -123,7 +123,7 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
 #[test]
 fn sheet_format_manager_requires_live_schematic_edit_authority() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.workspace = Workspace::Design;
     let key = app.state.workspace.content.active_key();
     app.state

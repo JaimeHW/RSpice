@@ -1398,6 +1398,7 @@ fn apply_authenticated_browser_pop(
 impl eframe::App for RSpiceApp {
     /// Called on each frame
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.state.assert_project_open_fact();
         let ctx = ui.ctx().clone();
         let simulation_input_before_frame = FrameSimulationInput::capture(&self.state);
         crate::ui::viewport::capture_root_viewport(&ctx, ui.max_rect());

@@ -19,6 +19,21 @@ mod result_cache;
 #[cfg(not(target_arch = "wasm32"))]
 mod save_acceptance;
 
+/// Test setters for whether a project is open, for every test in the crate.
+/// They move the lifecycle's authority exactly as a test needs it, with no
+/// baseline or binding, and publish the answer the way every transition does.
+impl AppState {
+    pub(crate) fn open_project_session(&mut self) {
+        self.project_lifecycle.authority.open_session();
+        self.project_lifecycle.publish_open(&mut self.project_open);
+    }
+
+    pub(crate) fn close_project_session(&mut self) {
+        self.project_lifecycle.authority.close_project();
+        self.project_lifecycle.publish_open(&mut self.project_open);
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn insert_ac_analysis(state: &mut AppState) -> crate::product::AnalysisInstanceId {
     state
@@ -49,7 +64,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
         .workbench
         .activate(crate::workbench::state::Workspace::Project);
     let baseline = snapshot(&state).expect("baseline");
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state
         .project_lifecycle
         .accept_project(baseline.clone(), None);
@@ -172,7 +187,7 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     let mut state = AppState::default();
     state.provision_test_project_technology_contract();
     let baseline = snapshot(&state).expect("baseline");
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state
         .project_lifecycle
         .accept_project(baseline.clone(), None);
@@ -269,7 +284,7 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
     let baseline = snapshot(&state).expect("baseline");
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state
         .project_lifecycle
         .accept_project(baseline.clone(), None);
@@ -364,7 +379,7 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
             .is_none()
     );
 
-    working_state.project_lifecycle.authority.open_session();
+    working_state.open_project_session();
     working_state
         .project_lifecycle
         .accept_project(baseline, None);
@@ -438,7 +453,7 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
             reference.clone(),
             crate::state::ViewType::VerilogA,
         ));
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state.project_lifecycle.accept_project(baseline, None);
 
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
@@ -490,7 +505,7 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
         "behavior",
         "module behavior(p, n); inout p, n; endmodule",
     );
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state.project_lifecycle.accept_project(baseline, None);
 
     revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
@@ -558,7 +573,7 @@ fn code_sources_change_generated_netlist_and_execution_identity() {
 fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
     let mut state = AppState::default();
     let baseline = snapshot(&state).unwrap();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state
         .project_lifecycle
         .accept_project(baseline.clone(), None);
@@ -587,15 +602,52 @@ fn lifecycle_epoch_advances_across_new_and_close() {
     state.native_project_binding_receipt = Some(receipt.clone());
     let initial = state.project_lifecycle.authority.epoch();
     reset_for_new_project(&mut state);
+    state.assert_project_open_fact();
     let after_new = state.project_lifecycle.authority.epoch();
     assert!(state.native_project_binding_receipt.is_none());
     state.native_project_binding_receipt = Some(receipt);
     mark_project_closed(&mut state);
+    state.assert_project_open_fact();
     let after_close = state.project_lifecycle.authority.epoch();
 
     assert!(after_new > initial);
     assert!(after_close > after_new);
     assert!(state.native_project_binding_receipt.is_none());
+}
+
+/// Model code reads whether a project is open from its own copy, so every
+/// transition that opens or closes the project has to carry the copy with it.
+#[test]
+fn the_model_reads_the_open_project_every_transition_leaves() {
+    let mut state = AppState::default();
+    assert!(state.project_open.is_open());
+    state.assert_project_open_fact();
+    let baseline = snapshot(&state).expect("baseline");
+
+    mark_project_closed(&mut state);
+    assert!(!state.project_open.is_open());
+    state.assert_project_open_fact();
+
+    accept_loaded_project(&mut state, baseline, None);
+    assert!(state.project_open.is_open());
+    state.assert_project_open_fact();
+
+    mark_project_closed(&mut state);
+    reset_for_new_project(&mut state);
+    assert!(state.project_open.is_open());
+    state.assert_project_open_fact();
+
+    state
+        .project_lifecycle
+        .close_restored_session(&mut state.project_open);
+    assert!(!state.project_open.is_open());
+    state.assert_project_open_fact();
+
+    state.open_project_session();
+    assert!(state.project_open.is_open());
+    state.close_project_session();
+    assert!(!state.project_open.is_open());
+    state.assert_project_open_fact();
 }
 
 #[test]
@@ -639,6 +691,7 @@ fn project_replacement_clears_open_model_editor_state() {
     assert!(state.workbench.model_editor_recovery.is_some());
 
     reset_for_new_project(&mut state);
+    state.assert_project_open_fact();
     assert!(state.workbench.model_editor.draft.is_none());
     assert!(state.workbench.model_editor_recovery.is_none());
 
@@ -653,6 +706,7 @@ fn project_replacement_clears_open_model_editor_state() {
         )
         .expect("reopen editor");
     mark_project_closed(&mut state);
+    state.assert_project_open_fact();
     assert!(state.workbench.model_editor.draft.is_none());
     assert!(state.workbench.model_editor_recovery.is_none());
 }

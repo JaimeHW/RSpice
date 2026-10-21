@@ -980,7 +980,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         if !project_open {
-            app.state.project_lifecycle.authority.close_project();
+            app.state.close_project_session();
         }
         let output = ctx.run_ui(
             egui::RawInput {
@@ -1060,7 +1060,7 @@ mod tests {
         };
 
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         let _ = app
             .state
             .workspace
@@ -1520,7 +1520,7 @@ mod tests {
         {
             use crate::services::recent_files::{RecentFile, RecentKind};
             let mut app = RSpiceApp::test_instance();
-            app.state.project_lifecycle.authority.close_project();
+            app.state.close_project_session();
             app.state.recent_files = ["C:/Engineering/afe.rspiceproj", "//lab/rf/rf_pa.rspiceproj"]
                 .into_iter()
                 .enumerate()

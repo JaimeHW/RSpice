@@ -2162,7 +2162,7 @@ mod tests {
         let alpha_root = configured_root("alpha", "alpha.lib", "alpha_n");
         let beta_root = configured_root("beta", "beta.lib", "beta_n");
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         state.model_library_manager.clear();
         state.pdk_config = PdkConfig::default();
         let initial_revision = state.workspace.content.project.revision();
@@ -2215,7 +2215,7 @@ mod tests {
     fn persistence_failure_leaves_configuration_manager_and_project_unchanged() {
         let root = configured_root("persistence", "persisted.lib", "persisted_n");
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         state.model_library_manager.clear();
         state.pdk_config = PdkConfig::default();
         let revision = state.workspace.content.project.revision();
@@ -2278,7 +2278,7 @@ mod tests {
         let root = configured_root("background", "background.lib", "background_n");
         let path = root.join("background.lib");
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         state.model_library_manager.clear();
         let authority = capture_native_model_import_authority(&state);
         assert!(native_model_import_authority_is_current(&authority, &state));
@@ -2328,11 +2328,11 @@ mod tests {
     #[test]
     fn background_authority_binds_the_exact_project_lifecycle() {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         let authority = capture_native_model_import_authority(&state);
         assert!(native_model_import_authority_is_current(&authority, &state));
 
-        state.project_lifecycle.authority.close_project();
+        state.close_project_session();
         assert!(!native_model_import_authority_is_current(
             &authority, &state
         ));

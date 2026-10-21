@@ -142,7 +142,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
 #[test]
 fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.console_visible = false;
 
     start(&mut app.state, &mut app.simulation_controller, false);
@@ -671,7 +671,7 @@ fn app_with_an_open_root(
     use crate::state::{NetLabel, Point, Wire};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     disable_global_process_axis(&mut app.state);
     let root = app.state.workspace.content.simulation_root_reference();
     assert_eq!(
@@ -1257,7 +1257,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
     );
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, binding.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
@@ -1302,7 +1302,7 @@ fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process()
 
     let mut app = RSpiceApp::test_instance();
     app.state.model_library_manager = state.model_library_manager.clone();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, binding.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
@@ -1368,7 +1368,7 @@ fn a_model_binding_blocker_with_no_single_library_names_what_to_select() {
 #[test]
 fn a_models_route_to_a_departed_library_states_its_refusal() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.model_library_manager.clear();
     app.state
         .model_library_manager
@@ -1410,7 +1410,7 @@ fn a_models_route_to_a_departed_library_states_its_refusal() {
 #[test]
 fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.model_library_manager.clear();
     let mut library = crate::state::model_library::ModelLibrary::new("pdk");
     let mut corner = crate::state::model_library::ProcessCorner::new("hot");
@@ -1468,7 +1468,7 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
     );
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Verify);
     app.state.ui.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
@@ -1492,7 +1492,7 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
 #[test]
 fn a_named_line_survives_the_parser_to_buffer_conversion() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
 
     apply_remediation(
         &mut app,
@@ -1513,7 +1513,7 @@ fn app_with_an_unfinished_transient_beside_a_selected_operating_point() -> (
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let plan = app
         .state
         .sim_setup
@@ -1614,7 +1614,7 @@ fn app_with_a_failing_root_and_an_unrelated_open_view() -> (RSpiceApp, crate::st
     use crate::state::{CellViewRef, ComponentType, Point, SchematicState};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let root = app.state.workspace.content.simulation_root_reference();
     app.state
         .workspace

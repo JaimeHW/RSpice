@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn a_frame_that_publishes_live_findings_asks_for_the_next_at_once() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         let ctx = egui::Context::default();
         let start = Instant::now();
         for _ in 0..3 {

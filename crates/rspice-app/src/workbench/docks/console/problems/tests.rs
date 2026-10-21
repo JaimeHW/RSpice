@@ -30,7 +30,7 @@ const HEIGHT: f32 = 420.0;
 
 fn open_state() -> AppState {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state
 }
 
@@ -1288,7 +1288,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
 /// empty drawing, as the frame loop finds it.
 fn design_app() -> crate::workbench::RSpiceApp {
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Design);

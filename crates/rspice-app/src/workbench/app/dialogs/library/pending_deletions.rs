@@ -1918,7 +1918,7 @@ mod tests {
     #[test]
     fn removing_placements_across_two_drawings_undoes_as_one_step() {
         let mut app = app_with_state(default_project_with_two_drawings_instancing_amp());
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         let top_key = CellViewRef::new("user", "top", "schematic").key();
         let aux_key = CellViewRef::new("user", "aux", "schematic").key();
         stage_cell_deletion(

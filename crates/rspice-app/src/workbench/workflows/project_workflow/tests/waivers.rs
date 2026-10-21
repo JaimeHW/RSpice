@@ -33,7 +33,7 @@ fn collision(state: &mut AppState) -> DiagnosticRecord {
 #[test]
 fn a_waiver_survives_save_and_reopen() {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state
         .schematic
         .with_undo("Label the collision", |schematic| {

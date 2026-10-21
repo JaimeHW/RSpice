@@ -59,6 +59,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
         .unwrap();
 
     create_new_project(&mut state);
+    state.assert_project_open_fact();
 
     assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Mil25);
     assert_eq!(state.schematic.session.editor.snap_engine.snap_radius, 8);
@@ -148,6 +149,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     state.dialogs.project_review_dialog.close();
     assert!(close_project_discard(&mut state));
     assert!(!state.project_lifecycle.is_open());
+    state.assert_project_open_fact();
     assert!(!state.workbench.project_launcher_open);
     assert_eq!(
         state.workbench.workspace,
@@ -327,7 +329,7 @@ fn closing_a_project_as_an_edit_settles_checks_nothing() {
 
     let reference = hierarchy_reference::build();
     let mut state = reference.state;
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     let amp = reference.amp_schematic;
     state.open_workspace_view(amp.clone());
     let start = crate::time_compat::Instant::now();
@@ -777,7 +779,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     state
         .model_library_manager
         .add_library(ModelLibrary::new("closing_project_only"));
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     assert!(close_project_discard(&mut state));
     assert!(
         state

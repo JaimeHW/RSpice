@@ -252,7 +252,7 @@ fn seeded(seed: Seed) -> (Reader, Observation) {
         let seen = observe(&ctx, &output, &reader.app);
         return (reader, seen);
     }
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
     crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
     // The default plan steps a millisecond at 10 ns: a hundred thousand

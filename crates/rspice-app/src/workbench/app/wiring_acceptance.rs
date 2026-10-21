@@ -55,7 +55,7 @@ impl Bench {
     /// second, empty sheet follows. Nothing is on the undo history.
     pub(super) fn new(parts: &[(&str, ComponentType, Point, Rotation)]) -> Self {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         let mut library = Library::new(LIBRARY);
         for name in ["top", "parts"] {
             let mut cell = Cell::new(name);

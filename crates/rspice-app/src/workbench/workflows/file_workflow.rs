@@ -667,7 +667,7 @@ mod tests {
     /// the drawing; inside a project the file is imported as a new cell view.
     fn no_project_state() -> AppState {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.close_project();
+        state.close_project_session();
         state
     }
 
@@ -916,7 +916,7 @@ mod tests {
         use crate::state::{ComponentType, Point};
 
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         let active = state.workspace.content.active_view.clone();
         state
             .schematic

@@ -41,7 +41,7 @@ fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
 fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
     for page in ProjectPage::ALL {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state.workbench.workspace = Workspace::Results;
         app.state.workbench.project_page = ProjectPage::Overview;
 
@@ -159,7 +159,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
 
     for command in commands {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.close_project();
+        app.state.close_project_session();
         app.state.workbench.workspace = Workspace::Project;
 
         assert!(
@@ -206,7 +206,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
 #[test]
 fn standalone_schematic_save_remains_available_without_a_project() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.close_project();
+    app.state.close_project_session();
     app.state.schematic.session.current_file = Some("standalone.rsch".into());
 
     assert!(!Command::Save.requires_open_project());

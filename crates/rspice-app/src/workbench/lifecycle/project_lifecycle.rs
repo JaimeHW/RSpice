@@ -43,8 +43,8 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
-use crate::state::CellViewRef;
 use crate::state::project_snapshot::SnapshotSessionCapture;
+use crate::state::{CellViewRef, ProjectOpenFact};
 use crate::workbench::app_state::AppState;
 use rspice_project::{ProjectWorkingSet, SnapshotContent};
 
@@ -84,6 +84,23 @@ pub(crate) struct ProjectLifecycleState {
 impl ProjectLifecycleState {
     pub(crate) const fn is_open(&self) -> bool {
         self.authority.is_open()
+    }
+
+    /// The one writer of the model's copy of whether a project is open.
+    ///
+    /// Every transition that changes [`Self::is_open`] calls this in the same
+    /// call, so model code reading the copy never sees an answer the lifecycle
+    /// no longer gives.
+    fn publish_open(&self, fact: &mut ProjectOpenFact) {
+        fact.set_from_lifecycle(self.is_open());
+    }
+
+    /// A restored session that recorded no open project starts with its
+    /// project closed. A restore builds a fresh lifecycle, so there is nothing
+    /// else to clear.
+    pub(crate) fn close_restored_session(&mut self, fact: &mut ProjectOpenFact) {
+        self.authority.close_project();
+        self.publish_open(fact);
     }
 
     pub(crate) fn operation_in_progress(&self) -> bool {
@@ -510,6 +527,9 @@ pub(crate) fn accept_loaded_project(
     #[cfg(target_arch = "wasm32")]
     release_replaced_browser_bindings(&state.project_lifecycle, binding.as_ref());
     state.project_lifecycle.authority.open_session();
+    state
+        .project_lifecycle
+        .publish_open(&mut state.project_open);
     state.project_lifecycle.accept_project(baseline, binding);
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -551,6 +571,9 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
         authority,
         ..ProjectLifecycleState::default()
     };
+    state
+        .project_lifecycle
+        .publish_open(&mut state.project_open);
     let _ = refresh_registry(state);
 }
 
@@ -577,6 +600,9 @@ pub(crate) fn mark_project_closed(state: &mut AppState) {
         authority,
         ..ProjectLifecycleState::default()
     };
+    state
+        .project_lifecycle
+        .publish_open(&mut state.project_open);
 }
 
 #[cfg(target_arch = "wasm32")]

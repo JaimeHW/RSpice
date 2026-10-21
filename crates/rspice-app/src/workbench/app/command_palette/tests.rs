@@ -524,7 +524,7 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
 #[test]
 fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs() {
     let mut app = test_app();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let mut library = crate::state::Library::new("behavioral");
     let mut cell = crate::state::Cell::new("gain");
     cell.add_view(crate::state::View::new(
@@ -560,7 +560,7 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
 
     // With nothing it could write, neither is offered as runnable.
     let mut read_only = test_app();
-    read_only.state.project_lifecycle.authority.open_session();
+    read_only.state.open_project_session();
     let names = read_only
         .state
         .library_manager
@@ -1023,7 +1023,7 @@ fn a_notice_reported_from_the_palette_is_toasted_by_the_next_frame() {
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
     app.state
         .pdk_config

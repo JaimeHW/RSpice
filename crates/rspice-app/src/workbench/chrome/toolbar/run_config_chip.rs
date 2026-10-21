@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn the_plan_chip_owns_no_dialog_construction_of_its_own() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
+        app.state.open_project_session();
         app.state.workbench.workspace = Workspace::Design;
 
         Command::ManageSimulationPlans.execute(&mut app);

@@ -498,7 +498,7 @@ mod tests {
 
     fn open_state() -> AppState {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         state
     }
 

@@ -1726,7 +1726,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
 #[test]
 fn a_failed_analysis_is_written_once_in_its_runs_log_and_filed_in_problems() {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     let attribution = rspice_results::convergence_attribution::from_core(
         &rspice_core::diagnostics::ConvergenceDiagnostic {
             class: rspice_core::diagnostics::ConvergenceFailureClass::NewtonNonConvergence,
@@ -1819,7 +1819,7 @@ fn a_real_operating_point_refusal_is_filed_with_the_conductor_the_engine_named()
     );
 
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     let run_sequence = state.simulation.start_run().id;
     let message = format!("Operating point failed: {error}");
     SimulationController::report_failed_analysis(
@@ -1844,7 +1844,7 @@ fn a_real_operating_point_refusal_is_filed_with_the_conductor_the_engine_named()
 #[test]
 fn a_failure_that_named_nothing_writes_one_line() {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     let run_sequence = state.simulation.start_run().id;
 
     SimulationController::report_failed_analysis(

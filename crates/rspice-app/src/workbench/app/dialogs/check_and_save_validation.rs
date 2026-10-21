@@ -1312,7 +1312,7 @@ mod tests {
         use crate::workbench::app_state::waivers::WaiverAction;
 
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         // An open pin is an error under this deck, and one a waiver may cover.
         state
             .workspace
@@ -1936,7 +1936,7 @@ mod tests {
 
         let reference = hierarchy_reference::build();
         let mut state = reference.state;
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         state.open_workspace_view(reference.amp_schematic);
         draw_supply_source(&mut state);
 

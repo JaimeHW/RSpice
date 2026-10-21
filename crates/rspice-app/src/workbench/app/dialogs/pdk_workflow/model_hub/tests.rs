@@ -64,7 +64,7 @@ fn installed_hub(
 
 fn open_project() -> AppState {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     state.model_library_manager.clear();
     state
 }

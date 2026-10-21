@@ -115,6 +115,9 @@ pub struct AppState {
     /// reconstructs this boundary at startup.
     pub(crate) project_lifecycle:
         Box<crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState>,
+    /// Whether a project is open, as model code reads it. Only the lifecycle
+    /// writes it, in the call that opens or closes the project.
+    pub(crate) project_open: crate::state::ProjectOpenFact,
     /// Pending cell deletion (library, cell_name)
     pub(crate) pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
@@ -186,6 +189,17 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// The model's copy of whether a project is open agrees with the project
+    /// lifecycle, in debug builds. The frame checks this before it does
+    /// anything else, and tests check it after each lifecycle transition.
+    pub(crate) fn assert_project_open_fact(&self) {
+        debug_assert_eq!(
+            self.project_open.is_open(),
+            self.project_lifecycle.is_open(),
+            "the model's project-open fact disagrees with the project lifecycle"
+        );
+    }
+
     /// Reserve the next project revision before a library membership
     /// transaction publishes any live state.
     pub(crate) fn preflight_project_library_mutation(

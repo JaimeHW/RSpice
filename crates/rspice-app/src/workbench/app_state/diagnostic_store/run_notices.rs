@@ -745,7 +745,7 @@ mod tests {
 
     fn open_state(runs: &[u64]) -> AppState {
         let mut state = AppState::default();
-        state.project_lifecycle.authority.open_session();
+        state.open_project_session();
         state.simulation.retained.runs = runs
             .iter()
             .map(|run| crate::state::SimulationRun::new(*run))

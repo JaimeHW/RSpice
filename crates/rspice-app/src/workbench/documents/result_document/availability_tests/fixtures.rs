@@ -151,7 +151,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
     // The production viewer classifies retained data outside an open
     // project as `no-project`; this fixture represents an open Results
     // workspace and must establish that authority explicitly.
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let analysis = match viewer {
         ResultViewer::Waves
         | ResultViewer::Table

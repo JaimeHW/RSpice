@@ -11,7 +11,7 @@ const LIBRARY: &str = "behavioral";
 /// the form open on it with `name` and `ports` typed.
 fn app_with_draft(name: &str, ports: &str) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     let mut library = Library::new(LIBRARY);
     library.add_cell(Cell::new("taken"));
     app.state.library_manager.add_library(library);

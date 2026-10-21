@@ -195,7 +195,7 @@ fn no_project_app() -> RSpiceApp {
 /// A project open in the Design workspace on its bootstrapped schematic.
 fn project_open_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app
 }
 

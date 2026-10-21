@@ -340,7 +340,7 @@ fn open_veriloga_view_opens_the_instances_module_in_design() {
 #[test]
 fn the_descend_shortcut_opens_a_veriloga_instances_view_as_its_row_does() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
     let (_, reference) = select_a_veriloga_instance(&mut app.state);
     assert!(Command::DescendHierarchyDirect.is_enabled(&app));

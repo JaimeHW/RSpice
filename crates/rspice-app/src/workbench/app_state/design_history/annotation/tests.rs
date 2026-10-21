@@ -25,7 +25,7 @@ struct Fixture {
 
 fn fixture(names: &[&str]) -> Fixture {
     let mut state = AppState::default();
-    state.project_lifecycle.authority.open_session();
+    state.open_project_session();
     let owner = state.workspace.content.active_schematic_reference();
     let plan = state.sim_setup.stable_analysis_plan().unwrap().id();
     let mut sources = Vec::new();

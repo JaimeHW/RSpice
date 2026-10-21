@@ -68,7 +68,7 @@ pub(super) fn add_operating_point(state: &mut AppState) {
 /// sections alone, with an operating point.
 pub(super) fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
     add_operating_point(&mut app.state);
     app.state
@@ -165,7 +165,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
     };
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     enable_only(&mut app.state, &[]);
 
     let mut rules = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
@@ -462,7 +462,7 @@ fn app_with_an_amp_instance(
     };
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
+    app.state.open_project_session();
     enable_only(&mut app.state, &[]);
     add_operating_point(&mut app.state);
     let root = app.state.workspace.content.simulation_root_reference();
