@@ -517,6 +517,52 @@ endmodule
         assert!(restore(&original, &malformed).is_err());
     }
 
+    /// The design reads a released XSPICE tristate (`1z`) as `z`. An image
+    /// whose reader of that net holds `1`, as one written while the design
+    /// read the state alone would, is refused, and the refusal names the net.
+    #[test]
+    fn a_stale_shared_net_image_is_refused_by_the_nets_name() {
+        let shared = |value| {
+            let mut store = store("module shared; wire io, seen; assign seen = io; endmodule");
+            let io = signal(&store, "io");
+            store
+                .connect_bits(&[vec![DigitalBitConnection { signal: io, bit: 0 }]])
+                .unwrap();
+            let drivers = store
+                .attach_external_bits(
+                    &[0],
+                    &[(
+                        0,
+                        EventTarget {
+                            node_id: usize::MAX,
+                            port_name: "out".into(),
+                            instance: "atri".into(),
+                            driver_index: 0,
+                        },
+                    )],
+                )
+                .unwrap();
+            run_drivers(&mut store);
+            store.publish_external_bank(&[(drivers[0], value)], &[]);
+            drain(&mut store);
+            store
+        };
+        let released = shared(DigitalValue::new(DigitalState::One, DigitalStrength::HighZ));
+        let io = signal(&released, "io");
+        assert_eq!(
+            released.values[usize::from(io)].bit(0),
+            rspice_veriloga::four_state::FourStateBit::HighImpedance
+        );
+        let driven = shared(DigitalValue::one());
+        let mut stale = released.checkpoint().unwrap();
+        stale.values[usize::from(io)] =
+            driven.checkpoint().unwrap().values[usize::from(io)].clone();
+        let error = restore(&released, &stale)
+            .err()
+            .expect("a stale shared-net image is refused");
+        assert!(error.contains("net `io`"), "{error}");
+    }
+
     #[test]
     fn store_checkpoint_rejects_inconsistent_images_without_changing_the_receiver() {
         let mut original = store(

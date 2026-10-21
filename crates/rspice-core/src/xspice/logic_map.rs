@@ -59,13 +59,6 @@ const PULL: DigitalDriveStrength = DigitalDriveStrength {
 
 /// The 1364 strength value an XSPICE value maps to. A value whose state names
 /// its own band (`0r`, `1z`, ...) maps by that band, as its event code does.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the shared-net resolution and the HDL's read of an XSPICE value are its callers"
-    )
-)]
 pub(crate) fn hdl_strength(value: DigitalValue) -> StrengthBit {
     use FourStateBit::{One, Unknown, Zero};
     match value.event_code() {

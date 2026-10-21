@@ -4,6 +4,7 @@
 use super::strength::{NetResolution, StrengthBit};
 use super::*;
 use crate::xspice::event_scheduler::EventTarget;
+use crate::xspice::logic_map;
 use crate::xspice::{DigitalState, DigitalValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -538,23 +539,14 @@ impl DigitalSignalStore {
         self.connected = Some(connected);
     }
 
-    fn connected_hdl_value(
-        &self,
-        connected: &ConnectedBits,
-        net_index: usize,
-    ) -> Option<DigitalValue> {
-        let net = &connected.topology.nets[net_index];
-        // A design with strengths hands the converters its drive strength.
+    /// What the design drives onto a connected net: its contributions at
+    /// their drive strengths in a design with strengths, and otherwise the
+    /// table 4-1 resolution of its four-state values, driven strong.
+    fn connected_hdl_drive(&self, net: &BitNet) -> StrengthBit {
         if self.strengths.any {
-            let drive = self.connected_strength(net).drive();
-            return (drive.value != FourStateBit::HighImpedance)
-                .then(|| crate::xspice::logic_map::xspice_value(drive));
-        }
-        match self.connected_four_state(net) {
-            FourStateBit::Zero => Some(DigitalValue::zero()),
-            FourStateBit::One => Some(DigitalValue::one()),
-            FourStateBit::Unknown => Some(DigitalValue::unknown()),
-            FourStateBit::HighImpedance => None,
+            self.connected_strength(net)
+        } else {
+            StrengthBit::strong(self.connected_four_state(net))
         }
     }
 
@@ -607,24 +599,58 @@ impl DigitalSignalStore {
         resolved
     }
 
+    /// The XSPICE value a connected net resolves to: the design's drive `hdl`
+    /// with every XSPICE driver of the net but `excluded`.
+    ///
+    /// - A net the design leaves undriven resolves by ngspice's table, so a
+    ///   net only XSPICE drives reads exactly as it does in ngspice.
+    /// - Strong values resolve by the same table, which is IEEE 1364-2005
+    ///   resolution restricted to them.
+    /// - Once an XSPICE driver is not strong, or the design has strengths,
+    ///   the net resolves as 1364 does (section 7.10) over the values
+    ///   `logic_map` maps, and XSPICE reads the result mapped back.
     fn connected_external_value(
         &self,
         connected: &ConnectedBits,
         net_index: usize,
-        hdl_value: Option<DigitalValue>,
+        hdl: StrengthBit,
         excluded: Option<usize>,
     ) -> DigitalValue {
-        let mut resolved = hdl_value;
-        for &slot in &connected.topology.external_by_net[net_index] {
-            if excluded == Some(slot) {
-                continue;
-            }
-            let value = connected.external_values[slot];
-            if value.state != DigitalState::HighZ {
-                resolved = Some(resolved.map_or(value, |existing| existing.resolve(&value)));
-            }
+        let drivers = || {
+            connected.topology.external_by_net[net_index]
+                .iter()
+                .filter(move |&&slot| excluded != Some(slot))
+                .map(|&slot| connected.external_values[slot])
+                .filter(|value| value.state != DigitalState::HighZ)
+        };
+        if hdl == StrengthBit::HIGH_Z {
+            return drivers()
+                .reduce(|resolved, value| resolved.resolve(&value))
+                .unwrap_or_else(DigitalValue::high_z);
         }
-        resolved.unwrap_or_else(DigitalValue::high_z)
+        // Event codes 0-2 are the strong band.
+        if !self.strengths.any && drivers().all(|value| value.event_code() <= 2) {
+            let hdl = logic_map::xspice_value(hdl.drive());
+            return drivers().fold(hdl, |resolved, value| resolved.resolve(&value));
+        }
+        let resolved = drivers().fold(hdl, |resolved, value| {
+            resolved.resolve(logic_map::hdl_strength(value))
+        });
+        logic_map::xspice_value(resolved.drive())
+    }
+
+    /// A connected net named for a diagnostic: its first member's signal,
+    /// with the bit when the signal is a vector.
+    fn connected_net_name(&self, net: &BitNet) -> String {
+        let Some(member) = net.members.first() else {
+            return "an empty net".into();
+        };
+        let name = super::signal_name(&self.plan, member.signal);
+        if self.widths[usize::from(member.signal)] > 1 {
+            format!("`{name}` bit {}", member.bit)
+        } else {
+            format!("`{name}`")
+        }
     }
 
     pub(super) fn validate_connected_checkpoint(
@@ -636,7 +662,7 @@ impl DigitalSignalStore {
         };
         for (index, net) in connected.topology.nets.iter().enumerate() {
             members.extend(net.members.iter().copied());
-            let hdl = self.connected_hdl_value(connected, index);
+            let hdl = self.connected_hdl_drive(net);
             let resolved = self.connected_external_value(connected, index, hdl, None);
             let resolved = self.forced_connected_value(net).unwrap_or(resolved);
             if connected.resolved[index] != resolved
@@ -644,7 +670,10 @@ impl DigitalSignalStore {
                     self.values[usize::from(member.signal)].bit(member.bit) != hdl_bit(resolved)
                 })
             {
-                return Err("connected bit value differs from driver resolution".into());
+                return Err(format!(
+                    "the connected value of net {} differs from its drivers' resolution",
+                    self.connected_net_name(net)
+                ));
             }
             for &slot in &connected.topology.external_by_net[index] {
                 let expected = if connected.topology.other_driver_observers[slot] {
@@ -653,7 +682,11 @@ impl DigitalSignalStore {
                     DigitalValue::high_z()
                 };
                 if connected.other_driver_values[slot] != expected {
-                    return Err("other-driver observation differs from driver resolution".into());
+                    return Err(format!(
+                        "an XSPICE driver's view of net {} differs from the other drivers' \
+                         resolution",
+                        self.connected_net_name(net)
+                    ));
                 }
             }
         }
@@ -668,7 +701,7 @@ impl DigitalSignalStore {
     ) {
         let topology = Arc::clone(&connected.topology);
         let net = &topology.nets[net_index];
-        let hdl = self.connected_hdl_value(connected, net_index);
+        let hdl = self.connected_hdl_drive(net);
         // A forced member bit decides the whole connected net (IEEE 1364-2005
         // section 9.3.2): a converter reading it sees the forced value, and a
         // drive from outside the design is overridden while the force lasts.
@@ -767,15 +800,11 @@ impl DigitalSignalStore {
     }
 }
 
+/// The bit the design reads for a connected net's resolved value: the logic
+/// value of its 1364 reading. A released XSPICE tristate (`1z`) reads `z`,
+/// and an undetermined `0u` or `1u` (an `L` or `H`) reads `x`.
 fn hdl_bit(value: DigitalValue) -> FourStateBit {
-    match value.state {
-        DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => FourStateBit::Zero,
-        DigitalState::One | DigitalState::OneR | DigitalState::OneZ => FourStateBit::One,
-        DigitalState::HighZ => FourStateBit::HighImpedance,
-        DigitalState::Unknown | DigitalState::UnknownR | DigitalState::UnknownZ => {
-            FourStateBit::Unknown
-        }
-    }
+    logic_map::hdl_strength(value).value()
 }
 
 #[cfg(test)]

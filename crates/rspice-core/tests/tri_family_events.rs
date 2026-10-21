@@ -583,6 +583,54 @@ fn deck_e3_xspice_flop_follows_the_hdl_divider_through_its_clock_delay() {
 }
 
 //=============================================================================
+// A released XSPICE tristate on a net an HDL module reads
+//=============================================================================
+
+/// A `d_tristate` whose enable is low publishes its data level at high
+/// impedance (`1z`), and the HDL module reading the net sees `z`: IEEE 1364
+/// has no driven level at high impedance, and `1z` maps to what a disabled
+/// `bufif1` drives. Icarus Verilog 13.0 reads that `bufif1` as `z`
+/// (`io === 1'bz`). ngspice-46's `d_cosim` with Icarus is no oracle here: it
+/// hands Icarus the level alone, so its module reads the released output as
+/// `1`. While the enable is high the tristate drives `1s`, which reads `1`.
+#[test]
+fn an_hdl_module_reads_a_released_xspice_tristate_as_high_impedance() {
+    let reader = ModelFile::new(
+        "module rdz(io, isz);\n input io; wire io; output isz; wire isz;\n assign isz = (io === 1'bz);\nendmodule\n",
+    );
+    let result = run(
+        &format!(
+            "* a released XSPICE tristate read by an HDL module\n\
+             .model up d_pullup\n\
+             .model tri1 d_tristate\n\
+             .model enable adc_bridge(in_low=0.5 in_high=0.5)\n\
+             ven ven 0 pulse(0 1 4n 1p 1p 4n 100n)\n\
+             aen [ven] [en] enable\n\
+             aup din up\n\
+             atri din en io tri1\n\
+             Xrd io isz rdz\n\
+             .va \"{}\" rdz\n\
+             .end\n",
+            reader.path()
+        ),
+        14e-9,
+        0.1e-9,
+    );
+    let points = trace_points(&result, "isz");
+    let at = |time: f64| {
+        points
+            .iter()
+            .take_while(|(when, _)| *when <= time)
+            .last()
+            .map(|(_, state)| *state)
+            .unwrap_or_else(|| panic!("isz has no value at {time:e}: {points:?}"))
+    };
+    assert_eq!(at(2e-9), DigitalState::One, "released: {points:?}");
+    assert_eq!(at(7.5e-9), DigitalState::Zero, "enabled: {points:?}");
+    assert_eq!(at(13e-9), DigitalState::One, "released again: {points:?}");
+}
+
+//=============================================================================
 // Deck G: pure digital, with no analog node in the deck at all
 //=============================================================================
 
