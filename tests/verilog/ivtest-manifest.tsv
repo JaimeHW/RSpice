@@ -296,9 +296,9 @@ br_gh99d	vlg	passed	L1	pass	PASSED
 br_gh99f	vlg	passed	L1	pass	PASSED
 br_gh99g	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
 br_gh99h	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
-br_gh99i	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `buffer`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
-br_gh99j	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `buffer`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
-br_gh99k	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `buffer`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+br_gh99i	vlg	passed	L7	refused:bufif1	Semantic error: Unsupported feature: the gate primitive `bufif1` (IEEE 1364-2005 section 7) has no executable form yet
+br_gh99j	vlg	passed	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
+br_gh99k	vlg	passed	L7	refused:cmos	Semantic error: Unsupported feature: the gate primitive `cmos` (IEEE 1364-2005 section 7) has no executable form yet
 br_gh99l	vlg	passed	L1	pass	PASSED
 br_gh99m	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 br_gh99o	vlg	passed	L1	pass	PASSED
@@ -314,7 +314,7 @@ br_ml20190806a	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital 
 br_ml20190806b	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 br_ml20190814	vlg	gold	-	excluded:sdf-annotate	
 br_mw20171108	vlg	passed	L3	pass	PASSED
-bufif	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `ad_drv`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+bufif	vlg	passed	L7	refused:bufif1	Semantic error: Unsupported feature: the gate primitive `bufif1` (IEEE 1364-2005 section 7) has no executable form yet
 busbug	vlg	gold	L1	pass	matches the gold file
 ca_force	vlg	passed	L4	racy	passes in reverse order only; no PASSED line (1 output lines)
 ca_func	vlg	passed	-	excluded:flag-gstrict-ca-eval	
@@ -514,9 +514,9 @@ function8	vlg	passed	L4	pass	PASSED
 function9	vlg	passed	L4	pass	PASSED
 function_exp	vlg	passed	L3	pass	PASSED
 ga_and	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
-ga_mod	vlg	passed	L4	refused:module-instance	testbench gap: no root selection (-s main); Parse error: Unsupported module instance `foo`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elab...
-ga_mod1	vlg	passed	L4	refused:module-instance	testbench gap: no root selection (-s main); Parse error: Unsupported module instance `foo`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elab...
-ga_mod2	vlg	passed	L4	refused:module-instance	testbench gap: no root selection (-s main); Parse error: Unsupported module instance `u`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabor...
+ga_mod	vlg	passed	L4	pass	testbench gap: no root selection (-s main); PASSED
+ga_mod1	vlg	passed	L4	pass	testbench gap: no root selection (-s main); PASSED
+ga_mod2	vlg	passed	L4	pass	testbench gap: no root selection (-s main); PASSED
 ga_nand	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
 ga_nor	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
 ga_or	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
@@ -670,7 +670,7 @@ nested_impl_event2	vlg	gold	L1	refused:feature	Semantic error: Unsupported featu
 no_if_statement	vlg	ce	-	excluded:systemverilog:var	
 no_timescale_in_module	vlg	ce	L1	refused:module-item	Parse error: Unsupported module item: __rspice_timescale
 npmos	vlg	passed	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
-npmos2	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `ad_drv`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+npmos2	vlg	passed	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
 onehot	vlg	passed	L5	pass	PASSED
 p_monta	vlg	passed	L3	pass	PASSED
 par_mismatch	vlg	ce	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
@@ -743,11 +743,11 @@ pr1033	vlg	gold	L1	pass	matches the gold file
 pr1065	vlg	gold	L5	pass	matches the gold file
 pr1072	vlg	passed	L1	pass	PASSED
 pr1077	vlg	gold	-	excluded:flag-g2	
-pr1087	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `INST_COUNTER`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this comp...
+pr1087	vlg	passed	L4	refused:instance-array-connection	Semantic error: Unsupported feature: instance array connection: port 'CLOCK_I' of an array of instances is connected to an expression; IEEE 1364-2005 section 12...
 pr1101	vlg	passed	L1	pass	PASSED
 pr1115	vlg	passed	L1	pass	PASSED
-pr1353345	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `U`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabor...
-pr1353345b	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `U`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabor...
+pr1353345	vlg	passed	L4	refused:instance-array-connection	Semantic error: Unsupported feature: instance array connection: port 'Q' of an array of instances is connected to an expression; IEEE 1364-2005 section 12.1.3 s...
+pr1353345b	vlg	passed	L4	refused:instance-array-connection	Semantic error: Unsupported feature: instance array connection: port 'Q' of an array of instances is connected to an expression; IEEE 1364-2005 section 12.1.3 s...
 pr136	vlg	passed	L1	pass	PASSED
 pr1367855	vlg	passed	L1	pass	PASSED
 pr1380261	vlg	passed	L1	pass	PASSED
@@ -786,7 +786,7 @@ pr1570451b	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 out
 pr1570635	vlg	passed	L1	pass	PASSED
 pr1570635b	vlg	passed	L1	pass	PASSED
 pr1574175	vlg	gold	L1	pass	matches the gold file
-pr1581580	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `u_lat`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
+pr1581580	vlg	passed	L4	pass	PASSED
 pr1587634	vlg	co	-	excluded:systemverilog:-=	
 pr1587669	vlg	gold	-	excluded:systemverilog:+=	
 pr1589497	vlg	gold	L3	pass	matches the gold file
@@ -937,7 +937,7 @@ pr1875866b	vlg	passed	L1	pass	PASSED
 pr1876798	vlg	gold	L5	pass	matches the gold file
 pr1877740	vlg	passed	L1	pass	PASSED
 pr1877743	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-pr1878909	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `test_mod0`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compile...
+pr1878909	vlg	passed	L4	refused:instance-array-connection	Semantic error: Unsupported feature: instance array connection: port 'in_0' of an array of instances is connected to an expression; IEEE 1364-2005 section 12.1....
 pr1879226	vlg	passed	L1	pass	PASSED
 pr1883052	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 pr1883052b	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
@@ -945,7 +945,7 @@ pr1885847	vlg	gold	L1	pass	matches the gold file
 pr1887168	vlg	gold	L1	pass	matches the gold file
 pr1892959	vlg	passed	L3	pass	PASSED
 pr1892959b	vlg	passed	L3	pass	PASSED
-pr1898983	vlg	gold	L4	refused:module-instance	Parse error: Unsupported module instance `sm`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabo...
+pr1898983	vlg	gold	L4	pass	matches the gold file
 pr1901125	vlg	passed	L3	pass	PASSED
 pr1903157	vlg	co	L1	pass	compiled
 pr1903324	vlg	passed	L4	pass	PASSED
@@ -1069,8 +1069,8 @@ pr2202846b	vlg	passed	L1	pass	PASSED
 pr2202846c	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr2208681	vlg	passed	L1	pass	PASSED
 pr2215342	vlg	passed	-	excluded:flag-grelative-include	
-pr2219441	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `child`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
-pr2219441b	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `child`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
+pr2219441	vlg	passed	L4	refused:instance-array-connection	Semantic error: Unsupported feature: instance array connection: port 'sel' of an array of instances is connected to an expression; IEEE 1364-2005 section 12.1.3...
+pr2219441b	vlg	passed	L4	refused:instance-array-connection	Semantic error: Unsupported feature: instance array connection: port 'sel' of an array of instances is connected to an expression; IEEE 1364-2005 section 12.1.3...
 pr2224845	vlg	passed	L1	pass	PASSED
 pr2224949	vlg	passed	L1	pass	PASSED
 pr2233180	vlg	passed	L1	pass	PASSED
@@ -1141,8 +1141,8 @@ pr2722339a	vlg	passed	L1	pass	PASSED
 pr2722339b	vlg	passed	L1	pass	PASSED
 pr2723712	vlg	passed	L1	pass	PASSED
 pr2725700a	vlg	passed	L7	refused:bufif0	Parse error: Unsupported module item: bufif0
-pr2725700b	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `bufs`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler ela...
-pr2725700c	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `bufs`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler ela...
+pr2725700b	vlg	passed	L7	refused:continuous-assignment	Parse error: Unsupported continuous assignment: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the reso...
+pr2725700c	vlg	passed	L7	refused:continuous-assignment	Parse error: Unsupported continuous assignment: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the reso...
 pr2728032	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 pr2728547	vlg	passed	L5	pass	PASSED
 pr2728812a	vlg	passed	L1	pass	PASSED
@@ -1268,8 +1268,8 @@ pr3284821	vlg	passed	L5	pass	PASSED
 pr3292735	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found LParen
 pr3296466a	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
 pr3296466b	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
-pr3296466c	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `t`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabor...
-pr3296466d	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `t3`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabo...
+pr3296466c	vlg	passed	L7	refused:tran	Semantic error: Unsupported feature: the gate primitive `tran` (IEEE 1364-2005 section 7) has no executable form yet
+pr3296466d	vlg	passed	L7	refused:tran	Semantic error: Unsupported feature: the gate primitive `tran` (IEEE 1364-2005 section 7) has no executable form yet
 pr3306516	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 pr3309391	vlg	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
 pr3368642	vlg	passed	L4	pass	PASSED
@@ -1474,7 +1474,7 @@ rise_fall_delay2	vlg	passed	L6	refused:delay-control	Parse error: Unsupported de
 rise_fall_delay3	vlg	passed	L6	refused:tranif1	Semantic error: Unsupported feature: the gate primitive `tranif1` (IEEE 1364-2005 section 7) has no executable form yet
 rl_pow	vlg	passed	L1	pass	PASSED
 rnpmos	vlg	passed	L7	refused:rnmos	Semantic error: Unsupported feature: the gate primitive `rnmos` (IEEE 1364-2005 section 7) has no executable form yet
-rnpmos2	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `ad_drv`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+rnpmos2	vlg	passed	L7	refused:rnmos	Semantic error: Unsupported feature: the gate primitive `rnmos` (IEEE 1364-2005 section 7) has no executable form yet
 rop	vlg	passed	L1	pass	PASSED
 rptconcat	vlg	passed	L1	pass	PASSED
 rtran	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
