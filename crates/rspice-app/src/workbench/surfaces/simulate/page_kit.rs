@@ -1235,6 +1235,11 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench/surfaces");
         let mut paths = vec![root.join("simulate.rs")];
         walk(&root.join("simulate"), &mut paths);
+        assert!(
+            paths.len() > 1,
+            "the walk of {} found no source files; a scan that reaches nothing passes forever",
+            root.join("simulate").display()
+        );
         paths.sort();
         let sources: Vec<(PathBuf, String)> = paths
             .into_iter()
