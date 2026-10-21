@@ -970,7 +970,7 @@ fn evaluate_ascending_polynomial(
             imaginary
                 .multiply_scaled(omega)
                 .multiply(-1.0)
-                .add(ScaledProduct::ONE.multiply(*coefficient)),
+                .add_scaled(ScaledProduct::ONE.multiply(*coefficient)),
             real.multiply_scaled(omega),
         );
     }
@@ -1000,18 +1000,18 @@ fn s_xfer_gain_at(coefficients: &SXferCoefficients, frequency: Value) -> Complex
     let omega = ScaledProduct::ONE.multiply(2.0 * PI).multiply(frequency);
     let (nr, ni) = evaluate_ascending_polynomial(numerator, omega);
     let (dr, di) = evaluate_ascending_polynomial(denominator, omega);
-    let norm_squared = dr.multiply_scaled(dr).add(di.multiply_scaled(di));
+    let norm_squared = dr.multiply_scaled(dr).add_scaled(di.multiply_scaled(di));
     // Apply f64's exponent range only after the complete quotient. Neither a
     // polynomial value, the numerator gain, nor |D|^2 has to fit on its own.
     // An unresolved zero denominator remains non-finite so AC can refuse it.
     Complex64::new(
         nr.multiply_scaled(dr)
-            .add(ni.multiply_scaled(di))
+            .add_scaled(ni.multiply_scaled(di))
             .multiply(coefficients.gain)
             .divide(norm_squared)
             .value(),
         ni.multiply_scaled(dr)
-            .add(nr.multiply_scaled(di).multiply(-1.0))
+            .add_scaled(nr.multiply_scaled(di).multiply(-1.0))
             .multiply(coefficients.gain)
             .divide(norm_squared)
             .value(),
@@ -1105,7 +1105,7 @@ fn s_xfer_transient_partial(coefficients: &SXferCoefficients, timestep: Value) -
     // not this derivative, even though the legacy ngspice callback used one.
     let mut partial = ScaledProduct::ZERO;
     for index in 0..=order {
-        partial = partial.multiply(dt).add(
+        partial = partial.multiply(dt).add_scaled(
             ScaledProduct::ONE.multiply(coefficients.numerator.get(index).copied().unwrap_or(0.0)),
         );
     }
@@ -1124,7 +1124,7 @@ fn s_xfer_canonical_transient_eval(
         let gain = s_xfer_transient_partial(coefficients, ctx.timestep);
         let input = ScaledProduct::ONE
             .multiply(ctx.input("in"))
-            .add(ScaledProduct::ONE.multiply(offset));
+            .add_scaled(ScaledProduct::ONE.multiply(offset));
         return Ok((gain.multiply_scaled(input).value(), gain.value()));
     }
 

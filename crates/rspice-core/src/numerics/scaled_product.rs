@@ -67,11 +67,12 @@ impl ScaledProduct {
     /// range can cancel against a finite offset to yield a finite result.
     #[doc(hidden)]
     pub fn plus(self, offset: Value) -> Value {
-        self.add(Self::ONE.multiply(offset)).value()
+        self.add_scaled(Self::ONE.multiply(offset)).value()
     }
 
+    /// Add two retained products without materializing their full values.
     #[doc(hidden)]
-    pub fn add(self, other: Self) -> Self {
+    pub fn add_scaled(self, other: Self) -> Self {
         if self.mantissa == 0.0 {
             return other;
         }

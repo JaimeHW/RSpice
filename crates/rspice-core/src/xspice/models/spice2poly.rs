@@ -412,7 +412,7 @@ fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEv
                 product = product.multiply(inputs[input_index]);
             }
         }
-        value = value.add(product);
+        value = value.add_scaled(product);
         for &(input_index, exponent) in &term.active_exponents {
             let input = inputs[input_index];
             let partial = if input != 0.0 {
@@ -420,7 +420,7 @@ fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEv
             } else {
                 evaluate_poly_partial_slow(inputs, term, input_index, exponent)
             };
-            partials[input_index] = partials[input_index].add(partial);
+            partials[input_index] = partials[input_index].add_scaled(partial);
         }
     }
     PolyEval {
