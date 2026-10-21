@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 _XYCE_EXCLUSION_FIXTURE = None
 
 # The `veriloga`-gated rspice-core integration targets that no pull-request lane
-# names, each with the reason it cannot run on a hosted runner. Anything not
+# names, each with the reason no lane runs it. Anything not
 # listed here must appear in both Verilog-A steps of `ci.yml`; see
 # `CiConfigurationTests.test_veriloga_gated_core_suites_run_on_both_routes`.
 VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
@@ -26,6 +26,11 @@ VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
     "veriloga_bsim4_ac_oracle": (
         "the AC arm of the same externally supplied BSIM4.8 source, unavailable "
         "for the same reason."
+    ),
+    "public_paths_snapshot": (
+        "holds no test: it only names public paths, so a route would run "
+        "nothing. Its Verilog-A paths are compiled by the all-features Clippy "
+        "in python.yml."
     ),
 }
 
