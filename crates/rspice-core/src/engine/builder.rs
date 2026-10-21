@@ -5462,6 +5462,15 @@ fn add_connect_rule_converter(
     if !drivers.is_empty() {
         instance.tap_digital_drivers("in", drivers);
     }
+    // An HDL port's converter reads the design's strength levels, which the
+    // XSPICE value on its event node carries only as a class.
+    if bridge.event_node.is_some() {
+        match bridge.kind {
+            XspiceAutoBridgeKind::Adc => {}
+            XspiceAutoBridgeKind::Dac => instance.read_hdl_drives("in"),
+            _ => instance.read_hdl_drives("d"),
+        }
+    }
     instance.init().map_err(|e| {
         SimulationError::Circuit(format!(
             "Failed to initialize the connect-rule converter '{instance_name}' on node \

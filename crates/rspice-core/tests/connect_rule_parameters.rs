@@ -517,6 +517,60 @@ fn an_hdl_drive_strength_picks_the_converter_resistance() {
     }
 }
 
+/// Supply and weak drives keep their own resistances through an HDL port's
+/// converter, which XSPICE's strong and resistive classes would not: a 1
+/// into a 1 kΩ load at the `d2a` defaults (`vsup` 3.3 V, `rsup` 2 Ω, `rpull`
+/// 10 kΩ, `rweak` 100 kΩ) settles at `3.3·1k/(1k + r)`, so 3.293413 V,
+/// 0.300000 V and 32.673 mV, on the `.hdl` and `.veriloga` routes alike.
+#[test]
+fn supply_pull_and_weak_drives_take_their_own_resistance_on_both_routes() {
+    let directory = TempDirectory::new("hdl-strength-classes");
+    let settled = |resistance: f64| 3.3 * 1e3 / (1e3 + resistance);
+    for (class, body, expected) in [
+        (
+            "supply",
+            "assign (supply1, supply0) o = 1'b1;",
+            settled(2.0),
+        ),
+        ("pull", "assign (pull1, pull0) o = 1'b1;", settled(10e3)),
+        ("weak", "assign (weak1, weak0) o = 1'b1;", settled(100e3)),
+    ] {
+        let mut source = format!(
+            "`include \"disciplines.vams\"\n\
+             `timescale 1ns/1ps\n\
+             module drv(o);\n  output o;\n  wire o;\n  {body}\nendmodule\n"
+        );
+        for (_, module) in BUILTIN_CONNECT_MODULES {
+            source.push_str(module);
+        }
+        source
+            .push_str("connectrules deck;\n    connect a2d;\n    connect d2a;\nendconnectrules\n");
+        let path = directory.write(&format!("drv-{class}.vams"), &source);
+        for (route, load) in [
+            ("hdl", format!(".hdl \"{path}\" module=drv\n")),
+            ("veriloga", format!(".veriloga \"{path}\"\n")),
+        ] {
+            let result = run(
+                &format!(
+                    "* a {class} 1 through an HDL port's converter, {route} route\n\
+                     {load}\
+                     .options connectrules=deck\n\
+                     x1 out drv\n\
+                     r1 out 0 1k\n\
+                     .end\n"
+                ),
+                20e-9,
+                0.1e-9,
+            );
+            let observed = value_at(&result, "out", 10e-9);
+            assert!(
+                (observed - expected).abs() <= 1e-6 * 3.3,
+                "{class} on the {route} route: {observed} V, expected {expected} V"
+            );
+        }
+    }
+}
+
 //=============================================================================
 // 5. A live bidirectional converter
 //=============================================================================

@@ -34,11 +34,15 @@ use super::bridges::{
 };
 use super::{AdcBridge, DacBridge};
 use crate::Value;
+use crate::xspice::logic_map;
+use crate::xspice::verilog::store::BitDrive;
 use crate::xspice::{
     AnalogBandLaw, AnalogInputThreshold, AnalogThresholdBehavior, CmContext, CmError, CmResult,
     CodeModel, DigitalState, DigitalStrength, DigitalValue, EvaluationPhase, ParamSpec,
     PortDirection, PortSpec, PortType, XspiceCheckpointSupport, XspiceSmallSignalDescriptor,
 };
+use rspice_veriloga::canonical_ir::digital::DigitalStrengthLevel;
+use rspice_veriloga::four_state::FourStateBit;
 
 #[cfg(test)]
 mod tests;
@@ -563,28 +567,12 @@ fn adc_crossing(
 
 /// A driver's strength, in IEEE 1364's order. XSPICE values reach only
 /// strong, pull (`Resistive`), high impedance and undetermined; supply and
-/// weak come from HDL drive strengths.
+/// weak come from an HDL port's drive ([`classify_drive`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConverterStrength {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "supply strength arrives with HDL drive strengths, which the digital side \
-                      does not model yet"
-        )
-    )]
     Supply,
     Strong,
     Pull,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "weak strength arrives with HDL drive strengths, which the digital side \
-                      does not model yet"
-        )
-    )]
     Weak,
     HighZ,
     Undetermined,
@@ -620,6 +608,32 @@ fn classify(value: DigitalValue) -> (DriveState, ConverterStrength) {
         DigitalState::OneZ => (DriveState::One, S::HighZ),
         DigitalState::UnknownZ => (DriveState::Unknown, S::HighZ),
         DigitalState::HighZ => (DriveState::HighZ, S::HighZ),
+    }
+}
+
+/// An HDL port's drive as a state and a strength: the state of the XSPICE
+/// value it maps to, at the drive's own strength level, so a supply or weak
+/// drive keeps its resistance. Large converts as pull, and medium and small
+/// as weak, the nearest levels with a resistance of their own. A value with
+/// no level of its own (`z`, `L`, `H`) converts as XSPICE reads it.
+fn classify_drive(drive: BitDrive) -> (DriveState, ConverterStrength) {
+    use ConverterStrength as S;
+    use DigitalStrengthLevel as L;
+    let level = |level: L| match level {
+        L::Supply => S::Supply,
+        L::Strong => S::Strong,
+        L::Pull | L::Large => S::Pull,
+        L::Weak | L::Medium | L::Small => S::Weak,
+        L::HighZ => S::HighZ,
+    };
+    let (state, strength) = classify(logic_map::xspice_value(drive));
+    match (drive.value, drive.zero, drive.one) {
+        (FourStateBit::Zero, zero, _) => (state, level(zero)),
+        (FourStateBit::One, _, one) => (state, level(one)),
+        (FourStateBit::Unknown, zero, one) if zero != L::HighZ && one != L::HighZ => {
+            (state, level(zero.max(one)))
+        }
+        _ => (state, strength),
     }
 }
 
@@ -883,7 +897,10 @@ fn dac_drive(
     let (target, g_target) = if unpowered {
         (TARGET_UNPOWERED, conductance(law.r_unknown))
     } else {
-        let (state, strength) = classify(input);
+        let (state, strength) = match ctx.input_hdl_drive(slots.input, index) {
+            Some(drive) => classify_drive(drive),
+            None => classify(input),
+        };
         (
             target_code(state),
             conductance(law.resistance(state, strength)),

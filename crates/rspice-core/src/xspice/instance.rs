@@ -933,6 +933,10 @@ pub struct XspiceInstance {
     /// than the net's resolved value; see [`Self::tap_digital_drivers`].
     #[cfg(feature = "veriloga")]
     driver_taps: Option<Arc<DigitalDriverTaps>>,
+    /// A digital input port whose elements read the design's drive at an
+    /// HDL port; see [`Self::read_hdl_drives`].
+    #[cfg(feature = "veriloga")]
+    hdl_drive_port: Option<Arc<str>>,
 }
 
 /// One input port's per-element drivers: element `i` reads `drivers[i]`.
@@ -1412,6 +1416,8 @@ impl XspiceInstance {
             mixed_input_thresholds_bound: false,
             #[cfg(feature = "veriloga")]
             driver_taps: None,
+            #[cfg(feature = "veriloga")]
+            hdl_drive_port: None,
         })
     }
 
@@ -1490,6 +1496,46 @@ impl XspiceInstance {
             port: port.to_string(),
             drivers,
         }));
+    }
+
+    /// Make each element of the digital input `port` read, beside its XSPICE
+    /// value, the design's drive at the HDL port its event node carries: the
+    /// value with its strongest 0-side and 1-side strength levels, which the
+    /// XSPICE value carries only as a class. A D/A converts a supply or weak
+    /// drive through its own resistance by it. The model reads it through
+    /// [`CmContext::input_hdl_drive`]; the circuit refreshes it before every
+    /// evaluation ([`Self::refresh_hdl_drives`]), so no image carries it.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn read_hdl_drives(&mut self, port: &str) {
+        self.hdl_drive_port = Some(Arc::from(port));
+    }
+
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn reads_hdl_drives(&self) -> bool {
+        self.hdl_drive_port.is_some()
+    }
+
+    /// Set the drive each element of the [`Self::read_hdl_drives`] port reads
+    /// to `drive` of the element's event node.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn refresh_hdl_drives(
+        &mut self,
+        drive: impl Fn(usize) -> Option<super::verilog::store::BitDrive>,
+    ) {
+        let Some(port) = self.hdl_drive_port.clone() else {
+            return;
+        };
+        let Some(connection) = self
+            .port_indices
+            .get(&*port)
+            .and_then(|&index| self.connections.get(index))
+        else {
+            return;
+        };
+        let context = &mut self.context;
+        for_each_event_connection_node(connection, |index, node| {
+            context.set_input_hdl_drive(&port, index, drive(node));
+        });
     }
 
     #[cfg(feature = "veriloga")]

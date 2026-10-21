@@ -307,7 +307,7 @@ impl DigitalSignalStore {
                         .any(|member| member.signal == signal && member.bit == bit)
                 });
             if let Some(net) = member {
-                return Some(self.connected_strength(net).drive());
+                return Some(self.net_drive(net));
             }
         }
         self.strengths_of(signal)
@@ -315,11 +315,38 @@ impl DigitalSignalStore {
             .map(|strength| strength.drive())
     }
 
+    /// A connected net's drive at the boundary: its drivers at their
+    /// strengths, or a forced member's value, driven strong, while the force
+    /// lasts (section 9.3.2), as [`Self::forced_connected_value`] reads it.
+    fn net_drive(&self, net: &BitNet) -> super::strength::BitDrive {
+        let forced = if self.overrides.is_empty() {
+            None
+        } else {
+            net.members
+                .iter()
+                .find_map(|member| self.forced_bit(member.signal, member.bit))
+        };
+        forced
+            .map_or_else(|| self.connected_strength(net), StrengthBit::strong)
+            .drive()
+    }
+
     pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
         let bits = self.connected.as_ref()?;
         bits.resolved
             .get(*bits.topology.external_nets.get(net)?)
             .copied()
+    }
+
+    /// What the design drives onto the caller's event net `net`: the
+    /// [`Self::boundary_drive`] of every member bit of it.
+    pub(crate) fn connected_drive(&self, net: usize) -> Option<super::strength::BitDrive> {
+        let bits = self.connected.as_ref()?;
+        let net = bits
+            .topology
+            .nets
+            .get(*bits.topology.external_nets.get(net)?)?;
+        Some(self.net_drive(net))
     }
 
     /// Validate the complete external topology before assigning any identity.

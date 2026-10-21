@@ -412,6 +412,13 @@ pub(super) trait XspiceDigitalResolver {
         resolved: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
         resolved_real: &mut Vec<(NodeId, Value)>,
     ) -> crate::xspice::CmResult<()>;
+    /// What the design drives onto the shared node `node`, at its strength
+    /// levels, for a converter on an HDL port: the owner's answer while it
+    /// runs a trial, and nothing for a node it does not own.
+    #[cfg(feature = "veriloga")]
+    fn hdl_drive(&self, _node: NodeId) -> Option<crate::xspice::verilog::store::BitDrive> {
+        None
+    }
 }
 
 struct LocalDigitalResolver;
@@ -1653,6 +1660,9 @@ impl CircuitData {
         // Non-transient evaluations run every model body, as before. Only
         // transient event-only models can use dirty-input dispatch.
         let dirty_dispatch_applies = analysis == crate::xspice::AnalysisType::Transient;
+        // The design an HDL port's converter reads its drive from.
+        #[cfg(feature = "veriloga")]
+        let hdl_owner = self.scheduler.mixed_digital_coordinator.as_ref();
         // Shared handles, not mutable views of their contents: a pass that
         // drains nothing and schedules nothing must leave the event world
         // still shared with the rollback snapshot.
@@ -1761,6 +1771,17 @@ impl CircuitData {
                 time,
                 |node| resolver.owns(node),
             );
+            // A converter on an HDL port has analog outputs, so no dispatch
+            // skips it: the drive it reads is refreshed here, every time, from
+            // the trial that owns the design or else the circuit's own copy.
+            #[cfg(feature = "veriloga")]
+            if instance.reads_hdl_drives() {
+                instance.refresh_hdl_drives(|node| {
+                    resolver
+                        .hdl_drive(node)
+                        .or_else(|| hdl_owner?.event_node_drive(node))
+                });
+            }
             instance.set_transient_companion_coefficients(companion_coefficients);
             instance.set_xyce_one_step_order2(xyce_one_step_order2);
             if let Err(e) = instance.update_inputs_with_analog_transitions(

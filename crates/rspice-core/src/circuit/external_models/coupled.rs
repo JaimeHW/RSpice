@@ -804,6 +804,10 @@ impl XspiceDigitalResolver for SharedResolver<'_, '_> {
     fn owns(&self, node: NodeId) -> bool {
         self.bindings.by_node.contains_key(&node)
     }
+    fn hdl_drive(&self, node: NodeId) -> Option<crate::xspice::verilog::store::BitDrive> {
+        let &net = self.bindings.by_node.get(&node)?;
+        self.exchange.read_net_drive(net)
+    }
     fn owns_real(&self, node: NodeId) -> bool {
         self.bindings.real_by_node.contains_key(&node)
     }

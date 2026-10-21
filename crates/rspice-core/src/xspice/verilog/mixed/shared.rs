@@ -257,6 +257,9 @@ pub(crate) struct MixedDigitalCoordinator {
     instance_of_process: Vec<usize>,
     port_signals: Vec<Vec<DigitalSignalId>>,
     event_nodes: Vec<usize>,
+    /// One linked bit of each event net, aligned with `event_nodes`: what
+    /// [`Self::event_node_drive`] asks [`Self::boundary_drive`] about.
+    event_bits: Arc<[super::super::store::DigitalBitConnection]>,
     real_event_nodes: Vec<(usize, DigitalSignalId)>,
     resolution: TimeResolution,
     enabled: bool,
@@ -573,6 +576,7 @@ impl MixedDigitalCoordinator {
             }
         }
         let (event_node_ids, bit_groups): (Vec<_>, Vec<_>) = bit_nets.into_iter().unzip();
+        let event_bits = bit_groups.iter().map(|group| group[0]).collect();
         let real_event_nodes = real_nets
             .keys()
             .map(|&node| (node, linked.signal_names[&format!("@real:{node}")]))
@@ -660,6 +664,7 @@ impl MixedDigitalCoordinator {
             instance_of_process,
             port_signals,
             event_nodes: event_node_ids,
+            event_bits,
             real_event_nodes,
             resolution,
             enabled: false,
@@ -737,6 +742,7 @@ impl MixedDigitalCoordinator {
             instance_of_process: self.instance_of_process.clone(),
             port_signals: self.port_signals.clone(),
             event_nodes: self.event_nodes.clone(),
+            event_bits: Arc::clone(&self.event_bits),
             real_event_nodes: self.real_event_nodes.clone(),
             resolution: self.resolution,
             enabled: false,
@@ -940,20 +946,26 @@ impl MixedDigitalCoordinator {
 
     /// What the design drives onto bit `bit` of the linked signal `signal`
     /// at the analog boundary: its value and the strongest 0-side and 1-side
-    /// strengths (IEEE 1364-2005 section 7.10). The converters read the XSPICE
-    /// strength this maps to through [`Self::event_values`]; a strength-to-
-    /// resistance table reads the levels themselves.
-    #[expect(
-        dead_code,
-        reason = "the converters read the mapped XSPICE strength today; the per-level \
-                  output-resistance table is this query's first caller"
-    )]
+    /// strengths (IEEE 1364-2005 section 7.10). XSPICE reads the class this
+    /// maps to through [`Self::event_values`]; a converter on an HDL port
+    /// reads the levels themselves, through [`Self::event_node_drive`].
     pub(crate) fn boundary_drive(
         &self,
         signal: DigitalSignalId,
         bit: u32,
     ) -> Option<crate::xspice::verilog::store::BitDrive> {
         self.digital.boundary_drive(signal, bit)
+    }
+
+    /// [`Self::boundary_drive`] of the event net the circuit's event node
+    /// `node` carries, or `None` for a node that is not the design's.
+    pub(crate) fn event_node_drive(
+        &self,
+        node: usize,
+    ) -> Option<crate::xspice::verilog::store::BitDrive> {
+        let net = self.event_nodes.iter().position(|&event| event == node)?;
+        let bit = self.event_bits[net];
+        self.boundary_drive(bit.signal, bit.bit)
     }
 
     pub(crate) fn event_values(

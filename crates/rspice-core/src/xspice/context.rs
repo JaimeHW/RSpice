@@ -545,6 +545,10 @@ impl fmt::Debug for ContextResources {
 /// Per inout port: every other driver's contribution and when it changed.
 type OtherDigitalDrivers = HashMap<String, Vec<Option<(DigitalValue, Value)>>>;
 
+/// Per digital input port: the HDL drive behind each element, if any.
+#[cfg(feature = "veriloga")]
+type HdlDrives = HashMap<String, Vec<Option<crate::xspice::verilog::store::BitDrive>>>;
+
 #[derive(Debug, Clone)]
 pub struct CmContext {
     //-------------------------------------------------------------------------
@@ -600,6 +604,11 @@ pub struct CmContext {
     /// Resolved contributions excluding this port's driver, with the physical
     /// time they changed. Only circuit-enrolled inout ports populate this view.
     other_digital_drivers: CopyOnWrite<OtherDigitalDrivers>,
+    /// The design's drive behind each element of a digital input that reads
+    /// an HDL port at the analog boundary, set before every evaluation; see
+    /// [`Self::input_hdl_drive`].
+    #[cfg(feature = "veriloga")]
+    hdl_drives: CopyOnWrite<HdlDrives>,
     /// Last event time for scalar digital input ports.
     input_event_times: CopyOnWrite<HashMap<String, Value>>,
     /// Last event time for vector digital input ports, per element.
@@ -772,6 +781,8 @@ impl CmContext {
             inputs: CopyOnWrite::default(),
             committed_digital_outputs: CopyOnWrite::default(),
             other_digital_drivers: CopyOnWrite::default(),
+            #[cfg(feature = "veriloga")]
+            hdl_drives: CopyOnWrite::default(),
             input_event_times: CopyOnWrite::default(),
             input_vector_event_times: CopyOnWrite::default(),
             port_total_loads: CopyOnWrite::default(),
@@ -1342,6 +1353,42 @@ impl CmContext {
         }
         values[index] = Some((value, time));
         true
+    }
+
+    /// Set the HDL drive element `index` of the digital input `name` reads;
+    /// see [`Self::input_hdl_drive`].
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn set_input_hdl_drive(
+        &mut self,
+        name: &str,
+        index: usize,
+        drive: Option<crate::xspice::verilog::store::BitDrive>,
+    ) {
+        if self.input_hdl_drive(name, index) == drive {
+            return;
+        }
+        if !self.hdl_drives.contains_key(name) {
+            self.hdl_drives.insert(name.to_owned(), Vec::new());
+        }
+        let drives = self.hdl_drives.get_mut(name).unwrap();
+        if drives.len() <= index {
+            drives.resize(index + 1, None);
+        }
+        drives[index] = drive;
+    }
+
+    /// What the design drives behind element `index` of the digital input
+    /// `name`, when that input reads an HDL port at the analog boundary: the
+    /// value with its strongest 0-side and 1-side strength levels (IEEE
+    /// 1364-2005 section 7.10), which the XSPICE value carries only as a
+    /// class.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn input_hdl_drive(
+        &self,
+        name: &str,
+        index: usize,
+    ) -> Option<crate::xspice::verilog::store::BitDrive> {
+        self.hdl_drives.get(name)?.get(index).copied().flatten()
     }
 
     /// Resolved drive from all other contributors on an inout port. Unlike the
