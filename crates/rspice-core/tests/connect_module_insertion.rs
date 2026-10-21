@@ -106,6 +106,15 @@ connectrules deck;
 endconnectrules
 ";
 
+/// The shipped modules switch with no edge time by default; these give the
+/// D/A's edges a duration so the conversion's ramp can be seen.
+const RAMPED_RULES: &str = "\
+connectrules deck;
+    connect a2d;
+    connect d2a #(.trise(5n), .tfall(5n));
+endconnectrules
+";
+
 const SUPPLIED_RULES: &str = "\
 connectrules deck;
     connect a2d #(.vsup(1.0));
@@ -123,7 +132,7 @@ endconnectrules
 #[test]
 fn a_connect_module_bridges_a_deck_both_ways() {
     let directory = TempDirectory::new("both-ways");
-    let library = directory.write_library(DEFAULT_RULES);
+    let library = directory.write_library(RAMPED_RULES);
     let waveform = transient_waveform(&deck(&library), "dout");
 
     let (_, first) = waveform.first().copied().expect("a first point");
@@ -137,7 +146,7 @@ fn a_connect_module_bridges_a_deck_both_ways() {
         "the inverter drives dout low once din crosses, got {last}"
     );
 
-    // The fall is a ramp, not a step: `dac_bridge`'s `t_rise`/`t_fall` shape
+    // The fall is a ramp, not a step: the connect statement's `tfall` shapes
     // it, which is the "ramped analog transition" half of the conversion.
     let intermediate = waveform
         .iter()

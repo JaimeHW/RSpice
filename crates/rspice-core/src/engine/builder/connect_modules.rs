@@ -42,6 +42,7 @@
 //! a matching module name never substitutes for its authored body.
 
 use rspice_veriloga::ast::PortDirection;
+use rspice_veriloga::connect::library::BuiltinSignature;
 use rspice_veriloga::connect::{
     ConnectDirection, ConnectRuleTable, ConnectValueKind, NetSegment, PortLink, ResolutionMode,
     Signal, plan_connect_modules, resolve_disciplines,
@@ -49,6 +50,11 @@ use rspice_veriloga::connect::{
 use rspice_veriloga::disciplines::DisciplineDb;
 
 use crate::{ElaborationError, ElaborationErrorKind, SimulationError};
+
+mod parameters;
+pub(super) use parameters::{
+    ConverterLaw, RULE_SET, Source as ParameterSource, Supply as ConverterSupply, module_name,
+};
 
 /// A clause-7 refusal about the deck's connect rules.
 ///
@@ -157,9 +163,18 @@ impl PlannedConnectModule {
     ///
     /// Section 7.7.3's `vsup` is authoritative for the boundary it is written
     /// on, which is why the deck's supply is neither derived nor spoken about
-    /// when it is present: see [`delegated_parameters`], which prefers it.
+    /// when it is present.
     pub(super) fn stated_supply(&self) -> Option<f64> {
         self.parameter("vsup")
+    }
+
+    /// The shipped signature this module's declaration matches, when the
+    /// built-in converter executes it.
+    pub(super) fn signature(&self) -> Option<BuiltinSignature> {
+        match self.execution.as_deref()? {
+            super::connect_execution::ConnectExecution::Delegated(signature) => Some(*signature),
+            super::connect_execution::ConnectExecution::Authored(_) => None,
+        }
     }
 
     /// Whether this connect statement answers the supply question itself.
@@ -303,88 +318,55 @@ fn connect_error(
     .into()
 }
 
-/// What the delegation stamps on the XSPICE bridge code model for one selected
-/// connect module.
+/// The built-in converter's law for one boundary: every parameter, checked,
+/// with where it came from.
 ///
-/// Nothing is stamped that the connect statement did not ask for. That is the
-/// whole of why a deck which names a connect module gets the same numbers it
-/// would have got from the auto-bridge alone: the supply is the deck's, the
-/// thresholds derive from it exactly as `super::add_planned_xspice_auto_bridge`
-/// derives them, and a code-model parameter with no section 7.7.3 override
-/// keeps the code model's own default.
+/// `selected` is the delegating connect module, or `None` for an HDL port no
+/// connect rule reaches, which converts with the rule set's defaults.
 ///
 /// The supply is the *deck's* rather than the connect module's declared
-/// `vsup` default, because a node's supply is a property of the deck and the
-/// module's default exists so the module is well formed standing alone. The
-/// library's default is 3.3 V, which `rspice_veriloga::connect::library`'s
-/// parameter pin holds still, and which is also what the deck's supply falls
-/// back to when nothing in the deck says otherwise.
-pub(super) fn delegated_parameters(
-    selected: &PlannedConnectModule,
+/// `vsup` default, unless the statement gives one: a node's supply is a
+/// property of the deck, and the module's default exists so the module is
+/// well formed standing alone.
+pub(super) fn converter_law(
+    selected: Option<&PlannedConnectModule>,
     kind: super::XspiceAutoBridgeKind,
-    vcc: crate::Value,
-) -> Result<Vec<(String, crate::Value)>, SimulationError> {
-    use super::XspiceAutoBridgeKind as Kind;
-
-    let supply = selected.stated_supply().unwrap_or(vcc);
-    let half_supply = supply / 2.0;
-    let mut parameters: Vec<(String, crate::Value)> = match kind {
-        Kind::Adc => vec![
-            ("in_low".to_string(), half_supply),
-            ("in_high".to_string(), half_supply),
-        ],
-        Kind::Dac => vec![
-            ("out_low".to_string(), 0.0),
-            ("out_high".to_string(), supply),
-        ],
-        Kind::Bidi => vec![
-            ("out_high".to_string(), supply),
-            ("in_low".to_string(), half_supply),
-            ("in_high".to_string(), half_supply),
-        ],
-        Kind::RealToV | Kind::VToReal | Kind::RealBidi => Vec::new(),
+    supply: ConverterSupply,
+) -> Result<ConverterLaw, SimulationError> {
+    let (selected, signature) = match selected {
+        Some(selected) => {
+            let signature = selected.signature().ok_or_else(|| {
+                SimulationError::from(ElaborationError::new(
+                    ElaborationErrorKind::Internal,
+                    format!(
+                        "connect module '{}' reached the built-in converter without delegating",
+                        selected.name
+                    ),
+                ))
+            })?;
+            (Some(selected), signature)
+        }
+        None => (None, BuiltinSignature::Legacy),
     };
-
-    // `dac_bridge` reads `out_undef` as the midpoint of the two levels exactly
-    // when they are given and it is not, so the midpoint is obtained by
-    // leaving it out. Stamping a midpoint here would be a second statement of
-    // what half is.
-    for (connect_parameter, model_parameter) in delegated_timing(kind) {
-        if let Some(value) = selected.parameter(connect_parameter) {
-            parameters.push((model_parameter.to_string(), value));
+    ConverterLaw::resolve(
+        kind,
+        selected.map(|selected| {
+            (
+                selected.name.as_str(),
+                signature,
+                selected.parameters.as_slice(),
+            )
+        }),
+        supply,
+    )
+    .map_err(|message| {
+        let refusal = connect_refusal(message);
+        match selected {
+            Some(selected) => refusal.module(selected.name.as_str()),
+            None => refusal,
         }
-    }
-
-    for (name, _) in &selected.parameters {
-        let known = name.eq_ignore_ascii_case("vsup")
-            || delegated_timing(kind)
-                .iter()
-                .any(|(connect_parameter, _)| name.eq_ignore_ascii_case(connect_parameter));
-        if !known {
-            return Err(connect_refusal(format!(
-                "the connect statement for '{}' passes parameter '{name}', which this \
-                 delegation does not carry to the {} bridge; the built-in connect modules \
-                 take a supply and their transition times",
-                selected.name,
-                super::xspice_auto_bridge_kind_label(kind)
-            ))
-            .module(selected.name.as_str())
-            .into());
-        }
-    }
-
-    Ok(parameters)
-}
-
-/// The timing parameters this kind's connect module carries, paired with the
-/// code-model parameter each becomes.
-fn delegated_timing(kind: super::XspiceAutoBridgeKind) -> &'static [(&'static str, &'static str)] {
-    use super::XspiceAutoBridgeKind as Kind;
-    match kind {
-        Kind::Adc => &[("tdrise", "rise_delay"), ("tdfall", "fall_delay")],
-        Kind::Dac | Kind::Bidi => &[("trise", "t_rise"), ("tfall", "t_fall")],
-        Kind::RealToV | Kind::VToReal | Kind::RealBidi => &[],
-    }
+        .into()
+    })
 }
 
 /// Which built-in connect module a bridge kind delegates to.
@@ -409,13 +391,15 @@ pub(super) fn check_execution(
     if let Some(net) = selected.supply_net()
         && !matches!(
             kind,
-            super::XspiceAutoBridgeKind::Adc | super::XspiceAutoBridgeKind::Dac
+            super::XspiceAutoBridgeKind::Adc
+                | super::XspiceAutoBridgeKind::Dac
+                | super::XspiceAutoBridgeKind::Bidi
         )
     {
         return Err(connect_refusal(format!(
             "node '{node_label}' selects connect module '{}' with vsup naming net '{net}'; only \
-             the analog-to-discrete and discrete-to-analog converters track a supply net, so \
-             give this {} boundary's vsup a level",
+             the digital/analog converters track a supply net, so give this {} boundary's \
+             vsup a level",
             selected.name,
             super::xspice_auto_bridge_kind_label(kind)
         ))
@@ -477,10 +461,8 @@ pub(super) struct DesignConnectRules {
     table: ConnectRuleTable,
     disciplines: DisciplineDb,
     source: Option<std::sync::Arc<str>>,
-    builtin_delegations: std::collections::BTreeMap<
-        String,
-        rspice_veriloga::connect::library::BuiltinSignature,
-    >,
+    builtin_delegations:
+        std::collections::BTreeMap<String, rspice_veriloga::connect::library::BuiltinSignature>,
     configuration: std::sync::OnceLock<std::sync::Arc<rspice_veriloga::ConnectionConfiguration>>,
     executions: std::cell::RefCell<
         std::collections::HashMap<
@@ -776,10 +758,12 @@ impl DesignConnectRules {
         let mut executions = self.executions.borrow_mut();
         let execution = executions.entry(key).or_insert_with(|| {
             std::sync::Arc::new(
-                if self.builtin_delegations.contains_key(&selected.name)
-                    && expected_library_module(kind) == Some(selected.name.as_str())
+                if let Some(signature) = self
+                    .builtin_delegations
+                    .get(&selected.name)
+                    .filter(|_| expected_library_module(kind) == Some(selected.name.as_str()))
                 {
-                    super::connect_execution::ConnectExecution::Delegated
+                    super::connect_execution::ConnectExecution::Delegated(*signature)
                 } else {
                     super::connect_execution::ConnectExecution::Authored(
                         super::connect_execution::AuthoredConnectBody::new(
@@ -874,6 +858,51 @@ pub(super) fn attach_to_planned_bridges(
     }
 
     Ok(())
+}
+
+/// Whether a planned boundary converts through the built-in connect-rule
+/// converter: a four-state HDL port, or an XSPICE boundary whose connect rule
+/// selects a shipped signature. An XSPICE boundary no connect rule reaches
+/// keeps ngspice's own bridge, and an authored module executes its body.
+pub(super) fn converts_built_in(bridge: &super::PlannedXspiceAutoBridge) -> bool {
+    use super::XspiceAutoBridgeKind as Kind;
+    matches!(bridge.kind, Kind::Adc | Kind::Dac | Kind::Bidi)
+        && match &bridge.connect_module {
+            Some(selected) => selected.signature().is_some(),
+            None => bridge.event_node.is_some(),
+        }
+}
+
+/// Every XSPICE output driving the event node `node`, in instance order: the
+/// drivers a driver-sensitive D/A converts one by one. Each is the event
+/// bank's driver key: instance, port and element.
+pub(super) fn event_node_drivers(
+    circuit: &crate::CircuitData,
+    node: usize,
+) -> Vec<(String, String, usize)> {
+    use crate::xspice::{PortConnection, PortDirection};
+    let mut drivers = Vec::new();
+    for instance in &circuit.xspice_instances {
+        for (port_index, port) in instance.ports().iter().enumerate() {
+            if !matches!(port.direction, PortDirection::Out | PortDirection::InOut) {
+                continue;
+            }
+            let nodes: Vec<usize> = match instance.connection_at(port_index) {
+                Some(PortConnection::Digital(n) | PortConnection::DigitalInverted(n)) => vec![*n],
+                Some(PortConnection::DigitalVector(nodes)) => nodes.clone(),
+                Some(PortConnection::DigitalVectorMapped(nodes)) => {
+                    nodes.iter().map(|mapped| mapped.node).collect()
+                }
+                _ => continue,
+            };
+            for (element, connected) in nodes.into_iter().enumerate() {
+                if connected == node {
+                    drivers.push((instance.name.clone(), port.name.clone(), element));
+                }
+            }
+        }
+    }
+    drivers
 }
 
 #[cfg(test)]

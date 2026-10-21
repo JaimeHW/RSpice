@@ -70,55 +70,85 @@ fn a_logic_only_library_leaves_real_conversion_policy_unchanged() {
 // The delegation
 // ---------------------------------------------------------------------------
 
-fn delegated(kind: Kind, source: &str, vcc: crate::Value) -> Vec<(String, crate::Value)> {
-    let selected = select(kind, source);
-    delegated_parameters(&selected, kind, vcc).unwrap_or_else(|error| panic!("delegates: {error}"))
+fn law(
+    kind: Kind,
+    source: &str,
+    vcc: crate::Value,
+) -> Result<ConverterLaw, crate::SimulationError> {
+    let mut selected = select(kind, source);
+    selected.execution = Some(std::sync::Arc::new(
+        super::super::connect_execution::ConnectExecution::Delegated(BuiltinSignature::Full),
+    ));
+    let level = selected.stated_supply().unwrap_or(vcc);
+    converter_law(
+        Some(&selected),
+        kind,
+        ConverterSupply {
+            level,
+            net: None,
+            source: ParameterSource::Supply("default".into()),
+        },
+    )
 }
 
-/// With no section 7.7.3 override the delegation stamps exactly what
-/// `add_planned_xspice_auto_bridge` stamps without a connect module: the same
-/// parameters, the same values, derived the same way from the same supply.
-///
-/// This is the equivalence that lets the connect-module route land without
-/// moving a single existing number. The literals are copied from that
-/// function's own arms deliberately — if either moves, this fails.
+fn delegated(kind: Kind, source: &str, vcc: crate::Value) -> Vec<(String, crate::Value)> {
+    law(kind, source, vcc)
+        .unwrap_or_else(|error| panic!("delegates: {error}"))
+        .model_parameters()
+}
+
+/// With no section 7.7.3 override the converter takes the shipped
+/// declaration's defaults, the levels derived from the deck's supply.
 #[test]
-fn an_unparameterized_connect_module_stamps_the_auto_bridges_own_numbers() {
+fn an_unparameterized_connect_module_stamps_the_declarations_defaults() {
     let source = builtin_connect_library_source();
     let vcc = 3.3;
     let half = vcc / 2.0;
-
+    let named = |values: &[(&str, f64)]| -> Vec<(String, f64)> {
+        values
+            .iter()
+            .map(|(name, value)| (name.to_string(), *value))
+            .collect()
+    };
     assert_eq!(
         delegated(Kind::Adc, &source, vcc),
-        vec![("in_low".to_string(), half), ("in_high".to_string(), half)]
+        named(&[
+            ("vsupmin", 0.0),
+            ("vthi", half),
+            ("vtlo", half),
+            ("tdrise", 0.0),
+            ("tdfall", 0.0),
+        ])
     );
     assert_eq!(
         delegated(Kind::Dac, &source, vcc),
-        vec![("out_low".to_string(), 0.0), ("out_high".to_string(), vcc)]
-    );
-    assert_eq!(
-        delegated(Kind::Bidi, &source, vcc),
-        vec![
-            ("out_high".to_string(), vcc),
-            ("in_low".to_string(), half),
-            ("in_high".to_string(), half),
-        ]
+        named(&[
+            ("vsupmin", 0.0),
+            ("vlo", 0.0),
+            ("vhi", vcc),
+            ("rlo", 20.0),
+            ("rhi", 20.0),
+            ("rpull", 10e3),
+            ("rweak", 100e3),
+            ("trise", 0.0),
+            ("tfall", 0.0),
+            ("tdelay", 0.0),
+        ])
     );
 }
 
-/// `dac_bridge` reads `out_undef` as the midpoint of the two levels exactly
-/// when they are given and it is not. The delegation therefore must not stamp
-/// it: leaving it out is how the midpoint is obtained, and stamping one would
-/// be a second statement of what half is.
+/// A default the converter derives from other parameters (`vx`, `vz`, `rx`,
+/// `rsup`) is left to it: stamping one would be a second statement of what
+/// the midpoint, or the stiffest strong drive, is.
 #[test]
-fn the_undefined_level_is_left_to_the_code_model() {
+fn derived_defaults_are_left_to_the_converter() {
     let stamped = delegated(Kind::Dac, &builtin_connect_library_source(), 5.0);
-    assert!(
-        !stamped
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("out_undef")),
-        "out_undef must be delegated, not restated: {stamped:?}"
-    );
+    for derived in ["vx", "vz", "rx", "rsup"] {
+        assert!(
+            !stamped.iter().any(|(name, _)| name == derived),
+            "{derived} must be derived, not restated: {stamped:?}"
+        );
+    }
 }
 
 const SUPPLIED: &str = "\
@@ -146,30 +176,29 @@ fn a_supplied_connect_module_moves_every_derived_level() {
     // 7.8.4's rule 3, so the supplied block stands alone.
     let source = format!("{}{SUPPLIED}", library_modules());
 
+    let value = |kind, name: &str| {
+        delegated(kind, &source, 3.3)
+            .into_iter()
+            .find(|(parameter, _)| parameter == name)
+            .map(|(_, value)| value)
+    };
     assert_eq!(
-        delegated(Kind::Adc, &source, 3.3),
-        vec![("in_low".to_string(), 0.9), ("in_high".to_string(), 0.9)],
+        value(Kind::Adc, "vthi"),
+        Some(0.9),
         "the deck's vcc is overridden by the connect statement's vsup"
     );
-    assert_eq!(
-        delegated(Kind::Dac, &source, 3.3),
-        vec![
-            ("out_low".to_string(), 0.0),
-            ("out_high".to_string(), 1.8),
-            ("t_rise".to_string(), 2e-9),
-            ("t_fall".to_string(), 3e-9),
-        ]
-    );
+    assert_eq!(value(Kind::Adc, "vtlo"), Some(0.9));
+    assert_eq!(value(Kind::Dac, "vhi"), Some(1.8));
+    assert_eq!(value(Kind::Dac, "trise"), Some(2e-9));
+    assert_eq!(value(Kind::Dac, "tfall"), Some(3e-9));
 }
 
 /// Without an override the supply is the deck's, because a node's supply is a
 /// property of the deck.
 #[test]
 fn the_supply_defaults_to_the_decks() {
-    assert_eq!(
-        delegated(Kind::Adc, &builtin_connect_library_source(), 5.0),
-        vec![("in_low".to_string(), 2.5), ("in_high".to_string(), 2.5)]
-    );
+    let law = law(Kind::Adc, &builtin_connect_library_source(), 5.0).expect("resolves");
+    assert_eq!(law.get("vthi").map(|parameter| parameter.value), Some(2.5));
 }
 
 /// A parameter the delegation cannot carry is refused rather than dropped: a
@@ -184,9 +213,13 @@ connectrules unknown_parameter;
 endconnectrules
 ",
     );
-    let selected = select(Kind::Adc, &source);
-    let error = delegated_parameters(&selected, Kind::Adc, 3.3).expect_err("vlo is refused");
-    assert!(format!("{error}").contains("vlo"), "unexpected: {error}");
+    let error = law(Kind::Adc, &source, 3.3).expect_err("vlo is refused");
+    let error = format!("{error}");
+    assert!(error.contains("'vlo'"), "unexpected: {error}");
+    assert!(
+        error.contains("vthi, vtlo, txdel"),
+        "lists the accepted set: {error}"
+    );
 }
 
 /// Authored declarations retain their source instead of a name-based fallback.

@@ -138,9 +138,10 @@ fn vams_hold_deck(module: &SourceFile, rules: Option<&SourceFile>, extra: &str) 
     ))
 }
 
-/// The XSPICE auto-bridge route: a `d_pullup` held 1 through the auto D/A,
-/// whose ideal source the 1 Meg load (which makes `q` an analog node) does not
-/// move.
+/// The XSPICE auto-bridge route: a `d_pullup` held 1 through the connect
+/// rule's D/A. The pull-up is a resistive 1, so the converter drives V(vdd)
+/// behind `rpull` = 10 kΩ, and the 1 Meg load (which makes `q` an analog
+/// node) divides it: v(q) = V(vdd)·[`PULL_DIVIDER`].
 fn xspice_hold_deck(rules: &SourceFile) -> Netlist {
     parse(&format!(
         "* live supply, XSPICE route\n\
@@ -189,8 +190,13 @@ fn a_held_one_follows_a_supply_ramp() {
     }
 }
 
+/// The resistive 1 of [`xspice_hold_deck`] into its 1 Meg load:
+/// 1 MΩ/(1 MΩ + 10 kΩ).
+const PULL_DIVIDER: f64 = 1.0e6 / (1.0e6 + 10.0e3);
+
 /// The XSPICE auto-bridge route binds the same way, and the two routes agree
-/// point for point on the supply's own value.
+/// point for point on the supply's own value, the XSPICE route's resistive
+/// pull-up through its load divider.
 #[test]
 fn the_xspice_and_verilog_ams_routes_agree() {
     let module = SourceFile::new("v", HOLD_ONE);
@@ -203,9 +209,11 @@ fn the_xspice_and_verilog_ams_routes_agree() {
         points.len()
     );
     for (time, level, supply) in points {
+        let expected = supply * PULL_DIVIDER;
         assert!(
-            (level - supply).abs() <= 1.0e-9 + 1.0e-9 * supply.abs(),
-            "the auto D/A's held 1 is V(vdd) at {time:e}: v(q) = {level}, v(vdd) = {supply}"
+            (level - expected).abs() <= 1.0e-9 + 1.0e-9 * supply.abs(),
+            "the auto D/A's held resistive 1 is V(vdd)·{PULL_DIVIDER} at {time:e}: \
+             v(q) = {level}, v(vdd) = {supply}"
         );
     }
     let vams = tran(&vams_hold_deck(&module, Some(&rules), ""), 2.0e-6, 10.0e-9);
@@ -225,7 +233,7 @@ fn the_xspice_and_verilog_ams_routes_agree() {
                 v0 + (v1 - v0) * (time - t0) / (t1 - t0)
             }
         };
-        let (a, b) = (sample(&xspice), sample(&vams));
+        let (a, b) = (sample(&xspice) / PULL_DIVIDER, sample(&vams));
         assert!(
             (a - ramp(time)).abs() < 1.0e-6 && (b - ramp(time)).abs() < 1.0e-6,
             "both routes drive V(vdd) = {} at {time:e}: XSPICE {a}, Verilog-AMS {b}",

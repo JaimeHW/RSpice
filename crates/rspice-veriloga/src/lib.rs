@@ -206,8 +206,7 @@ pub struct ConnectSpecification {
     pub source: Option<std::sync::Arc<str>>,
     /// Declarations token-equivalent to a shipped delegation signature, and
     /// which signature each matches.
-    pub builtin_delegations:
-        std::collections::BTreeMap<String, connect::library::BuiltinSignature>,
+    pub builtin_delegations: std::collections::BTreeMap<String, connect::library::BuiltinSignature>,
     /// Validated `connectmodule` declarations and named `connectrules` blocks.
     /// Use `rules.select_block(name)` to choose among alternative configurations.
     pub rules: connect::ConnectRuleTable,

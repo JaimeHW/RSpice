@@ -272,7 +272,15 @@ impl XspiceInstance {
             || image.version != 1
             || image.identity != self.runtime_checkpoint_identity(num_nodes, matrix_size)?
         {
-            return Err("XSPICE checkpoint instance identity or MNA dimensions differ".into());
+            // Name the instance: an image taken before a boundary's converter
+            // changed model (an HDL port's built-in converter, say) differs
+            // here and nowhere earlier.
+            return Err(format!(
+                "XSPICE checkpoint instance {}({}) differs from the image: its model, its \
+                 elaboration or the MNA dimensions changed since the image was taken",
+                self.name,
+                self.model_name()
+            ));
         }
         let context_limits =
             remaining_budget(image.signature.as_ref().map_or(0, Vec::len), limits)?;
@@ -281,13 +289,22 @@ impl XspiceInstance {
         restored.solution_num_nodes = num_nodes;
         restored.port_context_solution_num_nodes = None;
         restored.refresh_port_context_bindings();
-        restored.context = image.context.restore(
-            &restored.context,
-            &ports,
-            accepted,
-            matrix_size,
-            context_limits,
-        )?;
+        restored.context = image
+            .context
+            .restore(
+                &restored.context,
+                &ports,
+                accepted,
+                matrix_size,
+                context_limits,
+            )
+            .map_err(|error| {
+                format!(
+                    "XSPICE checkpoint instance {}({}): {error}",
+                    self.name,
+                    self.model_name()
+                )
+            })?;
         restored.last_event_input_signature = image
             .signature
             .as_ref()

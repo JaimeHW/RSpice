@@ -27,14 +27,6 @@
 //! converter with `txdel = inf` and to `adc_bridge` with `txdel = 0`, and the
 //! D/A to the HDL host's built-in D/A; the tests hold them to it.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "no boundary selects the connect-rule converters until the builder routes them"
-    )
-)]
-
 use super::bridges::{
     ADC_UNINITIALIZED_STATE, OFFICIAL_BRIDGE_TIMING_MIN, adc_bridge_delay_for_transition,
     analog_vector_input_value, bridge_vector_width, digital_vector_input_value,
@@ -568,9 +560,25 @@ fn adc_crossing(
 /// weak come from HDL drive strengths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConverterStrength {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "supply strength arrives with HDL drive strengths, which the digital side \
+                      does not model yet"
+        )
+    )]
     Supply,
     Strong,
     Pull,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "weak strength arrives with HDL drive strengths, which the digital side \
+                      does not model yet"
+        )
+    )]
     Weak,
     HighZ,
     Undetermined,
@@ -839,6 +847,23 @@ struct DacSlots {
     sense: Option<&'static str>,
 }
 
+/// The driver an element converts, and when it last changed.
+///
+/// The circuit fills a per-element driver view when the element converts
+/// one driver of a shared net (a D/A tapping each driver of an XSPICE node)
+/// or the other drivers of an inout port (the bidirectional converter, whose
+/// own receiving half drives the same net). Without one, the element converts
+/// its input as resolved.
+fn driver_input(ctx: &CmContext, slots: DacSlots, index: usize) -> (DigitalValue, Option<Value>) {
+    match ctx.other_digital_drivers(slots.input, index) {
+        Some((value, time)) => (value, Some(time)),
+        None => (
+            digital_vector_input_value(ctx, slots.input, index),
+            ctx.input_digital_vector_event_time(slots.input, index),
+        ),
+    }
+}
+
 fn dac_drive(
     ctx: &CmContext,
     law: &DacLaw,
@@ -848,10 +873,11 @@ fn dac_drive(
 ) -> DacDrive {
     let base = index * DAC_STATE_STRIDE;
     let unpowered = unpowered(supply, law.supply_min);
+    let (input, event) = driver_input(ctx, slots, index);
     let (target, g_target) = if unpowered {
         (TARGET_UNPOWERED, conductance(law.r_unknown))
     } else {
-        let (state, strength) = classify(digital_vector_input_value(ctx, slots.input, index));
+        let (state, strength) = classify(input);
         (
             target_code(state),
             conductance(law.resistance(state, strength)),
@@ -871,7 +897,6 @@ fn dac_drive(
         return held(settled(ctx.time));
     }
     let accepted = Change::accepted(ctx, base);
-    let event = ctx.input_digital_vector_event_time(slots.input, index);
     if accepted.target == TARGET_UNCOMMITTED && event.is_none_or(|time| time <= 0.0) {
         return held(settled(ctx.time));
     }
@@ -1153,11 +1178,12 @@ impl CodeModel for ConnectDac {
 // Bidirectional
 //=============================================================================
 
-/// The connect-rule bidirectional converter: the D/A, driven by the port's
-/// own drivers on `in` and driving `out`, and the A/D reading the same node
-/// through `sense` and publishing to the port's receivers on `rcv`. Both
-/// halves work at once, so a port driving 0 against a pull-up reads its own
-/// V_OL.
+/// The connect-rule bidirectional converter: the D/A, driven by the other
+/// drivers of the inout event port `d` and driving `out`, and the A/D reading
+/// the same node through `sense` and publishing onto `d`. The D/A converts
+/// the drivers other than the converter's own, so the receiving half never
+/// feeds back into the driving half. Both halves work at once, so a port
+/// driving 0 against a pull-up reads its own V_OL.
 ///
 /// `tracking` is the live-supply form, with a `sup` port both halves read.
 #[derive(Debug, Default)]
@@ -1166,30 +1192,30 @@ pub(crate) struct ConnectBidi {
 }
 
 const BIDI_DAC_SLOTS: DacSlots = DacSlots {
-    input: "in",
+    input: "d",
     sense: Some("sense"),
 };
 
 fn bidi_adc_slots(width: usize) -> AdcSlots {
     AdcSlots {
         input: "sense",
-        output: "rcv",
+        output: "d",
         state: width * DAC_STATE_STRIDE,
     }
 }
 
 fn bidi_width(ctx: &CmContext, model: &str) -> CmResult<usize> {
-    let width = ctx.port_width("in");
+    let width = ctx.port_width("d");
     if width == 0 {
         return Err(CmError::InvalidPortConnection(format!(
             "{model} requires non-empty port vectors"
         )));
     }
-    for port in ["out", "sense", "rcv"] {
+    for port in ["out", "sense"] {
         let other = ctx.port_width(port);
         if other != width {
             return Err(CmError::InvalidPortConnection(format!(
-                "{model} {port} vector width {other} does not match in vector width {width}"
+                "{model} {port} vector width {other} does not match d vector width {width}"
             )));
         }
     }
@@ -1221,7 +1247,24 @@ impl CodeModel for ConnectBidi {
         static PORTS: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
         static TRACKING: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
         let ports = || {
-            let mut ports = ConnectDac { tracking: false }.ports().to_vec();
+            let mut ports = vec![PortSpec {
+                name: "d".to_string(),
+                direction: PortDirection::InOut,
+                default_type: PortType::Digital,
+                allowed_types: vec![PortType::Digital],
+                is_vector: true,
+                null_allowed: false,
+                vector_min_len: Some(1),
+                vector_max_len: None,
+                description: "The port's drivers in, its receivers out".to_string(),
+            }];
+            ports.extend(
+                ConnectDac { tracking: false }
+                    .ports()
+                    .iter()
+                    .filter(|port| port.name == "out")
+                    .cloned(),
+            );
             ports.push(PortSpec {
                 name: "sense".to_string(),
                 direction: PortDirection::In,
@@ -1233,10 +1276,6 @@ impl CodeModel for ConnectBidi {
                 vector_max_len: None,
                 description: "The driven node, read by the receiving half".to_string(),
             });
-            ports.push(
-                PortSpec::vector_output("rcv", PortType::Digital)
-                    .with_description("The port's receivers"),
-            );
             ports
         };
         if self.tracking {

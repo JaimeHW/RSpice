@@ -3253,20 +3253,39 @@ fn plan_xspice_auto_bridges(
 /// neither used nor worth a sentence. Everything else is either the deck's own
 /// parameter (silent, as always), one rail (named), no rail (the 3.3 V default,
 /// named), or more than one rail, which is the refusal.
+///
+/// A bridge a user auto-bridge template materializes is the template's card,
+/// converting against the static level: it is never bound live, so it is
+/// never reported as live.
 fn report_planned_xspice_auto_bridge_supplies(
     circuit: &CircuitData,
     bridges: &[PlannedXspiceAutoBridge],
     supplies: &boundary_supply::BoundarySupplies,
+    templates: &[XspiceAutoBridgeTemplate],
+    source_path: Option<&Path>,
+    family_enabled: bool,
 ) -> Result<(), SimulationError> {
     if bridges.iter().all(|bridge| bridge.supply.is_none()) {
         return Ok(());
     }
     let node_names = circuit.node_names_sorted();
+    let templates =
+        xspice_auto_bridge_effective_templates(templates, bridges, source_path, family_enabled);
     for bridge in bridges {
         let Some(derivation) = bridge.supply.as_ref() else {
             continue;
         };
         let node_label = xspice_auto_bridge_node_label(Some(&node_names), bridge.node);
+        if let Some(template) = find_xspice_auto_bridge_template(&templates, bridge, family_enabled)
+        {
+            log::info!(
+                "boundary {node_label}: template {}, static at {} V",
+                template.key,
+                bridge.vcc
+            );
+            supplies.report(&node_label, derivation, false)?;
+            continue;
+        }
         #[cfg(feature = "veriloga")]
         if let Some(selected) = bridge.connect_module.as_ref() {
             if let Some(net) = selected.supply_net() {
@@ -4992,6 +5011,14 @@ fn add_planned_xspice_auto_bridge(
     // A converter bound live to a supply net takes its levels and thresholds
     // as fractions of that net's voltage.
     let live_supply = boundary_supply::live_supply_node(circuit, bridge)?;
+
+    // HDL ports and connect rules that select a shipped module convert
+    // through the one connect-rule converter law, on either route.
+    #[cfg(feature = "veriloga")]
+    if connect_modules::converts_built_in(bridge) {
+        return add_connect_rule_converter(circuit, bridge, event_node, live_supply, context);
+    }
+
     let vcc = if live_supply.is_some() {
         1.0
     } else {
@@ -5073,16 +5100,6 @@ fn add_planned_xspice_auto_bridge(
         }
     };
 
-    // Authored bodies have already materialized above. A delegated shipped
-    // declaration supplies its selected parameters to the equivalent built-in
-    // model; boundaries without a selected declaration use the default values.
-    #[cfg(feature = "veriloga")]
-    let numeric_params = if let Some(selected) = bridge.connect_module.as_ref() {
-        connect_modules::delegated_parameters(selected, bridge.kind, vcc)?
-    } else {
-        numeric_params
-    };
-
     let code_model = circuit.xspice_registry.get(model_name).ok_or_else(|| {
         SimulationError::Circuit(format!(
             "Failed to resolve generated XSPICE auto-bridge model '{}'",
@@ -5090,27 +5107,6 @@ fn add_planned_xspice_auto_bridge(
         ))
     })?;
 
-    #[cfg(feature = "veriloga")]
-    let (code_model, output_branch): (std::sync::Arc<dyn crate::xspice::CodeModel>, _) =
-        match (bridge.event_node, bridge.kind) {
-            (Some(_), XspiceAutoBridgeKind::Adc) => (
-                std::sync::Arc::new(crate::xspice::models::MixedAdcBridge {
-                    tracking: live_supply.is_some(),
-                }),
-                None,
-            ),
-            (Some(_), XspiceAutoBridgeKind::Dac) => (
-                std::sync::Arc::new(crate::xspice::models::MixedDacBridge {
-                    tracking: live_supply.is_some(),
-                }),
-                None,
-            ),
-            (Some(_), XspiceAutoBridgeKind::Bidi) => (
-                std::sync::Arc::new(crate::xspice::models::MixedBidiBridge),
-                None,
-            ),
-            _ => (code_model, output_branch),
-        };
     let (code_model, connections) =
         boundary_supply::with_live_supply(bridge, live_supply, code_model, connections);
 
@@ -5197,6 +5193,154 @@ fn add_planned_xspice_auto_bridge(
             log::debug!("Generated XSPICE auto-bridge card: {card}");
         }
     }
+    circuit.add_xspice_instance(instance);
+    Ok(())
+}
+
+/// Materialize one boundary through the built-in connect-rule converter
+/// (`xspice/models/connect_bridges.rs`), on either route, and log its
+/// insertion record: every parameter with its value and where it came from.
+///
+/// A D/A on an XSPICE event node converts each driver of the node separately
+/// (one output element per driver, the branches summing on the analog node),
+/// so a weak 1 against a strong 0 divides as their resistances say rather
+/// than converting the digitally resolved strong 0. An HDL port is one
+/// driver already: its own drivers resolve inside the module first.
+#[cfg(feature = "veriloga")]
+fn add_connect_rule_converter(
+    circuit: &mut CircuitData,
+    bridge: &PlannedXspiceAutoBridge,
+    event_node: usize,
+    live_supply: Option<usize>,
+    context: XspiceAutoBridgeContext<'_>,
+) -> Result<(), SimulationError> {
+    use crate::xspice::PortConnection;
+
+    let selected = bridge.connect_module.as_ref();
+    let names = context
+        .node_names
+        .map(<[String]>::to_vec)
+        .unwrap_or_else(|| circuit.node_names_sorted());
+    let node_label = xspice_auto_bridge_node_label(Some(&names), bridge.node);
+    let net = boundary_supply::live_supply_net(bridge).map(str::to_string);
+    let stated = selected
+        .is_some_and(|selected| selected.supply_net().is_some() || selected.states_supply());
+    let supply = connect_modules::ConverterSupply {
+        level: selected
+            .and_then(connect_modules::PlannedConnectModule::stated_supply)
+            .unwrap_or(bridge.vcc),
+        net,
+        source: if stated {
+            connect_modules::ParameterSource::Statement
+        } else {
+            connect_modules::ParameterSource::Supply(boundary_supply::supply_sentence(
+                bridge.supply.as_ref(),
+            ))
+        },
+    };
+    let law = connect_modules::converter_law(selected, bridge.kind, supply)?;
+    let tracking = live_supply.is_some();
+
+    let drivers = if bridge.kind == XspiceAutoBridgeKind::Dac && bridge.event_node.is_none() {
+        connect_modules::event_node_drivers(circuit, event_node)
+    } else {
+        Vec::new()
+    };
+    let width = drivers.len().max(1);
+    let (label, code_model, mut connections): (
+        &str,
+        std::sync::Arc<dyn crate::xspice::CodeModel>,
+        Vec<PortConnection>,
+    ) = match bridge.kind {
+        XspiceAutoBridgeKind::Adc => (
+            "adc",
+            std::sync::Arc::new(crate::xspice::models::ConnectAdc { tracking }),
+            vec![
+                PortConnection::AnalogVector(vec![bridge.node]),
+                PortConnection::DigitalVector(vec![event_node]),
+            ],
+        ),
+        XspiceAutoBridgeKind::Dac => (
+            "dac",
+            std::sync::Arc::new(crate::xspice::models::ConnectDac { tracking }),
+            vec![
+                PortConnection::DigitalVector(vec![event_node; width]),
+                PortConnection::AnalogVector(vec![bridge.node; width]),
+            ],
+        ),
+        _ => (
+            "bidi",
+            std::sync::Arc::new(crate::xspice::models::ConnectBidi { tracking }),
+            vec![
+                PortConnection::DigitalVector(vec![event_node]),
+                PortConnection::AnalogVector(vec![bridge.node]),
+                PortConnection::AnalogVector(vec![bridge.node]),
+            ],
+        ),
+    };
+    if let Some(supply) = live_supply {
+        connections.push(PortConnection::Analog(supply));
+    }
+    let instance_name = format!("__rspice_auto_{label}_{event_node}");
+    let mut instance = crate::xspice::XspiceInstance::new_with_string_vectors(
+        instance_name.clone(),
+        code_model,
+        connections,
+        &law.model_parameters(),
+        CodeModelVectorParams {
+            string_params: &[],
+            string_vector_params: &[],
+            real_vector_params: &[],
+            integer_vector_params: &[],
+        },
+    )
+    .map_err(|e| {
+        xspice_creation_error(
+            format!("Failed to create the connect-rule converter '{instance_name}' on node '{node_label}'"),
+            e,
+        )
+    })?;
+    instance.set_temperature(context.temperature);
+    instance.set_ramptime(context.ramptime);
+    instance.set_digital_delay_type(context.digital_delay_type);
+    instance.set_resource_limits(context.resource_limits);
+    if !drivers.is_empty() {
+        instance.tap_digital_drivers("in", drivers);
+    }
+    instance.init().map_err(|e| {
+        SimulationError::Circuit(format!(
+            "Failed to initialize the connect-rule converter '{instance_name}' on node \
+             '{node_label}': {e}"
+        ))
+    })?;
+
+    let direction = match bridge.kind {
+        XspiceAutoBridgeKind::Adc => "input",
+        XspiceAutoBridgeKind::Dac => "output",
+        _ => "inout",
+    };
+    let (module, rules) = match selected {
+        Some(selected) => (
+            selected.name.clone(),
+            match selected.signature() {
+                Some(rspice_veriloga::connect::library::BuiltinSignature::Legacy) => format!(
+                    "connect rule, earlier signature, defaults from rule set {}",
+                    connect_modules::RULE_SET
+                ),
+                _ => "connect rule".to_string(),
+            },
+        ),
+        None => (
+            connect_modules::module_name(bridge.kind).to_string(),
+            format!("no connect rule, rule set {}", connect_modules::RULE_SET),
+        ),
+    };
+    log::info!(
+        "{}",
+        law.record(&format!(
+            "boundary {node_label} ({direction}): {module} as {instance_name} [{rules}]"
+        ))
+    );
     circuit.add_xspice_instance(instance);
     Ok(())
 }
@@ -10006,6 +10150,9 @@ impl Engine {
                     &circuit,
                     &auto_bridges,
                     &boundary_supplies,
+                    &netlist.options.auto_bridge_templates,
+                    netlist.source_path.as_deref(),
+                    netlist.options.auto_bridge_family.unwrap_or(true),
                 )?;
                 add_planned_xspice_auto_bridges(
                     &mut circuit,
@@ -10042,7 +10189,14 @@ impl Engine {
                 if !netlist.options.auto_bridge.unwrap_or(true) {
                     reject_disabled_xspice_auto_bridge(&circuit, &bridges)?;
                 }
-                report_planned_xspice_auto_bridge_supplies(&circuit, &bridges, &boundary_supplies)?;
+                report_planned_xspice_auto_bridge_supplies(
+                    &circuit,
+                    &bridges,
+                    &boundary_supplies,
+                    &netlist.options.auto_bridge_templates,
+                    netlist.source_path.as_deref(),
+                    netlist.options.auto_bridge_family.unwrap_or(true),
+                )?;
                 add_planned_xspice_auto_bridges(
                     &mut circuit,
                     &bridges,
@@ -13383,7 +13537,7 @@ apull [mix] pull
                 .filter(|candidate| !classified && *candidate == node)
                 .count();
             let converted = circuit.xspice_instances.iter().filter(|instance| {
-                matches!(instance.model_name(), "__rspice_mixed_dac" | "__rspice_mixed_adc")
+                matches!(instance.model_name(), "__rspice_connect_dac" | "__rspice_connect_adc")
                     && instance.connections().iter().any(|connection| {
                         matches!(connection, crate::xspice::PortConnection::AnalogVector(nodes) if nodes.contains(&node))
                     })

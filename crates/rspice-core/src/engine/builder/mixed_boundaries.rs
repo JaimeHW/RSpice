@@ -82,7 +82,12 @@ pub(super) fn plan_conversions(
                     .as_ref()
                     .and_then(connect_modules::PlannedConnectModule::stated_supply)
                 {
-                    (level, Some(boundary_supply::SupplyDerivation::Declared))
+                    (
+                        level,
+                        Some(boundary_supply::SupplyDerivation::Declared {
+                            parameter: "vsup".to_string(),
+                        }),
+                    )
                 } else {
                     let resolved = supplies.resolve(&node_label, scoped.and_then(|item| item.vcc));
                     (resolved.level, Some(resolved.derivation))

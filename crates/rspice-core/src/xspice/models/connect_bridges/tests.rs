@@ -17,7 +17,7 @@ fn context(model: &dyn CodeModel, width: usize, params: Params) -> CmContext {
     for port in model.ports() {
         let port_width = if port.is_vector { width } else { 1 };
         ctx.set_port_width(&port.name, port_width);
-        if port.direction == PortDirection::Out {
+        if matches!(port.direction, PortDirection::Out | PortDirection::InOut) {
             ctx.init_output_vector(&port.name, port.default_type, port_width);
         }
     }
@@ -356,54 +356,6 @@ fn a_zero_timeout_is_adc_bridge() {
         (&AdcBridge, &mut their_ctx),
         &inputs,
         None,
-    );
-}
-
-/// `txdel = inf` is the HDL host's built-in A/D, bit for bit, static and
-/// tracking a live supply, on 50-point random traces.
-#[cfg(feature = "veriloga")]
-#[test]
-fn an_infinite_timeout_is_the_built_in_converter() {
-    use crate::xspice::models::MixedAdcBridge;
-    let inputs: Vec<_> = random_trace(50, 11).into_iter().map(|u| 3.3 * u).collect();
-    // Hit the equal-threshold rule's exact tie too.
-    let mut tied = inputs.clone();
-    tied[20] = 1.65;
-    tied[21] = 1.65;
-    let ours = ConnectAdc { tracking: false };
-    let theirs = MixedAdcBridge { tracking: false };
-    for (low, high) in [(1.0, 2.0), (1.65, 1.65)] {
-        let mut our_ctx = context(
-            &ours,
-            1,
-            &[("vtlo", low), ("vthi", high), ("tdrise", 1.0e-9)],
-        );
-        let mut their_ctx = context(
-            &theirs,
-            1,
-            &[("in_low", low), ("in_high", high), ("rise_delay", 1.0e-9)],
-        );
-        assert_adcs_identical(
-            (&ours, &mut our_ctx),
-            (&theirs, &mut their_ctx),
-            &tied,
-            None,
-        );
-    }
-
-    let supplies: Vec<_> = random_trace(50, 13)
-        .into_iter()
-        .map(|u| 2.0 + 1.3 * u)
-        .collect();
-    let ours = ConnectAdc { tracking: true };
-    let theirs = MixedAdcBridge { tracking: true };
-    let mut our_ctx = context(&ours, 1, &[]);
-    let mut their_ctx = context(&theirs, 1, &[("in_low", 0.5), ("in_high", 0.5)]);
-    assert_adcs_identical(
-        (&ours, &mut our_ctx),
-        (&theirs, &mut their_ctx),
-        &inputs,
-        Some(&supplies),
     );
 }
 
@@ -804,94 +756,45 @@ fn an_unpowered_dac_drives_low_through_rx() {
     assert_eq!((value, g), (0.0, 1.0 / 50.0));
 }
 
-/// A deterministic trace of strong 0, 1, X and Z.
-#[cfg(feature = "veriloga")]
-fn random_bits(count: usize, seed: u64) -> Vec<DigitalValue> {
-    random_trace(count, seed)
-        .into_iter()
-        .map(|u| match (u * 4.0) as usize {
-            0 => DigitalValue::zero(),
-            1 => DigitalValue::one(),
-            2 => DigitalValue::unknown(),
-            _ => DigitalValue::high_z(),
-        })
-        .collect()
-}
-
-/// At its defaults the D/A is the HDL host's built-in D/A, bit for bit,
-/// static and tracking a live supply: the same Norton pair, breakpoints,
-/// supply partial and noise at every point of a 50-point random trace.
-#[cfg(feature = "veriloga")]
+/// A zero-time edge is a discontinuity *after* its instant: the converter
+/// drives the analog solution at the edge's own timepoint with the level and
+/// the impedance it had before it, and with the new ones from the first
+/// instant after it, as ngspice-46 `dac_bridge` keeps the previous input in
+/// force for the whole step when the analog point is the input change. A
+/// release and a seize keep the left limit the same way.
 #[test]
-fn the_default_dac_is_the_built_in_converter() {
-    use crate::xspice::models::MixedDacBridge;
-    let bits = random_bits(50, 17);
-    let supplies: Vec<_> = random_trace(50, 19)
-        .into_iter()
-        .map(|u| 2.0 + 1.3 * u)
-        .collect();
-    for tracking in [false, true] {
-        let ours = ConnectDac { tracking };
-        let theirs = MixedDacBridge { tracking };
-        let (our_params, their_params): (Params, Params) = if tracking {
-            (
-                &[],
-                &[("out_low", 0.0), ("out_high", 1.0), ("out_undef", 0.5)],
-            )
-        } else {
-            (
-                &[("vhi", 3.3), ("vx", 1.65)],
-                &[("out_low", 0.0), ("out_high", 3.3), ("out_undef", 1.65)],
-            )
-        };
-        let mut our_ctx = context(&ours, 1, our_params);
-        let mut their_ctx = context(&theirs, 1, their_params);
-        let mut event = None;
-        let mut previous = None;
-        for (step, bit) in bits.iter().enumerate() {
-            let time = step as Value * 41.0e-9;
-            if previous != Some(*bit) {
-                event = Some(time);
-                previous = Some(*bit);
-            }
-            let supply = tracking.then(|| supplies[step]);
-            // Two points on each event: the edge itself and one just after.
-            for time in [time, time + 3.0e-12] {
-                // Asked as the engine asks: the stamp, its partials and the
-                // noise of one point, before that point is accepted.
-                let a = dac_evaluate(&ours, &mut our_ctx, time, &[*bit], event, supply);
-                let b = dac_evaluate(&theirs, &mut their_ctx, time, &[*bit], event, supply);
-                assert_eq!(
-                    (a[0].0.to_bits(), a[0].1.to_bits()),
-                    (b[0].0.to_bits(), b[0].1.to_bits()),
-                    "Norton pair at {time:e} for {bit:?}, tracking {tracking}"
-                );
-                assert_eq!(
-                    our_ctx.take_requested_breakpoints(),
-                    their_ctx.take_requested_breakpoints(),
-                    "breakpoints at {time:e}"
-                );
-                let a = ours.output_vector_input_partials(&our_ctx, "out", 0);
-                let b = theirs.output_vector_input_partials(&their_ctx, "out", 0);
-                assert_eq!(a.len(), b.len(), "supply partials at {time:e}");
-                for (a, b) in a.iter().zip(&b) {
-                    assert_eq!(a.0, b.0);
-                    assert_eq!(a.1, b.1, "supply partial at {time:e}");
-                }
-                // The built-in D/A lists noise by its input alone, so the two
-                // agree everywhere but on a seizing edge's own left limit.
-                if time > event.unwrap_or(0.0) {
-                    assert_eq!(
-                        ours.converter_noise_conductances(&our_ctx),
-                        theirs.converter_noise_conductances(&their_ctx),
-                        "noise at {time:e}"
-                    );
-                }
-                our_ctx.advance_state();
-                their_ctx.advance_state();
-            }
-        }
-    }
+fn a_zero_time_edge_drives_its_own_timepoint_with_the_left_limit() {
+    let model = ConnectDac { tracking: false };
+    let mut ctx = context(&model, 1, &[("vhi", 3.3)]);
+    let g = 1.0 / 20.0;
+    let mut step = |time: Value, bit: DigitalValue, event: Option<Value>| {
+        let pair = dac_evaluate(&model, &mut ctx, time, &[bit], event, None)[0];
+        ctx.advance_state();
+        pair
+    };
+    assert_eq!(step(0.0, DigitalValue::zero(), None), (-0.0, g));
+    assert_eq!(
+        step(5.0e-9, DigitalValue::one(), Some(5.0e-9)),
+        (-0.0, g),
+        "the solution at the edge is the left limit"
+    );
+    assert_eq!(
+        step(5.1e-9, DigitalValue::one(), Some(5.0e-9)),
+        (-g * 3.3, g)
+    );
+    assert_eq!(
+        step(7.0e-9, DigitalValue::high_z(), Some(7.0e-9)),
+        (-g * 3.3, g),
+        "a release keeps the impedance it had before it on its own timepoint"
+    );
+    let (_, released) = step(7.1e-9, DigitalValue::high_z(), Some(7.0e-9));
+    assert_eq!(released, 0.0, "and lets go of the net after it");
+    let (_, held) = step(9.0e-9, DigitalValue::zero(), Some(9.0e-9));
+    assert_eq!(
+        held, 0.0,
+        "a seize keeps the net released on its own timepoint"
+    );
+    assert_eq!(step(9.1e-9, DigitalValue::zero(), Some(9.0e-9)), (-0.0, g));
 }
 
 //=============================================================================
@@ -911,8 +814,11 @@ fn a_bidirectional_port_drives_and_reads_its_own_node() {
         (10.0e-9, DigitalValue::high_z()),
     ] {
         ctx.time = time;
-        ctx.set_input("in", InputValue::DigitalVector(vec![bit]));
-        ctx.set_input_digital_vector_event_times("in", vec![Some(time)]);
+        // The port's own drive reaches the converter as the other drivers of
+        // `d`; the resolved input, which carries the receiving half's own
+        // output, is never what the driving half converts.
+        ctx.set_input("d", InputValue::DigitalVector(vec![DigitalValue::one()]));
+        ctx.set_other_digital_drivers("d", 0, bit, time);
         // Solve the node against the pull-up with the drive as stamped.
         let mut node = 3.3;
         for _ in 0..3 {
@@ -959,6 +865,8 @@ fn a_bidirectional_port_drives_and_reads_its_own_node() {
     let thresholds = tracking.analog_input_thresholds(&ctx).expect("declares");
     let ports: Vec<_> = thresholds.iter().map(|t| t.port.as_str()).collect();
     assert_eq!(ports, ["sense", "sense", "sup"]);
+    let names: Vec<_> = tracking.ports().iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["d", "out", "sense", "sup"]);
     assert!(tracking.output_vector_input_partials(&ctx, "out", 0).len() <= 1);
     assert_eq!(tracking.analog_threshold_input(&ctx, "sup", 0, 2.0), 2.0);
 }

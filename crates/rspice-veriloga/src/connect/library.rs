@@ -264,9 +264,8 @@ pub(crate) fn equivalent_declarations(
             let crate::ast::Item::ConnectModule(module) = item else {
                 return None;
             };
-            let declaration = tokens(
-                source.get(module.span.start as usize..module.span.end as usize)?,
-            )?;
+            let declaration =
+                tokens(source.get(module.span.start as usize..module.span.end as usize)?)?;
             [
                 (BuiltinSignature::Full, &BUILTIN_CONNECT_MODULES),
                 (BuiltinSignature::Legacy, &LEGACY_BUILTIN_CONNECT_MODULES),

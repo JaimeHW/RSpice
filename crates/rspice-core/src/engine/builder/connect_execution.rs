@@ -10,7 +10,8 @@ use crate::{CircuitData, ElaborationError, ElaborationErrorKind, SimulationError
 
 #[derive(Debug)]
 pub(super) enum ConnectExecution {
-    Delegated,
+    /// A shipped signature, converted by the built-in connect-rule converter.
+    Delegated(rspice_veriloga::connect::library::BuiltinSignature),
     Authored(AuthoredConnectBody),
 }
 

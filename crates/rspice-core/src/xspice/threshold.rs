@@ -44,8 +44,8 @@ pub(crate) struct AnalogBandLaw {
 impl AnalogBandLaw {
     /// The XSPICE `adc_bridge` law.
     pub(crate) const UNKNOWN_BAND: Self = Self { timeout: 0.0 };
-    /// The HDL host's built-in converter law.
-    #[cfg(any(test, feature = "veriloga"))]
+    /// Pure hysteresis: an input between the thresholds never times out.
+    #[cfg(test)]
     pub(crate) const HYSTERESIS: Self = Self {
         timeout: Value::INFINITY,
     };
@@ -79,6 +79,7 @@ impl AnalogBandLaw {
     /// When an input that entered the band at `entry` reads X: the instant
     /// a converter asks the stepper to land on, and the one `expired` is
     /// measured against.
+    #[cfg(feature = "veriloga")]
     pub(crate) fn deadline(self, entry: Value) -> Value {
         entry + self.timeout
     }

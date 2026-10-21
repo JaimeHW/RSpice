@@ -56,8 +56,12 @@ const SUPPLY_LEVEL_TOLERANCE: crate::Value = 1e-9;
 pub(super) enum SupplyDerivation {
     /// The deck named it: `.param vcc`, the parameter
     /// `.options auto_bridge_parm_d` renames, or a subcircuit-scoped value for
-    /// this net. Authoritative and silent, as it has always been.
-    Declared,
+    /// this net. Authoritative and silent, as it has always been. The
+    /// parameter is named in a connect-rule converter's insertion record.
+    Declared {
+        #[cfg_attr(not(feature = "veriloga"), allow(dead_code))]
+        parameter: String,
+    },
     /// Exactly one rail reaches this net. The boundary binds to the rail's
     /// node live: see [`live_supply_net`].
     Derived {
@@ -117,7 +121,9 @@ impl BoundarySupplies {
         if let Some(level) = scoped.filter(|value| value.is_finite()).or(self.declared) {
             return ResolvedSupply {
                 level,
-                derivation: SupplyDerivation::Declared,
+                derivation: SupplyDerivation::Declared {
+                    parameter: self.parameter.clone(),
+                },
             };
         }
 
@@ -192,7 +198,7 @@ impl BoundarySupplies {
         }
 
         match derivation {
-            SupplyDerivation::Declared | SupplyDerivation::Ambiguous { .. } => {}
+            SupplyDerivation::Declared { .. } | SupplyDerivation::Ambiguous { .. } => {}
             SupplyDerivation::Derived {
                 source,
                 level,
@@ -227,13 +233,18 @@ impl BoundarySupplies {
 /// the boundary is powered from, and Spectre's supply-sensitive connect
 /// modules read that net's voltage rather than a snapshot of it.
 ///
-/// Only the A/D and D/A converters track a supply; a bidirectional boundary
-/// converts against its static level.
+/// The A/D and D/A converters track a supply, and so does the built-in
+/// connect-rule bidirectional converter; ngspice's `bidi_bridge`, which an
+/// XSPICE boundary no connect rule reaches still uses, converts against its
+/// static level.
 pub(super) fn live_supply_net(bridge: &super::PlannedXspiceAutoBridge) -> Option<&str> {
-    if !matches!(
-        bridge.kind,
-        super::XspiceAutoBridgeKind::Adc | super::XspiceAutoBridgeKind::Dac
-    ) {
+    let tracks = match bridge.kind {
+        super::XspiceAutoBridgeKind::Adc | super::XspiceAutoBridgeKind::Dac => true,
+        #[cfg(feature = "veriloga")]
+        super::XspiceAutoBridgeKind::Bidi => super::connect_modules::converts_built_in(bridge),
+        _ => false,
+    };
+    if !tracks {
         return None;
     }
     #[cfg(feature = "veriloga")]
@@ -247,7 +258,7 @@ pub(super) fn live_supply_net(bridge: &super::PlannedXspiceAutoBridge) -> Option
     }
     match bridge.supply.as_ref()? {
         SupplyDerivation::Derived { node, .. } => Some(node),
-        SupplyDerivation::Declared
+        SupplyDerivation::Declared { .. }
         | SupplyDerivation::Defaulted
         | SupplyDerivation::Ambiguous { .. } => None,
     }
@@ -308,6 +319,22 @@ pub(super) fn with_live_supply(
         _ => code_model,
     };
     (code_model, connections)
+}
+
+/// Where a planned converter's supply came from, as its insertion record
+/// says it.
+#[cfg(feature = "veriloga")]
+pub(super) fn supply_sentence(derivation: Option<&SupplyDerivation>) -> String {
+    match derivation {
+        Some(SupplyDerivation::Declared { parameter }) => format!(".param {parameter}"),
+        Some(SupplyDerivation::Derived { source, level, .. }) => {
+            format!("inferred from {source} = {level} V")
+        }
+        Some(SupplyDerivation::Ambiguous { rails }) => format!("{} rails disagree", rails.len()),
+        Some(SupplyDerivation::Defaulted) | None => {
+            format!("default {DEFAULT_BOUNDARY_SUPPLY} V")
+        }
+    }
 }
 
 /// Say that a boundary converts against a net its connect statement named.

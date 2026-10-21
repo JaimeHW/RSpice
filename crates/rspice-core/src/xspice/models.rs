@@ -128,6 +128,7 @@ mod analog;
 mod bridges;
 
 // The connect-rule converters: one law for every built-in boundary
+#[cfg(feature = "veriloga")]
 mod connect_bridges;
 
 // Xyce-compatible analog digital output devices
@@ -179,9 +180,9 @@ pub use analog::{
 #[cfg(feature = "veriloga")]
 pub(crate) use bridges::OFFICIAL_BRIDGE_TIMING_MIN;
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
-#[cfg(feature = "veriloga")]
-pub(crate) use bridges::{MixedAdcBridge, MixedBidiBridge, MixedDacBridge};
 pub(crate) use bridges::{TrackingAdcBridge, TrackingDacBridge};
+#[cfg(feature = "veriloga")]
+pub(crate) use connect_bridges::{ConnectAdc, ConnectBidi, ConnectDac};
 
 pub use digital_output::{
     XyceDAdd, XyceDGate, XyceDLegacyDff, XyceDLegacyGate, XyceDSequential, XyceDTff,

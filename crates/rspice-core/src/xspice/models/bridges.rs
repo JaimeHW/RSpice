@@ -324,353 +324,9 @@ fn evaluate_stock_adc_bridge(ctx: &mut CmContext, supply: Option<Value>) -> CmRe
     Ok(())
 }
 
-/// Mixed logic input publication. Physical root detection belongs to the
-/// coupled analog trial; delays and cancellation use the common event queue.
-///
-/// `tracking` is the supply-tracking form: a `sup` port reads the supply net,
-/// and `in_low`/`in_high` are fractions of its voltage.
-#[cfg(feature = "veriloga")]
-pub(crate) struct MixedAdcBridge {
-    pub(crate) tracking: bool,
-}
-
-#[cfg(feature = "veriloga")]
-impl CodeModel for MixedAdcBridge {
-    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
-        XspiceCheckpointSupport::Serializable
-    }
-
-    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
-        held_converter_descriptor()
-    }
-
-    fn name(&self) -> &str {
-        if self.tracking {
-            "__rspice_mixed_tracking_adc"
-        } else {
-            "__rspice_mixed_adc"
-        }
-    }
-    fn ports(&self) -> &[PortSpec] {
-        static TRACKING: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
-        if self.tracking {
-            TRACKING.get_or_init(|| with_supply_port(AdcBridge.ports()))
-        } else {
-            AdcBridge.ports()
-        }
-    }
-    fn analog_threshold_input(
-        &self,
-        ctx: &CmContext,
-        _port: &str,
-        _element: usize,
-        input: Value,
-    ) -> Value {
-        tracking_threshold_input(ctx, self.tracking, input)
-    }
-    fn parameters(&self) -> &[ParamSpec] {
-        static PARAMS: std::sync::OnceLock<Vec<ParamSpec>> = std::sync::OnceLock::new();
-        PARAMS.get_or_init(|| {
-            let mut params = AdcBridge.parameters().to_vec();
-            for param in &mut params {
-                if matches!(param.name.as_str(), "rise_delay" | "fall_delay") {
-                    param.default = 0.0;
-                    param.description = "Nonnegative propagation delay; zero is immediate".into();
-                }
-            }
-            params
-        })
-    }
-    fn analog_input_thresholds(
-        &self,
-        ctx: &CmContext,
-    ) -> CmResult<Vec<crate::xspice::AnalogInputThreshold>> {
-        tracking_input_thresholds(
-            ctx,
-            self.tracking,
-            crate::xspice::AnalogThresholdBehavior::Hysteresis,
-        )
-    }
-
-    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        AdcBridge.init(ctx)
-    }
-    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let width = bridge_vector_width(ctx, self.name())?;
-        let low = finite_bridge_param(ctx, self.name(), "in_low")?;
-        let high = finite_bridge_param(ctx, self.name(), "in_high")?;
-        let rise = mixed_bridge_timing(ctx, "rise_delay")?;
-        let fall = mixed_bridge_timing(ctx, "fall_delay")?;
-        let commit = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
-        let supply = self.tracking.then(|| tracked_supply(ctx));
-        for index in 0..width {
-            let (voltage, low, high) = tracking_adc_terms(
-                analog_vector_input_value(ctx, "in", index),
-                low,
-                high,
-                supply,
-            );
-            let previous = ctx.int_state(index);
-            let held = match previous {
-                0 => Some(DigitalState::Zero),
-                1 => Some(DigitalState::One),
-                _ => None,
-            };
-            let decision = crate::xspice::AnalogBandLaw::HYSTERESIS.decision(
-                voltage,
-                (ctx.time > 0.0).then(|| ctx.state_prev(index)),
-                held,
-                low,
-                high,
-                false,
-            );
-            let state = decision.map_or(
-                if previous == ADC_UNINITIALIZED_STATE {
-                    -1
-                } else {
-                    previous
-                },
-                |(state, _)| i64::from(state == DigitalState::One),
-            );
-            if commit && state != previous {
-                let value = match state {
-                    0 => DigitalValue::zero(),
-                    1 => DigitalValue::one(),
-                    _ => DigitalValue::unknown(),
-                };
-                let delay = adc_bridge_delay_for_transition(ctx.time, previous, state, rise, fall);
-                ctx.set_output_digital_vector_element("out", index, value, delay);
-            }
-            if commit {
-                ctx.set_int_state(index, state);
-                ctx.set_state(index, voltage);
-            }
-        }
-        Ok(())
-    }
-}
-
 /// Digital to analog converter bridge
 #[derive(Debug, Default)]
 pub struct DacBridge;
-
-/// A finite-impedance HDL output using the shared DAC ramp state.
-/// Keep the established mixed-port policy: 20-ohm loading, immediate edges
-/// unless configured, X at the rail midpoint, and a disconnected output for Z.
-/// Explicit XSPICE DAC instances retain their own voltage-source policy.
-///
-/// `tracking` is the supply-tracking form: a `sup` port reads the supply net,
-/// and `out_low`/`out_high`/`out_undef` are fractions of its voltage, so the
-/// held level, and the Jacobian, follow it.
-#[cfg(feature = "veriloga")]
-pub(crate) struct MixedDacBridge {
-    pub(crate) tracking: bool,
-}
-
-#[cfg(feature = "veriloga")]
-fn mixed_bridge_timing(ctx: &CmContext, name: &str) -> CmResult<Value> {
-    let value = finite_bridge_param(ctx, "mixed bridge", name)?;
-    if value < 0.0 {
-        return Err(CmError::InvalidParameter {
-            name: name.to_owned(),
-            message: "transition times and delays must be nonnegative".into(),
-        });
-    }
-    Ok(value)
-}
-
-#[cfg(feature = "veriloga")]
-impl CodeModel for MixedDacBridge {
-    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
-        XspiceCheckpointSupport::Serializable
-    }
-
-    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
-        held_converter_descriptor()
-    }
-
-    fn name(&self) -> &str {
-        if self.tracking {
-            "__rspice_mixed_tracking_dac"
-        } else {
-            "__rspice_mixed_dac"
-        }
-    }
-    fn ports(&self) -> &[PortSpec] {
-        static PORTS: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
-        static TRACKING: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
-        let ports = || {
-            let mut ports = DacBridge.ports().to_vec();
-            ports[1].default_type = PortType::Conductance;
-            ports[1].allowed_types = vec![PortType::Conductance, PortType::DifferentialConductance];
-            ports
-        };
-        if self.tracking {
-            TRACKING.get_or_init(|| with_supply_port(&ports()))
-        } else {
-            PORTS.get_or_init(ports)
-        }
-    }
-    fn parameters(&self) -> &[ParamSpec] {
-        static PARAMS: std::sync::OnceLock<Vec<ParamSpec>> = std::sync::OnceLock::new();
-        PARAMS.get_or_init(|| {
-            let mut params = DacBridge.parameters().to_vec();
-            for param in &mut params {
-                if matches!(param.name.as_str(), "t_rise" | "t_fall") {
-                    param.default = 0.0;
-                }
-            }
-            params.push(ParamSpec::real("output_resistance", 20.0));
-            params
-        })
-    }
-    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        DacBridge.init(ctx)?;
-        let width = bridge_vector_width(ctx, self.name())?;
-        let released = mixed_dac_released_base(width)?;
-        let total = released
-            .checked_add(width)
-            .ok_or_else(|| dac_bridge_state_layout_error(width))?;
-        ctx.allocate_states(total);
-        Ok(())
-    }
-    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let width = bridge_vector_width(ctx, self.name())?;
-        let (ramp, out_undef, resistance) = self.drive_law(ctx)?;
-        let supply = self.tracking.then(|| tracked_supply(ctx));
-        evaluate_dac_bridge(ctx, width, ramp, out_undef, supply)?;
-        let released_base = mixed_dac_released_base(width)?;
-        let commit = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
-        for index in 0..width {
-            let voltage = ctx.output_vector_value("out", index);
-            let (released, released_now) = mixed_dac_release(ctx, released_base, index);
-            if commit {
-                ctx.set_state(released_base + index, if released_now { 1.0 } else { 0.0 });
-            }
-            let conductance = if released { 0.0 } else { 1.0 / resistance };
-            ctx.set_output_vector_element_with_partial(
-                "out",
-                index,
-                -conductance * voltage,
-                conductance,
-            )?;
-        }
-        Ok(())
-    }
-    /// The supply partial of a tracking converter's output current
-    /// `−G·(fraction·V(sup) − V(out))`: `−G·fraction` (plan §8.2 rule 3).
-    fn output_vector_input_partials(
-        &self,
-        ctx: &CmContext,
-        output_port: &str,
-        output_index: usize,
-    ) -> Vec<(String, Value)> {
-        if !self.tracking || !output_port.eq_ignore_ascii_case("out") {
-            return Vec::new();
-        }
-        let (Ok(width), Ok((ramp, out_undef, resistance))) =
-            (bridge_vector_width(ctx, self.name()), self.drive_law(ctx))
-        else {
-            return Vec::new();
-        };
-        let (Ok(layout), Ok(released_base)) = (
-            dac_bridge_state_layout(width),
-            mixed_dac_released_base(width),
-        ) else {
-            return Vec::new();
-        };
-        if output_index >= width || mixed_dac_release(ctx, released_base, output_index).0 {
-            return Vec::new();
-        }
-        let fraction = dac_bridge_drive(ctx, output_index, layout, ramp, out_undef).v_out;
-        vec![("sup".to_string(), -fraction / resistance)]
-    }
-    fn excludes_output_from_transient_voltage_lte(&self, port: &str) -> bool {
-        DacBridge.excludes_output_from_transient_voltage_lte(port)
-    }
-    /// Every element not driving Z is its level behind `output_resistance`,
-    /// which is the physical driver's resistance and so noisy (design S11).
-    fn converter_noise_conductances(&self, ctx: &CmContext) -> Vec<(usize, Value)> {
-        let (Ok(width), Ok(resistance)) = (
-            bridge_vector_width(ctx, self.name()),
-            finite_bridge_param(ctx, self.name(), "output_resistance"),
-        ) else {
-            return Vec::new();
-        };
-        let conductance = 1.0 / resistance;
-        if resistance <= 0.0 || !conductance.is_finite() {
-            return Vec::new();
-        }
-        (0..width)
-            .filter(|&index| {
-                digital_vector_input_value(ctx, "in", index).state != DigitalState::HighZ
-            })
-            .map(|index| (index, conductance))
-            .collect()
-    }
-}
-
-#[cfg(feature = "veriloga")]
-impl MixedDacBridge {
-    /// The ramp, the X level and the output resistance from the parameters.
-    fn drive_law(&self, ctx: &CmContext) -> CmResult<(DacBridgeRamp, Value, Value)> {
-        let out_low = finite_bridge_param(ctx, self.name(), "out_low")?;
-        let out_high = finite_bridge_param(ctx, self.name(), "out_high")?;
-        let out_undef = dac_bridge_out_undef(ctx, out_low, out_high)?;
-        let t_rise = mixed_bridge_timing(ctx, "t_rise")?;
-        let t_fall = mixed_bridge_timing(ctx, "t_fall")?;
-        let resistance = finite_bridge_param(ctx, self.name(), "output_resistance")?;
-        if resistance <= 0.0 || !(1.0 / resistance).is_finite() {
-            return Err(CmError::InvalidParameter {
-                name: "output_resistance".into(),
-                message: "output resistance must be positive with finite conductance".into(),
-            });
-        }
-        Ok((
-            DacBridgeRamp {
-                out_low,
-                out_high,
-                t_rise,
-                t_fall,
-            },
-            out_undef,
-            resistance,
-        ))
-    }
-}
-
-/// Whether one built-in D/A element is released (drives Z) at this
-/// evaluation, and whether its input is Z now.
-///
-/// The impedance keeps the left limit the level keeps: a bit that released or
-/// seized the net at this very timepoint still drives it as it did before,
-/// from the slot the last accepted point left. `z` and `x` share a level, so
-/// the ramp state cannot tell them apart; this slot is what can.
-#[cfg(feature = "veriloga")]
-fn mixed_dac_release(ctx: &CmContext, released_base: usize, index: usize) -> (bool, bool) {
-    let slot = released_base + index;
-    let released_now = digital_vector_input_value(ctx, "in", index).state == DigitalState::HighZ;
-    let released_before = ctx.state_prev(slot) != 0.0;
-    let changed_here = ctx.is_transient()
-        && ctx.time > 0.0
-        && released_now != released_before
-        && ctx
-            .input_digital_vector_event_time("in", index)
-            .is_none_or(|event| event >= ctx.time);
-    let released = if changed_here {
-        released_before
-    } else {
-        released_now
-    };
-    (released, released_now)
-}
-
-/// The first of the built-in converter's per-bit release slots, after the ramp
-/// block it shares with `dac_bridge`.
-#[cfg(feature = "veriloga")]
-fn mixed_dac_released_base(width: usize) -> CmResult<usize> {
-    Ok(dac_bridge_state_layout(width)?.state_count)
-}
 
 const DAC_BRIDGE_STATE_STRIDE: usize = 4;
 
@@ -736,9 +392,6 @@ struct BidiParams {
     t_fall: Value,
     rise_delay: Value,
     fall_delay: Value,
-    /// Whether a released bit holds its drive ramp at the node's own level
-    /// ([`MixedBidiBridge`]) rather than at the midpoint (`bidi_bridge`).
-    tracks_released_level: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -992,20 +645,6 @@ fn bidi_params(ctx: &CmContext) -> CmResult<BidiParams> {
         t_fall: bridge_timing_param(ctx, "bidi_bridge", "t_fall")?,
         rise_delay: bridge_timing_param(ctx, "bidi_bridge", "rise_delay")?,
         fall_delay: bridge_timing_param(ctx, "bidi_bridge", "fall_delay")?,
-        tracks_released_level: false,
-    })
-}
-
-/// The built-in HDL inout converter's law: `bidi_bridge`'s, except that its
-/// A/D delays may be zero (the default, as for the built-in input converter)
-/// and a released bit tracks the node's level.
-#[cfg(feature = "veriloga")]
-fn mixed_bidi_params(ctx: &CmContext) -> CmResult<BidiParams> {
-    Ok(BidiParams {
-        rise_delay: mixed_bridge_timing(ctx, "rise_delay")?,
-        fall_delay: mixed_bridge_timing(ctx, "fall_delay")?,
-        tracks_released_level: true,
-        ..bidi_params(ctx)?
     })
 }
 
@@ -1163,29 +802,9 @@ fn bidi_target_svoc(drive: DigitalValue, params: BidiParams) -> Value {
     }
 }
 
-/// Where a released bit's drive ramp rests: the node's own level as a fraction
-/// of the output swing, so a drive that seizes the node ramps from the level
-/// the node is at. `bidi_bridge` itself rests at the midpoint instead.
-fn bidi_released_svoc(voltage: Value, params: BidiParams) -> Value {
-    let span = params.out_high - params.out_low;
-    let level = (voltage - params.out_low) / span;
-    if level.is_finite() {
-        level.clamp(0.0, 1.0)
-    } else {
-        0.5
-    }
-}
-
 fn bidi_advance_svoc(prev: Value, drive: DigitalValue, dt: Value, params: BidiParams) -> Value {
     if drive.strength == DigitalStrength::HighZ {
-        // A tracking bridge holds the level its last accepted point left
-        // across a released segment; `bidi_drive_current` re-reads the node
-        // when the bit ends the step released.
-        return if params.tracks_released_level {
-            prev
-        } else {
-            0.5
-        };
+        return 0.5;
     }
 
     let target = bidi_target_svoc(drive, params);
@@ -1470,13 +1089,8 @@ fn bidi_drive_current(
     // The initial transient point must solve the initialized digital state.
     // There is no elapsed interval over which to slew the allocator's default
     // midpoint/current. Acceptance then seeds the history used by later steps.
-    let released = params.tracks_released_level && drive.strength == DigitalStrength::HighZ;
     if !ctx.is_transient() || ctx.time == 0.0 {
-        let svoc = if released {
-            bidi_released_svoc(voltage, params)
-        } else {
-            bidi_target_svoc(drive, params)
-        };
+        let svoc = bidi_target_svoc(drive, params);
         let (current, partial, _) = bidi_current_target(voltage, drive, svoc, params);
         return BidiAnalogDrive {
             current,
@@ -1505,9 +1119,6 @@ fn bidi_drive_current(
             range,
             params,
         );
-    }
-    if released {
-        svoc = bidi_released_svoc(voltage, params);
     }
 
     BidiAnalogDrive {
@@ -2196,16 +1807,6 @@ impl CodeModel for BidiBridge {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        Self::evaluate_with(ctx, bidi_params)
-    }
-}
-
-impl BidiBridge {
-    /// One evaluation under the law `read_params` reads.
-    fn evaluate_with(
-        ctx: &mut CmContext,
-        read_params: fn(&CmContext) -> CmResult<BidiParams>,
-    ) -> CmResult<()> {
         let width = ctx.port_width("a");
         if ctx.port_width("d") != width {
             return Err(CmError::InvalidPortConnection(format!(
@@ -2215,7 +1816,7 @@ impl BidiBridge {
             )));
         }
 
-        let params = read_params(ctx)?;
+        let params = bidi_params(ctx)?;
         let output_strength = digital_strength_from_param(params.strength);
         let layout = bidi_state_layout(width)?;
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
@@ -2347,61 +1948,6 @@ impl BidiBridge {
         }
 
         Ok(())
-    }
-}
-
-/// The built-in converter for an HDL `inout` bit on an electrical node.
-///
-/// `bidi_bridge`'s law with the built-in converters' policy: the A/D side
-/// publishes the node's level without delay unless one is configured, as
-/// [`MixedAdcBridge`] does, so the HDL reads the solved level at time zero and
-/// again the instant it releases the node. A released bit's drive ramp rests
-/// at the node's level rather than the midpoint, so an HDL drive that seizes
-/// the node starts from where the node is: driving the level already present
-/// does not pull the node through mid-rail. Explicit `bidi_bridge` cards keep
-/// the stock model.
-#[cfg(feature = "veriloga")]
-pub(crate) struct MixedBidiBridge;
-
-#[cfg(feature = "veriloga")]
-impl CodeModel for MixedBidiBridge {
-    fn checkpoint_support(&self, ctx: &CmContext) -> XspiceCheckpointSupport {
-        BidiBridge.checkpoint_support(ctx)
-    }
-
-    fn small_signal_descriptor(&self, ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
-        BidiBridge.small_signal_descriptor(ctx)
-    }
-
-    fn name(&self) -> &str {
-        "__rspice_mixed_bidi"
-    }
-
-    fn ports(&self) -> &[PortSpec] {
-        bidi_ports()
-    }
-
-    fn parameters(&self) -> &[ParamSpec] {
-        static PARAMS: std::sync::OnceLock<Vec<ParamSpec>> = std::sync::OnceLock::new();
-        PARAMS.get_or_init(|| {
-            let mut params = bidi_parameters().to_vec();
-            for param in &mut params {
-                if matches!(param.name.as_str(), "rise_delay" | "fall_delay") {
-                    param.default = 0.0;
-                    param.description = "Nonnegative propagation delay; zero is immediate".into();
-                }
-            }
-            params
-        })
-    }
-
-    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        mixed_bidi_params(ctx)?;
-        BidiBridge.init(ctx)
-    }
-
-    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        BidiBridge::evaluate_with(ctx, mixed_bidi_params)
     }
 }
 
@@ -2891,96 +2437,6 @@ mod tests {
             "ngspice's signed DAC slope snaps inverted output ranges to the target"
         );
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
-    }
-
-    /// One accepted evaluation of the built-in converter at `time` with `bit`
-    /// on its input, changed at `event`. Returns the Norton pair it stamps:
-    /// `(-g·v, g)`.
-    #[cfg(feature = "veriloga")]
-    fn mixed_dac_step(
-        ctx: &mut CmContext,
-        time: Value,
-        bit: DigitalValue,
-        event: Option<Value>,
-    ) -> (Value, Value) {
-        ctx.time = time;
-        ctx.set_input("in", InputValue::DigitalVector(vec![bit]));
-        ctx.set_input_digital_vector_event_times("in", vec![event]);
-        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
-        MixedDacBridge { tracking: false }
-            .evaluate(ctx)
-            .expect("the built-in converter evaluates");
-        let pair = (
-            ctx.output_vector_value("out", 0),
-            ctx.partial_vector_value("out", 0),
-        );
-        ctx.advance_state();
-        pair
-    }
-
-    /// A zero-rise edge is a discontinuity *after* its instant: the converter
-    /// drives the analog solution at the edge's own timepoint with the level
-    /// and the impedance it had before it, and with the new ones from the first
-    /// instant after it — ngspice-46 `dac_bridge`'s "previous input value in
-    /// force for the whole step" when the analog point is the input change.
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn the_built_in_converter_holds_its_drive_from_before_an_edge_at_the_edge() {
-        let mut ctx = CmContext::new();
-        ctx.set_port_width("in", 1);
-        ctx.set_port_width("out", 1);
-        for (name, value) in [
-            ("out_low", 0.0),
-            ("out_high", 3.3),
-            ("out_undef", 1.65),
-            ("input_load", 1.0e-12),
-            ("t_rise", 0.0),
-            ("t_fall", 0.0),
-            ("output_resistance", 20.0),
-        ] {
-            ctx.set_param(name, value);
-        }
-        ctx.init_output_vector("out", PortType::Conductance, 1);
-        ctx.analysis = AnalysisType::Transient;
-        ctx.call_type = CallType::TransientAnalysis;
-        ctx.timestep = 1.0e-9;
-        MixedDacBridge { tracking: false }
-            .init(&mut ctx)
-            .expect("the built-in converter initializes");
-        let g = 1.0 / 20.0;
-
-        assert_eq!(
-            mixed_dac_step(&mut ctx, 0.0, DigitalValue::zero(), None),
-            (0.0, g)
-        );
-        // The rise at 5 ns: the point on it is driven low, the next one high.
-        assert_eq!(
-            mixed_dac_step(&mut ctx, 5.0e-9, DigitalValue::one(), Some(5.0e-9)),
-            (0.0, g),
-            "the solution at the edge must be the left limit"
-        );
-        assert_eq!(
-            mixed_dac_step(&mut ctx, 5.1e-9, DigitalValue::one(), Some(5.0e-9)),
-            (-g * 3.3, g)
-        );
-        // A release at 7 ns: still driven high on the edge, released after it.
-        assert_eq!(
-            mixed_dac_step(&mut ctx, 7.0e-9, DigitalValue::high_z(), Some(7.0e-9)),
-            (-g * 3.3, g),
-            "a release keeps the impedance it had before it on its own timepoint"
-        );
-        let (_, released) = mixed_dac_step(&mut ctx, 7.1e-9, DigitalValue::high_z(), Some(7.0e-9));
-        assert_eq!(released, 0.0, "and lets go of the net after it");
-        // Seized again at 9 ns: still released on the edge, driven after it.
-        let (_, held) = mixed_dac_step(&mut ctx, 9.0e-9, DigitalValue::zero(), Some(9.0e-9));
-        assert_eq!(
-            held, 0.0,
-            "a seize keeps the net released on its own timepoint"
-        );
-        assert_eq!(
-            mixed_dac_step(&mut ctx, 9.1e-9, DigitalValue::zero(), Some(9.0e-9)),
-            (0.0, g)
-        );
     }
 
     #[test]

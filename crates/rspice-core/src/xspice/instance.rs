@@ -929,6 +929,18 @@ pub struct XspiceInstance {
     initialized: bool,
     /// A coupled trial has bound this instance's declared input thresholds.
     mixed_input_thresholds_bound: bool,
+    /// An input port whose elements each read one driver of their net rather
+    /// than the net's resolved value; see [`Self::tap_digital_drivers`].
+    #[cfg(feature = "veriloga")]
+    driver_taps: Option<Arc<DigitalDriverTaps>>,
+}
+
+/// One input port's per-element drivers: element `i` reads `drivers[i]`.
+#[cfg(feature = "veriloga")]
+#[derive(Debug)]
+struct DigitalDriverTaps {
+    port: String,
+    drivers: Vec<super::event::XspiceDriverId>,
 }
 
 /// Who puts a failed evaluation's context back.
@@ -1398,6 +1410,8 @@ impl XspiceInstance {
             analog_stamp_surface,
             initialized: false,
             mixed_input_thresholds_bound: false,
+            #[cfg(feature = "veriloga")]
+            driver_taps: None,
         })
     }
 
@@ -1450,6 +1464,26 @@ impl XspiceInstance {
             }
         }
         Ok(thresholds)
+    }
+
+    /// Make each element of the digital input `port` read one driver of its
+    /// net, `drivers[i]` for element `i`, instead of the net's resolved value.
+    ///
+    /// A driver-sensitive D/A converts every driver of a net separately, so
+    /// that a weak 1 against a strong 0 is two Thevenin branches the analog
+    /// solution divides between rather than one resolved strong 0. The model
+    /// reads the tapped driver through [`CmContext::other_digital_drivers`],
+    /// the same per-element driver view an inout port receives.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn tap_digital_drivers(
+        &mut self,
+        port: &str,
+        drivers: Vec<super::event::XspiceDriverId>,
+    ) {
+        self.driver_taps = Some(Arc::new(DigitalDriverTaps {
+            port: port.to_string(),
+            drivers,
+        }));
     }
 
     #[cfg(feature = "veriloga")]
@@ -1789,6 +1823,23 @@ impl XspiceInstance {
         time: Value,
         shared: impl Fn(usize) -> bool,
     ) {
+        #[cfg(feature = "veriloga")]
+        if let Some(taps) = self.driver_taps.clone()
+            && let Some(connection) = self
+                .port_indices
+                .get(&taps.port)
+                .and_then(|&port| self.connections.get(port))
+        {
+            let context = &mut self.context;
+            for_each_event_connection_node(connection, |index, node| {
+                let value = taps
+                    .drivers
+                    .get(index)
+                    .and_then(|driver| drivers.get(&node)?.get(driver).copied())
+                    .unwrap_or_else(DigitalValue::high_z);
+                context.set_other_digital_drivers(&taps.port, index, value, time);
+            });
+        }
         for (port, connection) in self.ports.iter().zip(&self.connections) {
             if port.direction != super::PortDirection::InOut
                 || !matches!(
