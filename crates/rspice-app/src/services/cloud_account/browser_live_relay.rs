@@ -15,10 +15,8 @@ use rspice_cloud_client::contract::LIVE_SESSION_PROTOCOL;
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::closure::Closure;
 
-use super::{
-    CloudAccountCommand, LiveFrame, LiveFrameClass, LiveRelayClosure, MAX_LIVE_FRAME_BYTES,
-    MAX_LIVE_RELAY_WIRE_BYTES,
-};
+use super::{CloudAccountCommand, LiveRelayClosure, MAX_LIVE_RELAY_WIRE_BYTES};
+use crate::services::live_protocol::{LiveFrame, LiveFrameClass, MAX_LIVE_FRAME_BYTES};
 
 /// Maximum bytes admitted into the browser-owned WebSocket send buffer.
 const MAX_BROWSER_BUFFERED_BYTES: u32 = 2 * 1024 * 1024;

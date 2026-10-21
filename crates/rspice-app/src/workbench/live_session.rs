@@ -20,14 +20,12 @@ use std::time::Duration;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::schematic_io::{load_schematic_text, serialize_schematic_for_wire};
-use crate::services::cloud_account::{
-    CloudAccountService, LiveFrame, LiveFrameClass, LiveRelayPort, LiveSessionState,
-};
+use crate::services::cloud_account::{CloudAccountService, LiveRelayPort, LiveSessionState};
 use crate::services::live_protocol::{
     CompletedContent, ContentReassembler, CursorLocus, CursorPayload, DocumentMessage,
-    LeaseDecision, LeaseTable, LiveMessage, LiveProtocolError, ManifestEntry, PeerIdentity,
-    PresencePayload, RunIntent, RunPhase, RunRequestPayload, RunStatusMessage, RunStatusPayload,
-    content_digest, replace_messages,
+    LeaseDecision, LeaseTable, LiveFrame, LiveFrameClass, LiveMessage, LiveProtocolError,
+    ManifestEntry, PeerIdentity, PresencePayload, RunIntent, RunPhase, RunRequestPayload,
+    RunStatusMessage, RunStatusPayload, content_digest, replace_messages,
 };
 use crate::state::SchematicState;
 use crate::state::write_policy::LiveWriteLocks;
@@ -1769,7 +1767,7 @@ fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::cloud_account::LiveRelayIdentity;
+    use crate::services::live_protocol::LiveRelayIdentity;
 
     fn identity(principal: u128, client: u128) -> PeerIdentity {
         PeerIdentity {

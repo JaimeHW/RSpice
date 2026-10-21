@@ -1,8 +1,10 @@
-//! Live-session frame payload protocol (peer-owned, relay-opaque).
+//! Live-session relay frames and their payload protocol (peer-owned,
+//! relay-opaque).
 //!
 //! The relay validates only the leading class byte and enforces capability
 //! by class; everything inside the payload is a contract between RSpice
-//! peers, defined here. The model is host-authoritative state sync at
+//! peers, defined here. The frame types live here, beneath the cloud
+//! transport that carries them, so the protocol never names the transport. The model is host-authoritative state sync at
 //! document granularity: the host broadcasts whole documents (chunked under
 //! the relay's frame cap), guests mirror them, and per-document write leases
 //! decide who may edit what. Payloads carry a version byte so incompatible
@@ -24,7 +26,95 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::cloud_account::{LiveFrame, LiveFrameClass, MAX_LIVE_FRAME_BYTES};
+/// Payload class of one live-relay frame, mirroring the relay's class byte.
+/// The relay enforces capability by class alone: everyone sends presence and
+/// cursor frames, editors add document and run-request frames, and run-status
+/// frames are host-only.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LiveFrameClass {
+    Presence,
+    Cursor,
+    Document,
+    RunRequest,
+    RunStatus,
+}
+
+impl LiveFrameClass {
+    pub(crate) const fn as_byte(self) -> u8 {
+        match self {
+            Self::Presence => 0,
+            Self::Cursor => 1,
+            Self::Document => 2,
+            Self::RunRequest => 3,
+            Self::RunStatus => 4,
+        }
+    }
+
+    pub(crate) const fn from_byte(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Presence),
+            1 => Some(Self::Cursor),
+            2 => Some(Self::Document),
+            3 => Some(Self::RunRequest),
+            4 => Some(Self::RunStatus),
+            _ => None,
+        }
+    }
+}
+
+/// Hard per-frame bound: the relay closes the connection over anything
+/// larger, so senders must chunk beneath it.
+pub(crate) const MAX_LIVE_FRAME_BYTES: usize = 1024 * 1024;
+/// Relay-delivered v2 frames add two authenticated UUIDs after the class
+/// byte. This overhead is outside the peer-controlled frame-size allowance.
+pub(crate) const LIVE_RELAY_AUTHENTICATED_SENDER_BYTES: usize = 32;
+
+/// Identity stamped by the relay from the consumed one-time ticket. Payload
+/// identity fields are compatibility data only and never authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct LiveRelayIdentity {
+    pub principal_id: uuid::Uuid,
+    pub client_instance_id: uuid::Uuid,
+}
+
+/// One live-relay frame. Outbound bytes contain class + payload; inbound v2
+/// bytes contain class + the relay-authenticated sender + payload.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct LiveFrame {
+    pub class: LiveFrameClass,
+    pub authenticated_sender: Option<LiveRelayIdentity>,
+    pub payload: Vec<u8>,
+}
+
+impl LiveFrame {
+    pub(crate) fn encode(&self) -> Vec<u8> {
+        debug_assert!(
+            self.authenticated_sender.is_none(),
+            "relay-delivered frames must never be sent back as local authority"
+        );
+        let mut bytes = Vec::with_capacity(1 + self.payload.len());
+        bytes.push(self.class.as_byte());
+        bytes.extend_from_slice(&self.payload);
+        bytes
+    }
+
+    pub(crate) fn decode_authenticated(bytes: &[u8]) -> Option<Self> {
+        let (class_byte, stamped) = bytes.split_first()?;
+        if stamped.len() < LIVE_RELAY_AUTHENTICATED_SENDER_BYTES {
+            return None;
+        }
+        let principal_id = uuid::Uuid::from_slice(&stamped[..16]).ok()?;
+        let client_instance_id = uuid::Uuid::from_slice(&stamped[16..32]).ok()?;
+        Some(Self {
+            class: LiveFrameClass::from_byte(*class_byte)?,
+            authenticated_sender: Some(LiveRelayIdentity {
+                principal_id,
+                client_instance_id,
+            }),
+            payload: stamped[32..].to_vec(),
+        })
+    }
+}
 
 /// Wire version of every payload this build produces and accepts.
 pub(crate) const LIVE_PROTOCOL_VERSION: u8 = 1;
@@ -784,6 +874,47 @@ mod tests {
             principal_id: uuid::Uuid::from_u128(seed),
             client_instance_id: uuid::Uuid::from_u128(seed + 1000),
         }
+    }
+
+    #[test]
+    fn live_frames_encode_outbound_and_decode_ticket_stamped_identity() {
+        let principal_id = uuid::Uuid::from_u128(11);
+        let client_instance_id = uuid::Uuid::from_u128(12);
+        for (class, byte) in [
+            (LiveFrameClass::Presence, 0u8),
+            (LiveFrameClass::Cursor, 1),
+            (LiveFrameClass::Document, 2),
+            (LiveFrameClass::RunRequest, 3),
+            (LiveFrameClass::RunStatus, 4),
+        ] {
+            let frame = LiveFrame {
+                class,
+                authenticated_sender: None,
+                payload: vec![9, 8, 7],
+            };
+            let encoded = frame.encode();
+            assert_eq!(encoded[0], byte);
+            let mut delivered = vec![byte];
+            delivered.extend_from_slice(principal_id.as_bytes());
+            delivered.extend_from_slice(client_instance_id.as_bytes());
+            delivered.extend_from_slice(&[9, 8, 7]);
+            let decoded = LiveFrame::decode_authenticated(&delivered).expect("stamped frame");
+            assert_eq!(decoded.class, class);
+            assert_eq!(decoded.payload, vec![9, 8, 7]);
+            assert_eq!(
+                decoded.authenticated_sender,
+                Some(LiveRelayIdentity {
+                    principal_id,
+                    client_instance_id,
+                })
+            );
+        }
+        assert_eq!(LiveFrame::decode_authenticated(&[]), None, "no class byte");
+        assert_eq!(
+            LiveFrame::decode_authenticated(&[0; 32]),
+            None,
+            "truncated identity stamp"
+        );
     }
 
     #[test]

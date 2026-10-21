@@ -19,10 +19,8 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
-use super::{
-    CloudAccountCommand, LiveFrame, LiveFrameClass, LiveRelayClosure, MAX_LIVE_FRAME_BYTES,
-    MAX_LIVE_RELAY_WIRE_BYTES,
-};
+use super::{CloudAccountCommand, LiveRelayClosure, MAX_LIVE_RELAY_WIRE_BYTES};
+use crate::services::live_protocol::{LiveFrame, LiveFrameClass, MAX_LIVE_FRAME_BYTES};
 
 /// Everything one socket connection needs. Carries the bearer ticket inside
 /// `protocols`, so this type must never derive or implement `Debug`.
@@ -260,8 +258,8 @@ mod tests {
         Request as ServerRequest, Response as ServerResponse,
     };
 
-    use super::super::LiveFrameClass;
     use super::*;
+    use crate::services::live_protocol::LiveRelayIdentity;
 
     #[test]
     fn relay_endpoints_map_release_origins_onto_socket_schemes() {
@@ -452,7 +450,7 @@ mod tests {
         assert_eq!(echoed.payload, vec![42]);
         assert_eq!(
             echoed.authenticated_sender,
-            Some(super::super::LiveRelayIdentity {
+            Some(LiveRelayIdentity {
                 principal_id: uuid::Uuid::from_u128(41),
                 client_instance_id: uuid::Uuid::from_u128(42),
             })
