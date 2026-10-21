@@ -481,7 +481,7 @@ fn without_preprocessor_syntax(source: &str) -> String {
 const fn port_net_type(net_type: rspice_veriloga::ast::PortNetType) -> &'static str {
     use rspice_veriloga::ast::PortNetType;
     match net_type {
-        PortNetType::Wire => "wire",
+        PortNetType::Wire(kind) => kind.keyword(),
         PortNetType::Reg => "reg",
         PortNetType::Integer => "integer",
         PortNetType::Time => "time",
