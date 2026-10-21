@@ -20,6 +20,7 @@ use crate::simulation::execution::PreparedRunSnapshot;
 use crate::simulation::execution::TouchstoneExportPolicy;
 #[cfg(test)]
 use crate::simulation::execution::preparation::reject_deferred_corner_model_sources;
+use crate::state::CampaignMemberRefusal;
 use rspice_vocabulary::canonical::content_digest;
 
 #[cfg(test)]
@@ -906,7 +907,7 @@ impl SimulationController {
                         state,
                         member_index,
                         &member.plan_name,
-                        super::CampaignMemberRefusal::Start,
+                        CampaignMemberRefusal::Start,
                         &error,
                         line,
                     );
@@ -930,7 +931,7 @@ impl SimulationController {
                         state,
                         membership.member_index(),
                         &member_name,
-                        super::CampaignMemberRefusal::Authorization,
+                        CampaignMemberRefusal::Authorization,
                         &error,
                         line,
                     );
@@ -951,7 +952,7 @@ impl SimulationController {
                         state,
                         member_index,
                         &member_name,
-                        super::CampaignMemberRefusal::Start,
+                        CampaignMemberRefusal::Start,
                         &error.to_string(),
                         line,
                     );
@@ -974,7 +975,7 @@ impl SimulationController {
         state: &mut AppState,
         member_index: u32,
         member_name: &str,
-        refusal: super::CampaignMemberRefusal,
+        refusal: CampaignMemberRefusal,
         error: &str,
         line: u64,
     ) {

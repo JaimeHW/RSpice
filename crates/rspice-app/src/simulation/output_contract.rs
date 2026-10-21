@@ -49,6 +49,7 @@ pub(in crate::simulation) fn materialize_live_saved_outputs(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn materialize_deferred_saved_output(
     analysis: &mut AnalysisResult,
     receipt_index: usize,

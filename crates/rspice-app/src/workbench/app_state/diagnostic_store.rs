@@ -1492,6 +1492,7 @@ fn batch_standing(batch: &DiagnosticBatch, scope: &DigestScope<'_>) -> BatchStan
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::CampaignMemberRefusal;
 
     /// A symbol view whose pins the checks can read: `work/amp/symbol`, with
     /// one pin, beside a schematic that declares the matching port.
@@ -1731,8 +1732,6 @@ mod tests {
     /// next run outside the campaign. It used to reach only the Console.
     #[test]
     fn a_member_refused_at_authorization_stands_until_a_later_run_supersedes_it() {
-        use crate::simulation::controller::CampaignMemberRefusal;
-
         let mut state = AppState::default();
         let campaign = crate::product::SimulationCampaignId::new();
         let mut sibling = crate::state::SimulationRun::new(5);
@@ -1809,8 +1808,6 @@ mod tests {
     /// refused as a second finding with it.
     #[test]
     fn a_rerun_campaign_replaces_the_refusal_of_the_same_member() {
-        use crate::simulation::controller::CampaignMemberRefusal;
-
         let mut state = AppState::default();
         let refuse = |state: &mut AppState, campaign| {
             state.publish_campaign_member_refusal(

@@ -12,8 +12,8 @@ use rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata;
 use crate::diagnostics::LogAnchor;
 use crate::state::ConvergenceAttribution;
 use crate::state::{
-    DrawnObject, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
-    PreflightReport,
+    CampaignMemberRefusal, DrawnObject, ModelsPage, PreflightAdvisory, PreflightIssue,
+    PreflightRemediation, PreflightReport,
 };
 
 use super::super::AppState;
@@ -138,11 +138,9 @@ impl AppState {
         campaign: crate::product::SimulationCampaignId,
         member_index: u32,
         member: &str,
-        refusal: crate::simulation::controller::CampaignMemberRefusal,
+        refusal: CampaignMemberRefusal,
         error: &str,
     ) {
-        use crate::simulation::controller::CampaignMemberRefusal;
-
         let (code, message) = match refusal {
             CampaignMemberRefusal::Authorization => (
                 "RUN-MEMBER-UNAUTHORIZED",

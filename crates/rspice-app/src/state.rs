@@ -131,6 +131,7 @@ pub(crate) use schematic::overflow_memo;
 pub(crate) use schematic::symbol_context_cache;
 pub(crate) use schematic::transform_preview_memo;
 pub use schematic::*;
+pub(crate) use simulation::CampaignMemberRefusal;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.
 #[cfg(test)]

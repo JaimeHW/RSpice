@@ -59,8 +59,8 @@ impl SimulationState {
             .iter()
             .position(|analysis| analysis.id == analysis_id)
             .ok_or_else(|| "saved-output analysis is no longer retained".to_owned())?;
-        crate::simulation::output_contract::materialize_deferred_saved_output(
-            &mut self.retained.runs[run_index].analyses[analysis_index],
+        rspice_simulation::output_contract::materialization::materialize_deferred_saved_output(
+            &mut self.retained.runs[run_index].analyses[analysis_index].data,
             receipt_index,
         )?;
         self.retained.runs[run_index].validate_provenance()?;
