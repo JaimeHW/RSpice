@@ -409,7 +409,7 @@ pub(super) fn read_stored_zip_entries(
         let content = bytes
             .get(content_start..content_end)
             .ok_or_else(|| format!("ZIP entry '{name}' is truncated."))?;
-        if bundle_crc32(content) != crc {
+        if rspice_formats::zip::crc32(content) != crc {
             return Err(format!("ZIP entry '{name}' failed CRC-32 verification."));
         }
         retained_bytes = retained_bytes
@@ -444,18 +444,6 @@ pub(super) fn zip_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
         .get(offset..offset.saturating_add(4))
         .ok_or_else(|| "ZIP structure is truncated.".to_owned())?;
     Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
-}
-
-pub(super) fn bundle_crc32(bytes: &[u8]) -> u32 {
-    let mut crc = 0xffff_ffff_u32;
-    for byte in bytes {
-        crc ^= u32::from(*byte);
-        for _ in 0..8 {
-            let mask = 0_u32.wrapping_sub(crc & 1);
-            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
-        }
-    }
-    !crc
 }
 
 pub(super) fn decode_import_bytes(

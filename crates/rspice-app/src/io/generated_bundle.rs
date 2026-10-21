@@ -361,7 +361,13 @@ fn validate_bundle_entry_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The bundle's members, in name order, as one deterministic stored ZIP.
+///
+/// The record layout is `rspice_formats::zip`'s; what a bundle adds is the
+/// ordering and the refusal of an unsafe or repeated member name.
 fn build_store_zip(mut entries: Vec<BundleEntry>) -> Result<Vec<u8>, String> {
+    use rspice_formats::zip::{StoredZipError, deterministic_stored_zip};
+
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     let mut names = std::collections::HashSet::with_capacity(entries.len());
     for entry in &entries {
@@ -370,88 +376,27 @@ fn build_store_zip(mut entries: Vec<BundleEntry>) -> Result<Vec<u8>, String> {
             return Err(format!("duplicate bundle entry name '{}'", entry.name));
         }
     }
-    let entry_count = u16::try_from(entries.len()).map_err(|_| "too many bundle entries")?;
-    let mut output = Vec::new();
-    let mut central = Vec::new();
-    for entry in entries {
-        let name = entry.name.as_bytes();
-        let name_len = u16::try_from(name.len()).map_err(|_| "bundle entry name is too long")?;
-        let size = u32::try_from(entry.bytes.len()).map_err(|_| "bundle entry exceeds 4 GiB")?;
-        let offset =
-            u32::try_from(output.len()).map_err(|_| "bundle exceeds classic ZIP limits")?;
-        let crc = crc32(&entry.bytes);
-        push_u32(&mut output, 0x0403_4b50);
-        push_u16(&mut output, 20);
-        push_u16(&mut output, 0x0800);
-        push_u16(&mut output, 0);
-        push_u16(&mut output, 0);
-        push_u16(&mut output, 0x0021);
-        push_u32(&mut output, crc);
-        push_u32(&mut output, size);
-        push_u32(&mut output, size);
-        push_u16(&mut output, name_len);
-        push_u16(&mut output, 0);
-        output.extend_from_slice(name);
-        output.extend_from_slice(&entry.bytes);
-
-        push_u32(&mut central, 0x0201_4b50);
-        push_u16(&mut central, 20);
-        push_u16(&mut central, 20);
-        push_u16(&mut central, 0x0800);
-        push_u16(&mut central, 0);
-        push_u16(&mut central, 0);
-        push_u16(&mut central, 0x0021);
-        push_u32(&mut central, crc);
-        push_u32(&mut central, size);
-        push_u32(&mut central, size);
-        push_u16(&mut central, name_len);
-        push_u16(&mut central, 0);
-        push_u16(&mut central, 0);
-        push_u16(&mut central, 0);
-        push_u16(&mut central, 0);
-        push_u32(&mut central, 0);
-        push_u32(&mut central, offset);
-        central.extend_from_slice(name);
-    }
-    let central_offset = u32::try_from(output.len()).map_err(|_| "bundle exceeds ZIP limits")?;
-    let central_size = u32::try_from(central.len()).map_err(|_| "bundle exceeds ZIP limits")?;
-    central_offset
-        .checked_add(central_size)
-        .ok_or("bundle exceeds classic ZIP limits")?;
-    output.extend_from_slice(&central);
-    push_u32(&mut output, 0x0605_4b50);
-    push_u16(&mut output, 0);
-    push_u16(&mut output, 0);
-    push_u16(&mut output, entry_count);
-    push_u16(&mut output, entry_count);
-    push_u32(&mut output, central_size);
-    push_u32(&mut output, central_offset);
-    push_u16(&mut output, 0);
+    let members = entries
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.bytes.as_slice()))
+        .collect::<Vec<_>>();
+    let output = deterministic_stored_zip(&members).map_err(|error| match error {
+        StoredZipError::EntryCount { .. } => "too many bundle entries",
+        StoredZipError::EntryNameLength { .. } => "bundle entry name is too long",
+        StoredZipError::EntryLength { .. } => "bundle entry exceeds 4 GiB",
+        StoredZipError::ArchiveLength { .. } => "bundle exceeds classic ZIP limits",
+    })?;
+    // The central directory has to end inside ZIP32 as well as start there.
+    const END_RECORD_BYTES: usize = 22;
+    u32::try_from(output.len() - END_RECORD_BYTES)
+        .map_err(|_| "bundle exceeds classic ZIP limits")?;
     Ok(output)
-}
-
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = 0xffff_ffff_u32;
-    for byte in bytes {
-        crc ^= u32::from(*byte);
-        for _ in 0..8 {
-            let mask = 0_u32.wrapping_sub(crc & 1);
-            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
-        }
-    }
-    !crc
-}
-
-fn push_u16(output: &mut Vec<u8>, value: u16) {
-    output.extend_from_slice(&value.to_le_bytes());
-}
-
-fn push_u32(output: &mut Vec<u8>, value: u32) {
-    output.extend_from_slice(&value.to_le_bytes());
 }
 
 #[cfg(test)]
 mod tests {
+    use rspice_formats::zip::crc32;
+
     use super::*;
 
     // The writer is dialect-agnostic by construction, so these render each

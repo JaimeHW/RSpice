@@ -105,7 +105,10 @@ fn push_u32(bytes: &mut Vec<u8>, value: u32) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
-fn crc32(bytes: &[u8]) -> u32 {
+/// The ZIP member checksum: CRC-32 with the reflected IEEE polynomial, as
+/// every stored record above carries it and every reader verifies it.
+#[must_use]
+pub fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = u32::MAX;
     for byte in bytes {
         crc ^= u32::from(*byte);
@@ -119,6 +122,12 @@ fn crc32(bytes: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_member_checksum_is_the_standard_crc32() {
+        assert_eq!(crc32(b""), 0);
+        assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+    }
 
     #[test]
     fn zip32_refusals_retain_the_failed_count_and_name_length() {
