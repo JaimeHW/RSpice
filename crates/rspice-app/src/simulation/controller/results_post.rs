@@ -6,7 +6,7 @@
 
 use super::transient_post::{DerivedViewAvailability, LoadedDerivedView};
 use super::*;
-use crate::state::SpecializedViewerCacheProvenance;
+use crate::state::{RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
 
 use rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
 
@@ -35,7 +35,7 @@ impl SimulationController {
         self.transient_post.eye_loaded = None;
         self.transient_post.fft_loaded = None;
         if !analysis.success || analysis.analysis_type != crate::state::AnalysisType::Transient {
-            state.clear_transient_specialized_viewer_data();
+            state.apply_run_event(RunEvent::TransientResultReplaced);
             return;
         }
 
@@ -47,7 +47,7 @@ impl SimulationController {
             // claims to represent.  In particular, an analysis with no saved
             // transient outputs cannot keep an FFT derived from the engine's
             // discarded working set.
-            state.clear_transient_specialized_viewer_data();
+            state.apply_run_event(RunEvent::TransientResultReplaced);
             return;
         };
         // Eye folding retains its historical paired-prefix behavior. FFT
@@ -59,10 +59,9 @@ impl SimulationController {
         let time = waveform.x.as_slice();
         let values = waveform.y.as_slice();
 
-        state
-            .analysis
-            .fft_state
-            .set_selected_source(Some(waveform_key.clone()));
+        state.apply_run_event(RunEvent::FftSourceChosen {
+            source: waveform_key.clone(),
+        });
         let input_options = state.analysis.fft_state.input_options_for_waveform(time);
 
         let provenance = self.in_flight_specialized_viewer_provenance(state);
@@ -73,42 +72,27 @@ impl SimulationController {
             .map(|owner| state.eye_timebase_for(owner))
             .unwrap_or_default();
         let (eye_data, eye_provenance) = build_eye_from_waveform(eye_time, eye_values, timebase);
-        let folded = eye_data.is_some();
-        state
-            .analysis
-            .eye_diagram_state
-            .load_data_with_timebase(eye_data.unwrap_or_default(), Some(eye_provenance));
-        if folded && let Some(provenance) = provenance {
-            state.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, provenance);
-        }
+        state.apply_run_event(RunEvent::EyeFolded {
+            owner: provenance,
+            eye: eye_data,
+            timebase: eye_provenance,
+        });
 
-        let availability = match rspice_results_ui::fft::prepare_fft_input_with_options(
+        let input = rspice_results_ui::fft::prepare_fft_input_with_options(
             &waveform_key,
             time,
             values,
             input_options,
-        ) {
-            Ok(prepared) => {
-                if state
-                    .analysis
-                    .fft_state
-                    .load_prepared_input(prepared)
-                    .is_ok()
-                {
-                    if let Some(provenance) = provenance {
-                        state.bind_specialized_viewer_cache(ActiveViewer::Fft, provenance);
-                    }
-                    DerivedViewAvailability::Ready
-                } else {
-                    state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
-                    DerivedViewAvailability::Unavailable
-                }
-            }
-            Err(error) => {
-                state.analysis.fft_state.record_input_error(error);
-                state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
-                DerivedViewAvailability::Unavailable
-            }
+        );
+        state.apply_run_event(RunEvent::FftInputPrepared {
+            owner: provenance,
+            input,
+        });
+        // The viewer holds a spectrum exactly when it accepted the input.
+        let availability = if state.analysis.fft_state.has_data() {
+            DerivedViewAvailability::Ready
+        } else {
+            DerivedViewAvailability::Unavailable
         };
         if let Some(analysis) = provenance {
             self.transient_post.fft_loaded = Some(LoadedDerivedView {
@@ -144,11 +128,7 @@ impl SimulationController {
         waveforms: &std::collections::HashMap<String, crate::simulation::SampledWaveform>,
     ) {
         let mut bode_data = rspice_results_ui::bode::BodeData::new();
-        state.clear_specialized_viewer_cache_authority(ActiveViewer::BodePlot);
-        state.clear_specialized_viewer_cache_authority(ActiveViewer::Nyquist);
-        state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
-        state.analysis.nyquist_state.clear();
-        state.analysis.smith_chart_state.clear_traces();
+        let mut loop_gain_locus = None;
 
         let mut names: Vec<_> = waveforms.keys().cloned().collect();
         names.sort();
@@ -177,36 +157,21 @@ impl SimulationController {
             bode_data.add_response();
 
             if loop_gain == Some(name.as_str()) {
-                state.analysis.nyquist_state.load_data(
-                    rspice_results_ui::nyquist::NyquistData::from_arrays(
-                        LOOP_GAIN_LOCUS_LABEL,
-                        frequencies,
-                        &waveform.y_values,
-                        imag,
-                    ),
-                );
+                loop_gain_locus = Some(rspice_results_ui::nyquist::NyquistData::from_arrays(
+                    LOOP_GAIN_LOCUS_LABEL,
+                    frequencies,
+                    &waveform.y_values,
+                    imag,
+                ));
             }
-        }
-        let loaded_nyquist = !state.analysis.nyquist_state.is_empty();
-
-        let has_bode = bode_data.response_count() > 0;
-        if has_bode {
-            state.analysis.bode_plot_state.load_data(bode_data);
-        } else {
-            state
-                .analysis
-                .bode_plot_state
-                .load_data(rspice_results_ui::bode::BodeData::new());
         }
 
-        if let Some(provenance) = self.in_flight_specialized_viewer_provenance(state) {
-            if has_bode {
-                state.bind_specialized_viewer_cache(ActiveViewer::BodePlot, provenance);
-            }
-            if loaded_nyquist {
-                state.bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
-            }
-        }
+        let owner = self.in_flight_specialized_viewer_provenance(state);
+        state.apply_run_event(RunEvent::FrequencyResponseReplaced {
+            owner,
+            bode: bode_data,
+            loop_gain: loop_gain_locus,
+        });
     }
 
     pub(super) fn fft_source_waveform_from_state<'a>(

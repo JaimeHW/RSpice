@@ -34,9 +34,9 @@ use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 #[cfg(test)]
 use crate::state::AnalysisResultFamilyMetadata;
 use crate::state::{
-    ActiveViewer, AnalysisResult, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, AnalysisType, DigitalEventPointEvidence, DigitalEventTraceEvidence,
-    RealEventPointEvidence, RealEventTraceEvidence, RetainedTrace, SimulationRunIntent,
+    AnalysisResult, AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain,
+    AnalysisType, DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
+    RealEventTraceEvidence, RetainedTrace, RunEvent, RunEventSink, SimulationRunIntent,
     SimulationRunLifecycle,
 };
 use crate::workbench::app_state::AppState;
@@ -373,7 +373,7 @@ impl SimulationController {
 
         // Apply/cancel background transient post-processing work after any
         // selection changes that happened during the previous frame.
-        state.synchronize_specialized_viewer_cache_authority();
+        state.apply_run_event(RunEvent::CompletionsCollected);
         self.sync_transient_post_views(state);
 
         // Update running state

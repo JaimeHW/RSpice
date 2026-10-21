@@ -6,6 +6,7 @@
 
 #[cfg(test)]
 mod histogram_publication;
+mod run_events;
 
 use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,

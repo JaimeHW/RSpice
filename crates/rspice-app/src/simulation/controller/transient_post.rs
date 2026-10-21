@@ -5,7 +5,8 @@
 
 use super::*;
 use crate::state::{
-    ActiveViewer, AnalysisType, SharedWaveformValues, SpecializedViewerCacheProvenance,
+    ActiveViewer, AnalysisType, RunEvent, RunEventSink, SharedWaveformValues,
+    SpecializedViewerCacheProvenance,
 };
 use crate::workbench::app_state::AppState;
 use rspice_results_ui::eye_diagram::{
@@ -107,14 +108,20 @@ impl SimulationController {
 
         match viewer {
             ActiveViewer::EyeDiagram if state.analysis.eye_diagram_state.trace_count() > 0 => {
-                state.bind_specialized_viewer_cache(viewer, analysis);
+                state.apply_run_event(RunEvent::ViewerCacheConfirmed {
+                    viewer,
+                    owner: analysis,
+                });
                 self.transient_post.eye_loaded = Some(LoadedDerivedView {
                     analysis,
                     availability: DerivedViewAvailability::Ready,
                 });
             }
             ActiveViewer::Fft if state.analysis.fft_state.has_data() => {
-                state.bind_specialized_viewer_cache(viewer, analysis);
+                state.apply_run_event(RunEvent::ViewerCacheConfirmed {
+                    viewer,
+                    owner: analysis,
+                });
                 self.transient_post.fft_loaded = Some(LoadedDerivedView {
                     analysis,
                     availability: DerivedViewAvailability::Ready,
@@ -135,10 +142,7 @@ impl SimulationController {
             .map(|loaded| Some(loaded.analysis) != active_analysis)
             .unwrap_or(false)
         {
-            state
-                .analysis
-                .eye_diagram_state
-                .load_data(EyeData::default());
+            state.apply_run_event(RunEvent::EyeOutdated);
             self.transient_post.eye_loaded = None;
         }
 
@@ -148,7 +152,7 @@ impl SimulationController {
             .map(|loaded| Some(loaded.analysis) != active_analysis)
             .unwrap_or(false)
         {
-            state.analysis.fft_state.clear();
+            state.apply_run_event(RunEvent::FftOutdated);
             self.transient_post.fft_loaded = None;
         }
 
@@ -161,17 +165,16 @@ impl SimulationController {
         self.cancel_task_slot(DerivedViewKind::Fft);
         self.transient_post.eye_loaded = None;
         self.transient_post.fft_loaded = None;
-        state.clear_transient_specialized_viewer_data();
+        state.apply_run_event(RunEvent::TransientResultReplaced);
     }
 
     pub(super) fn prime_transient_fft_source_selection(&mut self, state: &mut AppState) {
         let Some(source) = self.current_transient_waveform_source(state) else {
             return;
         };
-        state
-            .analysis
-            .fft_state
-            .set_selected_source(Some(source.source_name.clone()));
+        state.apply_run_event(RunEvent::FftSourceChosen {
+            source: source.source_name,
+        });
     }
 
     fn ensure_eye_diagram_data(&mut self, state: &mut AppState) -> DerivedViewerLoadState {
@@ -185,11 +188,7 @@ impl SimulationController {
             if !eye_matches_timebase(state, requested) {
                 self.cancel_task_slot(DerivedViewKind::EyeDiagram);
                 self.transient_post.eye_loaded = None;
-                state
-                    .analysis
-                    .eye_diagram_state
-                    .load_data_with_timebase(EyeData::default(), None);
-                state.clear_specialized_viewer_cache_authority(ActiveViewer::EyeDiagram);
+                state.apply_run_event(RunEvent::EyeTimebaseChanged);
             }
         }
 
@@ -246,7 +245,7 @@ impl SimulationController {
                 DerivedViewAvailability::Ready => {
                     // `has_data` was false above, so this marker became stale
                     // after an in-place viewer recompute or explicit clear.
-                    state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                    state.apply_run_event(RunEvent::FftEmptied);
                     if state.analysis.fft_state.last_error.is_some() {
                         self.transient_post.fft_loaded = Some(LoadedDerivedView {
                             analysis: active_analysis,
@@ -278,10 +277,9 @@ impl SimulationController {
             });
             return DerivedViewerLoadState::Unavailable;
         };
-        state
-            .analysis
-            .fft_state
-            .set_selected_source(Some(source.source_name.clone()));
+        state.apply_run_event(RunEvent::FftSourceChosen {
+            source: source.source_name.clone(),
+        });
         self.spawn_derived_view_task(DerivedViewKind::Fft, source);
         DerivedViewerLoadState::Loading
     }
@@ -308,8 +306,7 @@ impl SimulationController {
                 // unexpected worker termination, not cancellation. Attribute
                 // it only to the still-active FFT provenance.
                 if view == DerivedViewKind::Fft && Some(disconnected_analysis) == active_analysis {
-                    state.analysis.fft_state.record_worker_disconnect();
-                    state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                    state.apply_run_event(RunEvent::FftWorkerLost);
                     self.transient_post.fft_loaded = Some(LoadedDerivedView {
                         analysis: disconnected_analysis,
                         availability: DerivedViewAvailability::Unavailable,
@@ -327,16 +324,11 @@ impl SimulationController {
         match (view, message.payload) {
             (DerivedViewKind::EyeDiagram, DerivedViewResultPayload::Eye(build)) => {
                 let available = build.data.is_some();
-                // The provenance is recorded either way: when nothing could
-                // be folded it is the only thing the sheet can tell the
-                // reader about why.
-                state.analysis.eye_diagram_state.load_data_with_timebase(
-                    build.data.unwrap_or_default(),
-                    Some(build.provenance),
-                );
-                if available {
-                    state.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, message.analysis);
-                }
+                state.apply_run_event(RunEvent::EyeFolded {
+                    owner: Some(message.analysis),
+                    eye: build.data,
+                    timebase: build.provenance,
+                });
                 self.transient_post.eye_loaded = Some(LoadedDerivedView {
                     analysis: message.analysis,
                     availability: if available {
@@ -346,36 +338,22 @@ impl SimulationController {
                     },
                 });
             }
-            (DerivedViewKind::Fft, DerivedViewResultPayload::Fft(result)) => match result {
-                Ok(prepared) => {
-                    let available = state
-                        .analysis
-                        .fft_state
-                        .load_prepared_input(prepared)
-                        .is_ok();
-                    if available {
-                        state.bind_specialized_viewer_cache(ActiveViewer::Fft, message.analysis);
+            (DerivedViewKind::Fft, DerivedViewResultPayload::Fft(input)) => {
+                state.apply_run_event(RunEvent::FftInputPrepared {
+                    owner: Some(message.analysis),
+                    input,
+                });
+                // The viewer holds a spectrum exactly when it accepted the input.
+                let available = state.analysis.fft_state.has_data();
+                self.transient_post.fft_loaded = Some(LoadedDerivedView {
+                    analysis: message.analysis,
+                    availability: if available {
+                        DerivedViewAvailability::Ready
                     } else {
-                        state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
-                    }
-                    self.transient_post.fft_loaded = Some(LoadedDerivedView {
-                        analysis: message.analysis,
-                        availability: if available {
-                            DerivedViewAvailability::Ready
-                        } else {
-                            DerivedViewAvailability::Unavailable
-                        },
-                    });
-                }
-                Err(error) => {
-                    state.analysis.fft_state.record_input_error(error);
-                    state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
-                    self.transient_post.fft_loaded = Some(LoadedDerivedView {
-                        analysis: message.analysis,
-                        availability: DerivedViewAvailability::Unavailable,
-                    });
-                }
-            },
+                        DerivedViewAvailability::Unavailable
+                    },
+                });
+            }
             _ => {}
         }
     }

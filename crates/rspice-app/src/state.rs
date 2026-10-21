@@ -9,6 +9,7 @@ use rspice_design::configuration_set;
 pub(crate) mod code_diagnostics;
 use rspice_design::connectivity_contract;
 pub(crate) mod engineering_table;
+mod events;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
 pub(crate) mod model_hub;
@@ -60,6 +61,7 @@ pub use engineering_table::{
     EngineeringViewScope, EngineeringVirtualizationPolicy, FrozenIdentifierPolicy,
     SavedEngineeringTableView, SortDirection,
 };
+pub(crate) use events::{RunEvent, RunEventSink};
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
     View, ViewType, library_cell_placement_candidates,
