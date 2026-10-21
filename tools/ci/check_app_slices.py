@@ -224,7 +224,11 @@ def edge_group(source: str, target: str) -> str | None:
     """The ratcheted group of a reference between two different slices."""
     if source in FEATURES and target in FEATURES:
         return "feature->feature"
-    if source in LOWER and (target in FEATURES or target == SHELL or source == "model"):
+    if source in LOWER and (
+        target in FEATURES
+        or target in (SESSION, SHELL)
+        or (target in LOWER and LOWER.index(target) > LOWER.index(source))
+    ):
         return "lower->upper"
     return None
 

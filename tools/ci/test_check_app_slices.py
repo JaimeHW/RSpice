@@ -72,7 +72,11 @@ class SliceRuleTests(unittest.TestCase):
         self.assertEqual(edge_group("framework", "results"), "lower->upper")
         self.assertEqual(edge_group("framework", "shell"), "lower->upper")
         self.assertEqual(edge_group("model", "session"), "lower->upper")
-        self.assertIsNone(edge_group("services", "session"))
+        self.assertEqual(edge_group("services", "session"), "lower->upper")
+        self.assertEqual(edge_group("services", "run"), "lower->upper")
+        self.assertEqual(edge_group("run", "framework"), "lower->upper")
+        self.assertIsNone(edge_group("framework", "run"))
+        self.assertIsNone(edge_group("services", "model"))
         self.assertIsNone(edge_group("design", "shell"))
         self.assertIsNone(edge_group("design", "model"))
 
