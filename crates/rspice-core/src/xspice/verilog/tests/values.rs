@@ -97,8 +97,8 @@ endmodule
 
 /// `` `unconnected_drive `` (IEEE 1364-2005 section 19.9) pulls the
 /// unconnected input ports of the modules that follow it, until
-/// `` `nounconnected_drive `` or `` `resetall ``; a connected port keeps its
-/// connection.
+/// `` `nounconnected_drive `` or `` `resetall ``, its operand on a later line
+/// when a comment pushes it there; a connected port keeps its connection.
 #[test]
 fn unconnected_drive_pulls_the_inputs_nothing_connects() {
     let report = bench(
@@ -113,7 +113,8 @@ endmodule
 `unconnected_drive pull0
 module pl0(in, y); input [1:0] in; output [1:0] y; assign y = in; endmodule
 `nounconnected_drive
-`unconnected_drive pull1
+`unconnected_drive /* an operand a comment
+  pushes onto the next line */ pull1
 module pl1(in, y); input [1:0] in; output [1:0] y; assign y = in; endmodule
 `resetall
 module plz(in, y); input [1:0] in; output [1:0] y; assign y = in; endmodule

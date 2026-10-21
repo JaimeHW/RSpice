@@ -4114,8 +4114,9 @@ impl<'a> Parser<'a> {
         self.advance();
         if name.as_deref() == Some("`unconnected_drive") {
             // Section 19.9: the unconnected input ports of the modules that
-            // follow are pulled to the operand's value.
-            let operand = (!self.at_end() && self.current_span().start < directive.end)
+            // follow are pulled to the operand's value, which a comment may
+            // have pushed onto a later line.
+            let operand = (!self.at_end())
                 .then(|| self.current().text.clone())
                 .flatten();
             self.unconnected_drive = match operand.as_deref() {
@@ -4129,6 +4130,9 @@ impl<'a> Parser<'a> {
                     )));
                 }
             };
+            if self.current_span().start >= directive.end {
+                self.advance();
+            }
         } else if name.as_deref() == Some("`nounconnected_drive") {
             self.unconnected_drive = None;
         } else if name.as_deref() == Some("`default_nettype") {
