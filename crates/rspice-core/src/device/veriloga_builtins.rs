@@ -8,13 +8,15 @@
 //! result into the solver's matrices.
 //!
 //! That direction is the reason the adapter lives here and not in a Verilog-A
-//! crate: it speaks `crate::netlist`, `crate::solver` and `crate::CircuitData`.
-//! Moving it across would make a generated crate depend on `rspice-core`,
-//! closing the cycle `rspice-core -> rspice-veriloga-models -> rspice-core`.
+//! crate: it speaks `crate::netlist` and `crate::solver`, and builds instances
+//! into the circuit store. Moving it across would make a generated crate
+//! depend on `rspice-core`, closing the cycle
+//! `rspice-core -> rspice-veriloga-models -> rspice-core`.
 //!
-//! What it must *not* name is `crate::engine`. `device` is ranked below it, so
-//! instantiation failures leave here as `BuiltinInstantiationError` and the
-//! engine converts at the boundary. (Not an intra-doc link: the type is gated
+//! What it must *not* name is anything above `device`. Instantiation reaches
+//! the circuit store only through `BuiltinTopology`, which `circuit`
+//! implements, and its failures leave here as `BuiltinInstantiationError` for
+//! the engine to convert at the boundary. (Not intra-doc links: both are gated
 //! behind `veriloga-builtins-base` and this module doc is not.)
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -2225,14 +2227,52 @@ impl std::fmt::Display for BuiltinInstantiationError {
 #[cfg(feature = "veriloga-builtins-base")]
 impl std::error::Error for BuiltinInstantiationError {}
 
+/// What building a generated instance does to the circuit it joins.
+///
+/// Instantiation names nets, allocates branch currents, records which nets
+/// the instance owns and how far its stamps reach into them, and reads the
+/// solver's `$simparam` environment. It reads nothing else, so it takes this
+/// trait rather than the circuit store: `device` sits below `circuit`, and
+/// `circuit` implements it.
 #[cfg(feature = "veriloga-builtins-base")]
+pub(crate) trait BuiltinTopology {
+    /// The node `name` names, created on first use. A ground name is node 0.
+    fn get_or_create_node(&mut self, name: &str) -> crate::NodeId;
+
+    /// A new branch-current unknown, as its 1-based ordinal.
+    fn allocate_branch(&mut self) -> crate::NodeId;
+
+    /// Record which of a model's `private` nodes its equations can write a DC
+    /// Jacobian row into (`dc_rows`) and which its stamps read (`read`).
+    /// Nodes outside `private` are ignored.
+    fn record_compact_model_stamp_reach(
+        &mut self,
+        private: &[crate::NodeId],
+        dc_rows: impl IntoIterator<Item = crate::NodeId>,
+        read: impl IntoIterator<Item = crate::NodeId>,
+    );
+
+    /// Mark `nodes` as nets a compact model owns, which the final nodal GMIN
+    /// floor does not reach.
+    fn add_compact_model_private_nodes(&mut self, nodes: impl IntoIterator<Item = crate::NodeId>);
+
+    /// The solver-controlled `$simparam` environment a new instance starts
+    /// from.
+    fn generated_simulation_parameters(&self) -> &GeneratedSimulationParameters;
+}
+
+#[cfg(feature = "veriloga-builtins-base")]
+#[expect(
+    private_bounds,
+    reason = "the circuit store is the one topology; callers outside the crate pass a `CircuitData` and cannot implement the trait"
+)]
 pub fn instantiate_builtin(
     model_name: &str,
     instance_name: &str,
     node_names: &[String],
     params: &[(String, crate::netlist::ParametricValue)],
     param_ctx: &crate::netlist::ParamContext,
-    circuit: &mut crate::CircuitData,
+    circuit: &mut impl BuiltinTopology,
 ) -> Result<Option<BuiltinVerilogAInstance>, BuiltinInstantiationError> {
     let scoped = params
         .iter()
@@ -2301,7 +2341,7 @@ pub(crate) fn instantiate_builtin_scoped(
     node_names: &[String],
     params: &[BuiltinParameterAssignment],
     param_ctx: &crate::netlist::ParamContext,
-    circuit: &mut crate::CircuitData,
+    circuit: &mut impl BuiltinTopology,
     optional_internal_nodes: &[&str],
     connected_terminals: usize,
 ) -> Result<Option<BuiltinVerilogAInstance>, BuiltinInstantiationError> {
@@ -2408,9 +2448,7 @@ pub(crate) fn instantiate_builtin_scoped(
             .chain(pattern.dynamic)
             .filter_map(|&(_, col)| node_at(col)),
     );
-    circuit
-        .compact_model_private_nodes
-        .extend(private_nodes.into_iter().filter(|&node| node > 0));
+    circuit.add_compact_model_private_nodes(private_nodes.into_iter().filter(|&node| node > 0));
     debug_assert_eq!(
         nodes.len(),
         total_nodes,
@@ -2455,7 +2493,7 @@ pub(crate) fn instantiate_builtin_scoped(
         &nodes,
         &branches,
         &resolved,
-        &circuit.generated_simulation_parameters,
+        circuit.generated_simulation_parameters(),
     )
     .and_then(|mut kind| {
         if let Some(kind) = kind.as_mut() {
@@ -2687,89 +2725,6 @@ mod tests {
                 assert!(!terminal.name.is_empty());
                 assert!(current_names.insert(terminal.current_parameter));
             }
-        }
-    }
-
-    #[cfg(feature = "veriloga-model-vbic13-4t")]
-    #[test]
-    fn optional_internal_connections_preserve_generated_node_slots() {
-        let optional = ["dt", "cx", "ci", "bx", "bi", "ei"];
-        for count in 0..=optional.len() {
-            let mut circuit = crate::CircuitData::new();
-            let mut terminals = ["c", "b", "e", "0"].map(str::to_string).to_vec();
-            terminals.extend((0..count).map(|index| {
-                if index == 2 {
-                    "0".to_string()
-                } else {
-                    format!("exposed_{index}")
-                }
-            }));
-            let instance = super::instantiate_builtin_scoped(
-                "vbic13_4t",
-                "Q1",
-                &terminals,
-                &[],
-                &crate::netlist::ParamContext::new(),
-                &mut circuit,
-                &optional,
-                4,
-            )
-            .unwrap()
-            .unwrap();
-            let descriptor = super::builtins::descriptor("vbic13_4t").unwrap();
-            assert_eq!(instance.nodes.len(), descriptor.total_node_count);
-            assert_eq!(instance.terminal_currents.len(), descriptor.terminals.len());
-            for (name, node) in instance.internal_nodes() {
-                let internal_name = format!("Q1.__{name}.internal");
-                let position = optional.iter().position(|candidate| *candidate == name);
-                if let Some(index) = position.filter(|index| *index < count) {
-                    let expected = if index == 2 {
-                        0
-                    } else {
-                        circuit
-                            .get_node_by_name(&format!("exposed_{index}"))
-                            .unwrap()
-                    };
-                    assert_eq!(
-                        node, expected,
-                        "binding {name} with {count} optional connections"
-                    );
-                    assert!(circuit.get_node_by_name(&internal_name).is_none());
-                } else {
-                    assert_eq!(Some(node), circuit.get_node_by_name(&internal_name));
-                }
-            }
-        }
-    }
-
-    #[cfg(feature = "veriloga-model-vbic13-4t")]
-    #[test]
-    fn invalid_optional_connections_fail_before_allocating_nodes() {
-        for (optional, count) in [
-            (&["dt", "dt"][..], 4),
-            (&["not_a_model_node"][..], 4),
-            (&["dt"][..], 6),
-            (&[][..], 5),
-            (&["dt"][..], 3),
-        ] {
-            let mut circuit = crate::CircuitData::new();
-            let initial_nodes = circuit.num_nodes();
-            let terminals = (0..count)
-                .map(|index| format!("n{index}"))
-                .collect::<Vec<_>>();
-            let error = super::instantiate_builtin_scoped(
-                "vbic13_4t",
-                "Q1",
-                &terminals,
-                &[],
-                &crate::netlist::ParamContext::new(),
-                &mut circuit,
-                optional,
-                count,
-            )
-            .unwrap_err();
-            assert!(error.to_string().contains("vbic13_4t"));
-            assert_eq!(circuit.num_nodes(), initial_nodes);
         }
     }
 

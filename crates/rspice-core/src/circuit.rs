@@ -33,6 +33,8 @@ pub(crate) use storage::{
     SolutionDependentCapacitorSpec, SolutionDependentCapacitorState, Vdmoses,
 };
 mod analog_tasks;
+#[cfg(feature = "veriloga-builtins-base")]
+mod builtin_topology;
 mod construction;
 mod model_safety;
 pub use model_safety::{
