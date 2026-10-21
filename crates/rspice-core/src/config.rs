@@ -1609,11 +1609,6 @@ mod timeint_config_tests {
                 !text.contains("lane") && !text.contains("P2"),
                 "no plan identifier reaches the text: {text}"
             );
-            // The engine's error keeps it typed.
-            assert!(matches!(
-                crate::SimulationError::from(error),
-                crate::SimulationError::UnsupportedCapability(_)
-            ));
         }
     }
 }

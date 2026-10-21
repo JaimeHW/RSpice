@@ -277,9 +277,6 @@ const LAYERS: &[(&str, u32)] = &[
 ///   to instantiate into. Their only callers are in `engine::builder`, so the
 ///   edge retires by moving the two entry points, and their tests, up beside
 ///   them.
-/// - `config -> analysis`, 2. Two unit-test lines widen a config error to
-///   `SimulationError`. The widening is `analysis::error`'s
-///   `From<SimulationConfigError>`, so they retire by moving beside it.
 /// - `circuit -> analysis`, 21. Production: the mixed-signal scheduler
 ///   (`circuit/scheduler.rs`, `circuit/scheduler/trial.rs`), mixed-signal port
 ///   elaboration (`circuit/mixed_signal.rs`) and model acceptance
@@ -301,7 +298,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("analysis", "engine", 3),
     ("circuit", "analysis", 21),
     ("circuit", "engine", 11),
-    ("config", "analysis", 2),
     ("device", "analysis", 5),
     ("device", "circuit", 11),
     ("device", "engine", 6),

@@ -1582,6 +1582,39 @@ mod tests {
         assert_eq!(carded.instance_name(), None);
     }
 
+    /// A run option refused during configuration validation keeps its typed
+    /// refusal when it widens to the engine's error.
+    #[test]
+    fn unlanded_hdl_option_refusals_stay_typed_when_widened() {
+        use crate::config::{HdlDelaySelect, HdlRunConfig, SimulationConfig};
+
+        for config in [
+            HdlRunConfig {
+                delay_select: HdlDelaySelect::Min,
+                ..HdlRunConfig::default()
+            },
+            HdlRunConfig {
+                path_delays: false,
+                ..HdlRunConfig::default()
+            },
+            HdlRunConfig {
+                timing_checks: false,
+                ..HdlRunConfig::default()
+            },
+        ] {
+            let error = SimulationConfig {
+                hdl: config,
+                ..SimulationConfig::default()
+            }
+            .validate()
+            .expect_err("an unlanded option is refused");
+            assert!(matches!(
+                SimulationError::from(error),
+                SimulationError::UnsupportedCapability(_)
+            ));
+        }
+    }
+
     #[test]
     fn instance_name_covers_every_family_that_knows_its_instance() {
         let elaboration = SimulationError::from(
