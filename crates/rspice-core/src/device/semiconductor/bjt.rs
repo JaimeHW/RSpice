@@ -274,7 +274,8 @@ impl BjtChargeBranch {
             || self.neg_external.is_some()
     }
 
-    pub(crate) fn accumulate_derivatives(
+    #[doc(hidden)]
+    pub fn accumulate_derivatives(
         &self,
         c_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
         c_ie: &mut [[Value; EXTERNAL_DIM]; BJT_INTERNAL_STATE_DIM],
@@ -343,7 +344,8 @@ impl BjtCurrentBranch {
             || self.neg_external.is_some()
     }
 
-    pub(crate) fn linearization_dot(
+    #[doc(hidden)]
+    pub fn linearization_dot(
         &self,
         internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
         external_voltages: &[Value; EXTERNAL_DIM],
@@ -363,7 +365,8 @@ impl BjtCurrentBranch {
         internal + external
     }
 
-    pub(crate) fn accumulate_derivatives(
+    #[doc(hidden)]
+    pub fn accumulate_derivatives(
         &self,
         g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
         g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
@@ -537,7 +540,8 @@ pub struct AcceptedBjtNonlinearCheckpoint {
 }
 
 impl AcceptedBjtNonlinearCheckpoint {
-    pub(crate) fn value_count_for_runtime(runtime: &str) -> Option<usize> {
+    #[doc(hidden)]
+    pub fn value_count_for_runtime(runtime: &str) -> Option<usize> {
         match runtime {
             BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG => Some(BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT),
             VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG | GP_MNA_ACCEPTED_NONLINEAR_RUNTIME_TAG => {
@@ -1608,7 +1612,8 @@ impl Bjt {
 
     /// Validate a charge-snapshot image against this elaborated BJT before it
     /// can become transient runtime state.
-    pub(crate) fn validate_accepted_charge_snapshot_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_charge_snapshot_checkpoint(
         &self,
         checkpoint: &AcceptedBjtChargeSnapshotCheckpoint,
     ) -> Result<(), String> {
@@ -1637,7 +1642,8 @@ impl Bjt {
     /// Decode a previously validated legacy-GP charge snapshot. This does not
     /// mutate the device; callers may finish validating an aggregate before
     /// replacing any engine-owned history/cache.
-    pub(crate) fn decode_accepted_charge_snapshot_checkpoint(
+    #[doc(hidden)]
+    pub fn decode_accepted_charge_snapshot_checkpoint(
         &self,
         checkpoint: &AcceptedBjtChargeSnapshotCheckpoint,
     ) -> Result<BjtChargeSnapshot, String> {

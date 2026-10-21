@@ -215,16 +215,19 @@ impl XyceTeamResistanceNoiseRuntime {
     }
 
     #[inline]
-    pub(crate) fn enabled(&self) -> bool {
+    #[doc(hidden)]
+    pub fn enabled(&self) -> bool {
         self.params.enabled
     }
 
     #[inline]
-    pub(crate) fn resistance_factor(&self) -> Value {
+    #[doc(hidden)]
+    pub fn resistance_factor(&self) -> Value {
         self.resistance_factor
     }
 
-    pub(crate) fn initialize_accepted_boundary(
+    #[doc(hidden)]
+    pub fn initialize_accepted_boundary(
         &mut self,
         time: Value,
     ) -> Result<(), XyceTeamMemristorError> {
@@ -239,7 +242,8 @@ impl XyceTeamResistanceNoiseRuntime {
         Ok(())
     }
 
-    pub(crate) fn prepare_trial(&mut self, time: Value) -> Result<(), XyceTeamMemristorError> {
+    #[doc(hidden)]
+    pub fn prepare_trial(&mut self, time: Value) -> Result<(), XyceTeamMemristorError> {
         finite_input("resistance-noise trial time", time)?;
         if !self.params.enabled {
             return Ok(());
@@ -285,7 +289,8 @@ impl XyceTeamResistanceNoiseRuntime {
             .max(self.params.epsilon_update_time)
     }
 
-    pub(crate) fn checkpoint(&self, instance_name: &str) -> XyceTeamResistanceNoiseCheckpoint {
+    #[doc(hidden)]
+    pub fn checkpoint(&self, instance_name: &str) -> XyceTeamResistanceNoiseCheckpoint {
         XyceTeamResistanceNoiseCheckpoint {
             version: XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION,
             instance_name: instance_name.to_string(),
@@ -300,7 +305,8 @@ impl XyceTeamResistanceNoiseRuntime {
         }
     }
 
-    pub(crate) fn validate_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_checkpoint(
         &self,
         instance_name: &str,
         checkpoint: &XyceTeamResistanceNoiseCheckpoint,
@@ -374,7 +380,8 @@ impl XyceTeamResistanceNoiseRuntime {
         Ok(())
     }
 
-    pub(crate) fn restore_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_checkpoint(
         &mut self,
         instance_name: &str,
         checkpoint: &XyceTeamResistanceNoiseCheckpoint,

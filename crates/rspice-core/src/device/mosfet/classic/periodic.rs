@@ -9,7 +9,8 @@ const RATE_TIME_SCALE: Value = 1e-9;
 mod tests;
 
 impl Mosfet {
-    pub(crate) const PERIODIC_RATE_TIME_SCALE: Value = RATE_TIME_SCALE;
+    #[doc(hidden)]
+    pub const PERIODIC_RATE_TIME_SCALE: Value = RATE_TIME_SCALE;
 
     #[doc(hidden)]
     pub fn periodic_coupling_nodes(&self) -> [NodeId; 4] {

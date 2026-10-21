@@ -5,8 +5,8 @@ use super::*;
 #[derive(Clone, Copy, Debug)]
 #[doc(hidden)]
 pub struct LegacyBsimGateCharge {
-    pub(crate) charges: [Value; 3],
-    pub(crate) derivatives: [[Value; 3]; 3],
+    pub charges: [Value; 3],
+    pub derivatives: [[Value; 3]; 3],
 }
 
 impl Mosfet {

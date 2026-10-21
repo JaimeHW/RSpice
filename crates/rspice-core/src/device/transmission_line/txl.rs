@@ -49,11 +49,11 @@ struct PreviousVi {
 #[derive(Debug, Clone, Copy)]
 #[doc(hidden)]
 pub struct TxlTransientStamp {
-    pub(crate) local_coeff: Value,
-    pub(crate) delayed_voltage_coeff: Value,
-    pub(crate) delayed_current_coeff: Value,
-    pub(crate) rhs1: Value,
-    pub(crate) rhs2: Value,
+    pub local_coeff: Value,
+    pub delayed_voltage_coeff: Value,
+    pub delayed_current_coeff: Value,
+    pub rhs1: Value,
+    pub rhs2: Value,
 }
 
 #[derive(Debug, Clone)]

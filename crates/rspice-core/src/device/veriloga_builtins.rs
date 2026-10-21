@@ -76,7 +76,7 @@ pub struct GeneratedEvaluationRequest {
 #[derive(Debug, Clone)]
 #[doc(hidden)]
 pub struct BuiltinParameterAssignment {
-    pub(crate) name: String,
+    pub name: String,
     pub(crate) value: crate::netlist::ParametricValue,
     pub(crate) origin: GeneratedParameterOrigin,
 }
@@ -86,15 +86,16 @@ pub struct BuiltinParameterAssignment {
 #[doc(hidden)]
 pub struct GeneratedTerminalCurrentAlias {
     /// Conventional SPICE lead-current parameter (for example `id`).
-    pub(crate) parameter: &'static str,
+    pub parameter: &'static str,
     /// Canonical Verilog-A terminal that owns the aliased current.
-    pub(crate) terminal: &'static str,
+    pub terminal: &'static str,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinParameterAssignment {
     #[inline]
-    pub(crate) fn new(
+    #[doc(hidden)]
+    pub fn new(
         name: impl Into<String>,
         value: crate::netlist::ParametricValue,
         origin: GeneratedParameterOrigin,
@@ -107,18 +108,14 @@ impl BuiltinParameterAssignment {
     }
 
     #[inline]
-    pub(crate) fn model_card(
-        name: impl Into<String>,
-        value: crate::netlist::ParametricValue,
-    ) -> Self {
+    #[doc(hidden)]
+    pub fn model_card(name: impl Into<String>, value: crate::netlist::ParametricValue) -> Self {
         Self::new(name, value, GeneratedParameterOrigin::ModelCard)
     }
 
     #[inline]
-    pub(crate) fn instance(
-        name: impl Into<String>,
-        value: crate::netlist::ParametricValue,
-    ) -> Self {
+    #[doc(hidden)]
+    pub fn instance(name: impl Into<String>, value: crate::netlist::ParametricValue) -> Self {
         Self::new(name, value, GeneratedParameterOrigin::Instance)
     }
 }
@@ -201,17 +198,18 @@ pub struct BuiltinVerilogAInstance {
 /// native device families hand it.
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct GeneratedDynamicCharges {
+#[doc(hidden)]
+pub struct GeneratedDynamicCharges {
     /// `Q` at the probed solution.
-    pub(crate) current: Vec<Value>,
+    pub current: Vec<Value>,
     /// `Q` at the last accepted timepoint.
-    pub(crate) previous: Vec<Value>,
+    pub previous: Vec<Value>,
     /// `Q` one accepted timepoint before that.
-    pub(crate) older: Vec<Value>,
+    pub older: Vec<Value>,
     /// `Q` one accepted timepoint before that again.
-    pub(crate) third_back: Vec<Value>,
+    pub third_back: Vec<Value>,
     /// The accepted companion current `dQ/dt` the model last stamped.
-    pub(crate) companion_previous: Vec<Value>,
+    pub companion_previous: Vec<Value>,
 }
 
 /// The `ddt` lanes packed into one generated rollback capture.
@@ -380,7 +378,8 @@ pub struct BuiltinVerilogADevicesRollback {
 #[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogADevices {
     #[inline]
-    pub(crate) fn new() -> Self {
+    #[doc(hidden)]
+    pub fn new() -> Self {
         Self {
             devices: Vec::new(),
             operating_point_analysis_override: None,
@@ -388,44 +387,51 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub(crate) fn add(&mut self, device: BuiltinVerilogAInstance) {
+    #[doc(hidden)]
+    pub fn add(&mut self, device: BuiltinVerilogAInstance) {
         self.devices.push(device);
     }
 
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_empty(&self) -> bool {
         self.devices.is_empty()
     }
 
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    #[doc(hidden)]
+    pub fn len(&self) -> usize {
         self.devices.len()
     }
 
     /// Whether every instantiated generated model admits Xyce OneStep's
     /// order-two split between dynamic charge and static residual history.
     #[inline]
-    pub(crate) fn all_one_step_dae_split_safe(&self) -> bool {
+    #[doc(hidden)]
+    pub fn all_one_step_dae_split_safe(&self) -> bool {
         self.devices
             .iter()
             .all(|device| device.kind.one_step_dae_split_safe())
     }
 
-    pub(crate) fn requires_nodeset_phase(&self) -> bool {
+    #[doc(hidden)]
+    pub fn requires_nodeset_phase(&self) -> bool {
         self.devices
             .iter()
             .any(|device| device.kind.requires_nodeset_phase())
     }
 
     /// Whether an accepted step should restart transient integration history.
-    pub(crate) fn discontinuity_rising(&self) -> bool {
+    #[doc(hidden)]
+    pub fn discontinuity_rising(&self) -> bool {
         self.devices
             .iter()
             .any(|device| device.kind.discontinuity_rising())
     }
 
     /// Tightest active generated `$bound_step` request, including zero.
-    pub(crate) fn transient_step_bound(&self) -> Result<Option<Value>, String> {
+    #[doc(hidden)]
+    pub fn transient_step_bound(&self) -> Result<Option<Value>, String> {
         let mut tightest: Option<Value> = None;
         for device in &self.devices {
             if let Some(bound) = device.kind.transient_step_bound().map_err(|error| {
@@ -443,7 +449,8 @@ impl BuiltinVerilogADevices {
     /// Earliest interior `cross`/`above` root produced by the latest complete
     /// generated-model evaluation.
     #[inline]
-    pub(crate) fn transient_event_refinement_time(&self) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn transient_event_refinement_time(&self) -> Option<Value> {
         self.devices
             .iter()
             .filter_map(|device| device.kind.transient_event_refinement_time())
@@ -457,7 +464,8 @@ impl BuiltinVerilogADevices {
     /// evaluation context, not persistent checkpoint state. A resumed
     /// transient must therefore compare this value with the checkpoint's
     /// accepted time rather than reconstructing it from a relative bound.
-    pub(crate) fn transient_timer_event_time(&self) -> Result<Option<Value>, String> {
+    #[doc(hidden)]
+    pub fn transient_timer_event_time(&self) -> Result<Option<Value>, String> {
         let mut earliest: Option<Value> = None;
         for device in &self.devices {
             let Some(target) = device.kind.transient_timer_event_time() else {
@@ -481,7 +489,8 @@ impl BuiltinVerilogADevices {
     /// accepted point and has already refused one by the time anything asks
     /// this. What it adds is the name — a refusal that says a schedule is
     /// holding the stepper has to say whose.
-    pub(crate) fn scheduled_timer_activation(&self) -> Option<(&str, Value)> {
+    #[doc(hidden)]
+    pub fn scheduled_timer_activation(&self) -> Option<(&str, Value)> {
         let mut owner: Option<(&str, Value)> = None;
         for device in &self.devices {
             let Some(target) = device.kind.transient_timer_event_time() else {
@@ -498,14 +507,13 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {
+    #[doc(hidden)]
+    pub fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {
         self.devices.iter()
     }
 
-    pub(crate) fn visit_accepted_analog_tasks(
-        &mut self,
-        consume: &mut dyn FnMut(AnalogTaskEvent<'_>),
-    ) {
+    #[doc(hidden)]
+    pub fn visit_accepted_analog_tasks(&mut self, consume: &mut dyn FnMut(AnalogTaskEvent<'_>)) {
         for device in &mut self.devices {
             device.kind.drain_analog_tasks(&mut |call| {
                 consume(AnalogTaskEvent {
@@ -518,7 +526,8 @@ impl BuiltinVerilogADevices {
         }
     }
 
-    pub(crate) fn first_candidate_analog_task(
+    #[doc(hidden)]
+    pub fn first_candidate_analog_task(
         &self,
         kind: AnalogTaskKind,
     ) -> Result<Option<AnalogTaskEvent<'_>>, String> {
@@ -548,7 +557,8 @@ impl BuiltinVerilogADevices {
     /// O(1) per device while leaving the generated model as the sole owner of
     /// its flow equations and terminal ordering.
     #[inline]
-    pub(crate) fn primary_terminal_current(&self, index: usize) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn primary_terminal_current(&self, index: usize) -> Option<Value> {
         let device = self.devices.get(index)?;
         if device.external_terminals.len() != 2 {
             return None;
@@ -560,19 +570,22 @@ impl BuiltinVerilogADevices {
     /// projection. Multi-terminal compact devices require an explicit lead
     /// accessor and intentionally fail closed here.
     #[inline]
-    pub(crate) fn two_terminal_instance_name(&self, index: usize) -> Option<&str> {
+    #[doc(hidden)]
+    pub fn two_terminal_instance_name(&self, index: usize) -> Option<&str> {
         let device = self.devices.get(index)?;
         (device.external_terminals.len() == 2).then_some(device.instance_name.as_str())
     }
 
-    pub(crate) fn checkpoint_states(&self) -> Vec<GeneratedVerilogAInstanceCheckpoint> {
+    #[doc(hidden)]
+    pub fn checkpoint_states(&self) -> Vec<GeneratedVerilogAInstanceCheckpoint> {
         self.devices
             .iter()
             .map(BuiltinVerilogAInstance::checkpoint_state)
             .collect()
     }
 
-    pub(crate) fn accepted_checkpoint_states(
+    #[doc(hidden)]
+    pub fn accepted_checkpoint_states(
         &self,
     ) -> Result<Vec<GeneratedVerilogAInstanceCheckpoint>, String> {
         for device in &self.devices {
@@ -581,7 +594,8 @@ impl BuiltinVerilogADevices {
         Ok(self.checkpoint_states())
     }
 
-    pub(crate) fn validate_checkpoint_states(
+    #[doc(hidden)]
+    pub fn validate_checkpoint_states(
         &self,
         states: &[GeneratedVerilogAInstanceCheckpoint],
     ) -> Result<(), String> {
@@ -600,14 +614,16 @@ impl BuiltinVerilogADevices {
         Ok(())
     }
 
-    pub(crate) fn restore_checkpoint_states(
+    #[doc(hidden)]
+    pub fn restore_checkpoint_states(
         &mut self,
         states: &[GeneratedVerilogAInstanceCheckpoint],
     ) -> Result<(), String> {
         self.restore_checkpoint_states_impl(states, None)
     }
 
-    pub(crate) fn restore_analysis_continuation_states(
+    #[doc(hidden)]
+    pub fn restore_analysis_continuation_states(
         &mut self,
         states: &[GeneratedVerilogAInstanceCheckpoint],
         simparams: GeneratedSimulationParameters,
@@ -638,7 +654,8 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub(crate) fn capture_rollback_state(&self) -> BuiltinVerilogADevicesRollback {
+    #[doc(hidden)]
+    pub fn capture_rollback_state(&self) -> BuiltinVerilogADevicesRollback {
         BuiltinVerilogADevicesRollback {
             states: self
                 .devices
@@ -660,10 +677,8 @@ impl BuiltinVerilogADevices {
     /// one topology-sized allocation on every rejected Newton point or
     /// timestep while preserving the generated model's exact state packing.
     #[inline]
-    pub(crate) fn capture_rollback_state_into(
-        &self,
-        rollback: &mut BuiltinVerilogADevicesRollback,
-    ) {
+    #[doc(hidden)]
+    pub fn capture_rollback_state_into(&self, rollback: &mut BuiltinVerilogADevicesRollback) {
         let expected_terminal_currents = self
             .devices
             .iter()
@@ -692,7 +707,8 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub(crate) fn restore_rollback_state(&mut self, rollback: BuiltinVerilogADevicesRollback) {
+    #[doc(hidden)]
+    pub fn restore_rollback_state(&mut self, rollback: BuiltinVerilogADevicesRollback) {
         debug_assert_eq!(self.devices.len(), rollback.states.len());
         let expected_terminal_currents: usize = self
             .devices
@@ -710,13 +726,15 @@ impl BuiltinVerilogADevices {
         debug_assert!(terminal_currents.is_empty());
     }
 
-    pub(crate) fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
+    #[doc(hidden)]
+    pub fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
         for device in &mut self.devices {
             device.link_static_stamps(matrix, num_nodes);
         }
     }
 
-    pub(crate) fn stamp_all_with_mode(
+    #[doc(hidden)]
+    pub fn stamp_all_with_mode(
         &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -728,13 +746,15 @@ impl BuiltinVerilogADevices {
         self.stamp_all_with_task_recording(matrix, rhs, voltages, num_nodes, request, record_tasks)
     }
 
-    pub(crate) fn has_point_analog_tasks(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_point_analog_tasks(&self) -> bool {
         self.devices
             .iter()
             .any(|device| device.kind.has_point_analog_tasks())
     }
 
-    pub(crate) fn stamp_all_with_task_recording(
+    #[doc(hidden)]
+    pub fn stamp_all_with_task_recording(
         &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -773,14 +793,16 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub(crate) fn all_converged(&self) -> bool {
+    #[doc(hidden)]
+    pub fn all_converged(&self) -> bool {
         self.devices
             .iter()
             .all(BuiltinVerilogAInstance::is_converged)
     }
 
     #[inline]
-    pub(crate) fn set_timepoint(
+    #[doc(hidden)]
+    pub fn set_timepoint(
         &mut self,
         time: Value,
         timestep: Value,
@@ -792,16 +814,15 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub(crate) fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
+    #[doc(hidden)]
+    pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
         for device in &mut self.devices {
             device.set_analysis_step(initial, final_step);
         }
     }
 
-    pub(crate) fn set_analysis_phase(
-        &mut self,
-        phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
-    ) {
+    #[doc(hidden)]
+    pub fn set_analysis_phase(&mut self, phase: rspice_veriloga_runtime::AnalogAnalysisPhase) {
         for device in &mut self.devices {
             device.analysis_phase = phase;
         }
@@ -809,7 +830,8 @@ impl BuiltinVerilogADevices {
 
     /// Initialize a staged collection before the circuit publishes any new
     /// analysis state. The caller retains the original collection on failure.
-    pub(crate) fn begin_analysis(
+    #[doc(hidden)]
+    pub fn begin_analysis(
         &mut self,
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
@@ -840,7 +862,8 @@ impl BuiltinVerilogADevices {
     /// equilibrium operating-point solve. The numerical solver still uses
     /// DC matrix assembly; only Verilog-A analysis predicates change.
     #[inline]
-    pub(crate) fn set_operating_point_analysis_override(
+    #[doc(hidden)]
+    pub fn set_operating_point_analysis_override(
         &mut self,
         analysis: Option<GeneratedAnalysisKind>,
     ) {
@@ -849,7 +872,8 @@ impl BuiltinVerilogADevices {
 
     /// Validate every generated instance before an accepted analysis point is
     /// allowed to mutate any runtime or generated Verilog-A state.
-    pub(crate) fn validate_state_acceptance(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_state_acceptance(&self) -> Result<(), String> {
         for device in &self.devices {
             device.validate_advance_state().map_err(|source| {
                 format!(
@@ -863,13 +887,15 @@ impl BuiltinVerilogADevices {
 
     /// Apply a state acceptance only after every runtime and generated
     /// instance in the circuit has passed validation.
-    pub(crate) fn apply_validated_state_acceptance(&mut self) {
+    #[doc(hidden)]
+    pub fn apply_validated_state_acceptance(&mut self) {
         for device in &mut self.devices {
             device.apply_validated_advance_state();
         }
     }
 
-    pub(crate) fn stamp_small_signal_real_all(
+    #[doc(hidden)]
+    pub fn stamp_small_signal_real_all(
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
@@ -889,7 +915,8 @@ impl BuiltinVerilogADevices {
         Ok(())
     }
 
-    pub(crate) fn stamp_small_signal_reactive_all(
+    #[doc(hidden)]
+    pub fn stamp_small_signal_reactive_all(
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
@@ -915,14 +942,16 @@ impl BuiltinVerilogADevices {
 
 #[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogAInstance {
-    pub(crate) fn instance_name(&self) -> &str {
+    #[doc(hidden)]
+    pub fn instance_name(&self) -> &str {
         &self.instance_name
     }
 
     /// Whether this instance's contributions connect an electrical port to
     /// node 0: the generator's reading of its module, decided with this
     /// instance's parameter values and the terminals its card connected.
-    pub(crate) fn references_ground(&self) -> bool {
+    #[doc(hidden)]
+    pub fn references_ground(&self) -> bool {
         struct Inputs<'a>(&'a builtins::GeneratedBuiltinKind);
         impl rspice_veriloga_runtime::GroundReferenceInputs for Inputs<'_> {
             fn parameter(&self, name: &str) -> Option<f64> {
@@ -940,7 +969,8 @@ impl BuiltinVerilogAInstance {
             .references_ground(&Inputs(&self.kind))
     }
 
-    pub(crate) fn visit_equation_abstols(
+    #[doc(hidden)]
+    pub fn visit_equation_abstols(
         &self,
         num_nodes: usize,
         current_abstol: Value,
@@ -1226,7 +1256,8 @@ impl BuiltinVerilogAInstance {
     /// injections, so the process table — not the injection table — is the
     /// compatibility signal used by catalogs generated before that ABI.
     #[inline]
-    pub(crate) fn has_grouped_noise_processes(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_grouped_noise_processes(&self) -> bool {
         Self::grouped_noise_capability(self.kind.grouped_noise_process_descriptors())
     }
 
@@ -1259,7 +1290,8 @@ impl BuiltinVerilogAInstance {
         Ok(())
     }
 
-    pub(crate) fn grouped_noise_process_catalog(&self) -> Vec<(usize, &'static str)> {
+    #[doc(hidden)]
+    pub fn grouped_noise_process_catalog(&self) -> Vec<(usize, &'static str)> {
         if !self.has_grouped_noise_processes() {
             return Vec::new();
         }
@@ -1285,20 +1317,23 @@ impl BuiltinVerilogAInstance {
     /// Exact currents entering the external terminals, in canonical module
     /// port order, from the most recent static device evaluation.
     #[inline]
-    pub(crate) fn terminal_currents(&self) -> &[Value] {
+    #[doc(hidden)]
+    pub fn terminal_currents(&self) -> &[Value] {
         &self.terminal_currents
     }
 
     /// Canonical external terminals in Verilog-A module declaration order.
     #[inline]
-    pub(crate) fn external_terminals(&self) -> &'static [GeneratedVerilogATerminalDescriptor] {
+    #[doc(hidden)]
+    pub fn external_terminals(&self) -> &'static [GeneratedVerilogATerminalDescriptor] {
         self.external_terminals
     }
 
     /// Conventional SPICE lead aliases admitted by the card route that
     /// created this instance. Direct X-device instantiation has no aliases.
     #[inline]
-    pub(crate) fn terminal_current_aliases(&self) -> &'static [GeneratedTerminalCurrentAlias] {
+    #[doc(hidden)]
+    pub fn terminal_current_aliases(&self) -> &'static [GeneratedTerminalCurrentAlias] {
         self.terminal_current_aliases
     }
 
@@ -1314,7 +1349,8 @@ impl BuiltinVerilogAInstance {
     /// bias zero, no channel current, no junction current — and the native
     /// EKV 2.6, MOSFET, VDMOS, JFET and BJT ports of that arm agree.
     #[inline]
-    pub(crate) fn set_initially_off(&mut self, off: bool) {
+    #[doc(hidden)]
+    pub fn set_initially_off(&mut self, off: bool) {
         self.initial_off = off;
     }
 
@@ -1401,7 +1437,8 @@ impl BuiltinVerilogAInstance {
         Some(anchor)
     }
 
-    pub(crate) fn set_terminal_current_aliases(
+    #[doc(hidden)]
+    pub fn set_terminal_current_aliases(
         &mut self,
         aliases: &'static [GeneratedTerminalCurrentAlias],
     ) -> Result<(), String> {
@@ -1422,7 +1459,8 @@ impl BuiltinVerilogAInstance {
     }
 
     /// Bound circuit node IDs occupied by private mathematical states.
-    pub(crate) fn non_electrical_node_indices(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn non_electrical_node_indices(&self) -> impl Iterator<Item = usize> + '_ {
         let external_count = self.terminal_currents.len();
         builtins::descriptor(self.model_name)
             .map_or(&[][..], |descriptor| descriptor.internal_state_nodes)
@@ -1433,7 +1471,8 @@ impl BuiltinVerilogAInstance {
 
     /// Canonical internal-node names paired with their circuit node IDs.
     /// External terminals occupy the prefix of `nodes`.
-    pub(crate) fn internal_nodes(&self) -> impl Iterator<Item = (&'static str, usize)> + '_ {
+    #[doc(hidden)]
+    pub fn internal_nodes(&self) -> impl Iterator<Item = (&'static str, usize)> + '_ {
         let external_count = self.terminal_currents.len();
         builtins::descriptor(self.model_name)
             .map_or(&[][..], |descriptor| descriptor.internal_node_names)
@@ -1582,7 +1621,8 @@ impl BuiltinVerilogAInstance {
         Ok(evaluated)
     }
 
-    pub(crate) fn evaluate_noise_processes_at_frequency(
+    #[doc(hidden)]
+    pub fn evaluate_noise_processes_at_frequency(
         &self,
         voltages: &[Value],
         num_nodes: usize,
@@ -1928,7 +1968,8 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
-    pub(crate) fn set_temperature(&mut self, temperature: Value) {
+    #[doc(hidden)]
+    pub fn set_temperature(&mut self, temperature: Value) {
         if temperature.is_finite() && temperature > 0.0 {
             self.temperature = temperature;
         }
@@ -2051,7 +2092,8 @@ impl BuiltinVerilogAInstance {
     /// off the live instance before the copy evaluates, because a model whose
     /// dynamic operators are inactive writes the trial value straight into its
     /// own previous lane and would otherwise report a charge that never moved.
-    pub(crate) fn dynamic_charges_at(
+    #[doc(hidden)]
+    pub fn dynamic_charges_at(
         &self,
         voltages: &[Value],
         num_nodes: usize,

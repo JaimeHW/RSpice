@@ -34,15 +34,15 @@ pub struct VdmosIndices {
 pub struct VdmosNoiseOperatingPoint {
     /// `(pos, neg, R)` of the series drain resistor, when it is a branch: `RD`,
     /// or the quasi-saturation drift resistance at the bias.
-    pub(crate) drain_resistor: Option<(NodeId, NodeId, Value)>,
+    pub drain_resistor: Option<(NodeId, NodeId, Value)>,
     /// `(pos, neg, RS)` of the series source resistor, when it is a branch.
-    pub(crate) source_resistor: Option<(NodeId, NodeId, Value)>,
+    pub source_resistor: Option<(NodeId, NodeId, Value)>,
     /// The channel's internal drain and source.
-    pub(crate) channel: (NodeId, NodeId),
+    pub channel: (NodeId, NodeId),
     /// Channel transconductance at the bias, the multiplicity included.
-    pub(crate) transconductance: Value,
+    pub transconductance: Value,
     /// Channel drain current at the bias, the multiplicity included.
-    pub(crate) drain_current: Value,
+    pub drain_current: Value,
 }
 
 #[derive(Debug, Clone, Copy)]

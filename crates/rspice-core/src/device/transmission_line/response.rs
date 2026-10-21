@@ -44,32 +44,38 @@ impl TlineTransientResponse {
     }
 
     #[inline]
-    pub(crate) fn self_conductance(self) -> Value {
+    #[doc(hidden)]
+    pub fn self_conductance(self) -> Value {
         self.self_conductance
     }
 
     #[inline]
-    pub(crate) fn mutual_conductance(self) -> Value {
+    #[doc(hidden)]
+    pub fn mutual_conductance(self) -> Value {
         self.mutual_conductance
     }
 
     #[inline]
-    pub(crate) fn mutual_current_coefficient(self) -> Value {
+    #[doc(hidden)]
+    pub fn mutual_current_coefficient(self) -> Value {
         self.mutual_current_coefficient
     }
 
     #[inline]
-    pub(crate) fn i_eq_port1(self) -> Value {
+    #[doc(hidden)]
+    pub fn i_eq_port1(self) -> Value {
         self.i_eq_port1
     }
 
     #[inline]
-    pub(crate) fn i_eq_port2(self) -> Value {
+    #[doc(hidden)]
+    pub fn i_eq_port2(self) -> Value {
         self.i_eq_port2
     }
 
     #[inline]
-    pub(crate) fn port_currents(self, v1: Value, v2: Value) -> (Value, Value) {
+    #[doc(hidden)]
+    pub fn port_currents(self, v1: Value, v2: Value) -> (Value, Value) {
         (
             self.self_conductance * v1 + self.mutual_conductance * v2 - self.i_eq_port1,
             self.self_conductance * v2 + self.mutual_conductance * v1 - self.i_eq_port2,

@@ -429,14 +429,16 @@ pub enum SwitchCheckpointKind {
 }
 
 impl SwitchCheckpointKind {
-    pub(crate) const fn tag(self) -> &'static str {
+    #[doc(hidden)]
+    pub const fn tag(self) -> &'static str {
         match self {
             Self::Voltage => "v",
             Self::Current => "i",
         }
     }
 
-    pub(crate) fn from_tag(tag: &str) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn from_tag(tag: &str) -> Option<Self> {
         match tag {
             "v" => Some(Self::Voltage),
             "i" => Some(Self::Current),
@@ -470,7 +472,8 @@ pub struct AcceptedSwitchCheckpoint {
 
 impl AcceptedSwitchCheckpoint {
     /// Range and finiteness checks that need no target circuit.
-    pub(crate) fn validate_numeric_state(&self) -> Result<(), String> {
+    #[doc(hidden)]
+    pub fn validate_numeric_state(&self) -> Result<(), String> {
         let [
             current_resistance,
             prev_resistance,

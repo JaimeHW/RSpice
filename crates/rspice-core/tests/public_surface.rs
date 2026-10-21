@@ -364,9 +364,14 @@ const MAX_PUBLIC_ITEMS: usize = 5753;
 // instances, `CplBranchCurrents` and `LtraRgTwoPort` keep theirs private and
 // add hidden getters and narrow writers in their place. Five test helpers and
 // the two BSIM oracle model cards compile under `test-support` as well as
-// `cfg(test)`, for the engine's tests above them. The census is 1,225, with no
+// `cfg(test)`, for the engine's tests above them. The census was 1,225, with no
 // slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1225;
+// The generated Verilog-A device set's analysis, checkpoint, rollback, noise
+// and charge plumbing, the switch and TEAM memristor checkpoints, the BJT
+// charge linearization, the line responses and the prescribed integral rates
+// add 86 more for the same move. Their stamp records and charge records keep
+// public fields. The census is 1,311, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1311;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

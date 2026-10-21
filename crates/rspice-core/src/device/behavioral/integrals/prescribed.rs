@@ -38,7 +38,8 @@ impl IntegralEquations {
 }
 
 impl PrescribedIntegralRate<'_> {
-    pub(crate) fn coordinates(&self) -> impl Iterator<Item = usize> + '_ {
+    #[doc(hidden)]
+    pub fn coordinates(&self) -> impl Iterator<Item = usize> + '_ {
         self.equation
             .inputs
             .iter()
@@ -50,7 +51,8 @@ impl PrescribedIntegralRate<'_> {
     }
 
     /// None means that the rate reads a physical circuit coordinate other than ground.
-    pub(crate) fn dependencies(&self) -> Option<Vec<usize>> {
+    #[doc(hidden)]
+    pub fn dependencies(&self) -> Option<Vec<usize>> {
         self.dependencies_with_coordinates(|_| false)
     }
 
@@ -85,7 +87,8 @@ impl PrescribedIntegralRate<'_> {
     /// Only an exact cancellation permits sampling them relative to a local
     /// reference. This changes neither the original circuit equations nor
     /// the physical derivatives used by retained small-signal consumers.
-    pub(crate) fn dependencies_with_offsets(
+    #[doc(hidden)]
+    pub fn dependencies_with_offsets(
         &self,
         group: impl Fn(usize) -> Option<usize>,
     ) -> Option<Vec<usize>> {
@@ -117,7 +120,8 @@ impl PrescribedIntegralRate<'_> {
         )
     }
 
-    pub(crate) fn sample_with_coordinates(
+    #[doc(hidden)]
+    pub fn sample_with_coordinates(
         &self,
         time: Value,
         phases: &[Value],

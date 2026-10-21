@@ -183,8 +183,8 @@ pub struct XyceCoreTrial {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[doc(hidden)]
 pub struct XyceCoreDaeEndpoint {
-    pub(crate) q: Value,
-    pub(crate) f: Value,
+    pub q: Value,
+    pub f: Value,
 }
 
 impl Default for JilesAthertonParams {
@@ -2147,11 +2147,13 @@ impl JilesAthertonInductor {
         }
     }
 
-    pub(crate) fn restore_xyce_core_mag_update(&mut self, update: Value) {
+    #[doc(hidden)]
+    pub fn restore_xyce_core_mag_update(&mut self, update: Value) {
         self.advance_xyce_core_mag_update(update);
     }
 
-    pub(crate) fn invalidate_xyce_core_trial(&mut self) {
+    #[doc(hidden)]
+    pub fn invalidate_xyce_core_trial(&mut self) {
         if self.params.xyce_core_level2 {
             self.xyce_trial = None;
         }
