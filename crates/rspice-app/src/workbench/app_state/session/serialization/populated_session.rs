@@ -424,7 +424,7 @@ fn a_populated_session_restores_and_saves_again_unchanged() {
     );
     assert_eq!(shortcuts.policies(), customized_shortcuts().policies());
     assert_same_session(
-        &session_value(&as_restored(state)),
+        &session_value(as_restored(state)),
         &session_value(&restored),
         "eframe RON",
     );
@@ -451,7 +451,7 @@ fn a_populated_session_survives_the_json_snapshot_unchanged() {
     let restored: AppState = serde_json::from_str(&written).expect("the JSON session reads back");
 
     assert_same_session(
-        &session_value(&as_restored(state)),
+        &session_value(as_restored(state)),
         &session_value(&restored),
         "JSON",
     );

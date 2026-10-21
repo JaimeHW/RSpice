@@ -18,9 +18,12 @@ fn navigate(state: &mut AppState, surface: SurfaceId) {
         .unwrap_or_else(|error| panic!("{surface:?} opens: {error}"));
 }
 
+/// Retained state by name, and the least that opens it on a default session.
+type GateRow = (&'static str, fn(&mut AppState));
+
 /// One row per term, in the order the two gates list them: the workbench's
 /// first, then the session's own.
-const APPLICATION_GATE: &[(&str, fn(&mut AppState))] = &[
+const APPLICATION_GATE: &[GateRow] = &[
     ("workbench.project_launcher_open", |state| {
         state.workbench.project_launcher_open = true;
     }),
@@ -137,7 +140,7 @@ fn each_term_of_the_application_gate_makes_it_modal_on_its_own() {
 /// Drawn while open, and not a term of the gate today: a keystroke still
 /// reaches the document beneath. This records the gate as it stands rather
 /// than ruling on each row; changing one is a behaviour change.
-const OUTSIDE_THE_APPLICATION_GATE: &[(&str, fn(&mut AppState))] = &[
+const OUTSIDE_THE_APPLICATION_GATE: &[GateRow] = &[
     ("ui.netlist, outside the Netlist workspace", |state| {
         state.ui.netlist.find.open = true;
     }),

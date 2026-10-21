@@ -171,10 +171,12 @@ fn open_veriloga_build_settings_alone(dialogs: &mut DialogState) {
     dialogs.veriloga_build_settings = app.state.dialogs.veriloga_build_settings.take();
 }
 
+/// A dialog by name, and the least that opens it on a closed dialog state.
+type DialogRow = (&'static str, fn(&mut DialogState));
+
 /// One row per term of [`DialogState::application_modal_open`], in the order
-/// the gate lists them: the term, and the least that opens it on a closed
-/// dialog state.
-const DIALOG_GATE: &[(&str, fn(&mut DialogState))] = &[
+/// the gate lists them.
+const DIALOG_GATE: &[DialogRow] = &[
     ("about", |dialogs| dialogs.about = true),
     ("shortcuts_help", |dialogs| dialogs.shortcuts_help = true),
     ("help_center", |dialogs| {
@@ -435,28 +437,27 @@ const DIALOG_GATE: &[(&str, fn(&mut DialogState))] = &[
 /// The gate's one term that exists only where a native autosave can be
 /// found beside the file being opened.
 #[cfg(not(target_arch = "wasm32"))]
-const NATIVE_DIALOG_GATE: &[(&str, fn(&mut DialogState))] =
-    &[("pending_autosave_restore", |dialogs| {
-        use crate::workbench::lifecycle::recovery_checkpoint::{
-            AutosaveRestoreCandidate, CheckpointBinding, CheckpointIdentity, CheckpointOwnership,
-        };
-        dialogs.pending_autosave_restore = Some(AutosaveRestoreCandidate {
-            source: std::path::PathBuf::from("afe.rspiceproj"),
-            checkpoint: std::path::PathBuf::from("afe.rspiceproj.autosave"),
-            binding: CheckpointBinding {
-                identity: CheckpointIdentity {
-                    content_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
-                    byte_len: 1,
-                    modified_unix_ms: 1,
-                },
-                ownership: CheckpointOwnership::Legacy,
-                source_snapshot: None,
+const NATIVE_DIALOG_GATE: &[DialogRow] = &[("pending_autosave_restore", |dialogs| {
+    use crate::workbench::lifecycle::recovery_checkpoint::{
+        AutosaveRestoreCandidate, CheckpointBinding, CheckpointIdentity, CheckpointOwnership,
+    };
+    dialogs.pending_autosave_restore = Some(AutosaveRestoreCandidate {
+        source: std::path::PathBuf::from("afe.rspiceproj"),
+        checkpoint: std::path::PathBuf::from("afe.rspiceproj.autosave"),
+        binding: CheckpointBinding {
+            identity: CheckpointIdentity {
+                content_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
+                byte_len: 1,
+                modified_unix_ms: 1,
             },
-        });
-    })];
+            ownership: CheckpointOwnership::Legacy,
+            source_snapshot: None,
+        },
+    });
+})];
 
 #[cfg(target_arch = "wasm32")]
-const NATIVE_DIALOG_GATE: &[(&str, fn(&mut DialogState))] = &[];
+const NATIVE_DIALOG_GATE: &[DialogRow] = &[];
 
 /// Each term of the dialog gate makes the application modal on its own, and
 /// nothing does when every dialog is closed.
@@ -485,7 +486,7 @@ fn each_term_of_the_dialog_gate_makes_the_application_modal_on_its_own() {
 /// a keystroke still reaches the drawing beneath it. This records the gate
 /// as it stands rather than ruling on each; a change to any row is a
 /// behaviour change and is made on purpose.
-const OUTSIDE_THE_DIALOG_GATE: &[(&str, fn(&mut DialogState))] = &[
+const OUTSIDE_THE_DIALOG_GATE: &[DialogRow] = &[
     ("waveform_calculator_dialog", |dialogs| {
         dialogs.waveform_calculator_dialog = true;
     }),
