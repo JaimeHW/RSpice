@@ -20,9 +20,10 @@ use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
     ComplexResultValue, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
     FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, PssFloquetMultiplierEvidence,
-    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, SensitivityResultMode,
-    SensitivityResultRow, SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
+    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, RetainedTrace,
+    SensitivityResultMode, SensitivityResultRow, SimulationRun, SoaEvaluationEvidence,
+    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence,
 };
 
 #[derive(Debug)]
@@ -98,8 +99,8 @@ impl ExportWorkflowIo for MockExportWorkflowIo {
     }
 }
 
-fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
-    WaveformData::new(name.to_owned(), x, y, "#4f81bd")
+fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> RetainedTrace {
+    RetainedTrace::new(name.to_owned(), x, y, "#4f81bd")
 }
 
 fn floquet_certificate(problem_order: u64) -> FloquetSpectrumCertificateEvidence {
@@ -158,8 +159,8 @@ fn complex_waveform(
     display_y: Vec<f64>,
     real: Vec<f64>,
     imag: Vec<f64>,
-) -> WaveformData {
-    WaveformData::new(name.to_owned(), x, display_y, "#4f81bd").with_complex_components(
+) -> RetainedTrace {
+    RetainedTrace::new(name.to_owned(), x, display_y, "#4f81bd").with_complex_components(
         source_name.to_owned(),
         real,
         imag,
@@ -1405,10 +1406,10 @@ fn sp_noise_csv_keeps_signed_complex_components_and_export_metadata() {
             noise_reference_temperature_kelvin: Some(450.0),
         })
         .with_waveforms(vec![
-            WaveformData::new("|CY(1,2)|", vec![1e6], vec![5e-20], "#fff")
+            RetainedTrace::new("|CY(1,2)|", vec![1e6], vec![5e-20], "#fff")
                 .with_unit("A²/Hz")
                 .with_complex_components("CY(1,2)", vec![-3e-20], vec![4e-20]),
-            WaveformData::new("F", vec![1e6], vec![3.0], "#fff").with_unit("1"),
+            RetainedTrace::new("F", vec![1e6], vec![3.0], "#fff").with_unit("1"),
         ]);
     let prepared = prepare_single_analysis_dataset(
         &analysis,
@@ -1448,14 +1449,14 @@ fn touchstone_noise_retained_export_preserves_independent_grid() {
         });
     for name in ["S11", "S12", "S21", "S22"] {
         analysis.waveforms.push(
-            WaveformData::new(format!("|{name}|"), vec![1e6, 3e6], vec![0.5; 2], "#fff")
+            RetainedTrace::new(format!("|{name}|"), vec![1e6, 3e6], vec![0.5; 2], "#fff")
                 .with_complex_components(name, vec![0.5; 2], vec![0.0; 2]),
         );
     }
     analysis.waveforms.extend([
-        WaveformData::new("Fmin", vec![2e6], vec![2.0], "#fff").with_unit("1"),
-        WaveformData::new("Rn", vec![2e6], vec![15.0], "#fff").with_unit("Ω"),
-        WaveformData::new("|Sopt|", vec![2e6], vec![0.5], "#fff")
+        RetainedTrace::new("Fmin", vec![2e6], vec![2.0], "#fff").with_unit("1"),
+        RetainedTrace::new("Rn", vec![2e6], vec![15.0], "#fff").with_unit("Ω"),
+        RetainedTrace::new("|Sopt|", vec![2e6], vec![0.5], "#fff")
             .with_complex_components("Sopt", vec![0.0], vec![-0.5])
             .with_unit("1"),
     ]);

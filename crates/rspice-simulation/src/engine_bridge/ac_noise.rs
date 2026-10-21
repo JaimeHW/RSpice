@@ -7,7 +7,7 @@ use rspice_core::analysis::noise::NoiseResult;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::error::SimulationError;
-use crate::results::{SimulationResult, WaveformData};
+use crate::results::{SampledWaveform, SimulationResult};
 use rspice_simulation_contract::config::{
     AcAnalysisConfig, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode,
 };
@@ -165,7 +165,7 @@ impl EngineBridge {
 
             let name = format!("V({})", first_result.node_names[node_idx]);
             let mut waveform =
-                WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values);
+                SampledWaveform::new_complex(&name, frequencies.clone(), real_values, imag_values);
             waveform.y_unit = "V".to_owned();
             waveforms.insert(name, waveform);
         }
@@ -184,7 +184,7 @@ impl EngineBridge {
 
             let name = format!("I({})", first_result.branch_names[branch_idx]);
             let mut waveform =
-                WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values);
+                SampledWaveform::new_complex(&name, frequencies.clone(), real_values, imag_values);
             waveform.y_unit = "A".to_owned();
             waveforms.insert(name, waveform);
         }

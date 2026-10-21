@@ -12,7 +12,7 @@ use crate::workbench::app_state::ActiveViewer;
 use super::frame_work::{self, DatasetWalk};
 use rspice_results_ui::smith_chart::view::{self, SmithPlotTrace};
 
-fn trace_is_well_formed(waveform: &crate::state::WaveformData) -> bool {
+fn trace_is_well_formed(waveform: &crate::state::RetainedTrace) -> bool {
     let Some(complex) = waveform.complex.as_ref() else {
         return false;
     };
@@ -304,7 +304,7 @@ mod tests {
         let x: Vec<f64> = (0..values.len())
             .map(|index| 1.0e9 * (index as f64 + 1.0))
             .collect();
-        let waveform = crate::state::WaveformData::new(
+        let waveform = crate::state::RetainedTrace::new(
             "S11",
             x.clone(),
             values.iter().map(|(re, _)| *re).collect::<Vec<_>>(),

@@ -123,7 +123,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
         .waveforms
         .iter()
         .map(|wave| {
-            WaveformData::new(
+            RetainedTrace::new(
                 &wave.name,
                 projection.times().to_vec(),
                 source.report_values(wave, &projection).unwrap(),

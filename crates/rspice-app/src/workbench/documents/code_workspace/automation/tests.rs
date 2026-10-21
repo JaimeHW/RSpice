@@ -3,8 +3,8 @@
 use crate::product::{AnalysisInstanceId, ObjectRevision, ProjectId};
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, PreparedRunReceipt,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, ProjectSourceRegistry,
-    SimulationPlanPayload, WaveformData,
+    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, ProjectSourceRegistry, RetainedTrace,
+    SimulationPlanPayload,
 };
 
 use super::*;
@@ -126,7 +126,7 @@ fn prepared_run(
     let analysis = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
         .with_provenance(provenance)
         .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)])
-        .with_waveforms(vec![WaveformData::new(
+        .with_waveforms(vec![RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0],
             vec![1.0, 2.0],

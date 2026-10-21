@@ -16,8 +16,8 @@ use super::{
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{
-    AnalysisResult, AnalysisResultPayload, AnalysisType, SimulationRun, SimulationState,
-    WaveformData,
+    AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SimulationRun,
+    SimulationState,
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::AnalysisPresentationKey;
@@ -743,10 +743,10 @@ fn result_navigator_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Results;
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+        RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
     ]);
     let ac =
-        AnalysisResult::new(2, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC").with_waveforms(vec![RetainedTrace::new(
             "V(in)",
             vec![1.0, 10.0],
             vec![1.0, 0.5],

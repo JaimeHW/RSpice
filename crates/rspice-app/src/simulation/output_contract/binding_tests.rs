@@ -410,8 +410,8 @@ fn scoped_deferred_probes_resolve_after_project_reload() {
 #[test]
 fn raw_scope_lookup_preserves_quantity_namespaces_and_does_not_rewrite_retained_names() {
     let waveforms = [
-        WaveformData::new("V(X1.out)", vec![0.0], vec![2.0], "#ffffff").with_unit("V"),
-        WaveformData::new("I(X1.out)", vec![0.0], vec![3.0], "#ffffff").with_unit("A"),
+        RetainedTrace::new("V(X1.out)", vec![0.0], vec![2.0], "#ffffff").with_unit("V"),
+        RetainedTrace::new("I(X1.out)", vec![0.0], vec![3.0], "#ffffff").with_unit("A"),
     ];
     for (expr, expected) in [("V(/X1/out)", 2.0), ("I(X1:out)", 3.0)] {
         let resolved = resolve_raw_probe(expr, &waveforms, "result", false).unwrap();

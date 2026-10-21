@@ -308,7 +308,7 @@ fn current_project_results_reject_incomplete_or_forged_failvalue_evidence() {
 /// states a unit, sealed as legacy-unattributed so no plan fixture is needed.
 fn run_with_waveform_unit(sequence: u64, unit: Option<&str>) -> SimulationRun {
     let mut waveform =
-        crate::state::WaveformData::new("I(V1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#00aaff");
+        crate::state::RetainedTrace::new("I(V1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#00aaff");
     waveform.unit = unit.map(str::to_owned);
     let mut run = SimulationRun::new(sequence);
     run.mark_running().expect("fixture run starts");

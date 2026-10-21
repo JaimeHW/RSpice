@@ -8,7 +8,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 pub(crate) use crate::state::ResultImportFormat;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
-    ResultImportSource, SimulationRunLifecycle, SimulationRunProvenance, WaveformData,
+    ResultImportSource, RetainedTrace, SimulationRunLifecycle, SimulationRunProvenance,
 };
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
@@ -107,7 +107,7 @@ pub(crate) struct ParsedResultDataset {
     pub(crate) coordinate_name: String,
     pub(crate) coordinate_unit: Option<String>,
     pub(crate) sample_count: usize,
-    pub(crate) waveforms: Vec<WaveformData>,
+    pub(crate) waveforms: Vec<RetainedTrace>,
     pub(crate) family_metadata: Option<AnalysisResultFamilyMetadata>,
     pub(crate) delimiter: u8,
     /// What the adapter had to decide that the source did not state, in the
@@ -821,7 +821,7 @@ fn result_import_summary_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.end_row();
 }
 
-fn result_import_signal_label(waveform: &WaveformData) -> String {
+fn result_import_signal_label(waveform: &RetainedTrace) -> String {
     waveform.unit.as_deref().map_or_else(
         || waveform.name.clone(),
         |unit| format!("{}  [{}]", waveform.name, unit),
@@ -1005,7 +1005,7 @@ fn parse_delimited_result_dataset(
         .into_iter()
         .enumerate()
         .map(|(index, values)| {
-            let mut waveform = WaveformData::new(
+            let mut waveform = RetainedTrace::new(
                 headers[index + 1].name.clone(),
                 Arc::clone(&coordinate),
                 values,

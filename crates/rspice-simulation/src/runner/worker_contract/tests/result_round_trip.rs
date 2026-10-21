@@ -24,7 +24,7 @@ fn soa_reporting_worker_detaches_source_and_rejects_changed_reports() {
         time: vec![0.25, 1.0],
         waveforms: HashMap::from([(
             "SOA_VGS(M1)".into(),
-            WaveformData::new_time_domain_in_unit(
+            SampledWaveform::new_time_domain_in_unit(
                 "SOA_VGS(M1)",
                 vec![0.25, 1.0],
                 vec![1.5, 0.0],
@@ -96,7 +96,7 @@ fn soa_current_envelope_worker_buffers_preserve_curve_metadata() {
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "SOA_ID_CURVE_VOLTAGE(M1)".into(),
-            WaveformData::new_time_domain(
+            SampledWaveform::new_time_domain(
                 "SOA_ID_CURVE_VOLTAGE(M1)",
                 vec![0.0, 1e-9],
                 vec![1.0, 2.0],
@@ -161,7 +161,7 @@ fn transient_convergence_survives_worker_round_trip() {
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
-            WaveformData::new_time_domain("V(out)", vec![0.0, 1e-9], vec![0.0, 0.8]),
+            SampledWaveform::new_time_domain("V(out)", vec![0.0, 1e-9], vec![0.0, 0.8]),
         )]),
         measurements: Vec::new(),
         periodic_state: None,
@@ -264,7 +264,7 @@ fn worker_result_round_trip() {
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
-            WaveformData::new_time_domain("V(out)", vec![0.0, 1e-9], vec![0.0, 0.8]),
+            SampledWaveform::new_time_domain("V(out)", vec![0.0, 1e-9], vec![0.0, 0.8]),
         )]),
         measurements: vec![rspice_core::MeasureResult::failed(
             "delay",
@@ -301,7 +301,11 @@ fn worker_result_round_trip() {
         sweep_values: vec![-40.0, 25.0, 125.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
-            WaveformData::new_time_domain("V(out)", vec![-40.0, 25.0, 125.0], vec![0.8, 0.9, 1.0]),
+            SampledWaveform::new_time_domain(
+                "V(out)",
+                vec![-40.0, 25.0, 125.0],
+                vec![0.8, 0.9, 1.0],
+            ),
         )]),
         num_failures: 1,
     };
@@ -331,7 +335,7 @@ fn worker_result_round_trip() {
         corner_labels: vec!["TT_1.0V_25C".to_string(), "FF_1.1V_125C".to_string()],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
-            WaveformData::new_time_domain("V(out)", vec![0.0, 1.0], vec![1.0, 1.1]),
+            SampledWaveform::new_time_domain("V(out)", vec![0.0, 1.0], vec![1.0, 1.1]),
         )]),
         num_failures: 2,
     };
@@ -410,7 +414,7 @@ fn worker_result_round_trip() {
         iterations: vec![0.0, 1.0, 2.0],
         waveforms: HashMap::from([(
             "OPT_COST".to_string(),
-            WaveformData::new_time_domain("OPT_COST", vec![0.0, 1.0, 2.0], vec![2.0, 1.0, 0.1]),
+            SampledWaveform::new_time_domain("OPT_COST", vec![0.0, 1.0, 2.0], vec![2.0, 1.0, 0.1]),
         )]),
         best_cost: 0.1,
         best_variables: HashMap::from([("RLOAD".to_string(), 1234.0)]),
@@ -442,7 +446,11 @@ fn worker_result_round_trip() {
         time: vec![0.0, 1e-6],
         waveforms: HashMap::from([(
             "SOA_VIOLATION_COUNT".to_string(),
-            WaveformData::new_time_domain("SOA_VIOLATION_COUNT", vec![0.0, 1e-6], vec![0.0, 1.0]),
+            SampledWaveform::new_time_domain(
+                "SOA_VIOLATION_COUNT",
+                vec![0.0, 1e-6],
+                vec![0.0, 1.0],
+            ),
         )]),
         violations: vec![rspice_results::safety::SoAViolation {
             device_id: "M1".to_string(),
@@ -626,7 +634,7 @@ fn worker_result_round_trip() {
         other => panic!("expected pole-zero result, got {other:?}"),
     }
 
-    let mut pac_current = WaveformData::new_complex(
+    let mut pac_current = SampledWaveform::new_complex(
         "I(V1)[sb=+0]",
         vec![1.0, 10.0],
         vec![-5.0e-4, f64::from_bits(1)],
@@ -641,7 +649,7 @@ fn worker_result_round_trip() {
         waveforms: HashMap::from([
             (
                 "V(out)".to_string(),
-                WaveformData::new_complex(
+                SampledWaveform::new_complex(
                     "V(out)",
                     vec![1.0, 10.0],
                     vec![0.5, 0.25],
@@ -1168,15 +1176,19 @@ fn pss_reporting_schedules_preserve_the_authenticated_orbit() {
         }
         // Exercise the same serialization boundary used by Studio, including
         // reconstruction from the retained orbit and reporting-time buffer.
-        use crate::results::{SimulationResult, WaveformData};
+        use crate::results::{SampledWaveform, SimulationResult};
         let time = reported.time;
         let waveforms: std::collections::HashMap<_, _> = reported
             .waveforms
             .into_iter()
             .map(|(name, values)| {
                 let unit = if name.starts_with("I(") { "A" } else { "V" };
-                let waveform =
-                    WaveformData::new_time_domain_in_unit(name.clone(), time.clone(), values, unit);
+                let waveform = SampledWaveform::new_time_domain_in_unit(
+                    name.clone(),
+                    time.clone(),
+                    values,
+                    unit,
+                );
                 (name, waveform)
             })
             .collect();

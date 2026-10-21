@@ -13,8 +13,8 @@ use super::pages;
 use crate::product::ContentDigest;
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
-    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SavedOutput,
-    SavedOutputMaterializationStatus, SavedOutputReceipt, SpecEntry, SpecPointScope, WaveformData,
+    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace,
+    SavedOutput, SavedOutputMaterializationStatus, SavedOutputReceipt, SpecEntry, SpecPointScope,
 };
 use crate::workbench::state::SimulationPage;
 use crate::workbench::{AppState, RSpiceApp};
@@ -389,7 +389,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     // A waveform of the same name, with no receipt claiming it, is not
     // evidence that this contract produced it.
     let analysis = AnalysisResult::new(1, AnalysisType::Transient, "tran").with_waveforms(vec![
-        WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+        RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
     ]);
     retain_run_for_active_plan(&mut app.state, analysis);
     assert_eq!(
@@ -483,7 +483,7 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
     let mut waveforms = members
         .iter()
         .map(|member| {
-            let mut waveform = WaveformData::new(
+            let mut waveform = RetainedTrace::new(
                 &member.waveform_name,
                 vec![0.0, 1.0],
                 vec![0.0, 0.5],
@@ -494,7 +494,7 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
             waveform
         })
         .collect::<Vec<_>>();
-    let mut unrelated = WaveformData::new("Unrelated", vec![0.0, 1.0], vec![1.0, 1.0], "#fff");
+    let mut unrelated = RetainedTrace::new("Unrelated", vec![0.0, 1.0], vec![1.0, 1.0], "#fff");
     unrelated.visible = false;
     waveforms.push(unrelated);
     let mut analysis = AnalysisResult::new(1, AnalysisType::DcSweep, "Retraced DC")

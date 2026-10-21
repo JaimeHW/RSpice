@@ -255,7 +255,7 @@ fn result_dataset_import_has_mockup_authoritative_command_identity_and_gates() {
 /// a console warning instead of a file.
 #[test]
 fn exporting_the_dataset_requires_an_open_result_document() {
-    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
     use crate::workbench::state::WorkspaceDocumentId;
 
     let mut app = RSpiceApp::test_instance();
@@ -269,7 +269,7 @@ fn exporting_the_dataset_requires_an_open_result_document() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#4f81bd"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#4f81bd"),
         ]),
     );
     let dataset_id = run.dataset_id;

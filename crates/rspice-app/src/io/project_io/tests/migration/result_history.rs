@@ -1828,7 +1828,7 @@ fn a_results_history_saved_at_schema_27_restores_with_its_digests_unchanged() {
         .expect("fixture run completes");
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.8], "#00aaff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.8], "#00aaff"),
         ]),
     );
     seal_legacy_unattributed(&mut run);
@@ -1926,7 +1926,7 @@ fn a_results_history_saved_before_the_study_restores_with_its_digests_unchanged(
         .expect("fixture run completes");
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.8], "#00aaff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.8], "#00aaff"),
         ]),
     );
     // The frozen payload, exactly as a build before this one wrote it.

@@ -313,7 +313,7 @@ mod tests {
     use super::*;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::state::{
-        AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, WaveformData,
+        AnalysisResult, AnalysisResultProvenance, AnalysisType, RetainedTrace, SimulationRun,
     };
 
     /// How many traces the selected ordinary-noise spectrum draws. The card
@@ -330,7 +330,7 @@ mod tests {
         magnitude: [f64; 2],
     ) -> AnalysisResult {
         AnalysisResult::new(1, AnalysisType::Ac, "AC")
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 format!("|{signal}|"),
                 vec![1.0, 10.0],
                 magnitude.to_vec(),
@@ -371,7 +371,7 @@ mod tests {
     }
 
     fn noise_result(analysis_type: AnalysisType, label: &str, name: &str) -> AnalysisResult {
-        AnalysisResult::new(1, analysis_type, label).with_waveforms(vec![WaveformData::new(
+        AnalysisResult::new(1, analysis_type, label).with_waveforms(vec![RetainedTrace::new(
             name,
             vec![1.0, 10.0],
             vec![1.0e-18, 1.0e-16],
@@ -394,9 +394,9 @@ mod tests {
             .collect::<Vec<_>>();
         let mut run = SimulationRun::new(1);
         run.add_analysis(
-            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
-                "|V(out)|", frequency, magnitude, "#fff",
-            )]),
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+                RetainedTrace::new("|V(out)|", frequency, magnitude, "#fff"),
+            ]),
         );
 
         let mut state = AppState::default();
@@ -511,12 +511,12 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE").with_waveforms(vec![
-                WaveformData::new("phase_noise", vec![1.0, 10.0], vec![-90.0, -110.0], "#fff"),
+                RetainedTrace::new("phase_noise", vec![1.0, 10.0], vec![-90.0, -110.0], "#fff"),
             ]),
         );
         run.add_analysis(
             AnalysisResult::new(2, AnalysisType::Noise, "NOISE").with_waveforms(vec![
-                WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 1.0e-16], "#fff"),
+                RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 1.0e-16], "#fff"),
             ]),
         );
 
@@ -544,14 +544,14 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(
             AnalysisResult::new(2, AnalysisType::Noise, "NOISE").with_waveforms(vec![
-                WaveformData::new("onoise", vec![1.0, 10.0], vec![4.0e-18, 9.0e-18], "#fff"),
-                WaveformData::new(
+                RetainedTrace::new("onoise", vec![1.0, 10.0], vec![4.0e-18, 9.0e-18], "#fff"),
+                RetainedTrace::new(
                     "inoise_spectrum",
                     vec![1.0, 10.0],
                     vec![16.0e-18, 25.0e-18],
                     "#fff",
                 ),
-                WaveformData::new(
+                RetainedTrace::new(
                     "noise(R1:thermal)",
                     vec![1.0, 10.0],
                     vec![1.0e-18, 2.25e-18],
@@ -573,11 +573,11 @@ mod tests {
     fn noise_spectrum_rejects_negative_or_nonmonotonic_retained_samples() {
         let invalid_value =
             AnalysisResult::new(1, AnalysisType::Noise, "negative").with_waveforms(vec![
-                WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, -1.0e-9], "#fff"),
+                RetainedTrace::new("inoise", vec![1.0, 10.0], vec![1.0e-9, -1.0e-9], "#fff"),
             ]);
         let invalid_axis =
             AnalysisResult::new(2, AnalysisType::Noise, "axis").with_waveforms(vec![
-                WaveformData::new("inoise", vec![10.0, 1.0], vec![1.0e-9, 2.0e-9], "#fff"),
+                RetainedTrace::new("inoise", vec![10.0, 1.0], vec![1.0e-9, 2.0e-9], "#fff"),
             ]);
         assert!(!ordinary_noise_spectrum_is_renderable(&invalid_value));
         assert!(!ordinary_noise_spectrum_is_renderable(&invalid_axis));
@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn contributor_only_noise_data_never_impersonates_a_total_reference_spectrum() {
         let contributor_only = AnalysisResult::new(1, AnalysisType::Noise, "contributors")
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "noise(R1:thermal)",
                 vec![1.0, 10.0],
                 vec![1.0e-18, 2.0e-18],
@@ -599,7 +599,7 @@ mod tests {
     fn hbnoise_spot_spectrum_keeps_its_result_inspector_accessible() {
         let analysis =
             AnalysisResult::new(1, AnalysisType::Hbnoise, "spot HBNOISE").with_waveforms(vec![
-                WaveformData::new("onoise", vec![1e3], vec![1e-18], "#fff"),
+                RetainedTrace::new("onoise", vec![1e3], vec![1e-18], "#fff"),
             ]);
         assert!(ordinary_noise_spectrum_is_renderable(&analysis));
         let shape = resolve_noise_spectrum_shape(&analysis).unwrap();
@@ -611,7 +611,7 @@ mod tests {
     fn hbnoise_psd_uses_the_noise_density_instrument() {
         let hbnoise =
             AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
-                WaveformData::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 2.0e-18], "#fff"),
+                RetainedTrace::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 2.0e-18], "#fff"),
             ]);
         assert!(ordinary_noise_spectrum_is_renderable(&hbnoise));
     }

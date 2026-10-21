@@ -2,13 +2,13 @@
 
 use crate::presentation::{PlotView, angle_readout, frequency_readout, plain_readout, well_hint};
 use crate::strip::{self, LegendChip};
-use crate::waveform::WaveformData;
 use crate::waves::ReadoutPolicy;
 use egui::Ui;
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::phase_noise::{
     exact_retained_value_at, retained_device_noise_shares, retained_measurement,
 };
+use rspice_results::waveform::RetainedTrace;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale};
 use rspice_ui_kit::tokens::Tokens;
@@ -27,7 +27,7 @@ pub struct PhaseNoiseTrace<'a> {
 /// Retained measurements from the same analysis as the displayed trace.
 pub struct PhaseNoiseInspector<'a> {
     pub trace: PhaseNoiseTrace<'a>,
-    pub analysis: &'a AnalysisResult<WaveformData>,
+    pub analysis: &'a AnalysisResult<RetainedTrace>,
 }
 
 /// Requests applied by the host to the same viewport that produced this frame.

@@ -192,7 +192,7 @@ fn matrix_csv(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::state::{AnalysisResultFamilyMetadata, SimulationRun, WaveformData};
+    use crate::state::{AnalysisResultFamilyMetadata, RetainedTrace, SimulationRun};
 
     pub(crate) fn fixture(mixed: bool) -> AnalysisResult {
         let mut traces = Vec::new();
@@ -212,7 +212,7 @@ pub(crate) mod tests {
                 };
                 let value = if row == column { 0.25 } else { 0.01 };
                 traces.push(
-                    WaveformData::new(
+                    RetainedTrace::new(
                         format!("|{name}|"),
                         vec![1e6, 2e6],
                         vec![value; 2],

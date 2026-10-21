@@ -2,9 +2,9 @@
 
 use crate::presentation::{PlotView, stat_table};
 use crate::strip::StripHeader;
-use crate::waveform::WaveformData;
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
+use rspice_results::waveform::RetainedTrace;
 use rspice_results::{analysis_result::AnalysisResult, optimization::history::OptimizationView};
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout};
@@ -31,7 +31,7 @@ pub struct OptimizationResponse {
 
 /// Exact metadata and index resolved by the host's candidate-selection gate.
 pub struct CandidateView<'a> {
-    pub analysis: &'a AnalysisResult<WaveformData>,
+    pub analysis: &'a AnalysisResult<RetainedTrace>,
     pub index: usize,
     pub iterations: &'a [f64],
     pub best_cost: &'a f64,
@@ -410,7 +410,7 @@ fn signed_readout(delta: f64) -> String {
 }
 
 fn candidate_matches_best(
-    analysis: &AnalysisResult<WaveformData>,
+    analysis: &AnalysisResult<RetainedTrace>,
     index: usize,
     best_cost: f64,
     best_variables: &BTreeMap<String, f64>,

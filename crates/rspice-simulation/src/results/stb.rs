@@ -3,14 +3,14 @@ use super::*;
 use rspice_core::analysis::stb::StbResult;
 
 impl SimulationResult {
-    pub fn stb_waveforms(response: &StbResult) -> Result<HashMap<String, WaveformData>, String> {
+    pub fn stb_waveforms(response: &StbResult) -> Result<HashMap<String, SampledWaveform>, String> {
         let mut waveforms = HashMap::new();
         for trace in
             rspice_results::analysis_payload::AnalysisResultPayload::stb_waveforms(response)?
         {
             waveforms.insert(
                 trace.name.clone(),
-                WaveformData {
+                SampledWaveform {
                     name: trace.name,
                     x_values: Arc::unwrap_or_clone(trace.x),
                     y_values: Arc::unwrap_or_clone(trace.y),
@@ -23,7 +23,7 @@ impl SimulationResult {
         if !response.nyquist_points.is_empty() {
             waveforms.insert(
                 STB_NYQUIST_CONTOUR_WAVEFORM.into(),
-                WaveformData::new_complex_in_unit(
+                SampledWaveform::new_complex_in_unit(
                     STB_NYQUIST_CONTOUR_WAVEFORM,
                     response
                         .nyquist_points

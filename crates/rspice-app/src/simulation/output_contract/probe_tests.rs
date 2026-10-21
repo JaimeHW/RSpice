@@ -295,7 +295,7 @@ fn execute(spec: AnalysisSpec, outputs: &[SavedOutput]) -> SimulationRun {
     run(DECK, spec, outputs, OutputSelectionMode::ExplicitOnly)
 }
 
-fn materialized<'a>(run: &'a SimulationRun, name: &str, count: usize) -> Vec<&'a WaveformData> {
+fn materialized<'a>(run: &'a SimulationRun, name: &str, count: usize) -> Vec<&'a RetainedTrace> {
     run.validate_provenance().unwrap();
     assert!(run.success);
     assert_eq!(run.analyses.len(), 1);
@@ -511,8 +511,8 @@ fn absent_non_ground_nodes_remain_unavailable() {
 
 #[test]
 fn incomplete_ac_phase_evidence_is_rejected_for_differential_arithmetic() {
-    let plain = WaveformData::new("V(pos)", vec![1.0, 2.0], vec![1.0, 1.0], "#fff").with_unit("V");
-    let complex = WaveformData::new("V(neg)", vec![1.0, 2.0], vec![1.0, 1.0], "#fff")
+    let plain = RetainedTrace::new("V(pos)", vec![1.0, 2.0], vec![1.0, 1.0], "#fff").with_unit("V");
+    let complex = RetainedTrace::new("V(neg)", vec![1.0, 2.0], vec![1.0, 1.0], "#fff")
         .with_unit("V")
         .with_complex_components("V(neg)", vec![-1.0, -1.0], vec![0.0, 0.0]);
     for require_complex in [false, true] {

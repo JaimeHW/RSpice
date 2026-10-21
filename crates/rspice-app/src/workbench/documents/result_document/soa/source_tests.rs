@@ -34,14 +34,14 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
     };
     let report_time = vec![full.x[0], *full.x.last().unwrap()];
     analysis.waveforms = vec![
-        WaveformData::new(
+        RetainedTrace::new(
             &full.name,
             report_time.clone(),
             vec![full.y[0], *full.y.last().unwrap()],
             "#00aaff",
         )
         .with_unit("V"),
-        WaveformData::new(
+        RetainedTrace::new(
             "SOA_VIOLATION_COUNT",
             report_time,
             vec![0.0, 1.0],

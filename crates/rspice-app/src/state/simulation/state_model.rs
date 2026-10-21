@@ -102,7 +102,7 @@ pub struct SimulationSourceState {
 #[derive(Debug, Clone, Default)]
 pub struct SimulationViewState {
     /// Waveform data for display
-    pub waveforms: Vec<WaveformData>,
+    pub waveforms: Vec<RetainedTrace>,
 
     /// Data version counter - incremented whenever waveforms change.
     /// Used by the waveform viewer to detect when to reload traces.
@@ -282,7 +282,7 @@ impl RetainedSimulationState {
 
 impl SimulationViewState {
     /// Replace the displayed waveform set and rebuild cross-probe mappings.
-    pub fn replace_waveforms(&mut self, waveforms: Vec<WaveformData>) {
+    pub fn replace_waveforms(&mut self, waveforms: Vec<RetainedTrace>) {
         self.node_to_waveform.clear();
         self.waveforms = waveforms;
         for (index, waveform) in self.waveforms.iter().enumerate() {

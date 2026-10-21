@@ -33,7 +33,7 @@ pub(crate) mod veriloga_tests;
 // types here duplicated the path without shortening any call site.
 pub use config::AnalysisConfig;
 pub use controller::SimulationController;
-pub use rspice_simulation::results::{SimulationResult, WaveformData};
+pub use rspice_simulation::results::{SampledWaveform, SimulationResult};
 // Test-only aliases for private modules: execution reaches the bridge and
 // these helpers through their module paths.
 pub use runner::SimulationRunner;

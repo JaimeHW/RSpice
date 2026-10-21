@@ -45,7 +45,7 @@ use std::f64::consts::TAU;
 
 use num_complex::Complex64;
 
-use crate::state::{AnalysisResult, AnalysisType, WaveformData, ac_bode_summary_for_analysis};
+use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, ac_bode_summary_for_analysis};
 
 use super::NyquistData;
 
@@ -215,8 +215,8 @@ impl<L: Fn(f64) -> Complex64> LoopFixture<L> {
         let magnitude: Vec<f64> = self.value.iter().map(|value| value.norm()).collect();
         let phase: Vec<f64> = self.value.iter().copied().map(retained_phase_deg).collect();
         let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-            WaveformData::new("|V(out)|", self.frequency.clone(), magnitude, "#fff"),
-            WaveformData::new("phase(V(out))", self.frequency.clone(), phase, "#fff"),
+            RetainedTrace::new("|V(out)|", self.frequency.clone(), magnitude, "#fff"),
+            RetainedTrace::new("phase(V(out))", self.frequency.clone(), phase, "#fff"),
         ]);
         let metrics = ac_bode_summary_for_analysis(&analysis, 0)
             .expect("the fixture is a frequency response")

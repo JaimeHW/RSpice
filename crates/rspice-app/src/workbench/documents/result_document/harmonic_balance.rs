@@ -1,6 +1,6 @@
 //! Coefficient-spectrum source qualification and application viewport ownership.
 
-use crate::state::{AnalysisResult, AnalysisType, WaveformData};
+use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::ui::tokens::Tokens;
 use crate::workbench::AppState;
 use egui::Ui;
@@ -9,7 +9,7 @@ use rspice_results_ui::harmonic_balance::{
 };
 use std::sync::Arc;
 
-pub(super) fn spectrum_trace_is_renderable(waveform: &WaveformData) -> bool {
+pub(super) fn spectrum_trace_is_renderable(waveform: &RetainedTrace) -> bool {
     rspice_results::harmonic_spectrum::spectrum_trace_is_renderable(waveform.as_ref(), || {
         super::frame_work::note(super::frame_work::DatasetWalk::HarmonicSpectrumScan);
     })
@@ -219,8 +219,8 @@ mod tests {
 
     use super::*;
 
-    fn spectrum_waveform() -> WaveformData {
-        WaveformData::new(
+    fn spectrum_waveform() -> RetainedTrace {
+        RetainedTrace::new(
             "|V(out)|",
             Arc::new(vec![0.0, 1.0e6, 2.0e6]),
             Arc::new(vec![0.1, 1.0, 0.2]),
@@ -240,7 +240,7 @@ mod tests {
         assert!(analysis_is_renderable(&result));
 
         let phase_only = AnalysisResult::new(1, AnalysisType::HarmonicBalance, "HB")
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "phase(V(out))",
                 Arc::new(vec![0.0, 1.0e6]),
                 Arc::new(vec![0.0, 45.0]),
@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn hb_viewer_rejects_malformed_or_wrong_family_data() {
-        let malformed = WaveformData::new(
+        let malformed = RetainedTrace::new(
             "|V(out)|",
             Arc::new(vec![1.0e6, 0.5e6]),
             Arc::new(vec![1.0, 0.5]),

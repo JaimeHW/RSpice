@@ -836,7 +836,6 @@ const fn plural_suffix(count: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::waveform::RetainedWaveform as WaveformData;
     use crate::{
         analysis_tag::CanonicalAnalysisKind,
         provenance::{AnalysisResultProvenance, AnalysisResultSourceDomain},
@@ -866,7 +865,7 @@ mod tests {
         run.lifecycle = SimulationRunLifecycle::Completed;
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "Transient", 0.0).with_waveforms(vec![
-                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0]),
+                RetainedWaveform::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0]),
             ]),
         );
 

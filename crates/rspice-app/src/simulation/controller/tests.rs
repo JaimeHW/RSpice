@@ -23,7 +23,7 @@ fn transient_specialized_views_never_outlive_their_retained_source() {
         .map(|index| ((index as f64) * 0.4).sin())
         .collect::<Vec<_>>();
     let retained = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::WaveformData::new("V(out)", x, y, "#ffffff"),
+        crate::state::RetainedTrace::new("V(out)", x, y, "#ffffff"),
     ]);
 
     controller.populate_transient_post_views(&mut state, &retained);
@@ -50,7 +50,7 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
         .map(|index| (index as f64 * 0.25).sin())
         .collect::<Vec<_>>();
     let valid = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::WaveformData::new("V(out)", valid_time.clone(), valid_values, "#ffffff"),
+        crate::state::RetainedTrace::new("V(out)", valid_time.clone(), valid_values, "#ffffff"),
     ]);
     controller.populate_transient_post_views(&mut state, &valid);
     assert!(state.analysis.fft_state.has_data());
@@ -64,7 +64,7 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
     }));
 
     let malformed = AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::WaveformData::new("V(out)", valid_time, vec![0.0; 16], "#ffffff"),
+        crate::state::RetainedTrace::new("V(out)", valid_time, vec![0.0; 16], "#ffffff"),
     ]);
     controller.populate_transient_post_views(&mut state, &malformed);
 
@@ -93,8 +93,8 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
 fn save_all_retains_engine_results_while_explicit_empty_retains_none() {
     let source = || {
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 0.5, 1.0], vec![0.0, 0.5, 1.0], "#fff"),
-            WaveformData::new("I(R1)", vec![0.0, 0.5, 1.0], vec![1.0, 0.5, 0.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 0.5, 1.0], vec![0.0, 0.5, 1.0], "#fff"),
+            RetainedTrace::new("I(R1)", vec![0.0, 0.5, 1.0], vec![1.0, 0.5, 0.0], "#fff"),
         ])
     };
     let policy = |mode| crate::simulation::execution::SavePolicy::PlanOwned {
@@ -251,7 +251,7 @@ fn synthetic_sparameter_result() -> crate::simulation::SimulationResult {
     ] {
         waveforms.insert(
             name.to_string(),
-            rspice_simulation::results::WaveformData::new_complex(
+            rspice_simulation::results::SampledWaveform::new_complex(
                 name,
                 frequencies.clone(),
                 real,
@@ -466,7 +466,7 @@ fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
     let run_sequence = state.simulation.start_run().id;
     let provenance = synthetic_result_provenance();
     let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "V(out)",
             (0..128).map(|index| index as f64).collect::<Vec<_>>(),
             vec![1.0; 128],
@@ -504,7 +504,7 @@ fn provisional_live_result_obeys_the_authenticated_storage_ceiling() {
     let mut state = AppState::default();
     let run_sequence = state.simulation.start_run().id;
     let partial = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
-        .with_waveforms(vec![WaveformData::new(
+        .with_waveforms(vec![RetainedTrace::new(
             "V(out)",
             (0..64).map(|index| index as f64).collect::<Vec<_>>(),
             vec![1.0; 64],
@@ -943,7 +943,7 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
     let mut waveforms = std::collections::HashMap::new();
     waveforms.insert(
         "V(out)".to_string(),
-        rspice_simulation::results::WaveformData {
+        rspice_simulation::results::SampledWaveform {
             name: "V(out)".to_string(),
             x_values: Vec::new(),
             y_values: values,
@@ -1020,7 +1020,7 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
     let mut waveforms = std::collections::HashMap::new();
     waveforms.insert(
         "V(out)".to_string(),
-        rspice_simulation::results::WaveformData {
+        rspice_simulation::results::SampledWaveform {
             name: "V(out)".to_string(),
             x_values: Vec::new(),
             y_values: values,

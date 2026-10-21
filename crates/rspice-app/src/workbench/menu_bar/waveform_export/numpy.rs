@@ -225,11 +225,11 @@ fn completion_detail(export: &NumpyExport, kind: NumpyKind) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, WaveformData};
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
     use crate::workbench::workflows::result_import_workflow::parse_result_dataset;
 
-    fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
-        WaveformData::new(name.to_owned(), x, y, "#4f81bd")
+    fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> RetainedTrace {
+        RetainedTrace::new(name.to_owned(), x, y, "#4f81bd")
     }
 
     fn complex_waveform(
@@ -239,8 +239,8 @@ mod tests {
         display: Vec<f64>,
         real: Vec<f64>,
         imag: Vec<f64>,
-    ) -> WaveformData {
-        WaveformData::new(name.to_owned(), x, display, "#4f81bd").with_complex_components(
+    ) -> RetainedTrace {
+        RetainedTrace::new(name.to_owned(), x, display, "#4f81bd").with_complex_components(
             source_name.to_owned(),
             real,
             imag,
@@ -253,7 +253,7 @@ mod tests {
 
     fn prepared(
         analysis_type: AnalysisType,
-        waveforms: &[WaveformData],
+        waveforms: &[RetainedTrace],
     ) -> Result<NumpyExport, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();

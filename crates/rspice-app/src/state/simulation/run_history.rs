@@ -20,7 +20,7 @@ mod tests {
                 super::super::AnalysisType::Transient,
                 "Transient",
             )
-            .with_waveforms(vec![super::super::WaveformData::new(
+            .with_waveforms(vec![super::super::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0],
                 vec![1.0, 2.0],

@@ -59,7 +59,7 @@ pub(super) fn orphaned_regression_targets(
 }
 
 pub(super) fn validate_regression_waveform_data(
-    waveform: &crate::state::WaveformData,
+    waveform: &crate::state::RetainedTrace,
 ) -> Result<(), String> {
     if waveform.x.len() != waveform.y.len() {
         return Err(format!(
@@ -1152,8 +1152,8 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
 #[derive(Debug, Clone)]
 pub(super) struct RegressionWaveformPair<'a> {
     pub(super) target: crate::state::RegressionTargetSelector,
-    pub(super) baseline: &'a crate::state::WaveformData,
-    pub(super) current: &'a crate::state::WaveformData,
+    pub(super) baseline: &'a crate::state::RetainedTrace,
+    pub(super) current: &'a crate::state::RetainedTrace,
     /// The analysis both waveforms came out of, which is what names the
     /// quantity their shared sweep axis is in.
     pub(super) analysis_type: crate::state::AnalysisType,
@@ -1710,7 +1710,7 @@ pub(super) fn minimum_interpolated_delta(
 }
 
 pub(super) fn interpolate_waveform_at(
-    waveform: &crate::state::WaveformData,
+    waveform: &crate::state::RetainedTrace,
     at: f64,
 ) -> Option<f64> {
     let first = *waveform.x.first()?;
@@ -1733,7 +1733,7 @@ pub(super) fn interpolate_waveform_at(
 }
 
 pub(super) fn waveform_evaluation_samples(
-    waveform: &crate::state::WaveformData,
+    waveform: &crate::state::RetainedTrace,
     window: Option<crate::state::RegressionComparisonWindow>,
 ) -> Result<Vec<(f64, f64)>, String> {
     let Some(window) = window else {

@@ -599,7 +599,7 @@ mod tests {
     use crate::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
     use crate::state::{
         AnalysisResult, AnalysisResultSourceDomain, AnalysisType, PreparedRunReceipt,
-        PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRun, WaveformData,
+        PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace, SimulationRun,
     };
     use crate::state::{GeneratedProvenance, GenerationInput};
 
@@ -639,7 +639,7 @@ mod tests {
         let mut run = SimulationRun::new_prepared(1, receipt);
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new(waveform_name, vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+                RetainedTrace::new(waveform_name, vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
             ]),
         );
         run

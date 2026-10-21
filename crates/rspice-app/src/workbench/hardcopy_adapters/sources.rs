@@ -34,8 +34,8 @@ pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 
 #[cfg(test)]
 use crate::state::{
-    DrawingSheetTitleFieldId, SchematicSheetFormat, SchematicState, Selection, SymbolDocument,
-    WaveformData, Wire,
+    DrawingSheetTitleFieldId, RetainedTrace, SchematicSheetFormat, SchematicState, Selection,
+    SymbolDocument, Wire,
 };
 #[cfg(test)]
 use rspice_design::symbol_resolver::SymbolResolver;

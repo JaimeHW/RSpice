@@ -17,7 +17,7 @@ mod yield_input;
 pub use yield_input::yield_provenance_from_monte_carlo_result;
 
 pub use rspice_results::fft::recorded::RecordedFftSpectrum;
-pub use rspice_results::waveform::WaveformData;
+pub use rspice_results::waveform::SampledWaveform;
 
 /// The waveform a stability run retains its Nyquist contour under.
 ///
@@ -60,7 +60,7 @@ pub enum SimulationResult {
         /// Sweep values
         sweep_values: Vec<f64>,
         /// Waveforms indexed by signal name
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         /// Evaluated `.MEAS DC` results.
         measurements: Vec<rspice_core::MeasureResult>,
     },
@@ -70,7 +70,7 @@ pub enum SimulationResult {
         /// Time vector
         time: Vec<f64>,
         /// Waveforms indexed by signal name
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         /// Evaluated `.MEAS TRAN` results.
         measurements: Vec<rspice_core::MeasureResult>,
         /// Exact shooting-PSS numerical state when this transient-shaped
@@ -117,7 +117,7 @@ pub enum SimulationResult {
         /// Frequency vector
         frequencies: Vec<f64>,
         /// Complex waveforms indexed by signal name
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         /// Evaluated `.MEAS AC` results (against magnitude data).
         measurements: Vec<rspice_core::MeasureResult>,
         /// Resolved power-wave references for SP/PSP/HBSP; absent for ordinary AC.
@@ -150,7 +150,7 @@ pub enum SimulationResult {
         converged: bool,
         iterations: usize,
         mode_indices: Vec<f64>,
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
     },
 
     /// Harmonic-balance spectra plus the exact retained numerical state used
@@ -158,7 +158,7 @@ pub enum SimulationResult {
     /// AC data; the operating point is an execution artifact, not a trace.
     HarmonicBalance {
         frequencies: Vec<f64>,
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         measurements: Vec<rspice_core::MeasureResult>,
         operating_point: std::sync::Arc<rspice_core::engine::HbOperatingPoint>,
     },
@@ -167,7 +167,7 @@ pub enum SimulationResult {
     Qpac {
         /// Probe offsets, not the translated physical frequencies.
         frequencies: Vec<f64>,
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
     },
 
@@ -180,14 +180,14 @@ pub enum SimulationResult {
     Qpnoise {
         /// Physical output frequencies, including negative values and zero.
         frequencies: Vec<f64>,
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         response: std::sync::Arc<rspice_core::engine::QpnoiseAnalysisResult>,
     },
 
     Qpxf {
         /// Physical output frequencies, including negative values and zero.
         frequencies: Vec<f64>,
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         response: std::sync::Arc<rspice_core::engine::QpxfAnalysisResult>,
     },
 
@@ -196,7 +196,7 @@ pub enum SimulationResult {
     Qpss {
         frequencies: Vec<f64>,
         tuples: Vec<Vec<i32>>,
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         operating_point: std::sync::Arc<rspice_core::engine::QpssOperatingPoint>,
     },
 
@@ -297,7 +297,7 @@ pub enum SimulationResult {
         /// Sweep values in execution order
         sweep_values: Vec<f64>,
         /// Waveforms indexed by signal name
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         /// Number of failed points (if any)
         num_failures: usize,
         /// What each swept point measured, with the point's own identity.
@@ -317,7 +317,7 @@ pub enum SimulationResult {
         /// Corner labels in execution order (e.g. `TT_1.000000V_25.000000C`).
         corner_labels: Vec<String>,
         /// Waveforms indexed by signal name
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         /// Number of failed corners
         num_failures: usize,
         /// What each corner measured, with the corner's own identity.
@@ -329,7 +329,7 @@ pub enum SimulationResult {
         /// Iteration axis values.
         iterations: Vec<f64>,
         /// Waveforms indexed by signal name.
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         /// Best cost reached.
         best_cost: f64,
         /// Best variable values.
@@ -350,7 +350,7 @@ pub enum SimulationResult {
         /// Reporting time axis; source_history retains the full check axis when resampled.
         time: Vec<f64>,
         /// Waveforms indexed by signal name.
-        waveforms: HashMap<String, WaveformData>,
+        waveforms: HashMap<String, SampledWaveform>,
         /// Collected SOA violations.
         violations: Vec<SoAViolation>,
         /// Complete evaluated-rule evidence, including passing rules.

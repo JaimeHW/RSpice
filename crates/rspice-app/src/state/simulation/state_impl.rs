@@ -1000,7 +1000,7 @@ mod tests {
     fn deferred_saved_output_materializes_by_stable_identity_and_refreshes_selection() {
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
             ]);
         analysis.saved_output_receipts.push(SavedOutputReceipt {
             source_bindings: Some(crate::state::SavedOutputSourceBindings {
@@ -1415,7 +1415,7 @@ mod tests {
         let mut run_one = SimulationRun::new(1);
         run_one.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN one").with_waveforms(vec![
-                WaveformData::new("V(one)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+                RetainedTrace::new("V(one)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
             ]),
         );
         let overlay_dataset_id = run_one.dataset_id;
@@ -1423,7 +1423,7 @@ mod tests {
         let mut run_two = SimulationRun::new(2);
         run_two.add_analysis(
             AnalysisResult::new(1, AnalysisType::Ac, "AC two").with_waveforms(vec![
-                WaveformData::new("V(two)", vec![1.0, 10.0], vec![2.0, 3.0], "#ffaa00"),
+                RetainedTrace::new("V(two)", vec![1.0, 10.0], vec![2.0, 3.0], "#ffaa00"),
             ]),
         );
         let active_run_id = run_two.run_id;

@@ -8,13 +8,16 @@ pub use retained::{
     ComplexWaveformComponents, RetainedWaveform, SharedWaveformValues, samples_equal,
 };
 
+mod trace;
+pub use trace::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DisplayWaveformCache, RetainedTrace};
+
 //=============================================================================
-// Waveform Data
+// Sampled Waveform
 //=============================================================================
 
 /// Time-domain waveform data for a single signal
 #[derive(Debug, Clone)]
-pub struct WaveformData {
+pub struct SampledWaveform {
     /// Signal name (e.g., "V(out)", "I(R1)")
     pub name: String,
 
@@ -34,7 +37,7 @@ pub struct WaveformData {
     pub y_imag: Option<Vec<f64>>,
 }
 
-impl WaveformData {
+impl SampledWaveform {
     /// Create a new time-domain node-voltage waveform.
     pub fn new_time_domain(name: impl Into<String>, time: Vec<f64>, values: Vec<f64>) -> Self {
         Self::new_time_domain_in_unit(name, time, values, "V")

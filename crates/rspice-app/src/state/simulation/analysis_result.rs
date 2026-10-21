@@ -16,22 +16,22 @@ use rspice_results::analysis_result::{
 /// A retained analysis whose waveforms include application display choices.
 #[derive(Debug, Clone)]
 pub struct AnalysisResult {
-    pub data: RetainedAnalysisResult<WaveformData>,
+    pub data: RetainedAnalysisResult<RetainedTrace>,
 }
 
-impl AsRef<RetainedAnalysisResult<WaveformData>> for AnalysisResult {
-    fn as_ref(&self) -> &RetainedAnalysisResult<WaveformData> {
+impl AsRef<RetainedAnalysisResult<RetainedTrace>> for AnalysisResult {
+    fn as_ref(&self) -> &RetainedAnalysisResult<RetainedTrace> {
         &self.data
     }
 }
-impl AsMut<RetainedAnalysisResult<WaveformData>> for AnalysisResult {
-    fn as_mut(&mut self) -> &mut RetainedAnalysisResult<WaveformData> {
+impl AsMut<RetainedAnalysisResult<RetainedTrace>> for AnalysisResult {
+    fn as_mut(&mut self) -> &mut RetainedAnalysisResult<RetainedTrace> {
         &mut self.data
     }
 }
 
 impl Deref for AnalysisResult {
-    type Target = RetainedAnalysisResult<WaveformData>;
+    type Target = RetainedAnalysisResult<RetainedTrace>;
     fn deref(&self) -> &Self::Target {
         &self.data
     }
@@ -122,7 +122,7 @@ impl AnalysisResult {
         self.data.provenance()
     }
     /// Add waveform data to this analysis
-    pub fn with_waveforms(mut self, waveforms: Vec<WaveformData>) -> Self {
+    pub fn with_waveforms(mut self, waveforms: Vec<RetainedTrace>) -> Self {
         self.data = self.data.with_waveforms(waveforms);
         self
     }

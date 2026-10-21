@@ -16,7 +16,7 @@ impl SimulationResult {
                 .map(|value| (value.re, value.im))
                 .unzip();
             let mut waveform =
-                WaveformData::new_complex(&name, data.frequencies.clone(), real, imaginary);
+                SampledWaveform::new_complex(&name, data.frequencies.clone(), real, imaginary);
             waveform.y_unit = if name.starts_with("I(") { "A" } else { "V" }.into();
             if waveforms.insert(name, waveform).is_some() {
                 return Err("QPSS returned duplicate spectral trace names".into());

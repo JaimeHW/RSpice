@@ -930,7 +930,11 @@ mod convergence_conversion_tests {
                 time: time.clone(),
                 waveforms: HashMap::from([(
                     "V(out)".to_owned(),
-                    crate::results::WaveformData::new_time_domain("V(out)", time, vec![0.0, 0.8]),
+                    crate::results::SampledWaveform::new_time_domain(
+                        "V(out)",
+                        time,
+                        vec![0.0, 0.8],
+                    ),
                 )]),
                 measurements: Vec::new(),
                 periodic_state: None,
@@ -1018,8 +1022,8 @@ mod waveform_unit_conversion_tests {
         name: &str,
         y_values: Vec<f64>,
         y_unit: &str,
-    ) -> crate::results::WaveformData {
-        crate::results::WaveformData {
+    ) -> crate::results::SampledWaveform {
+        crate::results::SampledWaveform {
             name: name.to_owned(),
             x_values: Vec::new(),
             y_values,
@@ -1079,7 +1083,7 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn an_ac_magnitude_keeps_the_source_unit_while_phase_states_degrees() {
-        let mut spectrum = crate::results::WaveformData::new_complex(
+        let mut spectrum = crate::results::SampledWaveform::new_complex(
             "V(out) Spectrum",
             vec![1.0, 10.0],
             vec![1.0, 0.0],
@@ -1109,7 +1113,7 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn a_real_frequency_quantity_keeps_its_name_and_unit_without_magnitude_wrapping() {
-        let group_delay = crate::results::WaveformData::new_time_domain_in_unit(
+        let group_delay = crate::results::SampledWaveform::new_time_domain_in_unit(
             "group_delay",
             vec![1.0, 10.0],
             vec![2.0e-9, 3.0e-9],
@@ -1132,7 +1136,7 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn a_frequency_companion_curve_keeps_its_own_exact_abscissa() {
-        let group_delay = crate::results::WaveformData::new_time_domain_in_unit(
+        let group_delay = crate::results::SampledWaveform::new_time_domain_in_unit(
             "group_delay",
             vec![3.0, 30.0],
             vec![2.0e-9, 3.0e-9],
@@ -1158,7 +1162,7 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn a_complex_time_domain_waveform_retains_both_components_and_phase() {
-        let waveform = crate::results::WaveformData::new_complex_in_unit(
+        let waveform = crate::results::SampledWaveform::new_complex_in_unit(
             "V(env)",
             vec![0.0, 1.0],
             vec![3.0, 0.0],
@@ -1203,7 +1207,7 @@ mod waveform_unit_conversion_tests {
             frequencies: vec![1.0, 10.0],
             waveforms: HashMap::from([(
                 "V(out)".to_owned(),
-                crate::results::WaveformData::new_complex(
+                crate::results::SampledWaveform::new_complex(
                     "V(out)",
                     vec![1.0, 10.0],
                     vec![1.0, 0.0],

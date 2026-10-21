@@ -6,7 +6,7 @@ use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::error::SimulationError;
-use crate::results::{DcOpResult, SimulationResult, WaveformData};
+use crate::results::{DcOpResult, SampledWaveform, SimulationResult};
 use rspice_results::dc_sweep::DcSweepDirection;
 use rspice_results::dc_sweep::DcSweepEvidence;
 use rspice_results::dc_sweep::DcSweepFamily;
@@ -316,7 +316,11 @@ impl EngineBridge {
                         .trace_name(&DcSweepQuantity::NodeVoltage(node_name.clone()), member);
                     waveforms.insert(
                         trace_name.clone(),
-                        WaveformData::new_time_domain(trace_name, sweep_values.clone(), voltages),
+                        SampledWaveform::new_time_domain(
+                            trace_name,
+                            sweep_values.clone(),
+                            voltages,
+                        ),
                     );
                 }
                 for (branch_idx, branch_name) in first_result.branch_names.iter().enumerate() {
@@ -330,7 +334,7 @@ impl EngineBridge {
                         .trace_name(&DcSweepQuantity::BranchCurrent(branch_name.clone()), member);
                     waveforms.insert(
                         trace_name.clone(),
-                        WaveformData::new_time_domain_in_unit(
+                        SampledWaveform::new_time_domain_in_unit(
                             trace_name,
                             sweep_values.clone(),
                             currents,
@@ -432,7 +436,11 @@ impl EngineBridge {
                     let voltages = ordered(&|result| result.node_voltages[index]);
                     waveforms.insert(
                         trace_name.clone(),
-                        WaveformData::new_time_domain(trace_name, sweep_values.clone(), voltages),
+                        SampledWaveform::new_time_domain(
+                            trace_name,
+                            sweep_values.clone(),
+                            voltages,
+                        ),
                     );
                 }
                 for (index, branch_name) in first_result.branch_names.iter().enumerate() {
@@ -442,7 +450,7 @@ impl EngineBridge {
                     let currents = ordered(&|result| result.branch_currents[index]);
                     waveforms.insert(
                         trace_name.clone(),
-                        WaveformData::new_time_domain_in_unit(
+                        SampledWaveform::new_time_domain_in_unit(
                             trace_name,
                             sweep_values.clone(),
                             currents,
@@ -495,7 +503,7 @@ impl EngineBridge {
                     evidence.trace_name(&DcSweepQuantity::NodeVoltage(name.clone()), 0);
                 waveforms.insert(
                     trace_name.clone(),
-                    WaveformData::new_time_domain(trace_name, sweep_values.clone(), voltages),
+                    SampledWaveform::new_time_domain(trace_name, sweep_values.clone(), voltages),
                 );
             }
             for (branch_idx, branch_name) in first_result.branch_names.iter().enumerate() {
@@ -509,7 +517,7 @@ impl EngineBridge {
                     evidence.trace_name(&DcSweepQuantity::BranchCurrent(branch_name.clone()), 0);
                 waveforms.insert(
                     trace_name.clone(),
-                    WaveformData::new_time_domain_in_unit(
+                    SampledWaveform::new_time_domain_in_unit(
                         trace_name,
                         sweep_values.clone(),
                         currents,

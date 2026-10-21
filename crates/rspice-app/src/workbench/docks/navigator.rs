@@ -4037,7 +4037,7 @@ fn result_analysis_browser_status(
 /// setup, so a run that stopped early states the range it actually solved.
 fn result_analysis_domain(
     analysis_type: crate::state::AnalysisType,
-    first_waveform: Option<&crate::state::WaveformData>,
+    first_waveform: Option<&crate::state::RetainedTrace>,
 ) -> String {
     let (sweep, unit, ..) = analysis_type.axis_info();
     if sweep.is_empty() {

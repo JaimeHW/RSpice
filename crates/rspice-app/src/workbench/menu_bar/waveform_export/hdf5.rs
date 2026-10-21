@@ -167,11 +167,11 @@ fn completion_detail(export: &Hdf5Export) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, WaveformData};
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
     use crate::workbench::workflows::result_import_workflow::parse_result_dataset;
 
-    fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
-        WaveformData::new(name.to_owned(), x, y, "#4f81bd")
+    fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> RetainedTrace {
+        RetainedTrace::new(name.to_owned(), x, y, "#4f81bd")
     }
 
     fn analysis(analysis_type: AnalysisType) -> AnalysisResult {
@@ -180,7 +180,7 @@ mod tests {
 
     fn prepared(
         analysis_type: AnalysisType,
-        waveforms: &[WaveformData],
+        waveforms: &[RetainedTrace],
     ) -> Result<Hdf5Export, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn an_ac_result_round_trips_its_complex_pairs() {
-        let waveforms = [WaveformData::new(
+        let waveforms = [RetainedTrace::new(
             "V(out) magnitude".to_owned(),
             vec![1.0, 10.0, 100.0],
             vec![1.0, 0.5, 0.25],

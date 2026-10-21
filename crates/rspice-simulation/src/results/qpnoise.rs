@@ -13,14 +13,14 @@ impl SimulationResult {
     }
     pub fn qpnoise_waveforms(
         response: &QpnoiseAnalysisResult,
-    ) -> Result<HashMap<String, WaveformData>, String> {
+    ) -> Result<HashMap<String, SampledWaveform>, String> {
         let mut waveforms = HashMap::new();
         for trace in
             rspice_results::analysis_payload::AnalysisResultPayload::qpnoise_display_traces(
                 response,
             )?
         {
-            let waveform = WaveformData {
+            let waveform = SampledWaveform {
                 name: trace.name.clone(),
                 x_values: trace.frequencies,
                 y_values: trace.real,

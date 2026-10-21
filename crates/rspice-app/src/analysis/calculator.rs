@@ -22,15 +22,15 @@ pub use value::{ComplexValue, RealValue};
 
 /// Evaluation context over the application's decorated retained waveforms.
 pub type WaveformsContext<'a> =
-    rspice_results::calculator::retained::WaveformsContext<'a, WaveformData>;
+    rspice_results::calculator::retained::WaveformsContext<'a, RetainedTrace>;
 
 /// Attach application presentation to an exact derived waveform.
 pub(crate) fn evaluated_waveform(
     value: CalcValue,
     name: &str,
     scalar_axis: Option<&[f64]>,
-) -> Result<WaveformData, String> {
-    Ok(WaveformData {
+) -> Result<RetainedTrace, String> {
+    Ok(RetainedTrace {
         data: rspice_results::calculator::retained::evaluated_waveform(value, name, scalar_axis)?,
         color: "#f5b700".to_owned(),
         visible: true,
@@ -45,7 +45,7 @@ pub(crate) fn evaluated_waveform(
 // Bridges SimulationState waveforms to the calculator EvaluationContext trait.
 // This allows expressions like "V(out) * 2" to resolve V(out) from simulation.
 
-use crate::state::{ComplexExpressionPolicy, SimulationState, WaveformData};
+use crate::state::{ComplexExpressionPolicy, RetainedTrace, SimulationState};
 
 /// Evaluation context backed by simulation results.
 ///
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn complex_and_real_arithmetic_never_turn_missing_samples_into_numbers() {
-        let wave = WaveformData::new("V(out)", vec![0.0, 1.0], vec![f64::NAN, 2.0], "#fff");
+        let wave = RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![f64::NAN, 2.0], "#fff");
         let waves = [wave];
         let context = WaveformsContext::new(&waves);
         for text in ["V(out)^0", "complex(V(out),0)^0"] {
@@ -224,8 +224,8 @@ mod tests {
         }
     }
 
-    fn waveform(name: &str, value: f64) -> WaveformData {
-        WaveformData::new(name, vec![0.0, 1.0], vec![value, value], "#ffffff")
+    fn waveform(name: &str, value: f64) -> RetainedTrace {
+        RetainedTrace::new(name, vec![0.0, 1.0], vec![value, value], "#ffffff")
     }
 
     fn expected(value: f64) -> CalcValue {
@@ -323,10 +323,10 @@ mod tests {
 #[test]
 fn complex_physical_difference_uses_retained_phase_in_both_contexts() {
     let waves = vec![
-        WaveformData::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+        RetainedTrace::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
             .with_unit("V")
             .with_complex_components("V(a)", vec![1.0; 2], vec![0.0; 2]),
-        WaveformData::new("|V(b)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+        RetainedTrace::new("|V(b)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
             .with_unit("V")
             .with_complex_components("V(b)", vec![-1.0; 2], vec![0.0; 2]),
     ];

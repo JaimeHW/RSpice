@@ -1073,9 +1073,9 @@ mod tests {
     use super::*;
     use crate::state::{
         AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, DcOpResult,
-        DigitalEventPointEvidence, DigitalEventTraceEvidence, OperatingPointValue, SimulationRun,
-        SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-        SoaViolationSeverityEvidence, WaveformData,
+        DigitalEventPointEvidence, DigitalEventTraceEvidence, OperatingPointValue, RetainedTrace,
+        SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+        SoaViolationEvidence, SoaViolationSeverityEvidence,
     };
 
     fn retained_run_with(analysis_type: AnalysisType) -> SimulationRun {
@@ -1090,7 +1090,7 @@ mod tests {
         };
         run.analyses.push(
             AnalysisResult::new(11, analysis_type, "analysis").with_waveforms(vec![
-                WaveformData::new(name, x, vec![0.0, 1.0, 0.0], "#55aaff"),
+                RetainedTrace::new(name, x, vec![0.0, 1.0, 0.0], "#55aaff"),
             ]),
         );
         run
@@ -1277,13 +1277,13 @@ mod tests {
                 time: soa_time.clone(),
             })
             .with_waveforms(vec![
-                WaveformData::new(
+                RetainedTrace::new(
                     "SOA_VIOLATION_COUNT",
                     soa_time.clone(),
                     vec![0.0, 0.0],
                     "#ffbd2e",
                 ),
-                WaveformData::new(
+                RetainedTrace::new(
                     crate::results::safety::soa_stress_waveform_name(
                         "M1",
                         crate::results::safety::SoAParameter::Vds,
@@ -1329,8 +1329,8 @@ mod tests {
                 converged: true,
             })
             .with_waveforms(vec![
-                WaveformData::new("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25], "#ffbd2e"),
-                WaveformData::new("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6], "#00aaff"),
+                RetainedTrace::new("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25], "#ffbd2e"),
+                RetainedTrace::new("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6], "#00aaff"),
             ]);
 
         for (analysis, family, viewer_id, evidence_kind) in [
@@ -1416,13 +1416,13 @@ mod tests {
     fn source_projection_preserves_independent_waveform_grids_without_truncation() {
         let analysis =
             AnalysisResult::new(11, AnalysisType::Transient, "analysis").with_waveforms(vec![
-                WaveformData::new(
+                RetainedTrace::new(
                     "V(out)",
                     vec![0.0, 0.5, 1.0],
                     vec![1.0, 2.0, 3.0],
                     "#55aaff",
                 ),
-                WaveformData::new("I(R1)", vec![10.0, 20.0], vec![0.25, -0.5], "#ffaa55"),
+                RetainedTrace::new("I(R1)", vec![10.0, 20.0], vec![0.25, -0.5], "#ffaa55"),
             ]);
         let mut run = SimulationRun::new(7);
         run.add_analysis(analysis);
@@ -1456,7 +1456,7 @@ mod tests {
         let mut run = SimulationRun::new(7);
         let mut analysis =
             AnalysisResult::new(11, AnalysisType::Transient, "gaps").with_waveforms(vec![
-                WaveformData::new(
+                RetainedTrace::new(
                     "out",
                     vec![0.0, 1.0, 2.0],
                     vec![1.0, f64::NAN, -0.0],

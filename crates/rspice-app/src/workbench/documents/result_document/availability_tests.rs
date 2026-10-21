@@ -5,7 +5,7 @@ use super::*;
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain,
-    AnalysisType, SensitivityResultMode, SensitivityResultRow, SimulationRun, WaveformData,
+    AnalysisType, RetainedTrace, SensitivityResultMode, SensitivityResultRow, SimulationRun,
 };
 
 mod fixtures;
@@ -26,14 +26,14 @@ fn frame_boundary_repairs_a_selector_that_drifted_from_the_open_dataset() {
     let mut first = SimulationRun::new(1);
     first.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Displayed").with_waveforms(vec![
-            WaveformData::new("V(displayed)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            RetainedTrace::new("V(displayed)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
     let displayed_dataset = first.dataset_id;
     let mut background = SimulationRun::new(2);
     background.add_analysis(
         AnalysisResult::new(2, AnalysisType::Transient, "Background").with_waveforms(vec![
-            WaveformData::new("V(background)", vec![0.0, 1.0], vec![2.0, 3.0], "#ff00aa"),
+            RetainedTrace::new("V(background)", vec![0.0, 1.0], vec![2.0, 3.0], "#ff00aa"),
         ]),
     );
 
@@ -90,10 +90,10 @@ fn authored_source_matching_accepts_a_distinct_expanded_execution_identity() {
 #[test]
 fn presentation_state_follows_analysis_identity_after_reorder() {
     let first = AnalysisResult::new(101, AnalysisType::Transient, "TRAN A").with_waveforms(vec![
-        WaveformData::new("V(a)", vec![0.0, 1.0], vec![1.0, 2.0], "#ffbd2e"),
+        RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![1.0, 2.0], "#ffbd2e"),
     ]);
     let second = AnalysisResult::new(202, AnalysisType::Transient, "TRAN B").with_waveforms(vec![
-        WaveformData::new("V(b)", vec![0.0, 1.0], vec![3.0, 4.0], "#4ec9b0"),
+        RetainedTrace::new("V(b)", vec![0.0, 1.0], vec![3.0, 4.0], "#4ec9b0"),
     ]);
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
@@ -161,8 +161,8 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
 #[test]
 fn table_and_marker_waveform_identity_survive_waveform_reorder() {
     let analysis = AnalysisResult::new(101, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new("V(a)", vec![0.0, 1.0], vec![1.0, 2.0], "#ffbd2e"),
-        WaveformData::new("V(b)", vec![0.0, 1.0], vec![3.0, 4.0], "#4ec9b0"),
+        RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![1.0, 2.0], "#ffbd2e"),
+        RetainedTrace::new("V(b)", vec![0.0, 1.0], vec![3.0, 4.0], "#4ec9b0"),
     ]);
     let mut state = state_with_analysis(analysis);
     let run = state.simulation.active_run().expect("active retained run");
@@ -202,7 +202,7 @@ fn table_and_marker_waveform_identity_survive_waveform_reorder() {
 #[test]
 fn selected_trace_identity_fails_closed_after_active_dataset_changes() {
     let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+        RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
     ]);
     let mut state = state_with_analysis(analysis.clone());
     state.ui.results.session.selected_trace = Some(
@@ -236,7 +236,7 @@ fn selected_trace_identity_fails_closed_after_active_dataset_changes() {
 fn waveform_data_does_not_enable_incompatible_result_viewers() {
     let state = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 1.0, 0.0],
@@ -257,12 +257,12 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(time)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            RetainedTrace::new("V(time)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
     run.add_analysis(
         AnalysisResult::new(2, AnalysisType::DcSweep, "DC").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.1, 0.9], "#ffbd2e"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.1, 0.9], "#ffbd2e"),
         ]),
     );
     let mut state = AppState::default();
@@ -298,7 +298,7 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
 fn ordinary_noise_enables_noise_but_never_substitutes_for_bode() {
     let state = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "NOISE").with_waveforms(vec![
-            WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#00aaff"),
+            RetainedTrace::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#00aaff"),
         ]),
     );
 
@@ -312,8 +312,8 @@ fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
         let state = state_with_analysis(
             AnalysisResult::new(1, analysis_type, analysis_type.short_label()).with_waveforms(
                 vec![
-                    WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![10.0, 1.0], "#00aaff"),
-                    WaveformData::new(
+                    RetainedTrace::new("|V(out)|", vec![1.0, 10.0], vec![10.0, 1.0], "#00aaff"),
+                    RetainedTrace::new(
                         "phase(V(out))",
                         vec![1.0, 10.0],
                         vec![-90.0, -135.0],
@@ -331,14 +331,14 @@ fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
 
     let stb = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Stb, "STB").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "Loop Gain (dB)",
                 vec![1.0, 10.0],
                 vec![40.0, 0.0],
                 "#00aaff",
             )
             .with_unit("dB"),
-            WaveformData::new(
+            RetainedTrace::new(
                 "Loop Phase (deg)",
                 vec![1.0, 10.0],
                 vec![-90.0, -135.0],
@@ -351,7 +351,7 @@ fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
 
     let pstb = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Pstb, "PSTB").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "Stability Margin (dB)",
                 vec![0.0, 1.0],
                 vec![12.0, 4.0],
@@ -369,7 +369,7 @@ fn pss_and_envelope_feed_waves_while_disto_feeds_unit_aware_frequency_curves() {
     for analysis_type in [AnalysisType::Pss, AnalysisType::Envelope] {
         let state = state_with_analysis(
             AnalysisResult::new(1, analysis_type, analysis_type.short_label()).with_waveforms(
-                vec![WaveformData::new(
+                vec![RetainedTrace::new(
                     "V(out)",
                     vec![0.0, 1.0e-6],
                     vec![0.0, 1.0],
@@ -382,7 +382,7 @@ fn pss_and_envelope_feed_waves_while_disto_feeds_unit_aware_frequency_curves() {
 
     let disto = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out) HD3(dBc)",
                 vec![1.0e3, 1.0e4],
                 vec![-80.0, -60.0],
@@ -398,7 +398,7 @@ fn pss_and_envelope_feed_waves_while_disto_feeds_unit_aware_frequency_curves() {
 fn fourier_coefficients_feed_spectrum_and_periodic_sparameters_feed_smith() {
     let fourier = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Fourier, "FOURIER").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "|V(out) Spectrum|",
                 vec![1.0e3, 2.0e3],
                 vec![1.0, 0.1],
@@ -421,7 +421,7 @@ fn fourier_coefficients_feed_spectrum_and_periodic_sparameters_feed_smith() {
                     reference_impedances_ohm: vec![75.0, 100.0],
                 })
                 .with_waveforms(vec![
-                    WaveformData::new("|S11|", vec![1.0e6, 2.0e6], vec![0.5, 0.25], "#00aaff")
+                    RetainedTrace::new("|S11|", vec![1.0e6, 2.0e6], vec![0.5, 0.25], "#00aaff")
                         .with_complex_components("S11", vec![0.5, 0.25], vec![0.0, -0.1]),
                 ]),
         );
@@ -433,7 +433,7 @@ fn fourier_coefficients_feed_spectrum_and_periodic_sparameters_feed_smith() {
 #[test]
 fn hbnoise_uses_the_noise_density_projection_and_never_impersonates_ac() {
     let analysis = AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "onoise",
             vec![1.0e3, 1.0e4],
             vec![1.0e-18, 2.0e-18],
@@ -535,7 +535,7 @@ fn the_specs_tab_speaks_for_the_active_run_and_not_the_history() {
     let mut unmeasured = SimulationRun::new(2);
     unmeasured.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
 
@@ -583,7 +583,7 @@ fn contribution_viewer_requires_the_active_valid_sensitivity_payload() {
 fn incompatible_active_viewer_falls_back_to_compatible_view() {
     let mut state = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 1.0, 0.0],
@@ -1503,7 +1503,7 @@ fn every_sheet_draws_at_a_touch_composition() {
 fn transient_state() -> AppState {
     state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
         ]),
     )
 }
@@ -1521,7 +1521,7 @@ fn active_analysis_key(state: &AppState) -> AnalysisPresentationKey {
 #[test]
 fn a_re_run_keeps_the_window_the_reader_zoomed_the_wave_stack_to() {
     let authored = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
-        .with_waveforms(vec![WaveformData::new(
+        .with_waveforms(vec![RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0, 1.0],
@@ -1579,7 +1579,7 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
     let mut discarded_run = SimulationRun::new(2);
     discarded_run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(gone)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+            RetainedTrace::new("V(gone)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
         ]),
     );
     let discarded =
@@ -1920,9 +1920,10 @@ fn markers_for_absent_datasets_are_dropped_on_restore() {
 #[test]
 fn a_failed_frequency_response_is_not_offered_as_a_bode_sheet() {
     let frequency = vec![1.0, 1.0e6];
-    let mut magnitude = WaveformData::new("|V(out)|", frequency.clone(), vec![40.0, -40.0], "#fff");
+    let mut magnitude =
+        RetainedTrace::new("|V(out)|", frequency.clone(), vec![40.0, -40.0], "#fff");
     magnitude.visible = true;
-    let mut phase = WaveformData::new("phase(V(out))", frequency, vec![0.0, -135.0], "#fff");
+    let mut phase = RetainedTrace::new("phase(V(out))", frequency, vec![0.0, -135.0], "#fff");
     phase.visible = true;
 
     let mut analysis =

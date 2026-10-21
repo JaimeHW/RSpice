@@ -12,7 +12,7 @@ const PHASORS: &str =
 
 #[test]
 fn complex_selected_samples_project_magnitude_after_rectangular_interpolation() {
-    let source = WaveformData::new("difference", vec![0.0, 1.0], vec![1.0; 2], "#fff")
+    let source = RetainedTrace::new("difference", vec![0.0, 1.0], vec![1.0; 2], "#fff")
         .with_complex_components("V(out)", vec![1.0, -1.0], vec![0.0; 2]);
     let selected = resample_selected_and_final(
         &source,
@@ -51,7 +51,12 @@ fn complex_live_outputs_keep_aligned_components_and_full_precision_source_knots(
         .collect::<Vec<_>>();
     let source =
         AnalysisResult::live_transient_partial(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![WaveformData::new("out", x.clone(), y.clone(), "#fff")]);
+            .with_waveforms(vec![RetainedTrace::new(
+                "out",
+                x.clone(),
+                y.clone(),
+                "#fff",
+            )]);
     let previews = materialize_live_saved_outputs(&source, &[contract]);
     assert_eq!(previews.len(), 1);
     let preview = &previews[0];

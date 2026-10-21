@@ -621,7 +621,7 @@ mod tests {
     #[test]
     fn app_state_session_round_trip_restores_results_but_not_runtime_flags() {
         let mut state = AppState::default();
-        let waveform = crate::state::WaveformData::new(
+        let waveform = crate::state::RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0, 2.0],
             vec![0.0, 0.75, 1.5],
@@ -1028,7 +1028,7 @@ mod tests {
         run.label = "Run 3 (bias sweep)".to_owned();
         run.add_analysis(
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-                .with_waveforms(vec![crate::state::WaveformData::new(
+                .with_waveforms(vec![crate::state::RetainedTrace::new(
                     "V(out)",
                     vec![0.0, 1.0, 2.0],
                     vec![0.0, 0.75, 1.5],
@@ -1596,7 +1596,7 @@ mod tests {
     #[test]
     fn app_state_session_omits_invalid_result_history() {
         let mut state = AppState::default();
-        let waveform = crate::state::WaveformData::new(
+        let waveform = crate::state::RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0, f64::NAN],

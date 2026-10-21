@@ -6,7 +6,7 @@ pub(super) fn complex_history() -> SimulationState {
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![1.0, 2.0], vec![3.0, 4.0], "#ffffff")
+            RetainedTrace::new("V(out)", vec![1.0, 2.0], vec![3.0, 4.0], "#ffffff")
                 .with_complex_components("V(out)", vec![5.0, 6.0], vec![7.0, 8.0]),
         ]),
     );

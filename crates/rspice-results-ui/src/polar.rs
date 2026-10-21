@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
-use crate::waveform::WaveformData;
+use rspice_results::waveform::RetainedTrace;
 use rspice_results::{analysis_type::AnalysisType, family_metadata::AnalysisResultFamilyMetadata};
-type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
+type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si;
 use rspice_ui_kit::theme::{self, FontWeight, paint_focus_ring};
@@ -97,7 +97,7 @@ pub struct PolarQuantity {
 /// [`AnalysisResult::validate_retained_evidence`], which the availability gate
 /// resolves through the workspace memo once per dataset generation. Repeating
 /// it here would walk every sample of every trace on every frame.
-fn complex_is_plottable(waveform: &WaveformData) -> bool {
+fn complex_is_plottable(waveform: &RetainedTrace) -> bool {
     waveform.complex.as_ref().is_some_and(|complex| {
         !complex.real.is_empty()
             && complex.real.len() == complex.imag.len()
@@ -1184,7 +1184,7 @@ mod tests {
                 .map(|(re, im)| re.hypot(*im))
                 .collect::<Vec<_>>();
             waveforms.push(
-                WaveformData::new(format!("|{name}|"), frequency.clone(), magnitude, "#00aaff")
+                RetainedTrace::new(format!("|{name}|"), frequency.clone(), magnitude, "#00aaff")
                     .with_complex_components(name, real, imaginary),
             );
         }
@@ -1256,9 +1256,9 @@ mod tests {
     #[test]
     fn an_ac_result_offers_its_complex_responses() {
         let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC", 0.0).with_waveforms(vec![
-            WaveformData::new("|V(out)|", vec![1.0, 2.0], vec![1.0, 0.5], "#00aaff")
+            RetainedTrace::new("|V(out)|", vec![1.0, 2.0], vec![1.0, 0.5], "#00aaff")
                 .with_complex_components("V(out)", vec![1.0, 0.5], vec![0.0, -0.25]),
-            WaveformData::new("phase(V(out))", vec![1.0, 2.0], vec![0.0, -26.0], "#f80"),
+            RetainedTrace::new("phase(V(out))", vec![1.0, 2.0], vec![0.0, -26.0], "#f80"),
         ]);
         let resolved = quantities(&analysis);
         assert_eq!(
@@ -1275,7 +1275,7 @@ mod tests {
     fn a_run_without_a_complex_response_offers_no_quantity() {
         let analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![
-                WaveformData::new("V(out)", vec![0.0, 1.0e-9], vec![0.0, 1.0], "#00aaff"),
+                RetainedTrace::new("V(out)", vec![0.0, 1.0e-9], vec![0.0, 1.0], "#00aaff"),
             ]);
         assert!(quantities(&analysis).is_empty());
         assert_eq!(

@@ -1,7 +1,7 @@
 //! What the measurement table admits as a measurement.
 
 use super::active_measurement_rows;
-use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 use crate::workbench::RSpiceApp;
 
 /// A frequency response whose margins the Bode extraction can read.
@@ -11,14 +11,14 @@ use crate::workbench::RSpiceApp;
 /// margin at 60°.
 fn ac_run() -> SimulationRun {
     let frequency = vec![1.0, 10.0, 100.0, 1000.0];
-    let mut magnitude = WaveformData::new(
+    let mut magnitude = RetainedTrace::new(
         "|V(out)|",
         frequency.clone(),
         vec![100.0, 10.0, 1.0, 0.1],
         "#fff",
     );
     magnitude.visible = true;
-    let mut phase = WaveformData::new(
+    let mut phase = RetainedTrace::new(
         "phase(V(out))",
         frequency,
         vec![-45.0, -80.0, -120.0, -160.0],

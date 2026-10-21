@@ -363,10 +363,10 @@ pub struct WaveformPresentationKey {
 /// Stable identity of one retained source waveform whose quick-view
 /// visibility has been overridden for this session.
 ///
-/// The solver-owned retained waveform remains an immutable result. A
-/// visibility click records presentation state against the dataset, authored
-/// analysis, and source name instead of rewriting the retained run (or its
-/// legacy live projection).
+/// The solver-owned [`RetainedTrace`](crate::waveform::RetainedTrace) remains
+/// an immutable result. A visibility click records presentation state against
+/// the dataset, authored analysis, and source name instead of rewriting the
+/// retained run (or its legacy live projection).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceWaveformPresentationKey {
     analysis: AnalysisPresentationKey,

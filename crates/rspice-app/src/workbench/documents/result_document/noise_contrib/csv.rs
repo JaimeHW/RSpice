@@ -39,7 +39,7 @@ mod tests {
             (None, 29, ""),
         ] {
             let mut run = SimulationRun::new(1);
-            let mut wave = crate::state::WaveformData::new(
+            let mut wave = crate::state::RetainedTrace::new(
                 "inoise",
                 vec![1e3, 1e4],
                 vec![1e-21, 1e-21],

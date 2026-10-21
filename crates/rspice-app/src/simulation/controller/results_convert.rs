@@ -40,7 +40,7 @@ impl SimulationController {
         let mut index = 0;
         AnalysisResult {
             data: retained.map_waveforms(|data| {
-                let waveform = crate::state::WaveformData {
+                let waveform = crate::state::RetainedTrace {
                     data,
                     color: Self::color_for_index(index),
                     visible: true,
@@ -169,7 +169,7 @@ mod floquet_payload_conversion_tests {
     }
 
     fn pss_result(multipliers: Vec<Complex64>) -> SimulationResult {
-        let display = rspice_simulation::results::WaveformData::new_time_domain(
+        let display = rspice_simulation::results::SampledWaveform::new_time_domain(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0, 0.0],
@@ -222,7 +222,7 @@ mod floquet_payload_conversion_tests {
         let waveforms = if mode_indices.is_empty() {
             HashMap::new()
         } else {
-            let waveform = rspice_simulation::results::WaveformData::new_time_domain_in_unit(
+            let waveform = rspice_simulation::results::SampledWaveform::new_time_domain_in_unit(
                 "Floquet |lambda|",
                 mode_indices.clone(),
                 multipliers[..display_count].to_vec(),

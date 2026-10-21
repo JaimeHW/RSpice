@@ -3,7 +3,7 @@
 use super::{AnalysisPresentationKey, SheetContext};
 use crate::{
     state::{
-        AnalysisResult, AnalysisResultPayload, AnalysisType, RunHistoryRevision, WaveformData,
+        AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, RunHistoryRevision,
     },
     workbench::AppState,
 };
@@ -79,7 +79,7 @@ fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
     });
     Some(order)
 }
-fn waveform_is_event(waveform: &WaveformData) -> bool {
+fn waveform_is_event(waveform: &RetainedTrace) -> bool {
     rspice_results::events::projection::waveform_is_event(waveform, || {
         super::frame_work::note(super::frame_work::DatasetWalk::EventProjectionScan);
     })
@@ -352,10 +352,10 @@ mod tests {
 
         let analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
+                RetainedTrace::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
             ]);
         let other = AnalysisResult::new(2, AnalysisType::Transient, "TRAN2").with_waveforms(vec![
-            WaveformData::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
+            RetainedTrace::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
         ]);
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis.clone());
@@ -450,7 +450,7 @@ mod availability_tests {
         };
         // A waveform with more coordinates than values is exactly what
         // `validate_retained_evidence` exists to refuse.
-        let mut corrupt = WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
+        let mut corrupt = RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
         corrupt.y = std::sync::Arc::new(vec![0.0]);
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
             .with_waveforms(vec![corrupt])

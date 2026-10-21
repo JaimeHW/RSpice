@@ -19,7 +19,7 @@ fn install_retained_results(state: &mut AppState) -> AnalysisPresentationKey {
     let mut run = crate::state::SimulationRun::new(1);
     run.add_analysis(
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "Tran")
-            .with_waveforms(vec![crate::state::WaveformData::new(
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0],
                 vec![1.0, 2.0],

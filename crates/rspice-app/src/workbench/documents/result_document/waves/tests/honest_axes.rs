@@ -68,7 +68,7 @@ fn swept_current_source() -> AppState {
     let run = state.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 5.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 5.0], "#fff"),
         ]),
     );
     let run_id = state.simulation.retained.runs[0].id;
@@ -132,7 +132,7 @@ fn imported_overlays_require_compatible_coordinate_units() {
             let mut run = SimulationRun::new(id);
             let mut analysis =
                 AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
-                    WaveformData::new("V(out)", vec![0.0, 1.0], vec![1.0, 2.0], "#fff"),
+                    RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![1.0, 2.0], "#fff"),
                 ]);
             analysis.import_source = Some(ResultImportSource {
                 source_name: "axis.raw".into(),
@@ -196,7 +196,7 @@ fn overlays_require_matching_source_signal_units_before_display_projection() {
             for (id, unit) in [(2, active_unit), (1, overlay_unit)] {
                 let mut run = SimulationRun::new(id);
                 let mut waveform =
-                    WaveformData::new("V(out)", vec![1.0, 2.0], vec![1.0, 2.0], "#fff");
+                    RetainedTrace::new("V(out)", vec![1.0, 2.0], vec![1.0, 2.0], "#fff");
                 waveform.unit = unit.map(str::to_owned);
                 run.add_analysis(
                     AnalysisResult::new(1, analysis_type, "source").with_waveforms(vec![waveform]),
@@ -295,13 +295,13 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
     let earlier = state.simulation.retained.runs[0].dataset_id;
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
         ]),
     );
     state.simulation.view.overlay_dataset_ids.push(earlier);
@@ -361,13 +361,13 @@ fn an_overlay_row_names_the_run_it_came_from() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
     let earlier = state.simulation.retained.runs[0].dataset_id;
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
         ]),
     );
     state.simulation.view.overlay_dataset_ids.push(earlier);

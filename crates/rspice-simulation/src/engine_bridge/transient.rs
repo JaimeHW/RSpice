@@ -7,7 +7,7 @@ use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::error::SimulationError;
-use crate::results::{SimulationResult, WaveformData};
+use crate::results::{SampledWaveform, SimulationResult};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_simulation_contract::config::TransientAnalysisConfig;
 
@@ -342,7 +342,7 @@ fn convert_transient_result(
 
         waveforms.insert(
             name.clone(),
-            WaveformData::new_time_domain(
+            SampledWaveform::new_time_domain(
                 &name,
                 filtered_time.clone(),
                 filtered_transient_values(
@@ -377,7 +377,7 @@ fn convert_transient_result(
         };
         waveforms.insert(
             name.clone(),
-            WaveformData::new_time_domain_in_unit(
+            SampledWaveform::new_time_domain_in_unit(
                 &name,
                 filtered_time.clone(),
                 filtered_transient_values(

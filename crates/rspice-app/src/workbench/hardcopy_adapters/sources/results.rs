@@ -12,7 +12,7 @@ use super::*;
 pub(super) fn active_quick_result(
     state: &AppState,
     viewer: ResultViewer,
-) -> Result<RetainedQuickViewSource<'_, WaveformData>, HardcopySourceError> {
+) -> Result<RetainedQuickViewSource<'_, RetainedTrace>, HardcopySourceError> {
     let run = active_terminal_run(state)?;
     let analysis_index = quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
         HardcopySourceError::UnretainedResult(format!(
@@ -26,7 +26,7 @@ pub(super) fn active_quick_result(
             run.dataset_id
         ))
     })?;
-    RetainedQuickViewSource::try_new(run.as_ref(), analysis.id, |waveform: &WaveformData| {
+    RetainedQuickViewSource::try_new(run.as_ref(), analysis.id, |waveform: &RetainedTrace| {
         waveform.visible
     })
 }

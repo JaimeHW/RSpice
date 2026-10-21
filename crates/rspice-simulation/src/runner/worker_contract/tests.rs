@@ -316,7 +316,7 @@ pub(super) fn authenticated_pstb_result() -> SimulationResult {
     let waveform = |name: &str, unit: &str, value: f64| {
         (
             name.to_owned(),
-            WaveformData {
+            SampledWaveform {
                 name: name.to_owned(),
                 x_values: mode_indices.clone(),
                 y_values: vec![value],
@@ -443,7 +443,7 @@ pub(super) fn nondefault_op_config() -> rspice_simulation_contract::config::OpCo
 }
 
 use crate::results::{
-    DcOpResult, SimulationResult, TransferFunctionQuantity, TransferFunctionScalar, WaveformData,
+    DcOpResult, SampledWaveform, SimulationResult, TransferFunctionQuantity, TransferFunctionScalar,
 };
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::EnvelopeAdaptiveMode;
@@ -714,7 +714,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
-            WaveformData::new_time_domain("V(out)", time, values),
+            SampledWaveform::new_time_domain("V(out)", time, values),
         )]),
         measurements: Vec::new(),
         periodic_state: None,
@@ -1722,7 +1722,7 @@ fn worker_response_rejects_payloads_that_exceed_transport_limit() {
         time: vec![0.0, 1.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
-            WaveformData::new_time_domain("V(out)", vec![0.0, 1.0], vec![0.2, 0.4]),
+            SampledWaveform::new_time_domain("V(out)", vec![0.0, 1.0], vec![0.2, 0.4]),
         )]),
         measurements: Vec::new(),
         periodic_state: None,
@@ -1752,7 +1752,7 @@ fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
         time: vec![0.0, 1.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
-            WaveformData::new_time_domain("V(out)", vec![0.0, 1.0], vec![0.2, 0.4]),
+            SampledWaveform::new_time_domain("V(out)", vec![0.0, 1.0], vec![0.2, 0.4]),
         )]),
         measurements: Vec::new(),
         periodic_state: None,
@@ -2355,7 +2355,7 @@ fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
         iterations: vec![0.0],
         waveforms: HashMap::from([(
             "OPT_COST".into(),
-            WaveformData::new_time_domain("OPT_COST", vec![0.0], vec![0.25]),
+            SampledWaveform::new_time_domain("OPT_COST", vec![0.0], vec![0.25]),
         )]),
         best_cost: 0.25,
         best_variables: HashMap::from([("X".into(), 2.0)]),

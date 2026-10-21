@@ -642,7 +642,7 @@ mod shortcut_ownership_tests {
         let mut app = RSpiceApp::test_instance();
         let analysis =
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-                .with_waveforms(vec![crate::state::WaveformData::new(
+                .with_waveforms(vec![crate::state::RetainedTrace::new(
                     "V(out)",
                     vec![0.0, 1.0],
                     vec![0.0, 2.0],

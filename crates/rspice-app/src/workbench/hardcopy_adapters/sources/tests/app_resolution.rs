@@ -381,7 +381,7 @@ fn global_app_resolver_rejects_stale_results_registry() {
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.analyses.push(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00ffff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00ffff"),
         ]),
     );
     state.simulation.retained.runs.push(run);

@@ -17,8 +17,8 @@ fn the_strip_extent_matches_the_walk_it_replaced() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(a)", vec![0.0, 1.0, 2.5], vec![0.0, 1.0, 2.0], "#fff"),
-            WaveformData::new("V(b)", vec![-3.0, 0.5], vec![1.0, 2.0], "#0af"),
+            RetainedTrace::new("V(a)", vec![0.0, 1.0, 2.5], vec![0.0, 1.0, 2.0], "#fff"),
+            RetainedTrace::new("V(b)", vec![-3.0, 0.5], vec![1.0, 2.0], "#0af"),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -50,8 +50,8 @@ fn hiding_a_trace_moves_the_strip_extent() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
-            WaveformData::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
+            RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -87,8 +87,8 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
-            WaveformData::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
+            RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -136,8 +136,8 @@ fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
-            WaveformData::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
+            RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
         ]),
     );
     toggle_visibility(&mut state, 0, 0);
@@ -170,12 +170,12 @@ fn the_extent_is_walked_once_per_strip_per_cache_build() {
     let run = state.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran A").with_waveforms(vec![
-            WaveformData::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
     run.add_analysis(
         AnalysisResult::new(2, AnalysisType::Transient, "Tran B").with_waveforms(vec![
-            WaveformData::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
+            RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();

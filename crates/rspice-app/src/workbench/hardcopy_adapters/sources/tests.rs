@@ -984,8 +984,8 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
 #[test]
 fn bode_hardcopy_exports_displayed_decibels_and_phase_for_periodic_response() {
     let analysis = AnalysisResult::new(1, AnalysisType::Pac, "PAC").with_waveforms(vec![
-        WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![10.0, 1.0], "#00aaff"),
-        WaveformData::new(
+        RetainedTrace::new("|V(out)|", vec![1.0, 10.0], vec![10.0, 1.0], "#00aaff"),
+        RetainedTrace::new(
             "phase(V(out))",
             vec![1.0, 10.0],
             vec![-90.0, -135.0],
@@ -1021,7 +1021,7 @@ fn bode_hardcopy_exports_displayed_decibels_and_phase_for_periodic_response() {
 #[test]
 fn disto_hardcopy_preserves_retained_engineering_values() {
     let analysis = AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "V(out) HD3(dBc)",
             vec![1.0e3, 1.0e4],
             vec![-80.0, -60.0],
@@ -1047,7 +1047,7 @@ fn disto_hardcopy_preserves_retained_engineering_values() {
 
 #[test]
 fn harmonic_balance_quick_view_exports_only_retained_complex_coefficients() {
-    let spectrum = WaveformData::new(
+    let spectrum = RetainedTrace::new(
         "|V(out)|",
         vec![0.0, 1.0e6, 2.0e6],
         vec![0.1, 1.0, 0.2],
@@ -1073,13 +1073,13 @@ fn phase_noise_quick_view_never_exports_ordinary_periodic_noise_as_l_of_f() {
     let state = quick_view_state(
         AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE")
             .with_waveforms(vec![
-                WaveformData::new(
+                RetainedTrace::new(
                     "onoise",
                     vec![1.0, 1.0e3, 1.0e6],
                     vec![1.0e-18, 1.0e-19, 1.0e-20],
                     "#4ec9b0",
                 ),
-                WaveformData::new(
+                RetainedTrace::new(
                     "phase_noise",
                     vec![1.0, 1.0e3, 1.0e6],
                     vec![-72.0, -103.0, -132.0],
@@ -1107,12 +1107,12 @@ fn waves_quick_view_selects_retained_transient_when_another_analysis_is_active()
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.analyses.push(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
-            WaveformData::new("V(dc)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+            RetainedTrace::new("V(dc)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
         ]),
     );
     run.analyses.push(
         AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(time)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            RetainedTrace::new("V(time)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
     state.simulation.retained.runs.push(run);
@@ -1136,7 +1136,7 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
     displayed.lifecycle = SimulationRunLifecycle::Completed;
     displayed.analyses.push(
         AnalysisResult::new(1, AnalysisType::Transient, "Displayed").with_waveforms(vec![
-            WaveformData::new("V(displayed)", vec![0.0, 1.0], vec![0.25, 0.75], "#00aaff"),
+            RetainedTrace::new("V(displayed)", vec![0.0, 1.0], vec![0.25, 0.75], "#00aaff"),
         ]),
     );
     let displayed_dataset = displayed.dataset_id;
@@ -1145,7 +1145,7 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
     background.lifecycle = SimulationRunLifecycle::Completed;
     background.analyses.push(
         AnalysisResult::new(2, AnalysisType::Transient, "Background").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(background)",
                 vec![0.0, 1.0],
                 vec![100.0, 200.0],
@@ -1263,12 +1263,12 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.analyses.push(
         AnalysisResult::new(1, AnalysisType::Transient, "First").with_waveforms(vec![
-            WaveformData::new("V(first)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            RetainedTrace::new("V(first)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
     run.analyses.push(
         AnalysisResult::new(2, AnalysisType::Transient, "Second").with_waveforms(vec![
-            WaveformData::new("V(second)", vec![0.0, 2.0], vec![2.0, 3.0], "#ff00aa"),
+            RetainedTrace::new("V(second)", vec![0.0, 2.0], vec![2.0, 3.0], "#ff00aa"),
         ]),
     );
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
@@ -1548,7 +1548,7 @@ fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.analyses.push(
         AnalysisResult::new(7, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0, 2.0],
                 vec![-0.25, 0.5, 1.25],
@@ -1597,7 +1597,7 @@ fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
 #[test]
 fn nyquist_and_smith_require_active_retained_complex_samples() {
     let real_only =
-        AnalysisResult::new(10, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+        AnalysisResult::new(10, AnalysisType::Ac, "AC").with_waveforms(vec![RetainedTrace::new(
             "V(out)",
             vec![1.0; 16],
             vec![2.0; 16],
@@ -1619,7 +1619,7 @@ fn nyquist_and_smith_require_active_retained_complex_samples() {
     ));
 
     let complex = AnalysisResult::new(10, AnalysisType::Ac, "AC").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "S(1,1)",
             (0..16).map(|index| index as f64).collect::<Vec<_>>(),
             vec![0.0; 16],

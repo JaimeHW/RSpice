@@ -1,10 +1,10 @@
 //! Independent panes retain their geometry within one model generation.
 use super::*;
+use crate::derived::DerivedSeries;
 use crate::waves::ProjectionOptions;
-use crate::{derived::DerivedSeries, waveform::WaveformData};
 use rspice_results::{
     analysis_result::AnalysisResult, analysis_type::AnalysisType,
-    executed_deck::ExecutedDeckArchive,
+    executed_deck::ExecutedDeckArchive, waveform::RetainedTrace,
 };
 use rspice_ui_kit::tokens::Tokens;
 
@@ -17,8 +17,8 @@ fn each_pane_of_a_two_unit_strip_keeps_its_own_envelope() {
     );
     run.analyses.push(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran", 0.0).with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0], "#fff"),
-            WaveformData::new(
+            RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0], "#fff"),
+            RetainedTrace::new(
                 "I(R1)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 1.0e-3, 2.0e-3],

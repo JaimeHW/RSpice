@@ -6,7 +6,7 @@
 //! belongs to a different frozen configuration.
 
 use super::*;
-use crate::results::WaveformData;
+use crate::results::SampledWaveform;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
@@ -21,11 +21,11 @@ fn transient() -> SimulationResult {
         waveforms: HashMap::from([
             (
                 "V(out)".to_owned(),
-                WaveformData::new_time_domain("V(out)", time.clone(), vec![0.0, 1.0, 0.0]),
+                SampledWaveform::new_time_domain("V(out)", time.clone(), vec![0.0, 1.0, 0.0]),
             ),
             (
                 "V(unused)".to_owned(),
-                WaveformData::new_time_domain("V(unused)", time, vec![4.0, 5.0, 6.0]),
+                SampledWaveform::new_time_domain("V(unused)", time, vec![4.0, 5.0, 6.0]),
             ),
         ]),
         measurements: Vec::new(),
@@ -190,7 +190,7 @@ fn periodic_result() -> SimulationResult {
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
-            WaveformData::new_time_domain("V(out)", time, values),
+            SampledWaveform::new_time_domain("V(out)", time, values),
         )]),
         measurements: Vec::new(),
         periodic_state: Some(Arc::new(operating_point)),
@@ -227,7 +227,7 @@ fn authenticated_periodic_result() -> SimulationResult {
         .map(|(node_name, waveform)| {
             (
                 format!("V({node_name})"),
-                WaveformData::new_time_domain(
+                SampledWaveform::new_time_domain(
                     format!("V({node_name})"),
                     result.time.clone(),
                     waveform.values.clone(),
@@ -354,7 +354,7 @@ fn hb_result() -> SimulationResult {
         frequencies: (0..=8).map(|harmonic| harmonic as f64).collect(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
-            WaveformData::new_complex(
+            SampledWaveform::new_complex(
                 "V(out)",
                 (0..=8).map(|harmonic| harmonic as f64).collect(),
                 coefficients.iter().map(|value| value.re * 2.0).collect(),
@@ -862,7 +862,7 @@ fn large_artifact_transfer_uses_constant_size_metadata_and_exact_buffers() {
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
-            WaveformData::new_time_domain("V(out)", time, values),
+            SampledWaveform::new_time_domain("V(out)", time, values),
         )]),
         measurements: Vec::new(),
         periodic_state: None,

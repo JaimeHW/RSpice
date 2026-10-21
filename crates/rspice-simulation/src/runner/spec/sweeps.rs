@@ -8,7 +8,7 @@ use rspice_core::abort_signal::AbortSignal;
 use crate::engine_services::{self as svc_runner, ServiceContext};
 use crate::error::SimulationError;
 use crate::execution_options::SpecExecutionOptions;
-use crate::results::{MonteCarloVariableResult, SimulationResult, WaveformData};
+use crate::results::{MonteCarloVariableResult, SampledWaveform, SimulationResult};
 use crate::runner::AnalysisExecutionEnvironment;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 
@@ -176,7 +176,7 @@ fn run_parametric(
         super::ensure_not_aborted(abort)?;
         waveforms.insert(
             name.clone(),
-            WaveformData::new_time_domain(name, sweep_values.clone(), values),
+            SampledWaveform::new_time_domain(name, sweep_values.clone(), values),
         );
     }
 

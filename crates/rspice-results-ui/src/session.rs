@@ -422,7 +422,7 @@ pub struct ResultViewerState {
         rspice_results::visualization_document::FamilyPresentationPolicy,
     >,
     /// Session-only visibility overrides for exact family group traces. These
-    /// are presentation state and never alter source WaveformData visibility.
+    /// are presentation state and never alter source RetainedTrace visibility.
     pub hidden_family_traces: HashSet<crate::waves::FamilyTraceVisibilityKey>,
     /// Session-only source-waveform visibility overrides for quick views.
     ///

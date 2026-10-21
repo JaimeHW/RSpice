@@ -43,12 +43,12 @@ fn magnitude_unit(spectrum: &RecordedFftSpectrum) -> String {
 /// Empty for an incomplete record: there is nothing to draw.
 fn spectrum_waveforms(
     spectrum: &RecordedFftSpectrum,
-) -> HashMap<String, crate::results::WaveformData> {
+) -> HashMap<String, crate::results::SampledWaveform> {
     if !spectrum.evidence.status.is_complete() {
         return HashMap::new();
     }
     let name = spectrum.evidence.output.clone();
-    let mut waveform = crate::results::WaveformData::new_complex(
+    let mut waveform = crate::results::SampledWaveform::new_complex(
         name.clone(),
         spectrum.frequency.clone(),
         spectrum.real.clone(),
@@ -69,7 +69,7 @@ pub(super) fn analysis_result(
     spectrum: &RecordedFftSpectrum,
     complex_waveforms: impl FnOnce(
         Vec<f64>,
-        HashMap<String, crate::results::WaveformData>,
+        HashMap<String, crate::results::SampledWaveform>,
     ) -> Vec<rspice_results::waveform::RetainedWaveform>,
     now: impl Fn() -> f64,
 ) -> AnalysisResult {

@@ -12,13 +12,13 @@ use super::*;
 #[test]
 fn noise_quick_view_exports_retained_psd_as_amplitude_density_without_summary() {
     let analysis = AnalysisResult::new(9, AnalysisType::Noise, "Noise").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "onoise",
             vec![1.0, 10.0, 100.0],
             vec![1.0e-18, 4.0e-18, 9.0e-18],
             "#00ffff",
         ),
-        WaveformData::new(
+        RetainedTrace::new(
             "noise(R1)",
             vec![1.0, 10.0, 100.0],
             vec![0.25e-18, 1.0e-18, 2.25e-18],
@@ -62,7 +62,7 @@ fn zero_noise_density_remains_available_in_results_and_hardcopy() {
         for density in [vec![0.0, 0.0, 0.0], vec![1e-18, 0.0, 4e-18]] {
             let analysis =
                 AnalysisResult::new(9, AnalysisType::Noise, "Noise").with_waveforms(vec![
-                    WaveformData::new("onoise", vec![1.0, 10.0, 100.0], density.clone(), "#fff")
+                    RetainedTrace::new("onoise", vec![1.0, 10.0, 100.0], density.clone(), "#fff")
                         .with_unit(unit),
                 ]);
             // The screen's offering gate is also the hardcopy's offering gate.
@@ -87,7 +87,7 @@ fn zero_noise_density_remains_available_in_results_and_hardcopy() {
 #[test]
 fn hbnoise_quick_view_exports_retained_psd_as_amplitude_density() {
     let analysis = AnalysisResult::new(9, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "onoise",
             vec![1.0e3, 1.0e4, 1.0e5],
             vec![1.0e-18, 4.0e-18, 9.0e-18],
@@ -116,7 +116,7 @@ fn hbnoise_quick_view_exports_retained_psd_as_amplitude_density() {
 fn hbnoise_spot_spectrum_exports_the_exact_single_sample() {
     let analysis =
         AnalysisResult::new(9, AnalysisType::Hbnoise, "spot HBNOISE").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1e3], vec![4e-18], "#fff"),
+            RetainedTrace::new("onoise", vec![1e3], vec![4e-18], "#fff"),
         ]);
     let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
     let resolved = resolve_quick_view(&state).unwrap();
@@ -133,7 +133,7 @@ fn hbnoise_spot_spectrum_exports_the_exact_single_sample() {
 #[test]
 fn noise_quick_view_rejects_contributor_only_evidence() {
     let analysis = AnalysisResult::new(10, AnalysisType::Noise, "Noise").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "noise(R1)",
             vec![1.0, 10.0],
             vec![1.0e-18, 4.0e-18],
@@ -154,13 +154,13 @@ fn noise_quick_view_rejects_contributor_only_evidence() {
 #[test]
 fn noise_quick_view_prefers_input_reference_exactly_like_the_results_instrument() {
     let analysis = AnalysisResult::new(11, AnalysisType::Noise, "Noise").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "onoise",
             vec![1.0, 10.0],
             vec![100.0e-18, 400.0e-18],
             "#00ffff",
         ),
-        WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff")
+        RetainedTrace::new("inoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff")
             .with_unit("A²/Hz"),
     ]);
     let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
@@ -179,13 +179,13 @@ fn noise_quick_view_prefers_input_reference_exactly_like_the_results_instrument(
 fn noise_quick_view_falls_back_to_the_first_renderable_noise_analysis() {
     let mut state = quick_view_state(
         AnalysisResult::new(12, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00ffff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00ffff"),
         ]),
         ResultViewer::NoiseContrib,
     );
     state.simulation.active_run_mut().unwrap().analyses.push(
         AnalysisResult::new(13, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff"),
+            RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff"),
         ]),
     );
     let run = state.simulation.active_run().unwrap();
@@ -211,7 +211,7 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
         .collect::<Vec<_>>();
     let analysis =
         AnalysisResult::new(7, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(active)", time, values, "#00ffff"),
+            RetainedTrace::new("V(active)", time, values, "#00ffff"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Fft);
     state.analysis.fft_state.selected_source = Some("V(active)".to_owned());
@@ -264,7 +264,7 @@ fn fft_quick_view_reports_unqualified_retained_evidence_as_invalid() {
     time[8] = time[7];
     let analysis =
         AnalysisResult::new(7, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(unqualified)", time, vec![0.0; 16], "#00ffff"),
+            RetainedTrace::new("V(unqualified)", time, vec![0.0; 16], "#00ffff"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Fft);
     state.analysis.fft_state.selected_source = Some("V(unqualified)".to_owned());
@@ -289,8 +289,8 @@ fn eye_quick_view_reconstructs_the_interactive_source_contract() {
         .collect::<Vec<_>>();
     let analysis =
         AnalysisResult::new(8, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("A(first)", time.clone(), ignored, "#ff00ff"),
-            WaveformData::new("V(selected)", time.clone(), selected.clone(), "#00ffff"),
+            RetainedTrace::new("A(first)", time.clone(), ignored, "#ff00ff"),
+            RetainedTrace::new("V(selected)", time.clone(), selected.clone(), "#00ffff"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Eye);
     state.analysis.fft_state.selected_source = Some("|V(selected)|".to_owned());
@@ -462,7 +462,7 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
 
     let analysis =
         AnalysisResult::new(4, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 4.0, 8.0], "#0af"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 4.0, 8.0], "#0af"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Waves);
     let analysis_key = {
@@ -539,8 +539,8 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
 fn a_trace_hidden_on_the_sheet_is_not_printed() {
     let analysis =
         AnalysisResult::new(5, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#0af"),
-            WaveformData::new("V(mid)", vec![0.0, 1.0], vec![0.0, 0.5], "#fa0"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#0af"),
+            RetainedTrace::new("V(mid)", vec![0.0, 1.0], vec![0.0, 0.5], "#fa0"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Waves);
 
@@ -580,7 +580,7 @@ fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
         .collect::<Vec<_>>();
     let gain = frequency.iter().map(|_| 1.0).collect::<Vec<_>>();
     let analysis = AnalysisResult::new(6, AnalysisType::Disto, "DISTO")
-        .with_waveforms(vec![WaveformData::new("V(out)", frequency, gain, "#0af")]);
+        .with_waveforms(vec![RetainedTrace::new("V(out)", frequency, gain, "#0af")]);
     let state = quick_view_state(analysis, ResultViewer::Bode);
 
     let resolved = resolve_quick_view(&state).expect("the sweep resolves");
@@ -632,7 +632,7 @@ fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
     // A sweep of two decades rules its minor lines as well, eight to a decade.
     let frequency = [1.0, 10.0, 100.0];
     let analysis = AnalysisResult::new(7, AnalysisType::Disto, "DISTO").with_waveforms(vec![
-        WaveformData::new("V(out)", frequency.to_vec(), vec![1.0, 1.0, 1.0], "#0af"),
+        RetainedTrace::new("V(out)", frequency.to_vec(), vec![1.0, 1.0, 1.0], "#0af"),
     ]);
     let state = quick_view_state(analysis, ResultViewer::Bode);
     let resolved = resolve_quick_view(&state).expect("the sweep resolves");
@@ -674,7 +674,7 @@ fn the_printed_spectrum_is_in_decibels() {
         .map(|index| (index as f64 * std::f64::consts::TAU / 8.0).sin())
         .collect::<Vec<_>>();
     let analysis = AnalysisResult::new(8, AnalysisType::Transient, "Transient")
-        .with_waveforms(vec![WaveformData::new("V(active)", time, values, "#0af")]);
+        .with_waveforms(vec![RetainedTrace::new("V(active)", time, values, "#0af")]);
     let mut state = quick_view_state(analysis, ResultViewer::Fft);
     state.analysis.fft_state.selected_source = Some("V(active)".to_owned());
 
@@ -722,7 +722,7 @@ fn the_printed_spectrum_is_in_decibels() {
 #[test]
 fn a_failed_noise_solve_is_neither_offered_nor_printed() {
     let mut analysis = AnalysisResult::new(9, AnalysisType::Noise, "Noise").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "onoise",
             vec![1.0, 10.0, 100.0],
             vec![1.0e-18, 4.0e-18, 9.0e-18],
@@ -744,7 +744,7 @@ fn a_failed_noise_solve_is_neither_offered_nor_printed() {
     // failed attempt and then refused the whole page for being unsuccessful.
     state.simulation.retained.runs[0].analyses.push(
         AnalysisResult::new(10, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#0ff"),
+            RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#0ff"),
         ]),
     );
     state.simulation.retained.runs[0]
@@ -773,7 +773,7 @@ fn a_failed_noise_solve_is_neither_offered_nor_printed() {
 #[test]
 fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
     let phase = AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "phase_noise",
             vec![1.0, 10.0],
             vec![1.0e-18, 4.0e-18],
@@ -781,7 +781,7 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
         ),
     ]);
     let ordinary = AnalysisResult::new(2, AnalysisType::Noise, "NOISE").with_waveforms(vec![
-        WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
+        RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
     ]);
     let transient = AnalysisResult::new(3, AnalysisType::Transient, "TRAN");
 
@@ -944,7 +944,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
 #[test]
 fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
     let analysis = AnalysisResult::new(4, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "V(out)",
             vec![0.0, 0.25, 0.5, 0.75, 1.0],
             vec![0.0, 1.0, 0.0, -1.0, 0.0],
@@ -1026,13 +1026,13 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
 #[test]
 fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
     let analysis = AnalysisResult::new(6, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "V(out)",
             vec![0.0, 0.5, 1.0],
             vec![0.0, 2.5, 5.0],
             "#00ffff",
         ),
-        WaveformData::new(
+        RetainedTrace::new(
             "I(R1)",
             vec![0.0, 0.5, 1.0],
             vec![1.0e-3, 2.0e-3, 3.0e-3],

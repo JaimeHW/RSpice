@@ -9,7 +9,7 @@ use rspice_results::waveform::RetainedWaveform;
 
 use super::mapping::{map_corner_results, map_temperature_results};
 use super::{CornerBaseMode, CornerPoint};
-use crate::results::{SimulationResult, WaveformData};
+use crate::results::{SampledWaveform, SimulationResult};
 
 /// One scalar per node at a single swept point, in a node order the caller
 /// keeps identical across points: the mappers pair names and values by index.
@@ -92,12 +92,12 @@ pub fn temperature_family_of_points(
 fn waveforms_over(
     x_values: &[Value],
     voltages: Vec<(String, Vec<Value>)>,
-) -> HashMap<String, WaveformData> {
+) -> HashMap<String, SampledWaveform> {
     let mut waveforms = HashMap::with_capacity(voltages.len());
     for (name, values) in voltages {
         waveforms.insert(
             name.clone(),
-            WaveformData::new_time_domain(name, x_values.to_vec(), values),
+            SampledWaveform::new_time_domain(name, x_values.to_vec(), values),
         );
     }
     waveforms

@@ -12,9 +12,9 @@ use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
     DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
     PendingDocumentationShapePlacement, PendingPortSequence, PlacementAuthority, PortDirection,
-    PortDiscipline, PortSignalType, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, SheetDefinition,
-    SheetPortPolicy, SheetTemplate, Tool, WaveformData, Wire,
+    PortDiscipline, PortSignalType, RetainedTrace, SavedOutput, SavedOutputCompatibility,
+    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
+    SheetDefinition, SheetPortPolicy, SheetTemplate, Tool, Wire,
 };
 use rspice_design::connectivity::extract_with_hierarchy as extract;
 
@@ -312,7 +312,7 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
 #[test]
 fn materialized_probe_toggles_immediately_and_preserves_future_save_intent() {
     let mut state = AppState::default();
-    state.simulation.view.waveforms.push(WaveformData::new(
+    state.simulation.view.waveforms.push(RetainedTrace::new(
         "V(OUT)",
         vec![0.0, 1.0],
         vec![0.0, 1.0],
@@ -337,7 +337,7 @@ fn materialized_probe_toggles_immediately_and_preserves_future_save_intent() {
 #[test]
 fn ensure_visible_probe_action_never_hides_an_existing_trace() {
     let mut state = AppState::default();
-    state.simulation.view.waveforms.push(WaveformData::new(
+    state.simulation.view.waveforms.push(RetainedTrace::new(
         "V(OUT)",
         vec![0.0, 1.0],
         vec![0.0, 1.0],

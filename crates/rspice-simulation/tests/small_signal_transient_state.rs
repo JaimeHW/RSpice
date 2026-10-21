@@ -255,7 +255,7 @@ fn v_out(result: &SimulationResult) -> Vec<(f64, f64)> {
 
 /// One complex waveform of a frequency-domain result, by name.
 fn complex_waveform(
-    waveforms: &HashMap<String, rspice_simulation::results::WaveformData>,
+    waveforms: &HashMap<String, rspice_simulation::results::SampledWaveform>,
     name: &str,
 ) -> Vec<(f64, f64)> {
     let waveform = waveforms

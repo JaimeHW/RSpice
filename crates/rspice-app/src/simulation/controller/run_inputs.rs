@@ -659,7 +659,7 @@ enum ResumeRead<'a> {
     Transient(Result<Vec<ContentDigest>, String>),
     /// A Monte Carlo's checkpoints, each beside the result it is taken from,
     /// or why they do not resolve.
-    MonteCarlo(Result<Vec<SelectedCheckpoint<'a, WaveformData>>, String>),
+    MonteCarlo(Result<Vec<SelectedCheckpoint<'a, RetainedTrace>>, String>),
 }
 
 /// What one analysis that resumes from checkpoints resumed from, held past
@@ -727,7 +727,7 @@ impl MonteCarloResume {
     /// checked. Taken from another result, as when a newer run holds the same
     /// image, or from the library instead of a result, it resumes alike when
     /// it checks alike against each, which reads the image.
-    fn resumes_as(&self, (holder, image): SelectedCheckpoint<'_, WaveformData>) -> bool {
+    fn resumes_as(&self, (holder, image): SelectedCheckpoint<'_, RetainedTrace>) -> bool {
         if self.image.digest() != image.digest() {
             return false;
         }

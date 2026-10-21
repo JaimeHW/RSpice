@@ -184,7 +184,7 @@ pub(crate) fn bode_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
 
 /// Whether one retained distortion curve is drawable: paired coordinates, a
 /// positive finite abscissa at every sample, and a strictly ascending sweep.
-fn raw_frequency_curve_is_renderable(waveform: &WaveformData) -> bool {
+fn raw_frequency_curve_is_renderable(waveform: &RetainedTrace) -> bool {
     if !waveform.visible || waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
         return false;
     }
@@ -267,7 +267,7 @@ use crate::product::{AnalysisInstanceId, DatasetId};
 
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
-use crate::state::{AnalysisResult, SimulationRun, WaveformData};
+use crate::state::{AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::ActiveViewer;
@@ -306,7 +306,7 @@ pub(crate) enum ExpressionSource {
 #[derive(Debug, Clone)]
 pub(crate) struct ExpressionWaveform {
     pub(crate) source: ExpressionSource,
-    pub(crate) waveform: crate::state::WaveformData,
+    pub(crate) waveform: crate::state::RetainedTrace,
 }
 /// Whether retained evidence belongs to the stable analysis authored in the
 /// simulation plan. Deterministically expanded executions (for example PVT
@@ -347,7 +347,7 @@ pub(crate) fn result_artifact_stable_path(
 fn resolved_result_signal<'a>(
     key: &SourceWaveformPresentationKey,
     runs: &'a [SimulationRun],
-) -> Result<(&'a SimulationRun, &'a AnalysisResult, &'a WaveformData), String> {
+) -> Result<(&'a SimulationRun, &'a AnalysisResult, &'a RetainedTrace), String> {
     let (run_index, analysis_index, _, waveform) = key.resolve(runs).ok_or_else(|| {
         "The selected signal is missing from its run or is no longer unique.".to_owned()
     })?;

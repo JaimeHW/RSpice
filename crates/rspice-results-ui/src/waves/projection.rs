@@ -6,7 +6,7 @@ use super::{
     stable_hash,
 };
 use crate::derived::DerivedSeries;
-use crate::waveform::{WaveformData, waveform_color};
+use crate::waveform::waveform_color;
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::display_preferences::ComplexNumberDisplay;
@@ -16,13 +16,14 @@ use rspice_results::family_projection::{
 };
 use rspice_results::run::SimulationRun;
 use rspice_results::visualization_document::AccessibleColorPalette;
+use rspice_results::waveform::RetainedTrace;
 use rspice_ui_kit::tokens::Tokens;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 fn unique_analysis<'a>(
-    mut candidates: impl Iterator<Item = &'a AnalysisResult<WaveformData>>,
-) -> Option<&'a AnalysisResult<WaveformData>> {
+    mut candidates: impl Iterator<Item = &'a AnalysisResult<RetainedTrace>>,
+) -> Option<&'a AnalysisResult<RetainedTrace>> {
     let candidate = candidates.next()?;
     candidates.next().is_none().then_some(candidate)
 }
@@ -30,10 +31,10 @@ fn unique_analysis<'a>(
 /// Resolve the result in an overlay run that was produced by the same
 /// prepared analysis instance. Kind/label inference is permitted only for
 /// unambiguous legacy history, where neither side has prepared provenance.
-fn matching_overlay_analysis<'a, A: AsRef<AnalysisResult<WaveformData>>>(
-    analysis: &AnalysisResult<WaveformData>,
+fn matching_overlay_analysis<'a, A: AsRef<AnalysisResult<RetainedTrace>>>(
+    analysis: &AnalysisResult<RetainedTrace>,
     overlay_run: &'a SimulationRun<A>,
-) -> Option<&'a AnalysisResult<WaveformData>> {
+) -> Option<&'a AnalysisResult<RetainedTrace>> {
     if let Some(source_instance_id) = analysis
         .provenance
         .as_ref()
@@ -180,7 +181,7 @@ pub fn family_color(style: FamilyTraceStyle, fallback: egui::Color32) -> egui::C
 /// evidence does not settle it — a run whose decks were not retained, or one
 /// with several sweeps whose points do not line up with its analyses — and
 /// the analysis default stands.
-fn swept_source_axis<A: AsRef<AnalysisResult<WaveformData>>>(
+fn swept_source_axis<A: AsRef<AnalysisResult<RetainedTrace>>>(
     executed_decks: &ExecutedDeckArchive,
     run: &SimulationRun<A>,
     analysis_index: usize,
@@ -369,7 +370,7 @@ pub struct ProjectionOptions<'a> {
 /// This is the raw dataset projection: `visible` carries only the retained
 /// data flag, so `x_range` is left unresolved. Callers pair this with
 /// their visibility overrides and then resolve the visible X ranges.
-pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationRun<A>>>(
+pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<SimulationRun<A>>>(
     display_runs: &[&R],
     executed_decks: &ExecutedDeckArchive,
     derived: &mut DerivedSeries,

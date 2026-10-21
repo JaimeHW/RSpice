@@ -458,10 +458,10 @@ fn operating_point_evidence_is_renderable(analysis: &AnalysisResult) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, SimulationRun, WaveformData};
+    use crate::state::{AnalysisResult, RetainedTrace, SimulationRun};
 
-    fn waveform(name: &str) -> WaveformData {
-        WaveformData::new(name, vec![1.0, 2.0], vec![0.0, 1.0], "#55aaff")
+    fn waveform(name: &str) -> RetainedTrace {
+        RetainedTrace::new(name, vec![1.0, 2.0], vec![0.0, 1.0], "#55aaff")
     }
 
     fn state_with_run(analyses: Vec<AnalysisResult>) -> AppState {

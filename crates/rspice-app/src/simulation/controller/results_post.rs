@@ -140,7 +140,7 @@ impl SimulationController {
         &self,
         state: &mut AppState,
         frequencies: &[f64],
-        waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
+        waveforms: &std::collections::HashMap<String, crate::simulation::SampledWaveform>,
     ) {
         let mut bode_data = rspice_results_ui::bode::BodeData::new();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::BodePlot);
@@ -209,10 +209,10 @@ impl SimulationController {
     }
 
     pub(super) fn fft_source_waveform_from_state<'a>(
-        waveforms: &'a [crate::state::WaveformData],
+        waveforms: &'a [crate::state::RetainedTrace],
         preferred_name: Option<&str>,
-    ) -> Option<(String, &'a crate::state::WaveformData)> {
-        let mut candidates: Vec<&crate::state::WaveformData> = waveforms
+    ) -> Option<(String, &'a crate::state::RetainedTrace)> {
+        let mut candidates: Vec<&crate::state::RetainedTrace> = waveforms
             .iter()
             // Keep malformed or short authored traces selectable so the
             // typed preparation boundary can explain their exact defect.
@@ -342,7 +342,7 @@ mod contour_name_tests {
 #[cfg(test)]
 mod nyquist_scope_tests {
     use super::*;
-    use crate::simulation::WaveformData;
+    use crate::simulation::SampledWaveform;
     use std::collections::HashMap;
 
     fn stb_spec() -> AnalysisSpec {
@@ -359,12 +359,12 @@ mod nyquist_scope_tests {
     /// A stability result and an AC result arrive at this seam spelled the
     /// same way. The frequencies and both responses are identical here, so
     /// only the analysis kind can separate them.
-    fn frequency_response() -> (Vec<f64>, HashMap<String, WaveformData>) {
+    fn frequency_response() -> (Vec<f64>, HashMap<String, SampledWaveform>) {
         let frequencies = vec![1.0, 10.0, 100.0];
         let mut waveforms = HashMap::new();
         waveforms.insert(
             STB_NYQUIST_CONTOUR_WAVEFORM.to_owned(),
-            WaveformData::new_complex(
+            SampledWaveform::new_complex(
                 STB_NYQUIST_CONTOUR_WAVEFORM,
                 frequencies.clone(),
                 vec![2.0, 0.5, -0.1],
@@ -373,7 +373,7 @@ mod nyquist_scope_tests {
         );
         waveforms.insert(
             "V(out)".to_owned(),
-            WaveformData::new_complex(
+            SampledWaveform::new_complex(
                 "V(out)",
                 frequencies.clone(),
                 vec![1.0, 0.7, 0.2],

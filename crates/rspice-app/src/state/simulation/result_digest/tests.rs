@@ -380,7 +380,7 @@ use std::sync::Arc;
 
 fn analysis(kind: AnalysisType) -> AnalysisResult {
     AnalysisResult::new(1, kind, "presentation label").with_waveforms(vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0, 2.0],
             vec![0.25, 0.5, 0.75],

@@ -36,7 +36,7 @@ use crate::state::AnalysisResultFamilyMetadata;
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain,
     AnalysisType, DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
-    RealEventTraceEvidence, SimulationRunIntent, SimulationRunLifecycle, WaveformData,
+    RealEventTraceEvidence, RetainedTrace, SimulationRunIntent, SimulationRunLifecycle,
 };
 use crate::workbench::app_state::{ActiveViewer, AppState};
 use crate::workbench::spawn_or_inline;

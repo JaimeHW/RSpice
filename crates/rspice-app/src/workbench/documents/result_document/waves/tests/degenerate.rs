@@ -13,19 +13,19 @@ use super::*;
 /// sample and a flat trace. The instrument draws whatever the engine kept, so
 /// every one of these reaches the painters, and a panic there takes the
 /// workbench down on the one run the user most needs to read.
-fn degenerate_waveforms() -> Vec<(&'static str, WaveformData)> {
+fn degenerate_waveforms() -> Vec<(&'static str, RetainedTrace)> {
     vec![
         (
             "empty",
-            WaveformData::new("V(empty)", Vec::<f64>::new(), Vec::<f64>::new(), "#fff"),
+            RetainedTrace::new("V(empty)", Vec::<f64>::new(), Vec::<f64>::new(), "#fff"),
         ),
         (
             "ragged",
-            WaveformData::new("V(ragged)", vec![0.0, 1.0e-3, 2.0e-3], vec![1.0], "#f80"),
+            RetainedTrace::new("V(ragged)", vec![0.0, 1.0e-3, 2.0e-3], vec![1.0], "#f80"),
         ),
         (
             "all-nan",
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(nan)",
                 vec![0.0, 1.0e-3],
                 vec![f64::NAN, f64::NAN],
@@ -34,7 +34,7 @@ fn degenerate_waveforms() -> Vec<(&'static str, WaveformData)> {
         ),
         (
             "infinite",
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(inf)",
                 vec![0.0, 1.0e-3],
                 vec![f64::INFINITY, f64::NEG_INFINITY],
@@ -43,19 +43,19 @@ fn degenerate_waveforms() -> Vec<(&'static str, WaveformData)> {
         ),
         (
             "single-sample",
-            WaveformData::new("V(single)", vec![5.0e-4], vec![2.0], "#f0f"),
+            RetainedTrace::new("V(single)", vec![5.0e-4], vec![2.0], "#f0f"),
         ),
         (
             "flat",
-            WaveformData::new("V(flat)", vec![0.0, 1.0e-3], vec![3.0, 3.0], "#ff0"),
+            RetainedTrace::new("V(flat)", vec![0.0, 1.0e-3], vec![3.0, 3.0], "#ff0"),
         ),
         (
             "nan-abscissa",
-            WaveformData::new("V(nanx)", vec![f64::NAN, 1.0e-3], vec![0.0, 1.0], "#0ff"),
+            RetainedTrace::new("V(nanx)", vec![f64::NAN, 1.0e-3], vec![0.0, 1.0], "#0ff"),
         ),
         (
             "astronomical",
-            WaveformData::new(
+            RetainedTrace::new(
                 "I(huge)",
                 vec![0.0, 1.0e-3],
                 vec![-1.0e300, 1.0e300],
@@ -64,11 +64,11 @@ fn degenerate_waveforms() -> Vec<(&'static str, WaveformData)> {
         ),
         (
             "denormal-span",
-            WaveformData::new("V(tiny)", vec![0.0, 1.0e-3], vec![0.0, 5.0e-324], "#88f"),
+            RetainedTrace::new("V(tiny)", vec![0.0, 1.0e-3], vec![0.0, 5.0e-324], "#88f"),
         ),
         (
             "denormal-domain",
-            WaveformData::new("V(dx)", vec![0.0, 5.0e-324], vec![0.0, 1.0], "#8ff"),
+            RetainedTrace::new("V(dx)", vec![0.0, 5.0e-324], vec![0.0, 1.0], "#8ff"),
         ),
     ]
 }
@@ -215,7 +215,7 @@ fn a_long_run_that_diverges_partway_still_draws() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![WaveformData::new("V(out)", x, y, "#0af")]),
+            .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#0af")]),
     );
     arm_cursors(&mut state);
 
@@ -231,7 +231,7 @@ fn the_log_frequency_sheets_survive_a_non_positive_abscissa() {
     // a real engine emits — an .ac list starting at 0, a subtracted noise
     // expression that undershoots.
     run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![RetainedTrace::new(
             "V(out)",
             vec![0.0, -1.0, 1.0e3],
             vec![1.0, 0.5, 0.25],
@@ -240,7 +240,7 @@ fn the_log_frequency_sheets_survive_a_non_positive_abscissa() {
     );
     run.add_analysis(
         AnalysisResult::new(2, AnalysisType::Noise, "NOISE").with_waveforms(vec![
-            WaveformData::new("onoise", vec![0.0, 1.0e3], vec![-1.0e-18, 4.0e-18], "#f80"),
+            RetainedTrace::new("onoise", vec![0.0, 1.0e3], vec![-1.0e-18, 4.0e-18], "#f80"),
         ]),
     );
 

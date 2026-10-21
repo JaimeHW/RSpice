@@ -167,13 +167,13 @@ pub use simulation::{
     OccurrenceProbeSpelling, OperatingPointAnnotationEvidence, OperatingPointValue,
     PreparedRunReceipt, PreparedSpecification, PstbStabilityClassificationEvidence,
     RealEventPointEvidence, RealEventTraceEvidence, ResultImportFormat, ResultImportSource,
-    RetainedSimulationState, RunHistory, RunRetention, SavedOutputMaterializationStatus,
-    SharedWaveformValues, SimulationCampaignMembership, SimulationExecutionState, SimulationRun,
-    SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance, SimulationSourceState,
-    SimulationState, SimulationViewState, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SpecificationVerdictStatus, WaveformData, absent_deck_reason,
-    ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
-    ac_bode_summary_for_selection,
+    RetainedSimulationState, RetainedTrace, RunHistory, RunRetention,
+    SavedOutputMaterializationStatus, SharedWaveformValues, SimulationCampaignMembership,
+    SimulationExecutionState, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
+    SimulationRunProvenance, SimulationSourceState, SimulationState, SimulationViewState,
+    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SpecificationVerdictStatus, absent_deck_reason, ac_bode_shape_for_analysis,
+    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
 #[cfg(test)]
 pub use simulation::{

@@ -407,7 +407,7 @@ impl LiveTransientAccumulator {
             .iter()
             .enumerate()
             .map(|(index, waveform)| {
-                WaveformData::new(
+                RetainedTrace::new(
                     waveform.name.clone(),
                     waveform.x.clone(),
                     waveform.y.clone(),

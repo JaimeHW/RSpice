@@ -18,7 +18,7 @@ pub(super) fn hysteresis_run() -> AppState {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 0.5, 1.0, 0.5, 0.0],
                 vec![0.0, 1.0, 2.0, 3.0, 4.0],
@@ -131,7 +131,7 @@ fn a_descending_sweep_keeps_one_untagged_row() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![2.0, 1.0, 0.0], vec![20.0, 10.0, 0.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![2.0, 1.0, 0.0], vec![20.0, 10.0, 0.0], "#fff"),
         ]),
     );
     state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
@@ -182,7 +182,7 @@ fn a_sweep_past_the_branch_budget_reports_the_nearest_retained_sample() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
-            .with_waveforms(vec![WaveformData::new("V(out)", x, y, "#fff")]),
+            .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]),
     );
     state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     state.ui.results.session.cursor_strip = Some(0);
@@ -311,7 +311,7 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
-            .with_waveforms(vec![WaveformData::new("V(out)", x, y, "#fff")]),
+            .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]),
     );
     state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     let analysis = {

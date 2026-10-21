@@ -1088,7 +1088,7 @@ pub(super) fn soa_evaluations_payload_bytes(evaluations: &[WorkerSoAEvaluation])
         .fold(0usize, |total, bytes| total.saturating_add(bytes))
 }
 
-pub(super) fn worker_waveforms(waveforms: HashMap<String, WaveformData>) -> Vec<WorkerWaveform> {
+pub(super) fn worker_waveforms(waveforms: HashMap<String, SampledWaveform>) -> Vec<WorkerWaveform> {
     let mut waveforms: Vec<_> = waveforms.into_values().map(WorkerWaveform::from).collect();
     waveforms.sort_by(|left, right| left.name.cmp(&right.name));
     waveforms
@@ -1129,7 +1129,7 @@ pub(super) fn pss_display_projection(
 
 pub(super) fn validate_pss_display_contract(
     time: &[f64],
-    waveforms: &HashMap<String, WaveformData>,
+    waveforms: &HashMap<String, SampledWaveform>,
     operating_point: &rspice_core::engine::PssOperatingPoint,
 ) -> Result<(), SimulationError> {
     let result = &operating_point.analysis().result;
@@ -1218,7 +1218,7 @@ pub(super) fn simulation_result_from_worker_pss(
         let display_name = format!("{prefix}({name})");
         waveforms.insert(
             display_name.clone(),
-            WaveformData::new_time_domain_in_unit(
+            SampledWaveform::new_time_domain_in_unit(
                 display_name,
                 time.clone(),
                 projection
@@ -1240,12 +1240,12 @@ pub(super) fn simulation_result_from_worker_pss(
     }
 }
 
-pub(super) fn waveform_map(waveforms: Vec<WorkerWaveform>) -> HashMap<String, WaveformData> {
+pub(super) fn waveform_map(waveforms: Vec<WorkerWaveform>) -> HashMap<String, SampledWaveform> {
     waveforms
         .into_iter()
         .map(|waveform| {
             let name = waveform.name.clone();
-            (name, WaveformData::from(waveform))
+            (name, SampledWaveform::from(waveform))
         })
         .collect()
 }

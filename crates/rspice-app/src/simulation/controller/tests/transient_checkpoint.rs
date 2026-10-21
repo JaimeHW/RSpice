@@ -213,7 +213,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
         let before = state.simulation.view.data_version;
         let partial = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
             .with_provenance(controller.current_provenance.clone().unwrap())
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1e-9],
                 vec![0.0, 0.01],

@@ -1,6 +1,6 @@
 //! Phase-noise source qualification, retained trace binding and viewport ownership.
 
-use crate::state::{AnalysisResult, AnalysisType, SharedWaveformValues, WaveformData};
+use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SharedWaveformValues};
 #[cfg(test)]
 use crate::state::{AnalysisResultFamilyMetadata, PeriodicNoiseOutputQuantity};
 use crate::workbench::AppState;
@@ -37,7 +37,7 @@ impl PhaseNoiseModel {
     }
 }
 
-pub(super) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
+pub(super) fn phase_noise_waveform_is_renderable(waveform: &RetainedTrace) -> bool {
     rspice_results::phase_noise::phase_noise_waveform_is_renderable(waveform.as_ref(), || {
         super::frame_work::note(super::frame_work::DatasetWalk::PhaseNoiseSpectrumScan);
     })
@@ -219,8 +219,8 @@ mod tests {
         );
     }
 
-    fn waveform(name: &str) -> WaveformData {
-        WaveformData::new(
+    fn waveform(name: &str) -> RetainedTrace {
+        RetainedTrace::new(
             name,
             vec![1.0, 1.0e3, 1.0e6],
             vec![-72.0, -103.0, -132.0],

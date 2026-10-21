@@ -389,7 +389,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
                 )
                 .expect("valid prepared analysis provenance"),
             )
-            .with_waveforms(vec![crate::state::WaveformData::new(
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0],
                 vec![0.0, 1.0],
@@ -614,7 +614,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
             )
             .expect("valid historical analysis provenance"),
         )
-        .with_waveforms(vec![crate::state::WaveformData::new(
+        .with_waveforms(vec![crate::state::RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0, 1.0],
@@ -1019,7 +1019,7 @@ fn the_design_and_veriloga_inspectors_paint_no_status_color() {
 /// `V(out)` swinging inside 4…6 V with its pane active, the trace selected,
 /// and the solver's convergence evidence retained with no forced points.
 fn waves_details_app() -> RSpiceApp {
-    use crate::state::{AnalysisResult, AnalysisType, TransientConvergenceEvidence, WaveformData};
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, TransientConvergenceEvidence};
     let quality = rspice_core::diagnostics::ConvergenceQuality::default();
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();
@@ -1031,7 +1031,7 @@ fn waves_details_app() -> RSpiceApp {
         .collect();
     let mut analysis =
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", time.clone(), volts, "#ffbd2e"),
+            RetainedTrace::new("V(out)", time.clone(), volts, "#ffbd2e"),
         ]);
     analysis.convergence = Some(std::sync::Arc::new(
         TransientConvergenceEvidence::capture(quality, &time, &rspice_core::abort_signal::NoAbort)

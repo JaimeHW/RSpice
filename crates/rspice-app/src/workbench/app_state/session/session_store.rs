@@ -156,7 +156,7 @@ mod tests {
         let mut run = crate::state::SimulationRun::new(7);
         run.add_analysis(
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-                .with_waveforms(vec![crate::state::WaveformData::new(
+                .with_waveforms(vec![crate::state::RetainedTrace::new(
                     "V(out)", time, volts, "#00aaff",
                 )]),
         );

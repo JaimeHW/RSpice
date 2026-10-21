@@ -207,7 +207,7 @@ fn output_reference_remains_psd_and_is_never_relabelled_as_phase_noise() {
 #[test]
 fn sp_noise_retains_temperature_complex_signs_and_extreme_finite_magnitudes() {
     let controller = SimulationController::new();
-    let mut waveform = crate::simulation::WaveformData::new_complex(
+    let mut waveform = crate::simulation::SampledWaveform::new_complex(
         "CY(1,2)",
         vec![1e6, 2e6],
         vec![-1e-200, -1e200],

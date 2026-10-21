@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
-use crate::results::{SimulationResult, WaveformData};
+use crate::results::{SampledWaveform, SimulationResult};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::OptimizationAlgorithm;
 use rspice_simulation_contract::analysis_spec::OptimizationGoal;
@@ -415,7 +415,7 @@ fn run_soa(
 }
 
 fn insert_scalar_waveform(
-    waveforms: &mut HashMap<String, WaveformData>,
+    waveforms: &mut HashMap<String, SampledWaveform>,
     name: String,
     x_values: Vec<f64>,
     y_values: Vec<f64>,
@@ -424,7 +424,7 @@ fn insert_scalar_waveform(
 ) {
     waveforms.insert(
         name.clone(),
-        WaveformData {
+        SampledWaveform {
             name,
             x_values,
             y_values,

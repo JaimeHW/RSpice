@@ -8,7 +8,7 @@ fn corrupted_waveform_keeps_identity_but_quarantines_every_exact_value_route() {
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25, f64::NAN], "#00aaff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.25, f64::NAN], "#00aaff"),
         ]),
     );
     let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);

@@ -128,7 +128,7 @@ impl SimulationController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_simulation::results::WaveformData;
+    use rspice_simulation::results::SampledWaveform;
 
     /// An N-port S-parameter result, as the runner assembles one.
     fn matrix_result(num_ports: usize) -> crate::simulation::SimulationResult {
@@ -143,7 +143,7 @@ mod tests {
                 };
                 waveforms.insert(
                     name.clone(),
-                    WaveformData {
+                    SampledWaveform {
                         name,
                         x_values: frequencies.clone(),
                         y_values: vec![0.5, 0.4],
@@ -187,7 +187,7 @@ mod tests {
         ] {
             waveforms.insert(
                 name.into(),
-                WaveformData {
+                SampledWaveform {
                     name: name.into(),
                     x_values: frequencies.clone(),
                     y_values: vec![value; 2],

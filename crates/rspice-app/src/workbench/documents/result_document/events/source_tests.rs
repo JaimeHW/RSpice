@@ -289,7 +289,7 @@ fn scalar_state(source: EventSelectionSource) -> (AppState, &'static str) {
             } else {
                 "E(level)"
             };
-            analysis.waveforms.push(WaveformData::new(
+            analysis.waveforms.push(RetainedTrace::new(
                 name,
                 vec![0.0, 1.0],
                 vec![0.0, 1.0],
@@ -363,7 +363,7 @@ fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
     let selection = pick(&mut state, EventSelectionSource::ExactDigital, name, 1);
     state.simulation.retained.runs[0].analyses[0]
         .waveforms
-        .push(WaveformData::new(
+        .push(RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0],
@@ -710,7 +710,7 @@ fn event_source_projected_idle_reads_do_not_rescan_the_trace() {
     values[99_999] = 1.0;
     let mut state = state_with(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "D(clk)",
                 (0..100_000).map(f64::from).collect::<Vec<_>>(),
                 values,
@@ -744,7 +744,7 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
     values[99_999] = 0.5;
     let mut state = state_with(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "E(level)",
                 (0..100_000).map(f64::from).collect::<Vec<_>>(),
                 values,
@@ -765,7 +765,7 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
         ))
         .is_err()
     );
-    state.simulation.retained.runs[0].analyses[0].waveforms = vec![WaveformData::new(
+    state.simulation.retained.runs[0].analyses[0].waveforms = vec![RetainedTrace::new(
         "E(level)",
         vec![99_999.0],
         vec![0.5],

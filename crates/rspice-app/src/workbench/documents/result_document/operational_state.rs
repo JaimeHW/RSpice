@@ -485,7 +485,7 @@ mod tests {
     use super::*;
     use crate::product::{ContentDigest, ObjectRevision};
     use crate::simulation::plan::AnalysisKind;
-    use crate::state::{AnalysisResultProvenance, AnalysisType, WaveformData};
+    use crate::state::{AnalysisResultProvenance, AnalysisType, RetainedTrace};
 
     #[test]
     fn browser_runtime_registry_keeps_access_and_verification_failures_distinct() {
@@ -575,7 +575,7 @@ mod tests {
             .expect("default plan");
         let source = plan.instances()[0].id();
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0],
                 vec![0.0, 1.0],

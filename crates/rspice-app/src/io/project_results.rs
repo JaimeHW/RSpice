@@ -1,9 +1,9 @@
 //! Application capture and restoration of portable project results.
-use crate::state::{AnalysisResult, SimulationRun, SimulationState, WaveformData};
+use crate::state::{AnalysisResult, RetainedTrace, SimulationRun, SimulationState};
 use rspice_formats::project_results::*;
 use std::collections::HashSet;
 
-fn capture_waveform(waveform: &WaveformData) -> ProjectWaveformData {
+fn capture_waveform(waveform: &RetainedTrace) -> ProjectWaveformData {
     ProjectWaveformData::from_waveform(&waveform.data, waveform.color.clone(), waveform.visible)
 }
 
@@ -116,7 +116,7 @@ fn restore_analysis(analysis: ProjectAnalysisResult) -> Result<AnalysisResult, S
     let data = analysis.into_analysis_with_waveforms(|mut waveform| {
         let color = std::mem::take(&mut waveform.color);
         let visible = waveform.visible;
-        WaveformData {
+        RetainedTrace {
             data: waveform.into_waveform(),
             color,
             visible,

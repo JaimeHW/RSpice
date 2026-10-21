@@ -647,7 +647,7 @@ pub fn right_panel(
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support {
     use super::*;
-    use crate::waveform::WaveformData;
+    use rspice_results::waveform::RetainedTrace;
     use rspice_results::{
         analysis_type::AnalysisType,
         events::{
@@ -655,7 +655,7 @@ pub mod test_support {
             DigitalEventTraceEvidence,
         },
     };
-    type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
+    type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
     pub fn committed_events(digital: &[(f64, u8)]) -> AnalysisResultPayload {
         AnalysisResultPayload::TransientEvents {
             current_impulses: None,
@@ -723,13 +723,13 @@ pub mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::waveform::WaveformData;
+    use rspice_results::waveform::RetainedTrace;
     use rspice_results::{
         analysis_type::AnalysisType,
         events::{DigitalEventPointEvidence, DigitalEventTraceEvidence},
     };
     use test_support::{counter, two_bit_counter};
-    type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
+    type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
     fn event_rows(analysis: &AnalysisResult) -> Vec<EventRow<'_>> {
         rspice_results::events::projection::build_event_order(
             analysis,
@@ -775,7 +775,7 @@ mod tests {
     }
     #[test]
     fn event_rows_keep_initial_value_and_only_projected_changes() {
-        let waveform = WaveformData::new(
+        let waveform = RetainedTrace::new(
             "D(clk)",
             vec![0.0, 1.0, 2.0, 3.0],
             vec![0.0, 0.0, 1.0, 1.0],
@@ -795,7 +795,7 @@ mod tests {
     }
     #[test]
     fn real_event_rows_preserve_projected_value_changes() {
-        let waveform = WaveformData::new("E(control)", vec![1.0, 2.0], vec![0.25, 0.5], "#fff");
+        let waveform = RetainedTrace::new("E(control)", vec![1.0, 2.0], vec![0.25, 0.5], "#fff");
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
             .with_waveforms(vec![waveform]);
         let rows = event_rows(&analysis);
@@ -806,7 +806,7 @@ mod tests {
     }
     #[test]
     fn real_event_trace_rejects_an_unknown_after_the_first_committed_value() {
-        let waveform = WaveformData::new(
+        let waveform = RetainedTrace::new(
             "E(control)",
             vec![0.0, 1.0, 2.0],
             vec![f64::NAN, 0.25, f64::NAN],
@@ -843,7 +843,7 @@ mod tests {
             digital_buses: Vec::new(),
         };
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "D(clk)",
                 vec![0.0, 1.0],
                 vec![2.0, 0.0],
@@ -903,7 +903,7 @@ mod tests {
     fn selection_resolution_rejects_a_projected_non_change_sample() {
         let analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![
-                WaveformData::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
+                RetainedTrace::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
             ]);
         let analysis_key =
             AnalysisPresentationKey::new(rspice_vocabulary::product::DatasetId::new(), &analysis);

@@ -17,18 +17,18 @@ fn periodic_port_noise_export_preserves_spectra_and_reference_context() {
         ]);
     for name in ["S11", "S12", "S21", "S22"] {
         analysis.waveforms.push(
-            WaveformData::new(format!("|{name}|"), vec![1e4], vec![0.5], "#fff")
+            RetainedTrace::new(format!("|{name}|"), vec![1e4], vec![0.5], "#fff")
                 .with_complex_components(name, vec![0.5], vec![0.0]),
         );
     }
     analysis.waveforms.push(
-        WaveformData::new("|Cw1_2[k=+1,m=-1]|", vec![1e4], vec![5e-20], "#fff")
+        RetainedTrace::new("|Cw1_2[k=+1,m=-1]|", vec![1e4], vec![5e-20], "#fff")
             .with_complex_components("Cw1_2[k=+1,m=-1]", vec![-3e-20], vec![4e-20])
             .with_unit("W/Hz"),
     );
     analysis
         .waveforms
-        .push(WaveformData::new("PN_F", vec![1e4], vec![2.0], "#fff").with_unit("1"));
+        .push(RetainedTrace::new("PN_F", vec![1e4], vec![2.0], "#fff").with_unit("1"));
     let waves = analysis.waveforms.iter().collect::<Vec<_>>();
     let dataset = prepare_single_analysis_dataset(&analysis, &waves, false).unwrap();
     let real = dataset

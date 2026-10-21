@@ -21,9 +21,9 @@ use super::super::{
 };
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, DcOpResult,
-    DigitalEventPointEvidence, DigitalEventTraceEvidence, OperatingPointValue, SimulationRun,
-    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, WaveformData,
+    DigitalEventPointEvidence, DigitalEventTraceEvidence, OperatingPointValue, RetainedTrace,
+    SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaViolationEvidence, SoaViolationSeverityEvidence,
 };
 
 /// Retained samples per transient waveform.
@@ -86,19 +86,19 @@ fn transient_analysis() -> AnalysisResult {
     let x: Vec<f64> = (0..TRANSIENT_SAMPLES)
         .map(|index| index as f64 * 1.0e-9)
         .collect();
-    let mut waveforms: Vec<WaveformData> = (0..TRANSIENT_TRACES)
+    let mut waveforms: Vec<RetainedTrace> = (0..TRANSIENT_TRACES)
         .map(|trace| {
             let y: Vec<f64> = (0..TRANSIENT_SAMPLES)
                 .map(|index| ((index + trace) as f64 * 1.0e-3).sin())
                 .collect();
-            WaveformData::new(format!("V(n{trace})"), x.clone(), y, "#00aaff")
+            RetainedTrace::new(format!("V(n{trace})"), x.clone(), y, "#00aaff")
         })
         .collect();
     waveforms.extend((0..TRANSIENT_CURRENT_TRACES).map(|trace| {
         let y: Vec<f64> = (0..TRANSIENT_SAMPLES)
             .map(|index| ((index + trace) as f64 * 1.0e-3).cos() * 1.0e-3)
             .collect();
-        WaveformData::new(format!("I(R{trace})"), x.clone(), y, "#ffbd2e")
+        RetainedTrace::new(format!("I(R{trace})"), x.clone(), y, "#ffbd2e")
     }));
 
     // The event history is retained evidence of its own — the sparse
@@ -146,8 +146,8 @@ fn ac_analysis() -> AnalysisResult {
         .map(|f| -(f / 10.0).atan().to_degrees() - (f / 1.0e5).atan().to_degrees())
         .collect();
     AnalysisResult::new(6, AnalysisType::Ac, "AC").with_waveforms(vec![
-        WaveformData::new("|V(out)|", frequency.clone(), magnitude, "#00aaff"),
-        WaveformData::new("phase(V(out))", frequency, phase, "#ffbd2e"),
+        RetainedTrace::new("|V(out)|", frequency.clone(), magnitude, "#00aaff"),
+        RetainedTrace::new("phase(V(out))", frequency, phase, "#ffbd2e"),
     ])
 }
 
@@ -171,8 +171,8 @@ fn distortion_analysis() -> AnalysisResult {
     };
     let (second_harmonic, third_harmonic) = (curve(1.0e-3), curve(1.0e-4));
     AnalysisResult::new(8, AnalysisType::Disto, "DISTO").with_waveforms(vec![
-        WaveformData::new("HD2", frequency.clone(), second_harmonic, "#00aaff"),
-        WaveformData::new("HD3", frequency, third_harmonic, "#ffbd2e"),
+        RetainedTrace::new("HD2", frequency.clone(), second_harmonic, "#00aaff"),
+        RetainedTrace::new("HD3", frequency, third_harmonic, "#ffbd2e"),
     ])
 }
 
@@ -193,7 +193,7 @@ fn harmonic_balance_analysis() -> AnalysisResult {
         .map(|(re, im)| re.hypot(*im))
         .collect();
     AnalysisResult::new(9, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
-        WaveformData::new("|V(out)|", frequency, magnitude, "#00aaff")
+        RetainedTrace::new("|V(out)|", frequency, magnitude, "#00aaff")
             .with_complex_components("V(out)", real, imag),
     ])
 }
@@ -212,7 +212,7 @@ fn phase_noise_analysis() -> AnalysisResult {
             output_quantity: crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
             carrier_frequency_hz: Some(2.4e9),
         })
-        .with_waveforms(vec![WaveformData::new(
+        .with_waveforms(vec![RetainedTrace::new(
             "phase_noise",
             offset,
             level,
@@ -242,7 +242,7 @@ fn sparameter_analysis() -> AnalysisResult {
                 .zip(imag.iter())
                 .map(|(re, im)| re.hypot(*im))
                 .collect();
-            WaveformData::new(name, frequency.clone(), magnitude, "#00aaff")
+            RetainedTrace::new(name, frequency.clone(), magnitude, "#00aaff")
                 .with_complex_components(name, real, imag)
         })
         .collect();
@@ -269,13 +269,13 @@ fn noise_analysis() -> AnalysisResult {
             .collect()
     };
     let mut waveforms = vec![
-        WaveformData::new(
+        RetainedTrace::new(
             "inoise_spectrum",
             frequency.clone(),
             density(0.5),
             "#00aaff",
         ),
-        WaveformData::new(
+        RetainedTrace::new(
             "onoise_spectrum",
             frequency.clone(),
             density(1.0),
@@ -283,7 +283,7 @@ fn noise_analysis() -> AnalysisResult {
         ),
     ];
     waveforms.extend((0..NOISE_TRACES - 2).map(|device| {
-        WaveformData::new(
+        RetainedTrace::new(
             format!("noise(r{device})"),
             frequency.clone(),
             density(0.1 * (device as f64 + 1.0)),
@@ -340,7 +340,7 @@ fn soa_analysis() -> AnalysisResult {
             .collect();
         let worst_actual_value = y[SOA_SAMPLES - 1];
         let worst_time_s = time[SOA_SAMPLES - 1];
-        waveforms.push(WaveformData::new(
+        waveforms.push(RetainedTrace::new(
             crate::results::safety::soa_stress_waveform_name(
                 &device_id,
                 crate::results::safety::SoAParameter::Vds,
@@ -422,8 +422,8 @@ fn optimization_analysis() -> AnalysisResult {
             converged: true,
         })
         .with_waveforms(vec![
-            WaveformData::new("OPT_COST", axis.clone(), cost, "#0af"),
-            WaveformData::new("OPT_GAIN", axis, gain, "#fa0"),
+            RetainedTrace::new("OPT_COST", axis.clone(), cost, "#0af"),
+            RetainedTrace::new("OPT_GAIN", axis, gain, "#fa0"),
         ])
 }
 

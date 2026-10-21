@@ -251,7 +251,7 @@ pub struct ResultImportDialogState {
     pub coordinate_name: String,
     pub coordinate_unit: Option<String>,
     pub sample_count: usize,
-    pub waveforms: std::sync::Arc<Vec<crate::state::WaveformData>>,
+    pub waveforms: std::sync::Arc<Vec<crate::state::RetainedTrace>>,
     /// Analysis-family authority recovered from the source (for example,
     /// Touchstone per-port reference impedances). It is committed atomically
     /// with the selected waveforms or discarded with the draft.

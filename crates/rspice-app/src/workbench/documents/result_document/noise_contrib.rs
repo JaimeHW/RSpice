@@ -38,7 +38,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, NoiseSummary, SimulationRun, WaveformData};
+    use crate::state::{AnalysisResult, AnalysisType, NoiseSummary, RetainedTrace, SimulationRun};
 
     #[test]
     fn hbnoise_csv_separates_decibels_from_density_and_retains_source_reference() {
@@ -55,13 +55,13 @@ mod tests {
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE")
                 .with_waveforms(vec![
-                    WaveformData::new(
+                    RetainedTrace::new(
                         "onoise",
                         figure.frequencies.clone(),
                         vec![1e-18, 2e-18],
                         "#fff",
                     ),
-                    WaveformData::new(
+                    RetainedTrace::new(
                         "Noise figure (SSB)",
                         figure.frequencies.clone(),
                         figure.decibels.clone(),
@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn selected_summary_is_bound_to_the_same_renderable_noise_analysis() {
         let mut first = AnalysisResult::new(1, AnalysisType::Noise, "first").with_waveforms(vec![
-            WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#fff"),
+            RetainedTrace::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#fff"),
         ]);
         first.noise_summary = Some(NoiseSummary {
             input_quantity: None,
@@ -148,7 +148,7 @@ mod tests {
         });
         let mut second =
             AnalysisResult::new(2, AnalysisType::Noise, "second").with_waveforms(vec![
-                WaveformData::new("inoise", vec![1.0, 10.0], vec![3.0e-9, 4.0e-9], "#fff"),
+                RetainedTrace::new("inoise", vec![1.0, 10.0], vec![3.0e-9, 4.0e-9], "#fff"),
             ]);
         second.noise_summary = Some(NoiseSummary {
             input_quantity: None,

@@ -11,11 +11,12 @@
 //! resulting count against the retained total, so "showing 200" can never
 //! be mistaken for "there are 200".
 
-use crate::{presentation::well_hint, waveform::WaveformData, waves::StripModel};
+use crate::{presentation::well_hint, waves::StripModel};
 use egui::Ui;
 use rspice_results::{
     analysis_payload::AnalysisResultPayload,
     result_presentation::{AnalysisPresentationKey, TracePresentationKey},
+    waveform::RetainedTrace,
 };
 use rspice_ui_kit::{
     theme::{self, FontWeight},
@@ -24,7 +25,7 @@ use rspice_ui_kit::{
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::borrow::Cow;
-type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
+type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
 
 pub struct SampleTable<'a> {
     pub model: &'a StripModel,
@@ -1125,7 +1126,7 @@ mod tests {
         let x: Vec<f64> = (0..samples).map(|i| i as f64 * 1.0e-6).collect();
         let y: Vec<f64> = (0..samples).map(|i| i as f64).collect();
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "Tran", 0.0)
-            .with_waveforms(vec![WaveformData::new("V(out)", x, y, "#fff")]);
+            .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]);
         let mut run = rspice_results::run::SimulationRun::new(
             1,
             0.0,

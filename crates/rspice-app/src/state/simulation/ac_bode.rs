@@ -2,7 +2,7 @@
 
 use super::{AnalysisResult, SimulationRun};
 #[cfg(test)]
-use super::{AnalysisType, WaveformData};
+use super::{AnalysisType, RetainedTrace};
 use crate::product::AnalysisInstanceId;
 pub use rspice_results::bode::retained::{AcBodeShape, AcBodeSummary};
 
@@ -108,12 +108,12 @@ mod tests {
     use super::*;
     use crate::product::{ContentDigest, ObjectRevision};
 
-    fn ac_analysis(waveforms: Vec<WaveformData>) -> AnalysisResult {
+    fn ac_analysis(waveforms: Vec<RetainedTrace>) -> AnalysisResult {
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(waveforms)
     }
 
-    fn wave(name: &str, x: &[f64], y: &[f64], visible: bool) -> WaveformData {
-        let mut waveform = WaveformData::new(name, x.to_vec(), y.to_vec(), "#fff");
+    fn wave(name: &str, x: &[f64], y: &[f64], visible: bool) -> RetainedTrace {
+        let mut waveform = RetainedTrace::new(name, x.to_vec(), y.to_vec(), "#fff");
         waveform.visible = visible;
         waveform
     }

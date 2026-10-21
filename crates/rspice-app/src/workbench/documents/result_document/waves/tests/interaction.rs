@@ -15,13 +15,13 @@ fn bode_strip() -> AppState {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "|V(out)|",
                 vec![1.0, 10.0, 100.0, 1000.0],
                 vec![1.0, 0.7, 0.3, 0.1],
                 "#fff",
             ),
-            WaveformData::new(
+            RetainedTrace::new(
                 "phase(V(out))",
                 vec![1.0, 10.0, 100.0, 1000.0],
                 vec![0.0, -30.0, -60.0, -90.0],
@@ -114,7 +114,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0, 2.0],
                 vec![1.0, 10.0, 100.0],
@@ -232,8 +232,8 @@ fn the_nearest_trace_is_measured_where_the_pane_draws_it() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(a)", vec![0.0, 1.0], vec![1.0, 1.0], "#fff"),
-            WaveformData::new("V(b)", vec![0.0, 1.0], vec![100.0, 100.0], "#0af"),
+            RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![1.0, 1.0], "#fff"),
+            RetainedTrace::new("V(b)", vec![0.0, 1.0], vec![100.0, 100.0], "#0af"),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -291,7 +291,7 @@ fn a_deeply_zoomed_shared_axis_states_the_value_its_ticks_are_offsets_from() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 vec![1.0e-3, 1.000_02e-3, 1.000_04e-3, 1.000_06e-3, 1.000_08e-3],
                 vec![0.0, 1.0, 0.0, 1.0, 0.0],

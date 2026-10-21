@@ -127,7 +127,7 @@ mod tests {
     use super::*;
     use rspice_results::analysis_type::AnalysisType;
     type AnalysisResult =
-        rspice_results::analysis_result::AnalysisResult<crate::waveform::WaveformData>;
+        rspice_results::analysis_result::AnalysisResult<rspice_results::waveform::RetainedTrace>;
 
     fn evidence_fixture(
         status: rspice_results::fft::spectrum::FftSpectrumStatusEvidence,

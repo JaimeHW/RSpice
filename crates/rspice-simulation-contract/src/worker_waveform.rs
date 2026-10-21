@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use rspice_results::waveform::WaveformData;
+use rspice_results::waveform::SampledWaveform;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkerWaveform {
@@ -14,8 +14,8 @@ pub struct WorkerWaveform {
     pub y_imag: Option<Vec<f64>>,
 }
 
-impl From<WaveformData> for WorkerWaveform {
-    fn from(value: WaveformData) -> Self {
+impl From<SampledWaveform> for WorkerWaveform {
+    fn from(value: SampledWaveform) -> Self {
         Self {
             name: value.name,
             x_values: value.x_values,
@@ -27,7 +27,7 @@ impl From<WaveformData> for WorkerWaveform {
     }
 }
 
-impl From<WorkerWaveform> for WaveformData {
+impl From<WorkerWaveform> for SampledWaveform {
     fn from(value: WorkerWaveform) -> Self {
         Self {
             name: value.name,

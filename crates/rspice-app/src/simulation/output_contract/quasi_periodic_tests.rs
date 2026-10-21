@@ -136,7 +136,7 @@ fn quasi_periodic_saved_outputs_select_physical_qpss_and_qpac_sources_without_lo
             let mut changed = retained.clone();
             changed
                 .waveforms
-                .push(WaveformData::new("invented", vec![0.0], vec![1.0], "#fff"));
+                .push(RetainedTrace::new("invented", vec![0.0], vec![1.0], "#fff"));
             assert!(changed.validate_retained_evidence().is_err());
         }
         let mut empty = original;

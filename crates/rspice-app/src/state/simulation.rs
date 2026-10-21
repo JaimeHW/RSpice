@@ -143,7 +143,7 @@ pub use rspice_vocabulary::hierarchy_path::OccurrenceProbeSpelling;
 pub use run::SimulationRun;
 pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
 pub(crate) use rspice_results::run_history::RunHistoryRevision;
-pub use rspice_results_ui::waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
+pub use rspice_results::waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 pub use rspice_simulation::execution::SimulationRunIntent;
 pub use state_model::{
     RetainedSimulationState, SimulationExecutionState, SimulationSourceState, SimulationState,

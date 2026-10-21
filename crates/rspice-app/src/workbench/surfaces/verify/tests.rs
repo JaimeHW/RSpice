@@ -8,7 +8,7 @@ use super::raster::sealed_run;
 use super::tuning::{revert_tuning_session, tuning_commit_block_reason, tuning_is_dirty};
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
     attributed_with_id(analysis, AnalysisInstanceId::new())
@@ -919,7 +919,7 @@ fn regression_waveforms_align_by_stable_source_and_signal_identity() {
     let mut baseline = SimulationRun::new(38);
     baseline.add_analysis(attributed_with_id(
         AnalysisResult::new(9, AnalysisType::Transient, "unrelated transient").with_waveforms(
-            vec![crate::state::WaveformData::new(
+            vec![RetainedTrace::new(
                 "v(OUT)",
                 vec![0.0, 2.0, 4.0],
                 vec![0.0, 2.0, 4.0],
@@ -930,7 +930,7 @@ fn regression_waveforms_align_by_stable_source_and_signal_identity() {
     ));
     baseline.add_analysis(attributed_with_id(
         AnalysisResult::new(1, AnalysisType::Transient, "baseline").with_waveforms(vec![
-            crate::state::WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 1.0, 2.0],
@@ -942,13 +942,13 @@ fn regression_waveforms_align_by_stable_source_and_signal_identity() {
     let mut current = SimulationRun::new(41);
     current.add_analysis(attributed_with_id(
         AnalysisResult::new(1, AnalysisType::Transient, "candidate").with_waveforms(vec![
-            crate::state::WaveformData::new(
+            RetainedTrace::new(
                 "v(OUT)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 1.1, 2.1],
                 "#ffbf00",
             ),
-            crate::state::WaveformData::new(
+            RetainedTrace::new(
                 "V(other)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 0.5, 1.0],
@@ -1030,24 +1030,14 @@ fn waveform_envelope_interpolates_within_skew_and_window() {
     let mut baseline = SimulationRun::new(1);
     baseline.add_analysis(attributed_with_id(
         AnalysisResult::new(1, AnalysisType::Transient, "baseline").with_waveforms(vec![
-            crate::state::WaveformData::new(
-                "V(out)",
-                vec![0.0, 1.0, 2.0],
-                vec![0.0, 1.0, 0.0],
-                "#fff",
-            ),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 0.0], "#fff"),
         ]),
         source_instance_id,
     ));
     let mut candidate = SimulationRun::new(2);
     candidate.add_analysis(attributed_with_id(
         AnalysisResult::new(1, AnalysisType::Transient, "candidate").with_waveforms(vec![
-            crate::state::WaveformData::new(
-                "V(out)",
-                vec![0.1, 1.1, 2.1],
-                vec![0.0, 1.0, 0.0],
-                "#ff0",
-            ),
+            RetainedTrace::new("V(out)", vec![0.1, 1.1, 2.1], vec![0.0, 1.0, 0.0], "#ff0"),
         ]),
         source_instance_id,
     ));
@@ -1077,9 +1067,8 @@ fn symmetric_waveform_envelope_rejects_candidate_only_spike_and_missing_coverage
         name: "v(out)".to_owned(),
         occurrence: 0,
     };
-    let baseline =
-        crate::state::WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 0.0], "#fff");
-    let spike = crate::state::WaveformData::new(
+    let baseline = RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 0.0], "#fff");
+    let spike = RetainedTrace::new(
         "V(out)",
         vec![0.0, 0.5, 1.0, 1.5, 2.0],
         vec![0.0, 0.0, 10.0, 0.0, 0.0],
@@ -1104,8 +1093,7 @@ fn symmetric_waveform_envelope_rejects_candidate_only_spike_and_missing_coverage
         .failed()
     );
 
-    let truncated =
-        crate::state::WaveformData::new("V(out)", vec![0.5, 1.0, 1.5], vec![0.0, 0.0, 0.0], "#ff0");
+    let truncated = RetainedTrace::new("V(out)", vec![0.5, 1.0, 1.5], vec![0.0, 0.0, 0.0], "#ff0");
     rule.time_skew_allowance = 0.1;
     assert!(
         evaluate_regression_waveform(
@@ -1130,10 +1118,8 @@ fn waveform_window_evaluates_interpolated_inclusive_boundaries() {
         name: "v(out)".to_owned(),
         occurrence: 0,
     };
-    let baseline =
-        crate::state::WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 0.0], "#fff");
-    let candidate =
-        crate::state::WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![2.0, 0.0, 2.0], "#ff0");
+    let baseline = RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 0.0], "#fff");
+    let candidate = RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], vec![2.0, 0.0, 2.0], "#ff0");
     let mut rule = tolerance_rule(
         target.clone(),
         crate::state::RegressionComparisonMethod::AbsoluteRelativeEnvelope,
@@ -1166,7 +1152,7 @@ fn coverage_union_blocks_dropped_measurement_waveform_analysis_and_orphan_rule()
     baseline.add_analysis(attributed_with_id(
         AnalysisResult::new(1, AnalysisType::Transient, "baseline")
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 10.0)])
-            .with_waveforms(vec![crate::state::WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0],
                 vec![0.0, 1.0],
@@ -1248,9 +1234,8 @@ fn every_supported_waveform_method_rejects_nonfinite_and_nonmonotonic_samples() 
         name: "v(out)".to_owned(),
         occurrence: 0,
     };
-    let baseline =
-        crate::state::WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 0.0], "#fff");
-    let invalid = crate::state::WaveformData::new(
+    let baseline = RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 0.0], "#fff");
+    let invalid = RetainedTrace::new(
         "V(out)",
         vec![0.0, 2.0, 1.0],
         vec![0.0, f64::NAN, 0.0],
@@ -1753,7 +1738,7 @@ fn soa_evidence_analysis() -> AnalysisResult {
             .collect();
         let worst_actual_value = y[EVIDENCE_SAMPLES - 1];
         let worst_time_s = time[EVIDENCE_SAMPLES - 1];
-        waveforms.push(crate::state::WaveformData::new(
+        waveforms.push(RetainedTrace::new(
             crate::results::safety::soa_stress_waveform_name(
                 &device_id,
                 crate::results::safety::SoAParameter::Vds,

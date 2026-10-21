@@ -183,7 +183,7 @@ fn ac_result_conversion_drops_traces_with_mismatched_frequency_shapes() {
     let mut waveforms = std::collections::HashMap::new();
     waveforms.insert(
         "V(bad_real)".to_string(),
-        rspice_simulation::results::WaveformData::new_complex(
+        rspice_simulation::results::SampledWaveform::new_complex(
             "V(bad_real)",
             frequencies.clone(),
             vec![1.0, 2.0],
@@ -192,7 +192,7 @@ fn ac_result_conversion_drops_traces_with_mismatched_frequency_shapes() {
     );
     waveforms.insert(
         "V(bad_imag)".to_string(),
-        rspice_simulation::results::WaveformData::new_complex(
+        rspice_simulation::results::SampledWaveform::new_complex(
             "V(bad_imag)",
             frequencies.clone(),
             vec![1.0, 2.0, 3.0],
@@ -201,7 +201,7 @@ fn ac_result_conversion_drops_traces_with_mismatched_frequency_shapes() {
     );
     waveforms.insert(
         "V(good)".to_string(),
-        rspice_simulation::results::WaveformData::new_complex(
+        rspice_simulation::results::SampledWaveform::new_complex(
             "V(good)",
             frequencies.clone(),
             vec![3.0, 4.0, 5.0],

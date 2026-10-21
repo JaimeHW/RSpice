@@ -764,7 +764,7 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
     };
     let waveforms_into =
         |observation: &mut Observation,
-         waveforms: &HashMap<String, rspice_simulation::results::WaveformData>| {
+         waveforms: &HashMap<String, rspice_simulation::results::SampledWaveform>| {
             for (name, waveform) in waveforms {
                 let key = canonical_signal(name);
                 if waveform.is_complex {

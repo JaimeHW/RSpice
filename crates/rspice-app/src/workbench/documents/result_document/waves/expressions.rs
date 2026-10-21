@@ -405,7 +405,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::WaveformData;
+    use crate::state::RetainedTrace;
 
     #[test]
     fn complex_quick_trace_upgrade_refreshes_cached_values_without_rewriting_evidence() {
@@ -413,9 +413,9 @@ mod tests {
         state.simulation.start_run().add_analysis(
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
                 .with_waveforms(vec![
-                    WaveformData::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+                    RetainedTrace::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
                         .with_complex_components("V(a)", vec![1.0; 2], vec![0.0; 2]),
-                    WaveformData::new("|V(b)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+                    RetainedTrace::new("|V(b)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
                         .with_complex_components("V(b)", vec![-1.0; 2], vec![0.0; 2]),
                 ]),
         );

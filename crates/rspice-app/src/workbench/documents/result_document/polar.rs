@@ -186,7 +186,7 @@ mod tests {
     use super::super::ResultsState;
     use super::*;
     use crate::state::{
-        AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, SimulationRun, WaveformData,
+        AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, RetainedTrace, SimulationRun,
     };
 
     fn four_port_analysis() -> AnalysisResult {
@@ -215,7 +215,7 @@ mod tests {
                 .map(|(re, im)| re.hypot(*im))
                 .collect::<Vec<_>>();
             waveforms.push(
-                WaveformData::new(format!("|{name}|"), frequency.clone(), magnitude, "#00aaff")
+                RetainedTrace::new(format!("|{name}|"), frequency.clone(), magnitude, "#00aaff")
                     .with_complex_components(name, real, imaginary),
             );
         }

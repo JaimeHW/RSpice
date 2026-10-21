@@ -259,7 +259,7 @@ fn corner_columns(labels: &[String]) -> Vec<CornerColumn> {
 
 /// The unit a corner waveform's samples are in: what the producer stated, or
 /// what its name says it is.
-fn waveform_unit(waveform: &crate::state::WaveformData) -> String {
+fn waveform_unit(waveform: &crate::state::RetainedTrace) -> String {
     waveform.unit.clone().unwrap_or_else(|| {
         let name = waveform.name.trim_start_matches('|');
         if name.starts_with("V(") {

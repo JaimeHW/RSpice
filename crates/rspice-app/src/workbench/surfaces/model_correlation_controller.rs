@@ -20,7 +20,7 @@ use crate::state::model_library::{
     CorrelationSuite, FiniteValue, MAX_CORRELATION_ROWS, MAX_CORRELATION_TEXT_BYTES,
     ModelCorrelationState, ModelSourceEvidenceBinding, NonNegativeFinite,
 };
-use crate::state::{AnalysisType, SimulationRunLifecycle, WaveformData};
+use crate::state::{AnalysisType, RetainedTrace, SimulationRunLifecycle};
 use crate::workbench::RSpiceApp;
 
 use crate::workbench::documents::model_correlation::{
@@ -728,7 +728,7 @@ fn retained_simulation_dataset(
 
 fn canonical_simulation_csv(
     analysis_type: AnalysisType,
-    trace: &WaveformData,
+    trace: &RetainedTrace,
 ) -> Result<Vec<u8>, String> {
     rspice_formats::result_csv::encode_correlation_csv(analysis_type, trace, MAX_CORRELATION_ROWS)
         .map_err(|error| error.to_string())
@@ -1093,7 +1093,7 @@ mod tests {
 
     #[test]
     fn retained_waveform_export_is_canonical_parseable_and_unit_aware() {
-        let waveform = WaveformData::new(
+        let waveform = RetainedTrace::new(
             "phase(V(out))",
             vec![1.0, 10.0],
             vec![-12.5, 42.25],

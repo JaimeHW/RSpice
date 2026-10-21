@@ -8,7 +8,7 @@ fn restored_spectrum(value: f64, samples: usize) -> SimulationState {
     let mut simulation = SimulationState::default();
     let run = simulation.start_run();
     run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![RetainedTrace::new(
             "|V(out)|",
             (1..=samples)
                 .map(|sample| sample as f64)

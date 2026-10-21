@@ -141,7 +141,7 @@ pub(crate) fn export_csv(run: &SimulationRun) -> super::ResultSheetCsv {
 mod tests {
     use super::*;
     use crate::state::{
-        AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle, WaveformData,
+        AnalysisResult, AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle,
     };
     use rspice_results::manifest::ManifestRow;
     fn row_for_analysis(analysis: AnalysisResult) -> ManifestRow {
@@ -154,7 +154,7 @@ mod tests {
         run.lifecycle = SimulationRunLifecycle::Completed;
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, label).with_waveforms(vec![
-                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+                RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
             ]),
         );
         let mut state = AppState::default();
@@ -216,7 +216,7 @@ mod tests {
         let run = state.simulation.start_run();
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+                RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
             ]),
         );
         run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
@@ -244,7 +244,7 @@ mod tests {
 
         state.simulation.retained.runs[0].analyses[0]
             .waveforms
-            .push(WaveformData::new(
+            .push(RetainedTrace::new(
                 "I(V1)",
                 vec![0.0, 1.0],
                 vec![0.0, -0.01],
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn retained_view_source_manifest_reuses_large_unchanged_history_clones() {
         let mut state = state_with_run("Transient");
-        state.simulation.retained.runs[0].analyses[0].waveforms = vec![WaveformData::new(
+        state.simulation.retained.runs[0].analyses[0].waveforms = vec![RetainedTrace::new(
             "V(out)",
             (0..100_000).map(f64::from).collect::<Vec<_>>(),
             vec![2.0; 100_000],
@@ -353,7 +353,7 @@ mod tests {
         second.lifecycle = SimulationRunLifecycle::Completed;
         second.add_analysis(
             AnalysisResult::new(2, AnalysisType::Transient, "Second").with_waveforms(vec![
-                WaveformData::new("V(out)", vec![0.0, 1.0], vec![5.0, 6.0], "#ffbd2e"),
+                RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![5.0, 6.0], "#ffbd2e"),
             ]),
         );
         state.simulation.retained.runs.push(second);

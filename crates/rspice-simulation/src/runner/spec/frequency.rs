@@ -8,7 +8,7 @@ use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
 use crate::execution_artifact::ResolvedExecutionDependencies;
 use crate::execution_options::SpecExecutionOptions;
-use crate::results::{PstbFloquetMode, SimulationResult, WaveformData};
+use crate::results::{PstbFloquetMode, SampledWaveform, SimulationResult};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::SpPort;
 use rspice_simulation_contract::config::FrequencySweep;
@@ -1132,7 +1132,7 @@ fn pac_traces_to_complex_waveforms(
     expected_frequencies: &[f64],
     traces: impl IntoIterator<Item = (String, &'static str, Vec<num_complex::Complex64>)>,
     abort: &dyn AbortSignal,
-) -> Result<HashMap<String, WaveformData>, SimulationError> {
+) -> Result<HashMap<String, SampledWaveform>, SimulationError> {
     if expected_frequencies.is_empty()
         || expected_frequencies
             .iter()
@@ -1187,7 +1187,7 @@ fn pac_traces_to_complex_waveforms(
             real.push(value.re);
             imaginary.push(value.im);
         }
-        let waveform = WaveformData {
+        let waveform = SampledWaveform {
             name: name.clone(),
             x_values: frequencies,
             y_values: real,
@@ -1273,7 +1273,7 @@ mod pac_trace_tests {
 }
 
 fn insert_group_delay(
-    waveforms: &mut HashMap<String, WaveformData>,
+    waveforms: &mut HashMap<String, SampledWaveform>,
     group_delay: Option<Vec<(f64, f64)>>,
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
@@ -1386,7 +1386,7 @@ fn complex_waveform(
     frequencies: &[f64],
     values: impl ExactSizeIterator<Item = num_complex::Complex64>,
     abort: &dyn AbortSignal,
-) -> Result<WaveformData, SimulationError> {
+) -> Result<SampledWaveform, SimulationError> {
     let mut real = Vec::with_capacity(values.len());
     let mut imaginary = Vec::with_capacity(values.len());
     for value in values {
@@ -1394,7 +1394,7 @@ fn complex_waveform(
         real.push(value.re);
         imaginary.push(value.im);
     }
-    Ok(WaveformData::new_complex(
+    Ok(SampledWaveform::new_complex(
         name,
         frequencies.to_vec(),
         real,
@@ -1414,7 +1414,7 @@ fn required_execution_option<T>(
 }
 
 fn insert_scalar_waveform(
-    waveforms: &mut HashMap<String, WaveformData>,
+    waveforms: &mut HashMap<String, SampledWaveform>,
     name: String,
     x_values: Vec<f64>,
     y_values: Vec<f64>,
@@ -1423,7 +1423,7 @@ fn insert_scalar_waveform(
 ) {
     waveforms.insert(
         name.clone(),
-        WaveformData {
+        SampledWaveform {
             name,
             x_values,
             y_values,

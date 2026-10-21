@@ -1,6 +1,6 @@
 //! Application presentation and adoption of exact runtime saved outputs.
 
-use crate::state::{AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
+use crate::state::{AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 use rspice_simulation::output_contract::{PreparedSavedOutput, materialization};
 
 #[cfg(test)]
@@ -41,7 +41,7 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
 pub(in crate::simulation) fn materialize_live_saved_outputs(
     analysis: &AnalysisResult,
     contracts: &[PreparedSavedOutput],
-) -> Vec<WaveformData> {
+) -> Vec<RetainedTrace> {
     materialization::materialize_live_saved_outputs(
         &analysis.data,
         contracts,
@@ -64,18 +64,18 @@ fn materialize_saved_outputs(analysis: &mut AnalysisResult, contracts: &[Prepare
 #[cfg(test)]
 fn resolve_raw_probe(
     expression: &str,
-    waveforms: &[WaveformData],
+    waveforms: &[RetainedTrace],
     output_name: &str,
     complex_domain: bool,
-) -> Result<WaveformData, String> {
+) -> Result<RetainedTrace, String> {
     materialization::resolve_raw_probe(expression, waveforms, output_name, complex_domain)
 }
 
 #[cfg(test)]
 fn resample_selected_and_final(
-    waveform: &WaveformData,
+    waveform: &RetainedTrace,
     grid: TransientSelectionGrid,
-) -> Result<WaveformData, String> {
+) -> Result<RetainedTrace, String> {
     materialization::resample_selected_and_final(waveform, grid)
 }
 
@@ -102,8 +102,8 @@ mod tests {
     #[test]
     fn raw_probes_keep_voltage_and_current_namespaces_separate() {
         for voltage_name in ["V(V1)", "V1", "|V(V1)|"] {
-            let voltage = WaveformData::new(voltage_name, vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
-            let current = WaveformData::new("I(V1)", vec![0.0, 1.0], vec![0.0, -0.001], "#fff");
+            let voltage = RetainedTrace::new(voltage_name, vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
+            let current = RetainedTrace::new("I(V1)", vec![0.0, 1.0], vec![0.0, -0.001], "#fff");
             for traces in [
                 vec![current.clone(), voltage.clone()],
                 vec![voltage.clone(), current.clone()],
@@ -165,7 +165,7 @@ mod tests {
         .expect("applies");
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new(
+                RetainedTrace::new(
                     "out",
                     vec![0.0, 0.1, 0.4, 1.0],
                     vec![0.0, 1.0, 4.0, 10.0],
@@ -201,7 +201,7 @@ mod tests {
         .expect("applies");
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new(
+                RetainedTrace::new(
                     "out",
                     vec![0.0, 0.1, 0.4, 0.8, 1.0],
                     vec![0.0, 1.0, 4.0, 8.0, 10.0],
@@ -240,7 +240,7 @@ mod tests {
         .expect("applies");
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
             ]);
         materialize_saved_outputs(&mut analysis, &[contract]);
         assert_eq!(analysis.waveforms.len(), 1);
@@ -267,8 +267,8 @@ mod tests {
         .expect("applies");
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
-                WaveformData::new("output_voltage", vec![0.0, 1.0], vec![9.0, 9.0], "#f00"),
+                RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                RetainedTrace::new("output_voltage", vec![0.0, 1.0], vec![9.0, 9.0], "#f00"),
             ]);
         materialize_saved_outputs(&mut analysis, &[contract]);
         let before_waveforms = analysis.waveforms.clone();
@@ -309,7 +309,7 @@ mod tests {
             .map(|value| (value / 17.0).sin())
             .collect::<Vec<_>>();
         let source = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![WaveformData::new("out", x.clone(), y, "#fff")]);
+            .with_waveforms(vec![RetainedTrace::new("out", x.clone(), y, "#fff")]);
 
         let projected = materialize_live_saved_outputs(&source, &[contract]);
 
@@ -333,7 +333,7 @@ mod tests {
         )
         .expect("prepare")
         .expect("applies");
-        let source = WaveformData::new("out", vec![0.0, 0.1], vec![0.0, 1.0], "#fff");
+        let source = RetainedTrace::new("out", vec![0.0, 0.1], vec![0.0, 1.0], "#fff");
         let mut success = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
             .with_waveforms(vec![source.clone()]);
         materialize_saved_outputs(&mut success, std::slice::from_ref(&contract));
@@ -368,8 +368,8 @@ mod tests {
         .expect("applies");
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
-                WaveformData::new("internal", vec![0.0, 1.0], vec![4.0, 5.0], "#aaa"),
+                RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                RetainedTrace::new("internal", vec![0.0, 1.0], vec![4.0, 5.0], "#aaa"),
             ]);
 
         retain_plan_saved_outputs(&mut analysis, &[contract]);
@@ -395,7 +395,7 @@ mod tests {
                 .expect("applies");
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
             ]);
 
         retain_plan_saved_outputs(&mut analysis, &[contract]);
@@ -412,7 +412,7 @@ mod tests {
     fn empty_plan_output_registry_retains_no_engine_waveforms() {
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
             ]);
 
         retain_plan_saved_outputs(&mut analysis, &[]);
@@ -433,7 +433,7 @@ mod tests {
             .expect("applies");
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+                RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
             ]);
 
         retain_plan_saved_outputs(&mut analysis, &[contract]);
@@ -503,7 +503,7 @@ mod tests {
         let contract = PreparedSavedOutput::prepare(&output, AnalysisInstanceId::new(), &spec)
             .unwrap()
             .unwrap();
-        let source = WaveformData::new("S10_1", vec![1e6], vec![0.5], "#fff")
+        let source = RetainedTrace::new("S10_1", vec![1e6], vec![0.5], "#fff")
             .with_complex_components("S10_1", vec![0.5], vec![-0.1]);
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::SParameter, "SP").with_waveforms(vec![source]);

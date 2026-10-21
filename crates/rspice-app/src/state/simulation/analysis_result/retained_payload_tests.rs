@@ -281,14 +281,14 @@ fn zero_order_pss_exposes_an_authenticated_zero_mode_count() {
 #[test]
 fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {
     let valid = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25, 0.5], "#00aaff")
+        RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.25, 0.5], "#00aaff")
             .with_unit("V")
             .with_complex_components("V(out)", vec![0.25, 0.5], vec![0.0, -0.125]),
     ]);
     assert!(valid.validate_retained_evidence().is_ok());
 
     let misaligned = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25], "#00aaff"),
+        RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.25], "#00aaff"),
     ]);
     assert!(
         misaligned
@@ -305,7 +305,7 @@ fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {
     ] {
         let non_finite =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25, value], "#00aaff"),
+                RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.25, value], "#00aaff"),
             ]);
         assert!(
             non_finite
@@ -316,8 +316,8 @@ fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {
     }
 
     let duplicated = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new("V(out)", vec![0.0], vec![0.25], "#00aaff"),
-        WaveformData::new("V(out)", vec![0.0], vec![0.5], "#ffaa00"),
+        RetainedTrace::new("V(out)", vec![0.0], vec![0.25], "#00aaff"),
+        RetainedTrace::new("V(out)", vec![0.0], vec![0.5], "#ffaa00"),
     ]);
     assert!(
         duplicated
@@ -327,7 +327,7 @@ fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {
     );
 
     let bad_complex = AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-        WaveformData::new("V(out)", vec![1.0, 10.0], vec![0.25, 0.5], "#00aaff")
+        RetainedTrace::new("V(out)", vec![1.0, 10.0], vec![0.25, 0.5], "#00aaff")
             .with_complex_components("V(out)", vec![0.25], vec![0.0, -0.125]),
     ]);
     assert!(

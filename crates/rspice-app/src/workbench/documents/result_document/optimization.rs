@@ -223,7 +223,7 @@ fn paint_selected_candidate(ui: &mut Ui, state: &AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisType, WaveformData};
+    use crate::state::{AnalysisType, RetainedTrace};
 
     /// A retained optimizer run of `iterations` candidates over one variable.
     fn optimization_state(iterations: usize) -> AppState {
@@ -246,8 +246,8 @@ mod tests {
                 converged: true,
             })
             .with_waveforms(vec![
-                WaveformData::new("OPT_COST", axis.clone(), cost, "#0af"),
-                WaveformData::new("OPT_GAIN", axis, gain, "#fa0"),
+                RetainedTrace::new("OPT_COST", axis.clone(), cost, "#0af"),
+                RetainedTrace::new("OPT_GAIN", axis, gain, "#fa0"),
             ]);
         let mut run = SimulationRun::new(5);
         run.add_analysis(analysis);

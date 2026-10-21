@@ -1,6 +1,5 @@
 //! Generation-bounded waveform projection cache over explicit presentation inputs.
 use super::{FamilyTraceVisibilityKey, ProjectionOptions, StripModel, extent, stable_hash};
-use crate::waveform::WaveformData;
 use rspice_results::{
     analysis_result::AnalysisResult,
     analysis_type::AnalysisType,
@@ -8,6 +7,7 @@ use rspice_results::{
     family_projection::SourceSampleSelection,
     result_presentation::{ResultViewer, SourceWaveformPresentationKey},
     run::SimulationRun,
+    waveform::RetainedTrace,
 };
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::product::DatasetId;
@@ -150,7 +150,7 @@ impl ModelsCache {
 /// Apply quick-view presentation overrides after constructing the immutable
 /// dataset projection. Family visibility remains the more specific gate, so
 /// revealing a source never accidentally reveals a hidden family member.
-pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<WaveformData>>>(
+pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
     models: &mut [StripModel],
     active_run: Option<&SimulationRun<A>>,
     overrides: &HashMap<SourceWaveformPresentationKey, bool>,

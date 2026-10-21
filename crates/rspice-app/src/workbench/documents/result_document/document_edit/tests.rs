@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::results::visualization_document::{LinkKind, Pane};
-use crate::state::{AnalysisType, SimulationRun, SimulationRunLifecycle, WaveformData};
+use crate::state::{AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle};
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
 fn transient_run(id: u64) -> SimulationRun {
@@ -10,8 +10,8 @@ fn transient_run(id: u64) -> SimulationRun {
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0], "#fff"),
-            WaveformData::new("V(in)", vec![0.0, 0.5, 1.0], vec![1.0, 0.0, 1.0], "#0ff"),
+            RetainedTrace::new("V(out)", vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0], "#fff"),
+            RetainedTrace::new("V(in)", vec![0.0, 0.5, 1.0], vec![1.0, 0.0, 1.0], "#0ff"),
         ]),
     );
     run
@@ -334,8 +334,8 @@ fn baseline_run(id: u64) -> SimulationRun {
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 0.5, 1.0], vec![0.0, 1.2, 0.0], "#fff"),
-            WaveformData::new("V(in)", vec![0.0, 0.5, 1.0], vec![1.0, 0.0, 1.0], "#0ff"),
+            RetainedTrace::new("V(out)", vec![0.0, 0.5, 1.0], vec![0.0, 1.2, 0.0], "#fff"),
+            RetainedTrace::new("V(in)", vec![0.0, 0.5, 1.0], vec![1.0, 0.0, 1.0], "#0ff"),
         ]),
     );
     run
@@ -461,7 +461,7 @@ fn compare_is_refused_without_a_compatible_baseline() {
     incompatible.lifecycle = SimulationRunLifecycle::Completed;
     incompatible.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(other)",
                 vec![0.0, 0.25, 1.0],
                 vec![0.0, 1.0, 0.0],
@@ -610,7 +610,7 @@ fn soa_run(id: u64) -> SimulationRun {
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Soa, "SOA")
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "V(out)",
                 SOA_TIMES.to_vec(),
                 vec![0.0, 1.0, 2.0, 1.0, 0.0],

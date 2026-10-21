@@ -1,7 +1,7 @@
 //! Network-matrix controls, exact cell display and sampled diagnostic presentation.
 
-use crate::waveform::WaveformData;
 use egui::Ui;
+use rspice_results::waveform::RetainedTrace;
 use rspice_results::{
     analysis_result::AnalysisResult,
     analysis_type::AnalysisType,
@@ -147,7 +147,7 @@ fn heat_legend(ui: &mut Ui, floor: &mut f64, palette: &rspice_ui_kit::palette::P
 /// Draw a validated, aligned matrix; the host supplies its existing exact exporter.
 pub fn show(
     ui: &mut Ui,
-    analysis: &AnalysisResult<WaveformData>,
+    analysis: &AnalysisResult<RetainedTrace>,
     matrix: &NetworkLayout,
     controls: &mut NetworkMatrixControls,
     angle_display: AngleDisplay,

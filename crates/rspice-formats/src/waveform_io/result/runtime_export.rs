@@ -1,13 +1,13 @@
 //! Touchstone datasets from completed sampled S-parameter output.
 
 use crate::waveform_io::{SignalType, TouchstoneError, WaveformDataset, WaveformSignal};
-use rspice_results::waveform::WaveformData;
+use rspice_results::waveform::SampledWaveform;
 use std::collections::HashMap;
 
 /// Retained port references take precedence over the supplied configuration fallback.
 pub fn project_sparameter_waveforms(
     frequencies: &[f64],
-    waveforms: &HashMap<String, WaveformData>,
+    waveforms: &HashMap<String, SampledWaveform>,
     references: Option<&[f64]>,
     noise_temperature: Option<f64>,
     z0: f64,
@@ -18,7 +18,7 @@ pub fn project_sparameter_waveforms(
         return Err("frequency vector is empty".into());
     }
 
-    let mut entries: std::collections::HashMap<(usize, usize), &WaveformData> =
+    let mut entries: std::collections::HashMap<(usize, usize), &SampledWaveform> =
         std::collections::HashMap::new();
     let mut max_port = 0usize;
     for (name, waveform) in waveforms {
@@ -152,7 +152,7 @@ pub fn project_sparameter_waveforms(
 fn push_complex_signal_pair(
     dataset: &mut WaveformDataset,
     name: &str,
-    waveform: &WaveformData,
+    waveform: &SampledWaveform,
 ) -> Result<(), TouchstoneError> {
     let imag = waveform
         .y_imag

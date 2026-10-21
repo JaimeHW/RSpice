@@ -8,7 +8,7 @@ fn transient(x: Vec<f64>, y: Vec<f64>) -> AppState {
     let run = state.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient")
-            .with_waveforms(vec![WaveformData::new("V(out)", x, y, "#fff")]),
+            .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]),
     );
     state.simulation.complete_run();
     state

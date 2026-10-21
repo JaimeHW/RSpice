@@ -94,8 +94,8 @@ use rspice_simulation_contract::config::{
 };
 
 use crate::results::{
-    DcOpResult, MonteCarloVariableResult, SimulationResult, TransferFunctionQuantity,
-    TransferFunctionScalar, TransientEventHistory, WaveformData,
+    DcOpResult, MonteCarloVariableResult, SampledWaveform, SimulationResult,
+    TransferFunctionQuantity, TransferFunctionScalar, TransientEventHistory,
 };
 use crate::status::{SimulationProgress, SimulationStatus};
 use rspice_results::noise::NoiseSummary;

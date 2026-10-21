@@ -18,8 +18,8 @@ use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, Cell, CellViewRef, LayoutEdit,
     LayoutInstance, LayoutObjectId, LayoutOrientation, LayoutPoint, LayoutTransform, OpenCellView,
     OperatingPointValue, PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
-    SimulationRun, SimulationRunLifecycle, SimulationRunProvenance, SimulationState, View,
-    ViewType, WaveformData,
+    RetainedTrace, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance, SimulationState,
+    View, ViewType,
 };
 use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisResultPayload, ExecutionTarget, NoiseContributorRow,
@@ -1196,7 +1196,7 @@ fn project_file_round_trips_persisted_simulation_results() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let mut simulation = SimulationState::default();
-    let waveform = WaveformData::new(
+    let waveform = RetainedTrace::new(
         "|V(out)|",
         vec![1.0, 10.0, 100.0],
         vec![2.0, 3.0, 4.0],
@@ -1279,7 +1279,7 @@ fn project_file_round_trips_exact_pac_branch_current_trace() {
     let mut simulation = SimulationState::default();
     let exact_real = f64::from_bits(1);
     let exact_imag = -f64::from_bits(2);
-    let current = WaveformData::new(
+    let current = RetainedTrace::new(
         "|I(V1)[sb=+0]|",
         vec![1.0, 10.0],
         vec![5.0e-4, exact_real],
@@ -1336,7 +1336,7 @@ fn project_results_round_trip_sp_noise_reference_authority() {
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::SParameter, "SP")
             .with_waveforms(vec![
-                WaveformData::new("S11", vec![1.0e6, 1.0e9], vec![0.25, 0.5], "#00aaff")
+                RetainedTrace::new("S11", vec![1.0e6, 1.0e9], vec![0.25, 0.5], "#00aaff")
                     .with_complex_components("S11", vec![0.25, 0.5], vec![-0.1, -0.2]),
             ])
             .with_family_metadata(metadata.clone()),
@@ -1371,7 +1371,7 @@ fn retained_result_data_digests_round_trip_and_reject_sample_tampering() {
         .expect("fixture run completes");
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![1.0, 10.0], vec![0.25, 0.5], "#00aaff")
+            RetainedTrace::new("V(out)", vec![1.0, 10.0], vec![0.25, 0.5], "#00aaff")
                 .with_complex_components("V(out)", vec![0.25, 0.5], vec![-0.75, -0.5]),
         ]),
     );
@@ -1727,7 +1727,7 @@ fn schema_v8_digests_are_authenticated_before_v9_resealing() {
         .expect("fixture run completes");
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
     seal_legacy_unattributed(&mut run);
@@ -2054,7 +2054,7 @@ fn schema_v7_digest_migration_is_deterministic_and_rejects_anachronistic_fields(
         .expect("fixture run completes");
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
     seal_legacy_unattributed(&mut run);

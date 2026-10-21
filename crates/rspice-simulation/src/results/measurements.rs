@@ -580,7 +580,7 @@ fn measurement_from_dc_op(op: &DcOpResult, key: &str) -> Option<f64> {
 }
 
 fn waveform_last_value_by_name(
-    waveforms: &HashMap<String, WaveformData>,
+    waveforms: &HashMap<String, SampledWaveform>,
     key: &str,
 ) -> Option<f64> {
     last_waveform_by_name(waveforms, key)?
@@ -590,9 +590,9 @@ fn waveform_last_value_by_name(
 }
 
 fn last_waveform_by_name<'a>(
-    waveforms: &'a HashMap<String, WaveformData>,
+    waveforms: &'a HashMap<String, SampledWaveform>,
     key: &str,
-) -> Option<&'a WaveformData> {
+) -> Option<&'a SampledWaveform> {
     let last = |name: &str| named_value(waveforms, name).filter(|wave| !wave.y_values.is_empty());
     last(key)
         .or_else(|| {

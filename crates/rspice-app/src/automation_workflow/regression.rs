@@ -5,8 +5,8 @@ use sha2::{Digest, Sha256};
 use crate::product::ContentDigest;
 use crate::state::{
     AnalysisResultSourceDomain, RegressionComparisonMethod, RegressionComparisonWindow,
-    RegressionTargetKind, RegressionTargetSelector, RegressionToleranceRule, SimulationRun,
-    WaveformData,
+    RegressionTargetKind, RegressionTargetSelector, RegressionToleranceRule, RetainedTrace,
+    SimulationRun,
 };
 
 use super::ComparisonEvidence;
@@ -18,7 +18,7 @@ const MAX_RETAINED_ISSUE_BYTES: usize = 768;
 #[derive(Clone)]
 struct OwnedWaveformObservation<'run> {
     target: RegressionTargetSelector,
-    waveform: &'run WaveformData,
+    waveform: &'run RetainedTrace,
 }
 
 /// Compare the complete union of baseline, candidate, and configured waveform
@@ -176,7 +176,7 @@ fn waveform_observations(run: &SimulationRun) -> Result<Vec<OwnedWaveformObserva
 fn find_observation<'run>(
     observations: &'run [OwnedWaveformObservation<'run>],
     target: &RegressionTargetSelector,
-) -> Option<&'run WaveformData> {
+) -> Option<&'run RetainedTrace> {
     observations
         .iter()
         .find(|observation| observation.target == *target)
@@ -241,7 +241,7 @@ fn retain_issue(issues: &mut Vec<String>, issue: String) {
     }
 }
 
-fn validate_waveform(waveform: &WaveformData) -> Result<(), String> {
+fn validate_waveform(waveform: &RetainedTrace) -> Result<(), String> {
     if waveform.x.len() != waveform.y.len() {
         return Err(format!(
             "axis/value length mismatch ({} x values, {} y values)",
@@ -267,8 +267,8 @@ fn validate_waveform(waveform: &WaveformData) -> Result<(), String> {
 }
 
 fn evaluate_waveform(
-    baseline: &WaveformData,
-    candidate: &WaveformData,
+    baseline: &RetainedTrace,
+    candidate: &RetainedTrace,
     rule: &RegressionToleranceRule,
 ) -> Result<(), String> {
     rule.validate()
@@ -535,11 +535,11 @@ mod tests {
         ContentDigest::from_bytes([byte; 32])
     }
 
-    fn waveform(name: &str, y: Vec<f64>) -> WaveformData {
-        WaveformData::new(name, vec![0.0, 1.0], y, "#ffffff")
+    fn waveform(name: &str, y: Vec<f64>) -> RetainedTrace {
+        RetainedTrace::new(name, vec![0.0, 1.0], y, "#ffffff")
     }
 
-    fn run(instance_id: AnalysisInstanceId, waveforms: Vec<WaveformData>) -> SimulationRun {
+    fn run(instance_id: AnalysisInstanceId, waveforms: Vec<RetainedTrace>) -> SimulationRun {
         let provenance = AnalysisResultProvenance::new(
             instance_id,
             ObjectRevision::INITIAL,

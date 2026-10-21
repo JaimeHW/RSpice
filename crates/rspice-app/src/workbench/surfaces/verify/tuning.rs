@@ -916,8 +916,8 @@ fn tuning_response_pane(ui: &mut Ui, app: &RSpiceApp) {
 
 fn tuning_waveform_preview(
     ui: &mut Ui,
-    baseline: Option<&crate::state::WaveformData>,
-    candidate: Option<&crate::state::WaveformData>,
+    baseline: Option<&crate::state::RetainedTrace>,
+    candidate: Option<&crate::state::RetainedTrace>,
     sweep_unit: &str,
 ) {
     let t = Tokens::get(ui.ctx());
@@ -926,7 +926,7 @@ fn tuning_waveform_preview(
     if rect.width() <= 1.0 || rect.height() <= 1.0 {
         return;
     }
-    let valid_waveform = |waveform: &&crate::state::WaveformData| {
+    let valid_waveform = |waveform: &&crate::state::RetainedTrace| {
         waveform.x.len() == waveform.y.len()
             && waveform.x.len() > 1
             && waveform

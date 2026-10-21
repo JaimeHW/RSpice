@@ -186,13 +186,13 @@ mod tests {
         let analysis =
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
                 .with_waveforms(vec![
-                    crate::state::WaveformData::new(
+                    crate::state::RetainedTrace::new(
                         "V(out)",
                         vec![0.0, 1.0],
                         vec![1.0, 2.0],
                         "#00aaff",
                     ),
-                    crate::state::WaveformData::new(
+                    crate::state::RetainedTrace::new(
                         "V(in)",
                         vec![0.0, 1.0],
                         vec![1.0, 1.0],

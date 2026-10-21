@@ -72,8 +72,8 @@ use crate::results::visualization_document::{
     FamilyXDimension, FamilyXOrdering, MissingPointPolicy, TypedValue, ValueType,
 };
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance, SimulationRun,
-    WaveformData,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance, RetainedTrace,
+    SimulationRun,
 };
 use crate::workbench::ChoicePreference;
 use rspice_results::family_projection::FamilyManifest;
@@ -108,7 +108,7 @@ fn family_policy() -> FamilyPresentationPolicy {
 
 fn family_analysis(values: Vec<f64>) -> AnalysisResult {
     AnalysisResult::new(41, AnalysisType::Corner, "PVT")
-        .with_waveforms(vec![WaveformData::new(
+        .with_waveforms(vec![RetainedTrace::new(
             "V(out)",
             vec![101.0, 102.0, 103.0, 104.0, 105.0, 106.0],
             values,
@@ -137,7 +137,7 @@ fn marker_fixture() -> AppState {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
         ]),
     );
     state
@@ -152,8 +152,8 @@ fn retained_and_live_expressions_align_real_analysis_waveforms() {
     let second = vec![0.0, 2.0, 3.0];
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(a)", first.clone(), first, "#fff"),
-            WaveformData::new("V(b)", second.clone(), second, "#0af"),
+            RetainedTrace::new("V(a)", first.clone(), first, "#fff"),
+            RetainedTrace::new("V(b)", second.clone(), second, "#0af"),
         ]),
     );
     state.simulation.complete_run();
@@ -182,7 +182,7 @@ fn retained_and_live_expressions_align_real_analysis_waveforms() {
 fn deep_readout_fixture(trace_count: usize) -> AppState {
     let waveforms = (0..trace_count)
         .map(|index| {
-            WaveformData::new(
+            RetainedTrace::new(
                 format!("V(out{index})"),
                 vec![0.0, 1.0],
                 vec![index as f64, index as f64 + 1.0],
@@ -204,8 +204,8 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
-            WaveformData::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -244,7 +244,7 @@ fn a_readout_states_the_value_while_a_table_column_pads_it() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.5], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.5], "#fff"),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -298,8 +298,8 @@ fn a_slope_is_named_by_its_own_unit_not_the_strips() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
-            WaveformData::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -341,8 +341,8 @@ fn a_copied_value_is_named_by_its_own_unit_not_the_strips() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
-            WaveformData::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
         ]),
     );
     state.ui.results.session.cursor_strip = Some(0);
@@ -369,7 +369,7 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
     // would reach for "k" and paste "2 knV/√Hz".
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1.0, 10.0], vec![4.0e-12, 4.0e-12], "#fff"),
+            RetainedTrace::new("onoise", vec![1.0, 10.0], vec![4.0e-12, 4.0e-12], "#fff"),
         ]),
     );
     state.ui.results.session.cursor_strip = Some(0);
@@ -548,7 +548,7 @@ fn marker_identity(state: &AppState) -> (AnalysisPresentationKey, WaveformPresen
 #[test]
 fn a_marker_never_migrates_to_a_different_dataset_after_a_re_run() {
     let waveforms = || {
-        vec![WaveformData::new(
+        vec![RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0, 5.0],
@@ -807,9 +807,9 @@ fn mixed_units_on_one_analysis_become_separate_panes() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
-            WaveformData::new("I(R1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#fff"),
-            WaveformData::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            RetainedTrace::new("I(R1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#fff"),
+            RetainedTrace::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
     let mut derived = DerivedSeries::default();
@@ -841,8 +841,8 @@ fn one_unit_stays_one_pane() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
-            WaveformData::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            RetainedTrace::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
     let mut derived = DerivedSeries::default();
@@ -867,8 +867,8 @@ fn a_hidden_trace_keeps_its_unit_pane_available_for_reactivation() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
-            WaveformData::new("I(R1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
+            RetainedTrace::new("I(R1)", vec![0.0, 1.0], vec![0.0, 1.0e-3], "#fff"),
         ]),
     );
     if let Some(run) = simulation.active_run_mut()
@@ -904,8 +904,8 @@ fn a_bode_pair_stacks_magnitude_over_phase() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-            WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
-            WaveformData::new("phase(V(out))", vec![1.0, 10.0], vec![0.0, -45.0], "#fff"),
+            RetainedTrace::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
+            RetainedTrace::new("phase(V(out))", vec![1.0, 10.0], vec![0.0, -45.0], "#fff"),
         ]),
     );
     let mut derived = DerivedSeries::default();
@@ -936,7 +936,7 @@ fn noise_analyses_project_psd_into_an_nv_sqrt_hz_pane() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "NOISE").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
+            RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
         ]),
     );
     let mut derived = DerivedSeries::default();
@@ -966,7 +966,7 @@ fn noise_input_units_use_current_density_without_a_second_si_prefix() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "NOISE").with_waveforms(vec![
-            WaveformData::new("inoise", vec![1.0, 10.0], vec![1e-18, 4e-18], "#fff")
+            RetainedTrace::new("inoise", vec![1.0, 10.0], vec![1e-18, 4e-18], "#fff")
                 .with_unit("A²/Hz"),
         ]),
     );
@@ -991,8 +991,8 @@ fn phase_panes_order_after_quantity_panes_regardless_of_waveform_order() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-            WaveformData::new("phase(V(out))", vec![1.0, 10.0], vec![0.0, -45.0], "#fff"),
-            WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
+            RetainedTrace::new("phase(V(out))", vec![1.0, 10.0], vec![0.0, -45.0], "#fff"),
+            RetainedTrace::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
         ]),
     );
     let mut derived = DerivedSeries::default();
@@ -1021,7 +1021,7 @@ fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
+            RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
         ]),
     );
     let mut derived = DerivedSeries::default();
@@ -1049,8 +1049,8 @@ fn hbnoise_figure_keeps_decibels_in_a_separate_pane_from_density() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1e3, 1e4], vec![1e-18, 4e-18], "#fff"),
-            WaveformData::new("Noise figure (SSB)", vec![1e3, 1e4], vec![0.0, 3.0], "#fff")
+            RetainedTrace::new("onoise", vec![1e3, 1e4], vec![1e-18, 4e-18], "#fff"),
+            RetainedTrace::new("Noise figure (SSB)", vec![1e3, 1e4], vec![0.0, 3.0], "#fff")
                 .with_unit("dB"),
         ]),
     );
@@ -1079,7 +1079,7 @@ fn family_selection_projects_exact_source_rows_without_mutating_the_run() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(41, AnalysisType::Corner, "PVT").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 vec![1.0, 2.0, 3.0, 4.0],
                 vec![10.0, 20.0, 30.0, 40.0],
@@ -1400,7 +1400,7 @@ fn filtered_overlay_uses_typed_ast_and_ignores_excluded_duplicate_x_rows() {
 
 fn ac_result(source_id: AnalysisInstanceId, values: [f64; 2], snapshot_byte: u8) -> AnalysisResult {
     AnalysisResult::new(1, AnalysisType::Ac, "AC")
-        .with_waveforms(vec![WaveformData::new(
+        .with_waveforms(vec![RetainedTrace::new(
             "V(out)",
             vec![1.0, 10.0],
             values.to_vec(),
@@ -1472,9 +1472,9 @@ fn overlays_pair_two_same_kind_results_by_exact_source_instance() {
 
 #[test]
 fn complex_display_policy_uses_original_components_or_radian_phase() {
-    let magnitude = WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 10.0], "#fff")
+    let magnitude = RetainedTrace::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 10.0], "#fff")
         .with_complex_components("V(out)", vec![0.8, 6.0], vec![0.6, 8.0]);
-    let phase = WaveformData::new("phase(V(out))", vec![1.0, 10.0], vec![180.0, 90.0], "#aaa");
+    let phase = RetainedTrace::new("phase(V(out))", vec![1.0, 10.0], vec![180.0, 90.0], "#aaa");
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![magnitude, phase]),
@@ -1504,7 +1504,7 @@ fn complex_display_policy_uses_original_components_or_radian_phase() {
 /// frequency axis, and each choice changes only what it names.
 #[test]
 fn ac_magnitude_and_frequency_axis_follow_the_reader_choice() {
-    let magnitude = WaveformData::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 10.0], "#fff");
+    let magnitude = RetainedTrace::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 10.0], "#fff");
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![magnitude]),
@@ -1551,7 +1551,7 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1.0, 10.0], vec![2.0e-18, 4.0e-18], "#fff"),
+            RetainedTrace::new("onoise", vec![1.0, 10.0], vec![2.0e-18, 4.0e-18], "#fff"),
         ]),
     );
     state.ui.results.session.cursor_strip = Some(0);
@@ -1579,7 +1579,7 @@ fn inline_readout_speaks_only_for_a_collapsed_strip() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 1.0], "#fff"),
         ]),
     );
     state.ui.results.session.cursor_strip = Some(0);
@@ -1614,11 +1614,11 @@ fn legend_cursor_values_stay_on_the_strip_that_owns_the_cursor() {
     let run = state.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
         ]),
     );
     run.add_analysis(
-        AnalysisResult::new(2, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC").with_waveforms(vec![RetainedTrace::new(
             "V(in)",
             vec![1.0, 10.0],
             vec![1.0, 0.5],
@@ -1653,12 +1653,12 @@ fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
     let run = state.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
     run.add_analysis(AnalysisResult::new(2, AnalysisType::DcOp, "OP"));
     run.add_analysis(
-        AnalysisResult::new(3, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+        AnalysisResult::new(3, AnalysisType::Ac, "AC").with_waveforms(vec![RetainedTrace::new(
             "V(in)",
             vec![1.0, 10.0],
             vec![1.0, 0.5],
@@ -1667,7 +1667,7 @@ fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
     );
     run.add_analysis(
         AnalysisResult::new(4, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            WaveformData::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 4.0e-18], "#f80"),
+            RetainedTrace::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 4.0e-18], "#f80"),
         ]),
     );
     state.ui.results.session.viewer = super::super::ResultViewer::NoiseContrib;
@@ -1695,13 +1695,13 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
         run.add_analysis(
             AnalysisResult::new(id, analysis_type, analysis_type.short_label()).with_waveforms(
                 vec![
-                    WaveformData::new(
+                    RetainedTrace::new(
                         format!("|{signal}|"),
                         vec![1.0, 10.0],
                         vec![10.0, 1.0],
                         "#0af",
                     ),
-                    WaveformData::new(
+                    RetainedTrace::new(
                         format!("phase({signal})"),
                         vec![1.0, 10.0],
                         vec![-90.0, -135.0],
@@ -1713,25 +1713,27 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
     }
     run.add_analysis(
         AnalysisResult::new(3, AnalysisType::Stb, "STB").with_waveforms(vec![
-            WaveformData::new("Loop Gain (dB)", vec![1.0, 10.0], vec![40.0, 0.0], "#0af")
+            RetainedTrace::new("Loop Gain (dB)", vec![1.0, 10.0], vec![40.0, 0.0], "#0af")
                 .with_unit("dB"),
-            WaveformData::new(
+            RetainedTrace::new(
                 "Loop Phase (deg)",
                 vec![1.0, 10.0],
                 vec![-90.0, -135.0],
                 "#fa0",
             )
             .with_unit("°"),
-            WaveformData::new("|Nyquist L(jw)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
+            RetainedTrace::new("|Nyquist L(jw)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
         ]),
     );
     run.add_analysis(
-        AnalysisResult::new(4, AnalysisType::Pstb, "PSTB").with_waveforms(vec![WaveformData::new(
-            "Stability Margin (dB)",
-            vec![0.0, 1.0],
-            vec![12.0, 4.0],
-            "#0af",
-        )]),
+        AnalysisResult::new(4, AnalysisType::Pstb, "PSTB").with_waveforms(vec![
+            RetainedTrace::new(
+                "Stability Margin (dB)",
+                vec![0.0, 1.0],
+                vec![12.0, 4.0],
+                "#0af",
+            ),
+        ]),
     );
 
     state.ui.results.session.viewer = super::super::ResultViewer::Bode;
@@ -1766,7 +1768,7 @@ fn waves_models_include_pss_and_envelope_complex_data() {
     let mut state = AppState::default();
     let run = state.simulation.start_run();
     run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_waveforms(vec![WaveformData::new(
+        AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_waveforms(vec![RetainedTrace::new(
             "V(pss)",
             vec![0.0, 1.0],
             vec![0.0, 1.0],
@@ -1775,9 +1777,9 @@ fn waves_models_include_pss_and_envelope_complex_data() {
     );
     run.add_analysis(
         AnalysisResult::new(2, AnalysisType::Envelope, "ENV").with_waveforms(vec![
-            WaveformData::new("|V(env)|", vec![0.0, 1.0], vec![1.0, 2.0], "#fa0")
+            RetainedTrace::new("|V(env)|", vec![0.0, 1.0], vec![1.0, 2.0], "#fa0")
                 .with_complex_components("V(env)", vec![1.0, 0.0], vec![0.0, 2.0]),
-            WaveformData::new("phase(V(env))", vec![0.0, 1.0], vec![0.0, 90.0], "#fff")
+            RetainedTrace::new("phase(V(env))", vec![0.0, 1.0], vec![0.0, 90.0], "#fff")
                 .with_unit("°"),
         ]),
     );
@@ -1809,7 +1811,7 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out) HD3(dBc)",
                 vec![1.0e3, 1.0e4],
                 vec![-80.0, -60.0],

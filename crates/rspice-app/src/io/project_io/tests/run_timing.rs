@@ -6,7 +6,7 @@ fn timed_results() -> ProjectSimulationResults {
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            WaveformData::new("V(out)", vec![0.0, 1.0], vec![1.0, 2.0], "#ffffff"),
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![1.0, 2.0], "#ffffff"),
         ]),
     );
     seal_legacy_unattributed(&mut run);

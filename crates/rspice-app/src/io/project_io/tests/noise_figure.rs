@@ -29,7 +29,7 @@ fn sampled_pnoise_studio_results_round_trip_and_reject_changed_geometry() {
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Pnoise, "Sampled noise")
             .with_waveforms(vec![
-                crate::state::WaveformData::new(
+                crate::state::RetainedTrace::new(
                     "onoise",
                     vec![10.0, 100.0],
                     vec![1e-20, 1e-20],
@@ -146,7 +146,7 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE")
                 .with_waveforms(vec![
-                    crate::state::WaveformData::new(
+                    crate::state::RetainedTrace::new(
                         "Noise figure (SSB)",
                         figure.frequencies.clone(),
                         figure.decibels.clone(),
@@ -262,7 +262,7 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
             .unwrap();
         let mut wave =
-            crate::state::WaveformData::new("inoise", vec![1e3, 1e4], vec![1e-21, 1e-21], "#fff");
+            crate::state::RetainedTrace::new("inoise", vec![1e3, 1e4], vec![1e-21, 1e-21], "#fff");
         if let Some(quantity) = quantity {
             wave = wave.with_unit(quantity.density_unit());
         }

@@ -17,8 +17,8 @@ use egui::{Rect, vec2};
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, FamilyMeasurementEvidence,
-    FamilyMemberId, FamilyMemberMeasurements, SimulationRun, SimulationRunLifecycle, SpecEntry,
-    SpecPointScope, WaveformData,
+    FamilyMemberId, FamilyMemberMeasurements, RetainedTrace, SimulationRun, SimulationRunLifecycle,
+    SpecEntry, SpecPointScope,
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{VerificationPage, Workspace};
@@ -312,7 +312,7 @@ fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)])
     let time = step_time();
     AnalysisResult::new(1, AnalysisType::Transient, "Step")
         .with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 time.clone(),
                 step_response(damping, natural_rad_s, &time),
@@ -606,13 +606,13 @@ pub(super) fn corner_app() -> RSpiceApp {
             member_measurements: members,
         })
         .with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(out)",
                 axis.clone(),
                 vec![0.912, 0.884, 0.901, 0.934, 0.951, 0.903, 0.915],
                 "#4c9be8",
             ),
-            WaveformData::new(
+            RetainedTrace::new(
                 "V(bias)",
                 axis,
                 vec![0.612, 0.655, 0.641, 0.578, 0.590, 0.620, 0.606],
@@ -711,7 +711,7 @@ pub(super) fn soa_app() -> RSpiceApp {
         };
         let worst_time_s = time[SAMPLES - 1];
         waveforms.push(
-            WaveformData::new(
+            RetainedTrace::new(
                 crate::results::safety::soa_stress_waveform_name(
                     device,
                     parameter.runtime_parameter(),
@@ -790,9 +790,9 @@ pub(super) fn optimization_app() -> RSpiceApp {
     app_with_run(
         AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
             .with_waveforms(vec![
-                WaveformData::new("OPT_COST", iterations.clone(), cost, "#4c9be8"),
-                WaveformData::new("OPT_W1", iterations.clone(), width.clone(), "#d0a03c"),
-                WaveformData::new("OPT_IBIAS", iterations.clone(), bias.clone(), "#8bc34a"),
+                RetainedTrace::new("OPT_COST", iterations.clone(), cost, "#4c9be8"),
+                RetainedTrace::new("OPT_W1", iterations.clone(), width.clone(), "#d0a03c"),
+                RetainedTrace::new("OPT_IBIAS", iterations.clone(), bias.clone(), "#8bc34a"),
             ])
             .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
                 iterations,

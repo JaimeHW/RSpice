@@ -192,7 +192,7 @@ impl CalculatorPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::WaveformData;
+    use crate::state::RetainedTrace;
 
     #[test]
     fn complex_copy_round_trips_both_components_and_invalid_samples_are_not_copyable() {
@@ -217,7 +217,7 @@ mod tests {
 
     fn simulation_with_a_ramp() -> SimulationState {
         let mut simulation = SimulationState::default();
-        simulation.view.waveforms = vec![WaveformData::new(
+        simulation.view.waveforms = vec![RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0, 2.0],
             vec![0.0, 1.0, 2.0],

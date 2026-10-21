@@ -464,7 +464,7 @@ fn project_named_with_results(path: &str) -> ProjectSnapshot {
         .project
         .set_path(std::path::PathBuf::from(path));
 
-    let waveform = crate::state::WaveformData::new(
+    let waveform = crate::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, 0.5, 1.0],
@@ -491,7 +491,7 @@ fn project_named_with_results(path: &str) -> ProjectSnapshot {
 }
 
 fn seed_specialized_viewer_caches(state: &mut AppState) {
-    let waveform = crate::state::WaveformData::new(
+    let waveform = crate::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, 0.5, 1.0],
@@ -1258,7 +1258,7 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
 #[test]
 fn save_project_to_path_writes_simulation_results() {
     let mut state = AppState::default();
-    let waveform = crate::state::WaveformData::new(
+    let waveform = crate::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, 1.5, 3.0],
@@ -1306,7 +1306,7 @@ fn save_project_to_path_round_trips_result_markers() {
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
 
     let mut state = AppState::default();
-    let waveform = crate::state::WaveformData::new(
+    let waveform = crate::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, 1.5, 3.0],
@@ -1397,7 +1397,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     let mut run = crate::state::SimulationRun::new(12);
     run.add_analysis(
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC").with_waveforms(
-            vec![crate::state::WaveformData::new(
+            vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 vec![1.0, 10.0, 100.0],
                 vec![1.0, 0.5, 0.1],
@@ -1476,7 +1476,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     let mut run = crate::state::SimulationRun::new(13);
     run.add_analysis(
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![crate::state::WaveformData::new(
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 0.5, 1.0],
@@ -1555,7 +1555,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
     let mut run = crate::state::SimulationRun::new(21);
     run.add_analysis(
         crate::state::AnalysisResult::new(4, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![crate::state::WaveformData::new(
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 0.5, 1.0],
@@ -1696,7 +1696,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
 #[test]
 fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() {
     let mut state = AppState::default();
-    let waveform = crate::state::WaveformData::new(
+    let waveform = crate::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, f64::NAN, 3.0],

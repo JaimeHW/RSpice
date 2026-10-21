@@ -1119,7 +1119,7 @@ fn exported_waveforms<'a>(
     state: &AppState,
     dataset_id: crate::product::DatasetId,
     analysis: &'a crate::state::AnalysisResult,
-) -> Vec<&'a crate::state::WaveformData> {
+) -> Vec<&'a crate::state::RetainedTrace> {
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
 

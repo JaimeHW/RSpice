@@ -3,7 +3,6 @@
 use crate::{
     presentation::{PlotView, panel_note, stat_table, well_hint},
     strip::StripHeader,
-    waveform::WaveformData,
 };
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
@@ -13,6 +12,7 @@ use rspice_results::{
     result_presentation::AnalysisPresentationKey,
     safety::dynamic_active_interval_indices,
     soa_evidence::{SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence},
+    waveform::RetainedTrace,
 };
 use rspice_ui_kit::{
     panels::section_header,
@@ -20,7 +20,7 @@ use rspice_ui_kit::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
 };
-type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
+type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
 const ROW_HEIGHT: f32 = 29.0;
 
 /// Which safe-operating-area rules the SOA table lists.
@@ -655,8 +655,8 @@ struct SoaTrace<'a> {
     y: &'a Vec<f64>,
 }
 
-impl<'a> From<&'a WaveformData> for SoaTrace<'a> {
-    fn from(wave: &'a WaveformData) -> Self {
+impl<'a> From<&'a RetainedTrace> for SoaTrace<'a> {
+    fn from(wave: &'a RetainedTrace) -> Self {
         Self {
             index: usize::MAX,
             name: &wave.name,
@@ -1196,7 +1196,7 @@ pub mod test_support {
                 .collect();
             let worst_actual_value = y[samples - 1];
             let worst_time_s = time[samples - 1];
-            waveforms.push(WaveformData::new(
+            waveforms.push(RetainedTrace::new(
                 rspice_results::safety::soa_stress_waveform_name(
                     &device_id,
                     rspice_results::safety::SoAParameter::Vds,
@@ -1343,7 +1343,7 @@ mod tests {
     #[test]
     fn the_plan_states_what_a_direct_scan_of_each_rule_states() {
         let analysis = test_support::soa_analysis(6, 32, 3.0);
-        let run = rspice_results::run::SimulationRun::<WaveformData>::new(
+        let run = rspice_results::run::SimulationRun::<RetainedTrace>::new(
             1,
             0.0,
             rspice_results::run::ExecutionTarget::LocalDesktop,

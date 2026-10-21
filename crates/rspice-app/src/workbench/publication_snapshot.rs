@@ -1396,7 +1396,7 @@ fn effective_deck(state: &AppState) -> Option<NetlistSection> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::WaveformData;
+    use crate::state::RetainedTrace;
     use rspice_hardcopy::render::{ScenePrimitive, SceneRect};
     use rspice_hardcopy_contract::{ContentExtent, Length};
     use std::sync::Arc;
@@ -1540,11 +1540,11 @@ mod tests {
         ));
     }
 
-    fn waveform(name: &str, x: &[f64], y: &[f64]) -> WaveformData {
-        WaveformData::new(name, Arc::new(x.to_vec()), Arc::new(y.to_vec()), "#000000")
+    fn waveform(name: &str, x: &[f64], y: &[f64]) -> RetainedTrace {
+        RetainedTrace::new(name, Arc::new(x.to_vec()), Arc::new(y.to_vec()), "#000000")
     }
 
-    fn analysis(label: &str, waveforms: Vec<WaveformData>) -> AnalysisResult {
+    fn analysis(label: &str, waveforms: Vec<RetainedTrace>) -> AnalysisResult {
         AnalysisResult {
             data: rspice_results::analysis_result::AnalysisResult {
                 convergence: None,

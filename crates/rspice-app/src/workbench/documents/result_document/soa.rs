@@ -5,7 +5,7 @@ use super::{
     frame_work::{self, DatasetWalk},
 };
 #[cfg(test)]
-use crate::state::{SoaParameterEvidence, WaveformData};
+use crate::state::{RetainedTrace, SoaParameterEvidence};
 #[cfg(test)]
 use crate::ui::plot::XScale;
 use crate::{

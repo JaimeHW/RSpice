@@ -703,15 +703,15 @@ fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
 fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     let mut app = test_app();
     let stale_waveform =
-        crate::state::WaveformData::new("V(stale)", vec![0.0, 1.0], vec![0.0, 0.1], "#777777");
+        crate::state::RetainedTrace::new("V(stale)", vec![0.0, 1.0], vec![0.0, 0.1], "#777777");
     let mut stale_run = crate::state::SimulationRun::new(40);
     stale_run.add_analysis(
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "tran")
             .with_waveforms(vec![stale_waveform]),
     );
 
-    let op_waveform = crate::state::WaveformData::new("I(VDD)", vec![0.0], vec![0.012], "#55aa99");
-    let mut target_waveform = crate::state::WaveformData::new(
+    let op_waveform = crate::state::RetainedTrace::new("I(VDD)", vec![0.0], vec![0.012], "#55aa99");
+    let mut target_waveform = crate::state::RetainedTrace::new(
         "V(precision_out)",
         vec![0.0, 1.0],
         vec![0.0, 2.5],

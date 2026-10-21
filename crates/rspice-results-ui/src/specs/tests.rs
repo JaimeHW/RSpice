@@ -9,7 +9,7 @@ use rspice_results::{
     specification::{SpecPointScope, report::result_row},
 };
 type AnalysisResult =
-    rspice_results::analysis_result::AnalysisResult<crate::waveform::WaveformData>;
+    rspice_results::analysis_result::AnalysisResult<rspice_results::waveform::RetainedTrace>;
 type Run = SimulationRun<AnalysisResult>;
 
 /// The pane widths this document is drawn in, from the narrowest it will fit in

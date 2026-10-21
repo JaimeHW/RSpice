@@ -176,15 +176,15 @@ fn completion_detail(export: &MatlabExport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, WaveformData};
+    use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace};
     use crate::workbench::workflows::result_import_workflow::parse_result_dataset;
     use writer::publication::{ELLIPSIS, created_on, matlab_identifier};
     use writer::{
         HEADER_BYTES, HEADER_SIGNATURE, HEADER_TEXT_BYTES, MAX_NAME_CHARS, is_matlab_identifier,
     };
 
-    fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
-        WaveformData::new(name.to_owned(), x, y, "#4f81bd")
+    fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> RetainedTrace {
+        RetainedTrace::new(name.to_owned(), x, y, "#4f81bd")
     }
 
     /// A fixed timestamp: the header text is the dataset's creation time, so
@@ -197,7 +197,7 @@ mod tests {
 
     fn prepared(
         analysis_type: AnalysisType,
-        waveforms: &[WaveformData],
+        waveforms: &[RetainedTrace],
     ) -> Result<MatlabExport, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn an_ac_result_round_trips_its_complex_values() {
-        let waveforms = [WaveformData::new(
+        let waveforms = [RetainedTrace::new(
             "V(out) magnitude".to_owned(),
             vec![1.0, 10.0, 100.0],
             vec![1.0, 0.5, 0.25],

@@ -19,7 +19,7 @@ pub(super) fn soa_analysis() -> AnalysisResult {
     AnalysisResult::new(1, AnalysisType::Soa, "SOA")
         .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time: time.clone() })
         .with_waveforms(vec![
-            WaveformData::new(
+            RetainedTrace::new(
                 "SOA_VIOLATION_COUNT",
                 time.clone(),
                 vec![0.0, 0.0],
@@ -27,7 +27,7 @@ pub(super) fn soa_analysis() -> AnalysisResult {
             ),
             // The stress history the producer now retains, named exactly as
             // the sheet addresses it.
-            WaveformData::new(
+            RetainedTrace::new(
                 crate::results::safety::soa_stress_waveform_name(
                     "M1",
                     crate::results::safety::SoAParameter::Vds,
@@ -83,8 +83,8 @@ pub(super) fn optimization_analysis() -> AnalysisResult {
         // The names the optimization runner emits: one OPT_COST trace over
         // the iteration axis, plus OPT_<variable> per design variable.
         .with_waveforms(vec![
-            WaveformData::new("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25], "#ffbd2e"),
-            WaveformData::new("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6], "#00aaff"),
+            RetainedTrace::new("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25], "#ffbd2e"),
+            RetainedTrace::new("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6], "#00aaff"),
         ])
 }
 
@@ -160,7 +160,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
         | ResultViewer::Eye
         | ResultViewer::Fft => transient_analysis(),
         ResultViewer::DcSweep => AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 0.5, 1.0, 1.5],
                 vec![0.0, 0.4, 0.9, 1.2],
@@ -189,7 +189,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
         }
         ResultViewer::HarmonicBalance => {
             AnalysisResult::new(1, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
-                WaveformData::new(
+                RetainedTrace::new(
                     "V(out)",
                     vec![0.0, 1.0e9, 2.0e9],
                     vec![1.0, 0.1, 0.01],
@@ -207,7 +207,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 output_quantity: crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
                 carrier_frequency_hz: Some(2.4e9),
             })
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "phase_noise",
                 vec![1.0e3, 1.0e4, 1.0e5],
                 vec![-80.0, -100.0, -120.0],
@@ -225,7 +225,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
             },
         ),
         ResultViewer::NoiseContrib => AnalysisResult::new(1, AnalysisType::Noise, "NOISE")
-            .with_waveforms(vec![WaveformData::new(
+            .with_waveforms(vec![RetainedTrace::new(
                 "inoise",
                 vec![1.0, 10.0, 100.0],
                 vec![1.0e-9, 2.0e-9, 4.0e-9],
@@ -322,7 +322,7 @@ pub(super) fn transient_analysis() -> AnalysisResult {
         .map(|t| (t * 1.0e9 * std::f64::consts::TAU / 8.0).sin())
         .collect();
     AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
-        .with_waveforms(vec![WaveformData::new("V(out)", time, values, "#00aaff")])
+        .with_waveforms(vec![RetainedTrace::new("V(out)", time, values, "#00aaff")])
 }
 
 /// A resonant second-order response, swept densely enough to decimate.
@@ -362,9 +362,9 @@ pub(super) fn ac_analysis() -> AnalysisResult {
         phase.push(im.atan2(re).to_degrees());
     }
     AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-        WaveformData::new("|V(out)|", frequency.clone(), magnitude, "#00aaff")
+        RetainedTrace::new("|V(out)|", frequency.clone(), magnitude, "#00aaff")
             .with_complex_components("V(out)", real, imaginary),
-        WaveformData::new("phase(V(out))", frequency, phase, "#ffaa00"),
+        RetainedTrace::new("phase(V(out))", frequency, phase, "#ffaa00"),
     ])
 }
 
@@ -454,7 +454,7 @@ pub(super) fn monte_carlo_population_analysis() -> AnalysisResult {
 
 pub(super) fn monte_carlo_analysis() -> AnalysisResult {
     AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC")
-        .with_waveforms(vec![WaveformData::new(
+        .with_waveforms(vec![RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0, 2.0, 3.0],
             vec![0.95, 1.02, 0.98, 1.05],

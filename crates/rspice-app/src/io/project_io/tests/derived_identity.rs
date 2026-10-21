@@ -301,8 +301,9 @@ fn a_declared_corner_space_round_trips_with_its_base_analysis_tag() {
         failed_corners: 0,
         member_measurements: Vec::new(),
     });
-    family.waveforms =
-        vec![WaveformData::new("V(out)", vec![0.0, 1.0], vec![2.0, 2.0], "#00aaff").with_unit("V")];
+    family.waveforms = vec![
+        RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![2.0, 2.0], "#00aaff").with_unit("V"),
+    ];
     let output = crate::state::SavedOutput::new(
         crate::state::SavedOutputKind::RawVoltageOrCurrent,
         "Chosen voltage",

@@ -20,7 +20,7 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
     for samples in [2, 100_000] {
         let (mut state, _) = super::durable_content::retained_results();
         state.simulation.retained.runs[0].analyses[0].waveforms =
-            vec![crate::state::WaveformData::new(
+            vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 (0..samples).map(|n| n as f64).collect::<Vec<_>>(),
                 vec![1.0; samples],

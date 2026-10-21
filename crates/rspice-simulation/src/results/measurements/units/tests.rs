@@ -13,10 +13,11 @@ fn converted(result: &SimulationResult, selector: &str, target: &str) -> f64 {
 
 #[test]
 fn study_measurement_units_follow_waveforms_and_transfer_normalization() {
-    let mut voltage = WaveformData::new_complex("V(out)", vec![1.0], vec![0.003], vec![0.004]);
+    let mut voltage = SampledWaveform::new_complex("V(out)", vec![1.0], vec![0.003], vec![0.004]);
     voltage.y_unit = "V".into();
-    let current = WaveformData::new_time_domain_in_unit("I(V1)", vec![1.0], vec![0.002], "A");
-    let unknown = WaveformData::new_time_domain_in_unit("undocumented", vec![1.0], vec![1.0], "");
+    let current = SampledWaveform::new_time_domain_in_unit("I(V1)", vec![1.0], vec![0.002], "A");
+    let unknown =
+        SampledWaveform::new_time_domain_in_unit("undocumented", vec![1.0], vec![1.0], "");
     let result = SimulationResult::Ac {
         convergence: None,
         frequencies: vec![1.0],

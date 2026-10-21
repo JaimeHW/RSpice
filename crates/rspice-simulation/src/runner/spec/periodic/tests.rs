@@ -180,11 +180,11 @@ fn an_authored_fourier_run_reports_every_output() {
         waveforms: HashMap::from([
             (
                 "out".to_owned(),
-                WaveformData::new_time_domain("out", time.clone(), fundamental),
+                SampledWaveform::new_time_domain("out", time.clone(), fundamental),
             ),
             (
                 "mid".to_owned(),
-                WaveformData::new_time_domain("mid", time, halved),
+                SampledWaveform::new_time_domain("mid", time, halved),
             ),
         ]),
         measurements: Vec::new(),
@@ -236,7 +236,7 @@ fn an_authored_fourier_run_reports_every_output() {
     assert_eq!(second.x_values, frequencies);
     // The same solve, projected twice: the halved output's fundamental is
     // half of the first's.
-    let magnitude = |waveform: &WaveformData| {
+    let magnitude = |waveform: &SampledWaveform| {
         let real = waveform.y_values[1];
         let imaginary = waveform.y_imag.as_ref().unwrap()[1];
         real.hypot(imaginary)
@@ -306,7 +306,7 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
         time: time.clone(),
         waveforms: HashMap::from([(
             "out".to_owned(),
-            WaveformData::new_time_domain("out", time, values),
+            SampledWaveform::new_time_domain("out", time, values),
         )]),
         measurements: Vec::new(),
         periodic_state: None,
@@ -377,7 +377,7 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
                 .collect();
             (
                 name.clone(),
-                WaveformData::new_time_domain(name, time.clone(), values),
+                SampledWaveform::new_time_domain(name, time.clone(), values),
             )
         })
         .collect();

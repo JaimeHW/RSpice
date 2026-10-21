@@ -99,7 +99,7 @@ pub(super) fn populated_session() -> AppState {
     run.label = "Run 3 (bias sweep)".to_owned();
     run.add_analysis(
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![crate::state::WaveformData::new(
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0, 2.0],
                 vec![0.0, 0.75, 1.5],

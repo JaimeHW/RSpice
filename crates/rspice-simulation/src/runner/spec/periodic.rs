@@ -10,7 +10,7 @@ use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
 use crate::execution_artifact::ResolvedExecutionDependencies;
 use crate::execution_artifact::TransientTrajectoryArtifact;
-use crate::results::{SimulationResult, WaveformData};
+use crate::results::{SampledWaveform, SimulationResult};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::PssMethod;
 use rspice_simulation_contract::config::FrequencySweep;
@@ -519,7 +519,7 @@ fn periodic_sparameter_result(
         if path.output_sideband == 0 && path.input_sideband == 0 {
             waveforms.insert(
                 base_name.clone(),
-                WaveformData::new_complex_in_unit(
+                SampledWaveform::new_complex_in_unit(
                     base_name,
                     clone_values_with_abort(&data.frequencies, abort)?,
                     clone_values_with_abort(&real, abort)?,
@@ -530,7 +530,7 @@ fn periodic_sparameter_result(
         }
         waveforms.insert(
             name.clone(),
-            WaveformData::new_complex_in_unit(
+            SampledWaveform::new_complex_in_unit(
                 name,
                 clone_values_with_abort(&data.frequencies, abort)?,
                 real,
@@ -569,7 +569,7 @@ fn periodic_sparameter_result(
                 real.push(value.re);
                 imaginary.push(value.im);
             }
-            let mut waveform = WaveformData::new_complex(
+            let mut waveform = SampledWaveform::new_complex(
                 name.clone(),
                 clone_values_with_abort(&data.frequencies, abort)?,
                 real,
@@ -661,7 +661,7 @@ fn periodic_sparameter_result(
                 }
                 waveforms.insert(
                     name.into(),
-                    WaveformData::new_time_domain_in_unit(
+                    SampledWaveform::new_time_domain_in_unit(
                         name,
                         clone_values_with_abort(&data.frequencies, abort)?,
                         values,
@@ -669,7 +669,7 @@ fn periodic_sparameter_result(
                     ),
                 );
             }
-            let mut optimum = WaveformData::new_complex(
+            let mut optimum = SampledWaveform::new_complex(
                 "PN_Sopt",
                 clone_values_with_abort(&data.frequencies, abort)?,
                 optimum_real,
@@ -740,7 +740,7 @@ fn project_pss_data(
         let unit = if name.starts_with("I(") { "A" } else { "V" };
         waveforms.insert(
             name.clone(),
-            WaveformData::new_time_domain_in_unit(name, waveform_time, values, unit),
+            SampledWaveform::new_time_domain_in_unit(name, waveform_time, values, unit),
         );
     }
 
@@ -899,7 +899,7 @@ fn run_pss_spectrum(
         if waveforms
             .insert(
                 name.clone(),
-                WaveformData::new_complex_in_unit(name, node_frequencies, real, imaginary, "V"),
+                SampledWaveform::new_complex_in_unit(name, node_frequencies, real, imaginary, "V"),
             )
             .is_some()
         {
@@ -984,7 +984,7 @@ fn project_hb_data(
             if waveforms
                 .insert(
                     name.clone(),
-                    WaveformData::new_complex_in_unit(
+                    SampledWaveform::new_complex_in_unit(
                         name,
                         vec![0.0],
                         vec![voltage],
@@ -1036,7 +1036,7 @@ fn run_envelope(
         waveforms.insert(
             name.clone(),
             if waveform.is_complex {
-                WaveformData::new_complex_in_unit(
+                SampledWaveform::new_complex_in_unit(
                     name,
                     waveform_time,
                     real,
@@ -1044,7 +1044,7 @@ fn run_envelope(
                     waveform.unit,
                 )
             } else {
-                WaveformData::new_time_domain_in_unit(name, waveform_time, real, waveform.unit)
+                SampledWaveform::new_time_domain_in_unit(name, waveform_time, real, waveform.unit)
             },
         );
     }
@@ -1184,7 +1184,7 @@ fn run_fourier(
                 data.output_label
             )));
         }
-        let mut spectrum = WaveformData::new_complex(
+        let mut spectrum = SampledWaveform::new_complex(
             spectrum_name.clone(),
             clone_values_with_abort(&data.frequencies, abort)?,
             real,
@@ -1431,7 +1431,7 @@ pub(super) fn run_disto(
 }
 
 fn insert_complex_waveform(
-    waveforms: &mut HashMap<String, WaveformData>,
+    waveforms: &mut HashMap<String, SampledWaveform>,
     name: String,
     frequencies: &[f64],
     values: Vec<num_complex::Complex64>,
@@ -1455,7 +1455,7 @@ fn insert_complex_waveform(
         real.push(value.re);
         imaginary.push(value.im);
     }
-    let mut waveform = WaveformData::new_complex(
+    let mut waveform = SampledWaveform::new_complex(
         name.clone(),
         clone_values_with_abort(frequencies, abort)?,
         real,
@@ -1471,7 +1471,7 @@ fn insert_complex_waveform(
 }
 
 fn insert_scalar_waveform_checked(
-    waveforms: &mut HashMap<String, WaveformData>,
+    waveforms: &mut HashMap<String, SampledWaveform>,
     name: String,
     frequencies: &[f64],
     values: Vec<f64>,
@@ -1487,7 +1487,7 @@ fn insert_scalar_waveform_checked(
         ));
     }
     super::ensure_not_aborted(abort)?;
-    let waveform = WaveformData {
+    let waveform = SampledWaveform {
         name: name.clone(),
         x_values: clone_values_with_abort(frequencies, abort)?,
         y_values: values,
@@ -1506,7 +1506,7 @@ fn insert_scalar_waveform_checked(
 fn spectra_to_complex_waveforms(
     spectra: impl IntoIterator<Item = svc_runner::HbSpectrum>,
     abort: &dyn AbortSignal,
-) -> Result<(Vec<f64>, HashMap<String, WaveformData>), SimulationError> {
+) -> Result<(Vec<f64>, HashMap<String, SampledWaveform>), SimulationError> {
     let mut waveforms = HashMap::new();
     let mut shared_frequencies: Option<Vec<f64>> = None;
     for (spectrum_index, spectrum) in spectra.into_iter().enumerate() {
@@ -1567,7 +1567,7 @@ fn spectra_to_complex_waveforms(
         } else {
             shared_frequencies = Some(frequencies.clone());
         }
-        let mut waveform = WaveformData::new_complex(name.clone(), frequencies, real, imaginary);
+        let mut waveform = SampledWaveform::new_complex(name.clone(), frequencies, real, imaginary);
         waveform.y_unit = unit.to_owned();
         if waveforms.insert(name, waveform).is_some() {
             return Err(SimulationError::SolverError(
@@ -1605,7 +1605,7 @@ fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), Simula
 }
 
 fn insert_scalar_waveform(
-    waveforms: &mut HashMap<String, WaveformData>,
+    waveforms: &mut HashMap<String, SampledWaveform>,
     name: String,
     x_values: Vec<f64>,
     y_values: Vec<f64>,
@@ -1614,7 +1614,7 @@ fn insert_scalar_waveform(
 ) {
     waveforms.insert(
         name.clone(),
-        WaveformData {
+        SampledWaveform {
             name,
             x_values,
             y_values,

@@ -23,7 +23,7 @@ fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentI
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            crate::state::WaveformData::new(
+            crate::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 0.5, 1.0],
                 vec![0.0, 1.0, 0.0],
@@ -1184,7 +1184,7 @@ fn authored_run(
     run.id = run_sequence;
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient")
-            .with_waveforms(vec![crate::state::WaveformData::new(
+            .with_waveforms(vec![crate::state::RetainedTrace::new(
                 trace_name,
                 vec![0.0, 0.5, 1.0],
                 vec![0.0, 1.0, 0.0],
@@ -1571,7 +1571,7 @@ fn inactive_panes_use_retained_viewers_and_never_the_global_viewer() {
 #[test]
 fn retained_frequency_document_restores_its_noise_projection() {
     let noise = AnalysisResult::new(3, AnalysisType::Noise, "noise").with_waveforms(vec![
-        crate::state::WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#fff"),
+        crate::state::RetainedTrace::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#fff"),
     ]);
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
@@ -1622,16 +1622,16 @@ fn interactive_result_viewers_keep_canonical_document_identity() {
 #[test]
 fn persistent_renderer_contract_never_substitutes_a_broader_catalog_mode() {
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "tran").with_waveforms(vec![
-        crate::state::WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+        crate::state::RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
     ]);
     let hb = AnalysisResult::new(2, AnalysisType::HarmonicBalance, "hb").with_waveforms(vec![
-        crate::state::WaveformData::new("V(out)", vec![1.0, 2.0], vec![1.0, 0.5], "#fff"),
+        crate::state::RetainedTrace::new("V(out)", vec![1.0, 2.0], vec![1.0, 0.5], "#fff"),
     ]);
     let noise = AnalysisResult::new(3, AnalysisType::Noise, "noise").with_waveforms(vec![
-        crate::state::WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 1.0e-19], "#fff"),
+        crate::state::RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 1.0e-19], "#fff"),
     ]);
     let invalid_noise = AnalysisResult::new(4, AnalysisType::Noise, "invalid noise")
-        .with_waveforms(vec![crate::state::WaveformData::new(
+        .with_waveforms(vec![crate::state::RetainedTrace::new(
             "onoise",
             vec![1.0, 10.0],
             vec![1.0e-18, -1.0e-19],

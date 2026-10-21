@@ -16,7 +16,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
     pub(super) fn build_waveforms_with_shared_x_owned(
         &self,
         x_values: Vec<f64>,
-        waveforms: HashMap<String, crate::results::WaveformData>,
+        waveforms: HashMap<String, crate::results::SampledWaveform>,
     ) -> Vec<rspice_results::waveform::RetainedWaveform> {
         self.build_sorted_waveforms_with_shared_x_owned(x_values, waveforms, |name, waveform| {
             (name, waveform.y_values)
@@ -26,7 +26,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
     pub(super) fn build_time_waveforms_owned(
         &self,
         time: Vec<f64>,
-        waveforms: HashMap<String, crate::results::WaveformData>,
+        waveforms: HashMap<String, crate::results::SampledWaveform>,
     ) -> Vec<rspice_results::waveform::RetainedWaveform> {
         let shared_time = Arc::new(time);
         let sample_count = shared_time.len();
@@ -241,7 +241,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
     pub(super) fn build_ac_waveforms_owned(
         &self,
         frequencies: Vec<f64>,
-        waveforms: HashMap<String, crate::results::WaveformData>,
+        waveforms: HashMap<String, crate::results::SampledWaveform>,
     ) -> Vec<rspice_results::waveform::RetainedWaveform> {
         let shared_freqs = Arc::new(frequencies);
         let freq_len = shared_freqs.len();
@@ -317,11 +317,11 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
     pub(super) fn build_sorted_waveforms_with_shared_x_owned<F>(
         &self,
         x_values: Vec<f64>,
-        waveforms: HashMap<String, crate::results::WaveformData>,
+        waveforms: HashMap<String, crate::results::SampledWaveform>,
         value_mapper: F,
     ) -> Vec<rspice_results::waveform::RetainedWaveform>
     where
-        F: Fn(String, crate::results::WaveformData) -> (String, Vec<f64>),
+        F: Fn(String, crate::results::SampledWaveform) -> (String, Vec<f64>),
     {
         let shared_x = Arc::new(x_values);
         let mut waveforms: Vec<_> = waveforms.into_iter().collect();

@@ -229,7 +229,7 @@ fn dc_family_materialization_is_atomic_when_the_last_member_collides() {
         };
         let collision_name = evidence.member_trace_name("Chosen", evidence.member_count() - 1);
         analysis.waveforms.push(
-            WaveformData::new(&collision_name, vec![0.0, 0.5, 1.0], vec![9.0; 3], "#fff")
+            RetainedTrace::new(&collision_name, vec![0.0, 0.5, 1.0], vec![9.0; 3], "#fff")
                 .with_unit("V"),
         );
         let names = analysis
