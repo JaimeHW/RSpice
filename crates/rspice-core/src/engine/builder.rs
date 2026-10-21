@@ -6339,6 +6339,7 @@ impl Engine {
                 &netlist.veriloga_includes,
                 library_map.as_deref(),
                 &mut design_connect_rules,
+                veriloga_sources::wreal_resolution(netlist.options.wreal_resolution),
                 self.config.resource_limits,
                 abort,
             )?;

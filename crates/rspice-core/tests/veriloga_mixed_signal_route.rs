@@ -4306,6 +4306,7 @@ fn real_drivers_on_one_electrical_node_are_refused_when_the_net_cannot_resolve_t
         "port 'y' drives the wreal net 'out'",
         "port 'y' of instance 'xa'",
         "one driver of a real-valued net",
+        ".options wreal_resolution=",
     ] {
         assert!(
             error.to_ascii_lowercase().contains(expected),
@@ -4322,6 +4323,54 @@ fn real_drivers_on_one_electrical_node_are_refused_when_the_net_cannot_resolve_t
         assert!(
             error.to_ascii_lowercase().contains(expected),
             "{expected}: {error}"
+        );
+    }
+}
+
+/// `.options wreal_resolution` reads every plain `wreal` as the resolution it
+/// names: the two plain drivers refused above average to 1.5 V. The same
+/// source compiled without the option is cached beside it, so the order of
+/// the two runs cannot hand one the other's compilation. A net that names its
+/// own resolution keeps it, and `4state` is refused by name.
+#[test]
+fn wreal_resolution_option_resolves_plain_wreal_drivers() {
+    let model = ModelFile::new("real_drivers_option", REAL_DRIVERS);
+    let plain = real_drivers_deck(&model, "ro", "ro", "");
+    operating_point_at(&plain, "out").expect_err("without the option, two drivers are refused");
+    for (option, expected) in [("avg", 1.5), ("sum", 3.0), ("min", 1.0), ("max", 2.0)] {
+        let deck = real_drivers_deck(
+            &model,
+            "ro",
+            "ro",
+            &format!(".options wreal_resolution={option}\n"),
+        );
+        let voltage = operating_point_at(&deck, "out")
+            .unwrap_or_else(|error| panic!("wreal_resolution={option}: {error}"));
+        assert!(
+            (voltage - expected).abs() < 1e-9,
+            "wreal_resolution={option}: V(out) = {voltage}, expected {expected}"
+        );
+    }
+    operating_point_at(&plain, "out").expect_err("the option's compilation is not reused");
+    let declared = real_drivers_deck(&model, "rs", "rs", ".options wreal_resolution=avg\n");
+    let voltage = operating_point_at(&declared, "out").expect("a declared resolution runs");
+    assert!(
+        (voltage - 3.0).abs() < 1e-9,
+        "V(out) = {voltage}, expected 3.0"
+    );
+    for value in ["4state", "4STATE"] {
+        let error = Netlist::parse(&real_drivers_deck(
+            &model,
+            "ro",
+            "ro",
+            &format!(".options wreal_resolution={value}\n"),
+        ))
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_else(|| panic!("wreal_resolution={value} parses"));
+        assert!(
+            error.contains("WREAL_RESOLUTION=4state") && error.contains("X and Z"),
+            "{error}"
         );
     }
 }

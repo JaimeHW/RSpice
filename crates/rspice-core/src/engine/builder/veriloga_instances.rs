@@ -234,11 +234,13 @@ pub(super) fn prepare<'a>(
         let specialized = if let Some(specialized) = specializations.get(&key) {
             specialized.clone()
         } else {
-            let compiler =
-                rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
-                    enable_ams: true,
-                    ..Default::default()
-                });
+            // The artifact was compiled under the deck's `wreal` resolution,
+            // and its specialization reads its declarations the same way.
+            let compiler = rspice_veriloga::VerilogACompiler::new(
+                super::veriloga_cache::deck_include_compiler_options(
+                    super::veriloga_sources::wreal_resolution(netlist.options.wreal_resolution),
+                ),
+            );
             let typed: Vec<_> = overrides
                 .iter()
                 .map(|&(name, value)| (name, rspice_veriloga::ScalarParameterValue::Real(value)))

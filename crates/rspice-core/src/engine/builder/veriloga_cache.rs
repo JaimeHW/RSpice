@@ -459,7 +459,13 @@ use super::*;
 // Version 159 follows the canonical IR's schema to 172, whose digital plan
 // records where each process was written. A version-158 record would replay
 // a plan whose processes a diagnostic cannot place.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 159;
+//
+// Version 160 keys a record by the resolution the deck gives a plain `wreal`
+// (`.options wreal_resolution`), which the compiler applies to the
+// declarations. The compiler's options were not part of the key, so a
+// version-159 record names no resolution and one compiled under another
+// would read as this deck's.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 160;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -681,6 +687,7 @@ pub(super) struct VerilogADiskCacheRecord {
     pub(super) selected_module: Option<String>,
     pub(super) configuration: Option<[u8; 32]>,
     pub(super) unit: Option<[u8; 32]>,
+    pub(super) wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: rspice_veriloga::CompiledModel,
     pub(super) canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -763,6 +770,9 @@ pub(super) struct VerilogASourceKey {
     /// The compilation unit of several files the module was compiled in;
     /// `None` when its own file was the whole unit.
     unit: Option<[u8; 32]>,
+    /// The resolution the deck gives a plain `wreal` net, which the compiler
+    /// applies to the declarations (`.options wreal_resolution`).
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
 }
 
 #[cfg(feature = "veriloga")]
@@ -773,7 +783,17 @@ impl VerilogASourceKey {
             selected_module: selected_module.map(str::to_owned),
             configuration: None,
             unit: None,
+            wreal_resolution: Default::default(),
         }
+    }
+
+    /// The same source compiled with plain `wreal` read as `resolution`.
+    fn resolving_wreal(
+        mut self,
+        resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+    ) -> Self {
+        self.wreal_resolution = resolution;
+        self
     }
 
     fn display(&self) -> std::path::Display<'_> {
@@ -796,6 +816,7 @@ struct BorrowedVerilogACacheRecord<'a> {
     selected_module: Option<&'a str>,
     configuration: Option<[u8; 32]>,
     unit: Option<[u8; 32]>,
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     dependencies: &'a [VerilogADependencyFingerprint],
     model: &'a rspice_veriloga::CompiledModel,
     canonical_ir: Option<&'a rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -811,6 +832,7 @@ impl<'a> BorrowedVerilogACacheRecord<'a> {
             selected_module: source.selected_module.as_deref(),
             configuration: source.configuration,
             unit: source.unit,
+            wreal_resolution: source.wreal_resolution,
             dependencies: &entry.dependencies,
             model: entry.model.as_ref(),
             canonical_ir: entry.canonical_ir.as_deref(),
@@ -1243,6 +1265,10 @@ pub(super) fn cache_record_path_with_root(
     if let Some(unit) = source.unit {
         hasher.update(b"\0unit\0");
         hasher.update(&unit);
+    }
+    if source.wreal_resolution != Default::default() {
+        hasher.update(b"\0wreal\0");
+        hasher.update(source.wreal_resolution.keyword().as_bytes());
     }
     let key = hasher.finalize().to_hex().to_string();
     cache_root.join(format!("{key}.json"))
@@ -1794,6 +1820,7 @@ fn load_model_from_disk_locked_with_limits(
         || source_path.selected_module != record.selected_module
         || source_path.configuration != record.configuration
         || source_path.unit != record.unit
+        || source_path.wreal_resolution != record.wreal_resolution
         || record.configuration.is_some_and(|identity| {
             record.canonical_ir.as_ref().and_then(|artifact| {
                 artifact.connections.configuration().map(|configuration| {
@@ -2023,10 +2050,16 @@ pub(super) fn resolve_cached_or_compile_veriloga(
 /// on an analog-only module is a no-op — so the `CompiledModel` and the
 /// canonical artifact a deck's analog `.va` produces are the ones it produced
 /// before.
+///
+/// `wreal_resolution` is the deck's `.options wreal_resolution`: the
+/// resolution a plain `wreal` net takes, which keys the cache record too.
 #[cfg(feature = "veriloga")]
-pub(super) fn deck_include_compiler_options() -> rspice_veriloga::CompilerOptions {
+pub(super) fn deck_include_compiler_options(
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+) -> rspice_veriloga::CompilerOptions {
     rspice_veriloga::CompilerOptions {
         enable_ams: true,
+        wreal_resolution,
         ..rspice_veriloga::CompilerOptions::default()
     }
 }
@@ -2066,11 +2099,12 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
 pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
     path: &Path,
     selected_module: Option<&str>,
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
     lookup_veriloga_key_with_limits_and_abort(
-        &VerilogASourceKey::new(path, selected_module),
+        &VerilogASourceKey::new(path, selected_module).resolving_wreal(wreal_resolution),
         limits,
         abort,
     )
@@ -2203,33 +2237,40 @@ fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<CachedVerilogAModel, SimulationError> {
-    if let Some(entry) =
-        lookup_cached_veriloga_with_limits_and_abort(path, selected_module, limits, abort)?
-    {
+    if let Some(entry) = lookup_cached_veriloga_with_limits_and_abort(
+        path,
+        selected_module,
+        Default::default(),
+        limits,
+        abort,
+    )? {
         return Ok(entry);
     }
     let prepared = prepare_veriloga_source(path, limits, abort)?;
     compile_and_cache_prepared_veriloga(path, selected_module, &prepared, limits, abort)
 }
 
+/// Prepare one source with the deck defaults: a plain `wreal` is the LRM's.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn prepare_veriloga_source(
     path: &Path,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
-    prepare_veriloga_unit(&[path], None, limits, abort)
+    prepare_veriloga_unit(&[path], None, Default::default(), limits, abort)
 }
 
 /// Prepare HDL sources as one compilation unit, read in the order given
 /// (IEEE 1364-2005 clause 19), or in the libraries a library map put them
 /// in (clause 13). One path without a map prepares that file alone. The
 /// files a map names are read under the same limits and refusals as the
-/// deck's own.
+/// deck's own. `wreal_resolution` is the deck's resolution for a plain
+/// `wreal`.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn prepare_veriloga_unit(
     paths: &[&Path],
     libraries: Option<&rspice_veriloga::UnitLibraries>,
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
@@ -2260,7 +2301,8 @@ pub(super) fn prepare_veriloga_unit(
         )?;
     }
 
-    let compiler = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options());
+    let compiler =
+        rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options(wreal_resolution));
     let control = VerilogACompileControl { abort };
     let preparation_started = crate::time_compat::Instant::now();
     let provider_limits = rspice_veriloga::SourceProviderLimits {
@@ -2372,6 +2414,7 @@ pub(super) fn prepare_veriloga_source(
 pub(super) fn prepare_veriloga_unit(
     paths: &[&Path],
     _libraries: Option<&rspice_veriloga::UnitLibraries>,
+    _wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
@@ -2402,6 +2445,7 @@ pub(super) fn compile_and_cache_prepared_veriloga(
         None,
         None,
         &[],
+        Default::default(),
         limits,
         abort,
     )
@@ -2425,10 +2469,11 @@ pub(super) fn lookup_configured_veriloga(
     selected_module: Option<&str>,
     identity: [u8; 32],
     unit: Option<[u8; 32]>,
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
-    let mut key = VerilogASourceKey::new(path, selected_module);
+    let mut key = VerilogASourceKey::new(path, selected_module).resolving_wreal(wreal_resolution);
     key.configuration = Some(identity);
     key.unit = unit;
     lookup_veriloga_key_with_limits_and_abort(&key, limits, abort)
@@ -2475,10 +2520,11 @@ pub(super) fn lookup_unit_veriloga(
     path: &Path,
     selected_module: Option<&str>,
     unit: [u8; 32],
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
-    let mut key = VerilogASourceKey::new(path, selected_module);
+    let mut key = VerilogASourceKey::new(path, selected_module).resolving_wreal(wreal_resolution);
     key.unit = Some(unit);
     lookup_veriloga_key_with_limits_and_abort(&key, limits, abort)
 }
@@ -2502,12 +2548,16 @@ pub(super) fn compile_and_cache_prepared_with_connections(
     configuration: Option<&rspice_veriloga::ConnectionConfiguration>,
     unit: Option<UnitSelection<'_>>,
     retained_dependencies: &[VerilogADependencyFingerprint],
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<CachedVerilogAModel, SimulationError> {
     use std::sync::atomic::Ordering::Relaxed;
     check_build_abort(abort)?;
-    let mut canonical = VerilogASourceKey::new(path, selected_module);
+    // `prepared` compiles with the options it was prepared with; the key
+    // names the same resolution.
+    let mut canonical =
+        VerilogASourceKey::new(path, selected_module).resolving_wreal(wreal_resolution);
     canonical.unit = unit.map(|unit| unit.identity);
     let selected_module = unit.map(|unit| unit.module).or(selected_module);
     if let Some(configuration) = configuration {

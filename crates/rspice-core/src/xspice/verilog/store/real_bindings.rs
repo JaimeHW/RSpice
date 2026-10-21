@@ -216,7 +216,9 @@ impl DigitalSignalStore {
                 && driver_count > 1
             {
                 return Err(format!(
-                    "wreal net '{}' requires one driver; HDL and external outputs declare {}",
+                    "wreal net '{}' requires one driver; HDL and external outputs declare {}. \
+                     Declare it with the resolution that combines them, or give every plain \
+                     `wreal` one with `.options wreal_resolution=sum|avg|min|max`",
                     self.plan.signal(signal).unwrap().name,
                     driver_count
                 ));

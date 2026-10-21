@@ -785,6 +785,10 @@ pub(crate) fn compiler_contract_identity(
     if options.discard_output_tasks {
         hasher.field(b"discard-output-tasks");
     }
+    if options.wreal_resolution != crate::canonical_ir::digital::DigitalRealResolution::Single {
+        hasher.field(b"wreal-resolution");
+        hasher.field(options.wreal_resolution.keyword().as_bytes());
+    }
     hasher.byte(match options.integration_order {
         IntegrationOrder::First => 1,
         IntegrationOrder::Second => 2,

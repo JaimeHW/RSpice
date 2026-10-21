@@ -357,6 +357,50 @@ pub struct CompilerOptions {
     /// generator sets it: printing from the shipped compact models changes
     /// their generated code and is a separate decision.
     pub discard_output_tasks: bool,
+    /// The resolution a plain `wreal` net takes.
+    ///
+    /// [`DigitalRealResolution::Single`] by default: Verilog-AMS LRM 2.4
+    /// section 6.5.3's one driver, a second refused. A host that offers
+    /// Cadence's `-wreal_resolution` choice (RSpice's `.options
+    /// wreal_resolution`) names another here, and every `wreal` declaration
+    /// is read as the `wrealsum`, `wrealavg`, `wrealmin` or `wrealmax` it
+    /// names before analysis, so each stage after it sees one declaration
+    /// and the canonical IR states the resolution every net has.
+    ///
+    /// [`DigitalRealResolution::Single`]: canonical_ir::digital::DigitalRealResolution::Single
+    pub wreal_resolution: canonical_ir::digital::DigitalRealResolution,
+}
+
+/// Read every plain `wreal` declaration as the resolution `resolution`
+/// names: the net declarations and the port declarations that carry a net
+/// type. Nothing changes for [`canonical_ir::digital::DigitalRealResolution::Single`].
+fn apply_wreal_resolution(
+    source: &mut ast::SourceFile,
+    resolution: canonical_ir::digital::DigitalRealResolution,
+) {
+    use canonical_ir::digital::DigitalRealResolution;
+    let resolution = match resolution {
+        DigitalRealResolution::Single => return,
+        DigitalRealResolution::Sum => ast::WrealResolution::Sum,
+        DigitalRealResolution::Average => ast::WrealResolution::Average,
+        DigitalRealResolution::Minimum => ast::WrealResolution::Minimum,
+        DigitalRealResolution::Maximum => ast::WrealResolution::Maximum,
+    };
+    for item in &mut source.items {
+        let (ast::Item::Module(module) | ast::Item::ConnectModule(module)) = item else {
+            continue;
+        };
+        for net in &mut module.digital_nets {
+            if net.kind == ast::DigitalNetKind::Wreal(ast::WrealResolution::Single) {
+                net.kind = ast::DigitalNetKind::Wreal(resolution);
+            }
+        }
+        for port in &mut module.port_declarations {
+            if port.net_type == Some(ast::PortNetType::Wreal(ast::WrealResolution::Single)) {
+                port.net_type = Some(ast::PortNetType::Wreal(resolution));
+            }
+        }
+    }
 }
 
 /// Integration order for the `idt` and `ddt` companion models.
@@ -1450,6 +1494,7 @@ impl VerilogACompiler {
             parser::expand_specialized_generates(selected)?;
         }
         semantic::defparam::apply_to_roots(&mut source_file, &root_defparams)?;
+        apply_wreal_resolution(&mut source_file, self.options.wreal_resolution);
         measurements.record(PipelinePhase::Parse, phase_started.elapsed())?;
         measurements.metrics_mut().top_level_item_count =
             metrics::usize_to_u64(source_file.items.len());

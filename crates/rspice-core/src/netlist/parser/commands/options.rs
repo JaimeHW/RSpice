@@ -522,6 +522,35 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         "CONNECTRULES_SOURCE",
                     )?);
                 }
+                (None, "WREAL_RESOLUTION") => {
+                    let value = parse_restart_string_option(stream, line_num, "WREAL_RESOLUTION")?;
+                    use crate::netlist::WrealResolution;
+                    options.wreal_resolution = Some(match value.to_ascii_lowercase().as_str() {
+                        "single" => WrealResolution::Single,
+                        "sum" => WrealResolution::Sum,
+                        "avg" => WrealResolution::Average,
+                        "min" => WrealResolution::Minimum,
+                        "max" => WrealResolution::Maximum,
+                        "4state" => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: "WREAL_RESOLUTION=4state resolves real nets with X and \
+                                          Z states, which real-valued nets here do not carry; \
+                                          choose single, sum, avg, min or max"
+                                    .to_owned(),
+                            });
+                        }
+                        _ => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "WREAL_RESOLUTION must be single, sum, avg, min or max, \
+                                     found '{value}'"
+                                ),
+                            });
+                        }
+                    });
+                }
                 (Some("XSPICE"), "AUTO_BRIDGE" | "AUTOBRIDGE")
                 | (None, "AUTO_BRIDGE" | "AUTOBRIDGE" | "XSPICE_AUTO_BRIDGE") => {
                     let (enabled, show_generated) =

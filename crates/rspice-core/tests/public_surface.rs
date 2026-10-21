@@ -295,9 +295,13 @@ use rspice_core::analysis::harmonic_balance::{
 // stays exhaustive in the enum's own crate. The move adds two:
 // `AnalysisKind::result_kind`, and the re-export that keeps
 // `execution::capability::AnalysisResultKind` and every path through it.
-// `analysis_result_kind` stays and delegates. The census is 5,752, with no
+// `analysis_result_kind` stays and delegates. The census was 5,752, with no
 // slack.
-const MAX_PUBLIC_ITEMS: usize = 5752;
+// `netlist::WrealResolution` adds one: the type of the public
+// `SimulationOptions::wreal_resolution` field `.options wreal_resolution`
+// sets, which the builder hands the Verilog-A compiler for every deck source
+// (engine/builder/veriloga_sources.rs). The census is 5,753, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5753;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

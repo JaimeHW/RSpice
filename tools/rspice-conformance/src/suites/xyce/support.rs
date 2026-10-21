@@ -2500,6 +2500,7 @@ impl XyceTestRunner {
             allow_simplified_mos,
             connect_rules,
             connect_rules_source,
+            wreal_resolution,
             auto_bridge,
             auto_bridge_show_generated,
             auto_bridge_family,
@@ -2609,6 +2610,8 @@ impl XyceTestRunner {
             // the kind of steering this predicate claims the deck does not do.
             && connect_rules.is_none()
             && connect_rules_source.is_none()
+            // So does how a plain `wreal` resolves several drivers.
+            && wreal_resolution.is_none()
             && auto_bridge.is_none()
             && auto_bridge_show_generated.is_none()
             && auto_bridge_family.is_none()

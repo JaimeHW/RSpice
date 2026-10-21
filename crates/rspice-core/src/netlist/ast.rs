@@ -4617,6 +4617,28 @@ pub enum EventSaveSelection {
     Nets(Vec<String>),
 }
 
+/// How a plain `wreal` net combines several drivers: `.options
+/// wreal_resolution=single|sum|avg|min|max`, Cadence's `-wreal_resolution`.
+///
+/// [`Self::Single`] is Verilog-AMS LRM 2.4 section 6.5.3's one driver of a
+/// real-valued net, a second refused. The others read `wreal` as the
+/// `wrealsum`, `wrealavg`, `wrealmin` or `wrealmax` net type. A net that
+/// names its own resolution keeps it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WrealResolution {
+    /// One driver, a second refused: the LRM, and the default.
+    #[default]
+    Single,
+    /// The sum of the drivers, as `wrealsum`.
+    Sum,
+    /// Their mean, as `wrealavg`.
+    Average,
+    /// The least of them, as `wrealmin`.
+    Minimum,
+    /// The greatest of them, as `wrealmax`.
+    Maximum,
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -4936,6 +4958,10 @@ pub struct SimulationOptions {
     /// Aliases are case-insensitive SPICE names; rule identifiers remain
     /// case-sensitive. The alias survives remapping to a sealed source key.
     pub connect_rules_source: Option<String>,
+    /// RSpice `.options wreal_resolution=single|sum|avg|min|max`: how a
+    /// plain `wreal` net combines several drivers. Unset is
+    /// [`WrealResolution::Single`], the LRM's one driver.
+    pub wreal_resolution: Option<WrealResolution>,
     /// Ngspice-compatible XSPICE automatic analog/digital bridge insertion.
     /// Enabled by default; set `.options auto_bridge=0` to disable.
     pub auto_bridge: Option<bool>,
@@ -5234,6 +5260,9 @@ impl SimulationOptions {
         }
         if other.connect_rules_source.is_some() {
             self.connect_rules_source = other.connect_rules_source.clone();
+        }
+        if other.wreal_resolution.is_some() {
+            self.wreal_resolution = other.wreal_resolution;
         }
         if other.auto_bridge.is_some() {
             self.auto_bridge = other.auto_bridge;

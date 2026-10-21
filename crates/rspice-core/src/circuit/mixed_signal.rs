@@ -510,7 +510,8 @@ impl CircuitData {
                      '{first}' of instance '{first_instance}' drives as well; Verilog-AMS LRM \
                      2.4 section 6.5.3 permits one driver of a real-valued net, so give \
                      '{node_name}' one driver, or give both ports the resolution that \
-                     combines them: `wrealsum`, `wrealavg`, `wrealmin` or `wrealmax`"
+                     combines them: `wrealsum`, `wrealavg`, `wrealmin` or `wrealmax`, or \
+                     every plain `wreal` one with `.options wreal_resolution=sum|avg|min|max`"
                 ),
             ));
         }
