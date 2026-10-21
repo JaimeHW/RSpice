@@ -235,7 +235,8 @@ pub struct DialogState {
     /// Exact library catalog revision captured when New View opened.
     pub(crate) new_view_library_revision: u64,
     /// New Verilog-A device: a cell whose module the reader writes next.
-    pub(crate) new_veriloga_device: NewVerilogADeviceFormState,
+    pub(crate) new_veriloga_device:
+        crate::workbench::app::dialogs::library::new_veriloga_device::NewVerilogADeviceFormState,
     /// Build settings: the open Verilog-A view's build profile, as a form.
     pub(crate) veriloga_build_settings: Option<crate::workbench::app::VerilogABuildSettingsDraft>,
     /// Copy Cell dialog
@@ -305,7 +306,8 @@ pub struct DialogState {
     /// Exact library catalog revision captured when Delete Library opened.
     pub(crate) delete_library_library_revision: u64,
     /// Exact, revision-bound destructive review for deleting one cell or view.
-    pub(crate) library_deletion_review: LibraryDeletionReviewState,
+    pub(crate) library_deletion_review:
+        crate::workbench::app::dialogs::library::pending_deletions::LibraryDeletionReviewState,
     /// Destructive review for removing one record from the analysis plan —
     /// an analysis, a design variable, a saved output or a capture group —
     /// raised only where removal orphans something.
@@ -465,7 +467,7 @@ pub struct DialogState {
         crate::workbench::app::dialogs::hierarchy::create::CreateHierarchyDialogState,
 
     /// Validated active-document save revision transaction.
-    pub(crate) check_and_save: CheckAndSaveDialogState,
+    pub(crate) check_and_save: crate::workbench::app::dialogs::check_and_save::CheckAndSaveDialogState,
 
     /// Project-owned hierarchy/view configuration manager.
     pub(crate) configuration_sets: ConfigurationSetsDialogState,
@@ -519,10 +521,12 @@ pub struct DialogState {
         crate::workbench::app::dialogs::selection::shared_properties::SharedPropertiesDialogState,
 
     /// Project-owned technology attachment transaction.
-    pub(crate) technology_attachment: TechnologyAttachmentDialogState,
+    pub(crate) technology_attachment:
+        crate::workbench::app::dialogs::project::TechnologyAttachmentDialogState,
 
     /// Cached, integrity-verified full-project recovery catalog.
-    pub(crate) project_checkpoint_recovery: ProjectCheckpointRecoveryState,
+    pub(crate) project_checkpoint_recovery:
+        crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState,
 
     /// Runtime interaction state for drag, hover, etc.
     pub interaction: crate::workbench::app_state::InteractionState,

@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::dialogs::library::pending_deletions::LibraryDeletionTarget;
 use crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
 use crate::workbench::app::dialogs::replace_instance::ReplaceInstanceOpen;
 use crate::workbench::app::dialogs::selection::commands::floating::{

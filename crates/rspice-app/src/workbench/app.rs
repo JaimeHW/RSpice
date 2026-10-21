@@ -139,7 +139,9 @@ pub(crate) use dialogs::library::new_veriloga_device::{
 };
 pub(crate) use dialogs::placement::bus_tap::open_bus_tap;
 pub(crate) use dialogs::placement::pin_port::open_create_pins;
-pub(crate) use dialogs::project::new_project::open_new_project_dialog;
+pub(crate) use dialogs::project::{
+    TechnologyAttachmentDialogState, new_project::open_new_project_dialog,
+};
 
 pub(crate) use dialogs::project_revision_history::{
     ProjectRevisionHistoryDialogState, open_project_revision_history,
@@ -171,7 +173,7 @@ pub use dialogs::state::DialogState;
 pub(crate) use dialogs::state::{
     DatasetExportPicker, GridSnapSpacingChoice, HelpCenterPage, NewWindowInitialContent,
     PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone, RunDetailsDialogState,
-    TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+    WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 
 /// Test-only: the studio pins this against its own hop label, and the dialog

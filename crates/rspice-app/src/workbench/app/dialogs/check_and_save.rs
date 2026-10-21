@@ -32,6 +32,97 @@ use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 
+/// Retained review state for the mockup-owned Check and save transaction.
+/// Validation evidence is frozen when the dialog opens and re-derived before
+/// publication; the editable revision note never mutates the live document
+/// until a canonical save request has been accepted.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CheckAndSaveDialogState {
+    pub(crate) open: bool,
+    pub(crate) revision_note: String,
+    pub(crate) revision_note_touched: bool,
+    pub(crate) report: Option<
+        crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport,
+    >,
+    pub(crate) validation_error: Option<String>,
+    /// The validated revision was published; the dialog now only reviews it.
+    pub(crate) saved: bool,
+    /// Edits arrived while the browser save was in flight, so the saved
+    /// snapshot does not hold them.
+    pub(crate) saved_with_newer_changes: bool,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_transaction: Option<crate::product::TransactionId>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_view_key: Option<String>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_original_journal: Option<crate::state::ValidatedRevisionJournal>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_expected_journal: Option<crate::state::ValidatedRevisionJournal>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_expected_design_digest: Option<crate::product::ContentDigest>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_original_dirty: bool,
+}
+
+impl CheckAndSaveDialogState {
+    pub(crate) fn open(
+        &mut self,
+        report: crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport,
+    ) {
+        *self = Self {
+            open: true,
+            report: Some(report),
+            ..Self::default()
+        };
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        if self.saved || self.is_pending() {
+            return;
+        }
+        self.dirty = !self.revision_note.is_empty();
+        self.revision_note_touched = true;
+        self.discard_confirm = false;
+        self.validation_error = None;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.is_pending() {
+            return false;
+        }
+        if self.saved {
+            self.close();
+            return true;
+        }
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+
+    pub(crate) fn is_pending(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.pending_transaction.is_some()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            false
+        }
+    }
+}
+
 const TITLE: &str = "Check and save schematic";
 const PRIMARY: &str = "Save validated revision";
 const DESCRIPTION: &str =

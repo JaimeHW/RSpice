@@ -41,13 +41,27 @@ use crate::state::{
     ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry, View, ViewType,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
-use crate::workbench::app::dialogs::state::NewVerilogADeviceFormState;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::{
     VerilogACompileReceipt, VerilogAPlacementHandoff, apply_receipt_interface,
     compile_project_bundle_receipt, writable_libraries,
 };
 use crate::workbench::{MessageCatalog, MessageId};
+
+/// Draft for New Verilog-A device….
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NewVerilogADeviceFormState {
+    pub(crate) open: bool,
+    pub(crate) library: String,
+    pub(crate) name: String,
+    /// The ports the starter module declares, as typed: `inp:in d[7:0] vss`.
+    pub(crate) ports: String,
+    /// Why the last commit was refused. Any edit clears it.
+    pub(crate) error: Option<String>,
+    /// The schematic the form was opened from: where the device is offered
+    /// for placement once its module compiles with a port.
+    pub(crate) origin: Option<crate::state::CellViewRef>,
+}
 
 /// Open New Verilog-A device… on the library holding the active design,
 /// remembering the schematic it was opened from.
