@@ -14,6 +14,7 @@ pub(crate) mod model_hub;
 pub(crate) mod model_library;
 pub(crate) use rspice_design::netlist_document;
 pub(crate) mod netlist_diagnostics;
+pub(crate) mod notices;
 pub(crate) use rspice_design::parameters as params_string;
 pub(crate) mod pdk_config;
 use rspice_design::physical_layout;

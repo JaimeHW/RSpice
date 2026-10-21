@@ -38,6 +38,7 @@ pub(in crate::workbench) mod viewer_capabilities;
 pub(in crate::workbench) mod waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
+use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};
 use crate::workbench::app::DialogState;
 
@@ -98,6 +99,10 @@ pub struct AppState {
     pub(crate) sim_setup: SimSetupState,
     /// Structured log history buffer (ring-buffer, filterable).
     pub(crate) log_buffer: crate::diagnostics::LogBuffer,
+    /// Failures and warnings reported and not yet toasted. Each one's line is
+    /// already in [`Self::log_buffer`]; the shell raises the toasts. Runtime
+    /// only: never persisted, and a clone starts empty.
+    pub(crate) notices: NoticeQueue,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Runtime collaboration-lock authority for governed project library
@@ -999,41 +1004,64 @@ impl AppState {
     /// export. The Console keeps the line; the toast says it now and offers
     /// that line, so the mirrored copy of it is the same notice, not another.
     pub(crate) fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
-        self.report(
-            crate::ui::widgets::ToastKind::Error,
-            title.into(),
-            detail.into(),
-        );
+        self.report(NoticeKind::Error, title.into(), detail.into());
     }
 
     /// [`Self::report_failure`] for something that completed, but not the way
     /// the user asked: saved as a download, not kept for the next session.
     pub(crate) fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
-        self.report(
-            crate::ui::widgets::ToastKind::Warn,
-            title.into(),
-            detail.into(),
-        );
+        self.report(NoticeKind::Warning, title.into(), detail.into());
     }
 
-    fn report(&mut self, kind: crate::ui::widgets::ToastKind, title: String, detail: String) {
+    /// The line is written first, so its identity is the one the toast offers;
+    /// the toast itself is raised by the shell's next [`Self::drain_notices`].
+    fn report(&mut self, kind: NoticeKind, title: String, detail: String) {
         use crate::diagnostics::{LogSeverity, LogSource};
-        use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 
         let severity = match kind {
-            ToastKind::Error => LogSeverity::Error,
-            _ => LogSeverity::Warning,
+            NoticeKind::Error => LogSeverity::Error,
+            NoticeKind::Warning => LogSeverity::Warning,
         };
         let log_id = self.record(severity, LogSource::Studio, format!("{title}: {detail}"));
-        let ctx = self.ui.toast_context.clone();
-        self.ui.toasts.notify_with_action(
-            &ctx,
-            NotificationCategory::System,
+        self.notices.push(Notice {
             kind,
             title,
             detail,
-            NotificationAction::ShowInConsole { log_id },
-        );
+            log_id,
+        });
+    }
+
+    /// Raise every reported notice as a toast, in the order reported.
+    ///
+    /// The one way a notice reaches the toasts. The shell calls it at the start
+    /// of the frame and before anything that shows the toasts or reads what
+    /// they hold, so a notice is seen in the frame it would have been seen had
+    /// it been toasted when reported; a test that asserts a toast after a
+    /// report calls it the same way. Anything drawn earlier in the frame that
+    /// counts the toasts, the bell's unread count, catches up on the next.
+    pub(crate) fn drain_notices(&mut self, ctx: &egui::Context) {
+        use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
+
+        let notices = self.notices.take();
+        if !notices.is_empty() {
+            ctx.request_repaint();
+        }
+        for notice in notices {
+            let kind = match notice.kind {
+                NoticeKind::Error => ToastKind::Error,
+                NoticeKind::Warning => ToastKind::Warn,
+            };
+            self.ui.toasts.notify_with_action(
+                ctx,
+                NotificationCategory::System,
+                kind,
+                notice.title,
+                notice.detail,
+                NotificationAction::ShowInConsole {
+                    log_id: notice.log_id,
+                },
+            );
+        }
     }
 
     /// Announce a committed plan command on the lifecycle status line and

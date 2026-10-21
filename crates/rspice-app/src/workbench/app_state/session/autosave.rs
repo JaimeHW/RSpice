@@ -248,7 +248,9 @@ mod tests {
         app.state.schematic.session.current_file = Some(blocker.join("design.rspice"));
         app.autosave_last =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(2 * 60));
-        app.autosave_tick(&egui::Context::default());
+        let ctx = egui::Context::default();
+        app.autosave_tick(&ctx);
+        app.state.drain_notices(&ctx);
         {
             let activity = app.state.ui.toasts.activity();
             assert_eq!(activity.len(), 1);
@@ -261,7 +263,8 @@ mod tests {
         // again for every checkpoint it goes on preventing.
         app.autosave_last =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(2 * 60));
-        app.autosave_tick(&egui::Context::default());
+        app.autosave_tick(&ctx);
+        app.state.drain_notices(&ctx);
         let _ = std::fs::remove_file(&blocker);
         assert_eq!(app.state.ui.toasts.activity().len(), 1);
         assert!(app.state.ui.autosave_failing);

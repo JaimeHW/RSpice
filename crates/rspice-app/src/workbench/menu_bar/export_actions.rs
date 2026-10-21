@@ -768,6 +768,7 @@ mod tests {
         assert_eq!(io.writes.borrow().len(), 1);
         assert_eq!(last_log_message(&state), "SVG export failed: disk full");
         // An export the user asked for that did not happen is said now.
+        state.drain_notices(&egui::Context::default());
         let activity = state.ui.toasts.activity();
         assert_eq!(activity.len(), 1);
         assert_eq!(activity[0].title(), "SVG export failed");

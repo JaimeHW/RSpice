@@ -1366,6 +1366,7 @@ fn a_committed_simulation_workflow_answers_on_the_status_bar() {
     draft.name = "Committed clone".to_owned();
 
     finish_workflow_choice(&mut app, DialogChoice::Primary, draft, commit_clone_plan);
+    app.state.drain_notices(&egui::Context::default());
 
     assert!(app.state.workbench.simulation_workflow.is_none());
     assert!(app.state.prompt_text().is_some());
@@ -1932,6 +1933,7 @@ fn a_render_path_refusal_restated_every_frame_is_one_event() {
     for _ in 0..4 {
         simulate_frame(&mut app, Some(SimulationPage::Analyses));
     }
+    app.state.drain_notices(&egui::Context::default());
 
     let outcome = &app.state.workbench.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());

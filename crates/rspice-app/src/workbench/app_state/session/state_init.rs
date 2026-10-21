@@ -182,6 +182,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         dialogs: Box::new(DialogState::default()),
         sim_setup,
         log_buffer: crate::diagnostics::LogBuffer::default(),
+        notices: Default::default(),
         library_manager,
         library_edit_locks: crate::state::ProjectLibraryLockAuthority::default(),
         workspace,

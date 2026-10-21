@@ -944,15 +944,18 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_hardcopy_that_fails_after_its_dialog_closed_is_reported() {
+    let ctx = egui::Context::default();
     let mut app = RSpiceApp::test_instance();
     conclude_native_finalization(
         &mut app,
         Err("Hardcopy export was cancelled before it was written.".to_owned()),
     );
+    app.state.drain_notices(&ctx);
     assert!(app.state.ui.toasts.activity().is_empty());
 
     app.state.dialogs.hardcopy.open = true;
     conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
+    app.state.drain_notices(&ctx);
     assert_eq!(
         app.state.dialogs.hardcopy.error.as_deref(),
         Some("The disk is full.")
@@ -961,6 +964,7 @@ fn a_hardcopy_that_fails_after_its_dialog_closed_is_reported() {
 
     app.state.dialogs.hardcopy.close();
     conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
+    app.state.drain_notices(&ctx);
     let activity = app.state.ui.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), "Hardcopy failed");

@@ -983,3 +983,77 @@ fn modal_claims_and_restores_prior_focus_on_escape() {
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(underlying_id));
     assert_eq!(underlying, "baseline");
 }
+
+/// One application frame in the native loop's order, and every
+/// accessibility label it drew.
+#[cfg(not(target_arch = "wasm32"))]
+fn application_frame(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> Vec<String> {
+    let output = ctx.run_ui(raw_input(events), |ui| {
+        let ctx = ui.ctx().clone();
+        app.prepare_frame(&ctx);
+        app.render_frame_chrome(ui);
+        app.render_frame_dialogs(&ctx);
+    });
+    output
+        .platform_output
+        .accesskit_update
+        .map(|update| {
+            update
+                .nodes
+                .iter()
+                .filter_map(|(_, node)| node.label().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The palette renders after the toasts, so a notice a command it runs
+/// reports is drawn by the next frame, as it was when the notice was toasted
+/// on the spot. The frame that ran the command leaves it queued, which is
+/// what makes the shell ask for that next frame.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_notice_reported_from_the_palette_is_toasted_by_the_next_frame() {
+    let missing = std::env::temp_dir().join(format!(
+        "rspice-palette-rescan-missing-{}-{}",
+        std::process::id(),
+        crate::time_compat::unix_epoch().as_nanos()
+    ));
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state
+        .pdk_config
+        .add_library_path(missing.to_string_lossy().into_owned());
+    app.state.dialogs.command_palette.open();
+    app.state.dialogs.command_palette.query = "Rescan model libraries".to_owned();
+    let title = "Model library rescan completed with warnings";
+    // The toast's own control: the Console's copy of the line is drawn too.
+    let dismiss = format!("Dismiss {title}");
+    let drawn = |labels: &[String]| labels.contains(&dismiss);
+
+    let _ = application_frame(&ctx, &mut app, Vec::new());
+    let ran = application_frame(&ctx, &mut app, vec![key_event(Key::Enter)]);
+    assert!(
+        !app.state.dialogs.command_palette.open,
+        "Enter ran the command"
+    );
+    assert!(
+        !drawn(&ran),
+        "the toasts were drawn before the palette ran it"
+    );
+    assert!(
+        !app.state.notices.is_empty(),
+        "the frame ends with it queued"
+    );
+
+    let next = application_frame(&ctx, &mut app, Vec::new());
+    assert!(drawn(&next), "the next frame draws it: {next:?}");
+    assert!(app.state.notices.is_empty());
+    let activity = app.state.ui.toasts.activity();
+    assert_eq!(activity.len(), 1);
+    assert_eq!(activity[0].title(), title);
+}

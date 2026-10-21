@@ -1733,6 +1733,7 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
         .expect("the failure is in the Console");
     // A save the user asked for that did not happen is said now, not left
     // for the reader to find under the bell.
+    state.drain_notices(&egui::Context::default());
     let activity = state.ui.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), "Project save failed");
@@ -1755,6 +1756,7 @@ fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
 
     assert!(!load_project_from_path(&mut state, &path));
 
+    state.drain_notices(&egui::Context::default());
     let activity = state.ui.toasts.activity();
     assert_eq!(activity.len(), 1, "an open that failed is said now");
     assert_eq!(activity[0].title(), "Project open failed");

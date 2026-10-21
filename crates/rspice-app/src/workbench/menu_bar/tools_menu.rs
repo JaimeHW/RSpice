@@ -73,8 +73,10 @@ mod tests {
     /// the Problems page; a clean one is a record. Neither is toasted.
     #[test]
     fn a_check_that_finds_errors_warns_and_opens_problems() {
+        let ctx = egui::Context::default();
         let mut state = AppState::default();
         report(&mut state, "Design checks", Ok(finding(DrcSeverity::Error)));
+        state.drain_notices(&ctx);
         let line = state
             .log_buffer
             .entries()
@@ -99,6 +101,7 @@ mod tests {
             "Design checks",
             Ok(finding(DrcSeverity::Warning)),
         );
+        state.drain_notices(&ctx);
         let line = state
             .log_buffer
             .entries()

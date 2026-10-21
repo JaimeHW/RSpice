@@ -2330,6 +2330,7 @@ fn a_plan_edit_is_answered_on_the_status_bar_not_toasted() {
 
     let browse = route_draft(&app, SimulationPlanManagerMode::Browse, active, available);
     handle_plan_manager_action(&ctx, &mut app, browse, Some(PlanManagerAction::CopyExport));
+    app.state.drain_notices(&ctx);
     assert_eq!(
         app.state.prompt_text(),
         Some("Portable plan JSON was copied to the clipboard.")

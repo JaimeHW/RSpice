@@ -1053,11 +1053,13 @@ mod tests {
             )
         };
 
+        let ctx = egui::Context::default();
         let mut app = RSpiceApp::test_instance();
         app.cloud_account = failed("The page could not be rendered.");
         app.state.dialogs.publish_web.open = true;
         app.state.dialogs.publish_web.submitted = true;
         app.record_publish_receipt();
+        app.state.drain_notices(&ctx);
         assert!(
             app.state.ui.toasts.activity().is_empty(),
             "the open dialog shows the failure itself"
@@ -1066,6 +1068,7 @@ mod tests {
         app.state.dialogs.publish_web.open = false;
         app.record_publish_receipt();
         app.record_publish_receipt();
+        app.state.drain_notices(&ctx);
         let activity = app.state.ui.toasts.activity();
         assert_eq!(activity.len(), 1);
         assert_eq!(activity[0].title(), "Publish failed");

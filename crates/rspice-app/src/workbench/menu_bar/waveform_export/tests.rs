@@ -542,6 +542,7 @@ fn a_result_export_names_its_file_on_the_status_bar() {
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
+    state.drain_notices(&egui::Context::default());
 
     let line = last_log_message(&state);
     assert!(line.contains("waveforms.csv"), "{line}");
@@ -567,6 +568,7 @@ fn a_result_export_that_fails_is_toasted() {
     };
 
     action_export_csv_with_io(&mut state, &io);
+    state.drain_notices(&egui::Context::default());
 
     assert_eq!(
         last_log_message(&state),

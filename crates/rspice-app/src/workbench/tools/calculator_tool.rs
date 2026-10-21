@@ -209,6 +209,7 @@ mod tests {
         plot_expression(&mut app);
         assert_eq!(app.state.prompt_text(), Some("Plotted V(out)/V(in)"));
         plot_expression(&mut app);
+        app.state.drain_notices(&egui::Context::default());
         // The reader is looking at the strips: the answer is the status
         // bar's, and nothing is interrupted for it.
         assert_eq!(

@@ -457,7 +457,9 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
     // The command itself reports, so the toolbar, the menu and the palette
     // all say the same. A clean rescan answers the gesture on the status bar
     // and in the Console; it interrupts nobody.
+    let ctx = egui::Context::default();
     Command::RescanModelLibraries.execute(&mut app);
+    app.state.drain_notices(&ctx);
 
     assert_eq!(app.state.pdk_config.discovered_files.len(), 1);
     let success = app
@@ -481,6 +483,7 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
         .pdk_config
         .add_library_path(root.join("missing").to_string_lossy().into_owned());
     Command::RescanModelLibraries.execute(&mut app);
+    app.state.drain_notices(&ctx);
 
     assert_eq!(app.state.pdk_config.discovered_files.len(), 1);
     let warning = app

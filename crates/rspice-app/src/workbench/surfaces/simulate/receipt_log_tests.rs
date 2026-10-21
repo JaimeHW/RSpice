@@ -58,6 +58,7 @@ fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
     let id = first_instance(&app);
 
     apply_analysis_action(&mut app, id, AnalysisAction::SetEnabled(false));
+    app.state.drain_notices(&egui::Context::default());
 
     let entries = plan_entries(&app);
     assert_eq!(entries.len(), 1, "one command is one record: {entries:?}");
@@ -93,6 +94,7 @@ fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
         AnalysisInstanceId::new(),
         AnalysisAction::SetEnabled(true),
     );
+    app.state.drain_notices(&egui::Context::default());
 
     let entries = plan_entries(&app);
     assert_eq!(entries.len(), 1, "one refusal is one record: {entries:?}");

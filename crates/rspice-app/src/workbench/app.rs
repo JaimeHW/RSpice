@@ -450,7 +450,6 @@ impl RSpiceApp {
         state.workspace.content.migrate_owned_netlist_deck_ids();
 
         state.initialize_shortcut_library_persistence(&cc.egui_ctx);
-        state.ui.toast_context = cc.egui_ctx.clone();
         state
             .ui
             .set_number_locale(crate::quantity::platform_number_locale());
@@ -574,6 +573,7 @@ impl RSpiceApp {
     }
 
     fn prepare_frame(&mut self, ctx: &Context) {
+        self.state.drain_notices(ctx);
         self.state.reconcile_schematic_drag(ctx, false);
         let initializing_frame = self.first_frame;
         let desired_zoom = self.state.ui.preferences.interface_scale();
@@ -1456,6 +1456,10 @@ impl eframe::App for RSpiceApp {
         self.render_frame_dialogs(&ctx);
         self.state.persist_preferences_file(&ctx);
         self.end_frame(&simulation_input_before_frame);
+        // A notice a dialog reported after the toasts is raised next frame.
+        if !self.state.notices.is_empty() {
+            ctx.request_repaint();
+        }
     }
 
     /// Called by eframe when the application is shutting down.

@@ -1043,9 +1043,11 @@ mod tests {
     /// that could not be written is said now.
     #[test]
     fn a_support_bundle_reports_its_file_and_toasts_only_a_failure() {
+        let ctx = egui::Context::default();
         let mut app = RSpiceApp::test_instance();
         app.export_workflow_io = Box::new(BundleIo { write_error: None });
         export_support_bundle(&mut app, false);
+        app.state.drain_notices(&ctx);
         assert!(
             app.state
                 .prompt_text()
@@ -1059,6 +1061,7 @@ mod tests {
             write_error: Some("disk full"),
         });
         export_support_bundle(&mut app, false);
+        app.state.drain_notices(&ctx);
         let activity = app.state.ui.toasts.activity();
         assert_eq!(activity.len(), 1);
         assert_eq!(activity[0].title(), "Support bundle failed");

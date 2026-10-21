@@ -34,6 +34,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // is finished, or stopped, on whichever frame finds it so, whatever that
     // frame shows.
     preflight::poll(&mut app.state, &mut app.simulation_controller);
+    // Reported failures are toasted before the mirror runs, so it meets their
+    // lines as already announced and does not file each a second time.
+    app.state.drain_notices(ctx);
     // The announcement goes first so that it is the record that survives.
     // Both of these report a finished run, and the mirror drops a line whose
     // destination is already announced — so whichever runs first is the one
@@ -160,6 +163,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // the session, not the application root, so the jump happens here.
     crate::workbench::diagnostic_routes::apply_pending(ctx, app);
     docks::show_run_details(ctx, app);
+    app.state.drain_notices(ctx);
     tools::notification_center::show(ctx, app, layout.title_bar_height);
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
@@ -198,6 +202,7 @@ fn show_toasts(
     state: &mut AppState,
     layout: LayoutSpec,
 ) -> Option<crate::ui::widgets::NotificationAction> {
+    state.drain_notices(ctx);
     if tools::notification_center::focused_window(ctx) != ctx.viewport_id()
         || tools::notification_center::showing_here(ctx, state)
     {
@@ -634,6 +639,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         app.state.ui.canvas_hover = None;
         app.state.ui.canvas_view_center = None;
     }
+    app.state.drain_notices(ctx);
     // A detached window with the keyboard draws the toasts instead.
     if tools::notification_center::focused_window(ctx) == ctx.viewport_id() {
         let large_targets = tools::notification_center::large_targets(ctx, &app.state);
@@ -709,6 +715,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     if layout.has_overlay_drawer {
         docks::show_drawers(root, app, layout);
     }
+    app.state.drain_notices(ctx);
     tools::notification_center::show(ctx, app, layout.title_bar_height);
     if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
         commands::result_navigation::perform_notification_action(app, action);
@@ -921,6 +928,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state
             .report_failure("Project save failed", "The disk is full.");
+        app.state.drain_notices(&ctx);
         synchronize_activity_stream(&ctx, &mut app);
         synchronize_activity_stream(&ctx, &mut app);
 
@@ -941,6 +949,56 @@ mod tests {
             activity[0].action(),
             Some(NotificationAction::ShowInConsole { log_id: line })
         );
+    }
+
+    /// A failure reported outside the shell's frame, by a save or the
+    /// autosave, is on screen in the next frame the shell draws, and the
+    /// console mirror that frame runs meets its line as the same notice.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_failure_reported_before_the_frame_is_toasted_in_it_and_filed_once() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .report_failure("Project save failed", "The disk is full.");
+
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| show(ui, &mut app),
+        );
+
+        let labels: Vec<String> = output
+            .platform_output
+            .accesskit_update
+            .map(|update| {
+                update
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, node)| node.label().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The toast's own control: the Console's copy of the line is drawn too.
+        assert!(
+            labels
+                .iter()
+                .any(|label| label == "Dismiss Project save failed"),
+            "the toast is drawn in this frame: {labels:?}"
+        );
+        assert_eq!(
+            app.state.ui.toasts.activity().len(),
+            1,
+            "the mirrored line is the same notice"
+        );
+        assert!(app.state.notices.is_empty());
     }
 
     /// A completion is announced on the transition into a terminal lifecycle,
