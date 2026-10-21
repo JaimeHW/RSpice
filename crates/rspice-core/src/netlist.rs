@@ -6936,26 +6936,8 @@ mod tests {
                     }
                 }
             }
-            // Check the actual diode current against the explicit, flattened
-            // reference circuit, including independent sibling bindings.
-            let current = |body: &str| {
-                let netlist = Netlist::parse_with_options(
-                    &format!("Physical AREA\nV1 a 0 0.6\n{body}\n.model dm d (IS=1p)\n.end"),
-                    NetlistParseOptions {
-                        expression_dialect: dialect,
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-                crate::engine::Engine::default()
-                    .run_dc_op(&netlist)
-                    .unwrap()
-                    .branch_currents[0]
-            };
-            assert_eq!(
-                current("X1 a cell q=3\nX2 a cell q=7\n.subckt cell a q=11\nD1 a 0 dm 2*q\n.ends"),
-                current("D1 a 0 dm 6\nD2 a 0 dm 14")
-            );
+            // That the AREA reaches the diode equation is checked through the
+            // engine in `tests/netlist_engine_roundtrip.rs`.
         }
     }
 
@@ -7074,30 +7056,9 @@ mod tests {
                         }
                     }
                 }
-                // The winning AREA and M must reach the actual diode equation.
-                let current = |fields: &str| {
-                    let device = format!("D1 d 0 m {fields}\n.model m d (IS=1p)");
-                    let body = if nested {
-                        format!("X1 d cell q=4\n.subckt cell d q=9\n{device}\n.ends")
-                    } else {
-                        device
-                    };
-                    let netlist = Netlist::parse_with_options(
-                        &format!(
-                            "Physical assignment values\n.param q=4\nV1 d 0 0.6\n{body}\n.end"
-                        ),
-                        NetlistParseOptions {
-                            expression_dialect: dialect,
-                            ..Default::default()
-                        },
-                    )
-                    .unwrap();
-                    crate::engine::Engine::default()
-                        .run_dc_op(&netlist)
-                        .unwrap()
-                        .branch_currents[0]
-                };
-                assert_eq!(current("AREA=2 AREA={q} M=2 MULT=3"), current("AREA=4 M=3"));
+                // That the winning AREA and M reach the diode equation is
+                // checked through the engine in
+                // `tests/netlist_engine_roundtrip.rs`.
             }
         }
     }

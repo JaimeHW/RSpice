@@ -226,19 +226,20 @@ const LAYERS: &[(&str, u32)] = &[
 /// `netlist -> engine` at 13 rather than 5. Each entry below says what retires
 /// it.
 ///
-/// - `netlist -> engine`, 13. Unit tests in `netlist.rs`,
-///   `netlist/add_resistors.rs`, `netlist/flattener.rs`, `netlist/parser.rs`,
-///   `netlist/parser/values.rs`, `netlist/source_map.rs` and
-///   `netlist/startup.rs` that check a parse by running the netlist they just
-///   built through `Engine`; eight of them name it `crate::Engine`. The
-///   physical check is the point of them — a positional `AREA`, a scoped
-///   subcircuit binding and an instance-argument expression are all things a
+/// - `netlist -> engine`, 11. Unit tests in `netlist/add_resistors.rs`,
+///   `netlist/flattener.rs`, `netlist/parser.rs`, `netlist/parser/values.rs`,
+///   `netlist/source_map.rs` and `netlist/startup.rs` that check a parse by
+///   running the netlist they just built through `Engine`; eight of them name
+///   it `crate::Engine`. The physical check is the point of them — a scoped
+///   subcircuit binding and an instance-argument expression are things a
 ///   parser can get wrong without saying so — but reaching six ranks up to
 ///   make it is still the inversion this test measures. They retire by moving
 ///   the physical half into an integration test under
 ///   `crates/rspice-core/tests/`, which is an external crate and therefore not
 ///   an edge at all; the parser-internal half has to stay, because it drives
 ///   `super::parse_numeric_field_value` and its siblings directly.
+///   `netlist.rs`'s positional-`AREA` and reassignment checks went that way,
+///   to `tests/netlist_engine_roundtrip.rs`.
 /// - `netlist -> circuit`, 1. One unit test in `netlist/flattener.rs` that
 ///   reads a materialized source waveform back through
 ///   `circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect`.
@@ -306,7 +307,7 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("device", "engine", 6),
     ("netlist", "circuit", 1),
     ("netlist", "device", 1),
-    ("netlist", "engine", 13),
+    ("netlist", "engine", 11),
 ];
 
 fn src_dir() -> PathBuf {
