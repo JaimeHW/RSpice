@@ -14,6 +14,7 @@
 use std::path::PathBuf;
 
 use crate::product::{ContentDigest, ModelSourceId};
+use crate::state::ModelsPage;
 use crate::state::model_library::{
     DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelSourceAuthority, ModelSourceContent,
     ModelSourcePin, ModelType, ProcessCorner, ProjectModelDefinition,
@@ -21,7 +22,6 @@ use crate::state::model_library::{
 };
 use crate::state::{Component, ComponentType, Point};
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::ModelsPage;
 
 /// Libraries a project at the top of its range binds at once.
 pub(super) const LIBRARIES: usize = 40;

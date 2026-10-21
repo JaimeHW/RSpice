@@ -8,7 +8,8 @@ use egui::Rect;
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 
 use super::*;
-use crate::workbench::state::{ModelsCatalogScope, ModelsPage};
+use crate::state::ModelsPage;
+use crate::workbench::state::ModelsCatalogScope;
 
 const MODELS_RASTER_SIZE: egui::Vec2 = egui::Vec2::new(1_180.0, 900.0);
 #[derive(Clone, Copy)]

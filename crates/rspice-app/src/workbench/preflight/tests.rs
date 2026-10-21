@@ -747,7 +747,7 @@ fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
         panic!("the finding is located on the drawing: {island:?}");
     };
     assert_eq!(cell_view, &root);
-    let crate::workbench::state::DrawnObject::Net { name, wire, .. } = object else {
+    let crate::state::DrawnObject::Net { name, wire, .. } = object else {
         panic!("the finding names a net: {island:?}");
     };
     assert_eq!(name, "OUT");
@@ -937,7 +937,7 @@ fn a_source_across_a_winding_is_refused_on_the_winding() {
         panic!("the finding is located on the drawing: {closed:?}");
     };
     assert_eq!(cell_view, &root);
-    let crate::workbench::state::DrawnObject::Component { name, .. } = object else {
+    let crate::state::DrawnObject::Component { name, .. } = object else {
         panic!("the finding names the winding: {closed:?}");
     };
     assert!(name.starts_with('L'), "{closed:?}");

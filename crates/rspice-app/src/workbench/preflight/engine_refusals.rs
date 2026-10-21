@@ -23,8 +23,8 @@ use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::NumericOverrideOption;
 use crate::state::{CellViewRef, Component, ViewType};
+use crate::state::{DrawnObject, PreflightIssue, PreflightRemediation};
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::{DrawnObject, PreflightIssue, PreflightRemediation};
 
 /// Row labels the Solver surface states as enforced contract. The refusal and
 /// the statement of the rule use one vocabulary.

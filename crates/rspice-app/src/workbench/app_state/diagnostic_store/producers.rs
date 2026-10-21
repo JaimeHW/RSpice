@@ -11,7 +11,7 @@ use rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata;
 
 use crate::diagnostics::LogAnchor;
 use crate::state::ConvergenceAttribution;
-use crate::workbench::state::{
+use crate::state::{
     DrawnObject, ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation,
     PreflightReport,
 };

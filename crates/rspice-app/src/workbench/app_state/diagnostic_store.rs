@@ -36,8 +36,8 @@ use rspice_vocabulary::diagnostics::{CanonicalDiagnosticMetadata, DiagnosticSeve
 
 use crate::diagnostics::LogAnchor;
 use crate::product::{ContentDigest, ProjectId};
+use crate::state::PreflightRemediation;
 use crate::state::{CanonicalCellViewOwnerKey, CellViewRef};
-use crate::workbench::state::PreflightRemediation;
 
 use super::{AppState, design_checks};
 

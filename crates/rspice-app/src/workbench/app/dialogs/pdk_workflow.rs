@@ -1726,7 +1726,7 @@ fn poll_browser_model_imports(state: &mut AppState) {
                 state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Models);
-                state.workbench.models_page = crate::workbench::state::ModelsPage::Models;
+                state.workbench.models_page = crate::state::ModelsPage::Models;
                 state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
                 state.workbench.models_view.action_receipt = Some(Ok(
                     "Select the executable entry file for the browser model source tree."

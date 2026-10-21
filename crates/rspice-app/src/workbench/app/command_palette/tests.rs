@@ -658,7 +658,7 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     assert_eq!(app.state.model_library_manager.filter_type, None);
     assert_eq!(
         app.state.workbench.models_page,
-        crate::workbench::state::ModelsPage::Models
+        crate::state::ModelsPage::Models
     );
     assert_eq!(
         app.state.workbench.workspace,

@@ -21,12 +21,11 @@
 
 use egui::Context;
 
+use crate::state::{DrawnObject, PreflightRemediation};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{
-    DrawnObject, PreflightRemediation, ProjectPage, SimulationPage, Workspace,
-};
+use crate::workbench::state::{ProjectPage, SimulationPage, Workspace};
 
 /// Apply the route a consumer asked for, if one is outstanding.
 ///

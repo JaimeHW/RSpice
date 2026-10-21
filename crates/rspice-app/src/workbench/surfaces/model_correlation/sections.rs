@@ -1124,7 +1124,7 @@ pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &Correl
             .show(ui)
             .clicked()
         {
-            app.state.workbench.models_page = super::super::super::state::ModelsPage::Qualification;
+            app.state.workbench.models_page = crate::state::ModelsPage::Qualification;
             if let Err(error) = app.state.workbench.navigate(
                 SurfaceRoute::surface(SurfaceId::Models),
                 RouteTransitionSource::User,

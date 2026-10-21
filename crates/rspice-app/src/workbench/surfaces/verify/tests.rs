@@ -190,7 +190,7 @@ fn retain_preflight_report(app: &mut RSpiceApp) {
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     app.state.workbench.preflight = crate::workbench::state::PreflightDialogState {
-        report: Some(crate::workbench::state::PreflightReport {
+        report: Some(crate::state::PreflightReport {
             project_revision: app.state.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
@@ -650,10 +650,9 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
         .stable_analysis_plan()
         .unwrap()
         .revision();
-    app.state.workbench.preflight.report =
-        Some(crate::workbench::state::PreflightReport::retained_for_test(
-            app.state.workspace.content.project.revision().get(),
-        ));
+    app.state.workbench.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
+        app.state.workspace.content.project.revision().get(),
+    ));
     sync_tuning_session(&mut app);
     app.state.workbench.verification.tuning_variables[0].candidate_expression =
         "620 ohm".to_owned();

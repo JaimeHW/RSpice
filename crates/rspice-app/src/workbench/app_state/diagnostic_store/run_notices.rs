@@ -23,8 +23,8 @@ use rspice_core::notice::{
 use rspice_results::convergence_quality::TransientConvergenceEvidence;
 
 use crate::quantity::engineering::{EngineeringPrecision, format_engineering_display_with};
+use crate::state::PreflightRemediation;
 use crate::state::{CellViewRef, InstancePath};
-use crate::workbench::state::PreflightRemediation;
 
 use super::super::AppState;
 use super::{

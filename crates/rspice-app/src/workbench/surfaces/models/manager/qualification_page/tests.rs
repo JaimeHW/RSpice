@@ -9,11 +9,11 @@
 use super::*;
 
 use super::super::super::ENGINE_OWNED_BAND;
+use crate::state::ModelsPage;
 use crate::state::model_library::{ModelLibraryManager, ProjectModelDefinition};
 use crate::workbench::documents::model_editor::{
     QualificationAuthoringAnalysis, QualificationAuthoringProbe, QualificationAuthoringSample,
 };
-use crate::workbench::state::ModelsPage;
 
 /// The document column in the shell at a 1680 px window, and a viewport tall
 /// enough to show the composition the page is measured against.

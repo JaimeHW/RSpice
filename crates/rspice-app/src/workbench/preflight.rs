@@ -26,14 +26,15 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::{PreflightOutcome, PreflightVerdict};
 use crate::simulation::execution::PreparationError;
+use crate::state::{
+    ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation, PreflightReport,
+    PreparedPreflightContract,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::CheckScope;
 
-use super::state::{
-    ModelsPage, PreflightAdvisory, PreflightCheck, PreflightIssue, PreflightRemediation,
-    PreflightReport, PreparedPreflightContract, Workspace,
-};
+use super::state::{PreflightCheck, Workspace};
 
 /// Run every local preflight check and the engine's build pass, retain the
 /// exact report for the current project revision, and publish what it found.

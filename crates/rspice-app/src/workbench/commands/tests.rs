@@ -26,8 +26,9 @@ mod view_state;
 
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
+use crate::state::ModelsPage;
 use crate::state::Wire;
-use crate::workbench::state::{ModelsPage, ProjectPage, SimulationPage, VerificationPage};
+use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage};
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {
     use crate::state::{

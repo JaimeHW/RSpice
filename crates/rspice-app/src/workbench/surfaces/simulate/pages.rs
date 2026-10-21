@@ -404,7 +404,7 @@ fn open_output_dialog(app: &mut RSpiceApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::state::{
+    use crate::state::{
         PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
     };
 

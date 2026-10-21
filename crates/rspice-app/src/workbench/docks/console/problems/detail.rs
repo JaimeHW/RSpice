@@ -724,7 +724,7 @@ mod tests {
             None,
             Some(DiagnosticRoute::NetlistDiagnostic(uuid::Uuid::nil())),
             Some(DiagnosticRoute::Repair(
-                crate::workbench::state::PreflightRemediation::DesignChecks,
+                crate::state::PreflightRemediation::DesignChecks,
             )),
         ] {
             assert_eq!(

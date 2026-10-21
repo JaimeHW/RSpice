@@ -28,7 +28,7 @@ use rspice_ui_kit::panels::{
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::state::model_library::ModelConsumerScope;
-use crate::state::{CellViewRef, Component, ViewType, explicit_component_model};
+use crate::state::{CellViewRef, Component, ModelsPage, ViewType, explicit_component_model};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::DesignCheckStatus;
@@ -42,7 +42,7 @@ use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, WorkbenchIcon, property_row, property_row_input_action, property_row_problem,
 };
-use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
+use super::super::state::{ProjectPage, VerificationPage, Workspace};
 
 const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
 

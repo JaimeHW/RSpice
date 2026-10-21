@@ -1835,7 +1835,7 @@ mod transaction_tests {
             .key();
         let topology_revision = app.state.schematic.topology_version();
         let topology_closure = vec![(topology_root.to_ascii_lowercase(), topology_revision)];
-        app.state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
+        app.state.workbench.preflight.report = Some(crate::state::PreflightReport {
             project_revision: app.state.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,

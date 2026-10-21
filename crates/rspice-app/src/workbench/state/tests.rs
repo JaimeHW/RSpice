@@ -558,7 +558,7 @@ fn toggling_the_active_drawer_closes_it_deterministically() {
 #[test]
 fn invalidating_preflight_drops_every_revision_bound_presentation_artifact() {
     let mut preflight = PreflightDialogState {
-        report: Some(PreflightReport {
+        report: Some(crate::state::PreflightReport {
             project_revision: 4,
             topology_root: "user/top/schematic".to_owned(),
             topology_revision: 9,

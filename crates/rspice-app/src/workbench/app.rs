@@ -1968,7 +1968,7 @@ mod tests {
     fn frame_topology_edits_drop_preflight_authority_at_one_central_boundary() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.preflight.report =
-            Some(crate::workbench::state::PreflightReport::retained_for_test(
+            Some(crate::state::PreflightReport::retained_for_test(
                 app.state.workspace.content.project.revision().get(),
             ));
         let before = FrameSimulationInput::capture(&app.state);

@@ -9,13 +9,13 @@
 
 use egui::Ui;
 
+use crate::state::ModelsPage;
 use crate::state::model_library::{ModelSourceAuthority, short_digest};
 use crate::ui::accessibility::{counted, plural_suffix};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, IconButton, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::ModelsPage;
 
 use super::super::models::closure::{
     DefinitionRow, definition_index, scan_source_drift, source_drift_findings,
@@ -973,7 +973,7 @@ mod tests {
         let second = add_sectioned_library(&mut app, "models-second.lib", "second_nch");
         let initial_revision = active_plan_revision(&app);
         app.state.workbench.preflight.report =
-            Some(crate::workbench::state::PreflightReport::retained_for_test(
+            Some(crate::state::PreflightReport::retained_for_test(
                 app.state.workspace.content.project.revision().get(),
             ));
 

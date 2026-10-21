@@ -11,7 +11,8 @@ use crate::workbench::RSpiceApp;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
-use super::super::state::{ModelsPage, VerificationPage, WorkbenchState, Workspace};
+use super::super::state::{VerificationPage, WorkbenchState, Workspace};
+use crate::state::ModelsPage;
 use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
 mod keyboard;

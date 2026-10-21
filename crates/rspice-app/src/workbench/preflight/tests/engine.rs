@@ -129,7 +129,7 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
         issue.remediation,
         PreflightRemediation::Drawing {
             cell_view: root.clone(),
-            object: crate::workbench::state::DrawnObject::Component {
+            object: crate::state::DrawnObject::Component {
                 id: pull_down,
                 name: "MN".to_owned(),
             },
@@ -343,7 +343,7 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
         panic!("the finding is located on the drawing: {crossing:?}");
     };
     assert_eq!(cell_view, &top);
-    let crate::workbench::state::DrawnObject::Component { id, .. } = object else {
+    let crate::state::DrawnObject::Component { id, .. } = object else {
         panic!("the finding names the device: {crossing:?}");
     };
     assert_eq!(*id, placed);
@@ -580,7 +580,7 @@ fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
         panic!("the finding is located on the drawing: {island:?}");
     };
     assert_eq!(cell_view, &amp, "shown in the cell that draws it");
-    let crate::workbench::state::DrawnObject::Net { name, wire, .. } = object else {
+    let crate::state::DrawnObject::Net { name, wire, .. } = object else {
         panic!("the finding names a net: {island:?}");
     };
     assert_eq!(name, "isl");
@@ -632,7 +632,7 @@ fn a_winding_loop_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
         panic!("the finding is located on the drawing: {closed:?}");
     };
     assert_eq!(cell_view, &amp, "shown in the cell that draws it");
-    let crate::workbench::state::DrawnObject::Component { id, .. } = object else {
+    let crate::state::DrawnObject::Component { id, .. } = object else {
         panic!("the finding names the winding: {closed:?}");
     };
     assert_eq!(*id, winding);

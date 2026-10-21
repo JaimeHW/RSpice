@@ -16,7 +16,7 @@ use super::diagnostic_store::{
     FindingKey, mint_canonical,
 };
 use crate::product::ContentDigest;
-use crate::workbench::state::PreflightRemediation;
+use crate::state::PreflightRemediation;
 
 /// Producer identity every rule-deck record carries.
 const RULE_DECK_PRODUCER: &str = "rspice.design.rule-deck";

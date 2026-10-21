@@ -878,7 +878,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let before_revision = active_plan_revision(&app);
         app.state.workbench.preflight.report =
-            Some(crate::workbench::state::PreflightReport::retained_for_test(
+            Some(crate::state::PreflightReport::retained_for_test(
                 app.state.workspace.content.project.revision().get(),
             ));
         let mut policy = app.state.sim_setup.save_policy;
@@ -902,7 +902,7 @@ mod tests {
         let before_policy = app.state.sim_setup.save_policy;
         let before_revision = active_plan_revision(&app);
         app.state.workbench.preflight.report =
-            Some(crate::workbench::state::PreflightReport::retained_for_test(
+            Some(crate::state::PreflightReport::retained_for_test(
                 app.state.workspace.content.project.revision().get(),
             ));
         let mut invalid = before_policy;

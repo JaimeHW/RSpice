@@ -2453,7 +2453,7 @@ mod tests {
             .expect("default plan");
         let (topology_root, topology_revision, topology_closure) =
             app.state.configured_topology_revision();
-        app.state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
+        app.state.workbench.preflight.report = Some(crate::state::PreflightReport {
             project_revision: app.state.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,

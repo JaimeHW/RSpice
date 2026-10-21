@@ -158,7 +158,7 @@ fn render_populated_symbols_page() {
         ("egui-01c-symbols-two-corpora.png", true),
     ] {
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.models_page = crate::workbench::state::ModelsPage::Symbols;
+        app.state.workbench.models_page = crate::state::ModelsPage::Symbols;
         super::super::symbol_contracts::seed_symbol_registry(&mut app.state);
         if bind_technology {
             app.state

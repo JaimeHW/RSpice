@@ -34,7 +34,8 @@ use rspice_results_ui::selection::{
 use super::super::commands::result_navigation::{open_run_log, producing_run};
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{PANEL_HEADER_H, WorkbenchIcon, property_row, section_header};
-use super::super::state::{ModelsPage, ProjectPage, SimulationPage, VerificationPage, Workspace};
+use super::super::state::{ProjectPage, SimulationPage, VerificationPage, Workspace};
+use crate::state::ModelsPage;
 use crate::ui::widgets::{Problem, paint_problem_mark};
 
 const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;

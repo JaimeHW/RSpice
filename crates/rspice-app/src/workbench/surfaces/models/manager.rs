@@ -49,6 +49,7 @@ use crate::ui::tokens::{self, Tokens};
 // The design system's widget vocabulary. Every page under this module reaches
 // it through `use super::*`, which is what keeps one spelling of a button, a
 // chip, a select and a modal across all six of them.
+use crate::state::ModelsPage;
 use crate::ui::widgets::{
     self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, SegmentedWidth,
     paint_problem_mark, problem_line,
@@ -61,7 +62,7 @@ use crate::workbench::app_state::design_history::{
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{
     ModelHubFacet, ModelPackFacet, ModelsCatalogScope, ModelsCatalogSortKey,
-    ModelsOperationalState, ModelsPage, ModelsTableSort, ModelsWorkbenchDialog, ProjectModelFacet,
+    ModelsOperationalState, ModelsTableSort, ModelsWorkbenchDialog, ProjectModelFacet,
     RSpicePartFacet,
 };
 use crate::workbench::{AppState, RSpiceApp};

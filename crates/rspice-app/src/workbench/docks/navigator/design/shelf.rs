@@ -582,7 +582,8 @@ fn arm_library_part(
 /// on the cursor when the install completes, so the round trip ends where the
 /// user started.
 fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, version: String) {
-    use crate::workbench::state::{ModelsPage, ModelsWorkbenchDialog, PackReleaseConfirmation};
+    use crate::state::ModelsPage;
+    use crate::workbench::state::{ModelsWorkbenchDialog, PackReleaseConfirmation};
 
     let Some(release) = PackReleaseConfirmation::for_release(
         &app.model_hub,

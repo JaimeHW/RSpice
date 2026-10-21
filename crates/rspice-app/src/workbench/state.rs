@@ -1112,7 +1112,7 @@ pub struct WorkbenchState {
     #[serde(default)]
     pub verification: VerificationSessionState,
     #[serde(default)]
-    pub models_page: ModelsPage,
+    pub models_page: crate::state::ModelsPage,
     /// Models & PDKs catalog filters and stable presentation selections.
     /// Model, source, symbol, and PDK records remain in their owning domains.
     #[serde(default)]
@@ -1427,7 +1427,7 @@ impl Default for WorkbenchState {
             verification_page: VerificationPage::Yield,
             simulation_page: SimulationPage::Analyses,
             verification: VerificationSessionState::default(),
-            models_page: ModelsPage::Models,
+            models_page: crate::state::ModelsPage::Models,
             models_view: ModelsWorkbenchViewState::default(),
             active_analysis: default_analysis_index(),
             active_analysis_instance: None,

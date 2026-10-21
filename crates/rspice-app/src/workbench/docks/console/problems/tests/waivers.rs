@@ -374,11 +374,11 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
     );
     retain_report(
         &mut app.state,
-        vec![crate::workbench::state::PreflightIssue {
+        vec![crate::state::PreflightIssue {
             check: "Schematic validation".to_owned(),
             observed: "1 design-rule error".to_owned(),
             required: "No error-level design-rule findings".to_owned(),
-            remediation: crate::workbench::state::PreflightRemediation::DesignChecks,
+            remediation: crate::state::PreflightRemediation::DesignChecks,
         }],
     );
     collision_current(&mut app.state);
@@ -410,10 +410,10 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
 
 /// Retain a preflight report over the design as it stands, as a pass does,
 /// with `blockers` against it.
-fn retain_report(state: &mut AppState, blockers: Vec<crate::workbench::state::PreflightIssue>) {
+fn retain_report(state: &mut AppState, blockers: Vec<crate::state::PreflightIssue>) {
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let plan = state.active_plan_revision();
-    state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
+    state.workbench.preflight.report = Some(crate::state::PreflightReport {
         project_revision: state.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,

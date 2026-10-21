@@ -10,10 +10,8 @@
 //! the artifact writers name a command without depending on the dispatcher
 //! that runs it.
 
-use crate::state::ComponentType;
-use crate::workbench::state::{
-    ModelsPage, ProjectPage, SimulationPage, VerificationPage, Workspace,
-};
+use crate::state::{ComponentType, ModelsPage};
+use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage, Workspace};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

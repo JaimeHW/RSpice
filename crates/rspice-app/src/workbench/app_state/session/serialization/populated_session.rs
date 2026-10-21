@@ -12,9 +12,10 @@
 use super::tests::{MemoryStorage, relaunch};
 use super::*;
 
+use crate::state::ModelsPage;
 use crate::workbench::state::{
-    ConsolePage, DesignPanel, LibraryCellviewPage, ModelsPage, ProjectPage, SimulationPage,
-    VerificationPage, Workspace, WorkspaceDocumentId,
+    ConsolePage, DesignPanel, LibraryCellviewPage, ProjectPage, SimulationPage, VerificationPage,
+    Workspace, WorkspaceDocumentId,
 };
 
 /// A session in mid-work with every persisted field moved off its default:
