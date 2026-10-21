@@ -5,6 +5,7 @@
 //! but never claim native-solver provenance or prepared-plan authority.
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::io::file_exchange::MAX_RESULT_DATASET_BYTES;
 pub(crate) use crate::state::ResultImportFormat;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
@@ -49,7 +50,6 @@ pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
         "fst",
     ],
 );
-pub(crate) const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RESULT_COLUMNS: usize = 1_024;
 const MAX_RESULT_ROWS: usize = 1_000_000;
 const MAX_SIGNAL_NAME_BYTES: usize = 1_024;

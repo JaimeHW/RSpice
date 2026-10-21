@@ -65,6 +65,18 @@ use egui::{Context, Id};
 mod binary;
 pub(crate) use binary::{open_binary_file, take_opened_binary};
 
+/// Largest result dataset an import reads. The result importers bound their
+/// decoding by it, and the browser picker refuses a larger file before it
+/// reads one.
+pub(crate) const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Maximum UTF-8 source accepted by the symbol-definition importer.
+///
+/// Symbol definitions are compact vector documents. A four MiB ceiling is
+/// deliberately independent from the much larger project/deck limit and is
+/// applied before parsing on both native and browser builds.
+pub(crate) const MAX_SYMBOL_DEFINITION_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
+
 /// What a picker offers, and how its refusals name the file.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FileKind {

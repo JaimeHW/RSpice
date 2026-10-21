@@ -54,10 +54,8 @@ impl BrowserTextImportKind {
                 crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES
             }
             Self::EngineeringTableView => 512 * 1024,
-            Self::ResultDataset => {
-                crate::workbench::workflows::result_import_workflow::MAX_RESULT_DATASET_BYTES
-            }
-            Self::SymbolDefinition => crate::workbench::app::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
+            Self::ResultDataset => crate::io::file_exchange::MAX_RESULT_DATASET_BYTES,
+            Self::SymbolDefinition => crate::io::file_exchange::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
             Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA | Self::Automation => {
                 crate::io::project_io::MAX_PROJECT_FILE_BYTES
             }

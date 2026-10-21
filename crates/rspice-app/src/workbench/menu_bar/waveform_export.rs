@@ -27,7 +27,7 @@ const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 /// Headers and container metadata also count against the receiving workflow's
 /// byte limit. Refuse an oversized artifact before selecting a destination.
 fn admit_result_export_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
-    let limit = crate::workbench::workflows::result_import_workflow::MAX_RESULT_DATASET_BYTES;
+    let limit = crate::io::file_exchange::MAX_RESULT_DATASET_BYTES;
     if bytes.len() as u64 > limit {
         return Err(format!(
             "The encoded result is {} bytes; the import limit is {limit} bytes. Hide traces or export a smaller selection.",
@@ -856,7 +856,7 @@ fn export_native_result_bundle(
     let bytes = match encode_native_bundle(
         kind,
         &native_dataset,
-        crate::workbench::workflows::result_import_workflow::MAX_RESULT_DATASET_BYTES,
+        crate::io::file_exchange::MAX_RESULT_DATASET_BYTES,
     ) {
         Ok(bytes) => bytes,
         Err(error) => {

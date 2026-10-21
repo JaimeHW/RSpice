@@ -3,9 +3,9 @@
 //! Native and browser variants: a file dialog on the desktop, a file input
 //! in the browser.
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
-use super::MAX_SYMBOL_DEFINITION_IMPORT_BYTES;
 use super::state::SymbolImportDialogState;
+#[cfg(any(not(target_arch = "wasm32"), test))]
+use crate::io::file_exchange::MAX_SYMBOL_DEFINITION_IMPORT_BYTES;
 
 const SYMBOL_SOURCE_FILTER_NAME: &str = "RSpice, SVG, EDIF, or LTspice symbol";
 const SYMBOL_SOURCE_EXTENSIONS: &[&str] = &["rspicesym", "json", "svg", "edif", "edf", "asy"];

@@ -816,7 +816,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/code_workspace", "app", 5),
     ("documents/model_editor", "app", 1),
     ("documents/result_document", "app", 3),
-    ("browser/file_import", "app", 1),
     ("lifecycle/recovery", "app", 1),
     // What still names the dispatcher rather than the vocabulary it routes.
     // These are shortcut artifacts asking whether a command is *available*,
@@ -876,11 +875,8 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // The live-session engine closes the project through the project
     // workflow, which ranks above the application that owns the engine.
     ("live_session", "workflows/project_workflow", 5),
+    // The browser import reads the shortcut profile's size limit.
     ("browser/file_import", "shortcuts/profile_workflow", 1),
-    // The browser import reads result import's size limit, as it reads the
-    // shortcut profile's above, while result import picks its file through
-    // the browser import.
-    ("browser/file_import", "workflows/result_import_workflow", 1),
     // Result import opens the imported result's tab through the document
     // bar, and the dispatcher that starts an import ranks below the bar.
     ("workflows/result_import_workflow", "chrome", 1),

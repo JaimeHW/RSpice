@@ -219,13 +219,6 @@ fn reference_has_typed_definition(state: &AppState, reference: &CellViewRef) -> 
         .is_some_and(|view| matches!(crate::state::load_model_bound_symbol(view), Ok(Some(_))))
 }
 
-/// Maximum UTF-8 source accepted by the symbol-definition importer.
-///
-/// Symbol definitions are compact vector documents. A four MiB ceiling is
-/// deliberately independent from the much larger project/deck limit and is
-/// applied before parsing on both native and browser builds.
-pub(crate) const MAX_SYMBOL_DEFINITION_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
-
 #[cfg(test)]
 mod tests {
     use super::*;
