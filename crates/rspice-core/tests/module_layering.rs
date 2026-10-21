@@ -226,57 +226,46 @@ const LAYERS: &[(&str, u32)] = &[
 /// `netlist -> engine` at 13 rather than 5. Each entry below says what retires
 /// it.
 ///
-/// - `netlist -> engine`, 11. Unit tests in `netlist/add_resistors.rs`,
-///   `netlist/flattener.rs`, `netlist/parser.rs`, `netlist/parser/values.rs`,
-///   `netlist/source_map.rs` and `netlist/startup.rs` that check a parse by
-///   running the netlist they just built through `Engine`; eight of them name
-///   it `crate::Engine`. The physical check is the point of them — a scoped
-///   subcircuit binding and an instance-argument expression are things a
-///   parser can get wrong without saying so — but reaching six ranks up to
-///   make it is still the inversion this test measures. They retire by moving
-///   the physical half into an integration test under
-///   `crates/rspice-core/tests/`, which is an external crate and therefore not
-///   an edge at all; the parser-internal half has to stay, because it drives
-///   `super::parse_numeric_field_value` and its siblings directly.
-///   `netlist.rs`'s positional-`AREA` and reassignment checks went that way,
-///   to `tests/netlist_engine_roundtrip.rs`.
+/// - `netlist -> engine`, 2. Two unit tests in `netlist/flattener.rs`
+///   (`subcircuit_bindings_preserve_complex_scopes_and_physical_values` and
+///   `statistical_parameter_expansion_reaches_the_built_circuit`) that build
+///   the flattened deck through `Engine` and read the built circuit's source
+///   tables and the statistics plan's sampling, which are crate-private. The
+///   rest of this edge retired by moving the physical half of each check into
+///   an integration test under `crates/rspice-core/tests/`
+///   (`netlist_engine_roundtrip.rs`, `netlist_engine_roundtrip_more.rs`),
+///   which is an external crate and therefore not an edge at all; the
+///   parser-internal halves stayed, because they drive
+///   `super::parse_numeric_field_value` and its siblings directly. These two
+///   retire the same way once the items they read are reachable from an
+///   integration test.
 /// - `netlist -> circuit`, 1. One unit test in `netlist/flattener.rs` that
 ///   reads a materialized source waveform back through
 ///   `circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect`.
 ///   Retires the same way.
-/// - `netlist -> device`, 1. Production, and the only one of the three that is:
-///   `netlist/expr/scalar_direction.rs` takes `BehavioralEnvironment`,
-///   `compiled_expression_node_direction` and `eval_binary_with_derivative`
-///   from `device::behavioral`, which is the one implementation of the
-///   derivative arithmetic it needs. Restating that arithmetic inside `netlist`
-///   is what the adapter was written to avoid, so the edge retires by moving
-///   the shared kernel below both callers — into `expr`, whose types its
-///   signatures already name — rather than by duplicating it.
-///
 /// The rest were found through the crate root's names.
 ///
-/// - `analysis -> engine`, 3; `circuit -> engine`, 11; `device -> engine`, 6.
+/// - `analysis -> engine`, 3; `circuit -> engine`, 11; `device -> engine`, 3.
 ///   Unit tests that run a deck through `crate::Engine` to get a circuit or a
 ///   result to check: `analysis/measure_signals.rs`; six in
 ///   `circuit/mixed_signal/coupled_tests.rs` and one each in
 ///   `circuit/mixed_checkpoint/tests.rs`, `circuit/force_accept.rs`,
 ///   `circuit/net_kind.rs`, `circuit/storage/passive/thermal_tests.rs` and
-///   `circuit/xyce_dae.rs`; and in `device/mosfet`, three in `bsim4v8`
-///   (`device/charge_tests.rs`, `tests.rs`) and three in `b3soi/dd.rs` and
-///   `dd/derivative_tests.rs`. They retire as `netlist -> engine` does, by
-///   moving the half that needs the facade into an integration test.
-/// - `device -> analysis`, 5. Unit tests in `device/stamp_error.rs` (2) and
-///   `device/veriloga.rs` (3) that check a `StampError` keeps its
-///   classification when it widens to `crate::SimulationError`. The widening
-///   is `analysis::error`'s `From<StampError>`, so they retire by moving
-///   beside it.
-/// - `device -> circuit`, 11. `instantiate_builtin` and
-///   `instantiate_builtin_scoped` in `device/veriloga_builtins.rs` take the
-///   `&mut crate::CircuitData` they create a built-in model's nodes and
-///   branches in (2, production), and nine of that file's unit tests build one
-///   to instantiate into. Their only callers are in `engine::builder`, so the
-///   edge retires by moving the two entry points, and their tests, up beside
-///   them.
+///   `circuit/xyce_dae.rs`; and in `device/mosfet`, two in
+///   `bsim4v8/device/charge_tests.rs` and one in `b3soi/dd/derivative_tests.rs`,
+///   which read the built circuit's crate-private device stores and probes.
+///   They retire as `netlist -> engine` does, by moving the half that needs
+///   the facade into an integration test.
+/// - `device -> analysis`, 3. Unit tests in `device/veriloga.rs` that check a
+///   `StampError` keeps its classification when it widens to
+///   `crate::SimulationError`. `device/veriloga.rs` moves up with `circuit`
+///   and `analysis` when the crate is split, so the edge leaves with it.
+/// - `device -> circuit`, 7. Unit tests in `device/veriloga_builtins.rs` that
+///   build a `crate::CircuitData` to instantiate a built-in model into and
+///   then read adapter-private state back. Production reaches the circuit
+///   store only through the `BuiltinTopology` trait, whose one implementation
+///   is in `circuit/builtin_topology.rs`. The tests retire by instantiating
+///   into a test topology instead.
 /// - `circuit -> analysis`, 21. Production: the mixed-signal scheduler
 ///   (`circuit/scheduler.rs`, `circuit/scheduler/trial.rs`), mixed-signal port
 ///   elaboration (`circuit/mixed_signal.rs`) and model acceptance
@@ -298,12 +287,11 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("analysis", "engine", 3),
     ("circuit", "analysis", 21),
     ("circuit", "engine", 11),
-    ("device", "analysis", 5),
-    ("device", "circuit", 11),
-    ("device", "engine", 6),
+    ("device", "analysis", 3),
+    ("device", "circuit", 7),
+    ("device", "engine", 3),
     ("netlist", "circuit", 1),
-    ("netlist", "device", 1),
-    ("netlist", "engine", 11),
+    ("netlist", "engine", 2),
 ];
 
 fn src_dir() -> PathBuf {
