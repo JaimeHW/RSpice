@@ -243,6 +243,7 @@ const LAYERS: &[(&str, u32)] = &[
 ///   reads a materialized source waveform back through
 ///   `circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect`.
 ///   Retires the same way.
+///
 /// The rest were found through the crate root's names.
 ///
 /// - `analysis -> engine`, 3; `circuit -> engine`, 11; `device -> engine`, 3.
