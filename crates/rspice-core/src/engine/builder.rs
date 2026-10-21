@@ -4896,7 +4896,10 @@ fn add_template_xspice_auto_bridge(
         .collect();
     if device_is_subcircuit {
         add_generated_xspice_auto_bridge_subcircuit(circuit, &generated, template, context, abort)?;
-        say_bridge_inserted(crate::circuit::record_text(&records));
+        let stated = crate::log_scope::stating(|| {
+            say_bridge_inserted(crate::circuit::record_text(&records));
+        });
+        boundary_supply::report_template_static(&records, stated);
         circuit.converter_insertions.extend(records);
         if node_names.is_some() {
             log::debug!("Generated XSPICE auto-bridge card: {}", device_card);
@@ -4920,7 +4923,10 @@ fn add_template_xspice_auto_bridge(
         context,
     )?;
 
-    say_bridge_inserted(crate::circuit::record_text(&records));
+    let stated = crate::log_scope::stating(|| {
+        say_bridge_inserted(crate::circuit::record_text(&records));
+    });
+    boundary_supply::report_template_static(&records, stated);
     circuit.converter_insertions.extend(records);
     if node_names.is_some() {
         log::debug!("Generated XSPICE auto-bridge card: {}", device_card);

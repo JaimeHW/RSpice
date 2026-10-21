@@ -34,6 +34,29 @@ pub enum EngineNotice {
     /// The transient stepper was held at its minimum timestep by an element's
     /// scheduled activations.
     TimestepFloor(TimestepFloor),
+    /// A mixed boundary converts against a supply the deck did not state.
+    BoundarySupply {
+        /// The boundary net, as the deck names it.
+        boundary: String,
+        kind: BoundarySupplyKind,
+        /// The level it converts against, in volts.
+        level: f64,
+        /// The rail an inferred supply was taken from, or the template whose
+        /// card holds a static one.
+        from: Option<String>,
+    },
+}
+
+/// Where a boundary's unstated supply came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum BoundarySupplyKind {
+    /// The one rail that reaches the boundary.
+    Inferred,
+    /// No rail reaches it, so the default level.
+    Defaulted,
+    /// An auto-bridge template's card, which converts against the level
+    /// formatted into it and does not follow the supply.
+    TemplateStatic,
 }
 
 /// A parameter the model replaced, and why.
@@ -139,6 +162,10 @@ enum NoticeKey {
     TimestepFloor {
         element: Option<String>,
     },
+    BoundarySupply {
+        boundary: String,
+        kind: BoundarySupplyKind,
+    },
 }
 
 impl EngineNotice {
@@ -156,6 +183,10 @@ impl EngineNotice {
             Self::ConvergenceAid(aid) => NoticeKey::ConvergenceAid(*aid),
             Self::TimestepFloor(floor) => NoticeKey::TimestepFloor {
                 element: floor.element.clone(),
+            },
+            Self::BoundarySupply { boundary, kind, .. } => NoticeKey::BoundarySupply {
+                boundary: boundary.to_ascii_uppercase(),
+                kind: *kind,
             },
         }
     }
@@ -408,6 +439,29 @@ pub(crate) fn parameter_replaced(
             applied,
             limit,
         }),
+        stated,
+    );
+}
+
+/// Record that the boundary net `boundary` converts against a supply the deck
+/// did not state, as the line `stated` says in prose.
+pub(crate) fn boundary_supply(
+    boundary: &str,
+    kind: BoundarySupplyKind,
+    level: f64,
+    from: Option<&str>,
+    stated: LogLine,
+) {
+    if !collecting() {
+        return;
+    }
+    record(
+        EngineNotice::BoundarySupply {
+            boundary: boundary.to_owned(),
+            kind,
+            level,
+            from: from.map(str::to_owned),
+        },
         stated,
     );
 }

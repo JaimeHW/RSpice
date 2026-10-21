@@ -1,7 +1,9 @@
 //! A run's advisories are recorded where the engine raises them, against the
 //! element and the card it was binding, beside the log line that says so.
 
-use rspice_core::notice::{EngineNotice, NoticeCollector, ParameterReplacement, ParameterScope};
+use rspice_core::notice::{
+    BoundarySupplyKind, EngineNotice, NoticeCollector, ParameterReplacement, ParameterScope,
+};
 use rspice_core::{Engine, Netlist, NoAbort, SimulationConfig};
 
 /// Two geometries of one card whose `pbs` is below BSIM4's floor and whose
@@ -231,4 +233,55 @@ fn a_clamp_every_monte_carlo_sample_raises_is_one_notice_listing_the_samples() {
             "{pbs:#?}"
         );
     }
+}
+
+/// An XSPICE inverter with no `.param vcc`: its input `din` is held by the
+/// 1 V source `vin`, the one rail that reaches it, and nothing reaches its
+/// output `dout`. The input's supply is inferred from `vin` and the output's
+/// defaults to 3.3 V: one notice each, naming the net.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_boundary_supply_the_deck_did_not_state_is_one_notice_naming_the_net() {
+    let collector = NoticeCollector::new();
+    let _installed = collector.install();
+    let netlist = Netlist::parse(
+        "boundary supplies\nvin din 0 dc 1\nrin din 0 1k\nainv din dout inv\n\
+         .model inv d_inverter\nrload dout 0 1k\n.op\n.end\n",
+    )
+    .expect("the deck parses");
+    Engine::default()
+        .run_dc_op_with_abort(&netlist, &NoAbort)
+        .expect("the deck solves");
+    let supplies: Vec<_> = collector
+        .take()
+        .into_iter()
+        .filter_map(|recorded| match recorded.notice {
+            EngineNotice::BoundarySupply {
+                boundary,
+                kind,
+                level,
+                from,
+            } => Some((boundary.to_ascii_lowercase(), kind, level, from)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(supplies.len(), 2, "{supplies:#?}");
+    let (_, kind, level, from) = supplies
+        .iter()
+        .find(|(boundary, ..)| boundary == "dout")
+        .unwrap_or_else(|| panic!("dout's notice: {supplies:#?}"));
+    assert_eq!(
+        (*kind, *level, from),
+        (BoundarySupplyKind::Defaulted, 3.3, &None)
+    );
+    let (_, kind, level, from) = supplies
+        .iter()
+        .find(|(boundary, ..)| boundary == "din")
+        .unwrap_or_else(|| panic!("din's notice: {supplies:#?}"));
+    assert_eq!((*kind, *level), (BoundarySupplyKind::Inferred, 1.0));
+    assert!(
+        from.as_deref()
+            .is_some_and(|source| source.eq_ignore_ascii_case("vin")),
+        "{from:?}"
+    );
 }

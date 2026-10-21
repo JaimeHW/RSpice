@@ -278,7 +278,12 @@ use rspice_core::analysis::harmonic_balance::{
 // `CircuitData::converter_insertions`. The CLI's `check --converters`
 // (`rspice-cli` commands/check.rs) lists and emits the records a build
 // inserted. The census is 5,750, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5750;
+// `notice::BoundarySupplyKind` adds one, for the `EngineNotice::BoundarySupply`
+// variant it classifies: the workbench's Problems list (`rspice-app`
+// diagnostic_store/run_notices.rs) raises one row per boundary whose supply
+// was inferred, defaulted or held static by a template, naming the net. The
+// census is 5,751, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5751;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

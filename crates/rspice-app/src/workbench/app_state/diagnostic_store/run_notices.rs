@@ -17,7 +17,9 @@ use std::collections::HashSet;
 use std::hash::Hash;
 
 use rspice_core::ContinuationAid;
-use rspice_core::notice::{EngineNotice, ParameterReplacement, ParameterScope, RecordedNotice};
+use rspice_core::notice::{
+    BoundarySupplyKind, EngineNotice, ParameterReplacement, ParameterScope, RecordedNotice,
+};
 use rspice_results::convergence_quality::TransientConvergenceEvidence;
 
 use crate::quantity::engineering::{EngineeringPrecision, format_engineering_display_with};
@@ -39,21 +41,29 @@ const CONVERGENCE_PRODUCER: &str = "rspice.engine.convergence";
 const TIMESTEP_PRODUCER: &str = "rspice.engine.timestep";
 /// The run's `.MEASURE` evaluation.
 const MEASURE_PRODUCER: &str = "rspice.engine.measure";
+/// The converters the build inserts on mixed boundaries.
+const BOUNDARY_PRODUCER: &str = "rspice.engine.boundary";
 
 const PARAMETER_CODE: &str = "MODEL-PARAMETER-CLAMPED";
 const AID_CODE: &str = "RUN-CONVERGENCE-AID";
 const TIMESTEP_CODE: &str = "RUN-TIMESTEP-FLOOR";
 const TRUNCATION_CODE: &str = "RUN-TRUNCATION-EXCEEDED";
 const MEASURE_CODE: &str = "RUN-MEASURE-FAILED";
+const SUPPLY_INFERRED_CODE: &str = "RUN-BOUNDARY-SUPPLY-INFERRED";
+const SUPPLY_DEFAULTED_CODE: &str = "RUN-BOUNDARY-SUPPLY-DEFAULTED";
+const SUPPLY_TEMPLATE_CODE: &str = "RUN-BOUNDARY-SUPPLY-TEMPLATE-STATIC";
 
 /// Every rule code a notice record carries, which is what tells a notice
 /// from a failure in the batch they share.
-const NOTICE_CODES: [&str; 5] = [
+const NOTICE_CODES: [&str; 8] = [
     PARAMETER_CODE,
     AID_CODE,
     TIMESTEP_CODE,
     TRUNCATION_CODE,
     MEASURE_CODE,
+    SUPPLY_INFERRED_CODE,
+    SUPPLY_DEFAULTED_CODE,
+    SUPPLY_TEMPLATE_CODE,
 ];
 
 /// The analyses, or the sweep points, one record names. Past this many, it
@@ -390,6 +400,21 @@ impl AppState {
                         Some(plan()),
                     )
                 }
+                EngineNotice::BoundarySupply {
+                    boundary,
+                    kind,
+                    level,
+                    from,
+                } => (
+                    match kind {
+                        BoundarySupplyKind::TemplateStatic => DiagnosticLevel::Info,
+                        _ => DiagnosticLevel::Warning,
+                    },
+                    boundary.clone(),
+                    None,
+                    boundary_supply_message(boundary, *kind, *level, from.as_deref()),
+                    Some(plan()),
+                ),
             },
             RunNotice::TruncationExceeded { first_time, .. } => (
                 DiagnosticLevel::Warning,
@@ -575,6 +600,15 @@ fn notice_key(notice: &RunNotice, scope: &str) -> FindingKey {
                     .unwrap_or_default()
                     .to_ascii_uppercase(),
             ),
+            EngineNotice::BoundarySupply { boundary, kind, .. } => (
+                BOUNDARY_PRODUCER,
+                match kind {
+                    BoundarySupplyKind::Inferred => SUPPLY_INFERRED_CODE,
+                    BoundarySupplyKind::Defaulted => SUPPLY_DEFAULTED_CODE,
+                    BoundarySupplyKind::TemplateStatic => SUPPLY_TEMPLATE_CODE,
+                },
+                boundary.to_ascii_uppercase(),
+            ),
         },
         // One condition of the run's stepping, however many analyses and
         // points it covers: the record counts them.
@@ -632,6 +666,32 @@ fn replacement_message(replacement: &ParameterReplacement) -> String {
         ParameterScope::Instance => format!(
             "{} {parameter} = {requested} {crossing}; the model uses {applied}",
             replacement.family
+        ),
+    }
+}
+
+/// What a boundary converts against, where the deck did not say.
+fn boundary_supply_message(
+    boundary: &str,
+    kind: BoundarySupplyKind,
+    level: f64,
+    from: Option<&str>,
+) -> String {
+    let level = engineering(level);
+    match kind {
+        BoundarySupplyKind::Inferred => format!(
+            "Boundary net {boundary} converts against {level}V inferred from {}; set .param vcc, \
+             or a connect statement's vsup, to state it",
+            from.unwrap_or("the one rail that reaches it")
+        ),
+        BoundarySupplyKind::Defaulted => format!(
+            "No supply reaches boundary net {boundary}; it converts against the {level}V \
+             default. Set .param vcc, or a connect statement's vsup, to state it"
+        ),
+        BoundarySupplyKind::TemplateStatic => format!(
+            "Boundary net {boundary} converts against the static {level}V of template {}, which \
+             does not follow its supply",
+            from.unwrap_or("its auto-bridge template")
         ),
     }
 }
@@ -914,6 +974,36 @@ mod tests {
                 )
             );
         }
+    }
+
+    /// A boundary whose supply defaulted is one warning naming its net,
+    /// however many analyses of the run built the circuit and raised it.
+    #[test]
+    fn a_defaulted_boundary_supply_is_one_warning_naming_the_net() {
+        let mut state = open_state(&[1]);
+        state.open_run_outcome(1);
+        let defaulted = || RecordedNotice {
+            notice: EngineNotice::BoundarySupply {
+                boundary: "dout".to_owned(),
+                kind: BoundarySupplyKind::Defaulted,
+                level: 3.3,
+                from: None,
+            },
+            occurrences: 1,
+            points: Vec::new(),
+            point_identities: Vec::new(),
+            line: None,
+        };
+        state.publish_run_notices("Operating Point", unstated([defaulted()]), None, &[], 1);
+        state.publish_run_notices("Transient", unstated([defaulted()]), None, &[], 1);
+
+        let standing = notices(&state);
+        assert_eq!(standing.len(), 1, "{standing:#?}");
+        let (code, subject, _) = &standing[0];
+        assert_eq!(code, SUPPLY_DEFAULTED_CODE);
+        assert_eq!(subject, "dout");
+        let listed = listing::listing(&state);
+        assert_eq!(listed.counts().warnings, 1, "{:?}", listed.counts());
     }
 
     /// A `.MEASURE` that produced no value is a warning about the run, in

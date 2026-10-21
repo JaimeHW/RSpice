@@ -33,8 +33,9 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use crate::SimulationError;
-use crate::circuit::ConverterSource;
+use crate::circuit::{ConverterInsertion, ConverterSource};
 use crate::netlist::{Element, Netlist, analyze_supply_reachability};
+use crate::notice::BoundarySupplyKind;
 
 /// The level a boundary converts against when the deck names no supply and no
 /// rail reaches it.
@@ -201,29 +202,47 @@ impl BoundarySupplies {
             return Ok(());
         }
 
-        match derivation {
-            SupplyDerivation::Declared { .. } | SupplyDerivation::Ambiguous { .. } => {}
+        let (kind, level, from, stated) = match derivation {
+            SupplyDerivation::Declared { .. } | SupplyDerivation::Ambiguous { .. } => {
+                return Ok(());
+            }
             SupplyDerivation::Derived {
                 source,
                 level,
                 node,
-            } if live => log::warn!(
-                "supply for boundary net '{node_label}' derived from {source} = {level} V, bound \
-                 live to net '{node}' (inferred); set '.param {}={level}' to make it explicit \
-                 and static",
-                self.parameter
+            } if live => (
+                BoundarySupplyKind::Inferred,
+                *level,
+                Some(source.as_str()),
+                crate::log_scope::warn_line!(
+                    "supply for boundary net '{node_label}' derived from {source} = {level} V, \
+                     bound live to net '{node}' (inferred); set '.param {}={level}' to make it \
+                     explicit and static",
+                    self.parameter
+                ),
             ),
-            SupplyDerivation::Derived { source, level, .. } => log::warn!(
-                "supply for boundary net '{node_label}' derived from {source} = {level} V; set \
-                 '.param {}={level}' to make it explicit",
-                self.parameter
+            SupplyDerivation::Derived { source, level, .. } => (
+                BoundarySupplyKind::Inferred,
+                *level,
+                Some(source.as_str()),
+                crate::log_scope::warn_line!(
+                    "supply for boundary net '{node_label}' derived from {source} = {level} V; \
+                     set '.param {}={level}' to make it explicit",
+                    self.parameter
+                ),
             ),
-            SupplyDerivation::Defaulted => log::warn!(
-                "no supply reaches boundary net '{node_label}'; defaulting to \
-                 {DEFAULT_BOUNDARY_SUPPLY} V. Set '.param {}=<volts>' to say what it is",
-                self.parameter
+            SupplyDerivation::Defaulted => (
+                BoundarySupplyKind::Defaulted,
+                DEFAULT_BOUNDARY_SUPPLY,
+                None,
+                crate::log_scope::warn_line!(
+                    "no supply reaches boundary net '{node_label}'; defaulting to \
+                     {DEFAULT_BOUNDARY_SUPPLY} V. Set '.param {}=<volts>' to say what it is",
+                    self.parameter
+                ),
             ),
-        }
+        };
+        crate::notice::boundary_supply(node_label, kind, level, from, stated);
         Ok(())
     }
 }
@@ -343,6 +362,29 @@ pub(super) fn supply_source(derivation: Option<&SupplyDerivation>) -> ConverterS
         Some(SupplyDerivation::Ambiguous { .. } | SupplyDerivation::Defaulted) | None => {
             ConverterSource::Default(DEFAULT_BOUNDARY_SUPPLY)
         }
+    }
+}
+
+/// Record that each boundary a template's card bridges converts against the
+/// static level formatted into it, as the line `stated` says.
+pub(super) fn report_template_static(
+    records: &[ConverterInsertion],
+    stated: crate::log_scope::LogLine,
+) {
+    for record in records {
+        let ConverterSource::Template(key) = &record.rules else {
+            continue;
+        };
+        let Some(supply) = &record.supply else {
+            continue;
+        };
+        crate::notice::boundary_supply(
+            &record.boundary,
+            BoundarySupplyKind::TemplateStatic,
+            supply.level,
+            Some(key),
+            stated,
+        );
     }
 }
 

@@ -19,6 +19,7 @@ use rspice_core::circuit::{
 };
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
+use rspice_core::notice::{BoundarySupplyKind, EngineNotice, NoticeCollector};
 use rspice_core::xspice::PortDirection;
 use rspice_veriloga::connect::library::{BUILTIN_CONNECT_MODULES, LEGACY_BUILTIN_CONNECT_MODULES};
 
@@ -561,8 +562,32 @@ set auto_bridge_d_out = ( \".model tdac dac_bridge(out_low = 0 out_high = %g)\" 
     );
 
     // The record says the same: the template's key, and the inferred 5 V
-    // rail as a static level, not a live net.
-    let records = insertions(&Netlist::parse(deck).expect("deck parses"));
+    // rail as a static level, not a live net. The run's notices say the
+    // supply was inferred and that the template holds it static.
+    let collector = NoticeCollector::new();
+    let records = {
+        let _installed = collector.install();
+        insertions(&Netlist::parse(deck).expect("deck parses"))
+    };
+    let kinds: Vec<_> = collector
+        .take()
+        .into_iter()
+        .filter_map(|recorded| match recorded.notice {
+            EngineNotice::BoundarySupply { boundary, kind, .. }
+                if boundary.eq_ignore_ascii_case("mix") =>
+            {
+                Some(kind)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            BoundarySupplyKind::Inferred,
+            BoundarySupplyKind::TemplateStatic
+        ]
+    );
     assert_eq!(records.len(), 1, "{records:#?}");
     let record = &records[0];
     assert!(record.boundary.eq_ignore_ascii_case("mix"), "{record:#?}");
