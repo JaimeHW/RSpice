@@ -5,7 +5,9 @@ use super::LogSource;
 use rspice_app_types::run_log::{RunLog, RunLogLine};
 use rspice_simulation::engine_log::{EngineLogLine, EngineLogOrigin};
 #[cfg(not(target_arch = "wasm32"))]
-use rspice_simulation::engine_log::{admits, note_stderr_level, offer};
+use rspice_simulation::engine_log::{
+    admits, note_stderr_level, offer, with_canonical_metadata, with_canonical_target,
+};
 
 /// Write a run's drained lines into its own log, stamped `unix_ms`.
 ///
@@ -96,14 +98,21 @@ impl log::Log for StudioLogger {
     /// core `debug!` is enabled exactly when some verbose run on this thread
     /// would capture it, and on every ordinary run it is not.
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        self.inner.enabled(metadata) || admits(metadata)
+        with_canonical_metadata(metadata, |metadata| {
+            self.inner.enabled(metadata) || admits(metadata)
+        })
     }
 
+    /// Both readers take the record under its canonical target, so the stderr
+    /// filter and its lines name an engine module the same way whichever crate
+    /// of the engine's family holds it.
     fn log(&self, record: &log::Record<'_>) {
-        if self.prints_to_stderr(record) {
-            self.inner.log(record);
-        }
-        offer(record);
+        with_canonical_target(record, |record| {
+            if self.prints_to_stderr(record) {
+                self.inner.log(record);
+            }
+            offer(record);
+        });
     }
 
     fn flush(&self) {
@@ -305,6 +314,26 @@ mod tests {
             rows[0].message,
             "Transient noise: 3 device noise source(s) injected from seed 7"
         );
+    }
+
+    /// A module of another crate of the engine's family reaches the run's log
+    /// as the same module of `rspice_core` does.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_line_from_a_crate_of_the_engine_family_reaches_the_runs_log() {
+        studio_logger_for_tests();
+        let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
+        {
+            let _run = install(RunLogSink::queued(Arc::clone(&queue), false));
+            log::info!(target: "rspice_core_netlist::netlist::parser", "Loading netlist");
+        }
+
+        let mut log = RunLog::default();
+        publish(lock_queue(&queue).drain(), &mut log, 0, &[]);
+        let rows = log.lines();
+        assert_eq!(rows.len(), 1, "one engine line: {rows:?}");
+        assert_eq!(rows[0].source, LogSource::Engine);
+        assert_eq!(rows[0].message, "Loading netlist");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

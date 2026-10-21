@@ -3,7 +3,9 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rspice_simulation::engine_log::{WarningLimiter, WarningVerdict, last_warning};
+use rspice_simulation::engine_log::{
+    WarningLimiter, WarningVerdict, last_warning, with_canonical_metadata, with_canonical_target,
+};
 
 use crate::cli::{CliError, LogFormat};
 
@@ -125,27 +127,7 @@ pub fn init(level: Option<&str>, format: LogFormat) -> Result<(), CliError> {
     }
 
     if format == LogFormat::Json {
-        let correlation_id = run_id().to_string();
-        builder.format(move |buffer, record| {
-            use std::io::Write as _;
-
-            let timestamp = buffer.timestamp_millis().to_string();
-            let thread = std::thread::current();
-            let payload = serde_json::json!({
-                "timestamp": timestamp,
-                "level": record.level().as_str(),
-                "target": record.target(),
-                "module": record.module_path(),
-                "file": record.file(),
-                "line": record.line(),
-                "message": record.args().to_string(),
-                "run_id": correlation_id.as_str(),
-                "process_id": std::process::id(),
-                "thread": thread.name(),
-            });
-            serde_json::to_writer(&mut *buffer, &payload).map_err(std::io::Error::other)?;
-            writeln!(buffer)
-        });
+        format_json(&mut builder, run_id().to_string());
     }
 
     let inner = builder.build();
@@ -160,9 +142,37 @@ pub fn init(level: Option<&str>, format: LogFormat) -> Result<(), CliError> {
     })
 }
 
+/// Write each record as one JSON object on a line of its own.
+fn format_json(builder: &mut env_logger::Builder, correlation_id: String) {
+    builder.format(move |buffer, record| {
+        use std::io::Write as _;
+
+        let timestamp = buffer.timestamp_millis().to_string();
+        let thread = std::thread::current();
+        let payload = serde_json::json!({
+            "timestamp": timestamp,
+            "level": record.level().as_str(),
+            "target": record.target(),
+            "module": record.module_path(),
+            "file": record.file(),
+            "line": record.line(),
+            "message": record.args().to_string(),
+            "run_id": correlation_id.as_str(),
+            "process_id": std::process::id(),
+            "thread": thread.name(),
+        });
+        serde_json::to_writer(&mut *buffer, &payload).map_err(std::io::Error::other)?;
+        writeln!(buffer)
+    });
+}
+
 /// The process logger: `env_logger`'s filter and format, with each call site
 /// held to the engine's warning limit for the life of the command, as a
 /// studio run's Console is.
+///
+/// Records are filtered and written under their canonical target and module
+/// path, so a `RUST_LOG` directive and a log line, text or JSON, name an engine
+/// module the same way whichever crate of the engine's family holds it.
 struct LimitedLogger {
     inner: env_logger::Logger,
     warnings: Mutex<WarningLimiter>,
@@ -170,10 +180,23 @@ struct LimitedLogger {
 
 impl log::Log for LimitedLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        self.inner.enabled(metadata)
+        with_canonical_metadata(metadata, |metadata| self.inner.enabled(metadata))
     }
 
     fn log(&self, record: &log::Record<'_>) {
+        with_canonical_target(record, |record| self.log_canonical(record));
+    }
+
+    fn flush(&self) {
+        self.inner.flush();
+    }
+}
+
+impl LimitedLogger {
+    /// Filter, limit and write a record already under its canonical target.
+    fn log_canonical(&self, record: &log::Record<'_>) {
+        use log::Log as _;
+
         if !self.inner.matches(record) {
             return;
         }
@@ -200,10 +223,6 @@ impl log::Log for LimitedLogger {
             WarningVerdict::Withhold => {}
         }
     }
-
-    fn flush(&self) {
-        self.inner.flush();
-    }
 }
 
 #[cfg(test)]
@@ -216,5 +235,84 @@ mod tests {
         let second = run_id();
         assert!(!first.is_empty());
         assert_eq!(first, second);
+    }
+
+    /// What the JSON format wrote, shared with the test reading it back.
+    #[derive(Clone, Default)]
+    struct Written(std::sync::Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Written {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A record from another crate of the engine's family is filtered and
+    /// written under the `rspice_core` target and module the same module has
+    /// in `rspice_core`.
+    #[test]
+    fn json_logs_name_an_engine_module_by_its_canonical_target() {
+        let written = Written::default();
+        let mut builder = env_logger::Builder::new();
+        builder.parse_filters("warn,rspice_core::netlist=info");
+        format_json(&mut builder, "test-run".into());
+        builder.target(env_logger::Target::Pipe(Box::new(written.clone())));
+        let logger = LimitedLogger {
+            inner: builder.build(),
+            warnings: Mutex::new(WarningLimiter::default()),
+        };
+
+        let info = |target: &'static str| {
+            log::Metadata::builder()
+                .level(log::Level::Info)
+                .target(target)
+                .build()
+        };
+        assert!(log::Log::enabled(
+            &logger,
+            &info("rspice_core_netlist::netlist::parser")
+        ));
+        assert!(!log::Log::enabled(
+            &logger,
+            &info("rspice_core_devices::device::diode")
+        ));
+
+        for target in [
+            "rspice_core_netlist::netlist::parser",
+            "rspice_core::netlist::parser",
+            "rspice_core_devices::device::diode",
+        ] {
+            log::Log::log(
+                &logger,
+                &log::Record::builder()
+                    .level(log::Level::Info)
+                    .target(target)
+                    .module_path(Some(target))
+                    .args(format_args!("Loading netlist"))
+                    .build(),
+            );
+        }
+
+        let text = String::from_utf8(written.0.lock().unwrap().clone()).unwrap();
+        let records: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("each line is one JSON record"))
+            .collect();
+        // The device record is held to the default `warn`, as `rspice_core`'s
+        // own device modules are.
+        assert_eq!(records.len(), 2, "{text}");
+        for record in &records {
+            assert_eq!(record["target"], "rspice_core::netlist::parser");
+            assert_eq!(record["module"], "rspice_core::netlist::parser");
+            assert_eq!(record["message"], "Loading netlist");
+        }
     }
 }

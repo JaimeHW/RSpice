@@ -18,11 +18,38 @@
 //! A site that logs the warning stating a notice learns which line of the
 //! run's log the host kept for it ([`warn_line!`]), and raises the notice with
 //! that line, so the two are linked by the site and never by text.
+//!
+//! A host reads a record's target through [`canonical_target`], which names a
+//! module of any `rspice_core_<name>` crate as `rspice_core`'s.
 
 use std::any::Any;
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+
+/// The engine's name for a log target: `rspice_core::rest` for a target in
+/// any `rspice_core_<name>` crate, and every other target as it is.
+///
+/// A module keeps its path from the crate root whichever crate of the
+/// engine's family holds it, so this is the name the module has in
+/// `rspice_core`. Hosts route, filter and print engine records by it.
+pub fn canonical_target(target: &str) -> Cow<'_, str> {
+    let Some(rest) = target.strip_prefix("rspice_core_") else {
+        return Cow::Borrowed(target);
+    };
+    let (name, path) = match rest.split_once("::") {
+        Some((name, path)) => (name, Some(path)),
+        None => (rest, None),
+    };
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Cow::Borrowed(target);
+    }
+    match path {
+        Some(path) => Cow::Owned(format!("rspice_core::{path}")),
+        None => Cow::Borrowed("rspice_core"),
+    }
+}
 
 /// What a host keeps on the thread executing one run, and the point of the
 /// run that thread is solving, when that is one of several.
@@ -212,6 +239,35 @@ pub(crate) fn first_saying(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_family_crates_target_reads_as_rspice_cores() {
+        for (target, canonical) in [
+            (
+                "rspice_core_netlist::netlist::parser",
+                "rspice_core::netlist::parser",
+            ),
+            ("rspice_core_base::expr", "rspice_core::expr"),
+            ("rspice_core_devices", "rspice_core"),
+        ] {
+            assert_eq!(canonical_target(target), canonical, "{target}");
+        }
+        for target in [
+            "rspice_core",
+            "rspice_core::engine::transient",
+            "rspice_corella",
+            "rspice_core_",
+            "rspice_core_::engine",
+            "rspice_veriloga::ir",
+            "rspice_simulation::engine_services",
+            "",
+        ] {
+            assert!(
+                matches!(canonical_target(target), Cow::Borrowed(same) if same == target),
+                "{target} is not a family crate's and stays as it is"
+            );
+        }
+    }
 
     #[test]
     fn a_run_says_a_line_once_on_every_thread_it_hands_work_to() {

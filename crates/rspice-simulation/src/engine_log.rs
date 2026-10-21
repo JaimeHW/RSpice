@@ -537,12 +537,58 @@ const ENGINE_TARGETS: [&str; 4] = [
 ];
 
 /// Whether the target is one of [`ENGINE_TARGETS`] or a module inside one.
+///
+/// Read as its [`log_scope::canonical_target`], so a module of any crate of
+/// the engine's family speaks for the run as `rspice_core`'s modules do.
 fn is_engine_target(target: &str) -> bool {
+    let target = log_scope::canonical_target(target);
     ENGINE_TARGETS.iter().any(|root| {
         target
             .strip_prefix(root)
             .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
     })
+}
+
+/// Hand `emit` the record as a host filters and writes it: under the
+/// [`log_scope::canonical_target`] of its target and of its module path, so a
+/// log directive and a log line name an engine module the same way whichever
+/// crate of the engine's family holds it. A record whose names are already
+/// canonical is handed on as it is.
+pub fn with_canonical_target<R>(
+    record: &log::Record<'_>,
+    emit: impl FnOnce(&log::Record<'_>) -> R,
+) -> R {
+    let target = log_scope::canonical_target(record.target());
+    let module_path = record.module_path().map(log_scope::canonical_target);
+    if *target == *record.target() && module_path.as_deref() == record.module_path() {
+        return emit(record);
+    }
+    emit(
+        &log::Record::builder()
+            .level(record.level())
+            .target(&target)
+            .module_path(module_path.as_deref())
+            .file(record.file())
+            .line(record.line())
+            .args(*record.args())
+            .build(),
+    )
+}
+
+/// [`with_canonical_target`] for the metadata a host is asked whether it would
+/// take a record by, so its answer matches what it does with the record.
+pub fn with_canonical_metadata<R>(
+    metadata: &log::Metadata<'_>,
+    ask: impl FnOnce(&log::Metadata<'_>) -> R,
+) -> R {
+    let target = log_scope::canonical_target(metadata.target());
+    if *target == *metadata.target() {
+        return ask(metadata);
+    }
+    ask(&log::Metadata::builder()
+        .level(metadata.level())
+        .target(&target)
+        .build())
 }
 
 /// The Console severity one engine level reports as, or `None` for a level the
@@ -788,6 +834,71 @@ mod tests {
         assert_eq!(
             captured_from("rspice_simulation::engine_services::transient", message),
             vec![core_record(0, log::Level::Warn, message)]
+        );
+    }
+
+    /// A module of another crate of the engine's family speaks for the run
+    /// exactly as the same module of `rspice_core` does.
+    #[test]
+    fn a_line_from_a_crate_of_the_engine_family_is_captured_as_the_cores() {
+        let message = "unknown parameter 'foo' on .model ignored";
+        let from_core = captured_from("rspice_core::netlist::parser", message);
+        assert_eq!(from_core, vec![core_record(0, log::Level::Warn, message)]);
+        assert_eq!(
+            captured_from("rspice_core_netlist::netlist::parser", message),
+            from_core
+        );
+    }
+
+    /// A host writes a family crate's record under `rspice_core`'s names, and
+    /// passes any other record on untouched.
+    #[test]
+    fn a_family_record_is_written_under_the_cores_target_and_module() {
+        let names = |target: &str, module: &str| {
+            with_canonical_target(
+                &log::Record::builder()
+                    .level(log::Level::Warn)
+                    .target(target)
+                    .module_path(Some(module))
+                    .file(Some("parser.rs"))
+                    .line(Some(12))
+                    .args(format_args!("kept"))
+                    .build(),
+                |record| {
+                    (
+                        record.target().to_owned(),
+                        record.module_path().map(str::to_owned),
+                        record.file().map(str::to_owned),
+                        record.line(),
+                        record.args().to_string(),
+                    )
+                },
+            )
+        };
+        let core = names(
+            "rspice_core::netlist::parser",
+            "rspice_core::netlist::parser",
+        );
+        assert_eq!(
+            core,
+            (
+                "rspice_core::netlist::parser".to_owned(),
+                Some("rspice_core::netlist::parser".to_owned()),
+                Some("parser.rs".to_owned()),
+                Some(12),
+                "kept".to_owned(),
+            )
+        );
+        assert_eq!(
+            names(
+                "rspice_core_netlist::netlist::parser",
+                "rspice_core_netlist::netlist::parser"
+            ),
+            core
+        );
+        assert_eq!(
+            names("rspice_veriloga::ir", "rspice_veriloga::ir").0,
+            "rspice_veriloga::ir"
         );
     }
 
