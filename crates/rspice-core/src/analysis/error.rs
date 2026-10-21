@@ -860,18 +860,6 @@ impl std::fmt::Display for ResultSchemaMismatchError {
 
 impl std::error::Error for ResultSchemaMismatchError {}
 
-impl ContinuationAid {
-    /// The aid's continuation parameter at `value`, in the aid's own units.
-    fn stage(self, value: crate::Value) -> String {
-        match self {
-            Self::GminStepping => format!("gmin = {value:.3e} S"),
-            Self::SourceStepping => format!("source scale = {value:.4}"),
-            Self::PseudoTransient => format!("pseudo-timestep = {value:.3e} s"),
-            Self::GateGenerationStepping => format!("gate-generation scale = {value:.4}"),
-        }
-    }
-}
-
 /// The stage a convergence aid could not solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ContinuationStage {

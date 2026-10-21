@@ -110,6 +110,18 @@ impl std::fmt::Display for ContinuationAid {
     }
 }
 
+impl ContinuationAid {
+    /// The aid's continuation parameter at `value`, in the aid's own units.
+    pub(crate) fn stage(self, value: crate::Value) -> String {
+        match self {
+            Self::GminStepping => format!("gmin = {value:.3e} S"),
+            Self::SourceStepping => format!("source scale = {value:.4}"),
+            Self::PseudoTransient => format!("pseudo-timestep = {value:.3e} s"),
+            Self::GateGenerationStepping => format!("gate-generation scale = {value:.4}"),
+        }
+    }
+}
+
 /// What makes two notices the same notice: the kind, the object it is about
 /// and, for a replacement, the parameter. A model-card replacement is about
 /// the card, so the element that happened to bind it first does not split it.
