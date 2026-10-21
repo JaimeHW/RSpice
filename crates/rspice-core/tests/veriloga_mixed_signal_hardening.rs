@@ -1694,13 +1694,102 @@ endmodule
          was accepted at: {error}"
     );
     assert!(error.contains("1 0 1 0"), "{error}");
+    // Each net names the converter it crosses, as the build's insertion
+    // record does, and the process a net the module reads wakes.
+    for expected in [
+        "(deck net `cin`; read by the module through converter __rspice_auto_adc_",
+        " (a2d), waking x1.always#",
+        "(deck net `yout`; driven by the module through converter __rspice_auto_dac_",
+        " (d2a))",
+    ] {
+        assert!(lowered.contains(expected), "missing `{expected}`: {error}");
+    }
     // The inserted A/D converter's own input root watches the same net as
     // `c`; it was listed again as `__rspice_auto_adc_5.in[0]` "on circuit
     // node 0".
     assert!(
-        !lowered.contains("__rspice_auto") && !lowered.contains("circuit node 0 "),
-        "the diagnostic names the author's nets, not inserted converters: {error}"
+        !lowered.contains("input `__rspice_auto") && !lowered.contains("circuit node 0 "),
+        "the diagnostic names the author's nets, not a converter's own input: {error}"
     );
+}
+
+/// An inverter whose input and output share one deck net: the A/D reads `n`
+/// and the D/A drives it with the inverse, so no value of `n` is consistent.
+const SHORTED_INVERTER: &str = "`include \"disciplines.vams\"
+`timescale 1ns/1ps
+module inv(a, y);
+  input a;
+  output y;
+  assign y = ~a;
+endmodule
+";
+
+fn shorted_deck(model: &ModelFile, module: &str, analysis: &str) -> String {
+    format!(
+        "* a module whose output drives its own input\n\
+         .hdl \"{}\" module={module}\n\
+         .param vcc=3.3\n\
+         xi n n {module}\n\
+         c1 n 0 1p\n\
+         {analysis}\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// **No operating point exists for an inverting loop through converters.**
+/// The operating point is refused as a loop rather than reported as a GMIN
+/// failure, naming both converters, the deck net and the process between
+/// them; a DC sweep's point is refused the same way.
+#[test]
+fn an_inverting_loop_through_converters_is_refused_at_the_operating_point() {
+    let model = ModelFile::hdl("shorted_inverter", SHORTED_INVERTER);
+    for analysis in [".op", "v1 s 0 0\nr1 s 0 1k\n.dc v1 0 1 0.5"] {
+        let netlist = Netlist::parse(&shorted_deck(&model, "inv", analysis)).expect("parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let error = if analysis == ".op" {
+            engine.run_dc_op(&netlist).map(drop)
+        } else {
+            engine.run_dc_sweep(&netlist, "v1", 0.0, 1.0, 0.5).map(drop)
+        }
+        .expect_err("no operating point exists");
+        assert!(
+            matches!(error, SimulationError::Circuit(_)),
+            "a loop with no fixed point is a refusal, not a convergence failure: {error:?}"
+        );
+        let error = error.to_string();
+        let lowered = error.to_lowercase();
+        for expected in [
+            "no coupled t = 0 fixed point exists: mixed verilog-ams instance 'xi'",
+            "net `a` on circuit node",
+            "(deck net `n`; read by the module through converter __rspice_auto_adc_",
+            " (a2d), waking xi.assign#0 (continuous assign))",
+            "net `y` on circuit node",
+            "(deck net `n`; driven by the module through converter __rspice_auto_dac_",
+            " (d2a))",
+            "1 0 1 0",
+            "break the loop with a delay",
+        ] {
+            assert!(
+                lowered.contains(expected),
+                "{analysis}: missing `{expected}`: {error}"
+            );
+        }
+    }
+}
+
+/// The control: a buffer whose output drives its own input has a fixed
+/// point at either level, and the operating point solves.
+#[test]
+fn a_buffer_loop_through_converters_solves_at_the_operating_point() {
+    let model = ModelFile::hdl(
+        "shorted_buffer",
+        "`include \"disciplines.vams\"\nmodule buf1(a, y);\n  input a;\n  output y;\n  assign y = a;\nendmodule\n",
+    );
+    let netlist = Netlist::parse(&shorted_deck(&model, "buf1", ".op")).expect("parses");
+    Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("a buffer loop has an operating point");
 }
 
 /// **Cross-domain feedback, vacuity guard.** A boundary a resolved waveform

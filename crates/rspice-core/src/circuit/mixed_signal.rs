@@ -213,6 +213,96 @@ impl CircuitData {
         error.with_convergence_context(&detail)
     }
 
+    /// A failed operating point's convergence failure, refused instead when
+    /// a mixed instance's rejected solves show a loop through the boundary
+    /// that has no consistent value at t = 0 (see
+    /// `MixedSignalHost::coupled_loop_at_start`). Any other error, and a
+    /// failure the probes do not explain, is unchanged.
+    pub(crate) fn refuse_coupled_loop_without_fixed_point(
+        &self,
+        error: SimulationError,
+    ) -> SimulationError {
+        if !error.is_convergence_failure() {
+            return error;
+        }
+        match self
+            .mixed_signal_hosts
+            .iter()
+            .zip(&self.scheduler.ledgers)
+            .find_map(|(host, ledger)| host.coupled_loop_at_start(ledger))
+        {
+            Some(detail) => {
+                SimulationError::Circuit(format!("no coupled t = 0 fixed point exists: {detail}"))
+            }
+            None => error,
+        }
+    }
+
+    /// Name what every mixed instance's boundary crosses, for the boundary
+    /// diagnostics: each node's deck name, and the deck converter on each
+    /// converted port as `instance (module)`, with the module the build's
+    /// insertion record gives it, or its code model where the build inserted
+    /// none.
+    fn name_boundary_crossings(&mut self) {
+        let mut endpoints = std::collections::BTreeSet::new();
+        for host in &self.mixed_signal_hosts {
+            host.converter_event_endpoints(|_, endpoint| {
+                endpoints.insert(endpoint);
+            });
+        }
+        let mut labels = std::collections::BTreeMap::new();
+        let converters = if endpoints.is_empty() {
+            &[][..]
+        } else {
+            &self.xspice_instances[..]
+        };
+        for converter in converters {
+            let mut name = |node: usize| {
+                if endpoints.contains(&node) {
+                    labels.entry(node).or_insert_with(|| {
+                        let module = self
+                            .converter_record(&converter.name)
+                            .map_or_else(|| converter.model_name(), |record| &record.module);
+                        format!("{} ({module})", converter.name)
+                    });
+                }
+            };
+            for connection in converter.connections() {
+                match connection {
+                    crate::xspice::PortConnection::Digital(node)
+                    | crate::xspice::PortConnection::DigitalInverted(node) => name(*node),
+                    crate::xspice::PortConnection::DigitalVector(nodes) => {
+                        nodes.iter().for_each(|node| name(*node));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // One pass over the node map, as `node_name_by_id` spells a node:
+        // its least name.
+        let mut nodes = std::collections::BTreeSet::new();
+        for host in &self.mixed_signal_hosts {
+            host.boundary_trace_bindings(|node, _, _, _| {
+                nodes.insert(node);
+            });
+        }
+        let mut names: std::collections::BTreeMap<usize, &str> = std::collections::BTreeMap::new();
+        for (name, id) in &self.node_map {
+            if nodes.contains(id) {
+                names
+                    .entry(*id)
+                    .and_modify(|least| *least = (*least).min(name.as_str()))
+                    .or_insert(name.as_str());
+            }
+        }
+        for host in &mut self.mixed_signal_hosts {
+            host.name_boundary_crossings(
+                |endpoint| labels.get(&endpoint).cloned(),
+                |node| names.get(&node).map(|name| (*name).to_owned()),
+            );
+        }
+    }
+
     /// The cross-domain loop the instances' accepted boundary histories show,
     /// named by instance, when a boundary net has moved at `minimum_run`
     /// consecutive accepted points with nothing scheduled to explain any of
@@ -315,6 +405,7 @@ impl CircuitData {
             for host in &mut self.mixed_signal_hosts {
                 host.declare_analog_sampled_reals(&sampled, &solution_samples);
             }
+            self.name_boundary_crossings();
             for (node, real) in coordinator.event_domains() {
                 self.net_kinds.register(
                     node,

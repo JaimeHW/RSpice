@@ -104,7 +104,7 @@ pub(crate) fn process_writes(process: &CfgDigitalProcess) -> BTreeSet<DigitalSig
 ///
 /// The static list when the process has one; otherwise every event control
 /// written in its body, since each is a place it can be woken from.
-fn reads(process: &CfgDigitalProcess) -> BTreeSet<DigitalSignalId> {
+pub(crate) fn process_reads(process: &CfgDigitalProcess) -> BTreeSet<DigitalSignalId> {
     if let Some(sensitivity) = &process.static_sensitivity {
         return sensitivity.terms.iter().map(|term| term.signal).collect();
     }
@@ -137,7 +137,10 @@ fn zero_delay_loop(plan: &CanonicalDigitalPlan, members: &[&CfgDigitalProcess]) 
         .iter()
         .map(|process| process_writes(process))
         .collect();
-    let read: Vec<_> = members.iter().map(|process| reads(process)).collect();
+    let read: Vec<_> = members
+        .iter()
+        .map(|process| process_reads(process))
+        .collect();
     // The lowest net through which `from` wakes `to`, if any.
     let link = |from: usize, to: usize| written[from].intersection(&read[to]).next().copied();
     for start in 0..members.len() {

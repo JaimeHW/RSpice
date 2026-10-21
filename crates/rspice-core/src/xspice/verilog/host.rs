@@ -65,7 +65,7 @@ mod oscillation;
 mod threads;
 use coupled::NoActiveParticipant;
 pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
-pub(crate) use oscillation::{process_label, process_writes};
+pub(crate) use oscillation::{process_label, process_reads, process_writes};
 
 use rspice_veriloga::canonical_ir::digital_value::DigitalEventCount;
 use std::{
