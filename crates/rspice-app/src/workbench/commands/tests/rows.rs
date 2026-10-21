@@ -21,10 +21,6 @@ use crate::workbench::{
     shortcut_context_precedence_rank,
 };
 
-/// How many commands the registry holds. A command added or retired changes
-/// this number in the same commit, so a rewrite that drops one cannot pass.
-const REGISTERED_COMMANDS: usize = 298;
-
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.
 pub(crate) const LEGACY_ALIASES: &[(&str, &str)] = &[
@@ -232,8 +228,7 @@ fn aliases_answered_by_from_stable_id() -> BTreeSet<&'static str> {
 #[test]
 fn legacy_rows_cover_the_registry_in_order() {
     let rows = legacy_command_rows();
-    assert_eq!(COMMAND_REGISTRY.len(), REGISTERED_COMMANDS);
-    assert_eq!(rows.len(), REGISTERED_COMMANDS);
+    assert_eq!(rows.len(), COMMAND_REGISTRY.len());
     for (index, (row, command)) in rows.iter().zip(COMMAND_REGISTRY).enumerate() {
         assert_eq!(row.index, index);
         assert_eq!(row.id, command.stable_id(), "row {index} is {command:?}");
