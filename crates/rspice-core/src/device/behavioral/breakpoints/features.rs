@@ -47,21 +47,9 @@ impl EventSchedule<'_> {
                 return Ok(false);
             }
             charge()?;
-            let left = vm.execute(
-                &program,
-                &Context {
-                    time: lower,
-                    ..*context
-                },
-            );
+            let left = vm.execute(&program, &context.at_time(lower));
             charge()?;
-            let right = vm.execute(
-                &program,
-                &Context {
-                    time: upper,
-                    ..*context
-                },
-            );
+            let right = vm.execute(&program, &context.at_time(upper));
             Ok(left.is_finite() && left == right)
         };
         if is_constant(0.0, self.tstop)? {
@@ -161,7 +149,7 @@ impl EventSchedule<'_> {
         });
         let mut vm = Vm::new();
         let mut evaluate = |time| {
-            let point = Context { time, ..*context };
+            let point = context.at_time(time);
             let value = if let Some((left, right)) = &operands {
                 let a = vm.execute(left, &point);
                 let b = vm.execute(right, &point);
@@ -579,7 +567,7 @@ impl EventSchedule<'_> {
         let budget = self.isolation_work.unwrap_or(&work);
         let mut evaluate = |time| -> Result<Value, BehavioralBreakpointError> {
             Self::charge_feature_work(budget, program.instructions.len())?;
-            Ok(vm.execute(&program, &Context { time, ..*context }))
+            Ok(vm.execute(&program, &context.at_time(time)))
         };
         let mut previous = 0.0;
         while let Some(root) = roots.next() {

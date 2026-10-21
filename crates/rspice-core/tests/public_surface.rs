@@ -323,8 +323,12 @@ const MAX_PUBLIC_ITEMS: usize = 5752;
 // crate could then break it: `ResultScalar`, `QualifiedOrdinarySpectrum`,
 // `FiniteDynamics` and `ExactElimination` keep theirs private to their crate
 // and add fifteen hidden getters and checked writers in their place. The
-// census is 369, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 369;
+// census was 369, with no slack.
+// `expr::Context::at_time` adds one: the context's logarithm domain stays
+// private to its crate, so the behavioral sources above it move a context to
+// another time through the method rather than struct-update syntax. The
+// census is 370, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 370;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

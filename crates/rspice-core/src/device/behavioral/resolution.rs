@@ -130,21 +130,9 @@ impl BehavioralSources {
                             // A proved VM order makes equal endpoints an exact
                             // plateau, even when outward bounds straddle a jump.
                             charge()?;
-                            let left = vm.execute(
-                                &program,
-                                &Context {
-                                    time: interval.lower,
-                                    ..context
-                                },
-                            );
+                            let left = vm.execute(&program, &context.at_time(interval.lower));
                             charge()?;
-                            let right = vm.execute(
-                                &program,
-                                &Context {
-                                    time: interval.upper,
-                                    ..context
-                                },
-                            );
+                            let right = vm.execute(&program, &context.at_time(interval.upper));
                             if left.is_finite() && left == right {
                                 return Ok(Resolution::Qualified);
                             }
@@ -166,7 +154,7 @@ impl BehavioralSources {
                                 let mut same = true;
                                 for time in [interval.lower, interval.upper] {
                                     charge()?;
-                                    same &= vm.execute(&program, &Context { time, ..context })
+                                    same &= vm.execute(&program, &context.at_time(time))
                                         == interior.value.lower;
                                 }
                                 if same {

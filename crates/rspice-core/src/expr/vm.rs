@@ -345,6 +345,14 @@ impl<'a> Context<'a> {
         self.logarithm_domain = LogarithmDomain::Ieee;
         self
     }
+
+    /// This context at another time, everything else unchanged, for sampling
+    /// one expression across an interval. The logarithm domain travels with
+    /// it, so a caller outside this crate never has to name it.
+    #[doc(hidden)]
+    pub fn at_time(&self, time: Value) -> Self {
+        Self { time, ..*self }
+    }
 }
 
 /// Bytecode virtual machine
