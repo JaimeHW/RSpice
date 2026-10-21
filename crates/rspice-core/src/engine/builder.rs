@@ -5281,7 +5281,7 @@ fn add_connect_rule_converter(
     if let Some(supply) = live_supply {
         connections.push(PortConnection::Analog(supply));
     }
-    let instance_name = format!("__rspice_auto_{label}_{event_node}");
+    let instance_name = format!("{AUTO_BRIDGE_PREFIX}{label}_{event_node}");
     let mut instance = crate::xspice::XspiceInstance::new_with_string_vectors(
         instance_name.clone(),
         code_model,
