@@ -68,7 +68,7 @@
     "model->simulate": 7,
     "run->code": 7,
     "run->framework": 26,
-    "run->session": 137,
+    "run->session": 126,
     "run->shell": 4,
     "services->cloud": 24,
     "services->design": 1,

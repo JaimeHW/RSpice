@@ -36,7 +36,7 @@ mod technology_demand_tests;
 pub(in crate::workbench) mod viewer_capabilities;
 pub(in crate::workbench) mod waivers;
 
-use crate::product::{AnalysisInstanceId, DatasetId};
+use crate::simulation::controller::SpecializedViewerCacheProvenance;
 use crate::state::{SchematicState, SimulationState};
 use crate::workbench::app::DialogState;
 
@@ -63,52 +63,6 @@ pub use sim_setup::plan_catalog::{
 pub use sim_setup::{
     AcSetup, DcSetup, ReferencePvtPoint, SimSetupState, SimulationSavePolicy, TranSetup,
 };
-
-/// Exact owner of one mutable specialized-viewer cache.
-///
-/// Current results use their prepared analysis-instance identity. Migrated
-/// result history that predates prepared-task provenance falls back to the
-/// retained run-local analysis ID; paired with the immutable dataset ID this
-/// is still an exact identity and never aliases another dataset's result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SpecializedViewerCacheProvenance {
-    pub(crate) dataset_id: DatasetId,
-    pub(crate) analysis_identity: SpecializedViewerAnalysisIdentity,
-}
-
-impl SpecializedViewerCacheProvenance {
-    pub(crate) fn for_analysis(
-        dataset_id: DatasetId,
-        analysis: &crate::state::AnalysisResult,
-    ) -> Self {
-        let analysis_identity = analysis.provenance().map_or(
-            SpecializedViewerAnalysisIdentity::LegacyResultId(analysis.id),
-            |provenance| {
-                SpecializedViewerAnalysisIdentity::Prepared(provenance.source_instance_id())
-            },
-        );
-        Self {
-            dataset_id,
-            analysis_identity,
-        }
-    }
-
-    pub(crate) const fn for_prepared_analysis(
-        dataset_id: DatasetId,
-        source_instance_id: AnalysisInstanceId,
-    ) -> Self {
-        Self {
-            dataset_id,
-            analysis_identity: SpecializedViewerAnalysisIdentity::Prepared(source_instance_id),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SpecializedViewerAnalysisIdentity {
-    Prepared(AnalysisInstanceId),
-    LegacyResultId(u64),
-}
 
 /// Provenance for the mutable specialized result caches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

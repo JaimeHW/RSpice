@@ -230,7 +230,7 @@ fn bind_active_fft_authority(state: &mut AppState) {
             .simulation
             .active_analysis()
             .expect("test retains an active result analysis");
-        crate::workbench::app_state::SpecializedViewerCacheProvenance::for_analysis(
+        crate::simulation::controller::SpecializedViewerCacheProvenance::for_analysis(
             run.dataset_id,
             analysis,
         )
@@ -483,7 +483,7 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
             let dataset_id = state.simulation.active_run().unwrap().dataset_id;
             let foreign = AnalysisResult::new(999, AnalysisType::Transient, "FOREIGN");
             let authority =
-                crate::workbench::app_state::SpecializedViewerCacheProvenance::for_analysis(
+                crate::simulation::controller::SpecializedViewerCacheProvenance::for_analysis(
                     dataset_id, &foreign,
                 );
             state.bind_specialized_viewer_cache(

@@ -7,9 +7,10 @@
 #[cfg(test)]
 mod histogram_publication;
 
-use crate::workbench::app_state::{
-    ActiveViewer, AppState, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
+use crate::simulation::controller::{
+    SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
+use crate::workbench::app_state::{ActiveViewer, AppState};
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
 /// Availability metadata for a specialized viewer.

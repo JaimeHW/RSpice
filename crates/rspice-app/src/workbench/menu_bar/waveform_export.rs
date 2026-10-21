@@ -609,7 +609,7 @@ fn fft_spectrum_csv(
             .to_owned()
     })?;
     let expected_authority =
-        crate::workbench::app_state::SpecializedViewerCacheProvenance::for_analysis(
+        crate::simulation::controller::SpecializedViewerCacheProvenance::for_analysis(
             displayed.dataset_id,
             displayed_analysis,
         );

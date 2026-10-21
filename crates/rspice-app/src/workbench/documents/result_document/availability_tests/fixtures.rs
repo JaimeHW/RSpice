@@ -7,8 +7,8 @@
 //! it". Nothing here asserts anything.
 
 use super::*;
+use crate::simulation::controller::SpecializedViewerCacheProvenance;
 use crate::state::{SensitivityResultMode, SensitivityResultRow};
-use crate::workbench::app_state::SpecializedViewerCacheProvenance;
 
 pub(super) fn soa_analysis() -> AnalysisResult {
     use crate::state::{

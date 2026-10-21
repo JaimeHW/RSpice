@@ -239,75 +239,6 @@ pub(crate) struct SchematicVisibilityRecovery {
     pub(crate) selection: crate::state::Selection,
 }
 
-/// What the shell has seen of runs and campaigns, so that each one's end is
-/// announced exactly once.
-///
-/// Every run seen before it ended is watched, not just the newest: a
-/// campaign starts its next member in the same update that finishes the
-/// last, so by the time a frame looks the newest run has already moved on.
-/// Transient by construction.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RunWatch {
-    /// Runs seen before they ended, by stable identity. A run that was over
-    /// when it was first seen, such as history opened with a project, is
-    /// never in here, so it is never announced as having just finished.
-    running: std::collections::HashSet<crate::product::RunId>,
-    /// Campaign outcomes the controller reported that the shell has not
-    /// announced yet, oldest first.
-    campaign_outcomes: Vec<crate::simulation::controller::prepared_run::CampaignOutcome>,
-}
-
-impl RunWatch {
-    /// Watch a run from the moment it opens, before any frame has seen it.
-    /// A run that ends inside the update that started it is still one that
-    /// was seen running.
-    pub(crate) fn run_started(&mut self, run_id: crate::product::RunId) {
-        self.running.insert(run_id);
-    }
-
-    /// Bring the watch up to date with the runs as they stand, newest first,
-    /// and return the runs that ended since it last looked, oldest first.
-    pub(crate) fn observe(
-        &mut self,
-        runs: impl IntoIterator<Item = (crate::product::RunId, crate::state::SimulationRunLifecycle)>,
-    ) -> Vec<crate::product::RunId> {
-        use crate::state::SimulationRunLifecycle as Lifecycle;
-
-        let mut running = std::collections::HashSet::new();
-        let mut ended = Vec::new();
-        for (run_id, lifecycle) in runs {
-            if matches!(
-                lifecycle,
-                Lifecycle::Preparing | Lifecycle::Running | Lifecycle::Cancelling
-            ) {
-                running.insert(run_id);
-            } else if lifecycle.is_terminal() && self.running.contains(&run_id) {
-                ended.push(run_id);
-            }
-        }
-        // A run that left the history while running is not announced, and
-        // is not kept waiting for an end it can no longer reach.
-        self.running = running;
-        ended.reverse();
-        ended
-    }
-
-    /// Hold a campaign outcome until the shell announces it.
-    pub(crate) fn campaign_outcome(
-        &mut self,
-        outcome: crate::simulation::controller::prepared_run::CampaignOutcome,
-    ) {
-        self.campaign_outcomes.push(outcome);
-    }
-
-    /// The campaign outcomes not yet announced, oldest first.
-    pub(crate) fn take_campaign_outcomes(
-        &mut self,
-    ) -> Vec<crate::simulation::controller::prepared_run::CampaignOutcome> {
-        std::mem::take(&mut self.campaign_outcomes)
-    }
-}
-
 /// What the last save of the session kept for the next start. Transient.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum SessionKept {
@@ -367,7 +298,7 @@ pub struct UiSessionState {
     /// lifecycle rather than on the terminal state itself, so opening a
     /// project whose history already holds a finished run never claims a run
     /// just completed.
-    pub(crate) run_watch: RunWatch,
+    pub(crate) run_watch: crate::simulation::controller::prepared_run::RunWatch,
     /// Schematic-space cursor position, reported by the canvas each frame the
     /// pointer hovers it; consumed by the status bar.
     pub canvas_hover: Option<(f64, f64)>,

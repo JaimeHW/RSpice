@@ -38,7 +38,7 @@ use crate::state::{
     AnalysisType, DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
     RealEventTraceEvidence, SimulationRunIntent, SimulationRunLifecycle, WaveformData,
 };
-use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
+use crate::workbench::app_state::{ActiveViewer, AppState};
 use crate::workbench::spawn_or_inline;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_results::yield_analysis::YieldAnalysisManager;
@@ -89,7 +89,10 @@ pub(crate) mod test_execution;
 mod touchstone;
 mod transient_checkpoint;
 mod transient_post;
-pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
+pub(crate) use transient_post::{
+    DerivedViewerLoadState, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
+    build_eye_from_waveform,
+};
 
 use self::live_transient::LiveTransientAccumulator;
 

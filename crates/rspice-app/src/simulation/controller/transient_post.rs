@@ -4,8 +4,9 @@
 //! viewers after a run does not re-derive the same traces.
 
 use super::*;
+use crate::product::{AnalysisInstanceId, DatasetId};
 use crate::state::{AnalysisType, SharedWaveformValues};
-use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
+use crate::workbench::app_state::{ActiveViewer, AppState};
 use rspice_results_ui::eye_diagram::{
     EyeData, EyeDataBuilder, EyeTimebase, EyeTimebaseProvenance, crossing_phase_at,
     estimate_unit_interval, fold_anchor,
@@ -13,6 +14,52 @@ use rspice_results_ui::eye_diagram::{
 use rspice_results_ui::fft::{FftInputError, FftInputOptions, PreparedFftInput};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
+
+/// Exact owner of one mutable specialized-viewer cache.
+///
+/// Current results use their prepared analysis-instance identity. Migrated
+/// result history that predates prepared-task provenance falls back to the
+/// retained run-local analysis ID; paired with the immutable dataset ID this
+/// is still an exact identity and never aliases another dataset's result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SpecializedViewerCacheProvenance {
+    pub(crate) dataset_id: DatasetId,
+    pub(crate) analysis_identity: SpecializedViewerAnalysisIdentity,
+}
+
+impl SpecializedViewerCacheProvenance {
+    pub(crate) fn for_analysis(
+        dataset_id: DatasetId,
+        analysis: &crate::state::AnalysisResult,
+    ) -> Self {
+        let analysis_identity = analysis.provenance().map_or(
+            SpecializedViewerAnalysisIdentity::LegacyResultId(analysis.id),
+            |provenance| {
+                SpecializedViewerAnalysisIdentity::Prepared(provenance.source_instance_id())
+            },
+        );
+        Self {
+            dataset_id,
+            analysis_identity,
+        }
+    }
+
+    pub(crate) const fn for_prepared_analysis(
+        dataset_id: DatasetId,
+        source_instance_id: AnalysisInstanceId,
+    ) -> Self {
+        Self {
+            dataset_id,
+            analysis_identity: SpecializedViewerAnalysisIdentity::Prepared(source_instance_id),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpecializedViewerAnalysisIdentity {
+    Prepared(AnalysisInstanceId),
+    LegacyResultId(u64),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DerivedViewerLoadState {

@@ -3,10 +3,11 @@
 use egui::Ui;
 use rspice_results::network_matrix::trace_identity;
 
-use crate::workbench::AppState;
-use crate::workbench::app_state::{
-    ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
+use crate::simulation::controller::{
+    SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
+use crate::workbench::AppState;
+use crate::workbench::app_state::ActiveViewer;
 
 use super::frame_work::{self, DatasetWalk};
 use rspice_results_ui::smith_chart::view::{self, SmithPlotTrace};
