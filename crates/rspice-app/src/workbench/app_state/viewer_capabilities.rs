@@ -131,6 +131,7 @@ impl AppState {
         });
         self.ui.netlist = Default::default();
         *self.netlist_artifacts = Default::default();
+        *self.manual_run = Default::default();
         self.ui.code_workspace = Default::default();
         self.workbench.netlist_open_documents.clear();
         self.ui.results_seen_version = 0;

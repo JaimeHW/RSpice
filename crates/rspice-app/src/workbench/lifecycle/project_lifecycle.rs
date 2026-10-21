@@ -1486,6 +1486,7 @@ fn revert_document_in_place(
             state.workspace.content.project_sources_dirty = false;
             state.ui.netlist = Default::default();
             *state.netlist_artifacts = Default::default();
+            *state.manual_run = Default::default();
             state.workbench.netlist_open_documents.clear();
             state.simulation.source.netlist_content = state
                 .workspace

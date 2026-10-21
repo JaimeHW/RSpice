@@ -104,6 +104,9 @@ pub struct AppState {
     /// The generated deck and its validation evidence. Runtime only. Boxed,
     /// as it was inside [`Self::ui`], so a moved state stays the same size.
     pub(crate) netlist_artifacts: Box<crate::state::NetlistArtifacts>,
+    /// The deck a manual-deck run started from and the baseline the last one
+    /// left. Runtime only, and boxed for the same reason.
+    pub(crate) manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Runtime collaboration-lock authority for governed project library

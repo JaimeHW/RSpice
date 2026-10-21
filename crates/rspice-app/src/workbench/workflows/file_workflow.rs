@@ -798,11 +798,11 @@ mod tests {
             .runs
             .push(crate::state::SimulationRun::new(1));
         state.simulation.view.active_run_idx = Some(0);
-        state.ui.netlist.last_run_buffer = Some("last manual run\n.end\n".to_owned());
-        state.ui.netlist.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
-        state.ui.netlist.pending_manual_run_id = Some(1);
+        state.manual_run.last_run_buffer = Some("last manual run\n.end\n".to_owned());
+        state.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
+        state.manual_run.pending_manual_run_id = Some(1);
         state.ui.netlist.rerun_queued = true;
-        state.ui.netlist.edited_lines.insert(3);
+        state.manual_run.edited_lines.insert(3);
         state.analysis.histogram_state.selected = Some("old measurement".to_owned());
     }
 
@@ -810,11 +810,11 @@ mod tests {
         assert!(state.workspace.content.netlist_source.is_none());
         assert!(state.simulation.source.netlist_content.is_empty());
         assert!(!state.simulation.retained.has_results());
-        assert!(state.ui.netlist.last_run_buffer.is_none());
-        assert!(state.ui.netlist.pending_run_buffer.is_none());
-        assert!(state.ui.netlist.pending_manual_run_id.is_none());
+        assert!(state.manual_run.last_run_buffer.is_none());
+        assert!(state.manual_run.pending_run_buffer.is_none());
+        assert!(state.manual_run.pending_manual_run_id.is_none());
         assert!(!state.ui.netlist.rerun_queued);
-        assert!(state.ui.netlist.edited_lines.is_empty());
+        assert!(state.manual_run.edited_lines.is_empty());
         assert_eq!(state.analysis.histogram_state.selected, None);
     }
 

@@ -639,8 +639,8 @@ impl SimulationController {
             });
         if dispatch.intent() == SimulationRunIntent::ManualDeck {
             let manual_source = dispatch.manual_source().unwrap_or_default().to_owned();
-            state.ui.netlist.pending_manual_run_id = Some(run_id);
-            state.ui.netlist.pending_run_buffer = Some(manual_source);
+            state.manual_run.pending_manual_run_id = Some(run_id);
+            state.manual_run.pending_run_buffer = Some(manual_source);
         }
 
         self.pending_analyses = dispatch.into_tasks();
@@ -716,8 +716,8 @@ impl SimulationController {
         state.simulation.execution.active_execution = None;
         state.simulation.execution.abort_request = None;
         state.simulation.execution.trigger_abort = false;
-        state.ui.netlist.pending_manual_run_id = None;
-        state.ui.netlist.pending_run_buffer = None;
+        state.manual_run.pending_manual_run_id = None;
+        state.manual_run.pending_run_buffer = None;
         self.design_execution_epoch = state.design_execution_epoch;
     }
 
@@ -1676,25 +1676,25 @@ impl SimulationController {
         run_success: bool,
         completed_run_id: Option<u64>,
     ) {
-        let pending_matches = state.ui.netlist.pending_manual_run_id.is_some()
-            && state.ui.netlist.pending_manual_run_id == completed_run_id;
+        let pending_matches = state.manual_run.pending_manual_run_id.is_some()
+            && state.manual_run.pending_manual_run_id == completed_run_id;
         if !pending_matches {
             return;
         }
 
-        let pending_buffer = state.ui.netlist.pending_run_buffer.take();
-        state.ui.netlist.pending_manual_run_id = None;
+        let pending_buffer = state.manual_run.pending_run_buffer.take();
+        state.manual_run.pending_manual_run_id = None;
 
         if run_success && let Some(buffer) = pending_buffer {
             let current_buffer = state.simulation.source.netlist_content.clone();
             let param_values = Self::manual_deck_param_values(&buffer);
-            state.ui.netlist.last_run_buffer = Some(buffer);
+            state.manual_run.last_run_buffer = Some(buffer);
             // The deck and the run it belongs to are sealed together; nothing
             // downstream may pair a buffer with a run it did not execute.
             state.ui.netlist.last_run_id = completed_run_id;
-            state.ui.netlist.last_run_params = param_values;
-            if let Some(baseline) = state.ui.netlist.last_run_buffer.as_deref() {
-                state.ui.netlist.edited_lines =
+            state.manual_run.last_run_params = param_values;
+            if let Some(baseline) = state.manual_run.last_run_buffer.as_deref() {
+                state.manual_run.edited_lines =
                     Self::changed_lines_against_baseline(&current_buffer, baseline);
             }
         }

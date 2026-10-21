@@ -225,8 +225,7 @@ fn netlist_search_documents(
                         state,
                     ),
                     source: state
-                        .ui
-                        .netlist
+                        .manual_run
                         .last_run_buffer
                         .as_deref()
                         .unwrap_or_default(),

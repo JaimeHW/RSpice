@@ -971,7 +971,7 @@ pub(crate) fn open_netlist_dependency_from_root(
     state.simulation.source.netlist_content = source;
     state.ui.netlist.requested_line = None;
     state.ui.netlist.cursor_line = 0;
-    state.ui.netlist.edited_lines.clear();
+    state.manual_run.edited_lines.clear();
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
@@ -2302,13 +2302,9 @@ pub struct NetlistDocumentState {
     last_edit_time: f64,
     /// Current parse diagnostics.
     pub diagnostics: std::sync::Arc<NetlistDiagnosticCollection>,
-    /// Zero-based lines edited since the last completed manual-deck run.
-    pub edited_lines: HashSet<usize>,
     /// Result data version last reconciled with the editor baseline.
     seen_data_version: u64,
-    /// Exact editor buffer from the last successful manual-deck run.
-    pub last_run_buffer: Option<String>,
-    /// Run sequence `last_run_buffer` was sealed with. This is the only
+    /// Run sequence the manual-run baseline was sealed with. This is the only
     /// deck-to-run binding: the run's label, deck digest and revision are read
     /// back off that run's own receipt rather than copied here.
     pub last_run_id: Option<u64>,
@@ -2323,12 +2319,6 @@ pub struct NetlistDocumentState {
     /// point of a completed run was actually handed — a different artifact,
     /// for a different question, with nothing to diff it against.
     pub executed_deck_view: Option<ExecutedDeckSelection>,
-    /// Numeric `.param` values captured from `last_run_buffer`.
-    pub last_run_params: HashMap<String, f64>,
-    /// Editor buffer captured when the current manual-deck run started.
-    pub pending_run_buffer: Option<String>,
-    /// Run id associated with `pending_run_buffer`.
-    pub pending_manual_run_id: Option<u64>,
     /// Zero-based line containing the caret.
     pub cursor_line: usize,
     /// Unicode-scalar caret position in the visible source. Language actions
@@ -2437,8 +2427,8 @@ pub fn prepare(state: &mut AppState) {
         return;
     }
     state.ui.netlist.seen_data_version = data_version;
-    if let Some(baseline) = state.ui.netlist.last_run_buffer.as_deref() {
-        state.ui.netlist.edited_lines = baseline::changed_lines_against_baseline(
+    if let Some(baseline) = state.manual_run.last_run_buffer.as_deref() {
+        state.manual_run.edited_lines = baseline::changed_lines_against_baseline(
             &state.simulation.source.netlist_content,
             baseline,
         );
@@ -2446,10 +2436,10 @@ pub fn prepare(state: &mut AppState) {
 }
 
 pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
-    let Some(baseline) = state.ui.netlist.last_run_buffer.as_deref() else {
+    let Some(baseline) = state.manual_run.last_run_buffer.as_deref() else {
         return;
     };
-    state.ui.netlist.edited_lines = baseline::changed_lines_against_baseline(
+    state.manual_run.edited_lines = baseline::changed_lines_against_baseline(
         &state.simulation.source.netlist_content,
         baseline,
     );

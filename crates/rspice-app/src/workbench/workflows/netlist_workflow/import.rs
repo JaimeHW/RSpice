@@ -142,6 +142,7 @@ fn install_imported_netlist(
     candidate.design_execution_epoch = candidate.design_execution_epoch.wrapping_add(1);
     candidate.ui.netlist = Default::default();
     *candidate.netlist_artifacts = Default::default();
+    *candidate.manual_run = Default::default();
     candidate.workbench.netlist_open_documents.clear();
     let source_digest = crate::state::content_digest(&source);
     let reopenable_import = source_path.is_some();

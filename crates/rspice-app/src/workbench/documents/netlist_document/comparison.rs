@@ -230,8 +230,7 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
 pub(crate) fn run_deck_snapshot_run_id(state: &AppState) -> Option<u64> {
     let run_id = state.ui.netlist.last_run_id?;
     state
-        .ui
-        .netlist
+        .manual_run
         .last_run_buffer
         .as_ref()
         .is_some_and(|buffer| !buffer.is_empty())
@@ -383,8 +382,7 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
         .last_run_id
         .ok_or_else(|| "No completed manual run owns a deck snapshot.".to_owned())?;
     let snapshot = state
-        .ui
-        .netlist
+        .manual_run
         .last_run_buffer
         .clone()
         .ok_or_else(|| "The deck this run used is no longer retained.".to_owned())?;

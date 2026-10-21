@@ -253,7 +253,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             ActiveNetlistDocument::RunSnapshot => {
                 let run_id =
                     crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state)?;
-                let snapshot = state.ui.netlist.last_run_buffer.as_deref()?;
+                let snapshot = state.manual_run.last_run_buffer.as_deref()?;
                 if state.simulation.source.netlist_content != snapshot {
                     return None;
                 }

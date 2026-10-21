@@ -10,6 +10,7 @@ pub(crate) mod controller;
 pub(crate) use rspice_simulation_contract::cost_probe;
 pub(crate) mod dialog;
 pub(crate) use rspice_simulation::execution;
+pub(crate) mod manual_run;
 pub(crate) mod multi_run;
 #[cfg(test)]
 pub(crate) mod netlist_gen;

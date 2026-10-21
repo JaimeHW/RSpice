@@ -601,7 +601,7 @@ fn a_schematic_run_retains_the_deck_it_executed() {
         executed.deck
     );
     assert!(
-        state.ui.netlist.last_run_buffer.is_none(),
+        state.manual_run.last_run_buffer.is_none(),
         "and nobody typed it, so there is no manual baseline to be current with"
     );
 }

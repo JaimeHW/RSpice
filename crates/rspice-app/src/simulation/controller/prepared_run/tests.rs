@@ -61,7 +61,7 @@ fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     assert!(controller.runner.can_accept_prepared_task());
     assert!(controller.cached_netlist.is_none());
     assert!(state.simulation.execution.active_execution.is_none());
-    assert!(state.ui.netlist.pending_manual_run_id.is_none());
+    assert!(state.manual_run.pending_manual_run_id.is_none());
     assert_eq!(state.simulation.retained.next_run_id, u64::MAX);
     assert_eq!(
         crate::io::capture_simulation_results(&state.simulation),
