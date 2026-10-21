@@ -357,7 +357,8 @@ pub enum HdlDelaySelect {
 
 impl HdlDelaySelect {
     /// The spelling `.options hdl_delay_select` takes.
-    pub(crate) fn parse(spelling: &str) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn parse(spelling: &str) -> Option<Self> {
         Some(match spelling.to_ascii_lowercase().as_str() {
             "min" => Self::Min,
             "typ" => Self::Typ,

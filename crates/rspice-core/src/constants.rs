@@ -211,11 +211,13 @@ pub const XYCE_Q_ELECTRON: Value = 1.6021918e-19;
 /// exponentiates it: at 0.7 V it moves a transconductance by one part in
 /// 1e5. Which pair applies is a dialect decision, so it is named once here
 /// and read by every equation that must reproduce ngspice's numbers.
-pub(crate) const NGSPICE_K_BOLTZMANN: Value = 1.38064852e-23;
+#[doc(hidden)]
+pub const NGSPICE_K_BOLTZMANN: Value = 1.38064852e-23;
 
 /// Elementary charge as ngspice 46's `const.h` carries it (C). See
 /// [`NGSPICE_K_BOLTZMANN`].
-pub(crate) const NGSPICE_Q_ELECTRON: Value = 1.6021766208e-19;
+#[doc(hidden)]
+pub const NGSPICE_Q_ELECTRON: Value = 1.6021766208e-19;
 
 /// Physical constants used while evaluating primitive noise sources.
 ///
@@ -247,7 +249,8 @@ impl NoisePhysicalConstants {
     };
 
     /// Constants embedded in vbic_1p3.va, distinct from Xyce's device library.
-    pub(crate) const VBIC_1_3: Self = Self {
+    #[doc(hidden)]
+    pub const VBIC_1_3: Self = Self {
         boltzmann: 1.380662e-23,
         electron_charge: 1.602189e-19,
     };

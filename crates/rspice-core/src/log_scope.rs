@@ -132,11 +132,13 @@ thread_local! {
 /// logged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
-pub(crate) struct LogLine(Option<u64>);
+#[doc(hidden)]
+pub struct LogLine(Option<u64>);
 
 impl LogLine {
     /// What a notice raised without a warning of its own carries.
-    pub(crate) const NONE: Self = Self(None);
+    #[doc(hidden)]
+    pub const NONE: Self = Self(None);
 
     /// The line, if the host kept one.
     pub(crate) fn line(self) -> Option<u64> {
@@ -161,7 +163,8 @@ pub fn logged(line: Option<u64>) {
 /// Whatever the thread was told before is cleared first and taken after, so
 /// the line is this warning's or none: none when the host withheld it, keeps
 /// no log, or was never offered it.
-pub(crate) fn stating(log: impl FnOnce()) -> LogLine {
+#[doc(hidden)]
+pub fn stating(log: impl FnOnce()) -> LogLine {
     let _ = LOGGED.try_with(|logged| logged.set(None));
     log();
     LogLine(LOGGED.try_with(Cell::take).ok().flatten())
@@ -215,7 +218,8 @@ impl Drop for LogScopeGuard {
 /// For the code that solves one point of many, on whichever thread it runs: a
 /// thread outside any run stays outside.
 #[must_use]
-pub(crate) fn enter_point(point: impl FnOnce() -> String) -> Option<LogScopeGuard> {
+#[doc(hidden)]
+pub fn enter_point(point: impl FnOnce() -> String) -> Option<LogScopeGuard> {
     capture().map(|scope| enter(Some(scope.at_point(point()))))
 }
 
@@ -225,7 +229,8 @@ pub(crate) fn enter_point(point: impl FnOnce() -> String) -> Option<LogScopeGuar
 /// elaborate several times over — before its operating point, per sweep point,
 /// per Monte Carlo sample — and that is worth reading once. A thread outside
 /// any run remembers nothing, so there every call is the first.
-pub(crate) fn first_saying(line: &str) -> bool {
+#[doc(hidden)]
+pub fn first_saying(line: &str) -> bool {
     let Some(scope) = capture() else {
         return true;
     };

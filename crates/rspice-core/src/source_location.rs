@@ -45,7 +45,8 @@ impl std::fmt::Display for NetlistSourceLocation {
 /// verbatim `\\?\` prefix, which is not what anyone wrote; a drive or UNC
 /// path reads the same without it. Device paths reached through `\\?\` have
 /// no plain spelling and keep it. Comparisons keep using the canonical path.
-pub(crate) fn display_source_path(path: &std::path::Path) -> String {
+#[doc(hidden)]
+pub fn display_source_path(path: &std::path::Path) -> String {
     let text = path.display().to_string();
     // A resolved include path can also arrive with its separators turned to
     // `/` (`//?/C:/...`); it reads the same way.

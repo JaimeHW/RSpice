@@ -1,12 +1,14 @@
 //! Incoming storage in exact binary-product units, before any projection.
 use super::*;
 
-pub(crate) struct TransitionStorage {
+#[doc(hidden)]
+pub struct TransitionStorage {
     pub(super) values: Vec<BigInt>,
 }
 
 impl TransitionStorage {
-    pub(crate) fn retained_words(&self) -> usize {
+    #[doc(hidden)]
+    pub fn retained_words(&self) -> usize {
         self.values
             .iter()
             .fold(self.values.capacity().saturating_mul(8), |sum, value| {
@@ -18,7 +20,8 @@ impl TransitionStorage {
 impl PreparedTransition {
     /// Each term is (row, physical coefficient, accepted device coordinate).
     /// Keeping C*V and L*I exact avoids inventing actions from rounding Q first.
-    pub(crate) fn storage_from_products(
+    #[doc(hidden)]
+    pub fn storage_from_products(
         &self,
         products: impl Iterator<Item = (usize, Value, Value)>,
         limits: ResourceLimits,
@@ -49,7 +52,8 @@ impl PreparedTransition {
         Ok(TransitionStorage { values })
     }
 
-    pub(crate) fn charge_from_coordinates(
+    #[doc(hidden)]
+    pub fn charge_from_coordinates(
         &self,
         coordinates: &[Value],
         limits: ResourceLimits,

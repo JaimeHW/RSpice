@@ -151,7 +151,8 @@ impl Function {
     /// Keeping this table on the semantic enum gives behavioral parsing and
     /// output-expression validation one source of truth. User-defined
     /// functions intentionally return `None` here.
-    pub(crate) fn from_name(name: &str) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn from_name(name: &str) -> Option<Self> {
         match name.to_ascii_uppercase().as_str() {
             "ABS" | "M" | "MAG" => Some(Self::Abs),
             "SQRT" => Some(Self::Sqrt),

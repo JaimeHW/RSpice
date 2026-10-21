@@ -79,11 +79,13 @@ impl ModelRunControl {
     }
 
     /// Claim the one report of the accepted finish; later callers get `false`.
-    pub(crate) fn claim_finish_report(&self) -> bool {
+    #[doc(hidden)]
+    pub fn claim_finish_report(&self) -> bool {
         self.is_finished() && !self.reported.swap(true, Ordering::AcqRel)
     }
 
-    pub(crate) fn request_finish(&self, finish: ModelFinish) {
+    #[doc(hidden)]
+    pub fn request_finish(&self, finish: ModelFinish) {
         let mut first = self
             .finish
             .lock()
@@ -97,17 +99,20 @@ impl ModelRunControl {
 
 /// A borrowed scope keeps model completion separate from the caller's abort
 /// flag, while preserving every observation and cancellation hook.
-pub(crate) struct ModelRunSignal<'a> {
+#[doc(hidden)]
+pub struct ModelRunSignal<'a> {
     parent: &'a dyn crate::AbortSignal,
     control: ModelRunControl,
 }
 
 impl<'a> ModelRunSignal<'a> {
-    pub(crate) fn if_needed(parent: &'a dyn crate::AbortSignal) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn if_needed(parent: &'a dyn crate::AbortSignal) -> Option<Self> {
         parent.model_control().is_none().then(|| Self::new(parent))
     }
 
-    pub(crate) fn new(parent: &'a dyn crate::AbortSignal) -> Self {
+    #[doc(hidden)]
+    pub fn new(parent: &'a dyn crate::AbortSignal) -> Self {
         Self {
             parent,
             control: ModelRunControl::default(),

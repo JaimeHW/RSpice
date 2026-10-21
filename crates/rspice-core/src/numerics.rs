@@ -9,15 +9,22 @@
 //! is the other half of this and sits one layer up, because it solves against
 //! an assembled matrix rather than defining one.
 
-pub(crate) mod eigenspectrum;
-pub(crate) mod exact_constraints;
-pub(crate) mod krylov;
+#[doc(hidden)]
+pub mod eigenspectrum;
+#[doc(hidden)]
+pub mod exact_constraints;
+#[doc(hidden)]
+pub mod krylov;
 mod power_law;
-pub(crate) mod scaled_noise;
-pub(crate) mod scaled_product;
+#[doc(hidden)]
+pub mod scaled_noise;
+#[doc(hidden)]
+pub mod scaled_product;
 mod split_mix;
-pub(crate) use power_law::{power_product_binary_normalization, scaled_power_law};
-pub(crate) use split_mix::{SPLIT_MIX_GAMMA, fnv1a, split_mix64_at, split_mix64_output};
+#[doc(hidden)]
+pub use power_law::{power_product_binary_normalization, scaled_power_law};
+#[doc(hidden)]
+pub use split_mix::{SPLIT_MIX_GAMMA, fnv1a, split_mix64_at, split_mix64_output};
 pub mod integration;
 pub mod rustfft_qualification;
 
@@ -25,7 +32,8 @@ use crate::Value;
 
 /// Logarithmic complex magnitude without overflowing or rounding a subnormal
 /// norm before taking its logarithm. Zero has negative-infinite log magnitude.
-pub(crate) fn complex_log10_magnitude(value: crate::Complex64) -> Value {
+#[doc(hidden)]
+pub fn complex_log10_magnitude(value: crate::Complex64) -> Value {
     if !value.re.is_finite() || !value.im.is_finite() {
         return Value::NAN;
     }
@@ -38,9 +46,8 @@ pub(crate) fn complex_log10_magnitude(value: crate::Complex64) -> Value {
 }
 
 /// Scalar operations for the small, stack-allocated device reductions.
-pub(crate) trait DenseScalar:
-    Copy + Default + std::ops::SubAssign + std::ops::Mul<Output = Self>
-{
+#[doc(hidden)]
+pub trait DenseScalar: Copy + Default + std::ops::SubAssign + std::ops::Mul<Output = Self> {
     fn magnitude(self) -> Value;
     fn finite(self) -> bool;
     fn scale_down(self, scale: Value) -> Self;
@@ -105,7 +112,8 @@ impl DenseScalar for crate::Complex64 {
 /// No physical-unit pivot floor: a nonzero pivot is usable only when the
 /// resulting finite solution passes a scale-independent backward-error check.
 /// Inactive rows/columns beyond `dim` are ignored, and inactive outputs are zero.
-pub(crate) fn solve_small_dense<T: DenseScalar, const N: usize>(
+#[doc(hidden)]
+pub fn solve_small_dense<T: DenseScalar, const N: usize>(
     matrix: &[[T; N]; N],
     rhs: &[T; N],
     dim: usize,
@@ -115,7 +123,8 @@ pub(crate) fn solve_small_dense<T: DenseScalar, const N: usize>(
 }
 
 /// Solve multiple RHS columns with one elimination; validate every solution.
-pub(crate) fn solve_small_dense_many<T: DenseScalar, const N: usize, const R: usize>(
+#[doc(hidden)]
+pub fn solve_small_dense_many<T: DenseScalar, const N: usize, const R: usize>(
     matrix: &[[T; N]; N],
     rhs: &[[T; R]; N],
     dim: usize,
@@ -239,7 +248,8 @@ pub(crate) fn solve_small_dense_many<T: DenseScalar, const N: usize, const R: us
 /// Evaluate a product/quotient times exp(exponent), retaining the ordinary
 /// arithmetic path unless an intermediate loses range or subnormal precision.
 #[inline]
-pub(crate) fn scaled_exp_product(
+#[doc(hidden)]
+pub fn scaled_exp_product(
     factors: &[crate::Value],
     divisors: &[crate::Value],
     exponent: crate::Value,
@@ -268,7 +278,8 @@ pub(crate) fn scaled_exp_product(
 /// Retain a product's binary scale when its value cannot be stored in f64.
 /// Inputs must be finite and nonzero. A normal product keeps its ordinary
 /// evaluation exactly; the normalized form also preserves subnormal precision.
-pub(crate) fn product_binary_normalization(factors: &[Value], divisors: &[Value]) -> (Value, i32) {
+#[doc(hidden)]
+pub fn product_binary_normalization(factors: &[Value], divisors: &[Value]) -> (Value, i32) {
     let product = scaled_exp_product(factors, divisors, 0.0);
     if product.is_normal() {
         return (product, 0);
@@ -303,7 +314,8 @@ fn product_binary_parts(factors: &[Value], divisors: &[Value]) -> (Value, i64) {
 }
 
 /// Combine a separately retained binary scale before rounding the final value.
-pub(crate) fn scaled_exp_product_with_binary_scale(
+#[doc(hidden)]
+pub fn scaled_exp_product_with_binary_scale(
     factors: &[Value],
     divisors: &[Value],
     exponent: Value,
@@ -369,7 +381,8 @@ fn scaled_exp_product_fallback(
 
 /// Infinity norm for residual and state vectors. Nonfinite entries yield
 /// infinity, so an invalid equation cannot disappear from a maximum reduction.
-pub(crate) fn infinity_norm(values: &[Value]) -> Value {
+#[doc(hidden)]
+pub fn infinity_norm(values: &[Value]) -> Value {
     let mut norm = 0.0_f64;
     for value in values {
         if !value.is_finite() {
@@ -382,13 +395,15 @@ pub(crate) fn infinity_norm(values: &[Value]) -> Value {
 
 /// Scaled sum of squares, retaining ratios even when a norm exceeds f64 range.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ScaledL2Norm {
+#[doc(hidden)]
+pub struct ScaledL2Norm {
     scale: Value,
     squared_sum: Value,
 }
 
 impl ScaledL2Norm {
-    pub(crate) fn between(old: &[Value], new: &[Value]) -> Self {
+    #[doc(hidden)]
+    pub fn between(old: &[Value], new: &[Value]) -> Self {
         let mut norm = Self::default();
         for (&a, &b) in old.iter().zip(new) {
             let delta = b - a;
@@ -417,7 +432,8 @@ impl ScaledL2Norm {
         }
     }
 
-    pub(crate) fn ratio(self, previous: Self) -> Value {
+    #[doc(hidden)]
+    pub fn ratio(self, previous: Self) -> Value {
         if self.scale == 0.0 {
             0.0
         } else if previous.scale == 0.0 {
@@ -509,7 +525,8 @@ fn solution_component_converged(a: Value, b: Value, abs_tol: Value, rel_tol: Val
 
 /// Authenticate an authored frequency ratio without accepting a fraction of
 /// a cycle as floating-point tolerance. Zero is a separate constant case.
-pub(crate) fn is_integral_cycle_count(cycles: Value) -> bool {
+#[doc(hidden)]
+pub fn is_integral_cycle_count(cycles: Value) -> bool {
     cycles.is_finite()
         && cycles > 0.0
         && (cycles - cycles.round()).abs() <= (32.0 * Value::EPSILON * cycles.max(1.0)).min(1e-10)
@@ -519,9 +536,8 @@ pub(crate) fn is_integral_cycle_count(cycles: Value) -> bool {
 /// Smallest PWL feature interval, discarding interior knots in constant runs.
 /// Keep both sides of ideal jumps and the complete width of a flat pulse;
 /// redundant flat knots must not force an arbitrarily fine integration grid.
-pub(crate) fn minimum_pwl_interval(
-    points: impl IntoIterator<Item = (Value, Value)>,
-) -> Option<Value> {
+#[doc(hidden)]
+pub fn minimum_pwl_interval(points: impl IntoIterator<Item = (Value, Value)>) -> Option<Value> {
     let mut points = pwl_event_points(points, false);
     let mut previous = points.next()?;
     let mut minimum: Option<Value> = None;
@@ -540,7 +556,8 @@ pub(crate) fn minimum_pwl_interval(
 /// PWL event knots, optionally retaining every authored point. Interior knots
 /// of a constant run do not change the value or slope; retaining them as
 /// physical events can demand a meaningless tiny integration step.
-pub(crate) fn pwl_event_points(
+#[doc(hidden)]
+pub fn pwl_event_points(
     points: impl IntoIterator<Item = (Value, Value)>,
     retain_flat_knots: bool,
 ) -> impl Iterator<Item = (Value, Value)> {
@@ -564,7 +581,8 @@ pub(crate) fn pwl_event_points(
 /// at exact repeat boundaries; the next representable instant belongs to the
 /// next cycle. A tolerance in seconds would flatten small waveforms and hold
 /// discontinuous endpoints past their seam.
-pub(crate) fn pwl_repeated_time(
+#[doc(hidden)]
+pub fn pwl_repeated_time(
     time: Value,
     first: Value,
     last: Value,
@@ -590,7 +608,8 @@ pub(crate) fn pwl_repeated_time(
 }
 
 /// Resolve a repeat span before applying any offset to its source clock.
-pub(crate) fn pwl_repeat_geometry(
+#[doc(hidden)]
+pub fn pwl_repeat_geometry(
     first: Value,
     last: Value,
     repeat_from: Option<Value>,
@@ -603,7 +622,8 @@ pub(crate) fn pwl_repeat_geometry(
 /// One represented clock for a repeated seam, shared by source-side evaluation
 /// and scheduling. Adding a period independently to both endpoint clocks can
 /// otherwise split one seam into adjacent floating-point timestamps.
-pub(crate) fn pwl_event_clock(
+#[doc(hidden)]
+pub fn pwl_event_clock(
     point: Value,
     start: Value,
     end: Value,
@@ -621,7 +641,8 @@ pub(crate) fn pwl_event_clock(
 /// unscaled sum could overflow; compensation recovers low-order terms lost
 /// when finite contributions of opposite sign nearly cancel.
 #[inline]
-pub(crate) fn compensated_add(sum: &mut Value, correction: &mut Value, value: Value) {
+#[doc(hidden)]
+pub fn compensated_add(sum: &mut Value, correction: &mut Value, value: Value) {
     let next = *sum + value;
     *correction += if sum.abs() >= value.abs() {
         (*sum - next) + value

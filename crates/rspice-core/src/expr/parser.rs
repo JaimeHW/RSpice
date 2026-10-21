@@ -977,12 +977,14 @@ pub fn parse_expression_strict(input: &str) -> Result<Expr, ParseError> {
 }
 
 #[derive(Debug)]
-pub(crate) enum ParseExpressionWithAbortError {
+#[doc(hidden)]
+pub enum ParseExpressionWithAbortError {
     Aborted,
     Parse(ParseError),
 }
 
-pub(crate) fn parse_expression_strict_with_abort(
+#[doc(hidden)]
+pub fn parse_expression_strict_with_abort(
     input: &str,
     abort: &dyn AbortSignal,
 ) -> Result<Expr, ParseExpressionWithAbortError> {

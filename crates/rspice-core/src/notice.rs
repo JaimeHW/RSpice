@@ -135,7 +135,8 @@ impl std::fmt::Display for ContinuationAid {
 
 impl ContinuationAid {
     /// The aid's continuation parameter at `value`, in the aid's own units.
-    pub(crate) fn stage(self, value: crate::Value) -> String {
+    #[doc(hidden)]
+    pub fn stage(self, value: crate::Value) -> String {
         match self {
             Self::GminStepping => format!("gmin = {value:.3e} S"),
             Self::SourceStepping => format!("source scale = {value:.4}"),
@@ -343,7 +344,8 @@ impl LogScope {
 
 /// The element being bound on this thread and the card it is bound to.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Binding {
+#[doc(hidden)]
+pub struct Binding {
     element: Option<String>,
     model: Option<String>,
 }
@@ -353,7 +355,8 @@ thread_local! {
 }
 
 /// Restores the thread's previous binding when dropped.
-pub(crate) struct ContextGuard<T: 'static> {
+#[doc(hidden)]
+pub struct ContextGuard<T: 'static> {
     key: &'static std::thread::LocalKey<RefCell<T>>,
     previous: Option<T>,
     _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
@@ -383,7 +386,8 @@ fn replace_context<T: 'static>(
 
 /// Name the element being bound, and its model card, for the replacements
 /// its model makes while the guard lives.
-pub(crate) fn binding(element: &str, model: Option<&str>) -> ContextGuard<Binding> {
+#[doc(hidden)]
+pub fn binding(element: &str, model: Option<&str>) -> ContextGuard<Binding> {
     replace_context(
         &BINDING,
         Binding {
@@ -403,7 +407,8 @@ fn collecting() -> bool {
 /// the line of the warning its site logged just before raising it
 /// ([`log_scope::warn_line!`]), or [`LogLine::NONE`] for a notice raised
 /// without one.
-pub(crate) fn record(notice: EngineNotice, stated: LogLine) {
+#[doc(hidden)]
+pub fn record(notice: EngineNotice, stated: LogLine) {
     let _ = log_scope::with_current(|scope| {
         if let Some(collector) = scope.notices() {
             collector.record(notice, scope.point(), stated.line());
@@ -413,7 +418,8 @@ pub(crate) fn record(notice: EngineNotice, stated: LogLine) {
 
 /// Record that `family` replaced `parameter` of the element or card being
 /// bound on this thread, as the warning `stated` says in prose.
-pub(crate) fn parameter_replaced(
+#[doc(hidden)]
+pub fn parameter_replaced(
     family: &str,
     scope: ParameterScope,
     parameter: &str,

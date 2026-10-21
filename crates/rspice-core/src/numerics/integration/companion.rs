@@ -86,7 +86,8 @@ impl CompanionCoefficients {
     /// fail-closed even when a caller constructs a netlist without going
     /// through the parser's validation.
     #[inline]
-    pub(crate) fn trapezoidal_with_xmu(xmu: Value) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn trapezoidal_with_xmu(xmu: Value) -> Option<Self> {
         if !xmu.is_finite() || !(0.0..=0.5).contains(&xmu) {
             return None;
         }
@@ -107,7 +108,8 @@ impl CompanionCoefficients {
     /// (3·v_{n+1} - 4·v_n + v_{n-1}) / (2·dt) = f_{n+1}
     /// Companion: G_eq = 3C/(2·dt), I_eq = (4C·v_n - C·v_{n-1})/(2·dt)
     #[inline]
-    pub(crate) fn gear2() -> Self {
+    #[doc(hidden)]
+    pub fn gear2() -> Self {
         Self {
             coeff_g: 1.5,            // 3/2
             coeff_v_n: 2.0,          // 4/2 = 2
@@ -129,7 +131,8 @@ impl CompanionCoefficients {
     /// `a1 = 1 + r`, and `a2 = -r^2/(1 + r)`. The equal-step case therefore
     /// reduces exactly to the ordinary `(3/2, 2, -1/2)` BDF2 coefficients.
     #[inline]
-    pub(crate) fn gear2_variable_step(dt: Value, previous_dt: Value) -> Self {
+    #[doc(hidden)]
+    pub fn gear2_variable_step(dt: Value, previous_dt: Value) -> Self {
         if !dt.is_finite() || dt <= 0.0 || !previous_dt.is_finite() || previous_dt <= 0.0 {
             return Self::backward_euler();
         }
@@ -157,7 +160,8 @@ impl CompanionCoefficients {
 
     /// Get coefficients for the specified integration method
     #[inline]
-    pub(crate) fn for_method(method: IntegrationMethod) -> Self {
+    #[doc(hidden)]
+    pub fn for_method(method: IntegrationMethod) -> Self {
         match method {
             IntegrationMethod::BackwardEuler => Self::backward_euler(),
             IntegrationMethod::Trapezoidal => Self::trapezoidal(),
@@ -168,7 +172,8 @@ impl CompanionCoefficients {
 
     /// Get coefficients for a method using the accepted timestep history.
     #[inline]
-    pub(crate) fn for_method_with_previous_step(
+    #[doc(hidden)]
+    pub fn for_method_with_previous_step(
         method: IntegrationMethod,
         dt: Value,
         previous_dt: Value,
@@ -181,14 +186,16 @@ impl CompanionCoefficients {
 
     /// Calculate equivalent conductance for a capacitor
     #[inline]
-    pub(crate) fn capacitor_geq(&self, capacitance: Value, dt: Value) -> Value {
+    #[doc(hidden)]
+    pub fn capacitor_geq(&self, capacitance: Value, dt: Value) -> Value {
         self.coeff_g * capacitance / dt
     }
 
     /// Calculate equivalent current source for a capacitor
     /// v_n is current voltage, v_n_minus_1 is previous voltage (for Gear2)
     #[inline]
-    pub(crate) fn capacitor_ieq(
+    #[doc(hidden)]
+    pub fn capacitor_ieq(
         &self,
         capacitance: Value,
         dt: Value,
@@ -208,7 +215,8 @@ impl CompanionCoefficients {
 
     /// Evaluate capacitor current from voltage differences before timestep
     /// scaling. This avoids subtracting large absolute Norton companions.
-    pub(crate) fn capacitor_current(
+    #[doc(hidden)]
+    pub fn capacitor_current(
         &self,
         capacitance: Value,
         dt: Value,
@@ -237,7 +245,8 @@ impl CompanionCoefficients {
 
     /// Calculate equivalent resistance for an inductor
     #[inline]
-    pub(crate) fn inductor_req(&self, inductance: Value, dt: Value) -> Value {
+    #[doc(hidden)]
+    pub fn inductor_req(&self, inductance: Value, dt: Value) -> Value {
         self.coeff_g * inductance / dt
     }
 
@@ -247,7 +256,8 @@ impl CompanionCoefficients {
     /// This is the capacitor charge derivative with dual physical units;
     /// callers add the separate previous-voltage contribution afterward.
     #[inline]
-    pub(crate) fn inductor_charge_derivative_correction(
+    #[doc(hidden)]
+    pub fn inductor_charge_derivative_correction(
         &self,
         inductance: Value,
         dt: Value,
@@ -341,7 +351,8 @@ impl CompanionCoefficients {
 /// The table lives beside the enum rather than in a parser or in the engine
 /// facade: a spelling-to-variant map is data about this enum, so every layer
 /// that reads a method name reads down into it instead of sideways.
-pub(crate) fn parse_integration_method(spelling: &str) -> Option<IntegrationMethod> {
+#[doc(hidden)]
+pub fn parse_integration_method(spelling: &str) -> Option<IntegrationMethod> {
     if spelling.eq_ignore_ascii_case("TRAP")
         || spelling.eq_ignore_ascii_case("TRAPEZOIDAL")
         || spelling.eq_ignore_ascii_case("TRAPEZOID")

@@ -17,7 +17,8 @@
 /// Keeping this low-level predicate literal prevents an ordinary node named
 /// `GND` from silently collapsing to zero when Xyce `REPLACEGROUND` is
 /// disabled.
-pub(crate) fn is_spice_ground_name(name: &str) -> bool {
+#[doc(hidden)]
+pub fn is_spice_ground_name(name: &str) -> bool {
     name.trim() == "0"
 }
 

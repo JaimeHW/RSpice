@@ -9,7 +9,8 @@ mod trace;
 mod voltage;
 pub use trace::{ImpulsePointValue, ImpulseTraceRef};
 pub use voltage::{VoltageImpulsePoint, VoltageImpulseTrace};
-pub(crate) use voltage::{validate_voltage_impulse_traces, voltage_impulse_value_count};
+#[doc(hidden)]
+pub use voltage::{validate_voltage_impulse_traces, voltage_impulse_value_count};
 
 /// A current's physical identity, independent of its displayed probe spelling.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -263,7 +264,8 @@ fn validate_impulse_series(
 
 /// Validate typed ownership and preserve the distinction between missing
 /// coverage and a complete empty history for a particular current.
-pub(crate) fn validate_current_impulse_traces<'a>(
+#[doc(hidden)]
+pub fn validate_current_impulse_traces<'a>(
     traces: Option<&[CurrentImpulseTrace]>,
     start: Option<Value>,
     stop: Option<Value>,
@@ -294,7 +296,8 @@ pub(crate) fn validate_current_impulse_traces<'a>(
     Ok(())
 }
 
-pub(crate) fn current_impulse_value_count(traces: Option<&[CurrentImpulseTrace]>) -> usize {
+#[doc(hidden)]
+pub fn current_impulse_value_count(traces: Option<&[CurrentImpulseTrace]>) -> usize {
     traces.into_iter().flatten().fold(0usize, |count, trace| {
         count
             .saturating_add(trace.numeric_value_count())

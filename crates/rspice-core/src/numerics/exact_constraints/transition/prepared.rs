@@ -2,9 +2,11 @@ use super::*;
 
 mod audit;
 mod incoming;
-pub(crate) use incoming::TransitionStorage;
+#[doc(hidden)]
+pub use incoming::TransitionStorage;
 
-pub(crate) struct PreparedTransition {
+#[doc(hidden)]
+pub struct PreparedTransition {
     size: usize,
     impulse_orders: usize,
     forms: Vec<ExactRow<Input>>,
@@ -17,42 +19,51 @@ pub(crate) struct PreparedTransition {
     e: Terms,
 }
 
-pub(crate) struct Transition {
+#[doc(hidden)]
+pub struct Transition {
     size: usize,
     impulse_orders: usize,
     values: Vec<Value>,
 }
 
 impl Transition {
-    pub(crate) fn impulse_count(&self) -> usize {
+    #[doc(hidden)]
+    pub fn impulse_count(&self) -> usize {
         self.impulse_orders
     }
-    pub(crate) fn value_count(&self) -> usize {
+    #[doc(hidden)]
+    pub fn value_count(&self) -> usize {
         self.values.len()
     }
 
-    pub(crate) fn finite(&self) -> &[Value] {
+    #[doc(hidden)]
+    pub fn finite(&self) -> &[Value] {
         &self.values[..self.size]
     }
-    pub(crate) fn rates(&self) -> &[Value] {
+    #[doc(hidden)]
+    pub fn rates(&self) -> &[Value] {
         &self.values[(self.impulse_orders + 1) * self.size..]
     }
-    pub(crate) fn impulse(&self, order: usize) -> Option<&[Value]> {
+    #[doc(hidden)]
+    pub fn impulse(&self, order: usize) -> Option<&[Value]> {
         (order < self.impulse_orders)
             .then(|| &self.values[(order + 1) * self.size..(order + 2) * self.size])
     }
 }
 
 impl PreparedTransition {
-    pub(crate) fn has_impulses(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_impulses(&self) -> bool {
         self.impulse_orders != 0
     }
 
-    pub(crate) fn retained_words(&self) -> usize {
+    #[doc(hidden)]
+    pub fn retained_words(&self) -> usize {
         self.retained_words
     }
 
-    pub(crate) fn new(
+    #[doc(hidden)]
+    pub fn new(
         size: usize,
         a: &[(usize, usize, Value)],
         e: &[(usize, usize, Value)],
@@ -189,7 +200,8 @@ impl PreparedTransition {
     }
 
     /// Use accepted physical products, including authored per-device ICs.
-    pub(crate) fn evaluate_storage(
+    #[doc(hidden)]
+    pub fn evaluate_storage(
         &self,
         storage: &TransitionStorage,
         mut forcing: impl FnMut(usize, usize) -> Result<Value>,

@@ -13,7 +13,8 @@ use crate::abort_signal::AbortSignal;
 use num_complex::Complex64;
 use rspice_matrix::{DenseSchurForm, qualified_dense_eigenspectrum};
 
-pub(crate) use rspice_matrix::DenseEigenspectrumError as OrdinarySpectrumError;
+#[doc(hidden)]
+pub use rspice_matrix::DenseEigenspectrumError as OrdinarySpectrumError;
 
 /// Residual certificate for one complete ordinary Floquet eigenspectrum.
 ///
@@ -69,11 +70,12 @@ impl FloquetSpectrumCertificate {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct QualifiedOrdinarySpectrum {
-    pub(crate) eigenvalues: Vec<Complex64>,
+#[doc(hidden)]
+pub struct QualifiedOrdinarySpectrum {
+    pub eigenvalues: Vec<Complex64>,
     /// Right eigenvectors stored one vector per eigenvalue.
-    pub(crate) right_eigenvectors: Vec<Vec<Complex64>>,
-    pub(crate) certificate: FloquetSpectrumCertificate,
+    pub right_eigenvectors: Vec<Vec<Complex64>>,
+    pub certificate: FloquetSpectrumCertificate,
 }
 
 #[inline]
@@ -81,7 +83,8 @@ pub(crate) fn qualification_tolerance(problem_order: usize) -> Value {
     FloquetSpectrumCertificate::canonical_qualification_tolerance(problem_order)
 }
 
-pub(crate) fn qualified_real_eigenspectrum(
+#[doc(hidden)]
+pub fn qualified_real_eigenspectrum(
     matrix: &[Vec<Value>],
     abort: &dyn AbortSignal,
 ) -> Result<QualifiedOrdinarySpectrum, OrdinarySpectrumError> {

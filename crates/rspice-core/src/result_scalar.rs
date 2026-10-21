@@ -47,17 +47,21 @@ impl From<ComplexSample> for num_complex::Complex64 {
 /// One typed per-analysis scalar, such as a stability margin or a residual.
 ///
 /// [`Self::new`] is the only public constructor and stores the name trimmed
-/// and lower-cased. The fields are visible to the crate so the result
-/// document can validate, look up and migrate its scalars; a writer inside
-/// the crate keeps that canonical form.
+/// and lower-cased. The fields are visible, hidden from the API, to the engine
+/// crates so the result document can validate, look up and migrate its
+/// scalars; a writer there keeps that canonical form.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ResultScalar {
-    pub(crate) name: String,
-    pub(crate) display_name: String,
+    #[doc(hidden)]
+    pub name: String,
+    #[doc(hidden)]
+    pub display_name: String,
     #[serde(with = "crate::signal_unit::wire::optional")]
-    pub(crate) unit: Option<SignalUnit>,
-    pub(crate) value: ScalarValue,
+    #[doc(hidden)]
+    pub unit: Option<SignalUnit>,
+    #[doc(hidden)]
+    pub value: ScalarValue,
 }
 
 impl ResultScalar {
@@ -102,7 +106,8 @@ impl ResultScalar {
         &self.value
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ResultScalarError> {
+    #[doc(hidden)]
+    pub fn validate(&self) -> Result<(), ResultScalarError> {
         require_name("scalar name", &self.name)?;
         require_name("scalar display name", &self.display_name)?;
         match &self.value {
@@ -287,7 +292,8 @@ fn finite_scalar(
     }
 }
 
-pub(crate) fn real_scalar(
+#[doc(hidden)]
+pub fn real_scalar(
     location: &'static str,
     name: &str,
     display: &str,
@@ -308,7 +314,8 @@ pub(crate) fn real_scalar(
 /// Those are determinations, so they are recorded as such. `NaN` stays a hard
 /// projection failure: it is a defect in the producing computation, not a
 /// statement about the circuit.
-pub(crate) fn real_or_unbounded_scalar(
+#[doc(hidden)]
+pub fn real_or_unbounded_scalar(
     location: &'static str,
     name: &str,
     display: &str,
@@ -337,7 +344,8 @@ pub(crate) fn real_or_unbounded_scalar(
 /// only the caller knows: the `None` arriving here is the same `None` either
 /// way. Both are determinations about the response, so both are recorded as
 /// such rather than reported as a zero the sweep would read as DC.
-pub(crate) fn derived_metric_scalar(
+#[doc(hidden)]
+pub fn derived_metric_scalar(
     location: &'static str,
     name: &str,
     display: &str,
@@ -356,7 +364,8 @@ pub(crate) fn derived_metric_scalar(
     }
 }
 
-pub(crate) fn count_scalar(
+#[doc(hidden)]
+pub fn count_scalar(
     name: &str,
     display: &str,
     value: usize,
@@ -371,7 +380,8 @@ pub(crate) fn count_scalar(
     )
 }
 
-pub(crate) fn boolean_scalar(
+#[doc(hidden)]
+pub fn boolean_scalar(
     name: &str,
     display: &str,
     value: bool,

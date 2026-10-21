@@ -5,7 +5,8 @@ impl ImpulseDerivative {
     /// Signed coefficient times `(2*pi*f)^order`, normalized to the period.
     /// Keep the binary exponent separate so a large derivative factor can be
     /// cancelled by a small authored coefficient without intermediate overflow.
-    pub(crate) fn periodic_rate(
+    #[doc(hidden)]
+    pub fn periodic_rate(
         &self,
         frequency: Value,
         weight: Value,

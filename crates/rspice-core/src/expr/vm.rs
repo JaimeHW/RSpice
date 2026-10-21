@@ -8,10 +8,14 @@ use crate::config::ExpressionDialect;
 use std::collections::HashMap;
 
 const TWO_PI: Value = std::f64::consts::TAU;
-pub(crate) const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
-pub(crate) const LOGARITHM_MIN_ARGUMENT: Value = 1.0e-38;
-pub(crate) const XYCE_ATANH_EPSILON: Value = 1.0e-12;
-pub(crate) const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
+#[doc(hidden)]
+pub const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
+#[doc(hidden)]
+pub const LOGARITHM_MIN_ARGUMENT: Value = 1.0e-38;
+#[doc(hidden)]
+pub const XYCE_ATANH_EPSILON: Value = 1.0e-12;
+#[doc(hidden)]
+pub const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 
 /// Bytecode instruction
 #[derive(Debug, Clone)]
@@ -178,7 +182,8 @@ impl CompiledExpr {
 
 /// How `ln`, `log` and `log10` treat an argument outside their domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum LogarithmDomain {
+#[doc(hidden)]
+pub enum LogarithmDomain {
     /// RSpice's guarded logarithm: raise the argument to
     /// [`LOGARITHM_MIN_ARGUMENT`] first, so the result is always finite.
     ///
@@ -314,7 +319,8 @@ impl<'a> Context<'a> {
     }
 
     /// Set the active analysis frequency in hertz.
-    pub(crate) fn with_frequency(mut self, frequency: Value) -> Self {
+    #[doc(hidden)]
+    pub fn with_frequency(mut self, frequency: Value) -> Self {
         self.frequency = frequency;
         self
     }
@@ -334,7 +340,8 @@ impl<'a> Context<'a> {
     /// Evaluate this expression as a circuit equation rather than as a
     /// one-shot parameter: a logarithm of a negative argument is NaN, which
     /// the consumer rejects, instead of a fabricated value on the clamp.
-    pub(crate) fn with_ieee_logarithm(mut self) -> Self {
+    #[doc(hidden)]
+    pub fn with_ieee_logarithm(mut self) -> Self {
         self.logarithm_domain = LogarithmDomain::Ieee;
         self
     }
@@ -377,7 +384,8 @@ struct SdtState {
 
 /// Only accepted history survives a restart; trial frames are reconstructed.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub(crate) struct AcceptedSdtState {
+#[doc(hidden)]
+pub struct AcceptedSdtState {
     pub time: Value,
     pub input: Value,
     pub integral: Value,
@@ -390,7 +398,8 @@ impl Default for Vm {
 }
 
 impl Vm {
-    pub(crate) fn accepted_integrals(&self, count: usize) -> impl Iterator<Item = Value> + '_ {
+    #[doc(hidden)]
+    pub fn accepted_integrals(&self, count: usize) -> impl Iterator<Item = Value> + '_ {
         (0..count).map(|index| {
             self.sdt_states
                 .get(index)
@@ -398,7 +407,8 @@ impl Vm {
         })
     }
 
-    pub(crate) fn accepted_sdt_history(&self, count: usize) -> Vec<AcceptedSdtState> {
+    #[doc(hidden)]
+    pub fn accepted_sdt_history(&self, count: usize) -> Vec<AcceptedSdtState> {
         (0..count)
             .map(|index| {
                 self.sdt_states
@@ -412,7 +422,8 @@ impl Vm {
             .collect()
     }
 
-    pub(crate) fn restore_sdt_history(&mut self, history: &[AcceptedSdtState]) {
+    #[doc(hidden)]
+    pub fn restore_sdt_history(&mut self, history: &[AcceptedSdtState]) {
         self.stack.clear();
         self.sdt_states = history
             .iter()
@@ -1170,11 +1181,13 @@ fn interpolate_segment(x: Value, x1: Value, y1: Value, x2: Value, y2: Value, fla
     y1 + t * (y2 - y1)
 }
 
-pub(crate) fn spice_waveform_parameters<const N: usize>(args: &[Value]) -> [Value; N] {
+#[doc(hidden)]
+pub fn spice_waveform_parameters<const N: usize>(args: &[Value]) -> [Value; N] {
     std::array::from_fn(|index| args.get(index).copied().unwrap_or(0.0))
 }
 
-pub(crate) fn spice_exp_parameters(args: &[Value]) -> [Value; 6] {
+#[doc(hidden)]
+pub fn spice_exp_parameters(args: &[Value]) -> [Value; 6] {
     let mut parameters = spice_waveform_parameters(args);
     parameters[4] = args.get(4).copied().unwrap_or(parameters[2]);
     parameters
@@ -1182,7 +1195,8 @@ pub(crate) fn spice_exp_parameters(args: &[Value]) -> [Value; 6] {
 
 /// Authored sinusoidal clocks of implicit-time functions, using their actual
 /// evaluator defaults. This does not bound all modulation sidebands.
-pub(crate) fn spice_waveform_max_tone_cycles(
+#[doc(hidden)]
+pub fn spice_waveform_max_tone_cycles(
     function: super::Function,
     args: &[Value],
     period: Value,
@@ -1212,10 +1226,8 @@ pub(crate) fn spice_waveform_max_tone_cycles(
 }
 
 /// Resolve implicit PULSE feature widths with the evaluator's own defaults.
-pub(crate) fn spice_waveform_minimum_interval(
-    function: super::Function,
-    args: &[Value],
-) -> Option<Value> {
+#[doc(hidden)]
+pub fn spice_waveform_minimum_interval(function: super::Function, args: &[Value]) -> Option<Value> {
     if function != super::Function::SpicePulse {
         return None;
     }
@@ -1231,7 +1243,8 @@ pub(crate) fn spice_waveform_minimum_interval(
 
 /// Certify implicit-time functions using the same resolved parameters as
 /// their evaluator. Their defaults differ from independent source cards.
-pub(crate) fn spice_waveform_is_periodic(
+#[doc(hidden)]
+pub fn spice_waveform_is_periodic(
     function: super::Function,
     args: &[Value],
     period: Value,

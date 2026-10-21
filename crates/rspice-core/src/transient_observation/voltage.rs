@@ -67,7 +67,8 @@ impl VoltageImpulseTrace {
     }
 }
 
-pub(crate) fn validate_voltage_impulse_traces<'a>(
+#[doc(hidden)]
+pub fn validate_voltage_impulse_traces<'a>(
     traces: Option<&[VoltageImpulseTrace]>,
     start: Option<Value>,
     stop: Option<Value>,
@@ -100,7 +101,8 @@ pub(crate) fn validate_voltage_impulse_traces<'a>(
     Ok(())
 }
 
-pub(crate) fn voltage_impulse_value_count(traces: Option<&[VoltageImpulseTrace]>) -> usize {
+#[doc(hidden)]
+pub fn voltage_impulse_value_count(traces: Option<&[VoltageImpulseTrace]>) -> usize {
     traces.into_iter().flatten().fold(0usize, |count, trace| {
         count
             .saturating_add(trace.numeric_value_count())

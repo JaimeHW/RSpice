@@ -69,9 +69,12 @@ impl TransientErrorControl {
 }
 
 /// Xyce 7.10 `TIMEINT` defaults used by `ERROPTION=1` step control.
-pub(crate) const XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT: usize = 10;
-pub(crate) const XYCE_DEFAULT_NLMIN: usize = 3;
-pub(crate) const XYCE_DEFAULT_NLMAX: usize = 8;
+#[doc(hidden)]
+pub const XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT: usize = 10;
+#[doc(hidden)]
+pub const XYCE_DEFAULT_NLMIN: usize = 3;
+#[doc(hidden)]
+pub const XYCE_DEFAULT_NLMAX: usize = 8;
 
 /// Fixed ceiling for one Xyce breakpoint span.
 ///
@@ -80,13 +83,15 @@ pub(crate) const XYCE_DEFAULT_NLMAX: usize = 8;
 /// distance on every step would shrink geometrically and never reproduce the
 /// source algorithm.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct XyceBreakpointSpanCeiling {
+#[doc(hidden)]
+pub struct XyceBreakpointSpanCeiling {
     min_steps: Option<usize>,
     max_dt: Option<Value>,
 }
 
 impl XyceBreakpointSpanCeiling {
-    pub(crate) fn new(min_steps: Option<usize>) -> Self {
+    #[doc(hidden)]
+    pub fn new(min_steps: Option<usize>) -> Self {
         Self {
             min_steps: min_steps.filter(|steps| *steps > 0),
             max_dt: None,
@@ -97,7 +102,8 @@ impl XyceBreakpointSpanCeiling {
     /// breakpoint. Merely discovering a runtime stop must not change the
     /// current span: the breakpoint manager first limits the step to that stop,
     /// then the accepted landing anchors the following span.
-    pub(crate) fn anchor(
+    #[doc(hidden)]
+    pub fn anchor(
         &mut self,
         current_time: Value,
         next_breakpoint: Option<Value>,
@@ -119,14 +125,16 @@ impl XyceBreakpointSpanCeiling {
         self.max_dt
     }
 
-    pub(crate) const fn ceiling(&self) -> Option<Value> {
+    #[doc(hidden)]
+    pub const fn ceiling(&self) -> Option<Value> {
         self.max_dt
     }
 
     /// Restore the ceiling of an already-active span from an authenticated
     /// in-flight checkpoint. Re-anchoring at the checkpoint time would create
     /// a shorter artificial span and could clamp the restored next proposal.
-    pub(crate) fn restore_active_ceiling(
+    #[doc(hidden)]
+    pub fn restore_active_ceiling(
         &mut self,
         max_dt: Option<Value>,
     ) -> Result<Option<Value>, String> {
@@ -154,11 +162,8 @@ impl XyceBreakpointSpanCeiling {
 
 /// Xyce `ERROPTION=1` accepted-step multiplier.
 #[inline]
-pub(crate) const fn xyce_iteration_step_scale(
-    iterations: usize,
-    nlmin: usize,
-    nlmax: usize,
-) -> Value {
+#[doc(hidden)]
+pub const fn xyce_iteration_step_scale(iterations: usize, nlmin: usize, nlmax: usize) -> Value {
     if iterations <= nlmin {
         2.0
     } else if iterations > nlmax {
@@ -171,7 +176,8 @@ pub(crate) const fn xyce_iteration_step_scale(
 /// Whether an otherwise converged `ERROPTION=1` attempt passes Xyce's
 /// optional timestep-reversal test.
 #[inline]
-pub(crate) const fn xyce_iteration_step_accepts(
+#[doc(hidden)]
+pub const fn xyce_iteration_step_accepts(
     iterations: usize,
     nlmax: usize,
     timesteps_reversal: bool,
@@ -234,7 +240,8 @@ impl TimestepController {
     ///
     /// This can be greater than a raw device or breakpoint-span limit when
     /// that limit lies below the hard convergence-recovery floor.
-    pub(crate) fn max_dt(&self) -> Value {
+    #[doc(hidden)]
+    pub fn max_dt(&self) -> Value {
         self.max_dt
     }
 
@@ -572,14 +579,15 @@ pub struct TrapGearController {
 /// they are implementation policy covered by the simulation identity, not
 /// mutable trajectory state.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct TrapGearControllerSnapshot {
-    pub(crate) current_method: IntegrationMethod,
-    pub(crate) prev_values: Vec<Value>,
-    pub(crate) prev_signs: Vec<bool>,
-    pub(crate) prev_sign_valid: Vec<bool>,
-    pub(crate) sign_change_count: Vec<usize>,
-    pub(crate) smooth_steps: usize,
-    pub(crate) at_breakpoint: bool,
+#[doc(hidden)]
+pub struct TrapGearControllerSnapshot {
+    pub current_method: IntegrationMethod,
+    pub prev_values: Vec<Value>,
+    pub prev_signs: Vec<bool>,
+    pub prev_sign_valid: Vec<bool>,
+    pub sign_change_count: Vec<usize>,
+    pub smooth_steps: usize,
+    pub at_breakpoint: bool,
 }
 
 impl TrapGearController {
@@ -599,7 +607,8 @@ impl TrapGearController {
     }
 
     /// Capture every mutable field that can affect the next method decision.
-    pub(crate) fn capture_snapshot(&self) -> TrapGearControllerSnapshot {
+    #[doc(hidden)]
+    pub fn capture_snapshot(&self) -> TrapGearControllerSnapshot {
         TrapGearControllerSnapshot {
             current_method: self.current_method,
             prev_values: self.prev_values.clone(),
@@ -617,7 +626,8 @@ impl TrapGearController {
     /// beside a nonempty accepted solution. Once active, every lane is updated
     /// together and `prev_values` must be the exact accepted boundary used to
     /// seed the next derivative decision.
-    pub(crate) fn validate_snapshot(
+    #[doc(hidden)]
+    pub fn validate_snapshot(
         snapshot: &TrapGearControllerSnapshot,
         accepted_solution: &[Value],
     ) -> Result<(), String> {
@@ -726,7 +736,8 @@ impl TrapGearController {
     }
 
     /// Restore a validated snapshot atomically with respect to validation.
-    pub(crate) fn restore_snapshot(
+    #[doc(hidden)]
+    pub fn restore_snapshot(
         &mut self,
         snapshot: &TrapGearControllerSnapshot,
         accepted_solution: &[Value],
@@ -839,7 +850,8 @@ impl TrapGearController {
     /// the derivative origin for the first departure, while returning the
     /// effective method and hysteresis counters to their canonical startup
     /// state.
-    pub(crate) fn restart_from(&mut self, accepted_solution: &[Value]) {
+    #[doc(hidden)]
+    pub fn restart_from(&mut self, accepted_solution: &[Value]) {
         self.current_method = IntegrationMethod::Trapezoidal;
         self.prev_values.clear();
         self.prev_values.extend_from_slice(accepted_solution);

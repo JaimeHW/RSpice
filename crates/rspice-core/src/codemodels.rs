@@ -15,7 +15,8 @@
 //! directions read down into it.
 
 /// Every XSPICE code model registered by `CodeModelRegistry::with_builtins`.
-pub(crate) const BUILTIN_MODEL_NAMES: &[&str] = &[
+#[doc(hidden)]
+pub const BUILTIN_MODEL_NAMES: &[&str] = &[
     "adc_bridge",
     "astate",
     "aswitch",
@@ -135,7 +136,8 @@ pub(crate) const BUILTIN_MODEL_NAMES: &[&str] = &[
 ];
 
 /// The ngspice-46 `.cm` bundles whose models are compiled in.
-pub(crate) const BUILTIN_CODEMODEL_LIBRARY_NAMES: &[&str] = &[
+#[doc(hidden)]
+pub const BUILTIN_CODEMODEL_LIBRARY_NAMES: &[&str] = &[
     "analog.cm",
     "digital.cm",
     "spice2poly.cm",
@@ -146,7 +148,8 @@ pub(crate) const BUILTIN_CODEMODEL_LIBRARY_NAMES: &[&str] = &[
 ];
 
 /// Check whether a name belongs to a built-in code model.
-pub(crate) fn is_builtin_model_name(name: &str) -> bool {
+#[doc(hidden)]
+pub fn is_builtin_model_name(name: &str) -> bool {
     BUILTIN_MODEL_NAMES
         .iter()
         .any(|candidate| candidate.eq_ignore_ascii_case(name))
@@ -159,7 +162,8 @@ pub(crate) fn is_builtin_model_name(name: &str) -> bool {
 /// `codemodel .../analog.cm` style directives from ngspice startup files;
 /// those are compatibility no-ops when the basename is one of the official
 /// bundles listed above.
-pub(crate) fn is_builtin_codemodel_library_path(path: &str) -> bool {
+#[doc(hidden)]
+pub fn is_builtin_codemodel_library_path(path: &str) -> bool {
     let trimmed = path
         .trim()
         .trim_matches('"')

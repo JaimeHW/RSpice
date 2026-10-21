@@ -115,7 +115,8 @@ macro_rules! op_labels {
 
         /// The fixed half of the vocabulary, which every build resolves
         /// identically. `crate::circuit` composes the catalog's half onto it.
-        pub(crate) fn declared_op_label(text: &str) -> Option<&'static str> {
+        #[doc(hidden)]
+        pub fn declared_op_label(text: &str) -> Option<&'static str> {
             match text {
                 $($text => Some($text),)+
                 _ => None,

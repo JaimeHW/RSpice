@@ -52,7 +52,8 @@ pub trait NumericJsonDocument: DeserializeOwned + Serialize {
 /// This internal wire adapter requires matching serialized and deserialized
 /// numeric field paths; aliases or adapters that relocate values must be
 /// normalized explicitly before applying the projection check.
-pub(crate) fn from_str<T: DeserializeOwned + Serialize>(
+#[doc(hidden)]
+pub fn from_str<T: DeserializeOwned + Serialize>(
     content: &str,
     abort: &dyn crate::AbortSignal,
 ) -> Result<T, JsonDecodeError> {

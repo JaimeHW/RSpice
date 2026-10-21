@@ -145,7 +145,8 @@ pub(crate) fn rational_rows_are_hurwitz(
     Ok(true)
 }
 
-pub(crate) fn matrix_is_hurwitz(
+#[doc(hidden)]
+pub fn matrix_is_hurwitz(
     matrix: &[Vec<Value>],
     limits: crate::resource::ResourceLimits,
     abort: &dyn AbortSignal,

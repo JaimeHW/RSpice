@@ -5,7 +5,8 @@
 //! exposing hidden constraints without a sampled Jacobian or a rank cutoff.
 use super::*;
 
-pub(crate) enum ConstraintDisposition {
+#[doc(hidden)]
+pub enum ConstraintDisposition {
     /// The analysis owner evaluates this original constitutive equation.
     RetainAtOwner,
     /// A different constitutive/state formulation must own the descriptor.
@@ -20,7 +21,8 @@ pub(crate) enum ConstraintDisposition {
 /// `retained_words` reserves caller-owned storage, including the pending-row
 /// vector's headers/capacity. Row coefficients and both reducers are charged
 /// here. The returned reducer retains that reservation through its limit.
-pub(crate) fn close_descriptor<K: Ord + Copy, E: From<ConstraintError>>(
+#[doc(hidden)]
+pub fn close_descriptor<K: Ord + Copy, E: From<ConstraintError>>(
     size: usize,
     mut rows: Vec<ExactRow<K>>,
     limits: crate::resource::ResourceLimits,

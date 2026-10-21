@@ -2,7 +2,8 @@
 use super::*;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum AsymptoteError {
+#[doc(hidden)]
+pub enum AsymptoteError {
     #[error(transparent)]
     Constraint(#[from] ConstraintError),
     #[error("the finite high-frequency gain is not representable in binary64")]
@@ -67,7 +68,8 @@ fn observed_coefficient(
 
 /// Return H(infinity) for H(s)=L*(G+sC)^-1*B. None proves a nonzero
 /// positive-power term; unavailable precision is a distinct error.
-pub(crate) fn high_frequency_gain(
+#[doc(hidden)]
+pub fn high_frequency_gain(
     g: &[Vec<Value>],
     c: &[Vec<Value>],
     input: &[Value],

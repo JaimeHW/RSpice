@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 
 /// Failures owned by the numerical kernel, independent of analysis dispatch.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ConstraintError {
+#[doc(hidden)]
+pub enum ConstraintError {
     #[error("exact constraint elimination was aborted")]
     Aborted,
     #[error("{0}")]
@@ -17,19 +18,25 @@ pub(crate) enum ConstraintError {
 }
 
 mod descriptor;
-pub(crate) mod finite;
-pub(crate) mod hurwitz;
-pub(crate) mod transition;
-pub(crate) use descriptor::{ConstraintDisposition, close_descriptor};
+#[doc(hidden)]
+pub mod finite;
+#[doc(hidden)]
+pub mod hurwitz;
+#[doc(hidden)]
+pub mod transition;
+#[doc(hidden)]
+pub use descriptor::{ConstraintDisposition, close_descriptor};
 
 /// Scratch words for binary64 product operands, exact signed/absolute sums,
 /// and a rounded ratio. Products use at most 4196 bits and accumulation adds
 /// at most usize::BITS. The caller charges this reusable per-equation space.
-pub(crate) const RESIDUAL_SCRATCH_WORDS: usize = 1536;
+#[doc(hidden)]
+pub const RESIDUAL_SCRATCH_WORDS: usize = 1536;
 
 /// Componentwise backward error of sum(a*x)=0, retaining products and
 /// cancellation exactly before rounding the normalized residual upward.
-pub(crate) fn equation_backward_error(
+#[doc(hidden)]
+pub fn equation_backward_error(
     terms: impl IntoIterator<Item = (Value, Value)>,
     abort: &dyn AbortSignal,
 ) -> Result<Value, ConstraintError> {
@@ -71,7 +78,8 @@ pub(crate) fn equation_backward_error(
 /// Entries must be unique and ordered by column; absent entries are zero.
 /// Eliminate columns as rows of the transpose so only one incoming sparse
 /// column is retained beside the bounded elimination workspace.
-pub(crate) fn has_full_rank(
+#[doc(hidden)]
+pub fn has_full_rank(
     size: usize,
     entries: impl IntoIterator<Item = (usize, usize, Value)>,
     limits: crate::resource::ResourceLimits,
@@ -123,22 +131,24 @@ pub(crate) fn has_full_rank(
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ExactRow<K> {
-    pub(crate) nodes: BTreeMap<usize, BigInt>,
-    pub(crate) values: BTreeMap<K, BigInt>,
+#[doc(hidden)]
+pub struct ExactRow<K> {
+    pub nodes: BTreeMap<usize, BigInt>,
+    pub values: BTreeMap<K, BigInt>,
     /// Coefficient of the queried coordinate, absent on physical equations.
-    pub(crate) query: BigInt,
+    pub query: BigInt,
 }
 
 /// Fraction-free sparse elimination preserves the exact rank of the authored
 /// binary64 gains. Rounding a product before subtracting another control path
 /// can otherwise create or remove a physical coordinate or conservation law.
 #[derive(Debug, Clone)]
-pub(crate) struct ExactElimination<K> {
+#[doc(hidden)]
+pub struct ExactElimination<K> {
     pub(crate) rows: Vec<(usize, ExactRow<K>)>,
-    pub(crate) pivots: Vec<Option<usize>>,
-    pub(crate) limits: crate::resource::ResourceLimits,
-    pub(crate) retained_words: usize,
+    pub pivots: Vec<Option<usize>>,
+    pub limits: crate::resource::ResourceLimits,
+    pub retained_words: usize,
 }
 
 impl<K> Default for ExactRow<K> {
@@ -152,7 +162,8 @@ impl<K> Default for ExactRow<K> {
 }
 
 /// Represent a finite binary64 number in units of 2^-1074 without rounding.
-pub(crate) fn integer_coefficient(value: Value) -> Option<BigInt> {
+#[doc(hidden)]
+pub fn integer_coefficient(value: Value) -> Option<BigInt> {
     if !value.is_finite() {
         return None;
     }
@@ -169,7 +180,8 @@ pub(crate) fn integer_coefficient(value: Value) -> Option<BigInt> {
 
 /// Round a rational coefficient, including subnormal ties. Refuse a nonzero
 /// edge that cannot survive projection into finite binary64 coefficients.
-pub(crate) fn coefficient_ratio(numerator: &BigInt, denominator: &BigInt) -> Option<Value> {
+#[doc(hidden)]
+pub fn coefficient_ratio(numerator: &BigInt, denominator: &BigInt) -> Option<Value> {
     if numerator.sign() == Sign::NoSign {
         return Some(0.0);
     }
@@ -215,7 +227,8 @@ pub(crate) fn coefficient_ratio(numerator: &BigInt, denominator: &BigInt) -> Opt
 }
 
 impl<K: Ord + Copy> ExactRow<K> {
-    pub(crate) fn words(&self) -> usize {
+    #[doc(hidden)]
+    pub fn words(&self) -> usize {
         self.nodes
             .values()
             .chain(self.values.values())
@@ -269,7 +282,8 @@ impl<K: Ord + Copy> ExactRow<K> {
 }
 
 impl<K: Ord + Copy> ExactElimination<K> {
-    pub(crate) fn new(
+    #[doc(hidden)]
+    pub fn new(
         nodes: usize,
         limits: crate::resource::ResourceLimits,
     ) -> Result<Self, ConstraintError> {
@@ -282,7 +296,8 @@ impl<K: Ord + Copy> ExactElimination<K> {
         })
     }
 
-    pub(crate) fn ensure_words(words: usize, limit: usize) -> Result<(), ConstraintError> {
+    #[doc(hidden)]
+    pub fn ensure_words(words: usize, limit: usize) -> Result<(), ConstraintError> {
         crate::resource::ResourceLimitError::ensure(
             crate::resource::ResourceKind::ResultValues,
             words,
@@ -291,20 +306,23 @@ impl<K: Ord + Copy> ExactElimination<K> {
         Ok(())
     }
 
-    pub(crate) fn check_cost(&self, extra: usize) -> Result<(), ConstraintError> {
+    #[doc(hidden)]
+    pub fn check_cost(&self, extra: usize) -> Result<(), ConstraintError> {
         Self::ensure_words(
             self.retained_words.saturating_add(extra),
             self.limits.max_result_values,
         )
     }
 
-    pub(crate) fn reserve_retained_words(&mut self, words: usize) -> Result<(), ConstraintError> {
+    #[doc(hidden)]
+    pub fn reserve_retained_words(&mut self, words: usize) -> Result<(), ConstraintError> {
         self.check_cost(words)?;
         self.retained_words = self.retained_words.saturating_add(words);
         Ok(())
     }
 
-    pub(crate) fn add_integer<J: Ord>(terms: &mut BTreeMap<J, BigInt>, key: J, value: BigInt) {
+    #[doc(hidden)]
+    pub fn add_integer<J: Ord>(terms: &mut BTreeMap<J, BigInt>, key: J, value: BigInt) {
         let sum = terms.get(&key).cloned().unwrap_or_default() + value;
         if sum.sign() == Sign::NoSign {
             terms.remove(&key);
@@ -313,7 +331,8 @@ impl<K: Ord + Copy> ExactElimination<K> {
         }
     }
 
-    pub(crate) fn reduce(
+    #[doc(hidden)]
+    pub fn reduce(
         &self,
         row: &mut ExactRow<K>,
         abort: &dyn AbortSignal,
@@ -383,7 +402,8 @@ impl<K: Ord + Copy> ExactElimination<K> {
 
     /// Eliminate known pivots, then retain a pivot in the requested variable
     /// block. A remaining row belongs to the complementary constraint space.
-    pub(crate) fn admit(
+    #[doc(hidden)]
+    pub fn admit(
         &mut self,
         mut row: ExactRow<K>,
         first_pivot: usize,

@@ -20,12 +20,13 @@ use crate::config::ExpressionDialect;
 /// the analysis coordinate, the ambient temperature, the conductance floor the
 /// solver adds, and the dialect whose function set and rounding apply.
 #[derive(Clone, Copy)]
-pub(crate) struct BehavioralEnvironment {
-    pub(crate) time: Value,
-    pub(crate) frequency: Value,
-    pub(crate) temperature: Value,
-    pub(crate) gmin: Value,
-    pub(crate) expression_dialect: ExpressionDialect,
+#[doc(hidden)]
+pub struct BehavioralEnvironment {
+    pub time: Value,
+    pub frequency: Value,
+    pub temperature: Value,
+    pub gmin: Value,
+    pub expression_dialect: ExpressionDialect,
     /// Whether a logarithm outside its domain is guarded or left to IEEE.
     ///
     /// The same switch the bytecode VM carries on its `Context`, and named
@@ -33,11 +34,12 @@ pub(crate) struct BehavioralEnvironment {
     /// from the VM and its Jacobian entry from this evaluator, so a caller
     /// that lets the two disagree has fabricated a tangent plane for a value
     /// it never published.
-    pub(crate) logarithm_domain: LogarithmDomain,
+    pub logarithm_domain: LogarithmDomain,
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum DerivativeTarget<'a> {
+#[doc(hidden)]
+pub enum DerivativeTarget<'a> {
     Node(usize),
     /// Physical event Jacobian, including unregularized polynomial slopes.
     PhysicalNode(usize),
@@ -48,25 +50,27 @@ pub(crate) enum DerivativeTarget<'a> {
     Time,
 }
 
-pub(crate) struct BehavioralDerivativeContext<'a> {
-    pub(crate) program: &'a CompiledExpr,
-    pub(crate) node_values: &'a [Value],
-    pub(crate) branch_values: &'a [Value],
-    pub(crate) time: Value,
-    pub(crate) frequency: Value,
-    pub(crate) temperature: Value,
-    pub(crate) gmin: Value,
-    pub(crate) expression_dialect: ExpressionDialect,
+#[doc(hidden)]
+pub struct BehavioralDerivativeContext<'a> {
+    pub program: &'a CompiledExpr,
+    pub node_values: &'a [Value],
+    pub branch_values: &'a [Value],
+    pub time: Value,
+    pub frequency: Value,
+    pub temperature: Value,
+    pub gmin: Value,
+    pub expression_dialect: ExpressionDialect,
     /// Whether a logarithm outside its domain is guarded or left to IEEE. The
     /// evaluator that owns the expression decides, exactly as it does for the
     /// bytecode VM's `Context`.
-    pub(crate) logarithm_domain: LogarithmDomain,
-    pub(crate) target: DerivativeTarget<'a>,
+    pub logarithm_domain: LogarithmDomain,
+    pub target: DerivativeTarget<'a>,
 }
 
 /// Propagate a caller-supplied direction through expression-local scalar
 /// leaves. Keep the derivative exponent until the owning consumer converts it.
-pub(crate) fn compiled_expression_node_direction(
+#[doc(hidden)]
+pub fn compiled_expression_node_direction(
     expr: &Expr,
     program: &CompiledExpr,
     node_values: &[Value],
@@ -118,7 +122,8 @@ fn behavioral_logarithm_argument(domain: LogarithmDomain, value: Value) -> Value
     domain.argument(value)
 }
 
-pub(crate) fn eval_behavioral_expr_with_derivative_at_boundary(
+#[doc(hidden)]
+pub fn eval_behavioral_expr_with_derivative_at_boundary(
     expr: &Expr,
     context: &BehavioralDerivativeContext<'_>,
 ) -> Option<(Value, Value)> {
@@ -129,7 +134,8 @@ pub(crate) fn eval_behavioral_expr_with_derivative_at_boundary(
     ))
 }
 
-pub(crate) fn eval_behavioral_expr_with_derivative(
+#[doc(hidden)]
+pub fn eval_behavioral_expr_with_derivative(
     expr: &Expr,
     context: &BehavioralDerivativeContext<'_>,
 ) -> Option<(Value, Derivative)> {
@@ -323,7 +329,8 @@ pub(crate) fn eval_behavioral_expr_with_derivative(
     }
 }
 
-pub(crate) fn eval_binary_with_derivative(
+#[doc(hidden)]
+pub fn eval_binary_with_derivative(
     op: BinaryOp,
     left: Value,
     d_left: Derivative,

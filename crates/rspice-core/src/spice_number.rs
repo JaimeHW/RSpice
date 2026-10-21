@@ -12,7 +12,8 @@ thread_local! {
 }
 
 /// Restores the suffix reading in force before [`read_suffixes_as_ngspice`].
-pub(crate) struct SuffixReading(bool);
+#[doc(hidden)]
+pub struct SuffixReading(bool);
 
 impl Drop for SuffixReading {
     fn drop(&mut self) {
@@ -25,13 +26,15 @@ impl Drop for SuffixReading {
 /// RSpice's own reading) takes it as mega, while ngspice's number readers,
 /// INPevaluate (inpeval.c) and numparam's parseunit (xpressn.c), know no `x`
 /// and ignore it with the rest of the unit word, so `1x` is 1.
-pub(crate) fn read_suffixes_as_ngspice(ngspice: bool) -> SuffixReading {
+#[doc(hidden)]
+pub fn read_suffixes_as_ngspice(ngspice: bool) -> SuffixReading {
     SuffixReading(NGSPICE_SUFFIXES.with(|cell| cell.replace(ngspice)))
 }
 
 /// Whether numbers on this thread are read as ngspice reads them (see
 /// [`read_suffixes_as_ngspice`]).
-pub(crate) fn reading_numbers_as_ngspice() -> bool {
+#[doc(hidden)]
+pub fn reading_numbers_as_ngspice() -> bool {
     NGSPICE_SUFFIXES.with(std::cell::Cell::get)
 }
 
@@ -45,7 +48,8 @@ pub fn spice_suffix_scale(text: &str) -> (Value, usize) {
     parse_spice_suffix(&chars)
 }
 
-pub(crate) fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
+#[doc(hidden)]
+pub fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
     let (scale, consumed) = parse_suffix(chars);
     (scale.parts().0, consumed)
 }
@@ -57,7 +61,8 @@ pub(crate) fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
 /// nearest 1e-6 is 9.999999999999999e-6, so `10u - 10e-6` was not zero. Each
 /// suffix's exact decimal ratio moves the exponent of the written number (and
 /// multiplies its digits, for `mil`), and the result is parsed once.
-pub(crate) fn scaled_spice_value(number: &str, value: Value, multiplier: Value) -> Value {
+#[doc(hidden)]
+pub fn scaled_spice_value(number: &str, value: Value, multiplier: Value) -> Value {
     if multiplier == 1.0 {
         return value;
     }
@@ -159,7 +164,8 @@ fn parse_suffix(chars: &[char]) -> (SuffixScale, usize) {
 /// Read an entire non-negative integer token without passing through `f64`.
 /// Decimal points, exponents and the shared engineering suffix vocabulary
 /// are accepted only when their exact value is an integer in the u64 range.
-pub(crate) fn parse_spice_u64_complete(text: &str) -> Option<u64> {
+#[doc(hidden)]
+pub fn parse_spice_u64_complete(text: &str) -> Option<u64> {
     let text = text.trim();
     let negative = text.starts_with('-');
     let text = text.strip_prefix(['+', '-']).unwrap_or(text);

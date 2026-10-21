@@ -11,15 +11,18 @@ use thiserror::Error;
 /// Hard ceiling for recursive expression grammar entry, independent of the
 /// caller's workload limits. Untrusted expressions must not exhaust the native
 /// or WebAssembly stack even when resource limits are disabled.
-pub(crate) const MAX_EXPRESSION_PARSE_DEPTH: usize = 64;
+#[doc(hidden)]
+pub const MAX_EXPRESSION_PARSE_DEPTH: usize = 64;
 
 /// Bound the depth of parsed trees as well as grammar recursion: a flat
 /// operator chain builds a deep tree whose cloning and destruction recurse.
-pub(crate) const MAX_EXPRESSION_TREE_DEPTH: usize = 128;
+#[doc(hidden)]
+pub const MAX_EXPRESSION_TREE_DEPTH: usize = 128;
 
 /// Bound generated polynomial source before it reaches either expression
 /// parser. A short coefficient list can otherwise multiply large operands.
-pub(crate) const MAX_POLYNOMIAL_EXPANSION_BYTES: usize = 8 * 1024 * 1024;
+#[doc(hidden)]
+pub const MAX_POLYNOMIAL_EXPANSION_BYTES: usize = 8 * 1024 * 1024;
 
 /// A resource whose configured or implementation limit can be enforced.
 ///
@@ -143,11 +146,8 @@ pub struct ResourceLimitError {
 
 impl ResourceLimitError {
     /// Check one observed amount against a limit.
-    pub(crate) fn ensure(
-        resource: ResourceKind,
-        requested: usize,
-        limit: usize,
-    ) -> Result<(), Self> {
+    #[doc(hidden)]
+    pub fn ensure(resource: ResourceKind, requested: usize, limit: usize) -> Result<(), Self> {
         if requested <= limit {
             Ok(())
         } else {
@@ -161,7 +161,8 @@ impl ResourceLimitError {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ResourceReadError {
+#[doc(hidden)]
+pub enum ResourceReadError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -170,7 +171,8 @@ pub(crate) enum ResourceReadError {
 
 /// Read bytes from an arbitrary stream without ever retaining more than the
 /// configured resource budget.
-pub(crate) fn read_bytes_limited(
+#[doc(hidden)]
+pub fn read_bytes_limited(
     mut reader: impl Read,
     resource: ResourceKind,
     limit: usize,
@@ -200,7 +202,8 @@ pub(crate) fn read_bytes_limited(
 
 /// Read one file as bytes with metadata and streaming checks so a concurrently
 /// growing file cannot bypass the initial size validation.
-pub(crate) fn read_file_bytes_limited(
+#[doc(hidden)]
+pub fn read_file_bytes_limited(
     path: &Path,
     resource: ResourceKind,
     limit: usize,
@@ -211,7 +214,8 @@ pub(crate) fn read_file_bytes_limited(
     read_bytes_limited(file, resource, limit)
 }
 
-pub(crate) fn read_utf8_file_limited_with_metadata(
+#[doc(hidden)]
+pub fn read_utf8_file_limited_with_metadata(
     path: &Path,
     resource: ResourceKind,
     limit: usize,
@@ -271,7 +275,8 @@ struct BoundedCacheEntry<V> {
 }
 
 /// Conservative retained-byte estimate for one [`BoundedCache`] entry.
-pub(crate) fn estimated_cache_entry_bytes<K, V>(
+#[doc(hidden)]
+pub fn estimated_cache_entry_bytes<K, V>(
     dynamic_key_bytes: usize,
     dynamic_value_bytes: usize,
 ) -> usize {
@@ -294,7 +299,8 @@ pub(crate) fn estimated_cache_entry_bytes<K, V>(
 /// cache whose held entries alone exceed its limit stays over it until they
 /// are released, and makes no room it would need a held entry for.
 #[derive(Debug)]
-pub(crate) struct BoundedCache<K, V> {
+#[doc(hidden)]
+pub struct BoundedCache<K, V> {
     entries: HashMap<K, BoundedCacheEntry<V>>,
     insertion_order: VecDeque<K>,
     retained_bytes: usize,
@@ -315,19 +321,23 @@ where
     K: Clone + Eq + Hash,
     V: Clone,
 {
-    pub(crate) fn get(&self, key: &K) -> Option<&V> {
+    #[doc(hidden)]
+    pub fn get(&self, key: &K) -> Option<&V> {
         self.entries.get(key).map(|entry| &entry.value)
     }
 
-    pub(crate) fn get_cloned(&self, key: &K) -> Option<V> {
+    #[doc(hidden)]
+    pub fn get_cloned(&self, key: &K) -> Option<V> {
         self.get(key).cloned()
     }
 
-    pub(crate) fn retained_bytes(&self) -> usize {
+    #[doc(hidden)]
+    pub fn retained_bytes(&self) -> usize {
         self.retained_bytes
     }
 
-    pub(crate) fn enforce_limit(&mut self, limit: usize) {
+    #[doc(hidden)]
+    pub fn enforce_limit(&mut self, limit: usize) {
         while self.retained_bytes > limit {
             if !self.evict_oldest_unheld() {
                 break;
@@ -365,7 +375,8 @@ where
     /// Keep `key` from eviction until a matching [`Self::release`]. Holds
     /// count, so each holder releases its own.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn hold(&mut self, key: &K) {
+    #[doc(hidden)]
+    pub fn hold(&mut self, key: &K) {
         if let Some(entry) = self.entries.get_mut(key) {
             entry.holds = entry.holds.saturating_add(1);
         }
@@ -374,7 +385,8 @@ where
     /// Release one [`Self::hold`] of `key`. The entry stays until it is next
     /// the oldest one evicted.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn release(&mut self, key: &K) {
+    #[doc(hidden)]
+    pub fn release(&mut self, key: &K) {
         if let Some(entry) = self.entries.get_mut(key) {
             entry.holds = entry.holds.saturating_sub(1);
         }
@@ -384,13 +396,8 @@ where
     ///
     /// Cache allocation failure degrades to an uncached result because the
     /// cache is an optimization and the caller already owns a valid value.
-    pub(crate) fn insert_or_get(
-        &mut self,
-        key: K,
-        value: V,
-        retained_bytes: usize,
-        limit: usize,
-    ) -> V {
+    #[doc(hidden)]
+    pub fn insert_or_get(&mut self, key: K, value: V, retained_bytes: usize, limit: usize) -> V {
         self.enforce_limit(limit);
         if let Some(existing) = self.get_cloned(&key) {
             return existing;
@@ -433,7 +440,8 @@ where
     /// A replaced entry keeps its holds. A batch that fits only by evicting a
     /// held entry is refused the same way.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn try_replace_batch(
+    #[doc(hidden)]
+    pub fn try_replace_batch(
         &mut self,
         replacements: Vec<(K, V, usize)>,
         limit: usize,
@@ -514,7 +522,8 @@ where
         Ok(())
     }
 
-    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&K, &V) -> bool) {
+    #[doc(hidden)]
+    pub fn retain(&mut self, mut keep: impl FnMut(&K, &V) -> bool) {
         self.entries.retain(|key, entry| keep(key, &entry.value));
         self.retained_bytes = self
             .entries
@@ -525,20 +534,15 @@ where
         self.insertion_order.retain(|key| entries.contains_key(key));
     }
 
-    // Called by `clear_in_memory_veriloga_cache` and by four `#[cfg(test)]`
-    // XSPICE cache resets; the allow covers the default-feature lib build,
-    // where neither configuration is present.
-    #[allow(dead_code)]
-    pub(crate) fn clear(&mut self) {
+    #[doc(hidden)]
+    pub fn clear(&mut self) {
         self.entries.clear();
         self.insertion_order.clear();
         self.retained_bytes = 0;
     }
 
-    // Called by `try_replace_batch` above, which is `feature = "veriloga"`;
-    // the allow covers the build without that feature.
-    #[allow(dead_code)]
-    pub(crate) fn remove(&mut self, key: &K) -> Option<V> {
+    #[doc(hidden)]
+    pub fn remove(&mut self, key: &K) -> Option<V> {
         let entry = self.entries.remove(key)?;
         self.retained_bytes = self.retained_bytes.saturating_sub(entry.retained_bytes);
         self.insertion_order.retain(|queued| queued != key);
@@ -546,12 +550,14 @@ where
     }
 
     #[cfg(feature = "veriloga")]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+    #[doc(hidden)]
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
         self.entries.iter().map(|(key, entry)| (key, &entry.value))
     }
 
-    #[cfg(test)]
-    pub(crate) fn keys(&self) -> impl Iterator<Item = &K> {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
         self.entries.keys()
     }
 }

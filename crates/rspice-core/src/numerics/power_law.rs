@@ -235,7 +235,8 @@ impl SignedFixed {
 /// Bases/coefficient must be positive finite and exponents finite. The caller
 /// keeps ordinary powers/products on its fast path and handles exact-zero bases.
 #[cold]
-pub(crate) fn scaled_power_law(
+#[doc(hidden)]
+pub fn scaled_power_law(
     coefficient: Value,
     binary_scale: i32,
     current: Value,
@@ -258,7 +259,8 @@ pub(crate) fn scaled_power_law(
 /// Bases/coefficient must be finite and positive, and powers finite. A zero
 /// or infinite mantissa denotes a result beyond the retained i32 exponent.
 #[cold]
-pub(crate) fn power_product_binary_normalization(
+#[doc(hidden)]
+pub fn power_product_binary_normalization(
     coefficient: Value,
     binary_scale: i32,
     powers: &[(Value, Value)],

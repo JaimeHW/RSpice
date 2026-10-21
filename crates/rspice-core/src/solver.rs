@@ -4,7 +4,8 @@ pub mod arc_length;
 pub mod convergence;
 pub mod damping;
 mod newton;
-pub(crate) use rspice_matrix::klu_backend_enabled;
+#[doc(hidden)]
+pub use rspice_matrix::klu_backend_enabled;
 pub use rspice_matrix::{
     CircuitLuOrientation, CircuitLuRobustness, CircuitLuRowScaling, ComplexMatrix, CscIndex,
     CscPatternToken, DivisionPolicy, FactorizationRequest, NumericFactorizationPolicy,
@@ -109,7 +110,8 @@ impl SimulationResult {
     }
 
     /// Append an engine-owned DC observable and update its lookup index.
-    pub(crate) fn push_dc_observable(&mut self, name: String, value: Value) {
+    #[doc(hidden)]
+    pub fn push_dc_observable(&mut self, name: String, value: Value) {
         self.dc_observable_index
             .insert(name.to_ascii_lowercase(), value);
         self.dc_observables.push((name, value));

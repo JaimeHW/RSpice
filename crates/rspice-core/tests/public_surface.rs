@@ -270,7 +270,7 @@ use rspice_core::analysis::harmonic_balance::{
 // feature flags with the crates below it at compile time: the
 // `family_features::FamilyFeatures` struct and the `FAMILY_FEATURES` constant
 // the `family_features!` macro declares at a crate's root. A crate above reads
-// both through the macro, so neither can be restricted. The census is 5,743,
+// both through the macro, so neither can be restricted. The census was 5,743,
 // with no slack.
 // The converter insertion record adds seven: `ConverterInsertion` and its
 // field types `ConverterKind`, `ConverterSource`, `ConverterSupply` and
@@ -282,8 +282,25 @@ use rspice_core::analysis::harmonic_balance::{
 // variant it classifies: the workbench's Problems list (`rspice-app`
 // diagnostic_store/run_notices.rs) raises one row per boundary whose supply
 // was inferred, defaulted or held static by a template, naming the net. The
-// census is 5,751, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5751;
+// census was 5,751, with no slack.
+// Hidden items now count apart, under `MAX_HIDDEN_FAMILY_ITEMS`, so the two
+// `family_features` statements leave this census. The census is 5,749, with
+// no slack.
+const MAX_PUBLIC_ITEMS: usize = 5749;
+
+/// The `#[doc(hidden)] pub` items of the family, counted apart from
+/// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
+/// family reaches in another: it is outside the documented API, so it never
+/// raises that ceiling, but it is still a public path any crate can name, so
+/// it has a falling ceiling of its own. An item leaves this count when its
+/// last reach across a crate boundary goes, and then returns to restricted
+/// visibility.
+// The engine reaches its numerics, expression, notice, log-scope, resource
+// and result-scalar plumbing through hidden items so that those modules can
+// move into a crate of their own below it, and every crate of the family
+// reads the two `family_features` statements. The census is 349, with no
+// slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 349;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
@@ -344,21 +361,50 @@ fn is_public_item(line: &str) -> bool {
         .any(|keyword| rest.starts_with(keyword))
 }
 
-/// The count over every crate of the `rspice-core` family, and each file's
-/// share of it. Every crate declares something public, so a root that counts
-/// nothing was not read and fails here.
-fn count_public_items() -> (usize, Vec<(String, usize)>) {
+/// Whether the item declared on `lines[index]` carries `#[doc(hidden)]`
+/// among the attributes and doc comments directly above it.
+fn is_hidden_item(lines: &[&str], index: usize) -> bool {
+    lines[..index]
+        .iter()
+        .rev()
+        .map(|line| line.trim_start())
+        .take_while(|line| line.starts_with("#[") || line.starts_with("///"))
+        .any(|line| line == "#[doc(hidden)]")
+}
+
+/// The public statements of one source, split into those the API documents
+/// and those `#[doc(hidden)]` keeps out of it.
+fn count_source(source: &str) -> (usize, usize) {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut public = 0;
+    let mut hidden = 0;
+    for (index, line) in lines.iter().enumerate() {
+        if is_public_item(line.trim_start()) {
+            if is_hidden_item(&lines, index) {
+                hidden += 1;
+            } else {
+                public += 1;
+            }
+        }
+    }
+    (public, hidden)
+}
+
+/// The count over every crate of the `rspice-core` family, the hidden count
+/// beside it, and each file's share of the first. Every crate declares
+/// something public, so a root that counts nothing was not read and fails
+/// here.
+fn count_public_items() -> (usize, usize, Vec<(String, usize)>) {
     let mut total = 0;
+    let mut hidden_total = 0;
     let mut per_file = Vec::new();
     for root in family_src_roots() {
         let mut root_total = 0;
         for path in rust_sources(&root) {
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-            let count = source
-                .lines()
-                .filter(|line| is_public_item(line.trim_start()))
-                .count();
+            let (count, hidden) = count_source(&source);
+            hidden_total += hidden;
             if count > 0 {
                 root_total += count;
                 per_file.push((family_relative(&path), count));
@@ -372,12 +418,12 @@ fn count_public_items() -> (usize, Vec<(String, usize)>) {
         total += root_total;
     }
     per_file.sort_by(|a, b| b.1.cmp(&a.1));
-    (total, per_file)
+    (total, hidden_total, per_file)
 }
 
 #[test]
 fn public_surface_does_not_grow() {
-    let (total, per_file) = count_public_items();
+    let (total, _, per_file) = count_public_items();
 
     if total > MAX_PUBLIC_ITEMS {
         let worst: Vec<String> = per_file
@@ -404,6 +450,47 @@ fn public_surface_does_not_grow() {
          headroom for the surface to grow back into.",
         MAX_PUBLIC_ITEMS - total
     );
+}
+
+#[test]
+fn hidden_family_surface_does_not_grow() {
+    let (_, hidden, _) = count_public_items();
+
+    assert!(
+        hidden <= MAX_HIDDEN_FAMILY_ITEMS,
+        "the `#[doc(hidden)]` public surface grew: {hidden} items, ceiling is \
+         {MAX_HIDDEN_FAMILY_ITEMS}.\n\n\
+         A hidden item is one a crate of the engine family reaches in another; \
+         anything else stays restricted. Name the crate that reaches it before \
+         raising the ceiling."
+    );
+    assert!(
+        hidden + STALE_CEILING_SLACK >= MAX_HIDDEN_FAMILY_ITEMS,
+        "the hidden surface is {hidden} items but the ceiling is still \
+         {MAX_HIDDEN_FAMILY_ITEMS}. Lower MAX_HIDDEN_FAMILY_ITEMS in \
+         tests/public_surface.rs to {hidden}."
+    );
+}
+
+#[test]
+fn hidden_items_count_apart_from_the_documented_surface() {
+    let source = "\
+pub fn documented() {}
+#[doc(hidden)]
+pub fn reached_from_another_crate() {}
+#[doc(hidden)]
+#[inline]
+pub const fn hidden_under_more_attributes() {}
+/// Documented, then hidden.
+#[doc(hidden)]
+pub struct Hidden;
+#[doc(hidden)]
+pub(crate) fn restricted() {}
+#[doc(hidden)]
+
+pub fn separated_by_a_blank_line() {}
+";
+    assert_eq!(count_source(source), (2, 3));
 }
 
 #[test]

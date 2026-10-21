@@ -20,7 +20,8 @@ const MIN_STEP_AFTER_BREAKPOINT: Value = 1e-12;
 const DEFAULT_BREAKPOINT_TOLERANCE: Value = 1e-15;
 
 /// Xyce 7.10 `Util::BreakPoint::defaultTolerance_`.
-pub(crate) const XYCE_BREAKPOINT_TOLERANCE: Value = 1.0e-20;
+#[doc(hidden)]
+pub const XYCE_BREAKPOINT_TOLERANCE: Value = 1.0e-20;
 
 /// Ngspice `dctran.c` factor for equalizing the last two pre-breakpoint steps.
 const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
@@ -58,7 +59,8 @@ const XYCE_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.1;
 /// it never leaves the solver a sub-floor sliver to step. A floor that is not
 /// a finite positive interval declares no resolution, and then only equal
 /// clocks are one instant.
-pub(crate) fn coincides_before(earlier: Value, later: Value, floor: Value) -> bool {
+#[doc(hidden)]
+pub fn coincides_before(earlier: Value, later: Value, floor: Value) -> bool {
     floor.is_finite() && floor > 0.0 && earlier < later && later - earlier < floor
 }
 
@@ -84,7 +86,8 @@ const CLOCK_RESOLUTION_ULPS: Value = 8.0;
 /// The transient stepper's hard minimum is therefore never below this at its
 /// accepted clock. It is constant within a binade, so a run of floor landings
 /// stays on one grid between powers of two.
-pub(crate) fn clock_resolution(time: Value) -> Value {
+#[doc(hidden)]
+pub fn clock_resolution(time: Value) -> Value {
     let magnitude = time.abs();
     if !magnitude.is_finite() {
         return 0.0;
@@ -185,9 +188,10 @@ struct EdgeCrossing {
 /// being crossed as `(completion, resume)`
 /// ([`BreakpointManager::edge_completion_schedule`]).
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct EdgeCompletionSchedule {
-    pub(crate) completions: Vec<Value>,
-    pub(crate) crossing: Option<(Value, Option<Value>)>,
+#[doc(hidden)]
+pub struct EdgeCompletionSchedule {
+    pub completions: Vec<Value>,
+    pub crossing: Option<(Value, Option<Value>)>,
 }
 
 impl Default for BreakpointManager {
@@ -233,7 +237,8 @@ impl BreakpointManager {
     }
 
     /// An empty schedule that merges and compares times as this one does.
-    pub(crate) fn empty_like(&self) -> Self {
+    #[doc(hidden)]
+    pub fn empty_like(&self) -> Self {
         Self {
             breakpoints: Vec::new(),
             runtime_breakpoints: BTreeSet::new(),
@@ -253,7 +258,8 @@ impl BreakpointManager {
 
     /// Retain the established small restart for device families whose dynamic
     /// charge integration still needs the extra breakpoint warmup resolution.
-    pub(crate) fn use_conservative_restart_step(&mut self) {
+    #[doc(hidden)]
+    pub fn use_conservative_restart_step(&mut self) {
         self.restart_step_scale = self
             .restart_step_scale
             .min(CONSERVATIVE_BREAKPOINT_RESTART_STEP_SCALE);
@@ -280,7 +286,8 @@ impl BreakpointManager {
     /// the stop time, a step no floor admits. The stop time is the instant the
     /// run ends on, so it is the one kept. A corner one floor or more before it
     /// keeps its own instant.
-    pub(crate) fn reconcile_onto_stop(&mut self, stop: Value, floor: Value) {
+    #[doc(hidden)]
+    pub fn reconcile_onto_stop(&mut self, stop: Value, floor: Value) {
         let pending = self.current_index.min(self.breakpoints.len());
         let mut ahead = self.breakpoints.split_off(pending);
         let before = ahead.len();
@@ -427,7 +434,8 @@ impl BreakpointManager {
     /// Each time is also a runtime breakpoint
     /// ([`Self::replace_runtime_breakpoints`]); this only says which ones end
     /// an edge.
-    pub(crate) fn replace_edge_completions<I>(&mut self, times: I)
+    #[doc(hidden)]
+    pub fn replace_edge_completions<I>(&mut self, times: I)
     where
         I: IntoIterator<Item = Value>,
     {
@@ -475,7 +483,8 @@ impl BreakpointManager {
     /// lands on then already holds the change, so the transient stepper
     /// solves the step that lands on any of them at order one; the clock does
     /// not say which of its times step and which only turn a corner.
-    pub(crate) fn extend_expression_clocks(&mut self, times: &[Value]) {
+    #[doc(hidden)]
+    pub fn extend_expression_clocks(&mut self, times: &[Value]) {
         self.expression_clocks.extend(
             times
                 .iter()
@@ -488,7 +497,8 @@ impl BreakpointManager {
 
     /// Whether `time` is a behavioral expression's own clock
     /// ([`Self::extend_expression_clocks`]).
-    pub(crate) fn is_expression_clock(&self, time: Value) -> bool {
+    #[doc(hidden)]
+    pub fn is_expression_clock(&self, time: Value) -> bool {
         self.holds(&self.expression_clocks, time)
     }
 
@@ -500,7 +510,8 @@ impl BreakpointManager {
     /// realization, which no error term chose, so neither the restart after it
     /// nor any growth ceiling the caller derives from that width may measure
     /// from it.
-    pub(crate) fn edge_completion_resume(&self, time: Value) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn edge_completion_resume(&self, time: Value) -> Option<Value> {
         self.edge_crossing
             .filter(|crossing| self.coincides(time, crossing.completion))
             .and_then(|crossing| crossing.resume)
@@ -510,7 +521,8 @@ impl BreakpointManager {
     /// realization of the zero-duration edge being crossed: `time` is the
     /// edge's landing, or a point accepted inside its realization, and the
     /// step ends on the completion at the latest.
-    pub(crate) fn crosses_edge_from(&self, time: Value) -> bool {
+    #[doc(hidden)]
+    pub fn crosses_edge_from(&self, time: Value) -> bool {
         self.edge_crossing.is_some_and(|crossing| {
             time < crossing.completion && !self.coincides(time, crossing.completion)
         })
@@ -522,7 +534,8 @@ impl BreakpointManager {
     /// A model asks for an edge's completion at the edge's own accepted point,
     /// and that request lives only here from then on: a resumed run evaluates
     /// no model at its first point, so it cannot ask again.
-    pub(crate) fn edge_completion_schedule(&self, time: Value) -> EdgeCompletionSchedule {
+    #[doc(hidden)]
+    pub fn edge_completion_schedule(&self, time: Value) -> EdgeCompletionSchedule {
         EdgeCompletionSchedule {
             completions: self
                 .edge_completions
@@ -542,7 +555,8 @@ impl BreakpointManager {
     /// [`Self::replace_runtime_breakpoints`] would have taken it from the
     /// model's request, and the crossing continues where the checkpoint left
     /// it.
-    pub(crate) fn restore_edge_completion_schedule(
+    #[doc(hidden)]
+    pub fn restore_edge_completion_schedule(
         &mut self,
         schedule: &EdgeCompletionSchedule,
         stop: Value,
@@ -583,7 +597,8 @@ impl BreakpointManager {
     /// from the checkpoint evaluates no model at its first point to ask
     /// again. The checkpoint carries these instead
     /// ([`Self::model_request_schedule`]).
-    pub(crate) fn replace_model_requests<I>(&mut self, times: I)
+    #[doc(hidden)]
+    pub fn replace_model_requests<I>(&mut self, times: I)
     where
         I: IntoIterator<Item = Value>,
     {
@@ -599,7 +614,8 @@ impl BreakpointManager {
     /// `time`, for a checkpoint taken there: every one but the edge
     /// completions, which [`Self::edge_completion_schedule`] carries with the
     /// edge being crossed.
-    pub(crate) fn model_request_schedule(&self, time: Value) -> Vec<Value> {
+    #[doc(hidden)]
+    pub fn model_request_schedule(&self, time: Value) -> Vec<Value> {
         self.model_requests
             .iter()
             .copied()
@@ -611,7 +627,8 @@ impl BreakpointManager {
     /// resumes: each at or before `stop` is a runtime breakpoint again, as
     /// [`Self::replace_runtime_breakpoints`] took it from the model's request,
     /// until the first accepted point asks the models anew.
-    pub(crate) fn restore_model_requests(&mut self, times: &[Value], stop: Value) {
+    #[doc(hidden)]
+    pub fn restore_model_requests(&mut self, times: &[Value], stop: Value) {
         for &time in times {
             if !time.is_finite() || time < 0.0 {
                 continue;
@@ -951,7 +968,8 @@ impl BreakpointManager {
     /// Only the refinement path calls this, and only with the proposal it
     /// interrupted: every ordinary approach keeps the delta `limit_step`
     /// saved for it, so the native and XSPICE restart policy is untouched.
-    pub(crate) fn restore_approach_step(&mut self, delta: Value) {
+    #[doc(hidden)]
+    pub fn restore_approach_step(&mut self, delta: Value) {
         if !delta.is_finite() || delta <= 0.0 {
             return;
         }
@@ -987,11 +1005,8 @@ impl BreakpointManager {
     /// later source breakpoint without being the same time. Restarting must
     /// therefore leave both the permanent/runtime schedules and any saved
     /// approach step intact for the later breakpoint.
-    pub(crate) fn mark_external_breakpoint_solved(
-        &mut self,
-        time: Value,
-        accepted_delta: Value,
-    ) -> Value {
+    #[doc(hidden)]
+    pub fn mark_external_breakpoint_solved(&mut self, time: Value, accepted_delta: Value) -> Value {
         self.just_passed_breakpoint = true;
         self.restart_after(time, Some(accepted_delta))
             .filter(|restart| restart.is_finite() && *restart > 0.0)

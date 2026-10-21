@@ -75,7 +75,8 @@ pub enum VariableType {
 
 impl VariableType {
     /// The rawfile spelling of this type, as it appears in a variable line.
-    pub(crate) fn as_str(&self) -> &'static str {
+    #[doc(hidden)]
+    pub fn as_str(&self) -> &'static str {
         match self {
             VariableType::Time => "time",
             VariableType::Frequency => "frequency",
@@ -121,7 +122,8 @@ impl RawEventKind {
     /// a private extension: ngspice executes any `Command:` line it does not
     /// recognise as its own and aborts the load on any header line it cannot
     /// key, while a plot name is free text to every reader of the format.
-    pub(crate) const fn plot_name(self) -> &'static str {
+    #[doc(hidden)]
+    pub const fn plot_name(self) -> &'static str {
         match self {
             Self::Digital => "Digital Events (rspice-digital-events/1)",
             Self::Real => "Real Events (rspice-real-events/1)",
@@ -130,7 +132,8 @@ impl RawEventKind {
     }
 
     /// The family a plot name declares, or `None` for an ordinary plot.
-    pub(crate) fn from_plot_name(plot_name: &str) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn from_plot_name(plot_name: &str) -> Option<Self> {
         let plot_name = plot_name.trim();
         [Self::Digital, Self::Real, Self::Bus]
             .into_iter()
@@ -138,7 +141,8 @@ impl RawEventKind {
     }
 
     /// The rawfile variable type of this family's value column.
-    pub(crate) const fn variable_type(self) -> VariableType {
+    #[doc(hidden)]
+    pub const fn variable_type(self) -> VariableType {
         match self {
             Self::Digital | Self::Bus => VariableType::Digital,
             Self::Real => VariableType::Real,
@@ -158,7 +162,8 @@ impl RawEventKind {
     }
 
     /// The node one variable name spells, when it is spelled for this family.
-    pub(crate) fn node_name(self, variable_name: &str) -> Option<&str> {
+    #[doc(hidden)]
+    pub fn node_name(self, variable_name: &str) -> Option<&str> {
         let prefix = match self {
             Self::Digital | Self::Bus => "D(",
             Self::Real => "E(",
@@ -200,7 +205,8 @@ pub(crate) fn hdl_time_precision_metadata(precision: Value) -> String {
 }
 
 /// The key [`hdl_time_precision_metadata`] writes the precision under.
-pub(crate) const HDL_TIME_PRECISION_KEY: &str = "hdl_time_precision";
+#[doc(hidden)]
+pub const HDL_TIME_PRECISION_KEY: &str = "hdl_time_precision";
 
 /// One declared bus's event plot: the declaration in its title, one column per
 /// member.

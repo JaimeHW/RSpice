@@ -9,7 +9,8 @@ use super::{CompiledExpr, Context, Instruction, LOGARITHM_MIN_ARGUMENT};
 use crate::Value;
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TimeInterval {
+#[doc(hidden)]
+pub struct TimeInterval {
     pub lower: Value,
     pub upper: Value,
 }
@@ -406,7 +407,8 @@ struct Dual {
 /// Bounds on one evaluation domain. Continuity is separate from a finite
 /// derivative: a continuous cusp may have an unbounded derivative, whereas
 /// a signed zero power has a finite-valued jump.
-pub(crate) struct TimeBounds {
+#[doc(hidden)]
+pub struct TimeBounds {
     pub value: TimeInterval,
     pub slope: TimeInterval,
     pub continuous: bool,
@@ -1410,7 +1412,8 @@ impl Dual {
 /// Reusable scratch for continuous expressions whose bounds are implemented.
 /// Construction refuses unsupported operators. An unavailable evaluation
 /// means the current domain is unresolved and may require subdivision.
-pub(crate) struct TimeEnclosure<'a> {
+#[doc(hidden)]
+pub struct TimeEnclosure<'a> {
     program: &'a CompiledExpr,
     stack: Vec<Dual>,
     stop: Value,
@@ -1493,7 +1496,8 @@ impl<'a> TimeEnclosure<'a> {
     /// A finite first derivative permits corners in a continuous source.
     /// Higher derivatives require a single analytic branch on the interval.
     /// Unresolved domains are not evidence of regularity.
-    pub(crate) fn regular_on(
+    #[doc(hidden)]
+    pub fn regular_on(
         &mut self,
         time: TimeInterval,
         context: &Context<'_>,

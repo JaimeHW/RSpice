@@ -10,5 +10,6 @@
 //! parser's job, and `netlist::foundation_subcircuits` does it there.
 
 /// Generic RSpice-authored starter models and the foundation op-amp subcircuit.
-pub(crate) const FOUNDATION_LIB: &str =
+#[doc(hidden)]
+pub const FOUNDATION_LIB: &str =
     include_str!("../../../models/spice/foundation/lib/foundation.lib");

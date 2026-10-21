@@ -7,19 +7,21 @@ use super::*;
 use crate::resource::ResourceLimits;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum FiniteDescriptorError {
+#[doc(hidden)]
+pub enum FiniteDescriptorError {
     #[error(transparent)]
     Constraint(#[from] ConstraintError),
     #[error("the descriptor pencil is irregular")]
     Irregular,
 }
 
-pub(crate) struct FiniteDynamics {
-    pub(crate) matrix: Vec<Vec<Value>>,
+#[doc(hidden)]
+pub struct FiniteDynamics {
+    pub matrix: Vec<Vec<Value>>,
     /// Residual of G*T + C*T*A, where x=T*q spans the finite subspace.
-    pub(crate) projection_error: Value,
+    pub projection_error: Value,
     /// Strict Hurwitz classification before the exact finite equations round.
-    pub(crate) asymptotically_stable: Option<bool>,
+    pub asymptotically_stable: Option<bool>,
 }
 
 type Reducer = ExactElimination<usize>;
@@ -59,7 +61,8 @@ fn rounded_projection(row: &Row, count: usize) -> Result<Vec<Value>, FiniteDescr
 }
 
 /// Input matrices and all exact/floating workspace share the owner's limit.
-pub(crate) fn finite_dynamics(
+#[doc(hidden)]
+pub fn finite_dynamics(
     g: &[Vec<Value>],
     c: &[Vec<Value>],
     limits: ResourceLimits,

@@ -16,13 +16,15 @@ pub fn compile(expr: &Expr) -> CompiledExpr {
 /// Specialize time-independent subexpressions to one explicitly fixed
 /// environment. Use the ordinary VM for constants, preserving dialect and
 /// evaluation order; no floating-point algebraic reassociation is performed.
-pub(crate) fn compile_time_expression(expr: &Expr, context: &Context<'_>) -> CompiledExpr {
+#[doc(hidden)]
+pub fn compile_time_expression(expr: &Expr, context: &Context<'_>) -> CompiledExpr {
     let mut program = CompiledExpr::new();
     compile_expr(expr, &mut program, Some(context));
     program
 }
 
-pub(crate) fn function_uses_implicit_time(function: Function) -> bool {
+#[doc(hidden)]
+pub fn function_uses_implicit_time(function: Function) -> bool {
     matches!(
         function,
         Function::Sdt
@@ -33,7 +35,8 @@ pub(crate) fn function_uses_implicit_time(function: Function) -> bool {
     )
 }
 
-pub(crate) fn constant_over_time(expr: &Expr) -> bool {
+#[doc(hidden)]
+pub fn constant_over_time(expr: &Expr) -> bool {
     match expr {
         Expr::Time | Expr::NodeVoltage(_) | Expr::BranchCurrent(_) | Expr::StringLiteral(_) => {
             false
@@ -48,7 +51,8 @@ pub(crate) fn constant_over_time(expr: &Expr) -> bool {
     }
 }
 
-pub(crate) fn constant_value(expr: &Expr, context: &Context<'_>) -> Option<Value> {
+#[doc(hidden)]
+pub fn constant_value(expr: &Expr, context: &Context<'_>) -> Option<Value> {
     if !constant_over_time(expr) {
         return None;
     }

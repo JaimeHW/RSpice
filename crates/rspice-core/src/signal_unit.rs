@@ -60,7 +60,8 @@ impl SignalUnit {
     }
 
     /// Decibels, which the core carries as a declared custom symbol.
-    pub(crate) fn decibel() -> Self {
+    #[doc(hidden)]
+    pub fn decibel() -> Self {
         Self::Custom("dB".to_owned())
     }
 }
@@ -70,13 +71,15 @@ impl SignalUnit {
 /// One wire form, because a result document and the scalars it carries must
 /// encode a volt the same way; it lives with the vocabulary it encodes, so
 /// neither producer owns it.
-pub(crate) mod wire {
+#[doc(hidden)]
+pub mod wire {
     use super::SignalUnit;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "unit", rename_all = "snake_case", deny_unknown_fields)]
-    pub(crate) enum SignalUnitWire {
+    #[doc(hidden)]
+    pub enum SignalUnitWire {
         Volt,
         Ampere,
         Ohm,
@@ -138,17 +141,20 @@ pub(crate) mod wire {
     }
 
     /// `#[serde(with = ...)]` form of a required unit.
-    pub(crate) mod required {
+    #[doc(hidden)]
+    pub mod required {
         use super::*;
 
-        pub(crate) fn serialize<S: Serializer>(
+        #[doc(hidden)]
+        pub fn serialize<S: Serializer>(
             value: &SignalUnit,
             serializer: S,
         ) -> Result<S::Ok, S::Error> {
             SignalUnitWire::from(value).serialize(serializer)
         }
 
-        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        #[doc(hidden)]
+        pub fn deserialize<'de, D: Deserializer<'de>>(
             deserializer: D,
         ) -> Result<SignalUnit, D::Error> {
             Ok(SignalUnitWire::deserialize(deserializer)?.into())
@@ -156,10 +162,12 @@ pub(crate) mod wire {
     }
 
     /// `#[serde(with = ...)]` form of an optional unit.
-    pub(crate) mod optional {
+    #[doc(hidden)]
+    pub mod optional {
         use super::*;
 
-        pub(crate) fn serialize<S: Serializer>(
+        #[doc(hidden)]
+        pub fn serialize<S: Serializer>(
             value: &Option<SignalUnit>,
             serializer: S,
         ) -> Result<S::Ok, S::Error> {
@@ -169,7 +177,8 @@ pub(crate) mod wire {
             }
         }
 
-        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        #[doc(hidden)]
+        pub fn deserialize<'de, D: Deserializer<'de>>(
             deserializer: D,
         ) -> Result<Option<SignalUnit>, D::Error> {
             Ok(Option::<SignalUnitWire>::deserialize(deserializer)?.map(SignalUnit::from))

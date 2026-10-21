@@ -4,23 +4,27 @@
 use crate::{Complex64, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ScaledComplex {
-    pub(crate) mantissa: Complex64,
-    pub(crate) exponent: i32,
+#[doc(hidden)]
+pub struct ScaledComplex {
+    pub mantissa: Complex64,
+    pub exponent: i32,
 }
 
 impl ScaledComplex {
-    pub(crate) const ZERO: Self = Self {
+    #[doc(hidden)]
+    pub const ZERO: Self = Self {
         mantissa: Complex64::new(0.0, 0.0),
         exponent: 0,
     };
 
-    pub(crate) fn is_zero(self) -> bool {
+    #[doc(hidden)]
+    pub fn is_zero(self) -> bool {
         self.mantissa.re == 0.0 && self.mantissa.im == 0.0
     }
 }
 
-pub(crate) fn scaled_complex_product3(
+#[doc(hidden)]
+pub fn scaled_complex_product3(
     first: Complex64,
     second: Complex64,
     third: Complex64,
@@ -78,7 +82,8 @@ pub(crate) fn scaled_complex_product3(
     })
 }
 
-pub(crate) fn scale_complex_component_exactly(
+#[doc(hidden)]
+pub fn scale_complex_component_exactly(
     component: Value,
     shift: i32,
 ) -> Result<Value, &'static str> {
@@ -122,7 +127,8 @@ fn compensated_add(
     Ok(())
 }
 
-pub(crate) fn validate_scaled_complex(term: ScaledComplex) -> Result<(), &'static str> {
+#[doc(hidden)]
+pub fn validate_scaled_complex(term: ScaledComplex) -> Result<(), &'static str> {
     if !term.mantissa.re.is_finite() || !term.mantissa.im.is_finite() {
         return Err("a scaled term has a non-finite mantissa");
     }
@@ -135,7 +141,8 @@ pub(crate) fn validate_scaled_complex(term: ScaledComplex) -> Result<(), &'stati
     Ok(())
 }
 
-pub(crate) struct ScaledComplexAccumulator {
+#[doc(hidden)]
+pub struct ScaledComplexAccumulator {
     common_exponent: i32,
     real_sum: Value,
     real_compensation: Value,
@@ -146,7 +153,8 @@ pub(crate) struct ScaledComplexAccumulator {
 }
 
 impl ScaledComplexAccumulator {
-    pub(crate) fn new(common_exponent: i32) -> Self {
+    #[doc(hidden)]
+    pub fn new(common_exponent: i32) -> Self {
         Self {
             common_exponent,
             real_sum: 0.0,
@@ -158,7 +166,8 @@ impl ScaledComplexAccumulator {
         }
     }
 
-    pub(crate) fn add(&mut self, term: ScaledComplex) -> Result<(), &'static str> {
+    #[doc(hidden)]
+    pub fn add(&mut self, term: ScaledComplex) -> Result<(), &'static str> {
         validate_scaled_complex(term)?;
         if term.is_zero() {
             return Ok(());
@@ -183,7 +192,8 @@ impl ScaledComplexAccumulator {
         Ok(())
     }
 
-    pub(crate) fn normalized_sum(&self) -> Result<(Complex64, Value), &'static str> {
+    #[doc(hidden)]
+    pub fn normalized_sum(&self) -> Result<(Complex64, Value), &'static str> {
         let normalized = Complex64::new(
             self.real_sum + self.real_compensation,
             self.imag_sum + self.imag_compensation,
@@ -199,12 +209,14 @@ impl ScaledComplexAccumulator {
         Ok((normalized, normalized_absolute_sum))
     }
 
-    pub(crate) fn into_scaled(self) -> Result<ScaledComplex, &'static str> {
+    #[doc(hidden)]
+    pub fn into_scaled(self) -> Result<ScaledComplex, &'static str> {
         let (value, _) = self.normalized_sum()?;
         scaled_complex_product3(value, Complex64::ONE, Complex64::ONE, self.common_exponent)
     }
 
-    pub(crate) fn finish(self) -> Result<(Complex64, Value), &'static str> {
+    #[doc(hidden)]
+    pub fn finish(self) -> Result<(Complex64, Value), &'static str> {
         let (normalized, normalized_absolute_sum) = self.normalized_sum()?;
         let contribution = Complex64::new(
             libm::scalbn(normalized.re, self.common_exponent),
@@ -227,7 +239,8 @@ impl ScaledComplexAccumulator {
     }
 }
 
-pub(crate) fn scaled_flicker_term(
+#[doc(hidden)]
+pub fn scaled_flicker_term(
     gain: Complex64,
     gain_binary_exponent: i32,
     coefficient: Value,
@@ -322,7 +335,8 @@ pub(crate) fn scaled_flicker_term(
 
 /// Colored covariance without materializing either source density or transfer
 /// product before their exponents cancel. The phase is left intact.
-pub(crate) fn scaled_flicker_cross_term(
+#[doc(hidden)]
+pub fn scaled_flicker_cross_term(
     left: ScaledComplex,
     right: ScaledComplex,
     coefficient: Value,

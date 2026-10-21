@@ -10,7 +10,8 @@ use crate::Value;
 /// small value into a trial leaves commit, rejection and checkpoint ownership
 /// with the driver.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct BranchChargeHistory {
+#[doc(hidden)]
+pub struct BranchChargeHistory {
     pub q_prev: Value,
     pub q_prev_prev: Value,
     pub cq_prev: Value,
@@ -28,7 +29,8 @@ pub(crate) struct BranchChargeHistory {
 /// restoring a capture. The field order also preserves the existing diode
 /// checkpoint wire representation.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct TwoTerminalChargeHistory {
+#[doc(hidden)]
+pub struct TwoTerminalChargeHistory {
     pub vd_prev: Vec<Value>,
     pub vd_prev_prev: Vec<Value>,
     pub qd_prev: Vec<Value>,
@@ -42,14 +44,16 @@ pub(crate) struct TwoTerminalChargeHistory {
 impl TwoTerminalChargeHistory {
     /// Initialize a quiescent accepted state from physical (voltage, charge)
     /// pairs. The device adapter resolves operating-point versus UIC policy.
-    pub(crate) fn from_biases(biases: impl ExactSizeIterator<Item = (Value, Value)>) -> Self {
+    #[doc(hidden)]
+    pub fn from_biases(biases: impl ExactSizeIterator<Item = (Value, Value)>) -> Self {
         let mut state = Self::default();
         state.reset_biases(biases);
         state
     }
 
     /// Reuse the allocated SoA buffers when installing another shooting state.
-    pub(crate) fn reset_biases(&mut self, biases: impl ExactSizeIterator<Item = (Value, Value)>) {
+    #[doc(hidden)]
+    pub fn reset_biases(&mut self, biases: impl ExactSizeIterator<Item = (Value, Value)>) {
         self.vd_prev.clear();
         self.qd_prev.clear();
         self.vd_prev.reserve(biases.len());
@@ -62,7 +66,8 @@ impl TwoTerminalChargeHistory {
     }
 
     #[inline]
-    pub(crate) fn branch(&self, index: usize) -> BranchChargeHistory {
+    #[doc(hidden)]
+    pub fn branch(&self, index: usize) -> BranchChargeHistory {
         BranchChargeHistory {
             q_prev: self.qd_prev[index],
             q_prev_prev: self.qd_prev_prev[index],
@@ -72,7 +77,8 @@ impl TwoTerminalChargeHistory {
 
     /// Commit the physical charge even at a bias where dQ/dV is zero.
     #[inline]
-    pub(crate) fn accept_branch(
+    #[doc(hidden)]
+    pub fn accept_branch(
         &mut self,
         index: usize,
         voltage: Value,
@@ -86,7 +92,8 @@ impl TwoTerminalChargeHistory {
 
     /// Commit an independently solved finite dQ/dt, including at an ideal
     /// event. A charge impulse is not part of this finite current.
-    pub(crate) fn accept_physical_branch(
+    #[doc(hidden)]
+    pub fn accept_physical_branch(
         &mut self,
         index: usize,
         voltage: Value,
@@ -101,7 +108,8 @@ impl TwoTerminalChargeHistory {
         self.cqd_prev[index] = current;
     }
 
-    pub(crate) fn finish_step(&mut self, dt: Value) {
+    #[doc(hidden)]
+    pub fn finish_step(&mut self, dt: Value) {
         self.accepted_dt_prev_prev = self.accepted_dt_prev;
         self.accepted_dt_prev = dt;
     }
@@ -117,7 +125,8 @@ impl TwoTerminalChargeHistory {
 
     /// Begin an order-one epoch while retaining the physical outgoing current
     /// for observations and checkpoint restoration.
-    pub(crate) fn restart_preserving_current(&mut self, accepted_dt_seed: Value) {
+    #[doc(hidden)]
+    pub fn restart_preserving_current(&mut self, accepted_dt_seed: Value) {
         self.vd_prev_prev.clone_from(&self.vd_prev);
         self.qd_prev_prev.clone_from(&self.qd_prev);
         self.qd_prev_prev_prev.clone_from(&self.qd_prev);
@@ -143,7 +152,8 @@ fn scaled_rate(coefficient: Value, value: Value, dt: Value) -> Value {
 /// Charge differences preserve invariance to the arbitrary additive origin
 /// of Q and avoid subtracting separately scaled large absolute charges.
 #[inline]
-pub(crate) fn integrated_charge_current(
+#[doc(hidden)]
+pub fn integrated_charge_current(
     coeff: &CompanionCoefficients,
     dt: Value,
     charge: Value,
@@ -177,7 +187,8 @@ pub(crate) fn integrated_charge_current(
 /// about an individual branch of a multi-terminal device. Nonfinite device
 /// values remain nonfinite so the enclosing solve can diagnose them.
 #[inline]
-pub(crate) fn nonlinear_charge_companion_terms(
+#[doc(hidden)]
+pub fn nonlinear_charge_companion_terms(
     coeff: &CompanionCoefficients,
     dt: Value,
     charge_slope: Value,

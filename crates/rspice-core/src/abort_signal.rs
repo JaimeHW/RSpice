@@ -53,7 +53,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod model_control;
-pub(crate) use model_control::ModelRunSignal;
+#[doc(hidden)]
+pub use model_control::ModelRunSignal;
 pub use model_control::{ModelFinish, ModelFinishPoint, ModelRunControl, SimulationOutcome};
 
 //=============================================================================

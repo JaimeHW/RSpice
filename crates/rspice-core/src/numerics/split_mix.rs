@@ -12,10 +12,12 @@
 //! drift from the other while both still looked deterministic.
 
 /// SplitMix64's additive step, `floor(2^64 / phi)`.
-pub(crate) const SPLIT_MIX_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
+#[doc(hidden)]
+pub const SPLIT_MIX_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// SplitMix64's output mixing function, applied to an advanced state.
-pub(crate) const fn split_mix64_output(state: u64) -> u64 {
+#[doc(hidden)]
+pub const fn split_mix64_output(state: u64) -> u64 {
     let mut z = state;
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
@@ -27,7 +29,8 @@ pub(crate) const fn split_mix64_output(state: u64) -> u64 {
 ///
 /// This is the closed form of `index + 1` sequential `next_u64` calls: the
 /// state is `seed + (index + 1) * GAMMA` in wrapping arithmetic.
-pub(crate) const fn split_mix64_at(seed: u64, index: u64) -> u64 {
+#[doc(hidden)]
+pub const fn split_mix64_at(seed: u64, index: u64) -> u64 {
     split_mix64_output(seed.wrapping_add(index.wrapping_add(1).wrapping_mul(SPLIT_MIX_GAMMA)))
 }
 
@@ -36,7 +39,8 @@ pub(crate) const fn split_mix64_at(seed: u64, index: u64) -> u64 {
 /// Noise streams are keyed by content — a device instance name and the
 /// mechanism inside it — so that a deck gains or loses an unrelated device
 /// without reshuffling any other device's train.
-pub(crate) fn fnv1a(input: &str) -> u64 {
+#[doc(hidden)]
+pub fn fnv1a(input: &str) -> u64 {
     let mut hash: u64 = 0xCBF2_9CE4_8422_2325;
     for byte in input.as_bytes() {
         hash ^= u64::from(*byte);

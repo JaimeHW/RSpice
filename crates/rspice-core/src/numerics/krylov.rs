@@ -31,12 +31,14 @@ const ZERO: Complex64 = Complex64::new(0.0, 0.0);
 /// Relative tolerance for the inner linear solve. Newton needs the step
 /// direction accurate well below its own tolerance; 1e-10 keeps Krylov
 /// steps numerically indistinguishable from the direct solve.
-pub(crate) const GMRES_REL_TOL: f64 = 1e-10;
+#[doc(hidden)]
+pub const GMRES_REL_TOL: f64 = 1e-10;
 
 /// Problem size at and above which the Krylov path is tried automatically
 /// (the direct solve remains the small-problem default — exact and faster
 /// below this size).
-pub(crate) const KRYLOV_AUTO_THRESHOLD: usize = 256;
+#[doc(hidden)]
+pub const KRYLOV_AUTO_THRESHOLD: usize = 256;
 
 /// Maximum retained Arnoldi basis length for every HB-family GMRES solve.
 ///
@@ -46,7 +48,8 @@ pub(crate) const KRYLOV_AUTO_THRESHOLD: usize = 256;
 pub(crate) const GMRES_RESTART_CAP: usize = 64;
 
 #[inline]
-pub(crate) fn bounded_gmres_restart(requested: usize, dimension: usize) -> usize {
+#[doc(hidden)]
+pub fn bounded_gmres_restart(requested: usize, dimension: usize) -> usize {
     requested.clamp(8, GMRES_RESTART_CAP).min(dimension.max(1))
 }
 
@@ -60,7 +63,8 @@ pub(crate) fn bounded_gmres_restart(requested: usize, dimension: usize) -> usize
 /// preconditioner only steers GMRES, so an approximate inverse of a
 /// degenerate block is still useful, and the exact-solve fallback path
 /// protects correctness.
-pub(crate) struct LuFactors {
+#[doc(hidden)]
+pub struct LuFactors {
     n: usize,
     /// Combined L (unit lower, below diagonal) and U (upper), row-major.
     lu: Vec<Complex64>,
@@ -71,7 +75,8 @@ pub(crate) struct LuFactors {
 }
 
 impl LuFactors {
-    pub(crate) fn factor(mut a: Vec<Complex64>, n: usize) -> Self {
+    #[doc(hidden)]
+    pub fn factor(mut a: Vec<Complex64>, n: usize) -> Self {
         debug_assert_eq!(a.len(), n * n);
         let mut pivots = vec![0usize; n];
         let mut regularized = false;
@@ -124,7 +129,8 @@ impl LuFactors {
     }
 
     /// Solve `A x = b` in place using the stored factors.
-    pub(crate) fn solve_in_place(&self, x: &mut [Complex64]) {
+    #[doc(hidden)]
+    pub fn solve_in_place(&self, x: &mut [Complex64]) {
         let n = self.n;
         debug_assert_eq!(x.len(), n);
 
@@ -164,7 +170,8 @@ impl LuFactors {
 ///
 /// Unknown layout is node-major (`index = node * h + harmonic`), so the
 /// harmonic-k block gathers the strided entries `J[i*h + k][j*h + k]`.
-pub(crate) struct BlockJacobiPreconditioner {
+#[doc(hidden)]
+pub struct BlockJacobiPreconditioner {
     num_nodes: usize,
     num_components: usize, // h = harmonics + 1
     factors: Vec<LuFactors>,
@@ -174,13 +181,15 @@ pub(crate) struct BlockJacobiPreconditioner {
 /// Keeping this operator-based lets HB, PAC, and PNoise use sparse/matrix-free
 /// Jacobians without first materializing a dense matrix solely to construct a
 /// preconditioner.
-pub(crate) trait KrylovPreconditioner {
+#[doc(hidden)]
+pub trait KrylovPreconditioner {
     fn apply(&self, r: &[Complex64]) -> Vec<Complex64>;
 }
 
 impl BlockJacobiPreconditioner {
     /// Extract and factorize the per-harmonic diagonal blocks of `jac`.
-    pub(crate) fn build(jac: &[Vec<Complex64>], num_nodes: usize, num_components: usize) -> Self {
+    #[doc(hidden)]
+    pub fn build(jac: &[Vec<Complex64>], num_nodes: usize, num_components: usize) -> Self {
         let factors: Vec<LuFactors> = (0..num_components)
             .map(|k| {
                 let mut block = vec![ZERO; num_nodes * num_nodes];
@@ -245,7 +254,8 @@ impl KrylovPreconditioner for BlockJacobiPreconditioner {
 //=============================================================================
 
 /// Outcome of a GMRES solve.
-pub(crate) struct GmresOutcome {
+#[doc(hidden)]
+pub struct GmresOutcome {
     pub solution: Vec<Complex64>,
     pub iterations: usize,
     pub relative_residual: f64,
@@ -253,7 +263,8 @@ pub(crate) struct GmresOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct GmresAborted;
+#[doc(hidden)]
+pub struct GmresAborted;
 
 #[inline]
 fn dot(u: &[Complex64], v: &[Complex64]) -> Complex64 {
@@ -263,7 +274,8 @@ fn dot(u: &[Complex64], v: &[Complex64]) -> Complex64 {
 /// Scaled sum of squares preserves every representable Euclidean norm.
 /// The scale only grows; squaring a component cannot overflow or erase a
 /// nonzero vector. One square root suffices for the entire reduction.
-pub(crate) fn complex_l2_norm(v: &[Complex64]) -> f64 {
+#[doc(hidden)]
+pub fn complex_l2_norm(v: &[Complex64]) -> f64 {
     let mut scale = 0.0_f64;
     let mut sum_squares = 1.0;
     for value in v.iter().flat_map(|v| [v.re, v.im]) {
@@ -314,7 +326,8 @@ fn givens(a: Complex64, b: Complex64) -> (f64, Complex64) {
 /// Newton step has no better initial guess). Stagnation across a restart
 /// cycle terminates early with `converged = false`; the caller must apply its
 /// own certification and bounded-recovery policy.
-pub(crate) fn gmres(
+#[doc(hidden)]
+pub fn gmres(
     matvec: &dyn Fn(&[Complex64]) -> Vec<Complex64>,
     precond: &dyn KrylovPreconditioner,
     b: &[Complex64],
@@ -336,7 +349,8 @@ pub(crate) fn gmres(
 /// restart, each Arnoldi step, and every expensive operator/preconditioner
 /// application so a desktop or browser cancellation does not wait for the
 /// entire inner linear solve.
-pub(crate) fn gmres_with_abort(
+#[doc(hidden)]
+pub fn gmres_with_abort(
     matvec: &dyn Fn(&[Complex64]) -> Vec<Complex64>,
     precond: &dyn KrylovPreconditioner,
     b: &[Complex64],
@@ -371,7 +385,8 @@ pub(crate) fn gmres_with_abort(
 /// A matrix-free operator may fail to evaluate a device or its derivative;
 /// preserve that typed failure rather than manufacturing a numerical vector.
 #[derive(Debug, PartialEq)]
-pub(crate) enum GmresError<E> {
+#[doc(hidden)]
+pub enum GmresError<E> {
     Aborted,
     Operator(E),
     InvalidData(&'static str),
@@ -397,7 +412,8 @@ type OperatorResult<E> = Result<Vec<Complex64>, E>;
 /// an explicit relative tolerance. Scratch-owning Fourier transforms and
 /// sparse factorizations need no interior-mutability/error side channels.
 /// Convergence is normwise; an analysis still certifies its physical equations.
-pub(crate) fn try_gmres_with_abort<E>(
+#[doc(hidden)]
+pub fn try_gmres_with_abort<E>(
     matvec: &mut dyn FnMut(&[Complex64]) -> OperatorResult<E>,
     precondition: &mut dyn FnMut(&[Complex64]) -> OperatorResult<E>,
     b: &[Complex64],

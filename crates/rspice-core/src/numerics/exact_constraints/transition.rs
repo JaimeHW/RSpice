@@ -8,7 +8,8 @@ use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 
 mod asymptote;
 mod storage;
-pub(crate) use asymptote::{AsymptoteError, high_frequency_gain};
+#[doc(hidden)]
+pub use asymptote::{AsymptoteError, high_frequency_gain};
 
 type Result<T> = std::result::Result<T, ConstraintError>;
 type Terms = Vec<Vec<(usize, Value)>>;
@@ -293,4 +294,5 @@ impl TransitionSystem {
 }
 
 mod prepared;
-pub(crate) use prepared::{PreparedTransition, Transition, TransitionStorage};
+#[doc(hidden)]
+pub use prepared::{PreparedTransition, Transition, TransitionStorage};

@@ -7,11 +7,13 @@ use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub};
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Derivative(ScaledValue);
+#[doc(hidden)]
+pub struct Derivative(ScaledValue);
 
 impl Derivative {
     #[inline]
-    pub(crate) fn binary64(self) -> Value {
+    #[doc(hidden)]
+    pub fn binary64(self) -> Value {
         self.0.binary64()
     }
 
@@ -35,7 +37,8 @@ impl Derivative {
 
     /// Apply an exponential without rounding its coefficient to zero or
     /// infinity before it reaches the retained incoming derivative.
-    pub(crate) fn multiply_exp(self, argument: Value) -> Self {
+    #[doc(hidden)]
+    pub fn multiply_exp(self, argument: Value) -> Self {
         let ordinary = argument.exp();
         if ordinary.is_normal() || !argument.is_finite() {
             return self * ordinary;
@@ -65,10 +68,8 @@ impl Derivative {
         Self(incoming.multiply(ScaledValue::new(remainder.exp())))
     }
 
-    pub(crate) fn product_ratio(
-        numerator: [(Self, Value); 2],
-        denominator: [(Value, Value); 2],
-    ) -> Self {
+    #[doc(hidden)]
+    pub fn product_ratio(numerator: [(Self, Value); 2], denominator: [(Value, Value); 2]) -> Self {
         let ordinary = denominator[0].0 * denominator[0].1 + denominator[1].0 * denominator[1].1;
         let divisor = if ordinary.is_normal() {
             ScaledValue::new(ordinary)

@@ -2,22 +2,26 @@
 use crate::Value;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ScaledProduct {
+#[doc(hidden)]
+pub struct ScaledProduct {
     mantissa: Value,
     exponent: i64,
 }
 
 impl ScaledProduct {
-    pub(crate) const ZERO: Self = Self {
+    #[doc(hidden)]
+    pub const ZERO: Self = Self {
         mantissa: 0.0,
         exponent: 0,
     };
-    pub(crate) const ONE: Self = Self {
+    #[doc(hidden)]
+    pub const ONE: Self = Self {
         mantissa: 1.0,
         exponent: 0,
     };
 
-    pub(crate) fn multiply(self, factor: Value) -> Self {
+    #[doc(hidden)]
+    pub fn multiply(self, factor: Value) -> Self {
         let (factor, exponent) = libm::frexp(factor);
         self.multiply_scaled(Self {
             mantissa: factor,
@@ -26,7 +30,8 @@ impl ScaledProduct {
     }
 
     /// Multiply two retained products without materializing their full values.
-    pub(crate) fn multiply_scaled(self, factor: Self) -> Self {
+    #[doc(hidden)]
+    pub fn multiply_scaled(self, factor: Self) -> Self {
         let (mantissa, normalization) = libm::frexp(self.mantissa * factor.mantissa);
         Self {
             mantissa,
@@ -35,7 +40,8 @@ impl ScaledProduct {
     }
 
     /// Remove a known nonzero factor without materializing the full product.
-    pub(crate) fn without_factor(self, factor: Value) -> Self {
+    #[doc(hidden)]
+    pub fn without_factor(self, factor: Value) -> Self {
         let (factor, exponent) = libm::frexp(factor);
         self.divide(Self {
             mantissa: factor,
@@ -43,7 +49,8 @@ impl ScaledProduct {
         })
     }
 
-    pub(crate) fn divide(self, divisor: Self) -> Self {
+    #[doc(hidden)]
+    pub fn divide(self, divisor: Self) -> Self {
         let (mantissa, normalization) = libm::frexp(self.mantissa / divisor.mantissa);
         Self {
             mantissa,
@@ -51,17 +58,20 @@ impl ScaledProduct {
         }
     }
 
-    pub(crate) fn value(self) -> Value {
+    #[doc(hidden)]
+    pub fn value(self) -> Value {
         scale(self.mantissa, self.exponent)
     }
 
     /// Include an additive offset before rounding: a product above f64's
     /// range can cancel against a finite offset to yield a finite result.
-    pub(crate) fn plus(self, offset: Value) -> Value {
+    #[doc(hidden)]
+    pub fn plus(self, offset: Value) -> Value {
         self.add(Self::ONE.multiply(offset)).value()
     }
 
-    pub(crate) fn add(self, other: Self) -> Self {
+    #[doc(hidden)]
+    pub fn add(self, other: Self) -> Self {
         if self.mantissa == 0.0 {
             return other;
         }

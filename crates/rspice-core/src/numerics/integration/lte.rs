@@ -54,7 +54,8 @@ impl TransientLteReference {
 }
 
 /// Current internal wire contract for accepted-boundary LTE estimator state.
-pub(crate) const ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION: u32 = 2;
+#[doc(hidden)]
+pub const ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION: u32 = 2;
 
 /// Versioned snapshot of the estimator state needed to make the next
 /// predictor and LTE decision identical after a transient restart.
@@ -63,28 +64,29 @@ pub(crate) const ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION: u32 = 2;
 /// candidate-local rollback checkpoint in [`LteEstimator`] is not persistent:
 /// capture and restore reject an estimator while such an attempt is active.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AcceptedBoundaryLteEstimatorCheckpoint {
-    pub(crate) version: u32,
-    pub(crate) solution_dimension: usize,
-    pub(crate) auxiliary_indices: Vec<usize>,
-    pub(crate) history_count: usize,
-    pub(crate) prev_solution: Vec<Value>,
-    pub(crate) prev_prev_solution: Vec<Value>,
-    pub(crate) prev_prev_prev_solution: Vec<Value>,
-    pub(crate) prev_dt: Value,
-    pub(crate) prev_prev_dt: Value,
-    pub(crate) reltol: Value,
-    pub(crate) abstol: Value,
-    pub(crate) reference: TransientLteReference,
-    pub(crate) accepted_reference_solution: Vec<Value>,
-    pub(crate) signal_global_reference: Value,
-    pub(crate) signal_local_reference: Vec<Value>,
-    pub(crate) method_order: u32,
-    pub(crate) xyce_order_two_difference: Vec<Value>,
-    pub(crate) xyce_order_two_difference_dt: Value,
-    pub(crate) xyce_attempt_dt: Value,
-    pub(crate) xyce_attempt_prev_dt: Value,
-    pub(crate) xyce_attempt_prev_prev_dt: Value,
+#[doc(hidden)]
+pub struct AcceptedBoundaryLteEstimatorCheckpoint {
+    pub version: u32,
+    pub solution_dimension: usize,
+    pub auxiliary_indices: Vec<usize>,
+    pub history_count: usize,
+    pub prev_solution: Vec<Value>,
+    pub prev_prev_solution: Vec<Value>,
+    pub prev_prev_prev_solution: Vec<Value>,
+    pub prev_dt: Value,
+    pub prev_prev_dt: Value,
+    pub reltol: Value,
+    pub abstol: Value,
+    pub reference: TransientLteReference,
+    pub accepted_reference_solution: Vec<Value>,
+    pub signal_global_reference: Value,
+    pub signal_local_reference: Vec<Value>,
+    pub method_order: u32,
+    pub xyce_order_two_difference: Vec<Value>,
+    pub xyce_order_two_difference_dt: Value,
+    pub xyce_attempt_dt: Value,
+    pub xyce_attempt_prev_dt: Value,
+    pub xyce_attempt_prev_prev_dt: Value,
 }
 
 /// Local Truncation Error (LTE) estimator for adaptive timestep
@@ -100,7 +102,8 @@ pub(crate) struct AcceptedBoundaryLteEstimatorCheckpoint {
 /// leading unknowns to score, the step size they were solved at, and the
 /// indices excluded from the norm because their rows are not integrated.
 #[derive(Clone, Copy)]
-pub(crate) struct LtePrefixWindow<'a> {
+#[doc(hidden)]
+pub struct LtePrefixWindow<'a> {
     pub prefix_len: usize,
     pub dt: Value,
     pub excluded_indices: &'a [usize],
@@ -263,7 +266,8 @@ impl LteEstimator {
 
     /// Configure the reference DAE domain before recording any history.
     /// Indices must be canonical so checkpoints can verify topology ownership.
-    pub(crate) fn with_auxiliary_indices(
+    #[doc(hidden)]
+    pub fn with_auxiliary_indices(
         mut self,
         auxiliary_indices: Vec<usize>,
         solution_dimension: usize,
@@ -288,7 +292,8 @@ impl LteEstimator {
     /// `latest_accepted_solution` is supplied independently by the caller so
     /// capture cannot bless a stale or mismatched estimator history. Equality
     /// is bit-exact, including the sign of zero.
-    pub(crate) fn capture_accepted_boundary_checkpoint(
+    #[doc(hidden)]
+    pub fn capture_accepted_boundary_checkpoint(
         &self,
         latest_accepted_solution: &[Value],
     ) -> Result<AcceptedBoundaryLteEstimatorCheckpoint, String> {
@@ -321,7 +326,8 @@ impl LteEstimator {
 
     /// Validate an accepted-boundary snapshot against this estimator's
     /// configured reference mode and the caller-owned accepted solution.
-    pub(crate) fn validate_accepted_boundary_checkpoint(
+    #[doc(hidden)]
+    pub fn validate_accepted_boundary_checkpoint(
         &self,
         checkpoint: &AcceptedBoundaryLteEstimatorCheckpoint,
         latest_accepted_solution: &[Value],
@@ -590,7 +596,8 @@ impl LteEstimator {
 
     /// Restore an accepted-boundary snapshot after validating every field.
     /// No estimator state is changed if validation fails.
-    pub(crate) fn restore_accepted_boundary_checkpoint(
+    #[doc(hidden)]
+    pub fn restore_accepted_boundary_checkpoint(
         &mut self,
         checkpoint: &AcceptedBoundaryLteEstimatorCheckpoint,
         latest_accepted_solution: &[Value],
@@ -704,23 +711,27 @@ impl LteEstimator {
     }
 
     /// Seed historical signal references without adding predictor history.
-    #[cfg(test)]
-    pub(crate) fn seed_reference_prefix(&mut self, solution: &[Value], prefix_len: usize) {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn seed_reference_prefix(&mut self, solution: &[Value], prefix_len: usize) {
         self.update_signal_reference_prefix(solution, prefix_len);
     }
 
     /// Seed both Xyce reference state and the accepted t0 predictor history.
-    pub(crate) fn seed_initial_solution(&mut self, solution: &[Value]) {
+    #[doc(hidden)]
+    pub fn seed_initial_solution(&mut self, solution: &[Value]) {
         self.restart_history_from(solution);
     }
 
     /// Snapshot historical signal references for transient checkpointing.
-    pub(crate) fn signal_reference_snapshot(&self) -> (Value, &[Value]) {
+    #[doc(hidden)]
+    pub fn signal_reference_snapshot(&self) -> (Value, &[Value]) {
         (self.signal_global_reference, &self.signal_local_reference)
     }
 
     /// Restore historical signal references from a validated checkpoint.
-    pub(crate) fn restore_signal_reference_snapshot(
+    #[doc(hidden)]
+    pub fn restore_signal_reference_snapshot(
         &mut self,
         global: Value,
         local: &[Value],
@@ -987,14 +998,16 @@ impl LteEstimator {
     /// A transient reaches this state at its own first step and, on the native
     /// arm, at the step after every breakpoint landing, where the predictor is
     /// restarted alongside the integrator.
-    pub(crate) fn predictor_is_constant(&self) -> bool {
+    #[doc(hidden)]
+    pub fn predictor_is_constant(&self) -> bool {
         self.history_count < 2
     }
 
     /// Advance Xyce OneStep's attempted coefficient history for a candidate
     /// that reaches the predictor. A rejected candidate is rolled back with
     /// the matching one-sided `restoreHistory` shift.
-    pub(crate) fn begin_xyce_attempt(&mut self, dt: Value, order: u8) {
+    #[doc(hidden)]
+    pub fn begin_xyce_attempt(&mut self, dt: Value, order: u8) {
         if !self.uses_accepted_solution_reference() || !dt.is_finite() || dt <= 0.0 {
             return;
         }
@@ -1032,7 +1045,8 @@ impl LteEstimator {
     /// Apply Xyce's policy for a rejected OneStep/Gear12 attempt. LTE control
     /// restores coefficient history; nonlinear-iteration control deliberately
     /// retains the attempted update, matching `ERROPTION=1`'s no-restore path.
-    pub(crate) fn reject_xyce_attempt(&mut self, restore_history: bool) {
+    #[doc(hidden)]
+    pub fn reject_xyce_attempt(&mut self, restore_history: bool) {
         if restore_history {
             self.rollback_xyce_attempt();
         } else {
@@ -1040,14 +1054,16 @@ impl LteEstimator {
         }
     }
 
-    pub(crate) fn requires_signal_reference_history(&self) -> bool {
+    #[doc(hidden)]
+    pub fn requires_signal_reference_history(&self) -> bool {
         matches!(
             self.reference,
             TransientLteReference::SignalGlobal | TransientLteReference::SignalLocal
         )
     }
 
-    pub(crate) fn reference_mode(&self) -> TransientLteReference {
+    #[doc(hidden)]
+    pub fn reference_mode(&self) -> TransientLteReference {
         self.reference
     }
 
@@ -1058,7 +1074,8 @@ impl LteEstimator {
 
     /// Record an accepted point together with the OneStep order that produced
     /// it. Xyce promotes the first-difference history only on order two.
-    pub(crate) fn record_with_order(
+    #[doc(hidden)]
+    pub fn record_with_order(
         &mut self,
         solution: &[Value],
         prefix_len: usize,
@@ -1147,7 +1164,8 @@ impl LteEstimator {
 
     /// Estimate LTE for the first `prefix_len` solution entries, skipping
     /// sorted zero-based indices owned by model-specific timestep semantics.
-    pub(crate) fn estimate_prefix_excluding(
+    #[doc(hidden)]
+    pub fn estimate_prefix_excluding(
         &self,
         current: &[Value],
         window: LtePrefixWindow<'_>,
@@ -1177,7 +1195,8 @@ impl LteEstimator {
     /// one third of that value, and for Gear order 2 it is
     /// `h/(h+h_prev+h_prev_prev)`. Native predictor-local control preserves its
     /// established uncorrected metric.
-    pub(crate) fn estimate_prefix_excluding_for_integration(
+    #[doc(hidden)]
+    pub fn estimate_prefix_excluding_for_integration(
         &self,
         current: &[Value],
         window: LtePrefixWindow<'_>,
@@ -1205,7 +1224,8 @@ impl LteEstimator {
     }
 
     /// Estimate LTE from the exact predictor vector used to seed Newton.
-    pub(crate) fn estimate_correction_prefix_excluding_for_integration(
+    #[doc(hidden)]
+    pub fn estimate_correction_prefix_excluding_for_integration(
         &self,
         current: &[Value],
         predicted: &[Value],
@@ -1402,7 +1422,8 @@ impl LteEstimator {
     }
 
     /// Return the timestep scale for the method/order of the candidate step.
-    pub(crate) fn recommend_scale_for_integration(
+    #[doc(hidden)]
+    pub fn recommend_scale_for_integration(
         &self,
         lte: Value,
         method: IntegrationMethod,
@@ -1416,7 +1437,8 @@ impl LteEstimator {
     /// Ratios at or above two grow by exactly two, ratios between one and two
     /// keep the current step, and ratios at or below one shrink within Xyce's
     /// `[0.25, 0.9]` bounds.
-    pub(crate) fn xyce_accepted_step_scale(
+    #[doc(hidden)]
+    pub fn xyce_accepted_step_scale(
         &self,
         lte: Value,
         method: IntegrationMethod,
@@ -1434,7 +1456,8 @@ impl LteEstimator {
     }
 
     /// Xyce's failed-LTE step ratio policy.
-    pub(crate) fn xyce_rejected_step_scale(
+    #[doc(hidden)]
+    pub fn xyce_rejected_step_scale(
         &self,
         lte: Value,
         method: IntegrationMethod,
@@ -1449,7 +1472,8 @@ impl LteEstimator {
     }
 
     /// Whether Xyce's order-2 promotion test passes for the current error.
-    pub(crate) fn xyce_should_promote_order_two(&self, lte: Value) -> bool {
+    #[doc(hidden)]
+    pub fn xyce_should_promote_order_two(&self, lte: Value) -> bool {
         self.history_count >= 2 && self.xyce_raw_step_ratio(lte, 2) > 1.05
     }
 
@@ -1581,7 +1605,8 @@ impl LteEstimator {
     /// makes the first predictor equal to the accepted breakpoint solution while
     /// retaining the correct `h / (h + h_prev)` LTE coefficient. Retries keep the
     /// original seed, matching Xyce's `lastTimeStep` restart state.
-    pub(crate) fn seed_restart_timestep(&mut self, dt: Value) {
+    #[doc(hidden)]
+    pub fn seed_restart_timestep(&mut self, dt: Value) {
         if self.history_count == 1 && self.prev_dt == 0.0 && dt.is_finite() && dt > 0.0 {
             self.prev_dt = dt;
             if self.uses_accepted_solution_reference() {

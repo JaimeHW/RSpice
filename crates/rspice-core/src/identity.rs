@@ -174,7 +174,8 @@ pub struct RunCoordinateId {
 }
 
 impl RunCoordinateId {
-    pub(crate) const fn from_parts(semantic: [u8; 16], occurrence: u32) -> Self {
+    #[doc(hidden)]
+    pub const fn from_parts(semantic: [u8; 16], occurrence: u32) -> Self {
         Self {
             semantic,
             occurrence,

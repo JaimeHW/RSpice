@@ -12,7 +12,8 @@ use crate::resource::{ResourceKind, ResourceLimitError};
 use rspice_veriloga_runtime::arithmetic::ScaledValue as S;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum TimeDerivativeError {
+#[doc(hidden)]
+pub enum TimeDerivativeError {
     #[error("time-expression differentiation was cancelled")]
     Aborted,
     #[error(transparent)]
@@ -532,14 +533,16 @@ impl Operations<'_> {
 }
 
 /// A borrowed compiled program and a checked bound for its Taylor workspace.
-pub(crate) struct TimeDerivatives<'a> {
+#[doc(hidden)]
+pub struct TimeDerivatives<'a> {
     program: &'a CompiledExpr,
     order: usize,
     stack_capacity: usize,
 }
 
 impl<'a> TimeDerivatives<'a> {
-    pub(crate) fn supports(program: &CompiledExpr) -> bool {
+    #[doc(hidden)]
+    pub fn supports(program: &CompiledExpr) -> bool {
         program.node_map.is_empty()
             && program.branch_map.is_empty()
             && program.sdt_count == 0
@@ -591,7 +594,8 @@ impl<'a> TimeDerivatives<'a> {
         })
     }
 
-    pub(crate) fn new(
+    #[doc(hidden)]
+    pub fn new(
         program: &'a CompiledExpr,
         order: usize,
         max_values: usize,
@@ -649,11 +653,8 @@ impl<'a> TimeDerivatives<'a> {
         })
     }
 
-    pub(crate) fn evaluate(
-        &self,
-        context: &Context<'_>,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<Value>> {
+    #[doc(hidden)]
+    pub fn evaluate(&self, context: &Context<'_>, abort: &dyn AbortSignal) -> Result<Vec<Value>> {
         let ops = Operations {
             count: self.order + 1,
             abort,

@@ -18,7 +18,8 @@ const XYCE_NONFINITE_REPLACEMENT: Value = 1.0e50;
 /// been evaluated.  Normalizing bytecode intermediates would change IEEE
 /// expressions such as `0*exp(1000)` from NaN to zero.
 #[inline]
-pub(crate) fn normalize_expression_boundary(value: Value, dialect: ExpressionDialect) -> Value {
+#[doc(hidden)]
+pub fn normalize_expression_boundary(value: Value, dialect: ExpressionDialect) -> Value {
     if dialect == ExpressionDialect::Xyce && !value.is_finite() {
         XYCE_NONFINITE_REPLACEMENT.copysign(value)
     } else {
@@ -79,7 +80,8 @@ fn real_signed_magnitude_power(base: Value, exponent: Value) -> Value {
 /// Exact SPICE sign function. Ordered comparisons deliberately map both
 /// signed zero and NaN to zero, matching Xyce and ngspice.
 #[inline]
-pub(crate) fn ordered_sign(value: Value) -> Value {
+#[doc(hidden)]
+pub fn ordered_sign(value: Value) -> Value {
     if value > 0.0 {
         1.0
     } else if value < 0.0 {
@@ -93,7 +95,8 @@ pub(crate) fn ordered_sign(value: Value) -> Value {
 /// The boolean is true exactly when the input branch is selected and its
 /// directional derivative must be retained.
 #[inline]
-pub(crate) fn ordered_limit(
+#[doc(hidden)]
+pub fn ordered_limit(
     value: Value,
     lower: Value,
     upper: Value,

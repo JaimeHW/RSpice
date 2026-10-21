@@ -1204,7 +1204,8 @@ fn write_changes(
 /// A bijection onto the non-empty strings over printable ASCII 33..=126, so no
 /// two signals collide however many there are. The HDL `$dumpvars` stream
 /// writer numbers its variables the same way.
-pub(crate) fn canonical_identifier(mut index: usize) -> String {
+#[doc(hidden)]
+pub fn canonical_identifier(mut index: usize) -> String {
     const ALPHABET: usize = 94;
     let mut identifier = String::new();
     loop {
@@ -1222,14 +1223,16 @@ fn unwritable(message: impl Into<String>) -> VcdError {
 }
 
 /// Whether a `$var` name survives the round trip through the token grammar.
-pub(crate) fn is_writable_variable_name(name: &str) -> bool {
+#[doc(hidden)]
+pub fn is_writable_variable_name(name: &str) -> bool {
     !name.is_empty()
         && name.split_whitespace().collect::<Vec<_>>().join(" ") == name
         && !name.split_whitespace().any(|token| token == "$end")
 }
 
 /// Whether a `$scope` name survives it. A scope name is one token.
-pub(crate) fn is_writable_scope_name(name: &str) -> bool {
+#[doc(hidden)]
+pub fn is_writable_scope_name(name: &str) -> bool {
     let mut tokens = name.split_whitespace();
     tokens.next() == Some(name) && tokens.next().is_none() && name != "$end"
 }

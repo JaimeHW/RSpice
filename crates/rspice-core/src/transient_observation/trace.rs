@@ -30,7 +30,8 @@ impl<'a> ImpulseTraceRef<'a> {
             Self::Voltage(trace) => trace.validate(start, stop),
         }
     }
-    pub(crate) fn identity(self) -> (u8, *const ()) {
+    #[doc(hidden)]
+    pub fn identity(self) -> (u8, *const ()) {
         match self {
             Self::Current(trace) => (0, std::ptr::from_ref(trace).cast()),
             Self::Voltage(trace) => (1, std::ptr::from_ref(trace).cast()),
