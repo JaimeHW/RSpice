@@ -13,6 +13,7 @@ use crate::workbench::app::dialogs::replace_instance::ReplaceInstanceOpen;
 use crate::workbench::app::dialogs::selection::commands::floating::{
     FloatingPaste, FloatingPasteOrigin,
 };
+use crate::workbench::app::dialogs::window_session::WindowSessionPage;
 use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
 
 fn edit_authority() -> SchematicEditAuthority {

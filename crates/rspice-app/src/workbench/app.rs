@@ -171,9 +171,8 @@ pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_h
 
 pub use dialogs::state::DialogState;
 pub(crate) use dialogs::state::{
-    DatasetExportPicker, GridSnapSpacingChoice, HelpCenterPage, NewWindowInitialContent,
-    PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone, RunDetailsDialogState,
-    WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+    DatasetExportPicker, GridSnapSpacingChoice, HelpCenterPage, PlanRemovalConsequence,
+    PlanRemovalTarget, PlanRemovalTone, RunDetailsDialogState,
 };
 
 /// Test-only: the studio pins this against its own hop label, and the dialog
@@ -209,7 +208,7 @@ pub(crate) use dialogs::replace_instance::{
 pub(crate) use dialogs::stimulus_link::{
     StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
 };
-pub(crate) use dialogs::window_session::open_window_workflow;
+pub(crate) use dialogs::window_session::{WindowSessionPage, WindowWorkflow, open_window_workflow};
 
 pub(crate) use actions::property_edit::{
     authoritative_component_property_sheet, open_property_editor, open_selected_object_properties,

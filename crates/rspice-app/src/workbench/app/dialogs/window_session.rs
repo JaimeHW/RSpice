@@ -9,12 +9,98 @@ use egui::{ComboBox, Context, Grid, RichText};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
-use crate::workbench::app::{
-    NewWindowInitialContent, RSpiceApp, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
-};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{ProjectPage, Workspace, WorkspaceDocumentId, WorkspaceLayoutState};
 use crate::workbench::{ApplicationWindowId, WorkspacePreset};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum WindowSessionPage {
+    #[default]
+    Windows,
+    Documents,
+    SessionRestore,
+}
+
+impl WindowSessionPage {
+    pub(crate) const ALL: [Self; 3] = [Self::Windows, Self::Documents, Self::SessionRestore];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Windows => "Windows",
+            Self::Documents => "Documents",
+            Self::SessionRestore => "Session restore",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowWorkflow {
+    NewApplicationWindow,
+    DetachDocument,
+    MoveDocument,
+    ReattachDocument,
+    ConsolidateWindows,
+    MonitorRecovery,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum NewWindowInitialContent {
+    #[default]
+    EmptyProjectWorkspace,
+    CloneCurrentWorkspaceLayout,
+    MoveActiveDocument,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum WindowLayoutChoice {
+    #[default]
+    Engineering,
+    Review,
+    PlotPresentation,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct WindowSessionDialogState {
+    pub(crate) open: bool,
+    pub(crate) page: WindowSessionPage,
+    pub(crate) workflow: Option<WindowWorkflow>,
+    pub(crate) source_window: crate::workbench::ApplicationWindowId,
+    pub(crate) source_document: Option<crate::workbench::state::WorkspaceDocumentId>,
+    pub(crate) source_label: String,
+    pub(crate) initial_content: NewWindowInitialContent,
+    pub(crate) destination: Option<crate::workbench::ApplicationWindowId>,
+    pub(crate) layout_choice: WindowLayoutChoice,
+    pub(crate) restore_on_launch: bool,
+    pub(crate) synchronize_chrome: bool,
+    pub(crate) recover_all_future_windows: bool,
+    pub(crate) reattach_at_end: bool,
+    pub(crate) recovery_selected: std::collections::BTreeSet<crate::workbench::ApplicationWindowId>,
+    pub(crate) error: Option<String>,
+}
+
+impl WindowSessionDialogState {
+    pub(crate) fn open(&mut self, page: WindowSessionPage) {
+        *self = Self::default();
+        self.open = true;
+        self.page = page;
+    }
+
+    pub(crate) fn open_workflow(&mut self, workflow: WindowWorkflow) {
+        *self = Self {
+            open: true,
+            workflow: Some(workflow),
+            restore_on_launch: true,
+            synchronize_chrome: true,
+            recover_all_future_windows: true,
+            ..Self::default()
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
 
 #[derive(Debug, Clone)]
 enum WindowSessionAction {

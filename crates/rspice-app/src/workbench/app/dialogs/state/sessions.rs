@@ -37,94 +37,6 @@ impl HelpCenterPage {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum WindowSessionPage {
-    #[default]
-    Windows,
-    Documents,
-    SessionRestore,
-}
-
-impl WindowSessionPage {
-    pub(crate) const ALL: [Self; 3] = [Self::Windows, Self::Documents, Self::SessionRestore];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Windows => "Windows",
-            Self::Documents => "Documents",
-            Self::SessionRestore => "Session restore",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WindowWorkflow {
-    NewApplicationWindow,
-    DetachDocument,
-    MoveDocument,
-    ReattachDocument,
-    ConsolidateWindows,
-    MonitorRecovery,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum NewWindowInitialContent {
-    #[default]
-    EmptyProjectWorkspace,
-    CloneCurrentWorkspaceLayout,
-    MoveActiveDocument,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum WindowLayoutChoice {
-    #[default]
-    Engineering,
-    Review,
-    PlotPresentation,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct WindowSessionDialogState {
-    pub(crate) open: bool,
-    pub(crate) page: WindowSessionPage,
-    pub(crate) workflow: Option<WindowWorkflow>,
-    pub(crate) source_window: crate::workbench::ApplicationWindowId,
-    pub(crate) source_document: Option<crate::workbench::state::WorkspaceDocumentId>,
-    pub(crate) source_label: String,
-    pub(crate) initial_content: NewWindowInitialContent,
-    pub(crate) destination: Option<crate::workbench::ApplicationWindowId>,
-    pub(crate) layout_choice: WindowLayoutChoice,
-    pub(crate) restore_on_launch: bool,
-    pub(crate) synchronize_chrome: bool,
-    pub(crate) recover_all_future_windows: bool,
-    pub(crate) reattach_at_end: bool,
-    pub(crate) recovery_selected: std::collections::BTreeSet<crate::workbench::ApplicationWindowId>,
-    pub(crate) error: Option<String>,
-}
-
-impl WindowSessionDialogState {
-    pub(crate) fn open(&mut self, page: WindowSessionPage) {
-        *self = Self::default();
-        self.open = true;
-        self.page = page;
-    }
-
-    pub(crate) fn open_workflow(&mut self, workflow: WindowWorkflow) {
-        *self = Self {
-            open: true,
-            workflow: Some(workflow),
-            restore_on_launch: true,
-            synchronize_chrome: true,
-            recover_all_future_windows: true,
-            ..Self::default()
-        };
-    }
-
-    pub(crate) fn close(&mut self) {
-        *self = Self::default();
-    }
-}
-
 /// The run Run details… is open on, with its manifest taken once when the
 /// dialog opened: projecting a run digests every sample it retained.
 /// The open "Export dataset…" format picker: the format chosen so far, by
@@ -153,7 +65,8 @@ pub struct DialogState {
     /// Versioned help, migration, diagnostics, support, and notices manager.
     pub(crate) help_center: crate::workbench::app::dialogs::help::HelpCenterDialogState,
     /// Device-local window, document, and session presentation manager.
-    pub(crate) window_session: WindowSessionDialogState,
+    pub(crate) window_session:
+        crate::workbench::app::dialogs::window_session::WindowSessionDialogState,
     /// New Cell creation dialog
     pub new_cell_dialog: bool,
     /// New Cell name input
@@ -342,7 +255,7 @@ pub struct DialogState {
     pub(crate) run_details: Option<RunDetailsDialogState>,
 
     /// Command palette state
-    pub command_palette: CommandPaletteState,
+    pub command_palette: crate::workbench::app::command_palette::CommandPaletteState,
 
     /// Validated configuration transaction for Place bus tap.
     pub(crate) bus_tap: crate::workbench::app::dialogs::placement::bus_tap::BusTapDialogState,

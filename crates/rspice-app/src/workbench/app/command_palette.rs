@@ -25,6 +25,55 @@ use crate::workbench::commands::vocabulary::{Command, CommandPlatform, command_c
 
 use crate::workbench::app::RSpiceApp;
 
+/// Command palette (Ctrl+K) state.
+#[derive(Debug, Clone, Default)]
+pub struct CommandPaletteState {
+    /// Whether the palette is showing.
+    pub open: bool,
+    /// Filter text.
+    pub query: String,
+    /// Index into the filtered list.
+    pub selected: usize,
+    /// Request keyboard focus on the next frame (set when opened).
+    pub want_focus: bool,
+    /// Optional reviewed scope selected by a task-focused menu entry. This is
+    /// consumed when the palette opens; ordinary Ctrl+K starts at All.
+    pub(crate) initial_scope: Option<String>,
+    /// Commands run from the palette, newest first — leads the empty-query
+    /// list under a RECENT header. Survives close/reopen, capped at five.
+    pub(crate) recent: Vec<crate::workbench::commands::vocabulary::Command>,
+    /// Whether the palette owns the canonical `?surface=command-palette`
+    /// route. Contextual test and embedded hosts may still render the palette
+    /// without changing application navigation.
+    pub(crate) route_owned: bool,
+}
+
+impl CommandPaletteState {
+    /// Open fresh (empty query, first row selected, focus requested).
+    pub fn open(&mut self) {
+        self.open = true;
+        self.query.clear();
+        self.selected = 0;
+        self.want_focus = true;
+        self.initial_scope = None;
+    }
+
+    pub(crate) fn open_routed(&mut self) {
+        self.open();
+        self.route_owned = true;
+    }
+
+    pub(crate) fn close(&mut self) {
+        self.open = false;
+        self.route_owned = false;
+    }
+
+    pub(crate) fn open_in_scope(&mut self, scope: &str) {
+        self.open();
+        self.initial_scope = Some(scope.to_owned());
+    }
+}
+
 const PALETTE_ID: &str = "rspice.command-palette";
 const DIALOG_LABEL: &str = "Search and run a command";
 const DIALOG_DESCRIPTION: &str = "Type to filter commands, cellviews, models, and signals. Use Up and Down Arrow to select a result and Enter to open it.";
