@@ -6,6 +6,7 @@
 
 use super::transient_post::{DerivedViewAvailability, LoadedDerivedView};
 use super::*;
+use crate::state::SpecializedViewerCacheProvenance;
 
 use rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
 

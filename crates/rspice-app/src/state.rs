@@ -3,6 +3,7 @@
 //! Application state for simulation, project, and UI state.
 //! Core data structures that are shared across multiple modules.
 
+mod active_viewer;
 pub(crate) mod command_catalog;
 use rspice_design::configuration_set;
 pub(crate) mod code_diagnostics;
@@ -28,6 +29,7 @@ mod simulation;
 pub(crate) mod stimulus_library;
 use rspice_design::symbol;
 pub(crate) mod symbol_resolver;
+mod viewer_cache;
 pub(crate) mod workspace;
 pub(crate) mod write_policy;
 
@@ -37,6 +39,7 @@ pub(crate) use rspice_design::symbol::SYMBOL_VIEW_PARSES;
 #[cfg(test)]
 pub(crate) use rspice_model_library::CATALOG_LIBRARY_SERIALIZATIONS;
 
+pub use active_viewer::ActiveViewer;
 pub use configuration_set::{
     ConfigurationBlackBoxPolicy, ConfigurationCloneScope, ConfigurationModelProfile,
     ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog, ConfigurationSetDefinition,
@@ -224,6 +227,9 @@ pub use symbol::{
 #[cfg(test)]
 pub use symbol_resolver::ResolvedCellSymbol;
 pub use symbol_resolver::SymbolResolver;
+pub(crate) use viewer_cache::{
+    SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
+};
 pub(crate) use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, ComplexExpressionPolicy,

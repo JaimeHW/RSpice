@@ -267,10 +267,9 @@ use crate::product::{AnalysisInstanceId, DatasetId};
 
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
-use crate::state::{AnalysisResult, RetainedTrace, SimulationRun};
+use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
-use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results::family_projection::SourceSampleSelection;

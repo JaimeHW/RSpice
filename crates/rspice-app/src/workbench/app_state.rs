@@ -13,7 +13,6 @@
 //! `workflows::project_workflow`). Only accessors over this struct's own
 //! fields are defined here.
 
-pub(in crate::workbench) mod active_viewer;
 pub(in crate::workbench) mod cell_usage;
 pub(in crate::workbench) mod design_checks;
 pub(in crate::workbench) mod design_history;
@@ -42,7 +41,6 @@ use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};
 use crate::workbench::app::DialogState;
 
-pub use active_viewer::ActiveViewer;
 pub(crate) use design_checks::{DesignCheckRuntime, DesignCheckStatus};
 pub(crate) use design_history::{
     DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta, VerilogABuildSettingsHistoryEntry,

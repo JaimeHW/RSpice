@@ -12,7 +12,7 @@ mod marker_history;
 #[cfg(not(target_arch = "wasm32"))]
 mod waivers;
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
-use crate::workbench::app_state::ActiveViewer;
+use crate::state::ActiveViewer;
 use rspice_results_ui::bode::BodeData;
 use rspice_results_ui::eye_diagram::{EyeData, EyeTrace};
 use rspice_results_ui::fft::{FftData, window::WindowFunction};

@@ -63,7 +63,6 @@
     "model->design": 2,
     "model->session": 161,
     "run->code": 6,
-    "run->framework": 26,
     "run->session": 126,
     "services->project": 15,
     "services->results": 1,

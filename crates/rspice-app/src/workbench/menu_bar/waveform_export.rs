@@ -608,11 +608,10 @@ fn fft_spectrum_csv(
         "FFT spectrum export is unavailable because the displayed analysis identity is no longer retained"
             .to_owned()
     })?;
-    let expected_authority =
-        crate::simulation::controller::SpecializedViewerCacheProvenance::for_analysis(
-            displayed.dataset_id,
-            displayed_analysis,
-        );
+    let expected_authority = crate::state::SpecializedViewerCacheProvenance::for_analysis(
+        displayed.dataset_id,
+        displayed_analysis,
+    );
     if state.analysis.cache_authority.fft != Some(expected_authority) {
         return Err(
             "FFT spectrum export is unavailable because the derived spectrum does not belong to the displayed result"

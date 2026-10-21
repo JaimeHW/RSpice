@@ -7,10 +7,10 @@
 #[cfg(test)]
 mod histogram_publication;
 
-use crate::simulation::controller::{
-    SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
+use crate::state::{
+    ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
-use crate::workbench::app_state::{ActiveViewer, AppState};
+use crate::workbench::app_state::AppState;
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
 /// Provenance for the mutable specialized result caches.
