@@ -6,5 +6,8 @@ rp p 0 {r}
 rq q 0 10k
 .param r=1k
 .step param r list 1k 2k 3k
+* The cell reads q on its converter's endpoint, which a run records only when
+* named: the deck net q carries the same bit.
+.esave x1.q__event_0
 .tran 1n 100n
 .end

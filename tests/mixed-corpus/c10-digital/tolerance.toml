@@ -4,7 +4,8 @@ schema = "rspice-mixed-tolerance/1"
 time_precision = 1e-12
 
 # The ISCAS outputs are read as codes on their event nets (xs: the XSPICE nets
-# d_<port>; vlog: the built-in converters' endpoints xdut.<port>__event_0),
+# d_<port>; vlog: the built-in converters' endpoints xdut.<port>__event_0,
+# which a run records only when named, so each vlog deck names them in .esave),
 # MSB first in natural port order, just before each rise of the strobe d_stb.
 # O1 is the ISCAS transistor-level deck run by ngspice-46 with A/D probes at
 # 0.9 V on the same outputs (oracle/<c>-xs.tran.ngspice.cir); O6 is the

@@ -3,5 +3,11 @@
 xlfsr clk q15 q14 q13 q12 q11 q10 q9 q8 q7 q6 q5 q4 q3 q2 q1 q0 lfsr16
 .include ../net/r2r16.cir
 .param vcc=1.0
+* The cells read each port on its converter's endpoint, which a run records
+* only when named: the deck nets carry the same bits.
+.esave xlfsr.clk__event_0 xlfsr.q15__event_0 xlfsr.q14__event_0 xlfsr.q13__event_0
++ xlfsr.q12__event_0 xlfsr.q11__event_0 xlfsr.q10__event_0 xlfsr.q9__event_0 xlfsr.q8__event_0
++ xlfsr.q7__event_0 xlfsr.q6__event_0 xlfsr.q5__event_0 xlfsr.q4__event_0 xlfsr.q3__event_0
++ xlfsr.q2__event_0 xlfsr.q1__event_0 xlfsr.q0__event_0
 .tran 1n 20u
 .end

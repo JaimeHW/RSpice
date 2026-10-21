@@ -6,5 +6,20 @@ xdut g21 g18 g32 g30 g12 g24 g5 g9 g14 g3 g26 g10 g15 g7 g31 g17 g27 g11 g22 g4 
 .param vcc=1.0
 .include ../net/c1908_vectors.cir
 .include ../net/strobe_vectors.cir
+* The cells read each port on its converter's endpoint, which a run records
+* only when named: the deck nets carry the same bits.
+.esave d_stb xdut.g21__event_0 xdut.g18__event_0 xdut.g32__event_0 xdut.g30__event_0
++ xdut.g12__event_0 xdut.g24__event_0 xdut.g5__event_0 xdut.g9__event_0 xdut.g14__event_0
++ xdut.g3__event_0 xdut.g26__event_0 xdut.g10__event_0 xdut.g15__event_0 xdut.g7__event_0
++ xdut.g31__event_0 xdut.g17__event_0 xdut.g27__event_0 xdut.g11__event_0 xdut.g22__event_0
++ xdut.g4__event_0 xdut.g29__event_0 xdut.g20__event_0 xdut.g23__event_0 xdut.g13__event_0
++ xdut.g2__event_0 xdut.g19__event_0 xdut.g8__event_0 xdut.g16__event_0 xdut.g6__event_0
++ xdut.g1__event_0 xdut.g28__event_0 xdut.g25__event_0 xdut.g33__event_0 xdut.g1884__event_0
++ xdut.g1885__event_0 xdut.g1886__event_0 xdut.g1887__event_0 xdut.g1888__event_0
++ xdut.g1889__event_0 xdut.g1890__event_0 xdut.g1891__event_0 xdut.g1892__event_0
++ xdut.g1893__event_0 xdut.g1894__event_0 xdut.g1895__event_0 xdut.g1896__event_0
++ xdut.g1897__event_0 xdut.g1898__event_0 xdut.g1899__event_0 xdut.g1900__event_0
++ xdut.g1901__event_0 xdut.g1902__event_0 xdut.g1903__event_0 xdut.g1904__event_0
++ xdut.g1905__event_0 xdut.g1906__event_0 xdut.g1907__event_0 xdut.g1908__event_0
 .tran 1n 640n
 .end

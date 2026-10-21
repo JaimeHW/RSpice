@@ -1,5 +1,8 @@
 * C3 d_cosim examples, variant 555, tran
 .verilog "../net/555.v" vl555
 .include ../net/555.shared
+* The cell reads the flip-flop's outputs on their converters' endpoints, as the
+* oracle deck names them, which a run records only when named.
+.esave x555.xverilog.q__event_0 x555.xverilog.qbar__event_0
 .tran 10u 200m uic
 .end

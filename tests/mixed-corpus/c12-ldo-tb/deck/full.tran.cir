@@ -8,5 +8,8 @@ xldo vin vout tr3 tr2 tr1 tr0 ldo
 xtrim sclk sdi csn tr3 tr2 tr1 tr0 spi_trim
 xtb vout sclk sdi csn ok meas tb_ldo
 .param vcc=1.8
+* The cell reads ok on its converter's endpoint, which a run records only when
+* named: the deck net ok carries the same bit.
+.esave xtb.ok__event_0
 .tran 0.5u 1.65m
 .end
