@@ -639,3 +639,57 @@ fn show_file_opens_the_folder_that_holds_it() {
         Some("Preferences are not kept in a file on this machine.")
     );
 }
+
+#[test]
+fn shortcut_profile_round_trips_inside_user_preferences() {
+    use crate::state::command_catalog::CommandPlatform;
+    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+    use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+    use egui::Key;
+
+    let mut preferences = UserPreferences::default();
+    preferences
+        .shortcuts_mut()
+        .unwrap()
+        .set_binding(
+            &CommandRegistry,
+            Command::Save.key(),
+            ShortcutBindingSlot::Primary,
+            CommandPlatform::ALL.to_vec(),
+            Some(ShortcutSequence::single(ShortcutStroke::new(
+                Key::F6,
+                false,
+                false,
+                false,
+            ))),
+        )
+        .unwrap();
+    let encoded = serde_json::to_string(&preferences).unwrap();
+    let restored: UserPreferences = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        restored
+            .shortcuts()
+            .resolved_bindings(&CommandRegistry, Command::Save.key())
+            .into_iter()
+            .find(|binding| { binding.slot() == ShortcutBindingSlot::Primary })
+            .unwrap()
+            .display_label(),
+        "F6"
+    );
+}
+
+#[test]
+fn future_incompatible_shortcut_root_does_not_invalidate_the_session() {
+    use crate::state::shortcuts::ShortcutProfileLibraryError;
+    use crate::workbench::commands::vocabulary::CommandRegistry;
+
+    let mut preferences: UserPreferences = serde_json::from_str(r#"{"shortcuts":17}"#).unwrap();
+    assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
+    assert!(!preferences.shortcuts().audit(&CommandRegistry).is_valid());
+
+    assert!(matches!(
+        preferences.shortcuts_mut(),
+        Err(ShortcutProfileLibraryError::IncompatibleLibrary)
+    ));
+    assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
+}

@@ -807,7 +807,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // gating methods that query a module above. `-> app` is `DialogState`,
     // which still lives in the dialogs tree.
     ("app_state", "app", 4),
-    ("app_state", "commands", 1),
     ("app_state", "workflows/file_workflow", 1),
     ("app_state", "workflows/project_workflow", 1),
     // What still reaches the application root rather than the session data.
@@ -817,12 +816,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/model_editor", "app", 1),
     ("documents/result_document", "app", 3),
     ("lifecycle/recovery", "app", 1),
-    // What still names the dispatcher rather than the vocabulary it routes.
-    // These are shortcut artifacts asking whether a command is *available*,
-    // which needs the running application, so they retire with the
-    // `&mut RSpiceApp` burndown rather than with another module move.
-    ("shortcuts/artifacts", "commands", 3),
-    ("shortcuts", "commands", 1),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),

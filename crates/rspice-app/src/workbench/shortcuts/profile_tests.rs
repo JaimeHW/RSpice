@@ -15,7 +15,6 @@ use crate::state::shortcuts::{
     ShortcutProfileIssueCode, ShortcutProfileIssueSeverity, ShortcutProfileLibrary,
     ShortcutProfileLibraryError, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
-use crate::workbench::UserPreferences;
 use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
 use crate::workbench::state::Workspace;
 
@@ -496,50 +495,4 @@ fn a_policy_saved_as_unit_reads_as_the_shipped_policy() {
             .is_empty()
     );
     assert!(read.active().audit(&CommandRegistry).is_valid());
-}
-
-#[test]
-fn shortcut_profile_round_trips_inside_user_preferences() {
-    let mut preferences = UserPreferences::default();
-    preferences
-        .shortcuts_mut()
-        .unwrap()
-        .set_binding(
-            &CommandRegistry,
-            Command::Save.key(),
-            ShortcutBindingSlot::Primary,
-            CommandPlatform::ALL.to_vec(),
-            Some(ShortcutSequence::single(ShortcutStroke::new(
-                Key::F6,
-                false,
-                false,
-                false,
-            ))),
-        )
-        .unwrap();
-    let encoded = serde_json::to_string(&preferences).unwrap();
-    let restored: UserPreferences = serde_json::from_str(&encoded).unwrap();
-    assert_eq!(
-        restored
-            .shortcuts()
-            .resolved_bindings(&CommandRegistry, Command::Save.key())
-            .into_iter()
-            .find(|binding| { binding.slot() == ShortcutBindingSlot::Primary })
-            .unwrap()
-            .display_label(),
-        "F6"
-    );
-}
-
-#[test]
-fn future_incompatible_shortcut_root_does_not_invalidate_the_session() {
-    let mut preferences: UserPreferences = serde_json::from_str(r#"{"shortcuts":17}"#).unwrap();
-    assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
-    assert!(!preferences.shortcuts().audit(&CommandRegistry).is_valid());
-
-    assert!(matches!(
-        preferences.shortcuts_mut(),
-        Err(ShortcutProfileLibraryError::IncompatibleLibrary)
-    ));
-    assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
 }
