@@ -10,7 +10,7 @@ use egui::{InputState, Key, Modifiers};
 
 use crate::state::command_catalog::CommandPlatform;
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 
 mod canvas_focus;
 mod category;
@@ -41,7 +41,12 @@ pub(crate) fn accessibility_shortcut_summary(
     let entries = commands
         .iter()
         .filter_map(|command| {
-            let labels = shortcuts.resolved_labels(*command, platform, operating_system);
+            let labels = shortcuts.resolved_labels(
+                &CommandRegistry,
+                command.key(),
+                platform,
+                operating_system,
+            );
             (!labels.is_empty()).then(|| {
                 format!(
                     "{}: {}",
@@ -68,7 +73,8 @@ mod accessibility_tests {
         let mut shortcuts = ShortcutPreferences::default();
         shortcuts
             .set_binding(
-                Command::SymbolCircleTool,
+                &CommandRegistry,
+                Command::SymbolCircleTool.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::single(ShortcutStroke::new(

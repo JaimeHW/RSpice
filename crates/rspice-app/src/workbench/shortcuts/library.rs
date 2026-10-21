@@ -497,19 +497,6 @@ mod tests {
     }
 
     #[test]
-    fn malformed_legacy_root_round_trips_and_all_normal_mutation_fails_closed() {
-        let mut library: ShortcutProfileLibrary = serde_json::from_str("17").unwrap();
-        assert_eq!(serde_json::to_value(&library).unwrap(), 17);
-        assert!(!library.active().audit().is_valid());
-        assert!(matches!(
-            library.active_mut(),
-            Err(ShortcutProfileLibraryError::IncompatibleLibrary)
-        ));
-        assert_eq!(library.revision(), 0);
-        assert_eq!(serde_json::to_value(library).unwrap(), 17);
-    }
-
-    #[test]
     fn preset_names_are_strict_and_case_fold_duplicates_require_overwrite() {
         for invalid in [
             "",
@@ -629,43 +616,6 @@ mod tests {
             serde_json::json!({})
         );
         assert_eq!(encoded["future-library"]["mode"], "portable");
-    }
-
-    #[test]
-    fn future_library_refuses_preset_mutation_without_discarding_raw_state() {
-        let source = r#"{
-            "library-version":99,
-            "active":{"commands":{}},
-            "named-presets":{"Future":{"commands":{}}},
-            "revision":12,
-            "future-library":{"required":true}
-        }"#;
-        let mut library: ShortcutProfileLibrary = serde_json::from_str(source).unwrap();
-        assert!(!library.is_compatible());
-        assert!(matches!(
-            library.insert_named_preset("Imported", ShortcutPreferences::default(), false),
-            Err(ShortcutProfileLibraryError::IncompatibleLibrary)
-        ));
-        assert!(matches!(
-            library.active_mut(),
-            Err(ShortcutProfileLibraryError::IncompatibleLibrary)
-        ));
-        assert!(matches!(
-            library.edit_active(|profile| profile.reset_all()),
-            Err(ShortcutProfileLibraryError::IncompatibleLibrary)
-        ));
-        assert!(matches!(
-            library.replace_active(ShortcutPreferences::default()),
-            Err(ShortcutProfileLibraryError::IncompatibleLibrary)
-        ));
-        assert!(matches!(
-            library.remove_named_preset("Future"),
-            Err(ShortcutProfileLibraryError::IncompatibleLibrary)
-        ));
-        assert_eq!(
-            serde_json::to_value(library).unwrap(),
-            serde_json::from_str::<Value>(source).unwrap()
-        );
     }
 
     #[test]

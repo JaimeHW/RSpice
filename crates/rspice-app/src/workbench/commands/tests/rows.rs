@@ -332,14 +332,18 @@ fn the_shortcut_resolver_breaks_equal_precedence_ties_by_registry_index() {
             for command in bound {
                 profile
                     .set_binding(
-                        command,
+                        &vocabulary::CommandRegistry,
+                        command.key(),
                         ShortcutBindingSlot::Primary,
                         vec![CommandPlatform::Desktop],
                         Some(ShortcutSequence::single(chord)),
                     )
                     .expect("binding accepted");
             }
-            assert!(profile.is_effective_profile_valid(), "{bound:?}");
+            assert!(
+                profile.is_effective_profile_valid(&vocabulary::CommandRegistry),
+                "{bound:?}"
+            );
             let precedence = profile.policies().context_precedence();
             assert_eq!(
                 shortcut_context_precedence_rank(earlier.shortcut_context(), precedence),

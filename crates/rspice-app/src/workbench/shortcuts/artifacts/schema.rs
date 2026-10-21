@@ -403,7 +403,7 @@ mod tests {
         assert!(
             !decoded
                 .profile()
-                .protected_override_acknowledged(Command::Save)
+                .protected_override_acknowledged(Command::Save.key())
         );
         assert!(
             decoded

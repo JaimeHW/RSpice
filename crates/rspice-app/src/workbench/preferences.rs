@@ -2211,55 +2211,6 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_profile_round_trips_inside_user_preferences() {
-        let mut preferences = UserPreferences::default();
-        preferences
-            .shortcuts_mut()
-            .unwrap()
-            .set_binding(
-                crate::workbench::commands::vocabulary::Command::Save,
-                crate::workbench::shortcuts::ShortcutBindingSlot::Primary,
-                crate::state::command_catalog::CommandPlatform::ALL.to_vec(),
-                Some(crate::workbench::shortcuts::ShortcutSequence::single(
-                    crate::workbench::shortcuts::ShortcutStroke::new(
-                        egui::Key::F6,
-                        false,
-                        false,
-                        false,
-                    ),
-                )),
-            )
-            .unwrap();
-        let encoded = serde_json::to_string(&preferences).unwrap();
-        let restored: UserPreferences = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(
-            restored
-                .shortcuts()
-                .resolved_bindings(crate::workbench::commands::vocabulary::Command::Save)
-                .into_iter()
-                .find(|binding| {
-                    binding.slot() == crate::workbench::shortcuts::ShortcutBindingSlot::Primary
-                })
-                .unwrap()
-                .display_label(),
-            "F6"
-        );
-    }
-
-    #[test]
-    fn future_incompatible_shortcut_root_does_not_invalidate_the_session() {
-        let mut preferences: UserPreferences = serde_json::from_str(r#"{"shortcuts":17}"#).unwrap();
-        assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
-        assert!(!preferences.shortcuts().audit().is_valid());
-
-        assert!(matches!(
-            preferences.shortcuts_mut(),
-            Err(ShortcutProfileLibraryError::IncompatibleLibrary)
-        ));
-        assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);
-    }
-
-    #[test]
     fn personal_print_mapping_presets_route_to_user_preferences() {
         let mut preferences = UserPreferences::default();
         let mapping = PrintMappingTable::try_new(

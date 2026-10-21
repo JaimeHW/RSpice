@@ -79,7 +79,8 @@ fn set(
 ) {
     profile
         .set_binding(
-            command,
+            &CommandRegistry,
+            command.key(),
             slot,
             vec![platform],
             Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -98,7 +99,8 @@ fn set_sequence(
 ) {
     profile
         .set_binding(
-            command,
+            &CommandRegistry,
+            command.key(),
             slot,
             vec![platform],
             Some(
@@ -202,7 +204,8 @@ fn same_target_conflict_honors_every_resolution_policy() {
         }));
         assert_eq!(
             plan.candidate_library().active().resolved_label(
-                Command::ZoomFit,
+                &CommandRegistry,
+                Command::ZoomFit.key(),
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),
@@ -249,7 +252,8 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
     );
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -257,7 +261,8 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
     );
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Browser,
             OperatingSystem::Windows
         ),
@@ -321,7 +326,8 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
         }));
         assert_eq!(
             plan.candidate_library().active().resolved_label(
-                Command::ZoomFit,
+                &CommandRegistry,
+                Command::ZoomFit.key(),
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),
@@ -329,7 +335,8 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
         );
         assert_eq!(
             plan.candidate_library().active().resolved_label(
-                Command::SelectTool,
+                &CommandRegistry,
+                Command::SelectTool.key(),
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),
@@ -373,7 +380,8 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
     }));
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -381,7 +389,8 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
     );
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::SelectTool,
+            &CommandRegistry,
+            Command::SelectTool.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -431,7 +440,8 @@ fn single_platform_replace_preserves_other_platform_slices() {
 
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -439,7 +449,8 @@ fn single_platform_replace_preserves_other_platform_slices() {
     );
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Browser,
             OperatingSystem::Windows
         ),
@@ -467,7 +478,8 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
     let mut imported = ShortcutPreferences::default();
     imported
         .set_binding(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             None,
@@ -490,7 +502,8 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
 
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -498,7 +511,8 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
     );
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Browser,
             OperatingSystem::Windows
         ),
@@ -578,7 +592,8 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
 
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -586,7 +601,8 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
     );
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ToggleLinkedCursors,
+            &CommandRegistry,
+            Command::ToggleLinkedCursors.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -711,7 +727,8 @@ fn full_replace_resets_omitted_known_and_unknown_command_overrides() {
 
     assert_eq!(
         plan.candidate_library().active().resolved_label(
-            Command::ZoomFit,
+            &CommandRegistry,
+            Command::ZoomFit.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -808,7 +825,8 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
         .set_protected_shortcuts(ProtectedShortcutPolicy::AllowWithConfirmation);
     imported
         .set_binding(
-            Command::Save,
+            &CommandRegistry,
+            Command::Save.key(),
             ShortcutBindingSlot::Alternate,
             vec![
                 CommandPlatform::Browser,
@@ -818,12 +836,12 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
             None,
         )
         .unwrap();
-    imported.acknowledge_protected_override(Command::Save);
+    imported.acknowledge_protected_override(Command::Save.key());
     let artifact = artifact_with_coverage(&imported, &["all"], &CommandPlatform::ALL, true);
     assert!(
         !artifact
             .profile()
-            .protected_override_acknowledged(Command::Save)
+            .protected_override_acknowledged(Command::Save.key())
     );
     let options = ShortcutImportOptions {
         conflict_policy: ShortcutConflictPolicy::UseImportedBinding,
@@ -851,7 +869,7 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
         confirmed
             .candidate_library()
             .active()
-            .protected_override_acknowledged(Command::Save)
+            .protected_override_acknowledged(Command::Save.key())
     );
 }
 
@@ -899,7 +917,8 @@ fn named_preset_import_leaves_active_profile_byte_equivalent() {
             .unwrap()
             .profile()
             .resolved_label(
-                Command::ZoomFit,
+                &CommandRegistry,
+                Command::ZoomFit.key(),
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),

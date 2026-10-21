@@ -373,7 +373,8 @@ fn opening_input_respects_custom_palette_bindings() {
             .shortcuts_mut()
             .unwrap()
             .set_binding(
-                Command::CommandPalette,
+                &crate::workbench::commands::vocabulary::CommandRegistry,
+                Command::CommandPalette.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::new(strokes).unwrap()),

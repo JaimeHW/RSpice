@@ -549,7 +549,14 @@ pub(super) fn shortcut_for_occurrence(
     shortcut_override: Option<&str>,
 ) -> String {
     shortcut_override.map_or_else(
-        || shortcuts.resolved_label(command, platform, operating_system),
+        || {
+            shortcuts.resolved_label(
+                &crate::workbench::commands::vocabulary::CommandRegistry,
+                command.key(),
+                platform,
+                operating_system,
+            )
+        },
         str::to_owned,
     )
 }

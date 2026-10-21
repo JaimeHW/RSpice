@@ -873,7 +873,7 @@ mod tests {
     #[test]
     fn pdf_excludes_private_profile_state_and_filesystem_paths() {
         let mut profile = ShortcutPreferences::default();
-        profile.acknowledge_protected_override(Command::Save);
+        profile.acknowledge_protected_override(Command::Save.key());
         let model = build_shortcut_reference_model(
             &profile,
             &ShortcutExportRequest {

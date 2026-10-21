@@ -810,25 +810,4 @@ mod tests {
             r#"{"single-key-canvas":"canvas-focus-only","chord-timeout":"one-point-five-seconds","protected-shortcuts":"require-conflict-free-alternate","context-precedence":"modal-editor-workspace-global"}"#
         );
     }
-
-    /// A session an earlier build saved holds each policy as `()`. It reads
-    /// as the shipped policies, so the profile is not refused as one this
-    /// build does not understand.
-    #[test]
-    fn a_policy_saved_as_unit_reads_as_the_shipped_policy() {
-        let saved = r#"{"library-version":1,"active":{"policies":{"single-key-canvas":(),"chord-timeout":(),"protected-shortcuts":(),"context-precedence":()},"commands":{},"protected-override-acknowledgements":[]},"named-presets":{},"revision":3}"#;
-
-        let read: super::super::ShortcutProfileLibrary = session_ron_options()
-            .from_str(saved)
-            .expect("the session reads the library back");
-
-        assert_eq!(read.active().policies(), &ShortcutPolicies::default());
-        assert!(
-            read.active()
-                .policies()
-                .unknown_execution_policy_names()
-                .is_empty()
-        );
-        assert!(read.active().audit().is_valid());
-    }
 }

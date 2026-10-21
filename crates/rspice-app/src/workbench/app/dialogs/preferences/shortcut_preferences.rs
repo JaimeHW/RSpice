@@ -15,7 +15,7 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
 };
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
 use crate::workbench::{
     ChordTimeoutPolicy, ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutPreferences,
@@ -371,7 +371,7 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
             .draft
             .as_ref()
             .expect("open editor owns a draft")
-            .audit();
+            .audit(&CommandRegistry);
         let errors = blocking_issue_count(&audit);
         editor.dirty && editor.recording.is_none() && errors == 0 && !editor.persistence_pending
     };
@@ -452,7 +452,11 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
 fn render_editor_body(ui: &mut Ui, editor: &mut ShortcutEditorState) {
     editor_toolbar(ui, editor);
 
-    let audit = editor.draft.as_ref().expect("editor draft").audit();
+    let audit = editor
+        .draft
+        .as_ref()
+        .expect("editor draft")
+        .audit(&CommandRegistry);
     let commands = filtered_commands(editor, ui.ctx().os());
     if commands.is_empty() {
         let t = Tokens::get(ui.ctx());
@@ -560,7 +564,7 @@ fn toolbar_controls(ui: &mut Ui, editor: &mut ShortcutEditorState, narrow: bool)
             .draft
             .as_mut()
             .expect("editor draft")
-            .reset_command(command);
+            .reset_command(command.key());
         mark_editor_changed(editor);
     }
 }
@@ -838,7 +842,11 @@ fn mark_editor_changed(editor: &mut ShortcutEditorState) {
 }
 
 fn synchronize_editor_validation(editor: &mut ShortcutEditorState) {
-    let audit = editor.draft.as_ref().expect("editor draft").audit();
+    let audit = editor
+        .draft
+        .as_ref()
+        .expect("editor draft")
+        .audit(&CommandRegistry);
     let errors = blocking_issue_count(&audit);
     if errors == 0 {
         editor.error_summary = None;
@@ -877,7 +885,7 @@ fn filtered_commands(
                 .draft
                 .as_ref()
                 .expect("editor draft")
-                .resolved_bindings(*command)
+                .resolved_bindings(&CommandRegistry, command.key())
                 .into_iter()
                 .map(|binding| binding.sequence().display_label_for(operating_system))
                 .collect::<Vec<_>>()
@@ -924,7 +932,7 @@ fn binding_for_slot(
     operating_system: egui::os::OperatingSystem,
 ) -> Option<String> {
     let bindings = profile
-        .resolved_bindings(command)
+        .resolved_bindings(&CommandRegistry, command.key())
         .into_iter()
         .filter(|binding| binding.slot() == slot)
         .map(|binding| binding.sequence().display_label_for(operating_system))
@@ -934,7 +942,7 @@ fn binding_for_slot(
 
 fn platform_summary(profile: &ShortcutPreferences, command: Command) -> String {
     let mut platforms = profile
-        .resolved_bindings(command)
+        .resolved_bindings(&CommandRegistry, command.key())
         .into_iter()
         .flat_map(|binding| binding.platforms().to_vec())
         .collect::<Vec<_>>();
@@ -1034,7 +1042,7 @@ fn conflict_list(ui: &mut Ui, editor: &mut ShortcutEditorState, audit: &Shortcut
                                 .draft
                                 .as_mut()
                                 .expect("editor draft")
-                                .acknowledge_protected_override(command);
+                                .acknowledge_protected_override(command.key());
                             mark_editor_changed(editor);
                         }
                     }
@@ -1090,7 +1098,7 @@ fn repair_invalid_entries(editor: &mut ShortcutEditorState) {
         .draft
         .as_mut()
         .expect("editor draft")
-        .remove_blocking_invalid_entries();
+        .remove_blocking_invalid_entries(&CommandRegistry);
     mark_editor_changed(editor);
     editor.repair_receipt = Some(if removed.is_empty() {
         "No incompatible shortcut profile entries were removed.".to_owned()
@@ -1202,7 +1210,7 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
         .draft
         .as_ref()
         .expect("editor draft")
-        .audit();
+        .audit(&CommandRegistry);
     if !audit.is_valid() {
         let count = blocking_issue_count(&audit);
         state.dialogs.shortcut_editor.error_summary = Some(format!(
@@ -1429,7 +1437,8 @@ mod tests {
             .set_protected_shortcuts(ProtectedShortcutPolicy::AllowWithConfirmation);
         profile
             .set_binding(
-                Command::Save,
+                &CommandRegistry,
+                Command::Save.key(),
                 ShortcutBindingSlot::Alternate,
                 vec![
                     CommandPlatform::Browser,
@@ -1439,17 +1448,23 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert!(!profile.audit().is_valid());
-        assert!(!profile.protected_override_acknowledged(Command::Save));
+        assert!(!profile.audit(&CommandRegistry).is_valid());
+        assert!(!profile.protected_override_acknowledged(Command::Save.key()));
 
-        profile.acknowledge_protected_override(Command::Save);
+        profile.acknowledge_protected_override(Command::Save.key());
 
-        assert!(profile.audit().is_valid());
-        assert!(profile.protected_override_acknowledged(Command::Save));
-        assert!(profile.audit().issues().iter().any(|issue| {
-            issue.code() == ShortcutProfileIssueCode::MissingBrowserAlternate
-                && issue.severity() == ShortcutProfileIssueSeverity::Warning
-        }));
+        assert!(profile.audit(&CommandRegistry).is_valid());
+        assert!(profile.protected_override_acknowledged(Command::Save.key()));
+        assert!(
+            profile
+                .audit(&CommandRegistry)
+                .issues()
+                .iter()
+                .any(|issue| {
+                    issue.code() == ShortcutProfileIssueCode::MissingBrowserAlternate
+                        && issue.severity() == ShortcutProfileIssueSeverity::Warning
+                })
+        );
     }
 
     #[test]
@@ -1458,14 +1473,28 @@ mod tests {
             r#"{"commands":{"save-project":{"bindings":[{"slot":"primary","platforms":["desktop"],"sequence":[{"key":"DefinitelyNotAKey"}]}]}}}"#,
         )
         .unwrap();
-        assert!(!live.audit().is_valid());
+        assert!(!live.audit(&CommandRegistry).is_valid());
         let mut editor = ShortcutEditorState::default();
         editor.open(&live);
 
         repair_invalid_entries(&mut editor);
 
-        assert!(editor.draft.as_ref().unwrap().audit().is_valid());
-        assert!(!editor.original.as_ref().unwrap().audit().is_valid());
+        assert!(
+            editor
+                .draft
+                .as_ref()
+                .unwrap()
+                .audit(&CommandRegistry)
+                .is_valid()
+        );
+        assert!(
+            !editor
+                .original
+                .as_ref()
+                .unwrap()
+                .audit(&CommandRegistry)
+                .is_valid()
+        );
         assert!(editor.dirty);
         assert!(
             editor
@@ -1556,7 +1585,8 @@ mod tests {
             .as_mut()
             .unwrap()
             .set_binding(
-                Command::Save,
+                &CommandRegistry,
+                Command::Save.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -1586,7 +1616,8 @@ mod tests {
             .as_mut()
             .unwrap()
             .set_binding(
-                Command::Save,
+                &CommandRegistry,
+                Command::Save.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -1626,7 +1657,8 @@ mod tests {
             .as_mut()
             .unwrap()
             .set_binding(
-                Command::Save,
+                &CommandRegistry,
+                Command::Save.key(),
                 ShortcutBindingSlot::Primary,
                 CommandPlatform::ALL.to_vec(),
                 Some(ShortcutSequence::single(ShortcutStroke::new(

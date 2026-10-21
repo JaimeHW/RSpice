@@ -243,9 +243,11 @@ fn customized_shortcuts() -> crate::workbench::shortcuts::ShortcutPreferences {
     policies.set_protected_shortcuts(ProtectedShortcutPolicy::AllowWithConfirmation);
     policies.set_context_precedence(ContextPrecedencePolicy::EditorModalWorkspaceGlobal);
     assert!(
-        profile.audit().is_valid(),
+        profile
+            .audit(&crate::workbench::commands::vocabulary::CommandRegistry)
+            .is_valid(),
         "the customized profile is one the reader could have saved: {:?}",
-        profile.audit()
+        profile.audit(&crate::workbench::commands::vocabulary::CommandRegistry)
     );
     profile
 }
@@ -419,9 +421,11 @@ fn a_populated_session_restores_and_saves_again_unchanged() {
     );
     let shortcuts = restored.ui.preferences.shortcuts();
     assert!(
-        shortcuts.audit().is_valid(),
+        shortcuts
+            .audit(&crate::workbench::commands::vocabulary::CommandRegistry)
+            .is_valid(),
         "the shortcut profile comes back as one this build understands: {:?}",
-        shortcuts.audit()
+        shortcuts.audit(&crate::workbench::commands::vocabulary::CommandRegistry)
     );
     assert_eq!(shortcuts.policies(), customized_shortcuts().policies());
     assert_same_session(

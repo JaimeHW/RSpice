@@ -17,7 +17,7 @@ use super::schema::{
 };
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
     ShortcutSequence,
@@ -118,7 +118,7 @@ pub fn build_shortcut_reference_model(
     profile: &ShortcutPreferences,
     request: &ShortcutExportRequest,
 ) -> Result<ShortcutReferenceModel, ShortcutExportError> {
-    let audit = profile.audit();
+    let audit = profile.audit(&CommandRegistry);
     if !audit.is_valid() {
         return Err(ShortcutExportError(
             "shortcut profile has blocking audit findings and cannot be exported".to_owned(),
@@ -267,7 +267,7 @@ fn user_override_rows(
 ) -> Vec<ShortcutReferenceRow> {
     let mut rows = Vec::new();
     for command in COMMAND_REGISTRY.iter().copied() {
-        let Some(command_override) = profile.command_override(command) else {
+        let Some(command_override) = profile.command_override(command.key()) else {
             continue;
         };
         if command_override.bindings().is_empty() {
@@ -311,7 +311,7 @@ fn materialized_projection(
             || coverage.covers_context(command.shortcut_context().label())
     }) {
         let mut bindings = Vec::new();
-        for binding in profile.effective_bindings(command) {
+        for binding in profile.effective_bindings(&CommandRegistry, command.key()) {
             let binding_platforms = binding
                 .platforms()
                 .iter()
@@ -420,7 +420,8 @@ mod tests {
         let mut profile = ShortcutPreferences::default();
         profile
             .set_binding(
-                Command::ToggleNavigator,
+                &CommandRegistry,
+                Command::ToggleNavigator.key(),
                 ShortcutBindingSlot::Primary,
                 CommandPlatform::ALL.to_vec(),
                 Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -431,7 +432,7 @@ mod tests {
                 ))),
             )
             .unwrap();
-        profile.acknowledge_protected_override(Command::Save);
+        profile.acknowledge_protected_override(Command::Save.key());
         let request = ShortcutExportRequest {
             scope: ShortcutExportScope::UserOverrides,
             include_platform_mappings: false,

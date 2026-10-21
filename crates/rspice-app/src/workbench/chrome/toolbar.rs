@@ -18,7 +18,7 @@ use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_butto
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
 use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::lifecycle::session::SymbolTool;
 
 use run_config_chip::{RUN_CONFIG_CHIP_MAX_WIDTH, run_config_selector};
@@ -275,7 +275,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 fn global_document_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state);
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
-        Command::Save,
+        &CommandRegistry,
+        Command::Save.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
@@ -1577,7 +1578,8 @@ fn toolbar_command(
         }
     };
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
-        command,
+        &CommandRegistry,
+        command.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
@@ -1713,7 +1715,8 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 )
             };
             let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
-                command,
+                &CommandRegistry,
+                command.key(),
                 crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
@@ -1879,7 +1882,8 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
     let enabled = command.is_enabled(app);
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
-        command,
+        &CommandRegistry,
+        command.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );

@@ -6,10 +6,16 @@
 //! `is_enabled` and `execute`, both of which need the running application —
 //! lives up in [`crate::workbench::commands`].
 //!
-//! Keeping the two apart is what lets shortcut profiles, preferences, and
-//! the artifact writers name a command without depending on the dispatcher
-//! that runs it.
+//! Keeping the two apart is what lets the artifact writers name a command
+//! without depending on the dispatcher that runs it. Shortcut profiles name
+//! none: they read command facts by key through [`CommandRegistry`].
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use crate::state::command_catalog::{
+    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
+};
 use crate::state::{ComponentType, ModelsPage};
 use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage, Workspace};
 
@@ -329,6 +335,11 @@ impl Command {
     /// Stable product identity used by portable command profiles.
     pub const fn stable_id(self) -> &'static str {
         self.spec().id
+    }
+
+    /// The key a shortcut profile names this command by.
+    pub const fn key(self) -> CommandKey {
+        CommandKey::new(self.stable_id())
     }
 
     /// Resolve a stable product identity through the canonical registry.
@@ -1436,6 +1447,56 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::About,
     Command::Cancel,
 ];
+
+/// [`COMMAND_REGISTRY`] as the catalog a shortcut profile reads command
+/// facts through. A key names the registered command with that stable id.
+#[derive(Debug, Clone, Copy)]
+pub struct CommandRegistry;
+
+static COMMAND_KEYS: [CommandKey; COMMAND_REGISTRY.len()] = {
+    let mut keys = [CommandKey::new(""); COMMAND_REGISTRY.len()];
+    let mut index = 0;
+    while index < COMMAND_REGISTRY.len() {
+        keys[index] = COMMAND_REGISTRY[index].key();
+        index += 1;
+    }
+    keys
+};
+
+fn registered(command: CommandKey) -> Option<Command> {
+    static BY_KEY: LazyLock<HashMap<CommandKey, Command>> = LazyLock::new(|| {
+        COMMAND_REGISTRY
+            .iter()
+            .map(|command| (command.key(), *command))
+            .collect()
+    });
+    BY_KEY.get(&command).copied()
+}
+
+impl CommandCatalog for CommandRegistry {
+    fn commands(&self) -> &[CommandKey] {
+        &COMMAND_KEYS
+    }
+
+    fn resolve(&self, id: &str) -> Option<CommandKey> {
+        Command::from_stable_id(id).map(Command::key)
+    }
+
+    fn context(&self, command: CommandKey) -> Option<ShortcutContext> {
+        registered(command).map(Command::shortcut_context)
+    }
+
+    fn default_bindings(&self, command: CommandKey) -> &'static [ShortcutBinding] {
+        match registered(command) {
+            Some(command) => command.shortcut_bindings(),
+            None => &[],
+        }
+    }
+
+    fn primary_is_reserved_on(&self, command: CommandKey, platform: CommandPlatform) -> bool {
+        registered(command).is_some_and(|command| command.primary_is_reserved_on(platform))
+    }
+}
 
 /// Searchable projection of [`COMMAND_REGISTRY`]. The command palette itself
 /// and context-only cancellation are intentionally not self-referential rows.

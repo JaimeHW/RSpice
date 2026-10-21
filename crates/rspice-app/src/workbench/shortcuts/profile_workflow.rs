@@ -274,11 +274,18 @@ mod tests {
     #[test]
     fn stage_is_transactional_and_preserves_unknown_future_commands() {
         let staged = stage_shortcut_profile_json(VALID_SOURCE).unwrap();
-        assert!(staged.candidate().audit().issues().iter().any(|issue| {
-            issue
-                .command_id()
-                .is_some_and(|id| id.as_str() == "future-command")
-        }));
+        assert!(
+            staged
+                .candidate()
+                .audit(&crate::workbench::commands::vocabulary::CommandRegistry)
+                .issues()
+                .iter()
+                .any(|issue| {
+                    issue
+                        .command_id()
+                        .is_some_and(|id| id.as_str() == "future-command")
+                })
+        );
 
         let reparsed = serde_json::json!({ "profile": staged.candidate() });
         assert_eq!(
@@ -310,7 +317,7 @@ mod tests {
         .unwrap();
 
         assert!(!staged.candidate().protected_override_acknowledged(
-            crate::workbench::commands::vocabulary::Command::Save
+            crate::workbench::commands::vocabulary::Command::Save.key()
         ));
         // The scrub happens before decoding, so the transferred entry cannot
         // reappear through the candidate's own serialization either.

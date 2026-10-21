@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::state::ViewType;
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
 use crate::workbench::state::Workspace;
 use crate::workbench::{
     ChordTimeoutPolicy, ContextPrecedencePolicy, ShortcutPreferences, SingleKeyCanvasPolicy,
@@ -87,7 +87,7 @@ impl ShortcutResolverState {
         // mixing default bindings with untrusted custom policies would produce
         // a third, never-authored runtime profile.
         let (timeout_policy, precedence, single_key_policy) =
-            if profile.is_effective_profile_valid() {
+            if profile.is_effective_profile_valid(&CommandRegistry) {
                 (
                     profile.policies().chord_timeout(),
                     profile.policies().context_precedence(),
@@ -375,7 +375,10 @@ fn analyze_prefix(
         {
             continue;
         }
-        for (binding_index, binding) in profile.effective_bindings(command).into_iter().enumerate()
+        for (binding_index, binding) in profile
+            .effective_bindings(&CommandRegistry, command.key())
+            .into_iter()
+            .enumerate()
         {
             if !binding.supports(platform)
                 || !single_key_canvas_binding_allowed(
@@ -587,7 +590,8 @@ mod tests {
     fn bind(profile: &mut ShortcutPreferences, command: Command, strokes: Vec<ShortcutStroke>) {
         profile
             .set_binding(
-                command,
+                &CommandRegistry,
+                command.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::new(strokes).unwrap()),
@@ -876,7 +880,7 @@ mod tests {
             }
         });
         let profile: ShortcutPreferences = serde_json::from_value(source).unwrap();
-        assert!(!profile.is_effective_profile_valid());
+        assert!(!profile.is_effective_profile_valid(&CommandRegistry));
         let mut state = ShortcutResolverState::default();
         let fallback = state.resolve(
             &snapshot(&[event(Key::K, primary(), false)], false),
@@ -979,7 +983,7 @@ mod tests {
         let profile = ShortcutPreferences::default();
         assert!(
             profile
-                .effective_bindings(Command::ArraySelection)
+                .effective_bindings(&CommandRegistry, Command::ArraySelection.key())
                 .is_empty(),
             "Create array has no factory shortcut to route through the resolver"
         );
@@ -1106,7 +1110,7 @@ mod tests {
             Command::Copy,
         ] {
             let sequence = profile
-                .effective_bindings(command)
+                .effective_bindings(&CommandRegistry, command.key())
                 .into_iter()
                 .find(|binding| binding.supports(CommandPlatform::Desktop))
                 .map(|binding| binding.sequence().clone())
@@ -1150,7 +1154,7 @@ mod tests {
         let profile = ShortcutPreferences::default();
         for command in [Command::Cut, Command::Paste, Command::Delete] {
             let sequence = profile
-                .effective_bindings(command)
+                .effective_bindings(&CommandRegistry, command.key())
                 .into_iter()
                 .find(|binding| binding.supports(CommandPlatform::Desktop))
                 .map(|binding| binding.sequence().clone())

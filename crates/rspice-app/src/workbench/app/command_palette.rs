@@ -452,9 +452,12 @@ impl PaletteEntry {
         operating_system: egui::os::OperatingSystem,
     ) -> String {
         match self {
-            Self::Command(command) => {
-                shortcuts.resolved_label(*command, platform, operating_system)
-            }
+            Self::Command(command) => shortcuts.resolved_label(
+                &crate::workbench::commands::vocabulary::CommandRegistry,
+                command.key(),
+                platform,
+                operating_system,
+            ),
             Self::CellView(_) | Self::Model(_) | Self::Signal(_) => String::new(),
         }
     }

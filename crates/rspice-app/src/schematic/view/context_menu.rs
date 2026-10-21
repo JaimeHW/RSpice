@@ -1548,7 +1548,8 @@ fn resolve_entry(
         .shortcut_command
         .map_or_else(String::new, |product_command| {
             state.ui.preferences.shortcuts().resolved_label(
-                product_command,
+                &crate::workbench::commands::vocabulary::CommandRegistry,
+                product_command.key(),
                 crate::workbench::app_state::runtime_command_platform(ctx),
                 ctx.os(),
             )

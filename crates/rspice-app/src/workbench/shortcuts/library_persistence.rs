@@ -10,6 +10,7 @@ use std::fmt;
 
 use serde_json::Value;
 
+use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::shortcuts::artifacts::{canonical_json_bytes, hex_digest, sha256};
 
@@ -356,12 +357,12 @@ pub(crate) fn validate_library(library: &ShortcutProfileLibrary) -> Result<(), S
     if library.revision() == u64::MAX {
         return Err("shortcut profile library revision is exhausted".to_owned());
     }
-    if !library.active().audit().is_valid() {
+    if !library.active().audit(&CommandRegistry).is_valid() {
         return Err("active shortcut profile does not pass its complete audit".to_owned());
     }
     if let Some(invalid) = library
         .named_presets()
-        .find(|preset| !preset.profile().audit().is_valid())
+        .find(|preset| !preset.profile().audit(&CommandRegistry).is_valid())
     {
         return Err(format!(
             "shortcut preset '{}' does not pass its complete audit",
@@ -1592,7 +1593,7 @@ mod tests {
             panic!("protected acknowledgement store did not restore");
         };
         assert!(restored.library().active().protected_override_acknowledged(
-            crate::workbench::commands::vocabulary::Command::Save
+            crate::workbench::commands::vocabulary::Command::Save.key()
         ));
     }
 

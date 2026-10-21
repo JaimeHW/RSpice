@@ -948,7 +948,7 @@ pub(super) fn restore_defaults(
             // replacing it has to go through the persist-before-live owner
             // that the editor and the policy rows already use.
             let mut shipped = preferences.shortcuts().clone();
-            shipped.restore_shipped();
+            shipped.restore_shipped(&crate::workbench::commands::vocabulary::CommandRegistry);
             actions.shortcut_policy_candidate = Some(shipped);
         }
         PreferenceCategory::Units => preferences.restore_defaults(
@@ -1397,7 +1397,7 @@ mod tests {
     #[test]
     fn restoring_shortcuts_saves_the_shipped_profile_before_it_goes_live() {
         use crate::state::command_catalog::CommandPlatform;
-        use crate::workbench::commands::vocabulary::Command;
+        use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
         use crate::workbench::{
             ChordTimeoutPolicy, ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence,
             ShortcutStroke,
@@ -1412,7 +1412,8 @@ mod tests {
             .set_chord_timeout(ChordTimeoutPolicy::ThreeSeconds);
         edited
             .set_binding(
-                Command::Save,
+                &CommandRegistry,
+                Command::Save.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::single(ShortcutStroke::new(

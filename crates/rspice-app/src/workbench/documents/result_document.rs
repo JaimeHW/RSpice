@@ -1664,7 +1664,10 @@ fn consume_command_key(
         .ui
         .preferences
         .shortcuts()
-        .effective_bindings(command)
+        .effective_bindings(
+            &crate::workbench::commands::vocabulary::CommandRegistry,
+            command.key(),
+        )
         .iter()
         .filter(|binding| binding.supports(platform))
         .filter_map(|binding| {
@@ -2090,7 +2093,8 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 
     if viewer_requires_retained_results(viewer) && !app.state.simulation.retained.has_results() {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
-            crate::workbench::commands::vocabulary::Command::RunSimulation,
+            &crate::workbench::commands::vocabulary::CommandRegistry,
+            crate::workbench::commands::vocabulary::Command::RunSimulation.key(),
             crate::workbench::app_state::runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
         );

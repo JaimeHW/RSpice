@@ -34,6 +34,43 @@ fn command_catalog_has_unique_stable_ids() {
     }
 }
 
+/// A shortcut profile reads its command facts by key through the registry's
+/// catalog. Every registered command answers there as it answers itself, in
+/// registry order, and a retired id resolves to the command it became.
+#[test]
+fn the_registry_catalog_answers_for_every_command_as_the_command_does() {
+    use crate::state::command_catalog::{CommandCatalog, CommandKey, CommandPlatform};
+
+    let catalog = vocabulary::CommandRegistry;
+    assert_eq!(catalog.commands().len(), vocabulary::COMMAND_REGISTRY.len());
+    for (key, command) in catalog
+        .commands()
+        .iter()
+        .copied()
+        .zip(vocabulary::COMMAND_REGISTRY.iter().copied())
+    {
+        assert_eq!(key, command.key());
+        assert_eq!(key.as_str(), command.stable_id());
+        assert_eq!(catalog.resolve(command.stable_id()), Some(key));
+        assert_eq!(catalog.context(key), Some(command.shortcut_context()));
+        assert_eq!(catalog.default_bindings(key), command.shortcut_bindings());
+        for platform in CommandPlatform::ALL {
+            assert_eq!(
+                catalog.primary_is_reserved_on(key, platform),
+                command.primary_is_reserved_on(platform),
+                "{command:?} on {platform:?}"
+            );
+        }
+    }
+    for &(alias, live) in super::rows::LEGACY_ALIASES {
+        assert_eq!(catalog.resolve(alias).map(CommandKey::as_str), Some(live));
+    }
+    let unknown = CommandKey::new("future-command");
+    assert_eq!(catalog.resolve(unknown.as_str()), None);
+    assert_eq!(catalog.context(unknown), None);
+    assert!(catalog.default_bindings(unknown).is_empty());
+}
+
 /// The palette is a title-matched list, so two commands sharing a title are two
 /// rows the user cannot tell apart — and picking the wrong one goes somewhere
 /// else entirely. Unique IDs do not cover this: they are never displayed.

@@ -1,12 +1,62 @@
-//! The terms a command's keyboard shortcuts are declared in.
+//! The command facts a persisted shortcut profile is written against.
 //!
-//! A binding targets platforms and a command's keys act in a context. The
-//! registry declares every command's factory bindings in these terms, and a
-//! persisted shortcut profile stores its own bindings in them, so the model
-//! can name them without naming the commands they describe.
+//! A profile names a command by its stable id, [`CommandKey`]. Which commands
+//! exist, the keys each ships with and the context its keys act in are the
+//! command registry's to declare; the profile reads them through
+//! [`CommandCatalog`]. The values those facts are stated in, platforms,
+//! contexts and chords, live here, so the model names them without naming a
+//! command.
 
 use egui::Key;
 use serde::{Deserialize, Serialize};
+
+use crate::product::CommandId;
+
+/// A command, named by its stable id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CommandKey(&'static str);
+
+impl CommandKey {
+    #[must_use]
+    pub const fn new(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+
+    /// The id a profile stores the command's bindings under.
+    #[must_use]
+    pub fn id(self) -> CommandId {
+        CommandId::new(self.0).expect("registry command IDs are validated product IDs")
+    }
+}
+
+/// The command facts a shortcut profile reads.
+///
+/// A profile caches whether it is valid, so every call on one profile passes
+/// the same catalog. The application has one: the command registry.
+pub trait CommandCatalog {
+    /// Every command, in registry order.
+    fn commands(&self) -> &[CommandKey];
+
+    /// The command a stored id names, a retired id included; `None` for an
+    /// id this build has no command for.
+    fn resolve(&self, id: &str) -> Option<CommandKey>;
+
+    /// The context the command's keys act in; `None` for a key the catalog
+    /// does not hold.
+    fn context(&self, command: CommandKey) -> Option<ShortcutContext>;
+
+    /// The bindings the command ships with.
+    fn default_bindings(&self, command: CommandKey) -> &'static [ShortcutBinding];
+
+    /// Whether `platform` keeps the command's primary chord for itself, so
+    /// the command needs an alternate there.
+    fn primary_is_reserved_on(&self, command: CommandKey, platform: CommandPlatform) -> bool;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

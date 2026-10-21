@@ -1438,7 +1438,8 @@ mod tests {
         let mut imported = ShortcutPreferences::default();
         imported
             .set_binding(
-                Command::ZoomFit,
+                &crate::workbench::commands::vocabulary::CommandRegistry,
+                Command::ZoomFit.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -1481,7 +1482,8 @@ mod tests {
         let original_revision = state.plan.as_ref().unwrap().base_revision();
         base.edit_active(|profile| {
             profile.set_binding(
-                Command::ZoomFit,
+                &crate::workbench::commands::vocabulary::CommandRegistry,
+                Command::ZoomFit.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 None,
@@ -1508,7 +1510,8 @@ mod tests {
             .set_protected_shortcuts(ProtectedShortcutPolicy::AllowWithConfirmation);
         imported
             .set_binding(
-                Command::Save,
+                &crate::workbench::commands::vocabulary::CommandRegistry,
+                Command::Save.key(),
                 ShortcutBindingSlot::Alternate,
                 vec![
                     CommandPlatform::Browser,
@@ -1518,7 +1521,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        imported.acknowledge_protected_override(Command::Save);
+        imported.acknowledge_protected_override(Command::Save.key());
         let artifact = exported_artifact(&imported);
         let base = ShortcutProfileLibrary::default();
         let mut state = ShortcutImportDialogState::default();

@@ -11,7 +11,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
@@ -101,7 +101,7 @@ fn shortcut_help_row(
     operating_system: egui::os::OperatingSystem,
 ) -> (String, &'static str) {
     (
-        shortcuts.resolved_label(command, platform, operating_system),
+        shortcuts.resolved_label(&CommandRegistry, command.key(), platform, operating_system),
         command.spec().label,
     )
 }
@@ -138,7 +138,7 @@ fn shortcut_row_matches(
         || command.spec().label.to_lowercase().contains(filter)
         || command.stable_id().contains(filter)
         || shortcuts
-            .resolved_label(command, platform, operating_system)
+            .resolved_label(&CommandRegistry, command.key(), platform, operating_system)
             .to_lowercase()
             .contains(filter)
 }
@@ -884,7 +884,12 @@ mod tests {
             .flat_map(|category| category.commands())
             .find(|command| {
                 shortcuts
-                    .resolved_label(*command, CommandPlatform::Desktop, os)
+                    .resolved_label(
+                        &CommandRegistry,
+                        command.key(),
+                        CommandPlatform::Desktop,
+                        os,
+                    )
                     .is_empty()
             })
             .expect("some listed command has no shortcut");

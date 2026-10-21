@@ -1319,7 +1319,7 @@ mod tests {
         let command_override = first
             .artifact()
             .profile()
-            .command_override(Command::CloseActiveDocument)
+            .command_override(Command::CloseActiveDocument.key())
             .unwrap();
         let strokes = command_override.bindings()[0].sequence().strokes();
         assert_eq!(strokes.len(), 2);
@@ -1356,7 +1356,7 @@ mod tests {
         let windows_binding = windows
             .artifact()
             .profile()
-            .command_override(Command::Save)
+            .command_override(Command::Save.key())
             .unwrap();
         let windows_stroke = windows_binding.bindings()[0].sequence().strokes()[0];
         assert!(windows_stroke.primary());
@@ -1371,7 +1371,7 @@ mod tests {
         let mac_binding = mac
             .artifact()
             .profile()
-            .command_override(Command::Save)
+            .command_override(Command::Save.key())
             .unwrap();
         let mac_stroke = mac_binding.bindings()[0].sequence().strokes()[0];
         assert!(mac_stroke.primary());
@@ -1429,7 +1429,7 @@ mod tests {
             conflict
                 .artifact()
                 .profile()
-                .command_override(Command::Save)
+                .command_override(Command::Save.key())
                 .is_none()
         );
     }
@@ -1484,7 +1484,7 @@ mod tests {
             adaptation
                 .artifact()
                 .profile()
-                .command_override(Command::Save)
+                .command_override(Command::Save.key())
                 .is_none()
         );
         assert_every_entry_accounted_for(adaptation.report());
@@ -1506,7 +1506,7 @@ mod tests {
         let command_override = adaptation
             .artifact()
             .profile()
-            .command_override(Command::Save)
+            .command_override(Command::Save.key())
             .unwrap();
         assert!(command_override.bindings()[0].sequence().strokes()[0].shift());
         assert_every_entry_accounted_for(adaptation.report());

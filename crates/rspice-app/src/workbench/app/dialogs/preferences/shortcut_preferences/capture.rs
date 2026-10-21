@@ -205,7 +205,8 @@ pub(super) fn finish_capture(editor: &mut ShortcutEditorState, target: ShortcutC
         target.slot,
     );
     match editor.draft.as_mut().expect("editor draft").set_binding(
-        target.command,
+        &CommandRegistry,
+        target.command.key(),
         target.slot,
         platforms,
         Some(sequence),
@@ -230,7 +231,8 @@ pub(super) fn clear_capture(editor: &mut ShortcutEditorState, target: ShortcutCa
         target.slot,
     );
     match editor.draft.as_mut().expect("editor draft").set_binding(
-        target.command,
+        &CommandRegistry,
+        target.command.key(),
         target.slot,
         platforms,
         None,
@@ -261,7 +263,7 @@ pub(super) fn binding_platforms(
     slot: ShortcutBindingSlot,
 ) -> Vec<CommandPlatform> {
     if let Some(binding) = profile
-        .resolved_bindings(command)
+        .resolved_bindings(&CommandRegistry, command.key())
         .into_iter()
         .find(|binding| binding.slot() == slot)
     {

@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::schema::DecodedShortcutArtifact;
 use super::{canonical_json_bytes, sha256};
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutPreferences,
     ShortcutProfileAudit, ShortcutProfileIssueCode, ShortcutProfileIssueSeverity,
@@ -268,13 +268,13 @@ pub fn plan_shortcut_import(
     if !base.is_compatible() {
         return Err(ShortcutImportPlanError::IncompatibleLibrary);
     }
-    let base_audit = base.active().audit();
+    let base_audit = base.active().audit(&CommandRegistry);
     if !base_audit.is_valid() {
         return Err(ShortcutImportPlanError::InvalidBaseProfile(
             blocking_messages(&base_audit),
         ));
     }
-    let imported_audit = artifact.profile().audit();
+    let imported_audit = artifact.profile().audit(&CommandRegistry);
     let non_resolvable = imported_audit
         .issues()
         .iter()
@@ -374,7 +374,7 @@ pub fn plan_shortcut_import(
                         .coverage
                         .covers_context(command.shortcut_context().label())
                 })
-                .filter(|command| baseline_profile.command_override(*command).is_some())
+                .filter(|command| baseline_profile.command_override(command.key()).is_some())
                 .map(|command| command.stable_id().to_owned()),
         );
     }
@@ -387,7 +387,7 @@ pub fn plan_shortcut_import(
         {
             continue;
         }
-        let has_current_override = baseline_profile.command_override(command).is_some();
+        let has_current_override = baseline_profile.command_override(command.key()).is_some();
         for slot in ShortcutBindingSlot::ALL {
             for platform in CommandPlatform::ALL {
                 if !artifact.manifest().coverage.covers_platform(platform) {
@@ -630,7 +630,7 @@ pub fn plan_shortcut_import(
     }
 
     let mut required_protected_confirmations = BTreeSet::new();
-    let pre_confirmation_audit = working_profile.audit();
+    let pre_confirmation_audit = working_profile.audit(&CommandRegistry);
     for issue in pre_confirmation_audit.issues() {
         if issue.severity() == ShortcutProfileIssueSeverity::Error
             && issue.code() == ShortcutProfileIssueCode::MissingBrowserAlternate
@@ -641,7 +641,7 @@ pub fn plan_shortcut_import(
                 .contains(command_id.as_str())
                 && let Some(command) = Command::from_stable_id(command_id.as_str())
             {
-                working_profile.acknowledge_protected_override(command);
+                working_profile.acknowledge_protected_override(command.key());
             } else {
                 required_protected_confirmations.insert(command_id.as_str().to_owned());
                 conflicts.push(ShortcutImportConflict {
@@ -657,7 +657,7 @@ pub fn plan_shortcut_import(
             }
         }
     }
-    let audit = working_profile.audit();
+    let audit = working_profile.audit(&CommandRegistry);
 
     let mut candidate_library = base.clone();
     match options.merge_policy {
@@ -713,7 +713,7 @@ fn imported_command_ids(artifact: &DecodedShortcutArtifact) -> BTreeSet<String> 
 fn profile_slices(profile: &ShortcutPreferences) -> SliceMap {
     let mut slices = BTreeMap::new();
     for command in COMMAND_REGISTRY.iter().copied() {
-        let bindings = profile.resolved_bindings(command);
+        let bindings = profile.resolved_bindings(&CommandRegistry, command.key());
         for slot in ShortcutBindingSlot::ALL {
             for platform in CommandPlatform::ALL {
                 let sequence = bindings
@@ -759,7 +759,7 @@ fn apply_slice_map(
             .iter()
             .all(|key| slices.get(key) == defaults.get(key))
         {
-            profile.reset_command(command);
+            profile.reset_command(command.key());
             continue;
         }
         let mut grouped =
@@ -782,7 +782,7 @@ fn apply_slice_map(
         let command_override = CommandShortcutOverride::new(bindings)
             .map_err(|error| ShortcutImportPlanError::Profile(error.to_string()))?;
         profile
-            .set_command_override(command, command_override)
+            .set_command_override(command.key(), command_override)
             .map_err(|error| ShortcutImportPlanError::Profile(error.to_string()))?;
     }
     Ok(())
@@ -1251,7 +1251,7 @@ fn collision_bindings(
     profile: &ShortcutPreferences,
     command: Command,
 ) -> Vec<crate::workbench::shortcuts::ResolvedShortcutBinding> {
-    let bindings = profile.resolved_bindings(command);
+    let bindings = profile.resolved_bindings(&CommandRegistry, command.key());
     if !matches!(
         command.shortcut_context(),
         ShortcutContext::EditContext
