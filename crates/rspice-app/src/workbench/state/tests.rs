@@ -1,8 +1,8 @@
 //! Tests for workspace layout persistence.
 //!
-//! Each workspace keeps an independent dock composition, presets apply to the
-//! live layout owner rather than a copy, and every layout must round-trip
-//! through the serialized session unchanged.
+//! Each workspace keeps an independent dock composition, and presets apply to
+//! the live layout owner rather than a copy. That every layout round-trips
+//! through the saved session unchanged is tested with the session wire.
 
 use super::*;
 
@@ -89,19 +89,6 @@ fn legacy_project_pages_restore_to_their_supported_successors() {
 }
 
 #[test]
-fn workbench_without_a_project_page_defaults_to_overview() {
-    let mut encoded = serde_json::to_value(WorkbenchState::default()).unwrap();
-    encoded
-        .as_object_mut()
-        .expect("workbench is an object")
-        .remove("project_page");
-
-    let restored: WorkbenchState = serde_json::from_value(encoded).unwrap();
-
-    assert_eq!(restored.project_page, ProjectPage::Overview);
-}
-
-#[test]
 fn ordinary_noise_uses_the_frequency_document_identity() {
     use super::super::ResultViewer;
     assert_eq!(
@@ -136,106 +123,6 @@ fn every_claimed_viewer_document_is_in_the_catalog() {
         !noise.analysis_ids.contains(&"noise"),
         "the spectrum document would accept noise, so this test proves nothing"
     );
-}
-
-/// A session saved while the Visualization Studio existed carries its
-/// `visualization_studio` block and may have quit on the Studio. The block
-/// below is copied from a real session file, with a pane, a selection and a
-/// cache budget added. The session must still load: the block is ignored,
-/// the Studio route is dropped with one diagnostic, and the rest of the
-/// session survives.
-#[test]
-fn session_saved_with_the_deleted_visualization_studio_still_restores() {
-    const STUDIO: &str = concat!(
-        "visualization_studio:(section:viewers,tool:select,zoom:2.5,",
-        "selected_viewer_document:\"viewer-bode\",panes:[(id:42,viewer:Bode,",
-        "viewer_document_id:\"viewer-bode\",",
-        "dataset_id:\"6f1c2c1e-5b7a-4c1d-9a54-0d3c2f6b8e01\",analysis_sequence:1,",
-        "x_link:Some(1),cursor_group:None,page:\"Page 1\",placement:r#below-selected)],",
-        "active_pane:Some(42),next_identity:43,revision:7,annotations:[],markers:[],",
-        "measurements:[],linked_x_ranges:{1:(0.0,1e-3)},linked_cursor_positions:{},",
-        "pane_x_ranges:{},pane_cursor_positions:{},family_policies:{},",
-        "report_page_policies:{},comparison_receipts:[],difference_trace_sets:[],",
-        "autoscale:r#robust-visible,complex_projection:r#magnitude-phase,",
-        "display_lod:r#envelope-preserving,tile_memory_mib:2048,significant_digits:9,",
-        "touch_pane:stage)"
-    );
-    let mut state = WorkbenchState::default();
-    state.activate(Workspace::Results);
-    let saved = ron::to_string(&state).expect("workbench serializes");
-    let saved = saved.replacen(
-        "current:\"?view=results\"",
-        "current:\"?surface=visualization-studio\"",
-        1,
-    );
-    assert!(
-        saved.contains("?surface=visualization-studio"),
-        "the session must have quit on the Studio for this to prove anything"
-    );
-    // The retired engineering profile rides along, as it does in every
-    // session saved before it was removed.
-    let saved = format!(
-        "{},engineering_profile:r#rf-microwave,{STUDIO})",
-        saved
-            .strip_suffix(')')
-            .expect("a workbench session is a RON struct")
-    );
-
-    let mut restored: WorkbenchState =
-        ron::from_str(&saved).expect("a session that kept the Studio's state restores");
-    restored.reconcile_restored_navigation();
-
-    assert_eq!(
-        restored.current_route(),
-        SurfaceRoute::surface(SurfaceId::Design)
-    );
-    assert!(
-        restored
-            .take_route_diagnostic()
-            .is_some_and(|message| message.contains("Malformed routes"))
-    );
-}
-
-#[test]
-fn library_cellview_route_and_page_restore_with_models_workspace_ownership() {
-    let mut state = WorkbenchState::default();
-    state.library_cellview_page = LibraryCellviewPage::SymbolForm;
-    state
-        .navigate(
-            SurfaceRoute::surface(SurfaceId::LibraryCellviewManager),
-            RouteTransitionSource::User,
-        )
-        .expect("Library Cellview Manager has a registered executor");
-
-    assert_eq!(state.workspace, Workspace::Models);
-    assert_eq!(
-        state.current_route().surface_id(),
-        SurfaceId::LibraryCellviewManager
-    );
-    assert!(!state.application_modal_open());
-
-    let encoded = serde_json::to_string(&state).expect("workbench session serializes");
-    let mut restored: WorkbenchState =
-        serde_json::from_str(&encoded).expect("workbench session restores");
-    restored.workspace = Workspace::Project;
-    restored.reconcile_restored_navigation();
-
-    assert_eq!(restored.workspace, Workspace::Models);
-    assert_eq!(
-        restored.current_route().surface_id(),
-        SurfaceId::LibraryCellviewManager
-    );
-    assert_eq!(
-        restored.library_cellview_page,
-        LibraryCellviewPage::SymbolForm
-    );
-}
-
-#[test]
-fn legacy_session_without_library_cellview_page_defaults_to_libraries() {
-    let state: WorkbenchState =
-        serde_json::from_str(r#"{"workspace":"Models"}"#).expect("legacy workbench restores");
-    assert_eq!(state.library_cellview_page, LibraryCellviewPage::Libraries);
 }
 
 #[test]
@@ -453,23 +340,6 @@ fn manager_history_roundtrips_back_and_forward_to_its_source() {
 }
 
 #[test]
-fn legacy_workspace_session_migrates_to_the_matching_primary_route() {
-    let mut state: WorkbenchState =
-        serde_json::from_str(r#"{"workspace":"Results"}"#).expect("legacy workbench restores");
-    assert_eq!(state.current_route().surface_id(), SurfaceId::Design);
-
-    state.reconcile_restored_navigation();
-    assert_eq!(state.workspace, Workspace::Results);
-    assert_eq!(state.current_route().surface_id(), SurfaceId::Results);
-    assert_eq!(
-        state.take_browser_history_effect(),
-        Some(BrowserHistoryEffect::Replace(SurfaceRoute::surface(
-            SurfaceId::Results
-        )))
-    );
-}
-
-#[test]
 fn legacy_shell_geometry_migrates_to_redesigned_responsive_docks() {
     let mut state = WorkbenchState::default();
     state.layout_schema_version = 0;
@@ -629,43 +499,6 @@ fn application_modals_own_global_input_exclusively() {
         )
         .expect("jobs manager has a registered executor");
     assert!(state.application_modal_open());
-}
-
-/// A session saved while the capability matrix existed carries its
-/// `capability_matrix` block and may have the matrix open or in its history.
-/// It must still load: the stale block is ignored, the dead routes are
-/// dropped with one diagnostic, and the rest of the session survives.
-#[test]
-fn session_saved_with_the_deleted_capability_matrix_still_restores() {
-    let mut state = WorkbenchState::default();
-    state.activate(Workspace::Results);
-    let mut saved = serde_json::to_value(&state).expect("workbench serializes");
-    saved["engineering_profile"] = serde_json::json!("rf-microwave");
-    saved["capability_matrix"] = serde_json::json!({ "section": "workspaces" });
-    saved["navigation"] = serde_json::json!({
-        "current": "?surface=feature-availability",
-        "back": ["?view=results", "?surface=touch-edit-guide"],
-        "forward": [],
-        "recent": ["?surface=interoperability-matrix"]
-    });
-
-    let mut restored: WorkbenchState =
-        serde_json::from_value(saved).expect("an old session restores");
-    restored.reconcile_restored_navigation();
-
-    assert_eq!(
-        restored.current_route(),
-        SurfaceRoute::surface(SurfaceId::Design)
-    );
-    assert_eq!(
-        restored.previous_route(),
-        Some(SurfaceRoute::surface(SurfaceId::Results))
-    );
-    assert!(
-        restored
-            .take_route_diagnostic()
-            .is_some_and(|message| message.contains("Malformed routes"))
-    );
 }
 
 #[test]
@@ -850,29 +683,6 @@ fn workspace_switches_restore_independent_dock_compositions() {
     assert_eq!(state.navigator_width, 224.0);
     assert!(state.console_visible);
     assert_eq!(state.console_height, 275.0);
-}
-
-#[test]
-fn independent_workspace_layouts_round_trip_with_the_session() {
-    let mut state = WorkbenchState::default();
-    state.apply_workspace_preset(WorkspacePreset::Diagnostics);
-    state.activate(Workspace::Results);
-    state.apply_results_review_layout();
-
-    let encoded = serde_json::to_string(&state).unwrap();
-    let restored: WorkbenchState = serde_json::from_str(&encoded).unwrap();
-    assert!(restored.workspace_layout(Workspace::Design).console_visible);
-    assert!(
-        !restored
-            .workspace_layout(Workspace::Results)
-            .navigator_visible
-    );
-    assert_eq!(
-        restored
-            .workspace_layout(Workspace::Results)
-            .inspector_width,
-        332.0
-    );
 }
 
 #[test]

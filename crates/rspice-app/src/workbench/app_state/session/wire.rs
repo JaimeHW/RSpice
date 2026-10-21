@@ -1162,265 +1162,41 @@ mod ui_session_tests {
     }
 }
 
-/// The workbench wire against the `WorkbenchState` derive, on every workbench
-/// fixture the session tests hold: each writes the same eframe RON, named RON
-/// and JSON, and each text reads back to the same state, runtime-only fields
-/// included, with the same JSON for the legacy project identity.
-///
-/// A hash set writes its entries in the order it iterates, which differs from
-/// one set to the next, so no fixture holds more than one entry in a set.
+/// Workbench sessions saved and restored through the wire: missing fields,
+/// retired blocks and routes, and the layouts and pages a restore keeps.
 #[cfg(test)]
-mod dual_run_tests {
+mod workbench_session_tests {
     use super::*;
-    use crate::workbench::app_state::session::serialization::populated_session::populated_session;
+    use crate::workbench::{BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute};
 
-    #[derive(Debug, Clone, Copy)]
-    enum Encoding {
-        /// What eframe writes, read as `AppState::restore_eframe_session`
-        /// reads it.
-        Ron,
-        /// The safe-mode snapshot and the legacy identity.
-        Json,
-    }
-
-    impl Encoding {
-        fn write(self, value: &impl Serialize) -> String {
-            match self {
-                Self::Ron => ron::ser::to_string(value).expect("eframe RON encodes"),
-                Self::Json => serde_json::to_string(value).expect("JSON encodes"),
-            }
-        }
-
-        fn read<T: serde::de::DeserializeOwned>(self, text: &str) -> T {
-            match self {
-                Self::Ron => ron::Options::default()
-                    .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
-                    .from_str(text)
-                    .unwrap_or_else(|error| panic!("the RON reads: {error}\n{text}")),
-                Self::Json => serde_json::from_str(text)
-                    .unwrap_or_else(|error| panic!("the JSON reads: {error}\n{text}")),
-            }
-        }
-    }
-
-    /// RON that names every struct. eframe does not write names, but a reader
-    /// that finds one checks it.
-    fn named_ron(value: &impl Serialize) -> String {
-        ron::ser::to_string_pretty(value, ron::ser::PrettyConfig::new().struct_names(true))
-            .expect("named RON encodes")
-    }
-
-    fn restored(wire: WorkbenchWire) -> WorkbenchState {
+    fn restore(wire: WorkbenchWire) -> WorkbenchState {
         let mut state = WorkbenchState::default();
         wire.scatter(&mut state);
         state
     }
 
-    /// `Debug` text with the entries of every map and set sorted, because a
-    /// hash container prints in the order its own random seed gives it.
-    /// Structs print `Name { ` with a space, maps and sets `{` without one.
-    fn canonical_debug(value: &impl std::fmt::Debug) -> String {
-        let text = format!("{value:?}");
-        let mut chars = text.chars().peekable();
-        let mut out = String::new();
-        copy_group(&mut chars, None, &mut out);
-        out
-    }
-
-    type Chars<'a> = std::iter::Peekable<std::str::Chars<'a>>;
-
-    fn copy_group(chars: &mut Chars<'_>, close: Option<char>, out: &mut String) {
-        while let Some(c) = chars.next() {
-            out.push(c);
-            if Some(c) == close {
-                return;
-            }
-            copy_nested(c, chars, out);
-        }
-    }
-
-    fn copy_nested(c: char, chars: &mut Chars<'_>, out: &mut String) {
-        match c {
-            '"' => copy_quoted(chars, out),
-            '(' => copy_group(chars, Some(')'), out),
-            '[' => copy_group(chars, Some(']'), out),
-            '{' if chars.peek() == Some(&' ') => copy_group(chars, Some('}'), out),
-            '{' => copy_sorted_entries(chars, out),
-            _ => {}
-        }
-    }
-
-    fn copy_quoted(chars: &mut Chars<'_>, out: &mut String) {
-        while let Some(c) = chars.next() {
-            out.push(c);
-            match c {
-                '\\' => {
-                    if let Some(escaped) = chars.next() {
-                        out.push(escaped);
-                    }
-                }
-                '"' => return,
-                _ => {}
-            }
-        }
-    }
-
-    fn copy_sorted_entries(chars: &mut Chars<'_>, out: &mut String) {
-        let mut entries = Vec::new();
-        let mut entry = String::new();
-        while let Some(c) = chars.next() {
-            match c {
-                '}' => break,
-                ',' if chars.peek() == Some(&' ') => {
-                    chars.next();
-                    entries.push(std::mem::take(&mut entry));
-                }
-                _ => {
-                    entry.push(c);
-                    copy_nested(c, chars, &mut entry);
-                }
-            }
-        }
-        if !entry.is_empty() {
-            entries.push(entry);
-        }
-        entries.sort();
-        out.push_str(&entries.join(", "));
-        out.push('}');
-    }
-
-    /// (a) and (b): the borrowed wire writes `state` as its derive does.
-    fn assert_writes_as_derived(state: &WorkbenchState, fixture: &str) {
-        let wire = WorkbenchWireRef::capture(state);
-        for encoding in [Encoding::Ron, Encoding::Json] {
-            assert_eq!(
-                encoding.write(state),
-                encoding.write(&wire),
-                "{fixture}: {encoding:?} text"
-            );
-        }
-        assert_eq!(named_ron(state), named_ron(&wire), "{fixture}: named RON");
-        assert_eq!(
-            serde_json::to_value(state).expect("the derive encodes"),
-            serde_json::to_value(&wire).expect("the wire encodes"),
-            "{fixture}: JSON value"
-        );
-    }
-
-    /// (c): `text` reads through the wire, scattered onto a default state, to
-    /// the state the derive reads, and the wire it read hashes as that state
-    /// does for the legacy project identity. Returns the state read.
-    fn assert_reads_as_derived(encoding: Encoding, text: &str, fixture: &str) -> WorkbenchState {
-        let derived: WorkbenchState = encoding.read(text);
-        let wire: WorkbenchWire = encoding.read(text);
-        assert_eq!(
-            serde_json::to_value(&derived).expect("the derive encodes"),
-            serde_json::to_value(WorkbenchWireRef::from(&wire)).expect("the wire encodes"),
-            "{fixture}: {encoding:?} legacy identity JSON"
-        );
-        assert_eq!(
-            canonical_debug(&derived),
-            canonical_debug(&restored(wire)),
-            "{fixture}: {encoding:?} read"
-        );
-        derived
-    }
-
-    /// Every check on a state and on its own eframe RON and JSON.
-    fn assert_round_trips_as_derived(state: &WorkbenchState, fixture: &str) {
-        assert_writes_as_derived(state, fixture);
-        for encoding in [Encoding::Ron, Encoding::Json] {
-            let read = assert_reads_as_derived(encoding, &encoding.write(state), fixture);
-            assert_writes_as_derived(&read, &format!("{fixture}, read back from {encoding:?}"));
-        }
-    }
-
-    /// A legacy text: read in its own encoding, then every check on what it
-    /// reads as.
-    fn assert_legacy_reads_as_derived(encoding: Encoding, text: &str, fixture: &str) {
-        let read = assert_reads_as_derived(encoding, text, fixture);
-        assert_round_trips_as_derived(&read, &format!("{fixture}, as read"));
-    }
-
     #[test]
-    fn the_default_workbench_round_trips_through_the_wire_as_derived() {
-        assert_round_trips_as_derived(&WorkbenchState::default(), "default");
-    }
-
-    #[test]
-    fn the_populated_workbench_round_trips_through_the_wire_as_derived() {
-        let state = populated_session();
-        assert!(
-            state.workbench.model_editor_recovery.is_some(),
-            "the fixture writes its optional field"
-        );
-        assert_round_trips_as_derived(&state.workbench, "populated");
-    }
-
-    /// A session with no workbench restores the default workbench, and hashes
-    /// it for the legacy identity as the derive's default did.
-    #[test]
-    fn a_session_without_a_workbench_restores_the_default_through_the_wire_as_derived() {
-        let default = WorkbenchState::default();
-        assert_eq!(
-            serde_json::to_value(&default).expect("the derive encodes"),
-            serde_json::to_value(WorkbenchWireRef::from(&WorkbenchWire::default()))
-                .expect("the wire encodes"),
-            "legacy identity JSON"
-        );
-        assert_eq!(
-            canonical_debug(&default),
-            canonical_debug(&restored(WorkbenchWire::default()))
-        );
-    }
-
-    /// Nothing but the struct: every field takes its attribute's default.
-    #[test]
-    fn an_empty_workbench_reads_through_the_wire_as_derived() {
-        assert_legacy_reads_as_derived(Encoding::Json, "{}", "empty JSON");
-        assert_legacy_reads_as_derived(Encoding::Ron, "()", "empty RON");
-    }
-
-    /// The workspace-only sessions and the session without a project page
-    /// that the workbench tests restore.
-    #[test]
-    fn workbenches_missing_fields_read_through_the_wire_as_derived() {
-        for workspace in ["Models", "Results"] {
-            let text = format!(r#"{{"workspace":"{workspace}"}}"#);
-            assert_legacy_reads_as_derived(Encoding::Json, &text, &format!("only {workspace}"));
-        }
-        let mut without_page =
-            serde_json::to_value(WorkbenchState::default()).expect("the derive encodes");
-        without_page
+    fn workbench_without_a_project_page_defaults_to_overview() {
+        let mut encoded =
+            serde_json::to_value(WorkbenchWireRef::capture(&WorkbenchState::default())).unwrap();
+        encoded
             .as_object_mut()
-            .expect("the workbench is an object")
+            .expect("workbench is an object")
             .remove("project_page");
-        assert_legacy_reads_as_derived(
-            Encoding::Json,
-            &without_page.to_string(),
-            "no project page",
-        );
+
+        let restored = restore(serde_json::from_value(encoded).unwrap());
+
+        assert_eq!(restored.project_page, ProjectPage::Overview);
     }
 
-    /// An option an older build wrote plainly, which the production RON
-    /// reader takes as present.
+    /// A session saved while the Visualization Studio existed carries its
+    /// `visualization_studio` block and may have quit on the Studio. The block
+    /// below is copied from a real session file, with a pane, a selection and a
+    /// cache budget added. The session must still load: the block is ignored,
+    /// the Studio route is dropped with one diagnostic, and the rest of the
+    /// session survives.
     #[test]
-    fn an_option_written_plainly_reads_through_the_wire_as_derived() {
-        let mut state = WorkbenchState::default();
-        state.selected_specification = Some("gain".to_owned());
-        let written = Encoding::Ron.write(&state);
-        let plain = written.replace(
-            "selected_specification:Some(\"gain\")",
-            "selected_specification:\"gain\"",
-        );
-        assert_ne!(plain, written, "the workbench holds the selection");
-        assert_legacy_reads_as_derived(Encoding::Ron, &plain, "plain option");
-    }
-
-    /// The retired engineering profile and Visualization Studio block, with
-    /// the session quit on the Studio's route.
-    #[test]
-    fn a_workbench_saved_with_the_studio_reads_through_the_wire_as_derived() {
+    fn session_saved_with_the_deleted_visualization_studio_still_restores() {
         const STUDIO: &str = concat!(
             "visualization_studio:(section:viewers,tool:select,zoom:2.5,",
             "selected_viewer_document:\"viewer-bode\",panes:[(id:42,viewer:Bode,",
@@ -1437,28 +1213,114 @@ mod dual_run_tests {
         );
         let mut state = WorkbenchState::default();
         state.activate(Workspace::Results);
-        let saved = Encoding::Ron.write(&state).replacen(
+        let saved =
+            ron::to_string(&WorkbenchWireRef::capture(&state)).expect("workbench serializes");
+        let saved = saved.replacen(
             "current:\"?view=results\"",
             "current:\"?surface=visualization-studio\"",
             1,
         );
-        assert!(saved.contains("?surface=visualization-studio"));
+        assert!(
+            saved.contains("?surface=visualization-studio"),
+            "the session must have quit on the Studio for this to prove anything"
+        );
+        // The retired engineering profile rides along, as it does in every
+        // session saved before it was removed.
         let saved = format!(
             "{},engineering_profile:r#rf-microwave,{STUDIO})",
             saved
                 .strip_suffix(')')
                 .expect("a workbench session is a RON struct")
         );
-        assert_legacy_reads_as_derived(Encoding::Ron, &saved, "Visualization Studio");
+
+        let mut restored = restore(
+            ron::from_str(&saved).expect("a session that kept the Studio's state restores"),
+        );
+        restored.reconcile_restored_navigation();
+
+        assert_eq!(
+            restored.current_route(),
+            SurfaceRoute::surface(SurfaceId::Design)
+        );
+        assert!(
+            restored
+                .take_route_diagnostic()
+                .is_some_and(|message| message.contains("Malformed routes"))
+        );
     }
 
-    /// The retired engineering profile and capability matrix, with routes
-    /// this build no longer has.
     #[test]
-    fn a_workbench_saved_with_the_capability_matrix_reads_through_the_wire_as_derived() {
+    fn library_cellview_route_and_page_restore_with_models_workspace_ownership() {
+        let mut state = WorkbenchState::default();
+        state.library_cellview_page = LibraryCellviewPage::SymbolForm;
+        state
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::LibraryCellviewManager),
+                RouteTransitionSource::User,
+            )
+            .expect("Library Cellview Manager has a registered executor");
+
+        assert_eq!(state.workspace, Workspace::Models);
+        assert_eq!(
+            state.current_route().surface_id(),
+            SurfaceId::LibraryCellviewManager
+        );
+        assert!(!state.application_modal_open());
+
+        let encoded = serde_json::to_string(&WorkbenchWireRef::capture(&state))
+            .expect("workbench session serializes");
+        let mut restored =
+            restore(serde_json::from_str(&encoded).expect("workbench session restores"));
+        restored.workspace = Workspace::Project;
+        restored.reconcile_restored_navigation();
+
+        assert_eq!(restored.workspace, Workspace::Models);
+        assert_eq!(
+            restored.current_route().surface_id(),
+            SurfaceId::LibraryCellviewManager
+        );
+        assert_eq!(
+            restored.library_cellview_page,
+            LibraryCellviewPage::SymbolForm
+        );
+    }
+
+    #[test]
+    fn legacy_session_without_library_cellview_page_defaults_to_libraries() {
+        let state = restore(
+            serde_json::from_str(r#"{"workspace":"Models"}"#).expect("legacy workbench restores"),
+        );
+        assert_eq!(state.library_cellview_page, LibraryCellviewPage::Libraries);
+    }
+
+    #[test]
+    fn legacy_workspace_session_migrates_to_the_matching_primary_route() {
+        let mut state = restore(
+            serde_json::from_str(r#"{"workspace":"Results"}"#).expect("legacy workbench restores"),
+        );
+        assert_eq!(state.current_route().surface_id(), SurfaceId::Design);
+
+        state.reconcile_restored_navigation();
+        assert_eq!(state.workspace, Workspace::Results);
+        assert_eq!(state.current_route().surface_id(), SurfaceId::Results);
+        assert_eq!(
+            state.take_browser_history_effect(),
+            Some(BrowserHistoryEffect::Replace(SurfaceRoute::surface(
+                SurfaceId::Results
+            )))
+        );
+    }
+
+    /// A session saved while the capability matrix existed carries its
+    /// `capability_matrix` block and may have the matrix open or in its history.
+    /// It must still load: the stale block is ignored, the dead routes are
+    /// dropped with one diagnostic, and the rest of the session survives.
+    #[test]
+    fn session_saved_with_the_deleted_capability_matrix_still_restores() {
         let mut state = WorkbenchState::default();
         state.activate(Workspace::Results);
-        let mut saved = serde_json::to_value(&state).expect("the derive encodes");
+        let mut saved =
+            serde_json::to_value(WorkbenchWireRef::capture(&state)).expect("workbench serializes");
         saved["engineering_profile"] = serde_json::json!("rf-microwave");
         saved["capability_matrix"] = serde_json::json!({ "section": "workspaces" });
         saved["navigation"] = serde_json::json!({
@@ -1467,41 +1329,45 @@ mod dual_run_tests {
             "forward": [],
             "recent": ["?surface=interoperability-matrix"]
         });
-        assert_legacy_reads_as_derived(Encoding::Json, &saved.to_string(), "capability matrix");
-    }
 
-    /// Page names an older build wrote, read through their aliases.
-    #[test]
-    fn retired_page_names_read_through_the_wire_as_derived() {
-        let text = r#"{
-            "console_page": "Interactive",
-            "project_page": "Technology",
-            "verification_page": "Drc"
-        }"#;
-        assert_legacy_reads_as_derived(Encoding::Json, text, "page aliases");
-        assert_legacy_reads_as_derived(
-            Encoding::Ron,
-            "(console_page:Interactive,project_page:Dashboard,verification_page:History)",
-            "page aliases",
+        let mut restored = restore(serde_json::from_value(saved).expect("an old session restores"));
+        restored.reconcile_restored_navigation();
+
+        assert_eq!(
+            restored.current_route(),
+            SurfaceRoute::surface(SurfaceId::Design)
+        );
+        assert_eq!(
+            restored.previous_route(),
+            Some(SurfaceRoute::surface(SurfaceId::Results))
+        );
+        assert!(
+            restored
+                .take_route_diagnostic()
+                .is_some_and(|message| message.contains("Malformed routes"))
         );
     }
 
-    /// A document identity this build retired, beside a live one, in the
-    /// open-document registry that reads it tolerantly.
     #[test]
-    fn retired_document_identities_read_through_the_wire_as_derived() {
-        let text = r#"{
-            "documents": {
-                "active": {"Simulate": {"AnalysisSetup": "9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f"}},
-                "closed": [{"AnalysisSetup": "9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f"}, "Verification"]
-            }
-        }"#;
-        assert_legacy_reads_as_derived(Encoding::Json, text, "retired documents");
-        assert_legacy_reads_as_derived(
-            Encoding::Ron,
-            "(documents:(active:{Simulate:AnalysisSetup(\"9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f\")},\
-             closed:[AnalysisSetup(\"9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f\"),Verification]))",
-            "retired documents",
+    fn independent_workspace_layouts_round_trip_with_the_session() {
+        let mut state = WorkbenchState::default();
+        state.apply_workspace_preset(WorkspacePreset::Diagnostics);
+        state.activate(Workspace::Results);
+        state.apply_results_review_layout();
+
+        let encoded = serde_json::to_string(&WorkbenchWireRef::capture(&state)).unwrap();
+        let restored = restore(serde_json::from_str(&encoded).unwrap());
+        assert!(restored.workspace_layout(Workspace::Design).console_visible);
+        assert!(
+            !restored
+                .workspace_layout(Workspace::Results)
+                .navigator_visible
+        );
+        assert_eq!(
+            restored
+                .workspace_layout(Workspace::Results)
+                .inspector_width,
+            332.0
         );
     }
 }

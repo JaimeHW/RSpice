@@ -564,7 +564,7 @@ fn canonical_session_identity_value(value: &serde_json::Value) -> serde_json::Va
 }
 
 #[cfg(test)]
-pub(super) mod populated_session;
+mod populated_session;
 
 #[cfg(test)]
 mod tests {
@@ -1093,8 +1093,8 @@ mod tests {
             "Run 3 (bias sweep)"
         );
         assert_eq!(
-            serde_json::to_value(&restored.workbench).unwrap(),
-            serde_json::to_value(&state.workbench).unwrap(),
+            serde_json::to_value(WorkbenchWireRef::capture(&restored.workbench)).unwrap(),
+            serde_json::to_value(WorkbenchWireRef::capture(&state.workbench)).unwrap(),
             "the workbench restores as it was saved"
         );
         assert_eq!(restored.recent_files, state.recent_files);

@@ -766,8 +766,8 @@ pub struct AnalysisLifecycleOutcome {
 }
 
 impl Default for AnalysisLifecycleOutcome {
-    /// The field is `#[serde(skip)]`, so a restored session gets this and never
-    /// the struct literal's value. It has to read as a real status line.
+    /// The field is runtime-only, so a restored session gets this rather than
+    /// the outcome it was saved with. It has to read as a real status line.
     fn default() -> Self {
         Self {
             severity: AnalysisLifecycleSeverity::Receipt,
@@ -854,126 +854,94 @@ impl SpecificationEvidenceFilter {
     }
 }
 
-/// New workbench session state.  Durable layout preferences are serialized;
-/// one-frame requests and open drawers are intentionally transient.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// New workbench session state. Durable layout preferences are kept with the
+/// session, through the wire in `app_state::session::wire`, which names every
+/// field it keeps; one-frame requests and open drawers are intentionally
+/// transient.
+#[derive(Debug, Clone)]
 pub struct WorkbenchState {
-    #[serde(default)]
     pub workspace: Workspace,
     /// Device-local application-window presentations and their exclusive
     /// document ownership. Engineering documents remain owned by their
     /// project stores; this registry only controls where each is presented.
-    #[serde(default)]
     pub window_session: crate::workbench::lifecycle::window_session::WindowSessionRegistry,
     // An `engineering_profile` key from older sessions is ignored: the
     // profile only ever narrowed one specialist tool list and is retired.
     /// Version marker used to distinguish sessions that predate canonical
     /// routes from sessions whose current route is intentionally Design.
-    #[serde(default)]
     pub(in crate::workbench) navigation_schema_version: u8,
     /// Version marker for persisted device-local dock geometry. This is kept
     /// independent from navigation because a visual-shell migration must not
     /// rewrite the user's current route or engineering state.
-    #[serde(default)]
     pub(in crate::workbench) layout_schema_version: u8,
     /// Canonical current route plus bounded back/forward/recent task history.
-    #[serde(default)]
     pub(in crate::workbench) navigation: SurfaceNavigation,
     /// Recovery or deep-link diagnostic awaiting presentation in the activity
     /// stream. It is runtime state, never engineering or preference data.
-    #[serde(skip)]
     pub(in crate::workbench) route_diagnostic: Option<String>,
-    #[serde(default = "default_true")]
     pub navigator_visible: bool,
-    #[serde(default = "default_true")]
     pub inspector_visible: bool,
     /// A one-frame request that the inspector's sheet panel scroll its Sheet
     /// section into view, the next time it shows.
-    #[serde(skip)]
     pub reveal_sheet_section: bool,
-    #[serde(default)]
     pub console_visible: bool,
-    #[serde(default)]
     pub console_maximized: bool,
-    #[serde(default)]
     pub focus_mode: bool,
     /// Device-local presentation toggle for the mockup's equal schematic /
     /// result stage. The immutable datasets and result-document state remain
     /// owned by `SimulationState` and `UiSessionState::results`; this flag
     /// only controls whether that existing document is projected beside an
     /// eligible primary workspace.
-    #[serde(default)]
     pub split_with_results: bool,
     /// Current viewport full-screen intent. Runtime-owned because the host
     /// window, browser, or mobile shell decides whether the request can be
     /// honored and must never restore a stale platform window state.
-    #[serde(skip)]
     pub full_screen: bool,
     /// RSpice-owned presentation state. Unlike `full_screen`, which mirrors
     /// what the host window is doing, this stays true for as long as the
     /// application chrome is intentionally suppressed — including while a
     /// browser is still deciding whether to honour the request.
-    #[serde(skip)]
     pub full_screen_presentation: bool,
     /// Capability-derived touch composition. Once a native touch event is
     /// observed it remains enabled for this process; browsers also refresh it
     /// from the exact `(pointer: coarse)` media query every frame.
-    #[serde(skip)]
     pub coarse_pointer: bool,
     /// The Project Launcher is an application-level modal, not a workspace.
-    #[serde(skip)]
     pub project_launcher_open: bool,
     /// Search text is transient and never becomes project state.
-    #[serde(skip)]
     pub project_launcher_query: String,
-    #[serde(skip)]
     pub project_launcher_sort: ProjectLauncherSort,
-    #[serde(skip)]
     pub project_launcher_filter: ProjectLauncherFilter,
     /// Selected startup page and scanned native checkpoint catalog are
     /// application-modal runtime state, never project or user preferences.
-    #[serde(skip)]
     pub project_launcher_page: ProjectLauncherPage,
-    #[serde(skip)]
     pub(crate) project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog,
     /// The Examples dialog, while it is open: the example chosen in it.
-    #[serde(skip)]
     pub(crate) examples_selection: Option<usize>,
     /// Safe mode applies only to this process. The prior session remains the
     /// persisted source of truth for the next ordinary launch.
-    #[serde(skip)]
     pub safe_mode: crate::state::write_policy::LocalSafeModeState,
     /// Live-session write leases held by other participants, projected by
     /// the live-session engine every frame it is attached.
-    #[serde(skip)]
     pub live_write_locks: crate::state::write_policy::LiveWriteLocks,
     /// Destination owned by an in-flight close-project review. It survives an
     /// asynchronous canonical-save continuation but is never persisted.
-    #[serde(skip)]
     pub(crate) project_close_destination: ProjectCloseDestination,
     /// One-shot request raised by a completed close-to-mirror transaction;
     /// the live-session engine consumes it to start mirroring the host.
-    #[serde(skip)]
     pub(crate) live_mirror_entry_pending: bool,
     /// Focus is requested only on the frame in which the launcher opens.
-    #[serde(skip)]
     pub focus_project_launcher_search: bool,
-    #[serde(default = "default_navigator_width")]
     pub navigator_width: f32,
     /// True after the user explicitly resizes the navigator. Until then the
     /// mockup's responsive 18vw clamp remains authoritative.
-    #[serde(default)]
     pub navigator_width_custom: bool,
-    #[serde(default = "default_inspector_width")]
     pub inspector_width: f32,
     /// True after the user explicitly resizes the inspector. Until then the
     /// mockup's responsive 22vw clamp remains authoritative.
-    #[serde(default)]
     pub inspector_width_custom: bool,
-    #[serde(default = "default_console_height")]
     pub console_height: f32,
     /// Independent device-local dock snapshots for every visited workspace.
-    #[serde(default)]
     pub(in crate::workbench) workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
     /// The composition a workspace with no snapshot above opens with.
     ///
@@ -982,94 +950,68 @@ pub struct WorkbenchState {
     /// there. Without it an unvisited workspace resolved to the shipped
     /// default and the preference governed only whichever workspace happened
     /// to be active when it was chosen.
-    #[serde(default)]
     pub(in crate::workbench) workspace_preset: WorkspacePreset,
-    #[serde(default)]
     pub console_page: ConsolePage,
     /// The reader's place on the Console page. Transient: a reading position
     /// over logs, not a layout preference.
-    #[serde(skip)]
     pub console_view: ConsoleView,
-    #[serde(default)]
     pub design_panel: DesignPanel,
     /// Active and locally closed document presentations in each workspace.
     /// Stable object IDs ensure a reordered run history or analysis plan does
     /// not silently retarget a restored tab.
-    #[serde(default)]
     pub documents: WorkspaceDocumentRegistry,
     /// Netlist secondary documents explicitly opened by the user. Resolved
     /// include closures can contain thousands of files, so availability alone
     /// must never materialize every include as a tab.
-    #[serde(default)]
     pub netlist_open_documents: HashSet<WorkspaceDocumentId>,
-    #[serde(default)]
     pub project_page: ProjectPage,
     /// Device-local filters and row selections for the Project workspace.
     /// They affect presentation only and never participate in project
     /// revisioning, execution snapshots, or recovery checkpoints.
-    #[serde(default)]
     pub project_library_filter: String,
-    #[serde(default)]
     pub project_dependency_filter: String,
-    #[serde(default)]
     pub project_dependency_selection: Option<String>,
-    #[serde(default)]
     pub project_checkpoint_selection: Option<String>,
     /// Device-local projection retained by the Library/Cellview specialist
     /// route. Authoritative library, cellview, symbol, and form records remain
     /// in the project domains.
-    #[serde(default)]
     pub library_cellview_page: LibraryCellviewPage,
-    #[serde(default)]
     pub verification_page: VerificationPage,
     /// Selected Simulation Studio setup route.
-    #[serde(default)]
     pub simulation_page: SimulationPage,
-    #[serde(default)]
     pub verification: VerificationSessionState,
-    #[serde(default)]
     pub models_page: crate::state::ModelsPage,
     /// Models & PDKs catalog filters and stable presentation selections.
     /// Model, source, symbol, and PDK records remain in their owning domains.
-    #[serde(default)]
     pub models_view: ModelsWorkbenchViewState,
     /// Analysis row whose configuration is shown in the simulation plan.
     /// Retained only to migrate pre-instance session selection.
-    #[serde(default = "default_analysis_index")]
     pub active_analysis: usize,
     /// Stable analysis instance whose configuration is shown in the plan.
-    #[serde(default)]
     pub active_analysis_instance: Option<crate::product::AnalysisInstanceId>,
     /// Device-local Simulation Studio viewport. Keeping this outside egui's
     /// transient widget memory prevents a committed form edit from snapping
     /// the editor back to the top when the selected instance is rebuilt.
-    #[serde(skip)]
     pub simulation_surface_scroll_y: f32,
     /// One-frame correction for structural edits above the stacked analysis
     /// editor. It is consumed after egui reports the current ScrollArea offset.
-    #[serde(skip)]
     pub simulation_surface_pending_scroll_delta_y: f32,
     /// Screen-space top edge of the selected analysis form immediately before
     /// a stacked structural edit. The next frame measures the actual displaced
     /// position so scroll compensation follows egui's rendered geometry and
     /// status-message height changes cannot move the editable controls.
-    #[serde(skip)]
     pub simulation_surface_editor_anchor_y: Option<f32>,
     /// Last analysis lifecycle outcome announced by the transaction owner.
-    #[serde(skip)]
     pub analysis_lifecycle_status: AnalysisLifecycleOutcome,
     /// The status bar's feedback on the gesture just made.
-    #[serde(skip)]
     pub prompt: Option<StatusPrompt>,
     /// The sheet-membership and generated-symbol failures last recorded.
     ///
     /// The drawing is synced every frame, so a failure that stands is
     /// recorded when it first appears or changes, not sixty times a second.
-    #[serde(skip)]
     pub recorded_sync_failures: SyncFailures,
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
-    #[serde(skip)]
     pub simulation_workflow: Option<SimulationWorkflowDialog>,
     /// Selected specification row in the verification matrix, by exact
     /// measurement name. That name is the specification's identity — it is the
@@ -1080,58 +1022,46 @@ pub struct WorkbenchState {
     /// The field name differs from the older `selected_spec` deliberately: that
     /// key held an index, and leaving it unread is what makes an older project
     /// start with no selection instead of resolving one to the wrong row.
-    #[serde(default)]
     pub selected_specification: Option<String>,
     /// One-shot request to open the canonical specification authoring surface.
     /// Runtime-only and owned by navigation rather than Results presentation:
     /// activating the destination document is allowed to reconcile viewer UI,
     /// but must not erase the route that caused that activation.
-    #[serde(skip)]
     pub(crate) specification_editor_route_pending: bool,
     /// Selected design-variable row on the Simulation Studio variables page,
     /// by exact name. Names are unique within a plan, and a name survives the
     /// registry being reordered where a row index would not.
-    #[serde(default)]
     pub selected_design_variable: Option<String>,
     /// Selected saved-output row on the outputs page, by exact name.
-    #[serde(default)]
     pub selected_saved_output: Option<String>,
     /// Selected capture group on the Save page, by its stable identity.
     ///
     /// By identity rather than by name because the page offers reordering, and
     /// order is this registry's precedence: a position would follow the wrong
     /// group the moment one was raised.
-    #[serde(default)]
     pub selected_capture_group: Option<crate::product::CaptureGroupId>,
     /// Selected run-set dimension on the PVT, sweeps & variation page, by its
     /// stable identity. Identities survive reordering, which is a command the
     /// page offers, where a position would not.
-    #[serde(default)]
     pub selected_run_set_dimension: Option<String>,
     /// In-progress edit of the selected dimension's authored value list.
     /// Runtime-only: half-typed values must never be restored as a declared
     /// run space.
-    #[serde(skip)]
     pub run_set_values_draft: Option<(String, String)>,
     /// In-progress edit of the execution budgets, as authored text.
-    #[serde(skip)]
     pub run_set_budget_drafts: Option<RunSetBudgetDrafts>,
     /// In-progress edit of the selected design variable's expression.
     /// Runtime-only: a partially typed expression must never be restored as
     /// authoritative plan data.
-    #[serde(skip)]
     pub design_variable_expression_draft: Option<String>,
     /// In-progress edit of the selected design variable's inclusive bounds, as
     /// `(minimum, maximum)`. Runtime-only for the same reason as the
     /// expression draft: a half-typed bound is not a bound.
-    #[serde(skip)]
     pub design_variable_bounds_draft: Option<(String, String)>,
     /// In-progress edit of the selected saved output's name. Runtime-only: a
     /// half-typed name must never be restored as the record's identity.
-    #[serde(skip)]
     pub saved_output_name_draft: Option<String>,
     /// In-progress edit of the selected saved output's source expression.
-    #[serde(skip)]
     pub saved_output_expression_draft: Option<String>,
     /// Filter over the saved-output registry on the outputs page.
     ///
@@ -1139,23 +1069,18 @@ pub struct WorkbenchState {
     /// filter narrows what one reader is looking at and changes nothing the
     /// plan holds. Restoring it would reopen the project on someone's partial
     /// reading of the registry and make the missing rows look deleted.
-    #[serde(skip)]
     pub saved_output_filter: String,
     /// Filter over the specification registry, runtime-only for the same
     /// reason as the saved-output filter.
-    #[serde(skip)]
     pub specification_filter: String,
     /// Which evidence classes the specification registry shows.
-    #[serde(skip)]
     pub specification_evidence_filter: SpecificationEvidenceFilter,
     /// Selected model name within the currently selected model library.
-    #[serde(default)]
     pub selected_model: Option<String>,
     /// Which stimulus definition the library workspace is reading, by exact
     /// name. Runtime-only: a definition can be renamed or deleted by another
     /// session of the same project, and restoring a name that no longer
     /// resolves would open the workspace on a definition nobody can see.
-    #[serde(skip)]
     pub selected_stimulus_definition: Option<String>,
     /// What the Stimulus Library instrument is in the middle of editing: one
     /// unapplied draft per definition, each with its own undo history, and the
@@ -1163,112 +1088,82 @@ pub struct WorkbenchState {
     /// selection is, and for one more: a draft is by construction not in the
     /// project document, so restoring one would offer a revision the library
     /// never published.
-    #[serde(skip)]
     pub stimulus_editor: StimulusEditorState,
     /// How the library browser is looking at that library: the scope strip's
     /// slice, and the waveform each row draws. Runtime-only, because both are
     /// readings of the project rather than part of it.
-    #[serde(skip)]
     pub stimulus_browser: StimulusBrowserState,
     /// Where each workspace's navigator tree is unfolded, and what its filter
     /// box narrows the listing to. Runtime-only.
-    #[serde(skip)]
     pub navigator_trees: NavigatorTrees,
     /// Netlist outline groups the engineer has collapsed. Collapsed rather
     /// than expanded, so a deck that gains a category discloses it instead of
     /// hiding it behind a preference nobody set.
-    #[serde(default)]
     pub netlist_outline_collapsed: std::collections::BTreeSet<crate::state::OutlineSectionKind>,
-    #[serde(default)]
     pub command_query: String,
     /// The inspector's open inline-edit session. Runtime-only: a partially
     /// typed instance name must never be restored as authoritative design
     /// data, and the retained undo snapshot belongs to this process.
-    #[serde(skip)]
     pub inline_edit: InlineEdit,
     /// The net each hierarchy occurrence lights under "Selected net across
     /// hierarchy", keyed by root cell view and instance path. One master
     /// placed twice has one editor session, so the session cannot hold it.
-    #[serde(skip)]
     pub occurrence_net_highlights: std::collections::BTreeMap<String, String>,
     /// The last placement or editing command run, which Repeat last
     /// command runs again. The command dispatcher writes and reads it as
     /// the command's stable id, so the state layer never names the command
     /// vocabulary above it.
-    #[serde(skip)]
     pub last_repeatable_command: Option<String>,
-    #[serde(skip)]
     pub drawer: Option<Drawer>,
     /// One-frame request to focus the workspace navigator filter.
-    #[serde(skip)]
     pub focus_navigator_search: bool,
     /// Filter text in the component chooser.
-    #[serde(skip)]
     pub placement_query: String,
     /// One-frame request to focus the component chooser filter.
-    #[serde(skip)]
     pub focus_placement_search: bool,
     /// Mockup-specified simulation-preflight workflow. Validation reports are
     /// revision-bound runtime evidence and therefore never serialized.
-    #[serde(skip)]
     pub preflight: PreflightDialogState,
     /// Runtime-only Jobs manager review context. Job and run records live in
     /// `SimulationState`; this state owns presentation only.
-    #[serde(skip)]
     pub jobs_manager: JobsManagerState,
     /// Personal specialist discovery metadata plus task-local browser state.
     /// The owned engineering documents remain in their canonical surfaces.
-    #[serde(default)]
     pub specialist_tool_browser: SpecialistToolBrowserState,
     /// Runtime-only draft for the project-owned result-document transaction.
-    #[serde(skip)]
     pub create_result_document: CreateResultDocumentDialogState,
     /// Runtime-only draft of the form open over a project result document.
-    #[serde(skip)]
     pub result_document_dialog: Option<rspice_results_ui::document_dialogs::ResultDocumentDialog>,
     /// Runtime-only external-result draft. Retained history changes only when
     /// this transaction explicitly commits.
-    #[serde(skip)]
     pub result_import: ResultImportDialogState,
     /// Session-local selection and editor drafts for the project-owned report
     /// documents.
-    #[serde(default)]
     pub report_authoring: ReportAuthoringState,
     /// Runtime-only transaction and presentation state for the project-owned
     /// device-model editor. Committed source and qualification records remain
     /// in the project model-library domain.
-    #[serde(skip)]
     pub model_editor: crate::workbench::documents::model_editor::ModelEditorState,
     /// Exact unsaved model candidate retained for device-local crash/session
     /// recovery. Its immutable base is reconstructed and authenticated before
     /// it is allowed back into the runtime editor.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) model_editor_recovery:
         Option<crate::workbench::documents::model_editor::ModelEditorRecoveryDraft>,
     /// Application-owned recovery for unsigned PDK authoring edits that have
     /// not completed the explicit durable PDK configuration transaction.
-    #[serde(default)]
     pub(crate) pdk_technology_authoring: PdkTechnologyAuthoringRecovery,
     /// Runtime-only selection and transactional drafts for measurement
     /// correlation. Committed suites and evidence remain in the project-owned
     /// model-library domain.
-    #[serde(skip)]
     pub model_correlation:
         crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
-    #[serde(skip)]
     pub notification_center_open: bool,
-    #[serde(skip)]
     pub notification_filter: NotificationFilter,
     /// Hide what has been read. A second axis rather than a fourth filter,
     /// because "unread" crosses the Jobs/System split instead of joining it.
-    #[serde(skip)]
     pub notification_unread_only: bool,
-}
-
-const fn default_true() -> bool {
-    true
 }
 
 pub(in crate::workbench) const fn default_navigator_width() -> f32 {

@@ -1886,14 +1886,15 @@ fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::workbench::state::Sim
     );
 }
 
-/// The field is `#[serde(skip)]`, so serde fills it from `Default` and never
-/// from the struct literal.
+/// The session wire does not keep the field, so a restore starts from its
+/// `Default`.
 ///
 /// A restore must not carry a receipt from the session that wrote it — a
 /// lifecycle outcome is an event, and a restored one would announce a change
 /// nobody just made.
 #[test]
 fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
+    use crate::workbench::app_state::session::wire::{WorkbenchWire, WorkbenchWireRef};
     use crate::workbench::state::{AnalysisLifecycleOutcome, WorkbenchState};
 
     assert!(!AnalysisLifecycleOutcome::default().message().is_empty());
@@ -1903,8 +1904,12 @@ fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
         .workbench
         .analysis_lifecycle_status
         .record_receipt("Receipt #9 · Insert committed for instance 5.");
-    let saved = serde_json::to_value(&app.state.workbench).expect("the workbench serializes");
-    let restored: WorkbenchState = serde_json::from_value(saved).expect("the workbench restores");
+    let saved = serde_json::to_value(WorkbenchWireRef::capture(&app.state.workbench))
+        .expect("the workbench serializes");
+    let mut restored = WorkbenchState::default();
+    serde_json::from_value::<WorkbenchWire>(saved)
+        .expect("the workbench restores")
+        .scatter(&mut restored);
 
     assert_eq!(
         restored.analysis_lifecycle_status,
