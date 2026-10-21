@@ -14,24 +14,18 @@
 //! identity is a hash of the workbench as JSON, so they also write the same
 //! JSON: a difference would give every such project a new identity.
 
-#[cfg(test)]
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-#[cfg(test)]
 use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
 use crate::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
 use crate::ui::Theme;
-use crate::workbench::UiSessionState;
-#[cfg(test)]
 use crate::workbench::documents::model_editor::ModelEditorRecoveryDraft;
 use crate::workbench::lifecycle::session::{
     SelectionBulkFilterSession, normalize_autosave_minutes,
 };
-#[cfg(test)]
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
-#[cfg(test)]
 use crate::workbench::state::{
     ConsolePage, DesignPanel, LibraryCellviewPage, ModelsWorkbenchViewState,
     PdkTechnologyAuthoringRecovery, ProjectPage, SimulationPage, SpecialistToolBrowserState,
@@ -39,8 +33,7 @@ use crate::workbench::state::{
     WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
     default_console_height, default_inspector_width, default_navigator_width,
 };
-#[cfg(test)]
-use crate::workbench::{SurfaceNavigation, WorkspacePreset};
+use crate::workbench::{SurfaceNavigation, UiSessionState, WorkspacePreset};
 
 /// Serialized subset of [`UiSessionState`]. Responsive layout is persisted by
 /// the workbench wire; transient document interaction signals are not.
@@ -214,7 +207,6 @@ impl From<UiSessionWire> for UiSessionState {
 /// Each field's attribute says what a session without it restores. A session
 /// with no workbench at all restores [`WorkbenchState::default`], which is
 /// what [`Self::default`] holds.
-#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(rename = "WorkbenchState")]
 pub(in crate::workbench) struct WorkbenchWire {
@@ -320,7 +312,6 @@ pub(in crate::workbench) struct WorkbenchWire {
 /// Declared exactly as [`WorkbenchWire`] is. The one difference is the
 /// model-editor recovery, held as `Option<&_>` rather than `&Option<_>` so
 /// that `Option::is_none` takes it as it is.
-#[cfg(test)]
 #[derive(Serialize)]
 #[serde(rename = "WorkbenchState")]
 pub(in crate::workbench) struct WorkbenchWireRef<'a> {
@@ -420,7 +411,6 @@ pub(in crate::workbench) struct WorkbenchWireRef<'a> {
     pdk_technology_authoring: &'a PdkTechnologyAuthoringRecovery,
 }
 
-#[cfg(test)]
 impl<'a> WorkbenchWireRef<'a> {
     /// Borrow what a session keeps of `state`.
     pub(in crate::workbench) fn capture(state: &'a WorkbenchState) -> Self {
@@ -636,7 +626,6 @@ impl<'a> WorkbenchWireRef<'a> {
     }
 }
 
-#[cfg(test)]
 impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
     fn from(wire: &'a WorkbenchWire) -> Self {
         Self {
@@ -691,14 +680,12 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
     }
 }
 
-#[cfg(test)]
 impl Default for WorkbenchWire {
     fn default() -> Self {
         WorkbenchWireRef::capture(&WorkbenchState::default()).to_wire()
     }
 }
 
-#[cfg(test)]
 impl WorkbenchWire {
     /// Restore what the session kept onto `state`.
     ///

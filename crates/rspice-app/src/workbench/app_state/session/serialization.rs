@@ -9,7 +9,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::AppState;
 
-use super::wire::UiSessionWire;
+use super::wire::{UiSessionWire, WorkbenchWire, WorkbenchWireRef};
 
 const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x655d_ae12_6cdd_5971_b7d8_aafe_02b6_b367);
@@ -195,7 +195,7 @@ impl AppState {
         state.serialize_field("project_workspace", workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
         state.serialize_field("ui_session", &UiSessionWire::from(&*self.ui))?;
-        state.serialize_field("workbench", &self.workbench)?;
+        state.serialize_field("workbench", &WorkbenchWireRef::capture(&self.workbench))?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
         state.serialize_field("execution_context_json", &execution_context_json)?;
@@ -239,7 +239,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             #[serde(default, rename = "ui_session", alias = "shell")]
             ui: Box<UiSessionWire>,
             #[serde(default)]
-            workbench: Box<crate::workbench::WorkbenchState>,
+            workbench: Box<WorkbenchWire>,
             #[serde(default)]
             recent_files: Vec<crate::services::recent_files::RecentFile>,
             #[serde(default)]
@@ -286,7 +286,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 de.project_workspace.as_deref(),
                 &de.library_manager,
                 &de.ui,
-                &de.workbench,
+                WorkbenchWireRef::from(&*de.workbench),
                 &de.recent_files,
                 &de.license_key,
                 &de.simulation_results,
@@ -365,7 +365,6 @@ impl<'de> serde::Deserialize<'de> for AppState {
             workspace: project_workspace,
             library_manager,
             ui: Box::new((*de.ui).into()),
-            workbench: de.workbench,
             recent_files: de.recent_files,
             license_key: de.license_key,
             license,
@@ -373,6 +372,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt,
             ..Default::default()
         };
+        de.workbench.scatter(&mut state.workbench);
         if de.no_project_open {
             state.project_lifecycle.authority.close_project();
         }
