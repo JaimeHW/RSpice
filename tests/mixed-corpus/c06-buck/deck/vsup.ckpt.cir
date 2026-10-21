@@ -1,0 +1,13 @@
+* C6 digitally controlled buck converter, variant vsup, ckpt
+* The tran deck, checkpointed at 400 us (design.toml) and resumed through
+* the supply sag to 1.6 ms.
+.param lv=22u cv=4.7u
+.hdl "../net/buck_ctrl_vsup.vams" module=buck_ctrl
+.options connectrules=gate_drive
+.include ../net/stage.cir
+vdrv vdrv 0 pwl(0 5 1.0m 5 1.1m 3.5 1.3m 3.5 1.4m 5)
+cghs ghs 0 1n
+cgls gls 0 1n
+xctrl vout ghs gls buck_ctrl
+.tran 50n 1.6m
+.end

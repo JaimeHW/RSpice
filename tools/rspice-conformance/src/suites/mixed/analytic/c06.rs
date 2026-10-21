@@ -3,6 +3,10 @@
 //! 5 V in; 22 µH; a 2 µs switching period of 64 ticks with two dead ticks on
 //! each side of the low-side pulse; 2 Ω load. The controller regulates the
 //! mean sampled code to 922, i.e. v(vout) = 922/512 V.
+//!
+//! The `vsup` variant drives each gate through the built-in D/A converter
+//! with its supply on the `vdrv` net, `rhi` = 10 Ω and `rlo` = 5 Ω, into
+//! Cg = 1 nF; vdrv sags from 5 V to 3.5 V and recovers.
 
 use std::collections::BTreeMap;
 
@@ -17,6 +21,9 @@ pub const REGISTRY: Registry = &[
     ("dead", dead),
     ("ripple", ripple),
     ("ilmean", ilmean),
+    ("vgate", vgate),
+    ("tau_r", tau_r),
+    ("tau_f", tau_f),
 ];
 
 const VIN: f64 = 5.0;
@@ -124,6 +131,76 @@ fn ilmean(_: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![vout() / R_LOAD]))
 }
 
+/// `(time, volts)` corners of the `vsup` variant's gate-drive supply, vdrv.
+const DRIVE_SUPPLY: [(f64, f64); 5] = [
+    (0.0, 5.0),
+    (1.0e-3, 5.0),
+    (1.1e-3, 3.5),
+    (1.3e-3, 3.5),
+    (1.4e-3, 5.0),
+];
+/// The gate drive's strong-1 and strong-0 resistances, and each gate's
+/// capacitance (`deck/vsup.tran.cir`).
+const R_HIGH: f64 = 10.0;
+const R_LOW: f64 = 5.0;
+const C_GATE: f64 = 1e-9;
+/// hs rises this many ticks into each period; ls falls at the period's end.
+const HS_RISE_TICKS: f64 = 2.0;
+
+fn drive_supply_at(time: f64) -> f64 {
+    for pair in DRIVE_SUPPLY.windows(2) {
+        let ((t0, v0), (t1, v1)) = (pair[0], pair[1]);
+        if time <= t1 {
+            return v0 + (v1 - v0) * (time - t0) / (t1 - t0);
+        }
+    }
+    DRIVE_SUPPLY[DRIVE_SUPPLY.len() - 1].1
+}
+
+/// A held 1 drives V(vdrv). The switch's control draws no current, so the
+/// gate is the converter's Thevenin source and Cg alone, and settles at the
+/// level exactly.
+fn vgate(context: &Context<'_>) -> Result<Expected, String> {
+    let times = context
+        .quantity
+        .measure
+        .at
+        .clone()
+        .ok_or("c06::vgate needs its sample times")?;
+    Ok(values(times.into_iter().map(drive_supply_at).collect()))
+}
+
+/// The period boundary a gate-edge quantity's window opens on.
+fn window_period(context: &Context<'_>) -> Result<f64, String> {
+    let [start, _] = context
+        .quantity
+        .measure
+        .window
+        .ok_or("a gate edge needs the quantity's window")?;
+    let boundary = (start / PERIOD).round() * PERIOD;
+    if (start - boundary).abs() > 1e-12 {
+        return Err(format!(
+            "a gate edge's window opens on a period boundary, not {start:e}"
+        ));
+    }
+    Ok(boundary)
+}
+
+/// The gate is first order through the converter's resistance: hs rises two
+/// ticks into the period, and v(ghs) passes 1 − 1/e of V(vdrv) one rhi·Cg
+/// (10 ns) later.
+fn tau_r(context: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(vec![
+        window_period(context)? + HS_RISE_TICKS * TICK + R_HIGH * C_GATE,
+    ]))
+}
+
+/// ls falls at the period's end, and v(gls) passes 1/e of V(vdrv) one rlo·Cg
+/// (5 ns) later.
+fn tau_f(context: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(vec![window_period(context)? + R_LOW * C_GATE]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +217,15 @@ mod tests {
         assert!((design_ripple(L_NOMINAL) - 0.11588).abs() < 2e-5);
         assert!((design_ripple(2.0 * L_NOMINAL) - 0.11588 / 2.0).abs() < 1e-5);
         assert!((vout() - 1.80078).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_gate_drive_supply_is_flat_where_the_gates_are_sampled() {
+        for (time, volts) in [(0.9e-3, 5.0), (1.05e-3, 4.25), (1.2e-3, 3.5), (1.5e-3, 5.0)] {
+            assert!((drive_supply_at(time) - volts).abs() < 1e-12, "{time}");
+        }
+        assert!((R_HIGH * C_GATE - 10e-9).abs() < 1e-21);
+        assert!((R_LOW * C_GATE - 5e-9).abs() < 1e-21);
+        assert!((HS_RISE_TICKS * TICK - 62.5e-9).abs() < 1e-21);
     }
 }

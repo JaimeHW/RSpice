@@ -24,23 +24,31 @@ name = "p3"
 families = ["spice", "vams-digital", "vams-analog"]
 today = "refused:P3.2"
 
+# Gate drive under a varying supply: the shipped d2a converter with its supply
+# on the vdrv net, which sags from 5 V to 3.5 V and recovers, rhi = 10 ohm and
+# rlo = 5 ohm into 1 nF gates. Runs to 1.6 ms, through the sag.
+[[variant]]
+name = "vsup"
+families = ["spice", "vams-digital", "vams-analog"]
+today = "runs"
+
 # The averaged model (design "O6 averaged") is an ngspice deck, so it is
 # captured as an O1 reference (oracle/vdig.tran.ngspice.cir).
 # Budgets are about five times the slower route's measured case time (tran
-# 6.1 s native, mc-tran 4.4 s native; ckpt refuses today, sized as a tran
-# run plus a resumed half).
+# 13.4 s and ckpt 22.3 s interp, both the vsup variant's 1.6 ms run through
+# its nanosecond gate edges; mc-tran 4.4 s native).
 [[analysis]]
 id = "tran"
-variants = ["vdig", "vams", "p3"]
+variants = ["vdig", "vams", "p3", "vsup"]
 oracles = ["O6", "O2", "O1"]
-timeout_s = 35
+timeout_s = 65
 phase = "P2"
 
 [[analysis]]
 id = "ckpt"
-variants = ["vdig", "vams"]
+variants = ["vdig", "vams", "vsup"]
 oracles = ["O6", "O2", "O7"]
-timeout_s = 40
+timeout_s = 110
 checkpoint_at = [4e-4]
 phase = "P8"
 

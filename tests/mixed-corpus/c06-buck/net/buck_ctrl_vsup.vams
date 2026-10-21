@@ -1,0 +1,81 @@
+// C6 vsup: buck_ctrl.vams's controller unchanged, with its gate drives
+// converted by the shipped d2a connect module (verbatim, full signature)
+// whose supply is the vdrv net (RSpice-authored). A net-named vsup binds the
+// built-in converter to that net live, so a held 1 drives V(vdrv) behind
+// rhi = 10 ohm and a 0 drives 0 V behind rlo = 5 ohm.
+`include "disciplines.vams"
+`timescale 1ps/1ps
+module buck_ctrl(fb, hs, ls);
+  input fb;
+  electrical fb;
+  output hs, ls;
+  reg hs, ls;
+  parameter integer TICK = 31250;
+  parameter integer RAMP = 16;
+  parameter integer TARGET = 922;
+  integer ref, code, acc, duty, d, dfr, carry;
+  initial begin
+    hs = 1'b0;
+    ls = 1'b0;
+    ref = 0;
+    code = 0;
+    acc = 0;
+    duty = 0;
+    d = 1;
+    dfr = 0;
+    carry = 0;
+  end
+  always begin
+    #(TICK);
+    code = V(fb) * 512.0;
+    if (code < 0) code = 0;
+    if (code > 1023) code = 1023;
+    ref = ref + RAMP;
+    if (ref > TARGET) ref = TARGET;
+    acc = acc + ref - code;
+    if (acc < 0) acc = 0;
+    if (acc > 65535) acc = 65535;
+    duty = acc / 64;
+    dfr = dfr + duty % 16;
+    carry = 0;
+    if (dfr >= 16) begin
+      dfr = dfr - 16;
+      carry = 1;
+    end
+    d = duty / 16 + carry;
+    if (d < 1) d = 1;
+    if (d > 58) d = 58;
+    #(TICK) hs = 1'b1;
+    #(d * TICK) hs = 1'b0;
+    #(2 * TICK) ls = 1'b1;
+    #((60 - d) * TICK) ls = 1'b0;
+  end
+endmodule
+
+connectmodule d2a(d, a);
+    input d;
+    output a;
+    logic d;
+    electrical a;
+
+    parameter real vsup = 3.3;
+    parameter real vsupmin = 0;
+    parameter real vlo = 0;
+    parameter real vhi = vsup;
+    parameter real vx = (vlo + vhi) / 2;
+    parameter real vz = vx;
+    parameter real rlo = 20;
+    parameter real rhi = 20;
+    parameter real rx = min(rlo, rhi);
+    parameter real rz = inf;
+    parameter real rsup = min(rlo, rhi) / 10;
+    parameter real rpull = 10e3;
+    parameter real rweak = 100e3;
+    parameter real trise = 0;
+    parameter real tfall = 0;
+    parameter real tdelay = 0;
+endmodule
+
+connectrules gate_drive;
+  connect d2a #(.vsup(vdrv), .rhi(10), .rlo(5));
+endconnectrules

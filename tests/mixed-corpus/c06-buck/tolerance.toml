@@ -8,7 +8,7 @@ time_precision = 1e-12
 [[q]]
 id = "vss"
 analysis = "tran"
-variants = ["vdig", "vams"]
+variants = ["vdig", "vams", "vsup"]
 kind = "mean"
 signal = "v(vout)"
 window = [4e-4, 5e-4]
@@ -20,7 +20,7 @@ why = "ADC LSB 1.95 mV + sampling-phase ripple ±3 mV (2 ohm load, settled)"
 [[q]]
 id = "vss_step"
 analysis = "tran"
-variants = ["vdig", "vams"]
+variants = ["vdig", "vams", "vsup"]
 kind = "mean"
 signal = "v(vout)"
 window = [7.5e-4, 8e-4]
@@ -28,6 +28,107 @@ oracle = "O6"
 expect = "c06::vss"
 abs = 6e-3
 why = "as vss, settled again after the 1 ohm step"
+
+# The vsup variant's gates sag to 3.5 V. That stays above the switch's
+# turn-on, vt + vh = 2.6 V, so the switch still conducts for the pulse; the
+# slower edge (tau = 10 ns, below) turns the high side on rhi·Cg·ln(V/(V −
+# 2.6)) after hs rises, 13.58 ns at 3.5 V against 7.34 ns at 5 V, and off
+# rlo·Cg·ln(V/2.4) after it falls, 1.89 ns against 3.67 ns. The 8.0 ns it
+# loses per period is a quarter tick of duty, which the integral law takes
+# up, so the averaged plant and its regulated mean are unchanged.
+
+[[q]]
+id = "vss_sag"
+analysis = "tran"
+variants = ["vsup"]
+kind = "mean"
+signal = "v(vout)"
+window = [1.2e-3, 1.3e-3]
+oracle = "O6"
+expect = "c06::vss"
+abs = 6e-3
+why = "as vss, with the gate drive at 3.5 V: the switch still turns on, and the integral law takes up the 8 ns of on-time the slower edges lose"
+
+# --- gate drive under a varying supply (variant vsup) ------------------------
+# Each gate is the built-in D/A converter with its supply on the vdrv net,
+# rhi = 10 ohm and rlo = 5 ohm, into Cg = 1 nF. The switch's control draws
+# no current, so the gate node is the converter's Thevenin source and Cg
+# alone: a held 1 settles at V(vdrv), a held 0 at 0 V, and each edge is first
+# order with tau = rhi·Cg = 10 ns rising and rlo·Cg = 5 ns falling. The
+# converter's zero-duration edge is realized over 1 ps, which moves a
+# crossing by 0.5 ps. The edges measured are on the controller's tick
+# schedule (hs rises 2 ticks into each 2 us period, ls falls at its end),
+# where vdrv is flat: 5 V before 1.0 ms and after 1.4 ms, 3.5 V over
+# 1.1-1.3 ms. Levels: 5·(1 − 1/e) = 3.1606028, 3.5·(1 − 1/e) = 2.2124220,
+# 5/e = 1.8393972, 3.5/e = 1.2875780.
+
+[[q]]
+id = "vgate"
+analysis = "tran"
+variants = ["vsup"]
+kind = "held_at"
+signal = "v(ghs)"
+at = [9.004375e-4, 1.2004375e-3, 1.5004375e-3]
+oracle = "O6"
+expect = "c06::vgate"
+rel = 1e-3
+why = "14 ticks into the period, 12 after hs rises (37.5 tau), the high-side gate holds V(vdrv): 5, 3.5 and 5 V"
+
+[[q]]
+id = "tau_r"
+analysis = "tran"
+variants = ["vsup"]
+kind = "cross"
+signal = "v(ghs)"
+level = 3.1606028
+edge = "rise"
+window = [9e-4, 9.001e-4]
+oracle = "O6"
+expect = "c06::tau_r"
+abs = 3e-10
+why = "v(ghs) passes 1 − 1/e of V(vdrv) = 5 V one rhi·Cg = 10 ns after hs rises at 900 us + 2 ticks"
+
+[[q]]
+id = "tau_r_sag"
+analysis = "tran"
+variants = ["vsup"]
+kind = "cross"
+signal = "v(ghs)"
+level = 2.2124220
+edge = "rise"
+window = [1.2e-3, 1.2001e-3]
+oracle = "O6"
+expect = "c06::tau_r"
+abs = 3e-10
+why = "as tau_r with vdrv at 3.5 V: the level follows the supply, the time constant does not"
+
+[[q]]
+id = "tau_f"
+analysis = "tran"
+variants = ["vsup"]
+kind = "cross"
+signal = "v(gls)"
+level = 1.8393972
+edge = "fall"
+window = [9e-4, 9.0005e-4]
+oracle = "O6"
+expect = "c06::tau_f"
+abs = 3e-10
+why = "v(gls) passes 1/e of V(vdrv) = 5 V one rlo·Cg = 5 ns after ls falls at the period's end, 900 us; the low-side gate, because ls falls on the tick schedule and hs falls at the duty"
+
+[[q]]
+id = "tau_f_sag"
+analysis = "tran"
+variants = ["vsup"]
+kind = "cross"
+signal = "v(gls)"
+level = 1.2875780
+edge = "fall"
+window = [1.2e-3, 1.20005e-3]
+oracle = "O6"
+expect = "c06::tau_f"
+abs = 3e-10
+why = "as tau_f with vdrv at 3.5 V"
 
 # --- digital timing --------------------------------------------------------
 
@@ -283,6 +384,17 @@ trials = 1
 oracle = "O7"
 abs = 1e-9
 why = "resumed = uninterrupted over [400 us, 800 us]: every event exact; every analog signal within 1 nV at the accepted times the runs share (design)"
+
+[[q]]
+id = "resume"
+analysis = "ckpt"
+variants = ["vsup"]
+kind = "identical"
+window = [4e-4, 1.6e-3]
+trials = 1
+oracle = "O7"
+abs = 1e-9
+why = "as resume, through the gate-drive supply's sag and recovery to 1.6 ms: the converters bound live to vdrv continue from the image"
 
 # --- Monte Carlo: L and C at 10 % sigma ------------------------------------
 
