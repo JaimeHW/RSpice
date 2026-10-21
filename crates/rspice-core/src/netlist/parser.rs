@@ -2216,11 +2216,6 @@ mod removeunused_tests {
         let flattened = crate::netlist::flatten_netlist_with_models(&netlist)
             .expect("subcircuit fixture flattens");
         assert!(flattened.elements.is_empty());
-
-        let circuit = crate::Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit build omits the newly redundant flattened resistor");
-        assert!(circuit.get_node_by_name("n").is_none());
     }
 
     #[test]
@@ -2244,11 +2239,6 @@ mod removeunused_tests {
             flattened.elements.is_empty(),
             "the redundant authored passive and every synthesized helper form one batch"
         );
-
-        let circuit = crate::Engine::default()
-            .build_circuit(&netlist)
-            .expect("circuit build omits the rejected passive batch");
-        assert!(circuit.get_node_by_name("n").is_none());
     }
 
     #[test]

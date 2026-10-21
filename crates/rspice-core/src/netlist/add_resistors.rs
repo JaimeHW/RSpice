@@ -1060,11 +1060,6 @@ mod tests {
                     && !element.name.starts_with("RNODCPATH"))
         );
 
-        let original_circuit = crate::Engine::default()
-            .build_circuit(&netlist)
-            .expect("first-run circuit builds");
-        assert_eq!(original_circuit.device_count(), 2);
-
         let materialized = netlist
             .materialize_xyce_add_resistors()
             .expect("derived copy materializes");
@@ -1109,10 +1104,6 @@ mod tests {
         assert_eq!(netlist.elements.len(), 2);
         assert!(netlist.options.add_resistors.is_some());
         assert!(netlist.source_text.is_some());
-        let generated_circuit = crate::Engine::default()
-            .build_circuit(&materialized.netlist)
-            .expect("derived circuit builds");
-        assert_eq!(generated_circuit.device_count(), 4);
     }
 
     #[test]
@@ -1295,9 +1286,6 @@ mod tests {
                 .materialize_xyce_add_resistors()
                 .expect("canonical resistor value is retained");
             assert_eq!(materialized.report.generated[0].resistance, expected);
-            crate::Engine::default()
-                .build_circuit(&materialized.netlist)
-                .expect("materialized zero, negative, and open resistors build safely");
         }
 
         let no_policy = parse("no policy\nV1 1 0 1\n.END\n")

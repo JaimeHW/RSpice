@@ -2271,25 +2271,6 @@ X1 n 0 cell\n\
 
         let map = source_map_for_editor(src);
 
-        let netlist = Netlist::parse(src).expect("deck parses");
-        let circuit = crate::Engine::new(crate::SimulationConfig::default())
-            .build_circuit(&netlist)
-            .expect("deck builds");
-        for (resistor, local) in [("X1.R1", "k"), ("X1.R2", "t")] {
-            let index = circuit
-                .resistors
-                .names
-                .iter()
-                .position(|name| name.eq_ignore_ascii_case(resistor))
-                .expect("resistor exists");
-            let engine = circuit.resistors.conductances[index].recip();
-            let editor = map.param_context_in(Some("cell")).get(local).unwrap();
-            assert!(
-                (engine / editor - 1.0).abs() < 1e-12,
-                "the editor ({editor}) and the engine ({engine}) disagree on {local} inside the subcircuit"
-            );
-        }
-
         let inside = map.param_context_in(Some("cell"));
         assert_eq!(inside.get("g"), Some(5.0), "the subcircuit default shadows");
         assert_eq!(

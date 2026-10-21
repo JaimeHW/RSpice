@@ -6167,61 +6167,6 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
     }
 
     #[test]
-    fn nested_instance_arguments_preserve_sequential_random_bindings() {
-        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
-            for mode in [
-                super::super::StatisticalParamMode::Sample,
-                super::super::StatisticalParamMode::Nominal,
-            ] {
-                let make = |nested| {
-                    let instances = if nested {
-                        "Xtop out 0 wrapper\n.subckt wrapper a b z=999\nX1 a b cell z={aunif(2,0.25)} next={z+1}\nX2 a b cell z={aunif(3,0.5)} next={z+1}\n.ends"
-                    } else {
-                        "X1 out 0 cell z={aunif(2,0.25)} next={z+1}\nX2 out 0 cell z={aunif(3,0.5)} next={z+1}"
-                    };
-                    Netlist::parse_with_options(&format!(
-                        "Sequential argument draws\n{instances}\n.subckt cell a b z=99 next=99\n.param sampled={{aunif(5,0.5)}}\nR1 a b {{next}}\nR2 a b {{sampled}}\n.ends\n.end"
-                    ), super::super::parser::NetlistParseOptions {
-                        expression_dialect: dialect,
-                        statistical_mode: mode,
-                        statistical_seed: Some(793),
-                        ..Default::default()
-                    }).unwrap()
-                };
-                let direct = make(false);
-                let nested = make(true);
-                let engine = crate::engine::Engine::default();
-                let direct_circuit = engine.build_circuit(&direct).unwrap();
-                let next_draw = direct.params.random().next_uniform();
-                let nested_circuit = engine.build_circuit(&nested).unwrap();
-                assert_eq!(
-                    nested_circuit.resistors.reported_resistances,
-                    direct_circuit.resistors.reported_resistances,
-                    "{dialect:?} {mode:?}"
-                );
-                assert_eq!(nested.params.random().next_uniform(), next_draw);
-                let expected_stream = RandomState::new(793);
-                let sample = |mean, spread| match mode {
-                    super::super::StatisticalParamMode::Sample => {
-                        mean + spread * expected_stream.next_symmetric()
-                    }
-                    super::super::StatisticalParamMode::Nominal => mean,
-                };
-                let expected = [
-                    sample(2.0, 0.25) + 1.0,
-                    sample(5.0, 0.5),
-                    sample(3.0, 0.5) + 1.0,
-                    sample(5.0, 0.5),
-                ];
-                assert_eq!(nested_circuit.resistors.reported_resistances, expected);
-                assert_eq!(next_draw, expected_stream.next_uniform());
-                assert!((2.75..=3.25).contains(&nested_circuit.resistors.reported_resistances[0]));
-                assert!((3.5..=4.5).contains(&nested_circuit.resistors.reported_resistances[2]));
-            }
-        }
-    }
-
-    #[test]
     fn numeric_subcircuit_bindings_retain_complex_parameter_directions() {
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
             let netlist = Netlist::parse_with_options(

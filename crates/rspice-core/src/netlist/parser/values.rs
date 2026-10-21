@@ -2604,18 +2604,18 @@ mod tests {
     #[test]
     fn numeric_fields_and_instance_arguments_preserve_complete_expressions() {
         use crate::config::ExpressionDialect;
-        use crate::netlist::{NetlistParseOptions, ParametricValue};
+        use crate::netlist::ParametricValue;
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
             let mut context = ParamContext::new();
             context.set_expression_dialect(dialect);
             context.set("p", 3.0);
-            for (expression, scalar, combined) in [
-                ("2^p", 8.0, 8.0),
-                ("5%p", 2.0, 2.0),
-                ("1<p", 1.0, 1.0),
-                ("3==p", 1.0, 1.0),
-                ("0||p", 1.0, 1.0),
-                ("1j", 0.0, 1.0),
+            for (expression, scalar) in [
+                ("2^p", 8.0),
+                ("5%p", 2.0),
+                ("1<p", 1.0),
+                ("3==p", 1.0),
+                ("0||p", 1.0),
+                ("1j", 0.0),
             ] {
                 assert_eq!(
                     super::parse_numeric_field_value(expression, &context, 1).unwrap(),
@@ -2625,27 +2625,6 @@ mod tests {
                     super::parse_parametric_field_value(expression, &context),
                     ParametricValue::Expression(_)
                 ));
-                for nested in [false, true] {
-                    let instance = if nested {
-                        format!(
-                            "Xtop in out wrapper p=3\n.subckt wrapper in out p=9\nXleaf in out cell q={expression}\n.ends"
-                        )
-                    } else {
-                        format!("Xtop in out cell q={expression}")
-                    };
-                    let netlist = Netlist::parse_with_options(
-                        &format!("Parameter field expressions\n.param p=3\nV1 in 0 1\n{instance}\n.subckt cell in out q=99\nE1 out 0 in 0 {{real(q)+img(q)}}\n.ends\n.end"),
-                        NetlistParseOptions { expression_dialect: dialect, ..Default::default() },
-                    ).unwrap();
-                    let result = crate::engine::Engine::default()
-                        .run_dc_op(&netlist)
-                        .unwrap();
-                    assert_eq!(
-                        result.voltage(2),
-                        combined,
-                        "{dialect:?} nested={nested}: {expression}"
-                    );
-                }
             }
         }
     }

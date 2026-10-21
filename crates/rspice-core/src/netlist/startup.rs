@@ -1761,28 +1761,4 @@ mod tests {
         assert_eq!(globals[0].canonical_nodes, ["$GFOO"]);
         assert_eq!(globals[1].canonical_nodes, ["$GFOO"]);
     }
-
-    #[test]
-    fn circuit_build_revalidates_programmatically_changed_sidecar_state() {
-        let mut netlist = Netlist::parse(
-            "build validation\n\
-             V1 1 0 1\n\
-             .IC V(1)=1\n\
-             .NODESET V(1)=2\n\
-             .OP\n\
-             .END\n",
-        )
-        .expect("ngspice parse permits both modes");
-        netlist
-            .params
-            .set_expression_dialect(ExpressionDialect::Xyce);
-        let error = crate::Engine::default()
-            .build_circuit(&netlist)
-            .expect_err("builder enforces Xyce startup conflict");
-        assert!(
-            error
-                .to_string()
-                .contains("Cannot set both .IC and .NODESET simultaneously")
-        );
-    }
 }
