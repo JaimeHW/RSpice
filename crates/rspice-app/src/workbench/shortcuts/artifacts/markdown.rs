@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use super::projection::{ShortcutReferenceModel, ShortcutReferenceRow, ShortcutReferenceStatus};
 use super::schema::ShortcutArtifactScope;
 use crate::state::command_catalog::CommandPlatform;
-use crate::workbench::shortcuts::ShortcutBindingSlot;
+use crate::state::shortcuts::ShortcutBindingSlot;
 
 /// Deterministic UTF-8 Markdown generated from the same immutable reference
 /// model as JSON. No live preference state is queried during rendering.
@@ -149,7 +149,7 @@ mod tests {
     use egui::os::OperatingSystem;
 
     use super::*;
-    use crate::workbench::ShortcutPreferences;
+    use crate::state::shortcuts::ShortcutPreferences;
     use crate::workbench::shortcuts::artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };

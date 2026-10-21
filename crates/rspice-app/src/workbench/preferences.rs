@@ -15,8 +15,8 @@ mod drawing_sheet;
 pub(crate) use drawing_sheet::DrawingSheetPersonalPreferences;
 
 #[cfg(test)]
-use super::shortcuts::ShortcutProfileLibraryError;
-use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary};
+use crate::state::shortcuts::ShortcutProfileLibraryError;
+use crate::state::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary};
 #[cfg(test)]
 use rspice_hardcopy_contract::PrintMappingTable;
 #[cfg(test)]

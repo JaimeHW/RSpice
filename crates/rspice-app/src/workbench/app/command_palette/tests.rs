@@ -352,7 +352,7 @@ fn opening_input_keeps_palette_editing_keys() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn opening_input_respects_custom_palette_bindings() {
-    use crate::workbench::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 
     for chord in [false, true] {
         let ctx = Context::default();

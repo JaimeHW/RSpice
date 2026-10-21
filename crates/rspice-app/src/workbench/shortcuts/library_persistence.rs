@@ -10,8 +10,8 @@ use std::fmt;
 
 use serde_json::Value;
 
+use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::commands::vocabulary::CommandRegistry;
-use crate::workbench::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::shortcuts::artifacts::{canonical_json_bytes, hex_digest, sha256};
 
 pub const SHORTCUT_LIBRARY_STORE_FORMAT: &str = "rspice.shortcut-profile-library";
@@ -1436,9 +1436,9 @@ mod tests {
         let mut candidate = predecessor.library().clone();
         candidate
             .edit_active(|profile| {
-                profile.policies_mut().set_chord_timeout(
-                    crate::workbench::shortcuts::ChordTimeoutPolicy::ThreeSeconds,
-                );
+                profile
+                    .policies_mut()
+                    .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
             })
             .unwrap();
         candidate
@@ -1536,7 +1536,7 @@ mod tests {
             library
                 .edit_active(|profile| {
                     profile.policies_mut().set_chord_timeout(
-                        crate::workbench::shortcuts::ChordTimeoutPolicy::ThreeSeconds,
+                        crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds,
                     );
                 })
                 .map_err(|error| error.to_string())?;
@@ -1545,7 +1545,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             next.library().active().policies().chord_timeout(),
-            crate::workbench::shortcuts::ChordTimeoutPolicy::ThreeSeconds
+            crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds
         );
         assert_eq!(next.token().generation(), 2);
     }

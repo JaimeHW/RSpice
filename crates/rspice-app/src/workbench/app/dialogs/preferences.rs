@@ -60,7 +60,7 @@ pub(in crate::workbench) struct PreferencePageActions {
     pub(in crate::workbench) export_settings_file: bool,
     pub(in crate::workbench) show_settings_file: bool,
     pub(in crate::workbench) shortcut_policy_candidate:
-        Option<crate::workbench::ShortcutPreferences>,
+        Option<crate::state::shortcuts::ShortcutPreferences>,
 }
 
 impl RSpiceApp {
@@ -238,7 +238,7 @@ impl RSpiceApp {
     fn begin_shortcut_policy_publication(
         &mut self,
         ctx: &Context,
-        profile: crate::workbench::ShortcutPreferences,
+        profile: crate::state::shortcuts::ShortcutPreferences,
     ) {
         let mut candidate = self.state.ui.preferences.shortcut_profiles().clone();
         if let Err(error) = candidate.replace_active(profile.clone()) {
@@ -397,7 +397,7 @@ impl RSpiceApp {
     fn publish_shortcut_candidate(
         &mut self,
         ctx: &Context,
-        candidate: &crate::workbench::shortcuts::ShortcutProfileLibrary,
+        candidate: &crate::state::shortcuts::ShortcutProfileLibrary,
         continuation: ShortcutLibraryPublicationContinuation,
     ) {
         if self
@@ -621,11 +621,11 @@ impl AppState {
 }
 
 fn stage_shortcut_import(
-    base: &crate::workbench::shortcuts::ShortcutProfileLibrary,
+    base: &crate::state::shortcuts::ShortcutProfileLibrary,
     plan: &crate::workbench::shortcuts::artifacts::ShortcutImportPlan,
 ) -> Result<
     (
-        crate::workbench::shortcuts::ShortcutProfileLibrary,
+        crate::state::shortcuts::ShortcutProfileLibrary,
         ShortcutImportReceipt,
     ),
     String,
@@ -1041,7 +1041,7 @@ mod tests {
         let mut candidate = before.clone();
         candidate
             .policies_mut()
-            .set_chord_timeout(crate::workbench::ChordTimeoutPolicy::ThreeSeconds);
+            .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
 
         app.execute_preference_page_actions(
             &ctx,
@@ -1074,7 +1074,7 @@ mod tests {
         let mut candidate = before.clone();
         candidate
             .policies_mut()
-            .set_chord_timeout(crate::workbench::ChordTimeoutPolicy::ThreeSeconds);
+            .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
         app.state.shortcut_library_persistence =
             crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::Unavailable(
                 "simulated canonical storage failure".to_owned(),

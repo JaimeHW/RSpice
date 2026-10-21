@@ -1,28 +1,12 @@
-//! Keyboard shortcut profiles.
+//! Keyboard shortcut profiles beyond the values the preferences hold.
 //!
-//! A profile binds commands to chords per platform. This module owns the
-//! profile model and its validation, the named-preset library a user can
-//! switch between, the portable artifacts that carry a profile between
-//! installations, and the device-local persistence behind both.
+//! The profile values themselves live in [`crate::state::shortcuts`]. This
+//! module owns the portable artifacts that carry a profile between
+//! installations, the device-local persistence behind the preset library, and
+//! the import and export workflow.
 
 pub(crate) mod artifacts;
-mod library;
 pub(crate) mod library_persistence;
-mod profile;
 #[cfg(test)]
 mod profile_tests;
 pub(crate) mod profile_workflow;
-mod types;
-
-pub use library::{ShortcutProfileLibrary, ShortcutProfileLibraryError};
-pub(crate) use profile::shortcut_contexts_overlap;
-pub use profile::{
-    ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
-    ShortcutProfileIssueSeverity, shortcut_context_precedence_rank,
-};
-pub use types::{
-    ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy,
-    MAX_SHORTCUT_SEQUENCE_STROKES, ProfileShortcutBinding, ProtectedShortcutPolicy,
-    ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource, ShortcutPolicies,
-    ShortcutProfileError, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
-};

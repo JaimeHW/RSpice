@@ -8,15 +8,15 @@
 use egui::{Context, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+use crate::state::shortcuts::ShortcutPreferences;
+use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
 };
-use crate::workbench::ShortcutPreferences;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::shortcuts::artifacts::{
     DecodedShortcutArtifact, DetectedShortcutArtifact, ImportBindingClass,
     PreparedShortcutArtifact, ReadyShortcutArtifactSource, ShortcutArtifactExportOutcome,
@@ -1299,12 +1299,12 @@ fn vscode_blocking_message(report: &VscodeImportReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::shortcuts::{
+        ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutSequence, ShortcutStroke,
+    };
     use crate::workbench::shortcuts::artifacts::{
         apply_shortcut_import, decode_shortcut_artifact_json, detect_shortcut_artifact,
         serialize_shortcut_reference_json,
-    };
-    use crate::workbench::shortcuts::{
-        ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutSequence, ShortcutStroke,
     };
 
     fn exported_artifact(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {

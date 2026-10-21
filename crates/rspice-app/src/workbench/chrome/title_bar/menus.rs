@@ -542,7 +542,7 @@ pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app:
 }
 
 pub(super) fn shortcut_for_occurrence(
-    shortcuts: &crate::workbench::ShortcutPreferences,
+    shortcuts: &crate::state::shortcuts::ShortcutPreferences,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
     command: Command,

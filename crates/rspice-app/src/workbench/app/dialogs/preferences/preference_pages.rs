@@ -1397,11 +1397,11 @@ mod tests {
     #[test]
     fn restoring_shortcuts_saves_the_shipped_profile_before_it_goes_live() {
         use crate::state::command_catalog::CommandPlatform;
-        use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
-        use crate::workbench::{
+        use crate::state::shortcuts::{
             ChordTimeoutPolicy, ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence,
             ShortcutStroke,
         };
+        use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 
         let ctx = egui::Context::default();
         let mut app = RSpiceApp::test_instance();

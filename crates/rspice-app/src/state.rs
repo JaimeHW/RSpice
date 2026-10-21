@@ -22,6 +22,7 @@ pub(crate) use rspice_design::project_sources;
 pub(crate) use rspice_design::properties as property_types;
 pub(crate) use rspice_results::result_presentation;
 mod schematic;
+pub(crate) mod shortcuts;
 mod simulation;
 pub(crate) mod stimulus_library;
 use rspice_design::symbol;

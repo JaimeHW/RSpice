@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use super::{canonical_json_bytes, canonicalize_value, sha256};
 use crate::state::command_catalog::CommandPlatform;
-use crate::workbench::ShortcutPreferences;
+use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::shortcuts::profile_workflow::{
     MAX_SHORTCUT_PROFILE_BYTES, SHORTCUT_PROFILE_FORMAT, stage_shortcut_profile_json,
 };

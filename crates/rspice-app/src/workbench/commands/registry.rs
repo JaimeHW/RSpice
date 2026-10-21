@@ -1530,7 +1530,7 @@ mod tests {
                 binding_owners(RENAME_SELECTION[0].chord, platform),
                 vec![Command::RenameSelection, Command::RenameSymbol]
             );
-            assert!(!crate::workbench::shortcuts::shortcut_contexts_overlap(
+            assert!(!crate::state::shortcuts::shortcut_contexts_overlap(
                 Command::RenameSelection.shortcut_context(),
                 Command::RenameSymbol.shortcut_context(),
             ));

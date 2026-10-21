@@ -517,7 +517,7 @@ fn f10_then_enter_opens_the_focused_application_menu() {
 
 #[test]
 fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
-    let shortcuts = crate::workbench::ShortcutPreferences::default();
+    let shortcuts = crate::state::shortcuts::ShortcutPreferences::default();
     assert_eq!(
         shortcut_for_occurrence(
             &shortcuts,
@@ -582,7 +582,7 @@ fn application_menu_height_is_viewport_bounded() {
 #[test]
 fn menu_shortcuts_are_projected_from_the_typed_registry() {
     let platform = crate::state::command_catalog::CommandPlatform::Desktop;
-    let shortcuts = crate::workbench::ShortcutPreferences::default();
+    let shortcuts = crate::state::shortcuts::ShortcutPreferences::default();
     for command in [
         Command::OpenProject,
         Command::Save,

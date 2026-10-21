@@ -19,7 +19,7 @@ use super::projection::{ShortcutReferenceModel, ShortcutReferenceRow, ShortcutRe
 use super::schema::ShortcutArtifactScope;
 use super::{hex_digest, sha256};
 use crate::state::command_catalog::CommandPlatform;
-use crate::workbench::shortcuts::ShortcutBindingSlot;
+use crate::state::shortcuts::ShortcutBindingSlot;
 
 const PAGE_WIDTH: f32 = 595.28;
 const PAGE_HEIGHT: f32 = 841.89;
@@ -781,7 +781,7 @@ mod tests {
     use lopdf::{Document as ParsedPdf, Object};
 
     use super::*;
-    use crate::workbench::ShortcutPreferences;
+    use crate::state::shortcuts::ShortcutPreferences;
     use crate::workbench::commands::vocabulary::Command;
     use crate::workbench::shortcuts::artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,

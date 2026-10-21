@@ -437,7 +437,7 @@ fn pointer_movement_alone_never_hashes_the_settings() {
         .active_mut()
         .unwrap()
         .policies_mut()
-        .set_chord_timeout(crate::workbench::ChordTimeoutPolicy::ThreeSeconds);
+        .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
     let edited = state.ui.preferences.shortcut_profiles().clone();
     assert_eq!(fingerprint(&mut state.ui), before);
     assert_eq!(state.ui.preferences.shortcut_profiles(), &edited);
@@ -498,7 +498,7 @@ fn exported(label: &str) -> (AppState, Vec<u8>) {
         .active_mut()
         .unwrap()
         .policies_mut()
-        .set_chord_timeout(crate::workbench::ChordTimeoutPolicy::ThreeSeconds);
+        .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
     *source.ui.preferences.shortcut_profiles_mut() = shortcuts;
     source.bind_preferences_file(store);
     let bytes = source.settings_file_bytes().expect("export");

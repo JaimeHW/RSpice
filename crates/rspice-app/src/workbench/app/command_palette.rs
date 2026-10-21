@@ -447,7 +447,7 @@ impl PaletteEntry {
 
     fn shortcut_label(
         &self,
-        shortcuts: &crate::workbench::ShortcutPreferences,
+        shortcuts: &crate::state::shortcuts::ShortcutPreferences,
         platform: CommandPlatform,
         operating_system: egui::os::OperatingSystem,
     ) -> String {

@@ -5,11 +5,11 @@
 //! state exactly as it was.
 
 use super::*;
+use crate::state::shortcuts::{ProtectedShortcutPolicy, ShortcutStroke};
 use crate::workbench::shortcuts::artifacts::{
     ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     decode_shortcut_artifact_json, serialize_shortcut_reference_json,
 };
-use crate::workbench::shortcuts::{ProtectedShortcutPolicy, ShortcutStroke};
 use egui::Key;
 use egui::os::OperatingSystem;
 

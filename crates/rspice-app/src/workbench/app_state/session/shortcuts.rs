@@ -9,7 +9,7 @@
 use egui::{InputState, Key, Modifiers};
 
 use crate::state::command_catalog::CommandPlatform;
-use crate::workbench::ShortcutPreferences;
+use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 
 mod canvas_focus;
@@ -66,7 +66,7 @@ pub(crate) fn accessibility_shortcut_summary(
 #[cfg(test)]
 mod accessibility_tests {
     use super::*;
-    use crate::workbench::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 
     #[test]
     fn accessibility_projection_uses_effective_custom_profile_and_host() {

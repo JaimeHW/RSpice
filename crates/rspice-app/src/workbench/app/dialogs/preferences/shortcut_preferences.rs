@@ -9,6 +9,12 @@ use std::time::Duration;
 use egui::{Context, Key, Modifiers, Response, Stroke, Ui, WidgetInfo, WidgetType};
 
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+use crate::state::shortcuts::{
+    ChordTimeoutPolicy, MAX_SHORTCUT_SEQUENCE_STROKES, ProtectedShortcutPolicy,
+    ShortcutBindingSlot, ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue,
+    ShortcutProfileIssueCode, ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke,
+    SingleKeyCanvasPolicy,
+};
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -16,12 +22,6 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
-use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
-use crate::workbench::{
-    ChordTimeoutPolicy, ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutPreferences,
-    ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
-    ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
-};
 
 use super::preferences_shell::{
     action_buttons, control_width, preference_row, searchable_row, section_heading, value_column,
@@ -67,7 +67,7 @@ impl ShortcutEditorContext {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ShortcutCaptureTarget {
     pub(crate) command: crate::workbench::commands::vocabulary::Command,
-    pub(crate) slot: crate::workbench::ShortcutBindingSlot,
+    pub(crate) slot: crate::state::shortcuts::ShortcutBindingSlot,
 }
 
 /// Retained transaction state for the command-binding editor. Visible
@@ -76,13 +76,13 @@ pub(crate) struct ShortcutCaptureTarget {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ShortcutEditorState {
     pub(crate) open: bool,
-    pub(crate) original: Option<crate::workbench::ShortcutPreferences>,
-    pub(crate) draft: Option<crate::workbench::ShortcutPreferences>,
+    pub(crate) original: Option<crate::state::shortcuts::ShortcutPreferences>,
+    pub(crate) draft: Option<crate::state::shortcuts::ShortcutPreferences>,
     pub(crate) query: String,
     pub(crate) context: ShortcutEditorContext,
     pub(crate) selected_command: Option<crate::workbench::commands::vocabulary::Command>,
     pub(crate) recording: Option<ShortcutCaptureTarget>,
-    pub(crate) capture_strokes: Vec<crate::workbench::ShortcutStroke>,
+    pub(crate) capture_strokes: Vec<crate::state::shortcuts::ShortcutStroke>,
     pub(crate) capture_last_input_at: Option<f64>,
     pub(crate) dirty: bool,
     /// A browser CAS is in flight. The draft remains isolated and the editor
@@ -96,7 +96,7 @@ pub(crate) struct ShortcutEditorState {
 }
 
 impl ShortcutEditorState {
-    pub(crate) fn open(&mut self, profile: &crate::workbench::ShortcutPreferences) {
+    pub(crate) fn open(&mut self, profile: &crate::state::shortcuts::ShortcutPreferences) {
         *self = Self {
             open: true,
             original: Some(profile.clone()),

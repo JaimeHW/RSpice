@@ -159,7 +159,7 @@ impl AppState {
     /// persistence backend.
     pub(crate) fn publish_shortcut_library_candidate(
         &mut self,
-        candidate: &crate::workbench::shortcuts::ShortcutProfileLibrary,
+        candidate: &crate::state::shortcuts::ShortcutProfileLibrary,
         ctx: &egui::Context,
     ) -> Result<ShortcutLibraryPublication, String> {
         if let Some(reason) = self.shortcut_library_persistence.blocked_reason() {
@@ -492,7 +492,7 @@ mod tests {
         candidate
             .insert_named_preset(
                 "Reentrant candidate",
-                crate::workbench::ShortcutPreferences::default(),
+                crate::state::shortcuts::ShortcutPreferences::default(),
                 false,
             )
             .unwrap();

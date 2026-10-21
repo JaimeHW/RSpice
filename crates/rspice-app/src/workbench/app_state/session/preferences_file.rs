@@ -31,10 +31,10 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::time_compat::Instant;
 use crate::ui::Theme;
 use crate::workbench::app_state::AppState;
-use crate::workbench::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::{UiSessionState, UserPreferences};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

@@ -210,8 +210,8 @@ fn populate_ui_session(state: &mut AppState) {
 ///
 /// The profile reads through an untyped value, so a value the session
 /// writes in a form that value cannot hold is lost on the way back.
-fn customized_shortcuts() -> crate::workbench::shortcuts::ShortcutPreferences {
-    use crate::workbench::shortcuts::{
+fn customized_shortcuts() -> crate::state::shortcuts::ShortcutPreferences {
+    use crate::state::shortcuts::{
         ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy,
         ProfileShortcutBinding, ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutPreferences,
         ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,

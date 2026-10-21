@@ -91,12 +91,6 @@ pub use routing::navigation::{RouteTransition, RouteTransitionSource, SurfaceNav
 pub use routing::surface_catalog::{SurfaceArchetype, SurfaceId};
 pub use routing::surface_route::SurfaceRoute;
 pub use rspice_design::symbol::edit::{SymbolCommitIntent, SymbolDocumentSnapshot};
-pub use shortcuts::{
-    ChordTimeoutPolicy, ContextPrecedencePolicy, ProtectedShortcutPolicy, ShortcutBindingSlot,
-    ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
-    ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
-    shortcut_context_precedence_rank,
-};
 pub use state::WorkbenchState;
 
 pub use app::RSpiceApp;

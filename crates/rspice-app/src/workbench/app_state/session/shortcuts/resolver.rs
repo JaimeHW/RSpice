@@ -8,12 +8,12 @@ use std::time::Duration;
 
 use crate::state::ViewType;
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
-use crate::workbench::state::Workspace;
-use crate::workbench::{
+use crate::state::shortcuts::{
     ChordTimeoutPolicy, ContextPrecedencePolicy, ShortcutPreferences, SingleKeyCanvasPolicy,
     shortcut_context_precedence_rank,
 };
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
+use crate::workbench::state::Workspace;
 
 use super::ShortcutInputSnapshot;
 use super::input_snapshot::ShortcutKeyPress;
@@ -439,7 +439,7 @@ fn analyze_prefix(
 /// bare `F` typed into a filter field never reaches here.
 fn single_key_canvas_binding_allowed(
     context: ShortcutContext,
-    sequence: &crate::workbench::ShortcutSequence,
+    sequence: &crate::state::shortcuts::ShortcutSequence,
     environment: ShortcutEnvironment,
     policy: SingleKeyCanvasPolicy,
 ) -> bool {
@@ -517,7 +517,7 @@ mod tests {
     use egui::{Event, Key, Modifiers};
 
     use super::*;
-    use crate::workbench::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 
     fn primary() -> Modifiers {
         Modifiers {

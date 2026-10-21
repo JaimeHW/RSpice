@@ -10,13 +10,13 @@ use serde_json::Value;
 
 use crate::state::ComponentType;
 use crate::state::command_catalog::CommandPlatform;
-use crate::workbench::UserPreferences;
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
-use crate::workbench::shortcuts::{
+use crate::state::shortcuts::{
     ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutPolicies, ShortcutPreferences,
     ShortcutProfileIssueCode, ShortcutProfileIssueSeverity, ShortcutProfileLibrary,
     ShortcutProfileLibraryError, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
+use crate::workbench::UserPreferences;
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
 use crate::workbench::state::Workspace;
 
 fn sequence(key: Key, primary: bool) -> ShortcutSequence {

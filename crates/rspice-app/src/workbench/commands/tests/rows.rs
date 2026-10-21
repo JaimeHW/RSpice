@@ -13,14 +13,14 @@ use std::time::Duration;
 use super::result_navigation::{RunOrigin, app_with_prepared_run};
 use super::*;
 use crate::state::command_catalog::{CommandPlatform, ShortcutBinding, ShortcutKind};
+use crate::state::shortcuts::{
+    ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
+    shortcut_context_precedence_rank,
+};
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
 use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
-use crate::workbench::{
-    ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
-    shortcut_context_precedence_rank,
-};
 
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.

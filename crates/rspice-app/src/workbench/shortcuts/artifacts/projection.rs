@@ -16,12 +16,11 @@ use super::schema::{
     ShortcutArtifactManifest, portable_profile_value, scrub_private_profile_state,
 };
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
-use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
-use crate::workbench::shortcuts::{
+use crate::state::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
-    ShortcutSequence,
+    ShortcutPreferences, ShortcutSequence,
 };
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
 
 pub use super::schema::ShortcutArtifactScope as ShortcutExportScope;
 
@@ -412,8 +411,8 @@ fn sort_rows(rows: &mut [ShortcutReferenceRow]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::shortcuts::{ShortcutSequence, ShortcutStroke};
     use crate::workbench::commands::vocabulary::Command;
-    use crate::workbench::shortcuts::{ShortcutSequence, ShortcutStroke};
 
     #[test]
     fn user_override_json_is_deterministic_private_and_platform_sliced() {

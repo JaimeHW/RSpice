@@ -13,13 +13,13 @@ use serde_json::Value;
 use super::schema::DecodedShortcutArtifact;
 use super::{canonical_json_bytes, sha256};
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
-use crate::workbench::shortcuts::{
+use crate::state::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutPreferences,
     ShortcutProfileAudit, ShortcutProfileIssueCode, ShortcutProfileIssueSeverity,
     ShortcutProfileLibrary, ShortcutProfileLibraryError, ShortcutSequence, ShortcutStroke,
     SingleKeyCanvasPolicy, shortcut_context_precedence_rank, shortcut_contexts_overlap,
 };
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1250,7 +1250,7 @@ fn blocking_collisions(profile: &ShortcutPreferences) -> Vec<BlockingCollision> 
 fn collision_bindings(
     profile: &ShortcutPreferences,
     command: Command,
-) -> Vec<crate::workbench::shortcuts::ResolvedShortcutBinding> {
+) -> Vec<crate::state::shortcuts::ResolvedShortcutBinding> {
     let bindings = profile.resolved_bindings(&CommandRegistry, command.key());
     if !matches!(
         command.shortcut_context(),

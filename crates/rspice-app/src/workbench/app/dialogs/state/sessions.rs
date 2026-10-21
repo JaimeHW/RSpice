@@ -232,7 +232,7 @@ pub struct DialogState {
 
     /// Browser-only persist-before-live policy candidate. Native publication
     /// completes in the initiating frame, while browser storage is async.
-    pub(crate) shortcut_policy_candidate: Option<crate::workbench::ShortcutPreferences>,
+    pub(crate) shortcut_policy_candidate: Option<crate::state::shortcuts::ShortcutPreferences>,
 
     /// License activation dialog state
     pub license_dialog: crate::workbench::app::dialogs::license::LicenseDialogState,
