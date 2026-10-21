@@ -253,7 +253,12 @@ use rspice_core::analysis::harmonic_balance::{
 // engine. The move adds one grouped re-export in `model_resolution` and no
 // name; every `rspice_core::engine::ModelBin*` path is unchanged. The census
 // is 5,737, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5737;
+// `log_scope::canonical_target` adds one: the run log (`rspice-simulation`
+// engine_log.rs), the CLI's JSON log and the application's engine log name a
+// record by its `rspice_core` target whichever crate of the family emitted it,
+// so the console and `RUST_LOG` directives keep today's names after the split.
+// The census is 5,738, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5738;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
