@@ -2876,7 +2876,7 @@ impl PnoiseCard {
 /// Like [`PacCard`], the large-signal carrier is deliberately absent: the
 /// period and the monodromy matrix come from the upstream `.PSS` instance when
 /// the analysis runs. There is deliberately no `FROM=` key either, and no
-/// harmonic-balance spelling of this card: [`crate::engine::PssAnalysisResult`]
+/// harmonic-balance spelling of this card: `PssAnalysisResult`
 /// is the only thing in the engine that carries a monodromy matrix, so a
 /// harmonic-balance carrier cannot answer what this card asks.
 #[derive(Debug, Clone, PartialEq)]
@@ -2910,7 +2910,7 @@ pub struct PstbCard {
     /// There is no tolerance in the `.PSTB` path this could be. The spectrum
     /// is produced by a direct eigensolve with no iteration to converge, and
     /// the one tolerance it does carry — the qualification bound a
-    /// [`SpectrumCertificate`](crate::analysis::pole_zero::SpectrumCertificate)
+    /// `SpectrumCertificate`
     /// is judged against — is *derived*, not chosen: `is_valid` requires it to
     /// equal `128 * n * EPSILON` for the matrix order exactly, and a
     /// certificate carrying any other value is invalid for pole-zero, PSS and
@@ -2997,11 +2997,11 @@ pub enum PeriodicSourceSelector {
 /// applies the engine's own default rather than a spelling of "default"
 /// invented by whoever wrote the card. That distinction is what lets one
 /// surface state a control while another leaves it alone and still get
-/// [`HbConfig`](crate::analysis::HbConfig)s that differ in exactly the
+/// `HbConfig`s that differ in exactly the
 /// authored field.
 ///
 /// The card is the only channel:
-/// [`HbConfig::from_hb_card`](crate::analysis::HbConfig::from_hb_card) is the
+/// `HbConfig::from_hb_card` is the
 /// one place a `.HB` card becomes a configuration, and it takes the card, so
 /// a field added here reaches every surface at once.
 #[derive(Debug, Clone, PartialEq, Default)]

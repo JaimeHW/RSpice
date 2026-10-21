@@ -8,7 +8,7 @@
 //!
 //! Nothing is defaulted here. An unauthored keyword stays `None` on the
 //! [`HbCard`] so that
-//! [`HbConfig::from_hb_card`](crate::analysis::HbConfig::from_hb_card) — the
+//! `HbConfig::from_hb_card` — the
 //! single place a `.HB` card becomes a configuration — applies the engine's
 //! own default. A parser that filled the gaps would be a second copy of the
 //! defaults, free to disagree with the first.

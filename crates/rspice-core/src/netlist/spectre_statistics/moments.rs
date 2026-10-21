@@ -5,7 +5,7 @@
 //! particular, bounding one variable also changes its unbounded partners.
 //! Eight independently shifted Halton rules estimate integration error. These
 //! points integrate the statistical model; they do not execute circuit trials.
-//! See https://people.cs.kuleuven.be/~dirk.nuyens/mcqmc2014_proceedings_preprints/223.pdf.
+//! See <https://people.cs.kuleuven.be/~dirk.nuyens/mcqmc2014_proceedings_preprints/223.pdf>.
 
 use super::*;
 use crate::abort_signal::AbortSignal;
