@@ -117,10 +117,19 @@ struct ModelFile(PathBuf);
 
 impl ModelFile {
     fn new(name: &str, source: &str) -> Self {
+        Self::with_extension(name, source, "va")
+    }
+
+    /// A Verilog-AMS source for a `.hdl` card.
+    fn hdl(name: &str, source: &str) -> Self {
+        Self::with_extension(name, source, "vams")
+    }
+
+    fn with_extension(name: &str, source: &str, extension: &str) -> Self {
         let sequence = MODEL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
         path.push(format!(
-            "rspice_mixed_hardening_{name}_{}_{sequence}.va",
+            "rspice_mixed_hardening_{name}_{}_{sequence}.{extension}",
             std::process::id()
         ));
         let mut file = std::fs::File::create(&path).expect("create model file");
@@ -1763,12 +1772,15 @@ fn a_same_tick_zero_delay_loop_surfaces_with_the_instance_that_owns_it() {
     );
     let error = error_for(&deck, 20.0e-9, 0.2e-9);
     let lowered = error.to_lowercase();
+    // Each process is named under the X-card that holds it, by kind, with
+    // the net it drives.
     assert!(
-        lowered.contains("mixed verilog-ams instance 'x1'"),
+        lowered.contains("x1.always#3 (always) driving x1.y")
+            && lowered.contains("x1.always#4 (always) driving x1.z"),
         "the deck-level context must be the instance: {error}"
     );
     assert!(
-        !lowered.contains("mixed verilog-ams instance 'x0'"),
+        !lowered.contains("x0."),
         "the quiet instance sorts first but does not own the looping processes: {error}"
     );
     assert!(
@@ -1776,8 +1788,101 @@ fn a_same_tick_zero_delay_loop_surfaces_with_the_instance_that_owns_it() {
         "the kernel's own diagnostic must survive the trip: {error}"
     );
     assert!(
-        lowered.contains("delta cycles") && lowered.contains("busiest driver"),
+        lowered.contains("delta cycles") && lowered.contains("busiest drivers"),
         "including the evidence it carries: {error}"
+    );
+    // `always @(z) y = ~y` and `always @(y) z = ~z` wake each other.
+    assert!(
+        lowered.contains("zero-delay loop: x1.y -> x1.z -> x1.y")
+            || lowered.contains("zero-delay loop: x1.z -> x1.y -> x1.z"),
+        "the loop closes through the two registers: {error}"
+    );
+}
+
+/// Verilog for the zero-delay loop probe: `a` and `b` drive each other once
+/// `go` rises at 10 ns, through two continuous assignments.
+const ZERO_DELAY_RING: &str = "`include \"disciplines.vams\"
+`timescale 1ns/1ps
+module ring(o);
+  output o;
+  wire a, b;
+  reg go;
+  initial begin go = 1'b0; #10 go = 1'b1; end
+  assign a = go ? ~b : 1'b0;
+  assign b = a;
+  assign o = a;
+endmodule
+";
+
+/// The same ring with one tick of delay in the inverting stage. A delay on a
+/// continuous assignment has no lowered form yet, so the stage is the
+/// procedural equivalent with an intra-assignment delay.
+const DELAYED_RING: &str = "`include \"disciplines.vams\"
+`timescale 1ns/1ps
+module ring(o);
+  output o;
+  reg a;
+  wire b;
+  reg go;
+  initial begin go = 1'b0; #10 go = 1'b1; end
+  always @(b or go) a = #1 (go ? ~b : 1'b0);
+  assign b = a;
+  assign o = a;
+endmodule
+";
+
+fn ring_deck(model: &ModelFile) -> String {
+    format!(
+        "* zero-delay loop between two continuous assignments\n\
+         .hdl \"{}\" module=ring\n\
+         .param vcc=3.3\n\
+         xr o ring\n\
+         r1 o 0 1k\n\
+         .tran 1n 100n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// **The loop is named, not only its busiest member.** Every process that kept
+/// firing at the tick is listed by kind with the net it drives, the loop is
+/// closed through what each one waits on, and the tick is given on the
+/// design's 1 ps grid and in seconds. `assign o = a` fires as often as the
+/// loop's members but is downstream of it, so it is listed and is not in the
+/// loop.
+#[test]
+fn a_zero_delay_loop_names_every_member_and_the_loop_they_close() {
+    let model = ModelFile::hdl("zero_delay_ring", ZERO_DELAY_RING);
+    let error = error_for(&ring_deck(&model), 100.0e-9, 1.0e-9);
+    for expected in [
+        "event network did not settle at tick 10000 (1e-8 s) within 10000 delta cycles",
+        "xr.assign#1 (continuous assign) driving xr.a fired",
+        "xr.assign#2 (continuous assign) driving xr.b fired",
+        "xr.assign#3 (continuous assign) driving port xr.o fired",
+        "xr.initial#0 (initial) driving xr.go fired 1 time",
+        "zero-delay loop: xr.a -> xr.b -> xr.a",
+    ] {
+        assert!(error.contains(expected), "missing `{expected}`: {error}");
+    }
+}
+
+/// The control: one tick of delay in the loop makes it a ring oscillator,
+/// which runs, toggling `o` every nanosecond once `go` rises.
+#[test]
+fn the_same_loop_with_a_delay_runs() {
+    let model = ModelFile::hdl("delayed_ring", DELAYED_RING);
+    let result = run(&ring_deck(&model), 100.0e-9, 1.0e-9);
+    let o = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("o"))
+        .expect("o is published");
+    let high = result.voltages[o].iter().filter(|v| **v > 1.65).count();
+    let low = result.voltages[o].iter().filter(|v| **v < 1.65).count();
+    assert!(
+        high > 0 && low > 0,
+        "o must toggle: {:?}",
+        result.voltages[o]
     );
 }
 

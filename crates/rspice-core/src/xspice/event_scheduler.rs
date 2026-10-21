@@ -616,6 +616,24 @@ pub struct OscillationDiagnostic {
     /// ordered by count descending, then by the driver's own order so the
     /// report is reproducible.
     pub entities: Vec<(EventTarget, u64)>,
+    /// The nets of a loop among `entities`, in loop order, when the host that
+    /// owns the drivers could close one through their static sensitivity.
+    ///
+    /// The kernel knows who fired, not why; this is the why, and only a host
+    /// that knows what each driver reads and writes can fill it in. Boxed
+    /// because it is rare and every refusal that can carry it is moved by
+    /// value.
+    #[cfg(feature = "veriloga")]
+    pub(crate) zero_delay_loop: Option<Box<ZeroDelayLoop>>,
+}
+
+/// A loop among an oscillation's drivers; see
+/// [`OscillationDiagnostic::zero_delay_loop`].
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ZeroDelayLoop {
+    /// The nets the loop runs through, in order; the last wakes the first.
+    pub(crate) nets: Vec<String>,
 }
 
 /// Errors the kernel reports instead of panicking or hanging.
@@ -690,7 +708,8 @@ impl fmt::Display for SchedulerError {
                 match diagnostic.tick {
                     Some(tick) => write!(
                         f,
-                        "event network did not settle at tick {tick} within {cause}"
+                        "event network did not settle at tick {tick} ({:e} s) within {cause}",
+                        diagnostic.at.seconds()
                     )?,
                     None => write!(
                         f,
@@ -698,12 +717,30 @@ impl fmt::Display for SchedulerError {
                         diagnostic.at
                     )?,
                 }
-                if let Some((target, count)) = diagnostic.entities.first() {
-                    write!(
-                        f,
-                        " (busiest driver {}.{} fired {count} times)",
-                        target.instance, target.port_name
-                    )?;
+                // Every driver collected, not the first: a loop has at least
+                // two members unless it feeds itself, and the one that fired
+                // most is only one of them.
+                for (position, (target, count)) in diagnostic.entities.iter().enumerate() {
+                    f.write_str(if position == 0 {
+                        "; busiest drivers: "
+                    } else {
+                        "; "
+                    })?;
+                    f.write_str(&target.instance)?;
+                    if !target.port_name.is_empty() {
+                        write!(f, " driving {}", target.port_name)?;
+                    }
+                    let times = if *count == 1 { "time" } else { "times" };
+                    write!(f, " fired {count} {times}")?;
+                }
+                #[cfg(feature = "veriloga")]
+                if let Some(nets) = diagnostic
+                    .zero_delay_loop
+                    .as_deref()
+                    .map(|cycle| &cycle.nets)
+                    && let Some(first) = nets.first()
+                {
+                    write!(f, "; zero-delay loop: {} -> {first}", nets.join(" -> "))?;
                 }
                 Ok(())
             }
@@ -1546,6 +1583,13 @@ impl EventScheduler {
         self.queues.intern(target)
     }
 
+    /// The identity behind an interned id, for a host naming its own drivers
+    /// in a diagnostic.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn target(&self, id: TargetId) -> &EventTarget {
+        self.queues.target(id)
+    }
+
     /// [`Self::schedule_at`] for a driver already interned.
     pub(crate) fn schedule_id_at(
         &mut self,
@@ -2002,6 +2046,8 @@ impl EventScheduler {
             delta_cycle_limit: self.limits.max_delta_cycles_per_tick,
             event_limit: self.limits.max_events_per_tick,
             entities,
+            #[cfg(feature = "veriloga")]
+            zero_delay_loop: None,
         })
     }
 }

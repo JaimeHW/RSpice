@@ -61,9 +61,11 @@ mod analog_sample_tests;
 pub(crate) mod checkpoint;
 mod coupled;
 mod image;
+mod oscillation;
 mod threads;
 use coupled::NoActiveParticipant;
 pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
+pub(crate) use oscillation::process_label;
 
 use rspice_veriloga::canonical_ir::digital_value::DigitalEventCount;
 use std::{
@@ -1201,7 +1203,7 @@ impl DigitalHost {
         fired.clear();
         self.fired = fired;
         self.checkpoint_failed |= outcome.is_err();
-        outcome
+        outcome.map_err(|error| self.explain_oscillation(error))
     }
 
     fn settle_into(

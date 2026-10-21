@@ -348,6 +348,19 @@ fn port_net_name(instance: &str, signal: DigitalSignalId, port: &str) -> String 
     )
 }
 
+/// [`port_net_name`]'s net as a diagnostic names it, `port xi.y`; any other
+/// name unchanged.
+fn readable_net_name(name: &str) -> String {
+    let port = name.strip_prefix("@port:").and_then(|rest| {
+        let (length, rest) = rest.split_once(':')?;
+        let length = length.parse::<usize>().ok()?;
+        let instance = rest.get(..length)?;
+        let (_, port) = rest.get(length..)?.strip_prefix(':')?.split_once(':')?;
+        Some(format!("port {instance}.{port}"))
+    });
+    port.unwrap_or_else(|| name.to_string())
+}
+
 impl MixedDigitalCoordinator {
     pub(crate) fn enroll(
         hosts: &mut [MixedSignalHost],
@@ -741,20 +754,45 @@ impl MixedDigitalCoordinator {
     /// This runs only on failure and leaves the structured diagnostic intact.
     fn execution_error(&self, mut error: DigitalRunError) -> MixedSignalError {
         if let DigitalRunError::Scheduler(SchedulerError::Oscillation(diagnostic)) = &mut error {
+            let plan = self.digital.plan();
             for (target, _) in &mut diagnostic.entities {
                 if self.digital.is_external_target(target) {
                     continue;
                 }
-                if let Some(owner) = self.maps.iter().find(|map| {
-                    map.processes
-                        .iter()
-                        .chain(&map.connection_processes)
-                        .any(|process| usize::from(*process) == target.node_id)
-                }) {
-                    target.instance = format!(
-                        "mixed Verilog-AMS instance '{}' process {}",
-                        owner.name, target.instance
-                    );
+                let Some(kind) = plan
+                    .processes
+                    .get(target.node_id)
+                    .map(|process| process.kind)
+                else {
+                    continue;
+                };
+                let is_this = |process: &rspice_veriloga::canonical_ir::ids::DigitalProcessId| {
+                    usize::from(*process) == target.node_id
+                };
+                // A process is numbered as its own module numbers it, not by
+                // where the link placed it among every instance's processes.
+                let Some((owner, label)) = self.maps.iter().find_map(|map| {
+                    if let Some(local) = map.processes.iter().position(is_this) {
+                        Some((map, super::super::host::process_label(kind, local)))
+                    } else if map.connection_processes.iter().any(is_this) {
+                        Some((map, "port connection".to_string()))
+                    } else {
+                        None
+                    }
+                }) else {
+                    continue;
+                };
+                target.instance = format!("{}.{label}", owner.name);
+                target.port_name = target
+                    .port_name
+                    .split(", ")
+                    .map(readable_net_name)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+            }
+            if let Some(cycle) = diagnostic.zero_delay_loop.as_deref_mut() {
+                for net in &mut cycle.nets {
+                    *net = readable_net_name(net);
                 }
             }
         }
