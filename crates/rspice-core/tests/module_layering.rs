@@ -130,6 +130,11 @@ const LAYERS: &[(&str, u32)] = &[
     // does `notice`, whose collector rides in the scope as an opaque value
     // that `notice` alone sets and downcasts.
     ("log_scope", 0),
+    // Where a line of deck text was written. It names nothing in the crate:
+    // the parser records one and every refusal and diagnostic that cites a
+    // deck line reads down into it, so none of them reaches up into `netlist`.
+    // `netlist` re-exports it.
+    ("source_location", 0),
     // SPICE RAW waveform files, read and written. A leaf by construction:
     // `raw_export` names nothing in the crate at all and the reader needs only
     // `resource` for its read limits, so a format module never has to move
@@ -152,6 +157,13 @@ const LAYERS: &[(&str, u32)] = &[
     // that publishes one all read down into it instead of the control host
     // reaching up into `execution`.
     ("result_scalar", 1),
+    // The typed refusal of a well-formed construct this build does not
+    // execute. It names only `identity` and `source_location`, and any layer
+    // from `config` up may raise one, so it sits below them all rather than in
+    // `analysis` beside the taxonomy that carries it; `analysis::error`
+    // re-exports it. It shares rank 1 with `io` and `numerics` because none
+    // references another.
+    ("capability", 1),
     // SIMD acceleration uses the scalar numerical definitions for exceptional
     // values, unaligned tails and convergence policy. Numerics stays independent
     // of the accelerator so native and browser fallbacks have the same meaning.
@@ -264,25 +276,15 @@ const LAYERS: &[(&str, u32)] = &[
 ///   to instantiate into. Their only callers are in `engine::builder`, so the
 ///   edge retires by moving the two entry points, and their tests, up beside
 ///   them.
-/// - `config -> analysis`, 5, and a cycle with it: `analysis::error` names
-///   `config::SimulationConfigError`, whose `UnsupportedCapability` variant
-///   carries the `UnsupportedCapabilityError` that `analysis::error` defines
-///   and `HdlRunConfig::unlanded_option` builds (3, production); two
-///   unit-test lines widen a config error to `SimulationError`. Retires by
-///   moving the refusal type below `config`, which first needs
-///   `NetlistSourceLocation`, its one field from above `config`, to move down
-///   with it.
-/// - `xspice -> analysis`, 4. Production: the digital testbench's
-///   `DigitalRunError::Unsupported` in `xspice/verilog/host.rs`, and the
-///   refusals `xspice/verilog.rs` and `xspice/verilog/mixed/checkpoint.rs`
-///   raise, carry the same `UnsupportedCapabilityError`. Retires with it.
-/// - `circuit -> analysis`, 25. Production: the mixed-signal scheduler
+/// - `config -> analysis`, 2. Two unit-test lines widen a config error to
+///   `SimulationError`. The widening is `analysis::error`'s
+///   `From<SimulationConfigError>`, so they retire by moving beside it.
+/// - `circuit -> analysis`, 21. Production: the mixed-signal scheduler
 ///   (`circuit/scheduler.rs`, `circuit/scheduler/trial.rs`), mixed-signal port
 ///   elaboration (`circuit/mixed_signal.rs`) and model acceptance
 ///   (`circuit/external_models.rs`) return `SimulationError` and
-///   `ElaborationError`, and `circuit/mixed_checkpoint.rs` builds an
-///   `UnsupportedCapabilityError`. The error taxonomy sits in `analysis`, and
-///   the edge retires by giving `analysis::error` a rank of its own just below
+///   `ElaborationError`. The error taxonomy sits in `analysis`, and the edge
+///   retires by giving `analysis::error` a rank of its own just below
 ///   `circuit`: its `From<CircuitError>` impl moves into `circuit`, and the
 ///   `s_param::PortError` its `RfPort` variant carries, the one analysis type
 ///   it names, moves down with it.
@@ -296,16 +298,15 @@ const LAYERS: &[(&str, u32)] = &[
 const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("abort_signal", "transient_observation", 2),
     ("analysis", "engine", 3),
-    ("circuit", "analysis", 25),
+    ("circuit", "analysis", 21),
     ("circuit", "engine", 11),
-    ("config", "analysis", 5),
+    ("config", "analysis", 2),
     ("device", "analysis", 5),
     ("device", "circuit", 11),
     ("device", "engine", 6),
     ("netlist", "circuit", 1),
     ("netlist", "device", 1),
     ("netlist", "engine", 13),
-    ("xspice", "analysis", 4),
 ];
 
 fn src_dir() -> PathBuf {

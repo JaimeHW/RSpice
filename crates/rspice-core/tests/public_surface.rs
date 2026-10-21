@@ -236,7 +236,14 @@ use rspice_core::analysis::harmonic_balance::{
 // `FourierAnalysis::analyze_current_with_abort`, which nothing called (current
 // traces go through `analyze_impulses_with_abort`), takes one away. The census
 // stays 5,735, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5735;
+// `NetlistSourceLocation` and `UnsupportedCapabilityError` moved down into
+// `source_location` and `capability`, below the configuration and XSPICE code
+// that name them, so neither reaches up into `netlist` or `analysis` for them.
+// The moves add one re-export and no name: `netlist` re-exports the location,
+// and `analysis::error` re-exports the refusal in the statement that already
+// re-exported `ContinuationAid`. Every public path to both is unchanged. The
+// census is 5,736, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5736;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

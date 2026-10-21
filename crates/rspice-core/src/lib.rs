@@ -76,6 +76,10 @@ pub mod analysis;
 /// Starter model cards embedded in the binary; a leaf with no dependencies so
 /// that library, netlist and engine can all share one copy.
 pub(crate) mod builtin_lib;
+/// The typed refusal of a well-formed construct this build does not execute.
+/// Below configuration and XSPICE, which raise one; published through
+/// `analysis::error` and the crate root.
+mod capability;
 pub mod circuit;
 /// Names of the XSPICE code models compiled in; a leaf so that both the parser
 /// that classifies a name and the subsystem that instantiates it read down.
@@ -121,6 +125,9 @@ mod result_scalar;
 /// Physical units carried by result schemas and control-expression vectors.
 mod signal_unit;
 pub mod solver;
+/// Where a line of deck text was written. A leaf, so a refusal raised below
+/// the parser can cite one; published through `netlist`.
+mod source_location;
 mod spice_number;
 pub mod time_compat;
 mod transient_observation;
