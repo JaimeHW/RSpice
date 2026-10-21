@@ -4375,6 +4375,69 @@ fn wreal_resolution_option_resolves_plain_wreal_drivers() {
     }
 }
 
+/// A sealed runtime is installed once, under its key alone, for every deck
+/// that later runs it. A deck's `.options wreal_resolution` runs one whose
+/// nets the option leaves alone, and refuses one with a plain `wreal` net by
+/// naming the net and both resolutions, not by calling it not installed.
+#[test]
+fn sealed_runtimes_serve_a_wreal_resolution_that_changes_none_of_their_nets() {
+    use rspice_core::{
+        ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration, ResourceLimits,
+        hold_project_veriloga_sources_for_session,
+    };
+    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let prefix = format!("__rspice_project__/sealed-wreal-{}", std::process::id());
+    let sealed = |name: &str, net: &str| {
+        let runtime = compiler
+            .compile_runtime(
+                &format!("module {name}(y); output y; {net} y; assign y = 1.0; endmodule"),
+                None,
+            )
+            .unwrap();
+        ProjectVerilogASourceRegistration::Runtime(ProjectVerilogARuntimeRegistration {
+            source_key: PathBuf::from(format!("{prefix}/{name}.vams")),
+            aliases: vec![name.to_ascii_uppercase()],
+            model: runtime.model,
+            canonical_ir: runtime.canonical_ir,
+        })
+    };
+    let _installed = hold_project_veriloga_sources_for_session(
+        vec![sealed("plain", "wreal"), sealed("summed", "wrealsum")],
+        ResourceLimits::default(),
+    )
+    .unwrap();
+    let deck = |name: &str, options: &str| {
+        format!(
+            "* sealed real driver\nxa out {name}\nrload out 0 1k\n{options}.va \"{prefix}/{}.vams\" {name}\n.end\n",
+            name.to_ascii_lowercase()
+        )
+    };
+    let avg = ".options wreal_resolution=avg\n";
+    for (name, options) in [("PLAIN", ""), ("SUMMED", ""), ("SUMMED", avg)] {
+        let voltage = operating_point_at(&deck(name, options), "out")
+            .unwrap_or_else(|error| panic!("{name} {options}: {error}"));
+        assert!(
+            (voltage - 1.0).abs() < 1e-9,
+            "{name} {options}: V(out) = {voltage}"
+        );
+    }
+    let error = operating_point_at(&deck("PLAIN", avg), "out")
+        .expect_err("the option would change the sealed plain wreal");
+    for expected in [
+        "sealed",
+        "`wreal_resolution=single`",
+        "`.options wreal_resolution=avg`",
+        "plain `wreal` net 'y'",
+        "`wrealavg`",
+    ] {
+        assert!(error.contains(expected), "{expected}: {error}");
+    }
+    assert!(!error.contains("not installed"), "{error}");
+}
+
 #[test]
 fn typed_event_boundaries_resolve_bidirectional_contention_and_release() {
     let model = ModelFile::new(

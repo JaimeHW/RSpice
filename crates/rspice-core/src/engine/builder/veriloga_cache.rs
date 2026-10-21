@@ -2160,6 +2160,14 @@ fn lookup_veriloga_key_with_limits_and_abort(
             cache.remove(canonical);
         }
     }
+    if let Some(entry) = registered_at_default_resolution(canonical, limits, abort)? {
+        VERILOGA_CACHE_TELEMETRY.memory_hits.fetch_add(1, Relaxed);
+        log::debug!(
+            "Verilog-A cache hit (registered at the default wreal resolution): '{}'",
+            canonical.display()
+        );
+        return Ok(Some(entry));
+    }
 
     // A sealed virtual key is an authenticated in-memory capability,
     // never a filesystem locator. A missing registration must fail closed;
@@ -2197,6 +2205,74 @@ fn lookup_veriloga_key_with_limits_and_abort(
 
     VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
     Ok(None)
+}
+
+/// A registration made at the default `wreal` resolution, for a deck that
+/// sets another.
+///
+/// A sealed source is installed once, under its key alone, for every deck
+/// that later runs it, and a browser compiles nothing of its own, so neither
+/// has a record at the deck's resolution to find. The option rewrites exactly
+/// the plain `wreal` declarations, so a runtime with no plain `wreal` net is
+/// the one the deck's resolution would compile, and it runs. One that has a
+/// plain `wreal` net would run with a resolution the deck did not ask for,
+/// so it is refused, naming the net and both resolutions.
+#[cfg(feature = "veriloga")]
+fn registered_at_default_resolution(
+    canonical: &VerilogASourceKey,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Option<CachedVerilogAModel>, SimulationError> {
+    use rspice_veriloga::canonical_ir::digital::{DigitalRealResolution, DigitalSignalKind};
+    let path = canonical.source_path.as_path();
+    let sealed = is_sealed_veriloga_virtual_path(path);
+    if canonical.wreal_resolution == DigitalRealResolution::Single
+        || !(sealed || cfg!(target_arch = "wasm32"))
+    {
+        return Ok(None);
+    }
+    let registered = canonical
+        .clone()
+        .resolving_wreal(DigitalRealResolution::Single);
+    let entry = veriloga_source_cache()
+        .read()
+        .ok()
+        .and_then(|cache| cache.get_cloned(&registered));
+    let Some(CachedVerilogASource::Runtime(entry)) = entry else {
+        return Ok(None);
+    };
+    if !dependencies_are_fresh_with_limits_and_abort(&entry.dependencies, limits, abort)? {
+        return Ok(None);
+    }
+    let plain = entry.canonical_ir.as_deref().and_then(|artifact| {
+        artifact.digital.signals.iter().find(|signal| {
+            signal.kind == DigitalSignalKind::Real(DigitalRealResolution::Single)
+                && !signal.procedurally_assignable
+                && signal.local.is_none()
+        })
+    });
+    let Some(net) = plain else {
+        return Ok(Some(entry));
+    };
+    let option = match canonical.wreal_resolution {
+        DigitalRealResolution::Single => "single",
+        DigitalRealResolution::Sum => "sum",
+        DigitalRealResolution::Average => "avg",
+        DigitalRealResolution::Minimum => "min",
+        DigitalRealResolution::Maximum => "max",
+    };
+    Err(cache_refusal(
+        path,
+        crate::ElaborationErrorKind::MissingSource,
+        format!(
+            "this {} Verilog-A runtime was compiled under `wreal_resolution=single`, and the \
+             deck's `.options wreal_resolution={option}` changes its plain `wreal` net '{}'; \
+             register it compiled under `{option}`, or declare that net `{}`",
+            if sealed { "sealed" } else { "registered" },
+            net.name,
+            canonical.wreal_resolution.keyword(),
+        ),
+    ))
 }
 
 #[cfg(feature = "veriloga")]
