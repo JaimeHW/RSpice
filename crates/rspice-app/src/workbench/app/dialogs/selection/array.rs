@@ -18,8 +18,104 @@ use crate::state::{
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows};
 
-use crate::workbench::app::{ArraySelectionDialogState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
+
+/// Isolated authority, typed draft, and canvas interaction state for the
+/// mockup-owned Create object array transaction. The complete replica set is
+/// validated as one candidate and the live document remains unchanged until
+/// the canvas commit boundary succeeds.
+#[derive(Debug, Clone)]
+pub(crate) struct ArraySelectionPreviewCache {
+    pub(crate) plan: crate::state::SchematicArrayPlan,
+    pub(crate) library_revision: u64,
+    pub(crate) symbol_revision: u64,
+    pub(crate) identity_cursor: u64,
+    pub(crate) preview: Result<crate::state::SchematicArrayPreview, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ArraySelectionDialogState {
+    pub(crate) open: bool,
+    pub(crate) armed: bool,
+    pub(crate) kind: crate::state::SchematicArrayKind,
+    pub(crate) count: String,
+    pub(crate) naming: String,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
+    pub(crate) generation: u64,
+    pub(crate) preview_cache: Option<ArraySelectionPreviewCache>,
+    pub(crate) initial_kind: crate::state::SchematicArrayKind,
+    pub(crate) initial_count: String,
+    pub(crate) initial_naming: String,
+    pub(crate) dirty: bool,
+}
+
+impl ArraySelectionDialogState {
+    pub(crate) fn open(
+        &mut self,
+        authority: SchematicEditAuthority,
+        count: String,
+        naming: String,
+    ) {
+        let initial_count = count.clone();
+        let initial_naming = naming.clone();
+        *self = Self {
+            open: true,
+            armed: false,
+            kind: crate::state::SchematicArrayKind::default(),
+            count,
+            naming,
+            authority: Some(authority),
+            canvas: Default::default(),
+            generation: self.generation.wrapping_add(1),
+            preview_cache: None,
+            initial_kind: crate::state::SchematicArrayKind::default(),
+            initial_count,
+            initial_naming,
+            dirty: false,
+        };
+    }
+
+    pub(crate) fn arm(&mut self) {
+        self.open = false;
+        self.armed = true;
+        self.canvas = Default::default();
+        self.generation = self.generation.wrapping_add(1);
+        self.preview_cache = None;
+        self.dirty = false;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self {
+            generation: self.generation.wrapping_add(1),
+            ..Self::default()
+        };
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = self.kind != self.initial_kind
+            || !equivalent_array_count(&self.count, &self.initial_count)
+            || !equivalent_array_naming(&self.naming, &self.initial_naming);
+        self.preview_cache = None;
+    }
+}
+
+fn equivalent_array_count(left: &str, right: &str) -> bool {
+    left == right
+        || crate::state::SchematicArrayCount::parse(left)
+            .ok()
+            .zip(crate::state::SchematicArrayCount::parse(right).ok())
+            .is_some_and(|(left, right)| left == right)
+}
+
+fn equivalent_array_naming(left: &str, right: &str) -> bool {
+    left == right
+        || crate::state::SchematicArrayNaming::parse(left)
+            .ok()
+            .zip(crate::state::SchematicArrayNaming::parse(right).ok())
+            .is_some_and(|(left, right)| left == right)
+}
 
 const TITLE: &str = "Create array";
 const PRIMARY: &str = "Create";

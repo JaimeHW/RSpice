@@ -433,19 +433,24 @@ pub struct DialogState {
         crate::workbench::app::dialogs::placement::documentation_shape::DocumentationShapeDialogState,
 
     /// Connectivity-aware selected-object movement transaction.
-    pub(crate) move_selection: MoveSelectionDialogState,
+    pub(crate) move_selection:
+        crate::workbench::app::dialogs::selection::move_selection::MoveSelectionDialogState,
 
     /// A Paste or Duplicate following the pointer until a click places it.
-    pub(crate) floating_paste: Option<FloatingPaste>,
+    pub(crate) floating_paste:
+        Option<crate::workbench::app::dialogs::selection::commands::floating::FloatingPaste>,
 
     /// Anchor-preserving conductor/documentation stretch transaction.
-    pub(crate) stretch_selection: StretchSelectionDialogState,
+    pub(crate) stretch_selection:
+        crate::workbench::app::dialogs::selection::stretch::StretchSelectionDialogState,
 
     /// Named linear, rectangular, or radial documentation array transaction.
-    pub(crate) array_selection: ArraySelectionDialogState,
+    pub(crate) array_selection:
+        crate::workbench::app::dialogs::selection::array::ArraySelectionDialogState,
 
     /// Pin-, parameter-, model-, and netlist-compatible instance replacement.
-    pub(crate) replace_instance: ReplaceInstanceDialogState,
+    pub(crate) replace_instance:
+        crate::workbench::app::dialogs::replace_instance::ReplaceInstanceDialogState,
 
     /// Adopting a stimulus definition onto a placed source, or saving one from
     /// it. Both directions are one transaction over one instance, so they are
@@ -497,11 +502,13 @@ pub struct DialogState {
 
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
-    pub(crate) object_properties: ObjectPropertiesDialogState,
+    pub(crate) object_properties:
+        crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState,
 
     /// Stable-identity rename transaction for one component, label, logical
     /// named net, or declared bus selected in the active schematic.
-    pub(crate) rename_selection: RenameSelectionDialogState,
+    pub(crate) rename_selection:
+        crate::workbench::app::dialogs::selection::rename::RenameSelectionDialogState,
 
     /// Find and replace on names, net labels and values.
     pub(crate) find_replace: crate::workbench::app::dialogs::find_replace::FindReplaceDialogState,

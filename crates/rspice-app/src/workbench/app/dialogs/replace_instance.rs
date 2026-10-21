@@ -28,8 +28,85 @@ use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_
 use crate::workbench::app::schematic::instance_catalog::{
     InstanceCatalogEntry, instance_catalog, resolve_instance_catalog_entry,
 };
-use crate::workbench::app::{RSpiceApp, ReplaceInstanceOpen, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
+
+/// Isolated authority and authored draft for the mockup-owned Replace
+/// instance transaction. The visible Current and Mapping values are resolved
+/// facts; Replacement is the only editable field. The selected component's
+/// stable identifier is retained so the commit cannot drift to a later
+/// selection.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReplaceInstanceDialogState {
+    pub(crate) open: bool,
+    pub(crate) source_component_id: u64,
+    pub(crate) current: String,
+    pub(crate) replacement: String,
+    pub(crate) mapping: String,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) replacement_authority: Option<crate::state::SchematicReplacementAuthority>,
+    pub(crate) initial_target_identity: String,
+    pub(crate) initial_target_spec: Option<crate::state::SchematicReplacementTargetSpec>,
+    pub(crate) initial_replacement: String,
+    pub(crate) preview_error: Option<String>,
+    pub(crate) dirty: bool,
+    pub(crate) discard_confirm: bool,
+}
+
+pub(crate) struct ReplaceInstanceOpen {
+    pub(crate) authority: SchematicEditAuthority,
+    pub(crate) replacement_authority: crate::state::SchematicReplacementAuthority,
+    pub(crate) source_component_id: u64,
+    pub(crate) current: String,
+    pub(crate) replacement: String,
+    pub(crate) initial_target_identity: String,
+    pub(crate) initial_target_spec: crate::state::SchematicReplacementTargetSpec,
+    pub(crate) mapping: String,
+}
+
+impl ReplaceInstanceDialogState {
+    pub(crate) fn open(&mut self, request: ReplaceInstanceOpen) {
+        let initial_replacement = request.replacement.clone();
+        *self = Self {
+            open: true,
+            source_component_id: request.source_component_id,
+            current: request.current,
+            replacement: request.replacement,
+            mapping: request.mapping,
+            authority: Some(request.authority),
+            replacement_authority: Some(request.replacement_authority),
+            initial_target_identity: request.initial_target_identity,
+            initial_target_spec: Some(request.initial_target_spec),
+            initial_replacement,
+            preview_error: None,
+            dirty: false,
+            discard_confirm: false,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = !self
+            .replacement
+            .trim()
+            .eq_ignore_ascii_case(self.initial_replacement.trim());
+        self.discard_confirm = false;
+        self.preview_error = None;
+    }
+
+    pub(crate) fn attempt_close(&mut self) -> bool {
+        if self.dirty && !self.discard_confirm {
+            self.discard_confirm = true;
+            false
+        } else {
+            self.close();
+            true
+        }
+    }
+}
 
 const TITLE: &str = "Replace selected instance";
 const PRIMARY: &str = "Replace instance";

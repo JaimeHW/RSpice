@@ -6,9 +6,16 @@
 //! named hole rather than an unstated pattern.
 
 use super::*;
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
+use crate::workbench::app::dialogs::replace_instance::ReplaceInstanceOpen;
+use crate::workbench::app::dialogs::selection::commands::floating::{
+    FloatingPaste, FloatingPasteOrigin,
+};
+use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
 
-fn edit_authority() -> super::SchematicEditAuthority {
-    super::SchematicEditAuthority::capture(&crate::workbench::app_state::AppState::default())
+fn edit_authority() -> SchematicEditAuthority {
+    SchematicEditAuthority::capture(&crate::workbench::app_state::AppState::default())
 }
 
 fn assert_blocks_shortcuts(configure: impl FnOnce(&mut DialogState)) {

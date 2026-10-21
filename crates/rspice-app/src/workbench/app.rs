@@ -168,11 +168,9 @@ pub(crate) use dialogs::symbol_definition::{
 pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
 
 pub(crate) use dialogs::state::{
-    ArraySelectionDialogState, ArraySelectionPreviewCache, DatasetExportPicker,
-    GridSnapSpacingChoice, HelpCenterPage, NewWindowInitialContent, PlanRemovalConsequence,
-    PlanRemovalTarget, PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen,
-    RunDetailsDialogState, TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage,
-    WindowWorkflow,
+    DatasetExportPicker, GridSnapSpacingChoice, HelpCenterPage, NewWindowInitialContent,
+    PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone, RunDetailsDialogState,
+    TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 
@@ -180,6 +178,11 @@ pub use dialogs::state::{DialogState, LicensePhase};
 /// module it lives in is private to the shell.
 #[cfg(test)]
 pub(in crate::workbench) use dialogs::plan_removal::REVEAL_BLOCKER;
+
+/// Test-only: the command tests read the rename target back, and the dialog
+/// module it lives in is private to the shell.
+#[cfg(test)]
+pub(in crate::workbench) use dialogs::selection::rename::RenameSelectionTarget;
 
 pub(crate) use schematic::edit_authority::{
     SchematicEditAuthority, schematic_editor_request_source, symbol_context_revision,
@@ -221,8 +224,8 @@ pub(crate) use dialogs::placement::net_label::{
     open_net_label_placement, place_sequenced_net_label,
 };
 pub(crate) use dialogs::selection::array::{
-    armed_array_selection_authority, armed_array_selection_plan, cancel_armed_array_selection,
-    open_array_selection_dialog,
+    ArraySelectionPreviewCache, armed_array_selection_authority, armed_array_selection_plan,
+    cancel_armed_array_selection, open_array_selection_dialog,
 };
 pub(crate) use dialogs::selection::commands::floating::{
     cancel_floating_paste, floating_paste_scope, on_grid, turn_floating_paste,

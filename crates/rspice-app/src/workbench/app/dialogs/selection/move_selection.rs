@@ -15,6 +15,42 @@ use crate::state::Tool;
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app_state::AppState;
 
+/// Authority and interaction state of the armed Move tool. The design
+/// snapshot remains immutable while the tool is armed; pointer and keyboard
+/// movement is accumulated as a preview delta and committed only once.
+///
+/// `mode` outlives one command on purpose: it is a tool option on the canvas
+/// strip, and a tool option a reader set two commands ago is still the one
+/// they meant.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MoveSelectionDialogState {
+    pub(crate) armed: bool,
+    pub(crate) mode: crate::state::MoveSelectionMode,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
+    pub(crate) generation: u64,
+}
+
+impl MoveSelectionDialogState {
+    pub(crate) fn arm(&mut self, authority: SchematicEditAuthority) {
+        *self = Self {
+            armed: true,
+            mode: self.mode,
+            authority: Some(authority),
+            canvas: Default::default(),
+            generation: self.generation.wrapping_add(1),
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self {
+            generation: self.generation.wrapping_add(1),
+            mode: self.mode,
+            ..Self::default()
+        };
+    }
+}
+
 const COMMAND: &str = "Move";
 
 /// Arm Move against an immutable document and selection baseline. Commands

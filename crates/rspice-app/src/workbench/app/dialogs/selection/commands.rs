@@ -23,7 +23,7 @@ use rspice_design::connectivity::summary::{
 use rspice_design::hierarchy::HierarchySource;
 use rspice_design::schematic::clipboard::ClipboardData;
 
-use crate::workbench::app::dialogs::state::FloatingPasteOrigin;
+use crate::workbench::app::dialogs::selection::commands::floating::FloatingPasteOrigin;
 use crate::workbench::app_state::AppState;
 
 pub(in crate::workbench) mod floating;

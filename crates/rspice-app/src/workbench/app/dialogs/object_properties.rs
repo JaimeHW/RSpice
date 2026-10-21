@@ -24,6 +24,174 @@ use rspice_schematic_editor::object_properties::{
     TAP_SLICE_FIELD, TAP_SOURCE_FIELD,
 };
 
+/// Retained owner for the mockup's generic Object properties transaction.
+/// Components continue to use their schema-driven tabbed editor; geometric
+/// connectivity objects and logical named nets use this draft because their
+/// invariants span stable authority, exact coordinates, and neighboring
+/// topology.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ObjectPropertiesDialogState {
+    pub(crate) open: bool,
+    pub(crate) draft: Option<ObjectPropertiesDraft>,
+    /// Canonical source captured with the isolated draft.
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+    /// Actual tab identity; a symbol tab can resolve to its paired schematic.
+    pub(crate) view_path: String,
+    pub(crate) dirty: bool,
+    pub(crate) validation_error: Option<String>,
+}
+
+impl ObjectPropertiesDialogState {
+    pub(crate) fn open_bus(
+        &mut self,
+        bus: &crate::state::Bus,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::Bus(BusObjectPropertiesDraft {
+                original: bus.clone(),
+                declaration: bus
+                    .declaration
+                    .as_ref()
+                    .map_or_else(String::new, ToString::to_string),
+            })),
+            source: Some(source),
+            view_path,
+            dirty: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn open_bus_tap(
+        &mut self,
+        tap: &crate::state::BusTap,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::BusTap(BusTapObjectPropertiesDraft {
+                original: tap.clone(),
+                source_bus_id: tap.bus_id,
+                slice: tap.slice.to_string(),
+                orientation: tap.orientation,
+            })),
+            source: Some(source),
+            view_path,
+            dirty: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn open_net_label(
+        &mut self,
+        label: &crate::state::NetLabel,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::NetLabel(
+                NetLabelObjectPropertiesDraft {
+                    original: label.clone(),
+                    name: label.name.clone(),
+                    x: label.pos.x.to_string(),
+                    y: label.pos.y.to_string(),
+                },
+            )),
+            source: Some(source),
+            view_path,
+            dirty: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn open_named_net(
+        &mut self,
+        target: crate::workbench::app::NamedNetTarget,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        view_path: String,
+    ) {
+        let name = target.name.clone();
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::NamedNet(
+                NamedNetObjectPropertiesDraft {
+                    original: target,
+                    name,
+                },
+            )),
+            source: Some(source),
+            view_path,
+            dirty: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn open_design_note(
+        &mut self,
+        note: &crate::state::DesignNote,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::DesignNote(
+                DesignNoteObjectPropertiesDraft {
+                    original: note.clone(),
+                    kind: note.kind,
+                    text: note.text.clone(),
+                    review_state: note.review.as_ref().map(|review| review.state),
+                },
+            )),
+            source: Some(source),
+            view_path,
+            dirty: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn open_documentation_shape(
+        &mut self,
+        shape: &crate::state::DocumentationShape,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        view_path: String,
+    ) {
+        *self = Self {
+            open: true,
+            draft: Some(ObjectPropertiesDraft::DocumentationShape(
+                DocumentationShapeObjectPropertiesDraft {
+                    original: shape.clone(),
+                    points: shape
+                        .geometry
+                        .points()
+                        .into_iter()
+                        .map(|point| (point.x.to_string(), point.y.to_string()))
+                        .collect(),
+                },
+            )),
+            source: Some(source),
+            view_path,
+            dirty: false,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn mark_edited(&mut self) {
+        self.dirty = self
+            .draft
+            .as_ref()
+            .is_some_and(ObjectPropertiesDraft::is_modified);
+        self.validation_error = None;
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 const PRIMARY: &str = "Apply";
 
 #[derive(Debug, Clone)]

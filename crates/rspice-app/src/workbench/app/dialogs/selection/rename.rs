@@ -16,11 +16,82 @@ use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
 use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 
-use crate::workbench::app::{RSpiceApp, RenameSelectionTarget};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod transaction_tests;
+
+/// The stable schematic object or exact logical net being renamed, captured
+/// when Edit ▸ Rename selected object opens.
+///
+/// Retaining the complete source value is intentional: the primary action can
+/// distinguish the original object from a later object that happens to reuse
+/// the same numeric ID, and it can reject any concurrent edit without
+/// overwriting it.
+#[derive(Debug, Clone)]
+pub(crate) enum RenameSelectionTarget {
+    Component(Box<crate::state::Component>),
+    NetLabel(crate::state::NetLabel),
+    NamedNet(crate::workbench::app::NamedNetTarget),
+    Bus(crate::state::Bus),
+}
+
+impl RenameSelectionTarget {
+    pub(crate) fn current_name(&self) -> &str {
+        match self {
+            Self::Component(component) => &component.name,
+            Self::NetLabel(label) => &label.name,
+            Self::NamedNet(net) => &net.name,
+            Self::Bus(bus) => bus
+                .declaration
+                .as_ref()
+                .map_or("", |declaration| declaration.name.as_str()),
+        }
+    }
+}
+
+/// Isolated draft and revision guard for the mockup-owned stable-identity
+/// rename workflow. No schematic field is changed until Primary validates and
+/// publishes the draft.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenameSelectionDialogState {
+    pub(crate) open: bool,
+    pub(crate) target: Option<RenameSelectionTarget>,
+    pub(crate) draft: String,
+    pub(crate) design_execution_epoch: u64,
+    pub(crate) active_schematic_epoch: u64,
+    pub(crate) topology_version: u64,
+    pub(crate) view_path: String,
+    pub(crate) validation_error: Option<String>,
+}
+
+impl RenameSelectionDialogState {
+    pub(crate) fn open(
+        &mut self,
+        target: RenameSelectionTarget,
+        design_execution_epoch: u64,
+        active_schematic_epoch: u64,
+        topology_version: u64,
+        view_path: String,
+    ) {
+        let draft = target.current_name().to_owned();
+        *self = Self {
+            open: true,
+            target: Some(target),
+            draft,
+            design_execution_epoch,
+            active_schematic_epoch,
+            topology_version,
+            view_path,
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
 
 const TITLE: &str = "Rename";
 const PRIMARY: &str = "Rename";

@@ -15,6 +15,46 @@ use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app_state::AppState;
 use rspice_schematic_editor::session::visibility::SchematicWireRoutingStyle;
 
+/// Authority and interaction state of the armed Stretch tool. The selected
+/// conductor segment or documentation control point is resolved before
+/// mutation and remains stable through the live canvas preview and the
+/// atomic commit.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StretchSelectionDialogState {
+    pub(crate) armed: bool,
+    pub(crate) policy: crate::state::StretchOrthogonalPolicy,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) canvas: rspice_schematic_editor::session::stretch::StretchCanvasSession,
+    pub(crate) generation: u64,
+}
+
+impl StretchSelectionDialogState {
+    pub(crate) fn arm(
+        &mut self,
+        authority: SchematicEditAuthority,
+        target: crate::state::StretchTarget,
+        policy: crate::state::StretchOrthogonalPolicy,
+    ) {
+        *self = Self {
+            armed: true,
+            policy,
+            authority: Some(authority),
+            canvas: rspice_schematic_editor::session::stretch::StretchCanvasSession {
+                target: Some(target),
+                gesture: Default::default(),
+            },
+            generation: self.generation.wrapping_add(1),
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self {
+            generation: self.generation.wrapping_add(1),
+            ..Self::default()
+        };
+    }
+}
+
 const COMMAND: &str = "Stretch";
 
 /// What the sheet's own routing style says about diagonals. A stretch that
