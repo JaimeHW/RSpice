@@ -375,13 +375,13 @@ impl ShootingNewtonSolver {
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<num_complex::Complex64>, FloquetSpectrumEvidence), FloquetSpectrumError> {
         let spectrum = qualified_real_eigenspectrum(monodromy, abort)?;
-        let certificate: FloquetSpectrumCertificate = spectrum.certificate;
+        let certificate: FloquetSpectrumCertificate = spectrum.certificate();
         let evidence = FloquetSpectrumEvidence::qualified(certificate).ok_or_else(|| {
             FloquetSpectrumError::Numerical(
                 "qualified eigensolver returned an invalid certificate".to_owned(),
             )
         })?;
-        Ok((spectrum.eigenvalues, evidence))
+        Ok((spectrum.into_eigenvalues(), evidence))
     }
 
     /// Reset solver state for new analysis

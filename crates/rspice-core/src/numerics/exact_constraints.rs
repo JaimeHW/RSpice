@@ -142,13 +142,18 @@ pub struct ExactRow<K> {
 /// Fraction-free sparse elimination preserves the exact rank of the authored
 /// binary64 gains. Rounding a product before subtracting another control path
 /// can otherwise create or remove a physical coordinate or conservation law.
+///
+/// The pivots index the retained rows and the retained words account for
+/// them, so the fields stay private to this crate: readers see them through
+/// the getters, and the words grow only through
+/// [`Self::reserve_retained_words`], which checks the budget.
 #[derive(Debug, Clone)]
 #[doc(hidden)]
 pub struct ExactElimination<K> {
     pub(crate) rows: Vec<(usize, ExactRow<K>)>,
-    pub pivots: Vec<Option<usize>>,
-    pub limits: crate::resource::ResourceLimits,
-    pub retained_words: usize,
+    pub(crate) pivots: Vec<Option<usize>>,
+    pub(crate) limits: crate::resource::ResourceLimits,
+    pub(crate) retained_words: usize,
 }
 
 impl<K> Default for ExactRow<K> {
@@ -319,6 +324,31 @@ impl<K: Ord + Copy> ExactElimination<K> {
         self.check_cost(words)?;
         self.retained_words = self.retained_words.saturating_add(words);
         Ok(())
+    }
+
+    /// The pivot row of each coordinate, or `None` while it is free.
+    #[doc(hidden)]
+    pub fn pivots(&self) -> &[Option<usize>] {
+        &self.pivots
+    }
+
+    #[doc(hidden)]
+    pub fn limits(&self) -> &crate::resource::ResourceLimits {
+        &self.limits
+    }
+
+    /// The words this elimination retains against its result-value budget.
+    #[doc(hidden)]
+    pub fn retained_words(&self) -> usize {
+        self.retained_words
+    }
+
+    /// Replace the result-value budget; every later reservation is checked
+    /// against it.
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn set_result_value_limit(&mut self, max_result_values: usize) {
+        self.limits.max_result_values = max_result_values;
     }
 
     #[doc(hidden)]

@@ -229,7 +229,7 @@ impl PssVoltageConstraintAdmission for PssVoltageConstraintBuilder {
         }
         Ok(PssVoltageConstraints {
             node_forms: std::sync::Arc::new(node_forms),
-            max_values: self.limits.max_result_values,
+            max_values: self.limits().max_result_values,
             retained_words: words,
         })
     }
@@ -477,7 +477,7 @@ mod tests {
         let mappings = builder.clone().finish(&circuit, &NoAbort).unwrap();
         // This budget can hold both retained representations, but leaves no
         // room for the query/conversion work while the last mapping is built.
-        builder.limits.max_result_values = builder.retained_words + mappings.retained_words;
+        builder.set_result_value_limit(builder.retained_words() + mappings.retained_words);
         assert!(matches!(
             builder.finish(&circuit, &NoAbort),
             Err(SimulationError::ResourceLimit(_))

@@ -110,9 +110,11 @@ fn retained_nyquist_samples_qualify_margins_when_the_complex_series_is_omitted()
     let margin = document
         .scalars
         .iter_mut()
-        .find(|scalar| scalar.name == "phase_margin_degrees")
+        .find(|scalar| scalar.name() == "phase_margin_degrees")
         .unwrap();
-    margin.value = ScalarValue::Real { value: Some(123.0) };
+    margin
+        .set_value(ScalarValue::Real { value: Some(123.0) })
+        .unwrap();
     assert!(document.validate().is_err());
 }
 

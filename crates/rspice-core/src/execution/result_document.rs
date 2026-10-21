@@ -810,8 +810,8 @@ impl AnalysisResultDocument {
         let units = self
             .scalars
             .iter()
-            .filter(|scalar| scalar.name == "output_value")
-            .map(|scalar| scalar.unit.as_ref())
+            .filter(|scalar| scalar.name() == "output_value")
+            .map(|scalar| scalar.unit())
             .chain(
                 self.signals
                     .iter()
@@ -855,10 +855,10 @@ impl AnalysisResultDocument {
         }
         for scalar in &mut self.scalars {
             check_abort(abort)?;
-            if scalar.name == "output_value"
-                && matches!(scalar.unit, None | Some(SignalUnit::Dimensionless))
+            if scalar.name() == "output_value"
+                && matches!(scalar.unit(), None | Some(SignalUnit::Dimensionless))
             {
-                scalar.unit = Some(SignalUnit::Unspecified);
+                scalar.set_unit(Some(SignalUnit::Unspecified));
             }
         }
         for signal in &mut self.signals {
@@ -1010,10 +1010,10 @@ impl AnalysisResultDocument {
         let mut names = BTreeSet::new();
         for scalar in &self.scalars {
             scalar.validate()?;
-            if !names.insert(scalar.name.to_ascii_lowercase()) {
+            if !names.insert(scalar.name().to_ascii_lowercase()) {
                 return Err(ResultDocumentError::DuplicateSeries {
                     location: "scalar",
-                    name: scalar.name.clone(),
+                    name: scalar.name().to_owned(),
                 });
             }
         }

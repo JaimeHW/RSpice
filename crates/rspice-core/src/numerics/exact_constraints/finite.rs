@@ -15,13 +15,40 @@ pub enum FiniteDescriptorError {
     Irregular,
 }
 
+/// The finite dynamics of a descriptor pencil and the evidence that qualifies
+/// them. Only [`finite_dynamics`] builds one, so the fields stay private to
+/// this crate and readers see them through the getters below.
 #[doc(hidden)]
 pub struct FiniteDynamics {
-    pub matrix: Vec<Vec<Value>>,
+    pub(crate) matrix: Vec<Vec<Value>>,
     /// Residual of G*T + C*T*A, where x=T*q spans the finite subspace.
-    pub projection_error: Value,
+    pub(crate) projection_error: Value,
     /// Strict Hurwitz classification before the exact finite equations round.
-    pub asymptotically_stable: Option<bool>,
+    pub(crate) asymptotically_stable: Option<bool>,
+}
+
+impl FiniteDynamics {
+    /// The order of the finite dynamics: the number of rows of the square
+    /// state matrix.
+    #[doc(hidden)]
+    pub fn order(&self) -> usize {
+        self.matrix.len()
+    }
+
+    #[doc(hidden)]
+    pub fn projection_error(&self) -> Value {
+        self.projection_error
+    }
+
+    #[doc(hidden)]
+    pub fn asymptotically_stable(&self) -> Option<bool> {
+        self.asymptotically_stable
+    }
+
+    #[doc(hidden)]
+    pub fn into_matrix(self) -> Vec<Vec<Value>> {
+        self.matrix
+    }
 }
 
 type Reducer = ExactElimination<usize>;

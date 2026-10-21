@@ -182,17 +182,18 @@ impl PoleZeroAnalyzer {
             certify_stability,
         )?;
         let order = g_matrix.rows;
-        let finite_count = dynamics.matrix.len();
+        let finite_count = dynamics.order();
         if finite_count == 0 {
             return ComputedSpectrum::exact(Vec::new(), order, order);
         }
         ensure_pole_zero_not_aborted(abort)?;
-        let spectrum = self.eigenvalues_from_matrix(&Matrix::from_dense(dynamics.matrix))?;
+        let projection_error = dynamics.projection_error();
+        let asymptotically_stable = dynamics.asymptotically_stable();
+        let spectrum = self.eigenvalues_from_matrix(&Matrix::from_dense(dynamics.into_matrix()))?;
         ensure_pole_zero_not_aborted(abort)?;
-        let error = dynamics
-            .projection_error
-            .max(spectrum.evidence.certificate().unwrap().max_backward_error);
-        if !dynamics.projection_error.is_finite()
+        let error =
+            projection_error.max(spectrum.evidence.certificate().unwrap().max_backward_error);
+        if !projection_error.is_finite()
             || !error.is_finite()
             || error > Self::APPROXIMATE_BACKWARD_ERROR_LIMIT
         {
@@ -215,7 +216,7 @@ impl PoleZeroAnalyzer {
             )
         })?;
         let mut spectrum = ComputedSpectrum::from_certificate(spectrum.finite, certificate)?;
-        if let Some(stable) = dynamics.asymptotically_stable {
+        if let Some(stable) = asymptotically_stable {
             spectrum.evidence.set_asymptotic_stability(stable);
         }
         Ok(spectrum)

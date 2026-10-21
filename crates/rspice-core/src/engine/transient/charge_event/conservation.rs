@@ -178,7 +178,7 @@ impl CurrentConservation {
             reducer.admit(row, 1, abort)?;
         }
         let free: Vec<_> = (1..=nodes)
-            .filter(|&node| charge_roots[node] == node && reducer.pivots[node].is_none())
+            .filter(|&node| charge_roots[node] == node && reducer.pivots()[node].is_none())
             .collect();
         for &node in &free {
             check_abort(abort)?;

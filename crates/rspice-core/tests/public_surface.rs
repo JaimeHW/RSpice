@@ -317,9 +317,14 @@ const MAX_PUBLIC_ITEMS: usize = 5752;
 // `AbortReason::select`, `AnalysisKind::control_command`,
 // `AnalysisKind::from_tag` and `ResultScalarError::fold` add four: a match on
 // a non-exhaustive base enum is exhaustive only in the enum's own crate, so
-// each moved beside its enum and the engine calls it there. The census is 354,
+// each moved beside its enum and the engine calls it there. The census was 354,
 // with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 354;
+// A field that carries an invariant is never public, hidden or not, since any
+// crate could then break it: `ResultScalar`, `QualifiedOrdinarySpectrum`,
+// `FiniteDynamics` and `ExactElimination` keep theirs private to their crate
+// and add fifteen hidden getters and checked writers in their place. The
+// census is 369, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 369;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

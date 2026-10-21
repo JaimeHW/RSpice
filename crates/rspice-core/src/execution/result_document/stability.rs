@@ -12,16 +12,15 @@ pub(super) fn normalize_legacy(
     }
     for scalar in &mut document.scalars {
         check_abort(abort)?;
-        if document.schema_version < 14 && scalar.name == "dc_loop_gain" {
+        if document.schema_version < 14 && scalar.name() == "dc_loop_gain" {
             return Err(invalid(
                 "zero-frequency evidence requires document version 14",
             ));
         }
-        if document.schema_version < 14 && scalar.name == "dc_loop_gain_db" {
+        if document.schema_version < 14 && scalar.name() == "dc_loop_gain_db" {
             // Versions 1-13 called the first AC sample DC. Preserve the
             // historical number under its actual meaning, never certify it.
-            scalar.name = "sweep_start_gain_db".into();
-            scalar.display_name = "Loop gain at sweep start".into();
+            scalar.rename("sweep_start_gain_db", "Loop gain at sweep start")?;
         }
     }
     // Older margin infinities meant that the sweep located no crossing.
@@ -29,22 +28,22 @@ pub(super) fn normalize_legacy(
     let mut absent = [true; 2];
     for scalar in &document.scalars {
         check_abort(abort)?;
-        let slot = match scalar.name.as_str() {
+        let slot = match scalar.name() {
             "gain_margin_frequency" => &mut absent[0],
             "phase_margin_frequency" => &mut absent[1],
             _ => continue,
         };
-        *slot = !matches!(scalar.value, ScalarValue::Real { value: Some(value) } if value.is_finite() && value > 0.0);
+        *slot = !matches!(*scalar.value(), ScalarValue::Real { value: Some(value) } if value.is_finite() && value > 0.0);
     }
     for scalar in &document.scalars {
         check_abort(abort)?;
-        let slot = match scalar.name.as_str() {
+        let slot = match scalar.name() {
             "gain_margin_db" => &mut absent[0],
             "phase_margin_degrees" => &mut absent[1],
             _ => continue,
         };
         *slot |= matches!(
-            scalar.value,
+            scalar.value(),
             ScalarValue::Unavailable {
                 reason: ScalarUnavailability::PositiveInfinity
                     | ScalarUnavailability::NegativeInfinity
@@ -53,19 +52,21 @@ pub(super) fn normalize_legacy(
     }
     for scalar in &mut document.scalars {
         check_abort(abort)?;
-        if scalar.name == "conditionally_stable" {
-            scalar.name = "multiple_unity_gain_crossovers".into();
-            scalar.display_name = "Multiple unity-gain crossovers".into();
+        if scalar.name() == "conditionally_stable" {
+            scalar.rename(
+                "multiple_unity_gain_crossovers",
+                "Multiple unity-gain crossovers",
+            )?;
         }
-        let missing = match scalar.name.as_str() {
+        let missing = match scalar.name() {
             "gain_margin_db" | "gain_margin_frequency" => absent[0],
             "phase_margin_degrees" | "phase_margin_frequency" | "unity_gain_bandwidth" => absent[1],
             _ => continue,
         };
         if missing {
-            scalar.value = ScalarValue::Unavailable {
+            scalar.set_value(ScalarValue::Unavailable {
                 reason: ScalarUnavailability::NoCrossover,
-            };
+            })?;
         }
     }
     Ok(())
@@ -89,7 +90,7 @@ pub(super) fn validate(
     let mut db = None;
     for scalar in &document.scalars {
         check_abort(abort)?;
-        match scalar.name.as_str() {
+        match scalar.name() {
             "dc_loop_gain" => raw = Some(scalar),
             "dc_loop_gain_db" => db = Some(scalar),
             _ => {}
@@ -109,14 +110,14 @@ pub(super) fn validate(
             "STB requires explicit DC return-ratio and magnitude availability",
         ));
     };
-    if raw.unit != Some(SignalUnit::Dimensionless)
-        || db.unit != Some(SignalUnit::Custom("dB".into()))
+    if raw.unit() != Some(&SignalUnit::Dimensionless)
+        || db.unit() != Some(&SignalUnit::Custom("dB".into()))
     {
         return Err(invalid(
             "DC return ratio requires dimensionless units and its magnitude requires dB",
         ));
     }
-    let ScalarValue::Complex { value } = raw.value else {
+    let ScalarValue::Complex { value } = *raw.value() else {
         return Err(invalid(
             "DC return ratio must be complex or explicitly unmeasured",
         ));
@@ -132,7 +133,7 @@ pub(super) fn validate(
         },
         Some(value) => ScalarValue::Real { value: Some(value) },
     };
-    if db.value != expected {
+    if *db.value() != expected {
         return Err(invalid(
             "DC magnitude disagrees with its independently measured return ratio",
         ));
@@ -157,7 +158,7 @@ fn validate_margins(
     let mut scalars = [None; 7];
     for scalar in &document.scalars {
         check_abort(abort)?;
-        let slot = match scalar.name.as_str() {
+        let slot = match scalar.name() {
             "gain_margin_db" => &mut scalars[0],
             "gain_margin_frequency" => &mut scalars[1],
             "phase_margin_degrees" => &mut scalars[2],
@@ -195,10 +196,10 @@ fn validate_margins(
         (gain, gain_frequency, SignalUnit::Custom("dB".into())),
         (phase, phase_frequency, SignalUnit::Degree),
     ] {
-        if margin.unit != Some(unit) || frequency.unit != Some(SignalUnit::Hertz) {
+        if margin.unit() != Some(&unit) || frequency.unit() != Some(&SignalUnit::Hertz) {
             return Err(invalid("STB margin and frequency units are inconsistent"));
         }
-        match (&margin.value, &frequency.value) {
+        match (margin.value(), frequency.value()) {
             (
                 ScalarValue::Real { value: Some(value) },
                 ScalarValue::Real {
@@ -213,19 +214,20 @@ fn validate_margins(
             }
         }
     }
-    if bandwidth.unit != Some(SignalUnit::Hertz) || bandwidth.value != phase_frequency.value {
+    if bandwidth.unit() != Some(&SignalUnit::Hertz) || bandwidth.value() != phase_frequency.value()
+    {
         return Err(invalid(
             "unity-gain bandwidth must name the phase-margin crossover",
         ));
     }
     let (ScalarValue::Count { value: count }, ScalarValue::Boolean { value: multiple }) =
-        (&count.value, &multiple.value)
+        (count.value(), multiple.value())
     else {
         return Err(invalid(
             "STB crossover observations require a count and boolean",
         ));
     };
-    if *multiple != (*count > 1) || (*count == 0) != (phase.value == absent) {
+    if *multiple != (*count > 1) || (*count == 0) != (*phase.value() == absent) {
         return Err(invalid(
             "STB crossover observations disagree with the measured phase margin",
         ));

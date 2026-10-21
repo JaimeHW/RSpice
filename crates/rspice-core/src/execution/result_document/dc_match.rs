@@ -81,22 +81,22 @@ pub(super) fn validate(
         let scalar = document
             .scalars
             .iter()
-            .find(|scalar| scalar.name == name)
+            .find(|scalar| scalar.name() == name)
             .ok_or_else(|| invalid(format!("missing '{name}' scalar")))?;
-        if !matches!(scalar.value, ScalarValue::Real { value: Some(value) } if close(value, expected))
+        if !matches!(*scalar.value(), ScalarValue::Real { value: Some(value) } if close(value, expected))
         {
             return Err(invalid(format!(
                 "'{name}' scalar disagrees with the retained report"
             )));
         }
-        if !matches!(scalar.unit, Some(SignalUnit::Volt | SignalUnit::Ampere))
-            || unit.is_some_and(|unit| scalar.unit.as_ref() != Some(unit))
+        if !matches!(scalar.unit(), Some(SignalUnit::Volt | SignalUnit::Ampere))
+            || unit.is_some_and(|unit| scalar.unit() != Some(unit))
         {
             return Err(invalid(
                 "output scalars must share the same voltage or current unit",
             ));
         }
-        unit = scalar.unit.as_ref();
+        unit = scalar.unit();
     }
     let mut identities = BTreeSet::new();
     for entry in &payload.contributors {

@@ -676,12 +676,13 @@ impl PstbAnalyzer {
 
         let spectrum = qualified_real_eigenspectrum(monodromy, abort)
             .map_err(map_eigenspectrum_error_for_pstb)?;
-        let n = spectrum.certificate.problem_order;
+        let n = spectrum.certificate().problem_order;
         debug_assert!(
-            spectrum.certificate.max_backward_error <= spectrum.certificate.qualification_tolerance
+            spectrum.certificate().max_backward_error
+                <= spectrum.certificate().qualification_tolerance
         );
         self.dimension = n;
-        let floquet_evidence = FloquetSpectrumEvidence::qualified(spectrum.certificate)
+        let floquet_evidence = FloquetSpectrumEvidence::qualified(spectrum.certificate())
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "PSTB eigensolver returned an invalid Floquet certificate".to_owned(),
@@ -689,8 +690,8 @@ impl PstbAnalyzer {
             })?;
 
         // Create FloquetMultiplier objects
-        let mut multipliers = Vec::with_capacity(spectrum.eigenvalues.len());
-        for (i, &ev) in spectrum.eigenvalues.iter().enumerate() {
+        let mut multipliers = Vec::with_capacity(spectrum.eigenvalues().len());
+        for (i, &ev) in spectrum.eigenvalues().iter().enumerate() {
             poll_periodically(abort, i)?;
             if ev.re == 0.0 && ev.im == 0.0 {
                 return Err(SimulationError::Circuit(format!(
@@ -712,7 +713,7 @@ impl PstbAnalyzer {
             }
             fm.index = i;
             if self.config.compute_eigenvectors {
-                fm.eigenvector = Some(spectrum.right_eigenvectors[i].clone());
+                fm.eigenvector = Some(spectrum.right_eigenvectors()[i].clone());
             }
             multipliers.push(fm);
         }

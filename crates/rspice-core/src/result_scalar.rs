@@ -47,21 +47,17 @@ impl From<ComplexSample> for num_complex::Complex64 {
 /// One typed per-analysis scalar, such as a stability margin or a residual.
 ///
 /// [`Self::new`] is the only public constructor and stores the name trimmed
-/// and lower-cased. The fields are visible, hidden from the API, to the engine
-/// crates so the result document can validate, look up and migrate its
-/// scalars; a writer there keeps that canonical form.
+/// and lower-cased. The fields stay private to this crate: the result document
+/// reads a scalar through its getters and migrates one only through the
+/// writers below, which keep that canonical form.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ResultScalar {
-    #[doc(hidden)]
-    pub name: String,
-    #[doc(hidden)]
-    pub display_name: String,
+    pub(crate) name: String,
+    pub(crate) display_name: String,
     #[serde(with = "crate::signal_unit::wire::optional")]
-    #[doc(hidden)]
-    pub unit: Option<SignalUnit>,
-    #[doc(hidden)]
-    pub value: ScalarValue,
+    pub(crate) unit: Option<SignalUnit>,
+    pub(crate) value: ScalarValue,
 }
 
 impl ResultScalar {
@@ -110,21 +106,57 @@ impl ResultScalar {
     pub fn validate(&self) -> Result<(), ResultScalarError> {
         require_name("scalar name", &self.name)?;
         require_name("scalar display name", &self.display_name)?;
-        match &self.value {
-            ScalarValue::Real { value } => finite_optional("scalar", *value),
-            ScalarValue::Complex { value } => {
-                if let Some(sample) = value {
-                    finite("scalar real part", sample.real)?;
-                    finite("scalar imaginary part", sample.imaginary)?;
-                }
-                Ok(())
+        validate_value(&self.value)
+    }
+
+    /// Rename a scalar a legacy document stored under an older name, keeping
+    /// the canonical form [`Self::new`] gives a name.
+    #[doc(hidden)]
+    pub fn rename(
+        &mut self,
+        name: impl Into<String>,
+        display_name: impl Into<String>,
+    ) -> Result<(), ResultScalarError> {
+        let name = name.into();
+        let display_name = display_name.into();
+        require_name("scalar name", &name)?;
+        require_name("scalar display name", &display_name)?;
+        self.name = name.trim().to_ascii_lowercase();
+        self.display_name = display_name.trim().to_owned();
+        Ok(())
+    }
+
+    /// Replace the unit a legacy document declared; any unit, or none, is a
+    /// valid declaration.
+    #[doc(hidden)]
+    pub fn set_unit(&mut self, unit: Option<SignalUnit>) {
+        self.unit = unit;
+    }
+
+    /// Replace the value, rejecting one [`Self::new`] would reject.
+    #[doc(hidden)]
+    pub fn set_value(&mut self, value: ScalarValue) -> Result<(), ResultScalarError> {
+        validate_value(&value)?;
+        self.value = value;
+        Ok(())
+    }
+}
+
+fn validate_value(value: &ScalarValue) -> Result<(), ResultScalarError> {
+    match value {
+        ScalarValue::Real { value } => finite_optional("scalar", *value),
+        ScalarValue::Complex { value } => {
+            if let Some(sample) = value {
+                finite("scalar real part", sample.real)?;
+                finite("scalar imaginary part", sample.imaginary)?;
             }
-            ScalarValue::Integer { .. }
-            | ScalarValue::Count { .. }
-            | ScalarValue::Boolean { .. }
-            | ScalarValue::Unavailable { .. } => Ok(()),
-            ScalarValue::Text { value } => require_name("scalar text value", value),
+            Ok(())
         }
+        ScalarValue::Integer { .. }
+        | ScalarValue::Count { .. }
+        | ScalarValue::Boolean { .. }
+        | ScalarValue::Unavailable { .. } => Ok(()),
+        ScalarValue::Text { value } => require_name("scalar text value", value),
     }
 }
 

@@ -16,7 +16,7 @@ impl Scalars<'_> {
     fn count(&self, name: &str) -> Result<Option<u64>, ResultDocumentError> {
         self.0
             .get(name)
-            .map(|scalar| match scalar.value {
+            .map(|scalar| match *scalar.value() {
                 ScalarValue::Count { value } => Ok(value),
                 _ => Err(invalid(format!("'{name}' must be an exact unsigned count"))),
             })
@@ -26,7 +26,7 @@ impl Scalars<'_> {
     fn boolean(&self, name: &str) -> Result<Option<bool>, ResultDocumentError> {
         self.0
             .get(name)
-            .map(|scalar| match scalar.value {
+            .map(|scalar| match *scalar.value() {
                 ScalarValue::Boolean { value } => Ok(value),
                 _ => Err(invalid(format!("'{name}' must be a boolean"))),
             })
@@ -46,7 +46,7 @@ pub(super) fn validate(
         document
             .scalars
             .iter()
-            .map(|scalar| (scalar.name.as_str(), scalar))
+            .map(|scalar| (scalar.name(), scalar))
             .collect(),
     );
     let population = payload
@@ -165,7 +165,7 @@ pub(super) fn validate(
         ));
     }
     if let Some(level) = scalars.0.get("mean_confidence_level_pct")
-        && !matches!(level.value, ScalarValue::Real { value: Some(value) } if value > 0.0 && value < 100.0)
+        && !matches!(*level.value(), ScalarValue::Real { value: Some(value) } if value > 0.0 && value < 100.0)
     {
         return Err(invalid(
             "confidence level must lie strictly between zero and 100 percent",
@@ -193,7 +193,7 @@ pub(super) fn validate(
             ScalarValue::Real { value: lower_value },
             ScalarValue::Real { value: upper_value },
             ScalarValue::Text { value: state },
-        ) = (&lower.value, &upper.value, &state.value)
+        ) = (lower.value(), upper.value(), state.value())
         else {
             return Err(invalid(
                 "confidence bounds or availability use an invalid scalar type",
@@ -216,11 +216,11 @@ pub(super) fn validate(
                 "confidence availability contradicts its bounds or sample population",
             ));
         }
-        if lower.unit != upper.unit
+        if lower.unit() != upper.unit()
             || variable
                 .unit
                 .as_ref()
-                .is_some_and(|unit| lower.unit.as_ref() != Some(unit))
+                .is_some_and(|unit| lower.unit() != Some(unit))
         {
             return Err(invalid("confidence bounds disagree with the output unit"));
         }
@@ -233,8 +233,8 @@ pub(super) fn validate(
             "mean_confidence_state:",
         ]
         .iter()
-        .any(|prefix| scalar.name.starts_with(prefix))
-            && !confidence_fields.contains(&scalar.name)
+        .any(|prefix| scalar.name().starts_with(prefix))
+            && !confidence_fields.contains(scalar.name())
         {
             return Err(invalid(
                 "confidence declaration refers to an unretained variable",

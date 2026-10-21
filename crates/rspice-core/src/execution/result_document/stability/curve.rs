@@ -232,9 +232,9 @@ pub(super) fn validate(
             let scalar = document
                 .scalars
                 .iter()
-                .find(|scalar| scalar.name == name)
+                .find(|scalar| scalar.name() == name)
                 .ok_or_else(|| invalid("missing STB margin evidence"))?;
-            let matches = match (&scalar.value, expected) {
+            let matches = match (scalar.value(), expected) {
                 (
                     ScalarValue::Real {
                         value: Some(actual),
@@ -256,8 +256,8 @@ pub(super) fn validate(
             }
         }
         if !document.scalars.iter().any(|scalar| {
-            scalar.name == "unity_gain_crossovers"
-                && scalar.value
+            scalar.name() == "unity_gain_crossovers"
+                && *scalar.value()
                     == (ScalarValue::Count {
                         value: expected.num_crossovers as u64,
                     })

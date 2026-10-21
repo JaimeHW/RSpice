@@ -72,8 +72,8 @@ pub(super) fn validate(
             .scalars
             .iter()
             .find_map(|scalar| {
-                if scalar.name == "output_value"
-                    && let ScalarValue::Real { value } = scalar.value
+                if scalar.name() == "output_value"
+                    && let ScalarValue::Real { value } = *scalar.value()
                 {
                     value
                 } else {

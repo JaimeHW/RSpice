@@ -69,13 +69,39 @@ impl FloquetSpectrumCertificate {
     }
 }
 
+/// A spectrum whose certificate attests to its eigenpairs. Only
+/// [`qualified_real_eigenspectrum`] builds one, so the fields stay private to
+/// this crate and readers see them through the getters below.
 #[derive(Debug, Clone, PartialEq)]
 #[doc(hidden)]
 pub struct QualifiedOrdinarySpectrum {
-    pub eigenvalues: Vec<Complex64>,
+    pub(crate) eigenvalues: Vec<Complex64>,
     /// Right eigenvectors stored one vector per eigenvalue.
-    pub right_eigenvectors: Vec<Vec<Complex64>>,
-    pub certificate: FloquetSpectrumCertificate,
+    pub(crate) right_eigenvectors: Vec<Vec<Complex64>>,
+    pub(crate) certificate: FloquetSpectrumCertificate,
+}
+
+impl QualifiedOrdinarySpectrum {
+    #[doc(hidden)]
+    pub fn eigenvalues(&self) -> &[Complex64] {
+        &self.eigenvalues
+    }
+
+    /// One right eigenvector per eigenvalue, in the same order.
+    #[doc(hidden)]
+    pub fn right_eigenvectors(&self) -> &[Vec<Complex64>] {
+        &self.right_eigenvectors
+    }
+
+    #[doc(hidden)]
+    pub fn certificate(&self) -> FloquetSpectrumCertificate {
+        self.certificate
+    }
+
+    #[doc(hidden)]
+    pub fn into_eigenvalues(self) -> Vec<Complex64> {
+        self.eigenvalues
+    }
 }
 
 #[inline]

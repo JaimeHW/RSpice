@@ -205,12 +205,12 @@ pub(super) fn certify_original_stability(
         }
         error
     })?;
-    if dynamics.matrix.len() != result.poles.len() {
+    if dynamics.order() != result.poles.len() {
         return Ok(false);
     }
     result
         .pole_evidence
-        .set_asymptotic_stability(dynamics.asymptotically_stable.unwrap());
+        .set_asymptotic_stability(dynamics.asymptotically_stable().unwrap());
     Ok(true)
 }
 
