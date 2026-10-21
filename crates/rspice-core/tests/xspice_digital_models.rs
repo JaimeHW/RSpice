@@ -5006,3 +5006,42 @@ fn a_newton_failure_on_a_dac_ramp_names_the_edge_and_the_converter() {
         "failed at {failed:e}, edge at {edge:e}: {error}"
     );
 }
+
+/// A `d_cosim` instance is refused when its circuit is built, not when its
+/// first evaluation finds no co-simulation runtime: the refusal names the
+/// instance, its model and its `simulation=` value, and says how to run the
+/// Verilog natively.
+#[test]
+fn d_cosim_without_a_runtime_provider_is_refused_at_elaboration() {
+    let netlist = Netlist::parse(
+        "* d_cosim with no runtime provider\n\
+         .model dut d_cosim simulation=\"ivlng\" sim_args=[\"adc\"]\n\
+         adut [din] [dout] dut\n\
+         .model up d_pullup\n\
+         aup din up\n\
+         .end\n",
+    )
+    .expect("deck parses");
+    let error = match Engine::default().build_circuit(&netlist) {
+        Ok(_) => panic!("a d_cosim deck without a runtime provider must be refused"),
+        Err(error) => error,
+    };
+    let rspice_core::SimulationError::Elaboration(refusal) = &error else {
+        panic!("an elaboration refusal, got {error}");
+    };
+    assert_eq!(
+        refusal.kind,
+        rspice_core::ElaborationErrorKind::ParameterValue
+    );
+    assert_eq!(refusal.instance.as_deref(), Some("ADUT"), "{error}");
+    let text = error.to_string();
+    for expected in [
+        "'ADUT'",
+        "'DUT'",
+        "simulation=\"ivlng\"",
+        ".hdl \"<file>.v\"",
+        "X-card",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?} in {text}");
+    }
+}

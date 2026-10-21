@@ -203,6 +203,12 @@ pub(crate) fn start_digital_process_runtime(
     default_digital_process_factory().start(spec)
 }
 
+/// Whether a `d_cosim` runtime provider is installed. Without one a deck that
+/// instantiates `d_cosim` is refused when its circuit is built.
+pub(crate) fn digital_cosim_runtime_installed() -> bool {
+    lock_external_factory(digital_cosim_factory()).is_some()
+}
+
 pub(crate) fn start_digital_cosim_runtime(
     spec: &DigitalCosimSpec,
 ) -> CmResult<Box<dyn DigitalCosimRuntime>> {

@@ -204,6 +204,7 @@ pub use digital::{
 };
 
 pub(crate) use digital::PspiceDigitalStimulus;
+pub(crate) use digital::unhosted_cosim_refusal;
 
 pub use lookup::{PiecewiseLinear, PiecewiseLinearTimeSeries};
 

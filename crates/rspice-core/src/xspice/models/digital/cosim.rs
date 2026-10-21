@@ -1,7 +1,7 @@
 use crate::Value;
 use crate::xspice::external::{
     DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimSpec, DigitalCosimStep,
-    start_digital_cosim_runtime,
+    digital_cosim_runtime_installed, start_digital_cosim_runtime,
 };
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, DigitalState, DigitalStrength, DigitalValue,
@@ -46,6 +46,27 @@ const COSIM_STARTUP_STEP_DONE: i64 = 2;
 const EVENT_TIME_EPSILON: Value = 1.0e-18;
 const COSIM_DELAY_MIN: Value = 1.0e-12;
 const COSIM_QUEUE_SIZE_MIN: i64 = 1;
+
+/// Why a `d_cosim` instance with the string parameters `string_params`
+/// cannot run, when no co-simulation runtime provider is installed; `None`
+/// when one is. The build refuses the instance with it, rather than its
+/// first evaluation failing to start a runtime. An embedding installs a
+/// provider with `set_digital_cosim_runtime_factory`; a deck runs the Verilog
+/// natively instead.
+pub(crate) fn unhosted_cosim_refusal(string_params: &[(String, String)]) -> Option<String> {
+    if digital_cosim_runtime_installed() {
+        return None;
+    }
+    let simulation = string_params
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("simulation"))
+        .map_or("", |(_, value)| value.as_str());
+    Some(format!(
+        "d_cosim cannot run simulation=\"{simulation}\": this build installs no \
+         co-simulation runtime provider. Simulate the Verilog natively instead: load \
+         it with .hdl \"<file>.v\" and instantiate its module with an X-card"
+    ))
+}
 
 fn d_cosim_error(message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("d_cosim: {}", message.into()))

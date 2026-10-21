@@ -10191,6 +10191,19 @@ impl Engine {
                         // their category across the construction boundary.
                         error => error,
                     })?;
+                    if resolved_model.code_model.name() == "d_cosim"
+                        && let Some(refusal) = crate::xspice::models::unhosted_cosim_refusal(
+                            &resolved_model.string_params,
+                        )
+                    {
+                        return Err(crate::ElaborationError::new(
+                            crate::ElaborationErrorKind::ParameterValue,
+                            refusal,
+                        )
+                        .instance(&element.name)
+                        .module(model)
+                        .into());
+                    }
 
                     let mut numeric_params = resolved_model.numeric_params.clone();
                     if let Some(kind) = xspice_meter_kind(resolved_model.code_model.name()) {

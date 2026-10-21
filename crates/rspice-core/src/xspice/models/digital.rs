@@ -18,6 +18,7 @@ mod sequential;
 mod sources;
 
 pub use cosim::DigitalCosim;
+pub(crate) use cosim::unhosted_cosim_refusal;
 pub use gates::{
     DigitalAnd, DigitalBuffer, DigitalInverter, DigitalNand, DigitalNor, DigitalOpenCollector,
     DigitalOpenEmitter, DigitalOr, DigitalPulldown, DigitalPullup, DigitalTristate, DigitalXnor,
