@@ -34,6 +34,8 @@ pub(super) struct AuthoredConnectBody {
     /// refusal with no narrower span points, such as an unknown parameter
     /// the statement overrides.
     statement: rspice_veriloga::source::Span,
+    /// The deck's `.options wreal_resolution`, for the body's plain `wreal`s.
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     compiled: OnceLock<CompiledConnectBody>,
 }
 
@@ -45,6 +47,7 @@ impl AuthoredConnectBody {
         continuous: String,
         discrete: String,
         statement: rspice_veriloga::source::Span,
+        wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     ) -> Self {
         Self {
             configuration,
@@ -53,6 +56,7 @@ impl AuthoredConnectBody {
             continuous,
             discrete,
             statement,
+            wreal_resolution,
             compiled: OnceLock::new(),
         }
     }
@@ -115,10 +119,11 @@ pub(super) fn materialize(
             .iter()
             .map(|(name, value)| (name.as_str(), *value))
             .collect();
-        let runtime = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
-            enable_ams: true,
-            ..Default::default()
-        })
+        // The body compiles with the deck's options, so its plain `wreal`
+        // ports resolve as the deck's own modules' do.
+        let runtime = rspice_veriloga::VerilogACompiler::new(
+            super::veriloga_cache::deck_include_compiler_options(body.wreal_resolution),
+        )
         .compile_connect_runtime_with_configuration(
             &body.source_package,
             &body.source,

@@ -544,6 +544,65 @@ endconnectrules
     }
 }
 
+/// `.options wreal_resolution` reaches an authored body's plain `wreal` port
+/// as it reaches the deck's own modules', so the body's driver and the
+/// module's join one net the option resolves.
+#[test]
+fn authored_plain_wreal_port_takes_the_deck_wreal_resolution() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module real_source(q);
+ inout q; wreal q;
+ real level=1.5;
+ initial #1000 level=3.0;
+ assign q=level;
+endmodule
+connectmodule feedback(a,r);
+ inout a; electrical a;
+ inout r; logic r; wreal r;
+ real sample=0, returned=0;
+ always begin #100 sample=0.25*V(a); #10 returned=sample; end
+ assign r=returned;
+ analog I(a)<+(V(a)-r)/500;
+endmodule
+connectrules chosen;
+ connect feedback;
+endconnectrules
+"#,
+    );
+    let deck = |options: &str| {
+        Netlist::parse(&format!(
+            "* plain wreal feedback\nX1 physical real_source\nRload physical 0 1k\n.va \"{}\" real_source\n{options}.end\n",
+            source.path()
+        ))
+        .unwrap()
+    };
+    let error = Engine::default()
+        .run_tran(&deck(""), 1.8e-9, 25e-12)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("wreal_resolution"), "{error}");
+    let result = Engine::default()
+        .run_tran(&deck(".options wreal_resolution=avg\n"), 1.8e-9, 25e-12)
+        .unwrap();
+    // Rload and the 500-ohm source give V = r/1.5, and the net averages its
+    // two drivers, r = (level+returned)/2: V[n+1] = level/3 + V[n]/12, with
+    // equilibrium 4*level/11.
+    for (time, expected) in [
+        (50e-12, 0.5),
+        (150e-12, 13.0 / 24.0),
+        (250e-12, 157.0 / 288.0),
+        (1.75e-9, 12.0 / 11.0),
+    ] {
+        let actual = voltage(&result, "physical", time);
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "t={time}: {actual} != {expected}"
+        );
+    }
+}
+
 #[test]
 fn hierarchy_connect_insertion_keeps_bidirectional_real_drivers_and_loading() {
     for (mode, initial) in [("merged", 2.0), ("split", 1.2)] {

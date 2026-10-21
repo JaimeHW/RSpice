@@ -519,6 +519,9 @@ pub(super) struct DesignConnectRules {
     /// prepared source, so the source is prepared again once per statement
     /// rather than once per boundary.
     locations: std::cell::RefCell<std::collections::HashMap<usize, Option<String>>>,
+    /// The deck's `.options wreal_resolution`, which an authored body's plain
+    /// `wreal` ports take as the deck's own modules do.
+    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
 }
 
 impl DesignConnectRules {
@@ -554,6 +557,9 @@ impl DesignConnectRules {
     pub(super) fn for_netlist(netlist: &crate::Netlist) -> Result<Self, SimulationError> {
         let mut selected = Self {
             requested: netlist.options.connect_rules.clone(),
+            wreal_resolution: super::veriloga_sources::wreal_resolution(
+                netlist.options.wreal_resolution,
+            ),
             ..Default::default()
         };
         if let Some(alias) = netlist.options.connect_rules_source.as_deref() {
@@ -837,6 +843,7 @@ impl DesignConnectRules {
                             rule.continuous.name.to_string(),
                             rule.discrete.name.to_string(),
                             rule.span,
+                            self.wreal_resolution,
                         ),
                     )
                 },
