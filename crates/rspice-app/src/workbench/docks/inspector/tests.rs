@@ -753,7 +753,7 @@ fn failure_row_height_grows_from_wrapped_target_copy_at_drawer_width() {
 
 #[test]
 fn netlist_diagnostic_locations_are_one_based_and_exact() {
-    let mut diagnostic = crate::workbench::documents::netlist_document::Diagnostic::current(
+    let mut diagnostic = crate::state::netlist_diagnostics::Diagnostic::current(
         "rspice.test",
         "TEST-ADVISORY",
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning,

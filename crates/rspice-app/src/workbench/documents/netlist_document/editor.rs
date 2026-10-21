@@ -26,13 +26,14 @@ use crate::workbench::documents::text_editor_commands::{
 };
 use crate::workbench::{AppState, MessageId};
 
-#[cfg(test)]
-use super::diagnostics::line_column_for_span;
 use super::{
-    Diagnostic, DiagnosticSeverity, NetlistDiagnosticCollection, completion,
+    DiagnosticSeverity, completion,
     diagnostics::{parser_diagnostics, unknown_reference_diagnostics},
     highlight,
 };
+#[cfg(test)]
+use crate::state::netlist_diagnostics::line_column_for_span;
+use crate::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
 
 /// Editor body font size (gutter follows it).
 const FONT_SIZE: f32 = 11.0;
@@ -2296,13 +2297,11 @@ M1 d g s b nch W={w} L={l*2}\n\
         diagnostic.span = Some(18..22);
         diagnostic.line = Some(1);
         diagnostic.column = Some(11);
-        diagnostic.fix = Some(
-            crate::workbench::documents::netlist_document::diagnostics::DiagnosticFix {
-                label: "Replace with nch".to_string(),
-                span: 18..22,
-                replacement: "nch".to_string(),
-            },
-        );
+        diagnostic.fix = Some(crate::state::netlist_diagnostics::DiagnosticFix {
+            label: "Replace with nch".to_string(),
+            span: 18..22,
+            replacement: "nch".to_string(),
+        });
         diagnostic.refresh_canonical_location();
 
         let text = diagnostic_strip_text(&diagnostic, source, 160.0);

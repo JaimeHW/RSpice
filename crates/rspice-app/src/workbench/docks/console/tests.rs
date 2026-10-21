@@ -547,12 +547,10 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
         .log_buffer
         .warning(LogSource::Run, "unrelated retained log warning");
     app.state.ui.netlist.diagnostics = std::sync::Arc::new(
-        crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
-            vec![
-                crate::workbench::documents::netlist_document::Diagnostic::error(
-                    "bad netlist card",
-                ),
-            ],
+        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            vec![crate::state::netlist_diagnostics::Diagnostic::error(
+                "bad netlist card",
+            )],
             "",
         )
         .unwrap(),
@@ -1089,12 +1087,10 @@ fn a_pages_toolbar_stands_on_the_panel_fill_above_the_well() {
     let mut app = busy_console();
     app.state.project_lifecycle.authority.open_session();
     app.state.ui.netlist.diagnostics = std::sync::Arc::new(
-        crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
-            vec![
-                crate::workbench::documents::netlist_document::Diagnostic::error(
-                    "bad netlist card",
-                ),
-            ],
+        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            vec![crate::state::netlist_diagnostics::Diagnostic::error(
+                "bad netlist card",
+            )],
             "",
         )
         .unwrap(),

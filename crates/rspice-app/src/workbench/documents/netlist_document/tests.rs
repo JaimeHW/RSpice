@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::product::ObjectRevision;
+use crate::state::netlist_diagnostics::Diagnostic;
 use crate::state::{
     DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
     NetlistDocumentId, SourceLocator,

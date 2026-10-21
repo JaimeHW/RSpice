@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{CodeSourceFileAction, CodeWorkspacePage};
+use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::state::same_include_graph;
 use crate::workbench::AppState;
 
@@ -39,9 +40,7 @@ pub(crate) use comparison::{
     close_run_deck_snapshot, open_netlist_comparison, run_deck_snapshot_artifact_name,
     run_deck_snapshot_run_id,
 };
-pub use diagnostics::{
-    Diagnostic, DiagnosticSeverity, NetlistDiagnosticCollection, control_disposition_summary,
-};
+pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub(crate) use editor::editor_id;
 pub use editor::show as show_editor;
 pub(crate) use executed_deck::run_snapshot_source;

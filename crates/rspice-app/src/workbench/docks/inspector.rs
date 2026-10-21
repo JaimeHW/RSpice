@@ -2050,10 +2050,7 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn diagnostic_row(
-    ui: &mut Ui,
-    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
-) {
+fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::Diagnostic) {
     const ICON_COLUMN_W: f32 = 14.0;
     const COLUMN_GAP: f32 = 7.0;
     const PADDING_Y: f32 = 8.0;
@@ -2299,9 +2296,7 @@ fn owned_source_state(
         .label()
 }
 
-fn diagnostic_location(
-    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
-) -> String {
+fn diagnostic_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> String {
     let location = match (
         diagnostic.source_line.or(diagnostic.line),
         diagnostic.column,

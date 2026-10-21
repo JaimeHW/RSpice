@@ -12,14 +12,13 @@ use egui::accesskit::Role;
 
 use super::super::{CONSOLE_CELL_INSET, CONSOLE_MARK_GUTTER};
 use super::*;
+use crate::state::netlist_diagnostics::{Diagnostic, DiagnosticFix, NetlistDiagnosticCollection};
 use crate::state::{ComponentType, Point};
 use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticSubject,
 };
 use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemGrouping};
-use crate::workbench::documents::netlist_document::diagnostics::DiagnosticFix;
-use crate::workbench::documents::netlist_document::{Diagnostic, NetlistDiagnosticCollection};
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
 mod detail_region;

@@ -21,9 +21,9 @@ use rspice_vocabulary::diagnostics::{
 };
 
 use super::{BatchStanding, DiagnosticBatch, DiagnosticLevel, DiagnosticRoute};
+use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::CodeDiagnosticCollection;
-use crate::workbench::documents::netlist_document::NetlistDiagnosticCollection;
 
 /// Where one finding stands against the design in front of the reader.
 ///
@@ -232,7 +232,7 @@ impl Segment<'_> {
 /// buffer revision than the editor holds is stale whatever it says about
 /// itself.
 fn netlist_current(
-    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+    diagnostic: &crate::state::netlist_diagnostics::Diagnostic,
     revision: u64,
 ) -> bool {
     diagnostic.is_current() && diagnostic.canonical.revision == revision
@@ -240,7 +240,7 @@ fn netlist_current(
 
 /// Where a netlist finding stands, by the same rule as [`netlist_current`].
 fn netlist_standing(
-    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+    diagnostic: &crate::state::netlist_diagnostics::Diagnostic,
     revision: u64,
 ) -> RowStanding {
     if diagnostic.is_current() && diagnostic.canonical.revision != revision {
@@ -594,9 +594,7 @@ fn stored_subject(record: &super::DiagnosticRecord) -> String {
 
 /// What a netlist finding is about: the document the parser was reading. The
 /// position inside it is the row's location.
-fn netlist_subject(
-    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
-) -> String {
+fn netlist_subject(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> String {
     diagnostic.source_path.as_deref().map_or_else(
         || "netlist editor".to_owned(),
         |path| path.display().to_string(),
@@ -606,9 +604,7 @@ fn netlist_subject(
 /// Where in that document it is. An included source keeps its own line rather
 /// than masquerading as a line of whatever file is open, which is why the
 /// physical source line is read when the buffer has none.
-fn netlist_location(
-    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
-) -> String {
+fn netlist_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> String {
     let line = diagnostic.line.or(diagnostic.source_line);
     match (line, diagnostic.column) {
         (Some(line), Some(column)) => format!("line {} · column {}", line + 1, column + 1),
@@ -1161,9 +1157,8 @@ mod tests {
     /// findings the rows did not.
     #[test]
     fn source_collections_count_what_their_rows_say() {
-        use crate::workbench::documents::netlist_document::{
-            Diagnostic, DiagnosticSeverity as NetlistSeverity,
-        };
+        use crate::state::netlist_diagnostics::Diagnostic;
+        use rspice_vocabulary::diagnostics::DiagnosticSeverity as NetlistSeverity;
         use rspice_vocabulary::diagnostics::{
             DiagnosticCurrentness, DiagnosticSeverity, SourceDiagnostic,
         };
@@ -1275,7 +1270,7 @@ mod tests {
     /// stale on the page whether or not the editor has been drawn since.
     #[test]
     fn a_netlist_finding_older_than_the_buffer_reads_stale() {
-        use crate::workbench::documents::netlist_document::Diagnostic;
+        use crate::state::netlist_diagnostics::Diagnostic;
 
         let mut state = open_state();
         let finding = Diagnostic::error("unknown model nchh").with_line(Some(0));

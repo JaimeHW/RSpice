@@ -1198,12 +1198,10 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         },
     );
     state.ui.netlist.diagnostics = std::sync::Arc::new(
-        crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
-            vec![
-                crate::workbench::documents::netlist_document::Diagnostic::error(
-                    "old project diagnostic",
-                ),
-            ],
+        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            vec![crate::state::netlist_diagnostics::Diagnostic::error(
+                "old project diagnostic",
+            )],
             "",
         )
         .unwrap(),

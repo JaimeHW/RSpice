@@ -1092,8 +1092,8 @@ mod tests {
         app.state.project_lifecycle.authority.open_session();
         app.state.workbench.activate(Workspace::Netlist);
         let diagnostics = vec![
-            crate::workbench::documents::netlist_document::Diagnostic::error("bad card"),
-            crate::workbench::documents::netlist_document::Diagnostic::current(
+            crate::state::netlist_diagnostics::Diagnostic::error("bad card"),
+            crate::state::netlist_diagnostics::Diagnostic::current(
                 "rspice.test",
                 "TEST-WARNING",
                 crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning,
@@ -1101,7 +1101,7 @@ mod tests {
             ),
         ];
         app.state.ui.netlist.diagnostics = std::sync::Arc::new(
-            crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
+            crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
                 diagnostics,
                 "",
             )

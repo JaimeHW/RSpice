@@ -11,7 +11,8 @@ use egui::{Color32, FontId, Stroke};
 
 use crate::ui::palette::Palette;
 
-use super::{Diagnostic, DiagnosticSeverity};
+use super::DiagnosticSeverity;
+use crate::state::netlist_diagnostics::Diagnostic;
 
 /// Mockup contract: 11-point editor text at a 1.55 line-height.
 const EDITOR_LINE_HEIGHT: f32 = 17.05;

@@ -973,7 +973,7 @@ pub(crate) fn apply_quick_fix_for_finding(
 /// after any other edit — would rewrite whatever bytes had moved into its
 /// range since.
 struct BoundQuickFix {
-    fix: super::diagnostics::DiagnosticFix,
+    fix: crate::state::netlist_diagnostics::DiagnosticFix,
     /// The editor revision the finding was validated at.
     revision: u64,
     /// The digest of the exact buffer it was validated against.
@@ -981,7 +981,7 @@ struct BoundQuickFix {
 }
 
 impl BoundQuickFix {
-    fn of(diagnostic: &super::diagnostics::Diagnostic) -> Option<Self> {
+    fn of(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> Option<Self> {
         diagnostic.fix.clone().map(|fix| Self {
             fix,
             revision: diagnostic.canonical.revision,
@@ -2193,8 +2193,9 @@ M1 d g s b nch W={w} L={l*2}\n\
         state.ui.netlist.revision = 7;
 
         let start = FIX_DECK.find("1kk").unwrap();
-        let mut diagnostic = super::super::Diagnostic::error("unknown suffix kk");
-        diagnostic.fix = Some(super::super::diagnostics::DiagnosticFix {
+        let mut diagnostic =
+            crate::state::netlist_diagnostics::Diagnostic::error("unknown suffix kk");
+        diagnostic.fix = Some(crate::state::netlist_diagnostics::DiagnosticFix {
             label: "Replace with 1k".to_owned(),
             span: start..start + 3,
             replacement: "1k".to_owned(),
@@ -2203,7 +2204,11 @@ M1 d g s b nch W={w} L={l*2}\n\
         diagnostic.bind_validation(7, &crate::state::content_digest(FIX_DECK).to_string());
         let finding = diagnostic.canonical.diagnostic_id;
         state.ui.netlist.diagnostics = Arc::new(
-            super::super::NetlistDiagnosticCollection::try_new(vec![diagnostic], FIX_DECK).unwrap(),
+            crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+                vec![diagnostic],
+                FIX_DECK,
+            )
+            .unwrap(),
         );
         (state, finding)
     }
@@ -2225,7 +2230,7 @@ M1 d g s b nch W={w} L={l*2}\n\
                 .netlist
                 .diagnostics
                 .iter()
-                .all(super::super::Diagnostic::is_current),
+                .all(crate::state::netlist_diagnostics::Diagnostic::is_current),
             "precondition: nothing marked the finding stale between the presses",
         );
 

@@ -13,9 +13,9 @@
 use std::sync::Arc;
 
 use super::FindingKey;
+use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::CodeDiagnosticCollection;
-use crate::workbench::documents::netlist_document::NetlistDiagnosticCollection;
 
 /// One source editor's collection of findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,7 +242,7 @@ fn find(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::documents::netlist_document::Diagnostic;
+    use crate::state::netlist_diagnostics::Diagnostic;
 
     fn collection(diagnostics: Vec<Diagnostic>) -> Arc<NetlistDiagnosticCollection> {
         Arc::new(
