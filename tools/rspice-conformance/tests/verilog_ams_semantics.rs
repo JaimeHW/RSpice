@@ -458,16 +458,17 @@ fn a_digital_activation_is_an_exact_analog_timepoint() {
          .end\n",
         model.deck_path()
     );
-    let result = ams::run_deck(&deck, f64::from(TSTOP_NS) * 1.0e-9, 1.0e-9)
+    let result = ams::run_deck(&deck, f64::from(TSTOP_NS) / 1.0e9, 1.0e-9)
         .expect("the self-clocked design runs");
 
     let activations = TSTOP_NS / ACTIVATION_NS;
     assert!(activations >= 200, "the run must cover many activations");
     let mut missing = Vec::new();
     for index in 1..=activations {
-        // The tick's seconds, formed the way the conversion forms them: a tick
-        // count times the seconds per tick.
-        let expected = f64::from(index * ACTIVATION_NS) * 1.0e-9;
+        // The tick's seconds, formed the way the conversion forms them: the
+        // tick count over the exact ticks per second, one correctly rounded
+        // division.
+        let expected = f64::from(index * ACTIVATION_NS) / 1.0e9;
         if !result
             .time
             .iter()
