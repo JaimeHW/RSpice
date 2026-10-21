@@ -166,6 +166,29 @@ fn level_param(
     })
 }
 
+/// A threshold. In the tracking form a threshold not given explicitly is the
+/// fraction `fraction` of the supply, when that is given; otherwise it is as
+/// [`level_param`] reads it.
+fn threshold_param(
+    ctx: &CmContext,
+    model: &str,
+    name: &str,
+    fraction: &str,
+    tracking: bool,
+) -> CmResult<Level> {
+    if tracking && !ctx.param_was_provided(name) && ctx.param_was_provided(fraction) {
+        let value = finite_bridge_param(ctx, model, fraction)?;
+        if !(0.0..=1.0).contains(&value) {
+            return Err(invalid(
+                fraction,
+                format!("{model} {fraction} must lie in [0, 1], got {value}"),
+            ));
+        }
+        return Ok(Level::of_supply(value));
+    }
+    level_param(ctx, model, name, tracking, true)
+}
+
 fn time_param(ctx: &CmContext, model: &str, name: &str) -> CmResult<Value> {
     let value = finite_bridge_param(ctx, model, name)?;
     if value < 0.0 {
@@ -219,6 +242,10 @@ fn adc_parameters() -> Vec<ParamSpec> {
             .with_description("Falling threshold; a fraction of the supply when left to track it"),
         ParamSpec::real("vthi", DEFAULT_THRESHOLD_FRACTION)
             .with_description("Rising threshold; a fraction of the supply when left to track it"),
+        ParamSpec::real("ftlo", DEFAULT_THRESHOLD_FRACTION)
+            .with_description("Falling threshold as the fraction of a tracked supply"),
+        ParamSpec::real("fthi", DEFAULT_THRESHOLD_FRACTION)
+            .with_description("Rising threshold as the fraction of a tracked supply"),
         ParamSpec::real("txdel", Value::INFINITY)
             .with_description("Time an input may stay between the thresholds before reading X"),
         ParamSpec::real("tdrise", 0.0).with_description("Delay to a published 1"),
@@ -269,8 +296,8 @@ struct AdcLaw {
 
 impl AdcLaw {
     fn from_params(ctx: &CmContext, model: &str, tracking: bool) -> CmResult<Self> {
-        let low = level_param(ctx, model, "vtlo", tracking, true)?;
-        let high = level_param(ctx, model, "vthi", tracking, true)?;
+        let low = threshold_param(ctx, model, "vtlo", "ftlo", tracking)?;
+        let high = threshold_param(ctx, model, "vthi", "fthi", tracking)?;
         let inverted = (low.fraction == high.fraction && low.absolute > high.absolute)
             || (low.absolute == high.absolute && low.fraction > high.fraction);
         if inverted {

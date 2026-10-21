@@ -28,6 +28,8 @@ enum Unit {
     Volt,
     Second,
     Ohm,
+    /// A fraction of the supply.
+    Fraction,
 }
 
 impl Unit {
@@ -36,6 +38,7 @@ impl Unit {
             Self::Volt => "V",
             Self::Second => "s",
             Self::Ohm => "Ω",
+            Self::Fraction => "",
         }
     }
 }
@@ -81,13 +84,21 @@ pub(in crate::engine::builder) struct ConverterLaw {
 }
 
 const A2D_NAMES: &[&str] = &[
-    "vsup", "vsupmin", "vthi", "vtlo", "txdel", "tdrise", "tdfall",
+    "vsup", "vsupmin", "fthi", "ftlo", "vthi", "vtlo", "txdel", "tdrise", "tdfall",
 ];
 const D2A_NAMES: &[&str] = &[
     "vsup", "vsupmin", "vlo", "vhi", "vx", "vz", "rlo", "rhi", "rx", "rz", "rsup", "rpull",
     "rweak", "trise", "tfall", "tdelay",
 ];
 const BIDIR_NAMES: &[&str] = &[
+    "vsup", "vsupmin", "fthi", "ftlo", "vthi", "vtlo", "txdel", "tdrise", "tdfall", "vlo", "vhi",
+    "vx", "vz", "rlo", "rhi", "rx", "rz", "rsup", "rpull", "rweak", "trise", "tfall", "tdelay",
+];
+/// The first-shipped full signatures, whose thresholds are volts only.
+const ABSOLUTE_A2D_NAMES: &[&str] = &[
+    "vsup", "vsupmin", "vthi", "vtlo", "txdel", "tdrise", "tdfall",
+];
+const ABSOLUTE_BIDIR_NAMES: &[&str] = &[
     "vsup", "vsupmin", "vthi", "vtlo", "txdel", "tdrise", "tdfall", "vlo", "vhi", "vx", "vz",
     "rlo", "rhi", "rx", "rz", "rsup", "rpull", "rweak", "trise", "tfall", "tdelay",
 ];
@@ -113,12 +124,14 @@ fn accepted(kind: Kind, signature: BuiltinSignature) -> (&'static [&'static str]
     match (signature, kind) {
         (BuiltinSignature::Legacy, Kind::Adc) => (LEGACY_A2D_NAMES, &[]),
         (BuiltinSignature::Legacy, _) => (LEGACY_D2A_NAMES, &[]),
-        (BuiltinSignature::Full, Kind::Adc) => (A2D_NAMES, A2D_ALIASES),
-        (BuiltinSignature::Full, Kind::Dac) => (D2A_NAMES, D2A_ALIASES),
-        (BuiltinSignature::Full, Kind::RealToV) => (R2E_NAMES, D2A_ALIASES),
-        (BuiltinSignature::Full, Kind::VToReal) => (E2R_NAMES, &[]),
-        (BuiltinSignature::Full, Kind::RealBidi) => (RBIDIR_NAMES, D2A_ALIASES),
-        (BuiltinSignature::Full, Kind::Bidi) => (BIDIR_NAMES, D2A_ALIASES),
+        (BuiltinSignature::Absolute, Kind::Adc) => (ABSOLUTE_A2D_NAMES, A2D_ALIASES),
+        (BuiltinSignature::Absolute, Kind::Bidi) => (ABSOLUTE_BIDIR_NAMES, D2A_ALIASES),
+        (_, Kind::Adc) => (A2D_NAMES, A2D_ALIASES),
+        (_, Kind::Dac) => (D2A_NAMES, D2A_ALIASES),
+        (_, Kind::RealToV) => (R2E_NAMES, D2A_ALIASES),
+        (_, Kind::VToReal) => (E2R_NAMES, &[]),
+        (_, Kind::RealBidi) => (RBIDIR_NAMES, D2A_ALIASES),
+        (_, Kind::Bidi) => (BIDIR_NAMES, D2A_ALIASES),
     }
 }
 
@@ -263,7 +276,7 @@ impl ConverterLaw {
         }
         let mut resolver = Resolver {
             given: &given,
-            default_source: if selected.is_some() && signature == BuiltinSignature::Full {
+            default_source: if selected.is_some() && signature != BuiltinSignature::Legacy {
                 Source::ModuleDefault
             } else {
                 Source::RuleSet(RULE_SET.into())
@@ -281,8 +294,65 @@ impl ConverterLaw {
         let mut band = None;
         if matches!(kind, Kind::Adc | Kind::Bidi) {
             let half = Some("vsup/2");
-            let vthi = resolver.take("vthi", Unit::Volt, vsup / 2.0, half, true, false);
-            let vtlo = resolver.take("vtlo", Unit::Volt, vsup / 2.0, half, true, false);
+            let (vthi, vtlo) = if signature == BuiltinSignature::Full && selected.is_some() {
+                // The thresholds as fractions of the supply, which a live
+                // supply carries with it. A threshold in volts beside its
+                // fraction would be two answers to one question.
+                for (fraction, volts) in [("fthi", "vthi"), ("ftlo", "vtlo")] {
+                    if let (Some(value), Some(_)) = (given.get(fraction), given.get(volts)) {
+                        return refuse(
+                            fraction,
+                            value,
+                            &format!(
+                                "{volts} is given too, and a threshold is either volts or a \
+                                 fraction of the supply; give one of them"
+                            ),
+                        );
+                    }
+                }
+                // A static supply stamps the thresholds in volts, so only a
+                // live one needs the fractions themselves.
+                let fthi = resolver.take("fthi", Unit::Fraction, 0.5, None, false, !live);
+                let ftlo = resolver.take("ftlo", Unit::Fraction, 0.5, None, false, !live);
+                for (name, value) in [("fthi", fthi), ("ftlo", ftlo)] {
+                    if !(0.0..=1.0).contains(&value) {
+                        return refuse(name, value, "a threshold fraction lies in [0, 1]");
+                    }
+                }
+                if ftlo > fthi {
+                    return refuse(
+                        "ftlo",
+                        ftlo,
+                        &format!(
+                            "it exceeds fthi = {fthi}; the falling threshold may not lie above the rising one"
+                        ),
+                    );
+                }
+                let rule =
+                    |given: bool, stated: &'static str| Some(if given { stated } else { "vsup/2" });
+                let vthi = resolver.take(
+                    "vthi",
+                    Unit::Volt,
+                    fthi * vsup,
+                    rule(given.get("fthi").is_some(), "fthi*vsup"),
+                    true,
+                    false,
+                );
+                let vtlo = resolver.take(
+                    "vtlo",
+                    Unit::Volt,
+                    ftlo * vsup,
+                    rule(given.get("ftlo").is_some(), "ftlo*vsup"),
+                    true,
+                    false,
+                );
+                (vthi, vtlo)
+            } else {
+                (
+                    resolver.take("vthi", Unit::Volt, vsup / 2.0, half, true, false),
+                    resolver.take("vtlo", Unit::Volt, vsup / 2.0, half, true, false),
+                )
+            };
             resolver.take("txdel", Unit::Second, f64::INFINITY, None, false, false);
             resolver.take("tdrise", Unit::Second, 0.0, None, false, false);
             resolver.take("tdfall", Unit::Second, 0.0, None, false, false);

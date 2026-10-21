@@ -41,17 +41,26 @@
 //! own `inh_conn_def_value` names, or the one constant rail that reaches the
 //! boundary (the first supply port only), and is refused otherwise.
 //!
-//! # Two signatures per module
+//! # Three signatures per module
 //!
-//! [`A2D`], [`D2A`] and [`BIDIR`] declare the converters' whole parameter set.
-//! The earlier, shorter signatures ([`LEGACY_BUILTIN_CONNECT_MODULES`]: a
+//! [`A2D`], [`D2A`] and [`BIDIR`] declare the converters' whole parameter set,
+//! including the fractional thresholds `fthi`/`ftlo`. The full declarations as
+//! first shipped, with volt thresholds only, still delegate and accept their
+//! own parameters. The earlier, shorter signatures ([`LEGACY_BUILTIN_CONNECT_MODULES`]: a
 //! supply and the edge times only) still delegate, so a deck carrying a
 //! verbatim copy of one keeps working. A legacy copy accepts only the
 //! parameters it declares, and its declared edge-time defaults are not
 //! applied: they never were, and the converter's own defaults stand in for
 //! them, exactly as before.
 //!
-//! The defaults that name another parameter (`vthi = vsup / 2`, `rx =
+//! # Shipped rule sets
+//!
+//! [`shipped_rule_sets`] names the rule sets a deck may select with
+//! `.options connectrules=<name>` without declaring them: `rspice_builtin`,
+//! fixed-supply sets such as `rspice_3v3_fast`, and the supply-tracking
+//! `rspice_track_fast`/`rspice_track_slow`.
+//!
+//! The defaults that name another parameter (`vthi = fthi * vsup`, `rx =
 //! min(rlo, rhi)`, ...) do not fold here; the engine reads them as the
 //! declarations state them, and a supply bound live to a net makes the
 //! supply-relative ones track it.
@@ -70,6 +79,10 @@ pub enum BuiltinSignature {
     /// The full parameter set: [`A2D`], [`D2A`], [`BIDIR`], and the real
     /// modules [`R2E`], [`E2R`], [`RBIDIR`].
     Full,
+    /// The full parameter set as first shipped, before the fractional
+    /// thresholds `fthi`/`ftlo`: an `a2d` or `bidir` whose thresholds are
+    /// volts only.
+    Absolute,
     /// The earlier signature: a supply and the edge times only.
     Legacy,
 }
@@ -78,9 +91,31 @@ pub enum BuiltinSignature {
 ///
 /// A hysteresis comparator: the output becomes `1` at `vthi` and `0` at
 /// `vtlo`, holds between them, and reads `x` once the input has stayed
-/// between them for `txdel`. Both thresholds default to half the supply, so
-/// the band is empty and the module is a plain comparator.
+/// between them for `txdel`. The thresholds default to the fractions `fthi`
+/// and `ftlo` of the supply, both one half, so the band is empty and the
+/// module is a plain comparator. A fraction follows a supply bound live to a
+/// net; a threshold given in volts does not, and giving both is refused.
 pub const A2D: &str = "\
+connectmodule a2d(a, d);
+    input a;
+    output d;
+    electrical a;
+    logic d;
+
+    parameter real vsup = 3.3;
+    parameter real vsupmin = 0;
+    parameter real fthi = 0.5;
+    parameter real ftlo = 0.5;
+    parameter real vthi = fthi * vsup;
+    parameter real vtlo = ftlo * vsup;
+    parameter real txdel = inf;
+    parameter real tdrise = 0;
+    parameter real tdfall = 0;
+endmodule
+";
+
+/// [`A2D`] as first shipped, with volt thresholds only.
+const ABSOLUTE_A2D: &str = "\
 connectmodule a2d(a, d);
     input a;
     output d;
@@ -143,6 +178,40 @@ endmodule
 /// same node for the port's receivers, both at once: `tdrise`/`tdfall` are the
 /// receiving half's delays and `tdelay` the driving half's.
 pub const BIDIR: &str = "\
+connectmodule bidir(a, d);
+    inout a;
+    inout d;
+    electrical a;
+    logic d;
+
+    parameter real vsup = 3.3;
+    parameter real vsupmin = 0;
+    parameter real fthi = 0.5;
+    parameter real ftlo = 0.5;
+    parameter real vthi = fthi * vsup;
+    parameter real vtlo = ftlo * vsup;
+    parameter real txdel = inf;
+    parameter real tdrise = 0;
+    parameter real tdfall = 0;
+    parameter real vlo = 0;
+    parameter real vhi = vsup;
+    parameter real vx = (vlo + vhi) / 2;
+    parameter real vz = vx;
+    parameter real rlo = 20;
+    parameter real rhi = 20;
+    parameter real rx = min(rlo, rhi);
+    parameter real rz = inf;
+    parameter real rsup = min(rlo, rhi) / 10;
+    parameter real rpull = 10e3;
+    parameter real rweak = 100e3;
+    parameter real trise = 0;
+    parameter real tfall = 0;
+    parameter real tdelay = 0;
+endmodule
+";
+
+/// [`BIDIR`] as first shipped, with volt thresholds only.
+const ABSOLUTE_BIDIR: &str = "\
 connectmodule bidir(a, d);
     inout a;
     inout d;
@@ -322,6 +391,87 @@ pub fn builtin_connect_library_source() -> String {
     source
 }
 
+/// The prefix every shipped rule set's name carries. A deck's own
+/// `connectrules` block may not use it, so a shipped name is never shadowed.
+pub const SHIPPED_RULE_SET_PREFIX: &str = "rspice_";
+
+/// The supplies the fixed-level shipped sets are made for, as their names
+/// spell them, and their volts.
+const SHIPPED_SUPPLIES: [(&str, f64); 6] = [
+    ("1v0", 1.0),
+    ("1v2", 1.2),
+    ("1v8", 1.8),
+    ("2v5", 2.5),
+    ("3v3", 3.3),
+    ("5v0", 5.0),
+];
+
+/// Every shipped connect rule set, in the order a list offers them: its name
+/// and its `connectrules` block, which selects [`A2D`], [`D2A`] and
+/// [`BIDIR`] with that set's overrides.
+///
+/// - `rspice_builtin`: the modules' own defaults, the deck's supply.
+/// - `rspice_<v>_fast` and `rspice_<v>_slow`, for each supply `v` of 1v0,
+///   1v2, 1v8, 2v5, 3v3 and 5v0: a static supply of `v` volts, the input
+///   switching at 0.7 of it rising and 0.3 falling, and edges of 100 ps
+///   (fast) or 1 ns (slow), with an X timeout of 1 ns or 10 ns.
+/// - `rspice_track_fast` and `rspice_track_slow`: the same, against the
+///   deck's supply (`.param`, a rail bound live, or the default).
+///
+/// The numbers are RSpice's own; they copy no vendor's rule set.
+pub fn shipped_rule_sets() -> Vec<(String, String)> {
+    let block = |name: &str, supply: Option<f64>, edge: &str, timeout: &str| {
+        let vsup = supply.map_or(String::new(), |volts| format!(".vsup({volts:?}), "));
+        (
+            name.to_owned(),
+            format!(
+                "connectrules {name};\n    connect a2d #({vsup}.ftlo(0.3), .fthi(0.7), \
+                 .txdel({timeout}));\n    connect d2a #({vsup}.trise({edge}), \
+                 .tfall({edge}));\n    connect bidir #({vsup}.ftlo(0.3), .fthi(0.7), \
+                 .txdel({timeout}), .trise({edge}), .tfall({edge}));\nendconnectrules\n"
+            ),
+        )
+    };
+    let mut sets = vec![(
+        "rspice_builtin".to_owned(),
+        BUILTIN_CONNECT_RULES.to_owned(),
+    )];
+    for (spelled, volts) in SHIPPED_SUPPLIES {
+        sets.push(block(
+            &format!("rspice_{spelled}_fast"),
+            Some(volts),
+            "100p",
+            "1n",
+        ));
+        sets.push(block(
+            &format!("rspice_{spelled}_slow"),
+            Some(volts),
+            "1n",
+            "10n",
+        ));
+    }
+    sets.push(block("rspice_track_fast", None, "100p", "1n"));
+    sets.push(block("rspice_track_slow", None, "1n", "10n"));
+    sets
+}
+
+/// The shipped library a deck selects a shipped rule set from: the three
+/// modules followed by every [`shipped_rule_sets`] block.
+pub fn shipped_connect_library_source() -> String {
+    let mut source = String::new();
+    for (_, module) in BUILTIN_CONNECT_MODULES {
+        source.push_str(module);
+    }
+    for (_, block) in shipped_rule_sets() {
+        source.push_str(&block);
+    }
+    source
+}
+
+/// The first-shipped full signatures, which still delegate.
+const ABSOLUTE_BUILTIN_CONNECT_MODULES: [(&str, &str); 2] =
+    [("a2d", ABSOLUTE_A2D), ("bidir", ABSOLUTE_BIDIR)];
+
 /// Conservative delegation proof: comments and whitespace may differ, but
 /// every declaration token, parameter default and body token must match a
 /// shipped signature, current or legacy. A familiar module name alone grants
@@ -349,13 +499,16 @@ pub(crate) fn equivalent_declarations(
             };
             let declaration =
                 tokens(source.get(module.span.start as usize..module.span.end as usize)?)?;
-            [
+            let signatures: [(BuiltinSignature, &[(&str, &str)]); 4] = [
                 (BuiltinSignature::Full, &BUILTIN_CONNECT_MODULES),
                 (BuiltinSignature::Full, &BUILTIN_REAL_CONNECT_MODULES),
+                (
+                    BuiltinSignature::Absolute,
+                    &ABSOLUTE_BUILTIN_CONNECT_MODULES,
+                ),
                 (BuiltinSignature::Legacy, &LEGACY_BUILTIN_CONNECT_MODULES),
-            ]
-            .into_iter()
-            .find_map(|(signature, modules)| {
+            ];
+            signatures.into_iter().find_map(|(signature, modules)| {
                 let (_, reference) = modules.iter().find(|(name, _)| module.name == *name)?;
                 (tokens(reference)? == declaration).then(|| (module.name.to_string(), signature))
             })

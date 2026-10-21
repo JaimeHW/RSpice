@@ -266,6 +266,8 @@ fn the_delegated_parameters_are_named_and_defaulted_as_the_engine_reads_them() {
     const A2D_FULL: &[(&str, f64)] = &[
         ("vsup", 3.3),
         ("vsupmin", 0.0),
+        ("fthi", 0.5),
+        ("ftlo", 0.5),
         ("vthi", DEPENDENT),
         ("vtlo", DEPENDENT),
         ("txdel", f64::INFINITY),
@@ -374,6 +376,70 @@ fn both_signatures_delegate_and_an_edited_copy_neither() {
         );
         let edited = full.replacen("vsupmin = 0", "vsupmin = 1", 1);
         assert!(delegations(&edited).is_empty(), "{name}");
+    }
+    // The full declarations as first shipped, with volt thresholds only,
+    // still delegate, and say so.
+    for (name, absolute) in ABSOLUTE_BUILTIN_CONNECT_MODULES {
+        assert_eq!(
+            delegations(absolute).get(name),
+            Some(&BuiltinSignature::Absolute),
+            "{name}"
+        );
+        let full = BUILTIN_CONNECT_MODULES
+            .iter()
+            .find(|(full, _)| *full == name)
+            .map(|(_, full)| *full)
+            .expect("a shipped full declaration");
+        assert_eq!(
+            absolute,
+            full.replace(
+                "    parameter real fthi = 0.5;\n    parameter real ftlo = 0.5;\n",
+                ""
+            )
+            .replace("fthi * vsup", "vsup / 2")
+            .replace("ftlo * vsup", "vsup / 2"),
+            "{name}: the fractions are the only difference"
+        );
+    }
+}
+
+/// Every shipped rule set analyzes against the shipped modules, each is
+/// named with the reserved prefix, and the names are distinct.
+#[test]
+fn every_shipped_rule_set_selects_the_shipped_modules() {
+    let db = DisciplineDb::with_standard();
+    let source = shipped_connect_library_source();
+    let table = build_connect_rule_table(&parse(&source), &db)
+        .unwrap_or_else(|error| panic!("the shipped library builds: {error:?}"));
+    let sets = shipped_rule_sets();
+    assert_eq!(sets.len(), 15);
+    let mut names = std::collections::BTreeSet::new();
+    for (name, _) in &sets {
+        assert!(name.starts_with(SHIPPED_RULE_SET_PREFIX), "{name}");
+        assert!(names.insert(name.clone()), "{name} is named once");
+        let block = table
+            .select_block(name)
+            .unwrap_or_else(|error| panic!("{name} selects: {error:?}"));
+        assert_eq!(block.insertions().len(), 3, "{name}");
+    }
+    let fast = table.select_block("rspice_1v8_fast").expect("1v8 fast");
+    let a2d = fast
+        .insertions()
+        .iter()
+        .find(|rule| rule.connect_module == "a2d")
+        .expect("a2d");
+    let parameters = a2d.numeric_parameters().expect("the overrides fold");
+    for (parameter, value) in [
+        ("vsup", 1.8),
+        ("ftlo", 0.3),
+        ("fthi", 0.7),
+        ("txdel", 1.0e-9),
+    ] {
+        let given = parameters
+            .iter()
+            .find(|(name, _)| name == parameter)
+            .map(|(_, value)| *value);
+        assert_eq!(given, Some(value), "rspice_1v8_fast a2d {parameter}");
     }
 }
 

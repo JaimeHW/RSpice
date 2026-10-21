@@ -213,7 +213,7 @@ fn every_refusal_names_its_parameter() {
             "an unknown name lists the accepted set",
             &[
                 "'vlo'",
-                "vsup, vsupmin, vthi, vtlo, txdel, tdrise, tdfall, tdelay",
+                "vsup, vsupmin, fthi, ftlo, vthi, vtlo, txdel, tdrise, tdfall, tdelay",
             ],
         ),
         (
@@ -1649,5 +1649,169 @@ fn rbidir_refuses_an_ideal_drive_by_name() {
     assert!(
         error.contains("rout = 0") && error.contains("rbidir"),
         "{error}"
+    );
+}
+
+//=============================================================================
+// Shipped rule sets
+//=============================================================================
+
+/// A Verilog buffer whose input and output carry `attributes`.
+fn shipped_buffer(directory: &TempDirectory, attributes: &str) -> String {
+    directory.write(
+        "buf1.v",
+        &format!(
+            "module buf1(a, y);\n  {attributes}input a;\n  {attributes}output y;\n  assign y = \
+             a;\nendmodule\n"
+        ),
+    )
+}
+
+/// Each fixed-supply shipped set converts a triangle 0 -> v -> 0 over 2 us
+/// at its fractions of v: the input reaches fthi*v = 0.7*v at 0.7 us and
+/// falls to ftlo*v = 0.3*v at 1.7 us (for rspice_1v8_fast, 1.26 V and
+/// 0.54 V). The buffered output leaves the X level v/2 for v, or for 0, over
+/// the set's full edge time, so it passes 0.75*v at 0.7 us + tr/2 and 0.25*v
+/// at 1.7 us + tf/2.
+#[test]
+fn each_fixed_shipped_set_switches_at_its_fractions_of_the_supply() {
+    let directory = TempDirectory::new("shipped-sets");
+    let buffer = shipped_buffer(&directory, "");
+    for (spelled, volts) in [
+        ("1v0", 1.0),
+        ("1v2", 1.2),
+        ("1v8", 1.8),
+        ("2v5", 2.5),
+        ("3v3", 3.3),
+        ("5v0", 5.0),
+    ] {
+        for (speed, edge) in [("fast", 100.0e-12), ("slow", 1.0e-9)] {
+            let set = format!("rspice_{spelled}_{speed}");
+            let result = run(
+                &format!(
+                    "* shipped set {set}\n.options connectrules={set}\nvin a 0 pwl(0 0 1u \
+                     {volts} 2u 0)\nxb a y buf1\n.hdl \"{buffer}\"\n.end\n"
+                ),
+                2.0e-6,
+                10.0e-9,
+            );
+            let rise = crossing(&result, "y", 0.75 * volts, 0.6e-6);
+            let fall = crossing(&result, "y", 0.25 * volts, 1.6e-6);
+            for (label, edge_at, expected) in [
+                ("rise", rise, 0.7e-6 + edge / 2.0),
+                ("fall", fall, 1.7e-6 + edge / 2.0),
+            ] {
+                assert!(
+                    (edge_at - expected).abs() <= 1.0e-12,
+                    "{set} {label}: {edge_at:e}, expected {expected:e}"
+                );
+            }
+        }
+    }
+}
+
+/// `rspice_track_fast` against a supply bound live: the input held at 1.0 V
+/// while V(vdd) ramps 1.8 -> 1.2 V over 1 us reads 1 once 0.7*V(vdd) falls
+/// to 1.0 V, at V(vdd) = 1/0.7 = 1.428571 V, which is
+/// t = (1.8 - 1/0.7)/0.6 us = 0.619048 us. The output then leaves the X level
+/// (half the supply) for the supply over 100 ps, so v(y)/v(vdd) passes 0.75
+/// 50 ps later.
+#[test]
+fn the_tracking_shipped_set_switches_at_its_fraction_of_a_live_supply() {
+    let directory = TempDirectory::new("shipped-track");
+    let buffer = shipped_buffer(&directory, "(* supplySensitivity = \"vdd\" *) ");
+    let result = run(
+        &format!(
+            "* rspice_track_fast\n.options connectrules=rspice_track_fast\nvdd vdd 0 pwl(0 1.8 \
+             1u 1.2)\nvin a 0 1.0\nxb a y buf1\n.hdl \"{buffer}\"\n.end\n"
+        ),
+        1.0e-6,
+        10.0e-9,
+    );
+    let output = series(&result, "y");
+    let supply = series(&result, "vdd");
+    let ratio: Vec<f64> = output.iter().zip(supply).map(|(y, v)| y / v).collect();
+    let flip = (1.8 - 1.0 / 0.7) / 0.6 * 1.0e-6;
+    let expected = flip + 50.0e-12;
+    let mut crossed = None;
+    for index in 1..ratio.len() {
+        let (a, b) = (ratio[index - 1] - 0.75, ratio[index] - 0.75);
+        if a < 0.0 && b >= 0.0 {
+            let (t0, t1) = (result.time[index - 1], result.time[index]);
+            crossed = Some(t0 + (t1 - t0) * a / (a - b));
+            break;
+        }
+    }
+    let crossed = crossed.expect("v(y)/v(vdd) passes 0.75");
+    assert!(
+        (crossed - expected).abs() <= 1.0e-12,
+        "the flip is dated at {expected:e}, got {crossed:e}"
+    );
+}
+
+/// A shipped set is selected by name, and the ways of selecting one wrongly
+/// are refused by name: an unknown name lists the declared and the shipped
+/// sets, a deck block may not take the shipped prefix, a shipped name does
+/// not combine with CONNECTRULES_SOURCE, and a threshold given both as a
+/// fraction and in volts is refused naming the fraction.
+#[test]
+fn shipped_set_selection_errors_name_the_choices() {
+    let directory = TempDirectory::new("shipped-errors");
+    let declared = directory.write(
+        "mine.va",
+        &library(
+            &BUILTIN_CONNECT_MODULES,
+            "connectrules mine;\n    connect a2d;\n    connect d2a;\nendconnectrules\n",
+        ),
+    );
+    let unknown = build_error(&format!(
+        "* unknown set\n.options connectrules=nosuch\n.veriloga \"{declared}\"\nvin din 0 \
+         1\nrin din 0 1meg\nainv din dout inverter\n.model inverter d_inverter\n.end\n"
+    ));
+    for named in [
+        "nosuch",
+        "'mine'",
+        "rspice_builtin",
+        "rspice_3v3_fast",
+        "rspice_track_slow",
+    ] {
+        assert!(unknown.contains(named), "lists {named}: {unknown}");
+    }
+
+    let shadow = directory.write(
+        "shadow.va",
+        &library(
+            &BUILTIN_CONNECT_MODULES,
+            "connectrules rspice_3v3_fast;\n    connect a2d;\nendconnectrules\n",
+        ),
+    );
+    let shadowing = build_error(&xspice_deck(&shadow, "rload dout 0 1k"));
+    assert!(
+        shadowing.contains("rspice_3v3_fast") && shadowing.contains("reserves"),
+        "{shadowing}"
+    );
+
+    let sourced = build_error(&format!(
+        "* shipped set and source\n.options connectrules=rspice_3v3_fast \
+         connectrules_source=lib\n.veriloga \"{declared}\" lib\nvin din 0 1\nrin din 0 \
+         1meg\nainv din dout inverter\n.model inverter d_inverter\n.end\n"
+    ));
+    assert!(
+        sourced.contains("rspice_3v3_fast") && sourced.contains("CONNECTRULES_SOURCE"),
+        "{sourced}"
+    );
+
+    let both = directory.write(
+        "both.va",
+        &library(
+            &BUILTIN_CONNECT_MODULES,
+            "connectrules both;\n    connect a2d #(.fthi(0.7), .vthi(1.0));\n    connect \
+             d2a;\nendconnectrules\n",
+        ),
+    );
+    let doubled = build_error(&xspice_deck(&both, "rload dout 0 1k"));
+    assert!(
+        doubled.contains("fthi = 0.7") && doubled.contains("vthi"),
+        "{doubled}"
     );
 }

@@ -299,6 +299,9 @@ pub(super) fn resolve_includes(
         )?)
     };
     super::check_build_abort(abort)?;
+    // Every deck source is registered: a requested name none declares may
+    // select a shipped rule set now.
+    rules.finish_registration()?;
     let configuration = rules.configuration()?;
     let compiler = rspice_veriloga::VerilogACompiler::new(
         super::veriloga_cache::deck_include_compiler_options(wreal_resolution),

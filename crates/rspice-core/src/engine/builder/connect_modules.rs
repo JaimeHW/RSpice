@@ -133,6 +133,19 @@ const DECK_DISCIPLINE: &str = "electrical";
 /// The discrete discipline an XSPICE event net has.
 const EVENT_DISCIPLINE: &str = "logic";
 
+/// The name the shipped connect library is registered under: no file, so a
+/// refusal about it names no path a deck author could open.
+const SHIPPED_LIBRARY_PATH: &str = "<rspice shipped connect rules>";
+
+use rspice_veriloga::connect::library::SHIPPED_RULE_SET_PREFIX;
+
+/// Every shipped rule set's name, in the order a list offers them.
+fn shipped_rule_set_names() -> impl Iterator<Item = String> {
+    rspice_veriloga::connect::library::shipped_rule_sets()
+        .into_iter()
+        .map(|(name, _)| name)
+}
+
 /// A selected boundary declaration, its execution binding and its parameters.
 /// The parameters are section 7.7.3's, already folded — see
 /// [`rspice_veriloga::connect::InsertionRule::numeric_parameters`], which folds
@@ -653,7 +666,25 @@ impl DesignConnectRules {
         {
             return Ok(());
         }
+        let shipped = path == std::path::Path::new(SHIPPED_LIBRARY_PATH);
         for block in specification.rules.blocks() {
+            // A shipped rule set's name is RSpice's, so a deck's block can
+            // never shadow it.
+            if !shipped
+                && block
+                    .name
+                    .get(..SHIPPED_RULE_SET_PREFIX.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(SHIPPED_RULE_SET_PREFIX))
+            {
+                return Err(SimulationError::from(
+                    connect_refusal(format!(
+                        "connectrules block '{}' takes a name RSpice reserves for its shipped \
+                         rule sets ({SHIPPED_RULE_SET_PREFIX}*); rename the block",
+                        block.name
+                    ))
+                    .in_source(path),
+                ));
+            }
             self.available.push((
                 block.name.to_string(),
                 path.to_path_buf(),
@@ -711,6 +742,36 @@ impl DesignConnectRules {
         Ok(self.configuration.get().cloned())
     }
 
+    /// Close registration: a requested name no deck source declares selects
+    /// the shipped rule set of that name, if there is one. Shipped sets are
+    /// never candidates for selection otherwise, so a deck with one declared
+    /// block selects it as before.
+    pub(super) fn finish_registration(&mut self) -> Result<(), SimulationError> {
+        if self.matches == 0
+            && let Some(requested) = self.requested.clone()
+            && shipped_rule_set_names().any(|name| name == requested)
+        {
+            if let Some((alias, _)) = &self.requested_source {
+                return Err(connect_refusal(format!(
+                    "connectrules '{requested}' is a shipped rule set, and CONNECTRULES_SOURCE \
+                     '{alias}' selects a deck source to take rules from; give one or the other"
+                ))
+                .into());
+            }
+            let specification = rspice_veriloga::VerilogACompiler::default()
+                .connect_specification_from_preprocessed(
+                    &rspice_veriloga::connect::library::shipped_connect_library_source(),
+                )
+                .map_err(|error| {
+                    SimulationError::from(connect_refusal(format!(
+                        "the shipped connect rules could not be read: {error}"
+                    )))
+                })?;
+            self.register(std::path::Path::new(SHIPPED_LIBRARY_PATH), specification)?;
+        }
+        self.finish_selection()
+    }
+
     pub(super) fn finish_selection(&self) -> Result<(), SimulationError> {
         if self.matches == 1
             || (self.matches == 0 && self.requested.is_none() && self.requested_source.is_none())
@@ -733,9 +794,16 @@ impl DesignConnectRules {
             .collect::<Vec<_>>()
             .join(", ");
         let mut message = match self.requested.as_deref() {
-            Some(name) if self.matches == 0 => {
-                format!("Unknown connectrules '{name}'; available configurations: {available}")
-            }
+            Some(name) if self.matches == 0 => format!(
+                "Unknown connectrules '{name}'; available configurations: {}; shipped rule sets: \
+                 {}",
+                if available.is_empty() {
+                    "none declared"
+                } else {
+                    available.as_str()
+                },
+                shipped_rule_set_names().collect::<Vec<_>>().join(", ")
+            ),
             Some(name) => format!(
                 "Connectrules '{name}' is ambiguous across distinct source closures: {available}"
             ),

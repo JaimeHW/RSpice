@@ -7,7 +7,7 @@ time_precision = 1e-12
 [[q]]
 id = "proto"
 analysis = "tran"
-variants = ["flat", "tasks"]
+variants = ["flat", "tasks", "set"]
 kind = "codes"
 nets = ["sda_d"]
 strobe = "scl_d"
@@ -44,7 +44,7 @@ why = "the same modules on an Icarus tri1 bus: protocol bits at SCL rises match 
 [[q]]
 id = "tr30"
 analysis = "tran"
-variants = ["flat", "tasks", "xcard"]
+variants = ["flat", "tasks", "xcard", "set"]
 kind = "cross"
 signal = "v(scl)"
 level = 0.99
@@ -58,7 +58,7 @@ why = "20 us + Rp·Cbus·ln((3.3 − V_OL)/(3.3 − 0.99)) = 20 us + 153.0 ns; 2
 [[q]]
 id = "tr70"
 analysis = "tran"
-variants = ["flat", "tasks", "xcard"]
+variants = ["flat", "tasks", "xcard", "set"]
 kind = "cross"
 signal = "v(scl)"
 level = 2.31
@@ -72,7 +72,7 @@ why = "20 us + Rp·Cbus·ln((3.3 − V_OL)/(3.3 − 2.31)) = 20 us + 525.8 ns (3
 [[q]]
 id = "tf70"
 analysis = "tran"
-variants = ["flat", "tasks"]
+variants = ["flat", "tasks", "set"]
 kind = "cross"
 signal = "v(scl)"
 level = 2.31
@@ -100,7 +100,7 @@ why = "ngspice-46's bidi_bridge, current-limited: 25.01026 us"
 [[q]]
 id = "tf30"
 analysis = "tran"
-variants = ["flat", "tasks"]
+variants = ["flat", "tasks", "set"]
 kind = "cross"
 signal = "v(scl)"
 level = 0.99
@@ -128,7 +128,7 @@ why = "ngspice-46's bidi_bridge, current-limited: 25.02398 us (70→30% = 13.715
 [[q]]
 id = "vol"
 analysis = "tran"
-variants = ["flat", "tasks", "xcard"]
+variants = ["flat", "tasks", "xcard", "set"]
 kind = "held_at"
 signal = "v(sda)"
 at = [1.25e-5]
@@ -168,7 +168,7 @@ why = "two bidi_bridges, one driving 1 and one 0, each a 20 ohm taper limited to
 [[q]]
 id = "idle"
 analysis = "op"
-variants = ["flat", "tasks", "cont", "xcard"]
+variants = ["flat", "tasks", "cont", "xcard", "set"]
 kind = "op"
 signals = ["v(sda)", "v(scl)"]
 oracle = "O6"

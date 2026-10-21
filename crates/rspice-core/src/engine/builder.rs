@@ -6388,7 +6388,7 @@ impl Engine {
                 self.config.resource_limits,
                 abort,
             )?;
-            design_connect_rules.finish_selection()?;
+            design_connect_rules.finish_registration()?;
             for (include, entry) in netlist.veriloga_includes.iter().zip(resolved) {
                 let Some(entry) = entry else {
                     continue; // Standalone connection library, already registered.

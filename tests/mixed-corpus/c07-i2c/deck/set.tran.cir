@@ -1,0 +1,12 @@
+* C7 open-drain bus, variant set (the flat script converted by the shipped
+* rule set rspice_3v3_fast: 3.3 V, thresholds at 0.3 and 0.7 of it, 100 ps
+* edges and a 1 ns X timeout), tran
+.hdl "../net/i2c_ctrl.v"
+.hdl "../net/i2c_dev.v"
+.include ../net/bus.cir
+.options connectrules=rspice_3v3_fast
+xctrl scl sda i2c_ctrl
+xdev2a scl sda i2c_dev addr=42
+xdev51 scl sda i2c_dev addr=81
+.tran 100n 540u
+.end

@@ -1,0 +1,11 @@
+* C7 open-drain bus, variant set (the flat script converted by the shipped
+* rule set rspice_3v3_fast), op
+.hdl "../net/i2c_ctrl.v"
+.hdl "../net/i2c_dev.v"
+.include ../net/bus.cir
+.options connectrules=rspice_3v3_fast
+xctrl scl sda i2c_ctrl
+xdev2a scl sda i2c_dev addr=42
+xdev51 scl sda i2c_dev addr=81
+.op
+.end
