@@ -25,6 +25,7 @@ pub mod include;
 mod initcond;
 pub mod lexer;
 pub mod measure;
+pub(crate) mod model_bin;
 mod model_resolution;
 pub mod multi_run;
 mod mutual_inductor;

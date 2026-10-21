@@ -243,7 +243,13 @@ use rspice_core::analysis::harmonic_balance::{
 // and `analysis::error` re-exports the refusal in the statement that already
 // re-exported `ContinuationAid`. Every public path to both is unchanged. The
 // census is 5,736, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5736;
+// The `ModelBin*` geometry-bin types moved down from `engine::builder` into
+// `netlist::model_bin`, so a reader of a card's bin bounds
+// (`rspice-model-library` bin_family.rs and facts.rs) need not depend on the
+// engine. The move adds one grouped re-export in `model_resolution` and no
+// name; every `rspice_core::engine::ModelBin*` path is unchanged. The census
+// is 5,737, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5737;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
