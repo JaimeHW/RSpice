@@ -125,16 +125,6 @@ mod fixture_root;
 /// points.
 pub use workbench::RSpiceApp;
 
-/// Offline organization drawing-sheet publisher contract. Private keys are
-/// accepted only by the separate native publisher binary; the GUI exposes
-/// package construction, inspection, and verification primitives.
-pub use workbench::{
-    DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding, DrawingSheetPackageInspection,
-    DrawingSheetPackageVerification, PublishedDrawingSheetPackage,
-    drawing_sheet_publisher_public_key, inspect_drawing_sheet_package,
-    publish_organization_drawing_sheet_package, verify_published_drawing_sheet_package,
-};
-
 /// Native logging environment for the desktop binary, and the logger it
 /// installs: stderr as before, plus the running analysis's own Console log.
 #[cfg(not(target_arch = "wasm32"))]

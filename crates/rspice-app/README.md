@@ -73,10 +73,6 @@ editor with completion and a parameter tuner).
 - `RSpiceApp`: the application root, constructed by both the desktop and the
   browser entry point. `main.rs` attaches the browser build to a
   `#rspice_canvas` element and requires a WebGPU-capable browser.
-- `publish_organization_drawing_sheet_package`,
-  `inspect_drawing_sheet_package`, `verify_published_drawing_sheet_package` and
-  `drawing_sheet_publisher_public_key`: the signed drawing-sheet package
-  contract. Private keys are accepted only by `tools/rspice-sheet-publisher`.
 - `ModelHub` with `ModelHubStore` and `ModelHubTransport`: the
   model-distribution client: signed catalog, verified installation and the
   part shelf over foundation, installed, catalog and retained parts.

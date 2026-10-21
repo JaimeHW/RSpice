@@ -26,15 +26,6 @@ use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 pub(crate) use model::capture_personal_preset_into_project;
-// The signing and verification surface belongs to the shared package
-// contract, not to this dialog. It is re-exported here because `lib.rs` has
-// always published it from this path.
-pub use rspice_design_model::sheet_package::{
-    DRAWING_SHEET_PACKAGE_MAX_BYTES, DrawingSheetPackageEncoding, DrawingSheetPackageInspection,
-    DrawingSheetPackageVerification, PublishedDrawingSheetPackage,
-    drawing_sheet_publisher_public_key, inspect_drawing_sheet_package,
-    publish_organization_drawing_sheet_package, verify_published_drawing_sheet_package,
-};
 
 use rspice_design_model::sheet_package::{
     build_package_with_options, encode_package_with_format, parse_package,
@@ -1347,8 +1338,8 @@ mod tests {
     use ed25519_dalek::{Signer as _, SigningKey};
 
     use rspice_design_model::sheet_package::{
-        DrawingSheetPresetPackage, DrawingSheetPresetPublisherSignature, package_digest,
-        package_signature_message,
+        DrawingSheetPackageEncoding, DrawingSheetPresetPackage,
+        DrawingSheetPresetPublisherSignature, package_digest, package_signature_message,
     };
 
     use crate::state::pdk_config::{PdkPublisherTrustStore, TrustedPdkPublisherKey};
