@@ -319,7 +319,9 @@ pub fn placed_sources(
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedSource> {
     #[cfg(test)]
-    crate::simulation::cost_probe::record(crate::simulation::cost_probe::Derivation::PlacedSources);
+    rspice_simulation_contract::cost_probe::record(
+        rspice_simulation_contract::cost_probe::Derivation::PlacedSources,
+    );
     if !schematic
         .as_ref()
         .components
@@ -610,7 +612,9 @@ fn walk_design(
     projection: &Arc<DesignProjection>,
 ) -> DesignExcitations {
     #[cfg(test)]
-    crate::simulation::cost_probe::record(crate::simulation::cost_probe::Derivation::PlacedSources);
+    rspice_simulation_contract::cost_probe::record(
+        rspice_simulation_contract::cost_probe::Derivation::PlacedSources,
+    );
     let mut terminals: HashMap<String, Arc<TerminalNets>> = HashMap::new();
     let mut sources = Vec::new();
     let mut ports = Vec::new();
