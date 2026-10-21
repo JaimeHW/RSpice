@@ -303,6 +303,13 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
             }
         }
     }
+    // A root that moved leaves an empty directory or none; either way every
+    // ceiling over it would hold on nothing.
+    assert!(
+        !found.is_empty(),
+        "{} holds no Rust source; a scan that reaches nothing passes forever",
+        root.display()
+    );
     found.sort();
     found
 }

@@ -350,6 +350,13 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
             }
         }
     }
+    // A root that moved leaves an empty directory or none; either way every
+    // ratchet over it would pass on nothing.
+    assert!(
+        !found.is_empty(),
+        "{} holds no Rust source; a scan that reaches nothing passes forever",
+        root.display()
+    );
     found.sort();
     found
 }
@@ -462,6 +469,7 @@ fn every_top_level_module_declares_a_layer() {
     let root = src_dir();
     let entries = fs::read_dir(&root).expect("read src/");
     let mut undeclared = Vec::new();
+    let mut checked = 0_usize;
     for entry in entries {
         let path = entry.expect("directory entry").path();
         // A top-level module is either a directory or a `.rs` file sitting
@@ -486,10 +494,16 @@ fn every_top_level_module_declares_a_layer() {
         } else {
             continue;
         };
+        checked += 1;
         if !LAYERS.iter().any(|(declared, _)| *declared == name) && !undeclared.contains(&name) {
             undeclared.push(name);
         }
     }
+    assert!(
+        checked > 0,
+        "{} holds no module; a scan that reaches nothing passes forever",
+        root.display()
+    );
     assert!(
         undeclared.is_empty(),
         "new top-level modules without a declared layer: {undeclared:?}\n\
@@ -1039,15 +1053,22 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
 fn every_workbench_module_declares_a_layer() {
     let entries = fs::read_dir(workbench_dir()).expect("read src/workbench/");
     let mut undeclared = Vec::new();
+    let mut checked = 0_usize;
     for entry in entries {
         let path = entry.expect("directory entry").path();
         let Some(name) = workbench_owning_module(&path) else {
             continue;
         };
+        checked += 1;
         if !WORKBENCH_LAYERS.contains(&name.as_str()) {
             undeclared.push(name);
         }
     }
+    assert!(
+        checked > 0,
+        "{} holds no module; a scan that reaches nothing passes forever",
+        workbench_dir().display()
+    );
     undeclared.sort();
     undeclared.dedup();
     assert!(
