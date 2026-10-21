@@ -100,6 +100,9 @@ type Aliases = &'static [(&'static str, &'static [&'static str])];
 
 const LEGACY_A2D_NAMES: &[&str] = &["vsup", "tdrise", "tdfall"];
 const LEGACY_D2A_NAMES: &[&str] = &["vsup", "trise", "tfall"];
+const R2E_NAMES: &[&str] = &["rout", "trise", "tfall"];
+const E2R_NAMES: &[&str] = &["vdelta", "ttol"];
+const RBIDIR_NAMES: &[&str] = &["rout", "trise", "tfall", "vdelta", "ttol"];
 
 /// The parameters a converter of `kind` accepts under `signature`, and the
 /// aliases it accepts for them: Cadence's `tr`/`tf`, and `tdelay` for both
@@ -112,7 +115,10 @@ fn accepted(kind: Kind, signature: BuiltinSignature) -> (&'static [&'static str]
         (BuiltinSignature::Legacy, _) => (LEGACY_D2A_NAMES, &[]),
         (BuiltinSignature::Full, Kind::Adc) => (A2D_NAMES, A2D_ALIASES),
         (BuiltinSignature::Full, Kind::Dac) => (D2A_NAMES, D2A_ALIASES),
-        (BuiltinSignature::Full, _) => (BIDIR_NAMES, D2A_ALIASES),
+        (BuiltinSignature::Full, Kind::RealToV) => (R2E_NAMES, D2A_ALIASES),
+        (BuiltinSignature::Full, Kind::VToReal) => (E2R_NAMES, &[]),
+        (BuiltinSignature::Full, Kind::RealBidi) => (RBIDIR_NAMES, D2A_ALIASES),
+        (BuiltinSignature::Full, Kind::Bidi) => (BIDIR_NAMES, D2A_ALIASES),
     }
 }
 
@@ -426,6 +432,77 @@ impl ConverterLaw {
             })
             .map(|parameter| (parameter.name.to_string(), parameter.value))
             .collect()
+    }
+
+    /// Every parameter with its value and source, as the insertion record
+    /// keeps them.
+    pub(in crate::engine::builder) fn record(&self) -> Vec<ConverterParameter> {
+        self.parameters.iter().map(Parameter::record).collect()
+    }
+}
+
+/// Everything one real-valued converter (`r2e`, `e2r`, `rbidir`) is
+/// instantiated from. A real boundary carries a number, so there is no supply.
+#[derive(Debug, Clone)]
+pub(in crate::engine::builder) struct RealConverterLaw {
+    parameters: Vec<Parameter>,
+}
+
+impl RealConverterLaw {
+    /// Resolve and check every parameter of the real converter `module`
+    /// delegates to: the statement's value, else the declaration's default.
+    pub(in crate::engine::builder) fn resolve(
+        kind: Kind,
+        module: &str,
+        statement: &[(String, f64)],
+    ) -> Result<Self, String> {
+        let given = read_statement(kind, BuiltinSignature::Full, module, statement)?;
+        let mut resolver = Resolver {
+            given: &given,
+            default_source: Source::ModuleDefault,
+            live: false,
+            parameters: Vec::new(),
+        };
+        let drives = matches!(kind, Kind::RealToV | Kind::RealBidi);
+        if drives {
+            // `rbidir` shares its node with the sources that drive it while
+            // it receives, so its drive is never ideal.
+            let rout = if kind == Kind::RealToV { 0.0 } else { 20.0 };
+            resolver.take("rout", Unit::Ohm, rout, None, false, false);
+            resolver.take("trise", Unit::Second, 1e-9, None, false, false);
+            resolver.take("tfall", Unit::Second, 1e-9, None, false, false);
+        }
+        if matches!(kind, Kind::VToReal | Kind::RealBidi) {
+            resolver.take("vdelta", Unit::Volt, 0.0, None, false, false);
+            resolver.take("ttol", Unit::Second, 0.0, None, false, false);
+        }
+        for parameter in &resolver.parameters {
+            let (name, value) = (parameter.name, parameter.value);
+            let why = if !value.is_finite() {
+                "it must be finite"
+            } else if value < 0.0 {
+                "it must be nonnegative"
+            } else if name == "rout" && value == 0.0 && kind != Kind::RealToV {
+                "the port receives from the node it drives, so the node has other sources and \
+                 an ideal drive would short them; give rout a positive resistance"
+            } else {
+                continue;
+            };
+            return Err(format!(
+                "the connect statement for '{module}' gives {name} = {value}; {why}"
+            ));
+        }
+        Ok(Self {
+            parameters: resolver.parameters,
+        })
+    }
+
+    /// One parameter's resolved value; every name the kind takes resolves.
+    pub(in crate::engine::builder) fn value(&self, name: &str) -> f64 {
+        self.parameters
+            .iter()
+            .find(|parameter| parameter.name == name)
+            .map_or(f64::NAN, |parameter| parameter.value)
     }
 
     /// Every parameter with its value and source, as the insertion record

@@ -96,6 +96,8 @@ mod mixed_boundaries;
 #[cfg(feature = "veriloga")]
 mod mixed_modules;
 #[cfg(feature = "veriloga")]
+mod real_converters;
+#[cfg(feature = "veriloga")]
 mod veriloga_instances;
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 mod veriloga_terminal_meters;
@@ -5096,6 +5098,15 @@ fn add_planned_xspice_auto_bridge(
             context.temperature,
             abort,
         );
+    }
+
+    // A real port whose connect rule selects a shipped real module converts
+    // through that module's parameters.
+    #[cfg(feature = "veriloga")]
+    if connect_modules::converts_real_built_in(bridge)
+        && let Some(selected) = &bridge.connect_module
+    {
+        return real_converters::materialize(circuit, bridge, selected, context);
     }
 
     let event_node = bridge.event_node.unwrap_or(bridge.node);

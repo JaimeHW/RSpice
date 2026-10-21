@@ -1294,3 +1294,214 @@ fn a_tracking_converter_inside_its_band_is_reported_in_volts() {
         lines[0]
     );
 }
+
+//=============================================================================
+// The shipped real converters
+//=============================================================================
+
+/// `source` (an HDL design), the shipped real modules and one rules block, as
+/// a library file.
+fn real_library(directory: &TempDirectory, source: &str, rules: &str) -> String {
+    let mut text = format!("`include \"disciplines.vams\"\n`timescale 1ns/1ps\n{source}");
+    for (_, module) in rspice_veriloga::connect::library::BUILTIN_REAL_CONNECT_MODULES {
+        text.push_str(module);
+    }
+    text.push_str(rules);
+    directory.write("real.vams", &text)
+}
+
+/// An HDL real output of 0.6 behind `r2e` at `rout` = 1 kΩ, on node `n` of
+/// `vin` (AC 1) through 1 kΩ with 1 kΩ to ground; the twin replaces the
+/// converter with its resistor to ground, which is what a held ideal source
+/// behind `rout` is to small signals.
+fn r2e_divider(directory: &TempDirectory, twin: bool) -> Netlist {
+    let converter = if twin {
+        "rr n 0 1k\n".to_string()
+    } else {
+        let path = real_library(
+            directory,
+            "module level(r);\n  output r; wreal r;\n  assign r = 0.6;\nendmodule\n",
+            "connectrules deck;\n    connect r2e #(.rout(1k));\nendconnectrules\n",
+        );
+        format!(".hdl \"{path}\" module=level\n.options connectrules=deck\nx1 n level\n")
+    };
+    Netlist::parse(&format!(
+        "* r2e behind rout\nvin in 0 dc 0 ac 1\nrin in n 1k\nrl n 0 1k\n{converter}.end\n"
+    ))
+    .expect("deck parses")
+}
+
+/// `r2e` at `rout` = 1 kΩ: the operating point divides 0.6 V by three, the
+/// small-signal gain from `in` is (1/1k)/(3/1k) = 1/3, and the noise at `n`
+/// is the resistor twin's, 4kT/`rout` across the converter.
+#[test]
+fn r2e_is_its_value_behind_rout_in_every_analysis() {
+    let directory = TempDirectory::new("r2e-small-signal");
+    let netlist = r2e_divider(&directory, false);
+    let records = insertions(&netlist);
+    let record = only_on(&records, "n", "x1.r");
+    assert_eq!(record.kind, ConverterKind::R2e);
+    assert_eq!(record.module, "r2e");
+    assert!(record.supply.is_none());
+    let rout = parameter(record, "rout");
+    assert_eq!(
+        (rout.value, &rout.source),
+        (1e3, &ConverterSource::ConnectStatement)
+    );
+    assert_eq!(
+        parameter(record, "trise").source,
+        ConverterSource::ModuleDefault
+    );
+
+    let engine = Engine::default();
+    let tran = engine
+        .run_tran(&netlist, 10e-9, 1e-9)
+        .expect("transient solves");
+    assert!((value_at(&tran, "n", 5e-9) - 0.2).abs() < 1e-9);
+    let ac = engine.run_ac(&netlist, &[1e3]).expect("AC solves");
+    let n = ac[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("n"))
+        .expect("n is published");
+    let gain = ac[0].voltages[n];
+    assert!(
+        (gain.re - 1.0 / 3.0).abs() < 1e-12 && gain.im.abs() < 1e-12,
+        "{gain}"
+    );
+
+    let twin = r2e_divider(&directory, true);
+    let density = |netlist: &Netlist| {
+        let node = engine
+            .build_circuit(netlist)
+            .expect("builds")
+            .get_node_by_name("n")
+            .expect("n exists");
+        engine
+            .run_noise(netlist, node, &[1e3], 300.15)
+            .expect("noise solves")[0]
+            .output_noise_density
+    };
+    let (converter, resistor) = (density(&netlist), density(&twin));
+    // 4kT·(R/3) at 300.15 K: three 1 kΩ in parallel.
+    let expected = 4.0 * 1.380649e-23 * 300.15 * (1e3 / 3.0);
+    assert!((resistor - expected).abs() < 1e-3 * expected, "{resistor}");
+    assert!(
+        (converter - resistor).abs() < 1e-12 * resistor,
+        "{converter} against {resistor}"
+    );
+}
+
+/// An HDL real stepping 0 → 1 at 100 ns and back at 400 ns behind `r2e` with
+/// `rout` into 900 Ω: the rise takes `trise` = 200 ns and the fall `tfall` =
+/// 50 ns, divided by 0.9 at `rout` = 100 Ω.
+fn r2e_ramp_deck(directory: &TempDirectory, rout: &str) -> Netlist {
+    let path = real_library(
+        directory,
+        "module step(r);\n  output r; wreal r;\n  real v;\n  initial begin v = 0.0; #100 v = 1.0; #300 v = 0.0; end\n  assign r = v;\nendmodule\n",
+        &format!(
+            "connectrules deck;\n    connect r2e #(.rout({rout}), .trise(200n), .tfall(50n));\nendconnectrules\n"
+        ),
+    );
+    Netlist::parse(&format!(
+        "* r2e ramps\n.hdl \"{path}\" module=step\n.options connectrules=deck\nx1 out step\nrl out 0 900\n.end\n"
+    ))
+    .expect("deck parses")
+}
+
+/// Each edge takes its own time, behind `rout` or ideal; and a checkpoint
+/// taken inside the rise resumes onto the uninterrupted run.
+#[test]
+fn r2e_ramps_each_edge_and_resumes_inside_a_ramp() {
+    use rspice_core::engine::TransientCheckpointEncoding;
+    let directory = TempDirectory::new("r2e-ramp");
+    let engine = Engine::default();
+    for (rout, scale) in [("100", 0.9), ("0", 1.0)] {
+        let netlist = r2e_ramp_deck(&directory, rout);
+        let whole = engine
+            .run_tran(&netlist, 600e-9, 1e-9)
+            .expect("the uninterrupted run");
+        for (time, level) in [
+            (50e-9, 0.0),
+            (150e-9, 0.25),
+            (200e-9, 0.5),
+            (350e-9, 1.0),
+            (412.5e-9, 0.75),
+            (500e-9, 0.0),
+        ] {
+            let value = value_at(&whole, "out", time);
+            assert!(
+                (value - level * scale).abs() < 1e-9,
+                "rout {rout} at {time:e}: {value}"
+            );
+        }
+        if rout == "0" {
+            continue;
+        }
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&netlist, 150e-9, 1e-9)
+            .expect("checkpoints inside the rise");
+        let text = String::from_utf8(
+            checkpoint
+                .to_bytes(TransientCheckpointEncoding::Unpacked)
+                .expect("serializes"),
+        )
+        .expect("canonical text");
+        assert!(
+            text.contains("__rspice_connect_r2e"),
+            "the image names its model"
+        );
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 600e-9, 1e-9)
+            .expect("resumes");
+        assert_resumes_onto(&whole, &resumed, 150e-9);
+    }
+}
+
+/// `e2r` with `vdelta` = 10 mV on a 1 V/ms ramp publishes once per 10 mV:
+/// 100 publications over the millisecond, give or take the last.
+#[test]
+fn e2r_publishes_once_per_vdelta_on_a_ramp() {
+    let directory = TempDirectory::new("e2r-vdelta");
+    let path = real_library(
+        &directory,
+        "",
+        "connectrules deck;\n    connect e2r #(.vdelta(10m));\n    connect r2e;\nendconnectrules\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* e2r on a ramp\n.veriloga \"{path}\"\nvin in 0 pwl(0 0 1m 1)\na1 in out g\n.model g real_gain\nrl out 0 1k\n.end\n"
+    ))
+    .expect("deck parses");
+    let records = insertions(&netlist);
+    let sample = records
+        .iter()
+        .find(|record| record.kind == ConverterKind::E2r)
+        .unwrap_or_else(|| panic!("an e2r: {records:#?}"));
+    assert_eq!(parameter(sample, "vdelta").value, 10e-3);
+    let drive = records
+        .iter()
+        .find(|record| record.kind == ConverterKind::R2e)
+        .unwrap_or_else(|| panic!("an r2e: {records:#?}"));
+    assert_eq!(
+        parameter(drive, "rout").source,
+        ConverterSource::ModuleDefault
+    );
+
+    let result = Engine::default()
+        .run_tran(&netlist, 1e-3, 1e-6)
+        .expect("transient solves");
+    // The event side of the boundary keeps the deck's name for it.
+    let trace = result
+        .real_trace_named("in")
+        .expect("the sampled real net is traced");
+    let published: Vec<_> = trace.iter().filter(|point| point.time > 0.0).collect();
+    assert!(
+        (99..=101).contains(&published.len()),
+        "{} publications",
+        published.len()
+    );
+    // Each publication is the node's value where it was taken.
+    for point in &published {
+        assert!((point.value - point.time * 1e3).abs() < 1e-9, "{point:?}");
+    }
+}

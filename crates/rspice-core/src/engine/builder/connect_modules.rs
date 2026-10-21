@@ -53,7 +53,7 @@ use crate::{ElaborationError, ElaborationErrorKind, SimulationError};
 
 mod parameters;
 pub(super) use crate::circuit::{ConverterSource as ParameterSource, ConverterSupply};
-pub(super) use parameters::{ConverterLaw, module_name};
+pub(super) use parameters::{ConverterLaw, RealConverterLaw, module_name};
 
 /// A clause-7 refusal about the deck's connect rules.
 ///
@@ -394,8 +394,35 @@ pub(super) fn expected_library_module(kind: super::XspiceAutoBridgeKind) -> Opti
         Kind::Adc => Some("a2d"),
         Kind::Dac => Some("d2a"),
         Kind::Bidi => Some("bidir"),
-        Kind::RealToV | Kind::VToReal | Kind::RealBidi => None,
+        Kind::RealToV => Some("r2e"),
+        Kind::VToReal => Some("e2r"),
+        Kind::RealBidi => None,
     }
+}
+
+/// The law of the real-valued converter a delegating module selects: every
+/// parameter, checked, with where it came from.
+pub(super) fn real_converter_law(
+    selected: &PlannedConnectModule,
+    kind: super::XspiceAutoBridgeKind,
+) -> Result<RealConverterLaw, SimulationError> {
+    RealConverterLaw::resolve(kind, &selected.name, &selected.parameters).map_err(|message| {
+        connect_refusal(message)
+            .module(selected.name.as_str())
+            .into()
+    })
+}
+
+/// Whether a planned boundary converts through a shipped real-valued
+/// converter: a real port whose connect rule selects `r2e` or `e2r`. A real
+/// port no connect rule reaches keeps the stock converters.
+pub(super) fn converts_real_built_in(bridge: &super::PlannedXspiceAutoBridge) -> bool {
+    use super::XspiceAutoBridgeKind as Kind;
+    matches!(bridge.kind, Kind::RealToV | Kind::VToReal)
+        && bridge
+            .connect_module
+            .as_ref()
+            .is_some_and(|selected| selected.signature().is_some())
 }
 
 /// Selection must carry an authenticated execution decision from its source.

@@ -46,11 +46,20 @@
 //! min(rlo, rhi)`, ...) do not fold here; the engine reads them as the
 //! declarations state them, and a supply bound live to a net makes the
 //! supply-relative ones track it.
+//!
+//! # Real-valued boundaries
+//!
+//! [`R2E`], [`E2R`] and [`RBIDIR`] are the same three rows of Table 7-2 for
+//! a `wreal` discrete port, and delegate the same way. They carry a number
+//! rather than a logic level, so they have no supply. No rule set selects
+//! them: a real port no connect rule reaches converts as before, and a
+//! `connect` statement naming one of these chooses its parameters.
 
 /// Which shipped signature a token-equivalent declaration matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuiltinSignature {
-    /// The full parameter set: [`A2D`], [`D2A`], [`BIDIR`].
+    /// The full parameter set: [`A2D`], [`D2A`], [`BIDIR`], and the real
+    /// modules [`R2E`], [`E2R`], [`RBIDIR`].
     Full,
     /// The earlier signature: a supply and the edge times only.
     Legacy,
@@ -154,6 +163,71 @@ connectmodule bidir(a, d);
     parameter real tdelay = 0;
 endmodule
 ";
+
+/// `r2e` — real to electrical, Table 7-2 row 2 for a `wreal` port.
+///
+/// The port's resolved real value behind `rout`: an ideal source at the
+/// default 0, as an HDL real output converts with no connect rule. A change
+/// takes the full `trise` (upward) or `tfall` (downward).
+pub const R2E: &str = "\
+connectmodule r2e(d, a);
+    input d;
+    output a;
+    logic d;
+    wreal d;
+    electrical a;
+
+    parameter real rout = 0;
+    parameter real trise = 1e-9;
+    parameter real tfall = 1e-9;
+endmodule
+";
+
+/// `e2r` — electrical to real, Table 7-2 row 1 for a `wreal` port.
+///
+/// The node's voltage, sampled at accepted analog steps: at every one at the
+/// default `vdelta = 0`, otherwise once the node has moved `vdelta` from the
+/// last value published, and never sooner than `ttol` after it. It names no
+/// future time, so it never moves the step sequence.
+pub const E2R: &str = "\
+connectmodule e2r(a, d);
+    input a;
+    output d;
+    electrical a;
+    logic d;
+    wreal d;
+
+    parameter real vdelta = 0;
+    parameter real ttol = 0;
+endmodule
+";
+
+/// `rbidir` — both, Table 7-2 row 3 for a `wreal` port.
+///
+/// [`R2E`] driven by the port's own drivers and [`E2R`] publishing to the
+/// port's receivers. Until a driver of the port has produced a value the
+/// port reads the node; from then on it drives the node behind `rout`, and
+/// its receivers read the net its drivers resolve. `rout` is finite by
+/// default so the port can share its node with other sources.
+pub const RBIDIR: &str = "\
+connectmodule rbidir(a, d);
+    inout a;
+    inout d;
+    electrical a;
+    logic d;
+    wreal d;
+
+    parameter real rout = 20;
+    parameter real trise = 1e-9;
+    parameter real tfall = 1e-9;
+    parameter real vdelta = 0;
+    parameter real ttol = 0;
+endmodule
+";
+
+/// The real-valued built-in connect modules, in declaration order.
+pub const BUILTIN_REAL_CONNECT_MODULES: [(&str, &str); 3] =
+    [("r2e", R2E), ("e2r", E2R), ("rbidir", RBIDIR)];
 
 /// The earlier `a2d` signature, still delegating.
 const LEGACY_A2D: &str = "\
@@ -268,6 +342,7 @@ pub(crate) fn equivalent_declarations(
                 tokens(source.get(module.span.start as usize..module.span.end as usize)?)?;
             [
                 (BuiltinSignature::Full, &BUILTIN_CONNECT_MODULES),
+                (BuiltinSignature::Full, &BUILTIN_REAL_CONNECT_MODULES),
                 (BuiltinSignature::Legacy, &LEGACY_BUILTIN_CONNECT_MODULES),
             ]
             .into_iter()

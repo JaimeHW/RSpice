@@ -532,3 +532,48 @@ endmodule
         "the process's `real` moved into the discrete domain"
     );
 }
+
+/// The real-valued modules analyze, delegate as the full signature, and a
+/// rule block naming them selects each by its direction with a real
+/// discrete port.
+#[test]
+fn the_real_modules_delegate_and_select_by_direction() {
+    let delegations = |source: &str| equivalent_declarations(source, &parse(source));
+    let mut source = String::new();
+    for (name, module) in BUILTIN_REAL_CONNECT_MODULES {
+        let file = parse(&as_plain_module(module));
+        crate::semantic::SemanticAnalyzer::new()
+            .analyze(&file)
+            .unwrap_or_else(|error| panic!("{name} passes semantic analysis: {error:?}"));
+        assert_eq!(
+            delegations(module).get(name),
+            Some(&BuiltinSignature::Full),
+            "{name}"
+        );
+        let edited = module.replacen("ttol = 0", "ttol = 1", 1);
+        if edited != module {
+            assert!(delegations(&edited).is_empty(), "{name}");
+        }
+        source.push_str(module);
+    }
+    source.push_str("connectrules real;\n    connect r2e;\n    connect e2r;\n    connect rbidir;\nendconnectrules\n");
+    let db = DisciplineDb::with_standard();
+    let table = build_connect_rule_table(&parse(&source), &db)
+        .unwrap_or_else(|error| panic!("real modules build a rule table: {error}"));
+    for (module, direction) in [
+        ("e2r", ConnectDirection::AnalogToDiscrete),
+        ("r2e", ConnectDirection::DiscreteToAnalog),
+        ("rbidir", ConnectDirection::Bidirectional),
+    ] {
+        let rule = table
+            .select_typed(
+                "electrical",
+                "logic",
+                direction,
+                Some(crate::connect::ConnectValueKind::Real),
+                &db,
+            )
+            .unwrap_or_else(|error| panic!("{module} is selectable: {error}"));
+        assert_eq!(rule.connect_module, module);
+    }
+}

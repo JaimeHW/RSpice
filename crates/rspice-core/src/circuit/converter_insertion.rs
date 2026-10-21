@@ -67,6 +67,12 @@ pub enum ConverterKind {
     BidiBridge,
     RealToV,
     VToReal,
+    /// The built-in real-to-electrical converter a connect rule selecting
+    /// `r2e` inserts.
+    R2e,
+    /// The built-in electrical-to-real converter a connect rule selecting
+    /// `e2r` inserts.
+    E2r,
     /// An authored connect module, executing its own body.
     Authored,
     /// The card an auto-bridge template generates.
@@ -188,7 +194,11 @@ impl ConverterInsertion {
     fn is_built_in(&self) -> bool {
         matches!(
             self.kind,
-            ConverterKind::A2d | ConverterKind::D2a | ConverterKind::Bidir
+            ConverterKind::A2d
+                | ConverterKind::D2a
+                | ConverterKind::Bidir
+                | ConverterKind::R2e
+                | ConverterKind::E2r
         )
     }
 

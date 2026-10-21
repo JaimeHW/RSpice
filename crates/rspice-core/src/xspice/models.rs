@@ -131,6 +131,10 @@ mod bridges;
 #[cfg(feature = "veriloga")]
 mod connect_bridges;
 
+// The real-valued connect-rule converters
+#[cfg(feature = "veriloga")]
+mod connect_real;
+
 // Xyce-compatible analog digital output devices
 mod digital_output;
 
@@ -183,6 +187,8 @@ pub use bridges::{AdcBridge, BidiBridge, DacBridge};
 pub(crate) use bridges::{TrackingAdcBridge, TrackingDacBridge};
 #[cfg(feature = "veriloga")]
 pub(crate) use connect_bridges::{ConnectAdc, ConnectBidi, ConnectDac, is_connect_converter};
+#[cfg(feature = "veriloga")]
+pub(crate) use connect_real::{ConnectE2r, ConnectR2e};
 
 pub use digital_output::{
     XyceDAdd, XyceDGate, XyceDLegacyDff, XyceDLegacyGate, XyceDSequential, XyceDTff,
