@@ -159,7 +159,7 @@ br916a	vlg	gold	L1	fail	differs from the gold file at line 1 (1 lines against 4)
 br916b	vlg	gold	L1	fail	differs from the gold file at line 1 (3 lines against 4)
 br918a	vlg	passed	L7	pass	PASSED
 br918b	vlg	passed	L7	pass	PASSED
-br918c	vlg	passed	L7	refused:pullup	Semantic error: Unsupported feature: the gate primitive `pullup` (IEEE 1364-2005 section 7) has no executable form yet
+br918c	vlg	passed	L7	pass	PASSED
 br918d	vlg	passed	L7	pass	PASSED
 br919	vlg	passed	L1	pass	PASSED
 br924	vlg	ce	L3	refused:feature	Semantic error: Unsupported feature: call to `func1` inside a discrete-domain expression is not supported yet
@@ -294,11 +294,11 @@ br_gh99a	vlg	passed	L1	pass	PASSED
 br_gh99b	vlg	passed	L1	pass	PASSED
 br_gh99d	vlg	passed	L1	pass	PASSED
 br_gh99f	vlg	passed	L1	pass	PASSED
-br_gh99g	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
-br_gh99h	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
-br_gh99i	vlg	passed	L7	refused:bufif1	Semantic error: Unsupported feature: the gate primitive `bufif1` (IEEE 1364-2005 section 7) has no executable form yet
-br_gh99j	vlg	passed	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
-br_gh99k	vlg	passed	L7	refused:cmos	Semantic error: Unsupported feature: the gate primitive `cmos` (IEEE 1364-2005 section 7) has no executable form yet
+br_gh99g	vlg	passed	L4	pass	PASSED
+br_gh99h	vlg	passed	L4	pass	PASSED
+br_gh99i	vlg	passed	L7	pass	PASSED
+br_gh99j	vlg	passed	L7	pass	PASSED
+br_gh99k	vlg	passed	L7	pass	PASSED
 br_gh99l	vlg	passed	L1	pass	PASSED
 br_gh99m	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 br_gh99o	vlg	passed	L1	pass	PASSED
@@ -306,15 +306,15 @@ br_gh99p	vlg	passed	L1	pass	PASSED
 br_gh99q	vlg	passed	L1	pass	PASSED
 br_gh99r	vlg	passed	L1	pass	PASSED
 br_gh99s	vlg	passed	L7	pass	PASSED
-br_gh99t	vlg	passed	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
-br_gh99u	vlg	passed	L7	refused:cmos	Semantic error: Unsupported feature: the gate primitive `cmos` (IEEE 1364-2005 section 7) has no executable form yet
+br_gh99t	vlg	passed	L7	pass	PASSED
+br_gh99u	vlg	passed	L7	pass	PASSED
 br_ml20150315	vlg	gold	L1	pass	matches the gold file
 br_ml20150321	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'undeclared'
 br_ml20190806a	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 br_ml20190806b	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 br_ml20190814	vlg	gold	-	excluded:sdf-annotate	
 br_mw20171108	vlg	passed	L3	pass	PASSED
-bufif	vlg	passed	L7	refused:bufif1	Semantic error: Unsupported feature: the gate primitive `bufif1` (IEEE 1364-2005 section 7) has no executable form yet
+bufif	vlg	passed	L7	pass	PASSED
 busbug	vlg	gold	L1	pass	matches the gold file
 ca_force	vlg	passed	L4	racy	passes in reverse order only; no PASSED line (1 output lines)
 ca_func	vlg	passed	-	excluded:flag-gstrict-ca-eval	
@@ -358,7 +358,7 @@ check_constant_6	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wi
 check_constant_7	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
 check_constant_8	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
 check_constant_9	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: `unpacked array Array` vector bounds must be compile-time constants within the supported signed 64-bit index range
-cmos	vlg	gold	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
+cmos	vlg	gold	L7	pass	matches the gold file
 cmpi	vlg	passed	L1	pass	PASSED
 comp1000	vlg	gold	L1	fail	differs from the gold file at line 91 (255 lines against 255)
 comp1001	vlg	gold	L1	fail	differs from the gold file at line 179 (255 lines against 255)
@@ -480,7 +480,7 @@ fifo	vlg	passed	L5	pass	PASSED
 fopen1	vlg	passed	L5	pass	PASSED
 fopen2	vlg	passed	L5	pass	PASSED
 for3.16A	vlg	passed	L1	pass	PASSED
-force1	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+force1	vlg	passed	L4	pass	PASSED
 force2	vlg	passed	L4	pass	PASSED
 force3.17A	vlg	passed	L4	pass	PASSED
 force3.17B	vlg	passed	L4	pass	PASSED
@@ -513,18 +513,18 @@ function7	vlg	passed	L3	pass	PASSED
 function8	vlg	passed	L4	pass	PASSED
 function9	vlg	passed	L4	pass	PASSED
 function_exp	vlg	passed	L3	pass	PASSED
-ga_and	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+ga_and	vlg	passed	L4	pass	PASSED
 ga_mod	vlg	passed	L4	pass	testbench gap: no root selection (-s main); PASSED
 ga_mod1	vlg	passed	L4	pass	testbench gap: no root selection (-s main); PASSED
 ga_mod2	vlg	passed	L4	pass	testbench gap: no root selection (-s main); PASSED
-ga_nand	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
-ga_nor	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
-ga_or	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
-ga_xnor	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
-ga_xor	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+ga_nand	vlg	passed	L4	pass	PASSED
+ga_nor	vlg	passed	L4	pass	PASSED
+ga_or	vlg	passed	L4	pass	PASSED
+ga_xnor	vlg	passed	L4	pass	PASSED
+ga_xor	vlg	passed	L4	pass	PASSED
 galan	vlg	passed	L1	pass	PASSED
 gate_connect1	vlg	passed	L1	pass	PASSED
-gate_connect2	vlg	ce	L4	pass	language error: Parse error: Expected LParen, found LBracket
+gate_connect2	vlg	ce	L4	refused:buf	Parse error: Unsupported `buf` gate array: a 32-bit terminal on an array of 1 instances; IEEE 1364-2005 section 7.1.6 requires one bit or one bit per instance
 gen_case_opt1	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
 gen_case_opt2	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
 gen_case_opt3	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
@@ -594,7 +594,7 @@ macro_replacement	vlg	gold	-	excluded:flag-Wmacro-replacement
 macsub	vlg	passed	L1	pass	PASSED
 mangle	vlg	passed	L1	refused:escaped-ground-or-comma-bearing	Parse error: Unsupported escaped ground or comma-bearing identifier requires structured branch labels: \`~!-_=+\|[]{};:'"",./<>?
 mangle_1	vlg	passed	L4	refused:module-item	Parse error: Unsupported module item: m
-many_drivers	vlg	passed	L1	fail	no PASSED line (15 output lines)
+many_drivers	vlg	passed	L1	pass	PASSED
 mcl2	vlg	gold	L1	pass	matches the gold file
 mem1	vlg	gold	L5	pass	matches the gold file
 mem2port	vlg	passed	L1	pass	PASSED
@@ -669,8 +669,8 @@ nested_impl_event1	vlg	gold	L1	pass	matches the gold file
 nested_impl_event2	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: `@*` names no signal: the statement it guards reads none, so the process could never resume
 no_if_statement	vlg	ce	-	excluded:systemverilog:var	
 no_timescale_in_module	vlg	ce	L1	refused:module-item	Parse error: Unsupported module item: __rspice_timescale
-npmos	vlg	passed	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
-npmos2	vlg	passed	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
+npmos	vlg	passed	L7	pass	PASSED
+npmos2	vlg	passed	L7	pass	PASSED
 onehot	vlg	passed	L5	pass	PASSED
 p_monta	vlg	passed	L3	pass	PASSED
 par_mismatch	vlg	ce	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
@@ -790,7 +790,7 @@ pr1581580	vlg	passed	L4	pass	PASSED
 pr1587634	vlg	co	-	excluded:systemverilog:-=	
 pr1587669	vlg	gold	-	excluded:systemverilog:+=	
 pr1589497	vlg	gold	L3	pass	matches the gold file
-pr1598445	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pr1598445	vlg	passed	L7	pass	PASSED
 pr1601896	vlg	passed	L1	pass	PASSED
 pr1601898	vlg	passed	L3	pass	PASSED
 pr1603313	vlg	passed	L1	pass	PASSED
@@ -853,7 +853,7 @@ pr1701921	vlg	passed	L1	pass	PASSED
 pr1702593	vlg	gold	L1	pass	matches the gold file
 pr1703120	vlg	gold	L1	fail	differs from the gold file at line 2 (19 lines against 19)
 pr1703346	vlg	passed	L7	pass	PASSED
-pr1703959	vlg	passed	L7	refused:pmos	Parse error: Unsupported module item: pmos
+pr1703959	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: net `c` joins discrete port `ZI` of instance `ia` and analog port `c` of instance `ib`, a discipline boundary inside the HD...
 pr1704013	vlg	ce	L1	fail	compiled without error; ran to quiescence
 pr1704726a	vlg	ce	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
 pr1704726b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `name_func` is not declared in the selected scope
@@ -885,11 +885,11 @@ pr1776485	vlg	passed	L1	pass	PASSED
 pr1777103	vlg	passed	L1	pass	PASSED
 pr1780480	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 2 (2 lines against 4)
 pr1784984	vlg	passed	L1	pass	PASSED
-pr1787394a	vlg	gold	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
-pr1787394b	vlg	gold	L7	refused:bufif1	Semantic error: Unsupported feature: the gate primitive `bufif1` (IEEE 1364-2005 section 7) has no executable form yet
-pr1787423	vlg	gold	L7	refused:pulldown	Parse error: Unsupported module item: pulldown
-pr1787423b	vlg	passed	L7	refused:pulldown	Parse error: Unsupported module item: pulldown
-pr1787423c	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+pr1787394a	vlg	gold	L7	pass	matches the gold file
+pr1787394b	vlg	gold	L7	pass	matches the gold file
+pr1787423	vlg	gold	L7	pass	matches the gold file
+pr1787423b	vlg	passed	L7	racy	passes in reverse order only; no PASSED line (4 output lines)
+pr1787423c	vlg	passed	L4	pass	PASSED
 pr1792108	vlg	gold	-	excluded:systemverilog:int	
 pr1792152	vlg	gold	L6	fail	compile error: Parse error: Expected RParen, found Colon
 pr1792734	vlg	gold	L1	pass	matches the gold file
@@ -931,7 +931,7 @@ pr1868991b	vlg	co	L1	pass	compiled
 pr1869769	vlg	passed	L1	pass	PASSED
 pr1869772	vlg	passed	L3	pass	PASSED
 pr1869781	vlg	passed	L1	pass	PASSED
-pr1873146	vlg	passed	L6	fail	compile error: Parse error: Expected LParen, found LBracket
+pr1873146	vlg	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
 pr1875866	vlg	passed	L1	pass	PASSED
 pr1875866b	vlg	passed	L1	pass	PASSED
 pr1876798	vlg	gold	L5	pass	matches the gold file
@@ -1013,7 +1013,7 @@ pr2015466	vlg	passed	L1	pass	PASSED
 pr2018235a	vlg	passed	L1	pass	PASSED
 pr2018235b	vlg	passed	L1	pass	PASSED
 pr2018305	vlg	passed	L1	pass	PASSED
-pr2019553	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pr2019553	vlg	passed	L7	pass	PASSED
 pr2029336	vlg	gold	L5	pass	work/pr2029336.out matches the gold file
 pr2030767	vlg	passed	L1	pass	PASSED
 pr2036953	vlg	passed	L1	pass	PASSED
@@ -1055,7 +1055,7 @@ pr2159630	vlg	gold	L1	pass	matches the gold file
 pr2166188	vlg	passed	L1	pass	PASSED
 pr2166311	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr2169870	vlg	gold	L3	pass	matches the gold file
-pr2172606	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pr2172606	vlg	passed	L7	pass	PASSED
 pr2172606b	vlg	passed	-	excluded:systemverilog:bit	
 pr2181249	vlg	passed	L1	pass	PASSED
 pr2190323	vlg	passed	L1	pass	PASSED
@@ -1100,9 +1100,9 @@ pr2355304	vlg	passed	L1	pass	PASSED
 pr2355304b	vlg	passed	L1	pass	PASSED
 pr2358264	vlg	passed	L1	pass	PASSED
 pr2358848	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
-pr2395378a	vlg	ce	L6	refused:buf	Parse error: Unsupported `buf` gate: 1 terminal(s); IEEE 1364-2005 section 7.2 requires at least 2
+pr2395378a	vlg	ce	L6	refused:buf	Parse error: Unsupported `buf` gate: 1 terminal(s); IEEE 1364-2005 section 7 requires at least 2
 pr2395378b	vlg	ce	L1	pass	language error: Parse error: Invalid expression
-pr2395378c	vlg	ce	L6	refused:not	Parse error: Unsupported `not` gate: 1 terminal(s); IEEE 1364-2005 section 7.2 requires at least 2
+pr2395378c	vlg	ce	L6	refused:not	Parse error: Unsupported `not` gate: 1 terminal(s); IEEE 1364-2005 section 7 requires at least 2
 pr2395835	vlg	passed	L3	pass	PASSED
 pr2425055a	vlg	passed	L1	pass	PASSED
 pr2425055b	vlg	passed	L1	pass	PASSED
@@ -1140,9 +1140,9 @@ pr2722330b	vlg	passed	L1	pass	PASSED
 pr2722339a	vlg	passed	L1	pass	PASSED
 pr2722339b	vlg	passed	L1	pass	PASSED
 pr2723712	vlg	passed	L1	pass	PASSED
-pr2725700a	vlg	passed	L7	refused:bufif0	Parse error: Unsupported module item: bufif0
-pr2725700b	vlg	passed	L7	refused:bufif0	Semantic error: Unsupported feature: the gate primitive `bufif0` (IEEE 1364-2005 section 7) has no executable form yet
-pr2725700c	vlg	passed	L7	refused:bufif0	Semantic error: Unsupported feature: the gate primitive `bufif0` (IEEE 1364-2005 section 7) has no executable form yet
+pr2725700a	vlg	passed	L7	pass	PASSED
+pr2725700b	vlg	passed	L7	pass	PASSED
+pr2725700c	vlg	passed	L7	pass	PASSED
 pr2728032	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 pr2728547	vlg	passed	L5	pass	PASSED
 pr2728812a	vlg	passed	L1	pass	PASSED
@@ -1150,7 +1150,7 @@ pr2728812b	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in
 pr2728812c	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in digital module hierarchy at instance 'sum.s0.s0.s1': specialization repeats ancestor 'sum.s0.s0'
 pr273	vlg	passed	L1	pass	PASSED
 pr2745281	vlg	passed	L1	pass	PASSED
-pr2781595	vlg	passed	L6	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
+pr2781595	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
 pr2785294	vlg	gold	L1	fail	differs from the gold file at line 2 (25 lines against 5)
 pr2788686	vlg	passed	L3	pass	PASSED
 pr2790236	vlg	passed	L1	pass	PASSED
@@ -1170,9 +1170,9 @@ pr2823711	vlg	passed	L1	pass	PASSED
 pr2824189	vlg	passed	-	excluded:systemverilog:var	
 pr2829776	vlg	passed	L6	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
 pr2829776b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-pr2832234	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
-pr2834340	vlg	passed	L6	refused:pulldown	Parse error: Unsupported module item: pulldown
-pr2834340b	vlg	passed	L6	refused:pullup	Parse error: Unsupported module item: pullup
+pr2832234	vlg	passed	L7	refused:tranif0	Semantic error: Unsupported feature: the gate primitive `tranif0` (IEEE 1364-2005 section 7) has no executable form yet
+pr2834340	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
+pr2834340b	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
 pr2835632a	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr2835632b	vlg	passed	L4	pass	PASSED
 pr2837451	vlg	passed	L1	pass	PASSED
@@ -1307,7 +1307,7 @@ pr492	vlg	gold	L1	pass	matches the gold file
 pr498b	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam foo`: module `main` declares no parameter `foo`
 pr508	vlg	passed	L3	pass	PASSED
 pr509	vlg	passed	L1	pass	PASSED
-pr509b	vlg	passed	L7	refused:bufif1	Semantic error: Unsupported feature: the gate primitive `bufif1` (IEEE 1364-2005 section 7) has no executable form yet
+pr509b	vlg	passed	L7	pass	PASSED
 pr511	vlg	passed	L3	pass	PASSED
 pr513	vlg	passed	L5	pass	PASSED
 pr522	vlg	gold	L3	pass	matches the gold file
@@ -1330,7 +1330,7 @@ pr540b	vlg	gold	L3	pass	matches the gold file
 pr540c	vlg	gold	L3	pass	matches the gold file
 pr541	vlg	gold	L1	pass	matches the gold file
 pr542	vlg	gold	L1	pass	matches the gold file
-pr544	vlg	gold	L7	refused:bufif1	Parse error: Unsupported module item: bufif1
+pr544	vlg	gold	L7	pass	matches the gold file
 pr547	vlg	gold	L1	pass	testbench gap: no defines (__ICARUS__); matches the gold file
 pr556	vlg	gold	L1	pass	matches the gold file
 pr564	vlg	passed	L1	pass	PASSED
@@ -1408,8 +1408,8 @@ ptest009	vlg	passed	L1	pass	PASSED
 ptest010	vlg	passed	L1	pass	PASSED
 ptest011	vlg	passed	L1	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'b1.x' is declared with no net or variable of its own, in a module that declares no discrete-d...
 pullupdown	vlg	passed	L7	pass	PASSED
-pullupdown2	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
-pullupdown3	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pullupdown2	vlg	passed	L7	pass	PASSED
+pullupdown3	vlg	passed	L7	pass	PASSED
 pv_undef_sig_sel	vlg	passed	L5	pass	PASSED
 pv_wr_vec4	vlg	passed	L4	pass	PASSED
 pv_wr_vec4_nb	vlg	passed	L4	pass	PASSED
@@ -1466,15 +1466,15 @@ repl_zero_wid_fail	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature
 repl_zero_wid_pass	vlg	passed	L1	pass	PASSED
 resetall	vlg	gold	-	excluded:flag-Wtimescale	
 resetall2	vlg	gold	-	excluded:flag-Wtimescale	
-resolv1	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+resolv1	vlg	passed	L7	pass	PASSED
 rise_fall_decay1	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
-rise_fall_decay2	vlg	passed	L6	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
+rise_fall_decay2	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 rise_fall_delay1	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 rise_fall_delay2	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
 rise_fall_delay3	vlg	passed	L6	refused:tranif1	Semantic error: Unsupported feature: the gate primitive `tranif1` (IEEE 1364-2005 section 7) has no executable form yet
 rl_pow	vlg	passed	L1	pass	PASSED
-rnpmos	vlg	passed	L7	refused:rnmos	Semantic error: Unsupported feature: the gate primitive `rnmos` (IEEE 1364-2005 section 7) has no executable form yet
-rnpmos2	vlg	passed	L7	refused:rnmos	Semantic error: Unsupported feature: the gate primitive `rnmos` (IEEE 1364-2005 section 7) has no executable form yet
+rnpmos	vlg	passed	L7	pass	PASSED
+rnpmos2	vlg	passed	L7	pass	PASSED
 rop	vlg	passed	L1	pass	PASSED
 rptconcat	vlg	passed	L1	pass	PASSED
 rtran	vlg	gold	L7	refused:rtran	Semantic error: Unsupported feature: the gate primitive `rtran` (IEEE 1364-2005 section 7) has no executable form yet
@@ -1591,7 +1591,7 @@ string8	vlg	gold	L1	pass	matches the gold file
 string9	vlg	gold	L1	pass	matches the gold file
 supply1	vlg	passed	L7	pass	PASSED
 supply2	vlg	passed	L7	pass	PASSED
-switch_primitives	vlg	gold	L7	refused:bufif0	Parse error: Unsupported module item: bufif0
+switch_primitives	vlg	gold	L7	refused:tranif0	Parse error: Unsupported module item: tranif0
 sys_func_task_error	vlg	re	-	excluded:nonstandard-systf:$this_icarus_call_should_not_exist	
 talu	vlg	passed	L1	pass	PASSED
 task-scope	vlg	passed	L4	pass	PASSED
@@ -1647,18 +1647,18 @@ tern5	vlg	gold	L1	pass	matches the gold file
 tern6	vlg	passed	L1	pass	PASSED
 tern7	vlg	passed	-	excluded:systemverilog:ref	
 tern9	vlg	passed	L1	pass	PASSED
-test_bufif0	vlg	passed	L7	refused:bufif0	Semantic error: Unsupported feature: the gate primitive `bufif0` (IEEE 1364-2005 section 7) has no executable form yet
-test_bufif1	vlg	passed	L7	refused:bufif1	Semantic error: Unsupported feature: the gate primitive `bufif1` (IEEE 1364-2005 section 7) has no executable form yet
+test_bufif0	vlg	passed	L7	pass	PASSED
+test_bufif1	vlg	passed	L7	pass	PASSED
 test_disphob	vlg	gold	L1	pass	matches the gold file
 test_dispwided	vlg	gold	L1	pass	matches the gold file
 test_extended	vlg	gold	L1	pass	matches the gold file
-test_mos_strength_reduction	vlg	passed	L7	refused:rnmos	Semantic error: Unsupported feature: the gate primitive `rnmos` (IEEE 1364-2005 section 7) has no executable form yet
-test_nmos	vlg	passed	L7	refused:nmos	Semantic error: Unsupported feature: the gate primitive `nmos` (IEEE 1364-2005 section 7) has no executable form yet
-test_notif0	vlg	passed	L7	refused:notif0	Semantic error: Unsupported feature: the gate primitive `notif0` (IEEE 1364-2005 section 7) has no executable form yet
-test_notif1	vlg	passed	L7	refused:notif1	Semantic error: Unsupported feature: the gate primitive `notif1` (IEEE 1364-2005 section 7) has no executable form yet
-test_pmos	vlg	passed	L7	refused:pmos	Semantic error: Unsupported feature: the gate primitive `pmos` (IEEE 1364-2005 section 7) has no executable form yet
-test_rnmos	vlg	passed	L7	refused:rnmos	Semantic error: Unsupported feature: the gate primitive `rnmos` (IEEE 1364-2005 section 7) has no executable form yet
-test_rpmos	vlg	passed	L7	refused:rpmos	Semantic error: Unsupported feature: the gate primitive `rpmos` (IEEE 1364-2005 section 7) has no executable form yet
+test_mos_strength_reduction	vlg	passed	L7	pass	PASSED
+test_nmos	vlg	passed	L7	pass	PASSED
+test_notif0	vlg	passed	L7	pass	PASSED
+test_notif1	vlg	passed	L7	pass	PASSED
+test_pmos	vlg	passed	L7	pass	PASSED
+test_rnmos	vlg	passed	L7	pass	PASSED
+test_rpmos	vlg	passed	L7	pass	PASSED
 test_width	vlg	gold	L1	pass	matches the gold file
 time1	vlg	passed	L1	pass	PASSED
 time2	vlg	passed	L1	pass	PASSED
@@ -1673,7 +1673,7 @@ timescale1	vlg	passed	L1	pass	PASSED
 timescale2	vlg	passed	L1	pass	PASSED
 timescale3	vlg	ce	L1	fail	compiled without error; nothing to run: module `ivltests/timescale3.v` declares no digital nets, processes or drivers
 tran	vlg	gold	L7	refused:tran	Semantic error: Unsupported feature: the gate primitive `tran` (IEEE 1364-2005 section 7) has no executable form yet
-tran-keeper	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+tran-keeper	vlg	passed	L7	refused:tranif1	Parse error: Unsupported module item: tranif1
 tranif0	vlg	gold	L7	refused:tranif0	Semantic error: Unsupported feature: the gate primitive `tranif0` (IEEE 1364-2005 section 7) has no executable form yet
 tranif1	vlg	gold	L7	refused:tranif1	Semantic error: Unsupported feature: the gate primitive `tranif1` (IEEE 1364-2005 section 7) has no executable form yet
 tri0	vlg	passed	L7	pass	PASSED
@@ -1690,7 +1690,7 @@ udp_bx	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct 
 udp_delay_fail	vlg	ce	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 udp_dff	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 udp_dff_std	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
-udp_eval_arg	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+udp_eval_arg	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 udp_jkff	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 udp_output_reg	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 udp_real_delay	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
