@@ -9,5 +9,5 @@ use crate::workbench::app_state::AppState;
 /// stale draft left behind by an abandoned edit.
 pub(crate) fn open_simulation_options(state: &mut AppState) {
     state.sim_setup.session.options_draft =
-        crate::simulation::dialog::OptionsDialogState::from_options(&state.sim_setup.options);
+        crate::simulation::plan::OptionsDialogState::from_options(&state.sim_setup.options);
 }

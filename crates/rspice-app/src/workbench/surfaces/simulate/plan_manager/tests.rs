@@ -1484,14 +1484,14 @@ fn a_created_plan_inherits_exactly_what_its_route_committed() {
         Ok(-40.0),
         "the draft states the plan's reference temperature"
     );
-    let rebuilt = crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
+    let rebuilt = crate::simulation::plan::OptionsDialogState::from_options(&setup.options);
     assert_eq!(
         setup.session.options_draft.reltol, rebuilt.reltol,
         "the draft states the inherited options, not the defaults create_plan minted"
     );
     assert_ne!(
         rebuilt.reltol,
-        crate::simulation::dialog::OptionsDialogState::from_options(
+        crate::simulation::plan::OptionsDialogState::from_options(
             &crate::simulation::dialog::SimulationOptions::default()
         )
         .reltol,

@@ -29,7 +29,7 @@ pub use rspice_simulation_contract::drafts::{AcSetup, DcSetup, TranSetup};
 #[derive(Debug, Clone, Default)]
 pub struct SimSetupEditorSession {
     /// Draft buffers edited before effective solver options are committed.
-    pub options_draft: crate::simulation::dialog::OptionsDialogState,
+    pub options_draft: crate::simulation::plan::OptionsDialogState,
     /// Add-analysis palette visibility and keyboard interaction state.
     pub palette_open: bool,
     pub palette_query: String,
@@ -94,7 +94,7 @@ impl SimSetupState {
         options.temp = setup.reference_pvt.temperature_celsius;
         setup.options = options;
         setup.session.options_draft =
-            crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
+            crate::simulation::plan::OptionsDialogState::from_options(&setup.options);
         setup
     }
 
@@ -116,7 +116,7 @@ impl SimSetupState {
     pub(crate) fn prepare_after_restore(&mut self) {
         self.setup.prepare_after_restore();
         self.session.options_draft =
-            crate::simulation::dialog::OptionsDialogState::from_options(&self.options);
+            crate::simulation::plan::OptionsDialogState::from_options(&self.options);
         self.session.palette_open = false;
         self.session.palette_query.clear();
         self.session.palette_active = 0;

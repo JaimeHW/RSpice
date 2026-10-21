@@ -8,6 +8,7 @@
 mod config;
 #[cfg(test)]
 mod model_app_tests;
+mod options_draft;
 
 pub use config::{
     AcDataDraft, AnalysisDependencyRepairContext, AnalysisDraft, DcMismatchDraft, DistoDraft,
@@ -16,6 +17,7 @@ pub use config::{
     QpssDraft, QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicAcDraft,
     QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft, TransientNoiseDraft,
 };
+pub use options_draft::OptionsDialogState;
 pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, AnalysisKind};
 #[cfg(test)]
 pub use rspice_simulation_contract::numeric_override::OverrideValue;

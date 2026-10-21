@@ -41,10 +41,9 @@ use egui::Ui;
 use crate::product::AnalysisInstanceId;
 use crate::simulation::accuracy::AnalysisAccuracy;
 use crate::simulation::dialog::{
-    DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationCompatibility,
-    SimulationOptions,
+    DampingStrategy, IntegrationMethod, MatrixSolver, SimulationCompatibility, SimulationOptions,
 };
-use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption};
+use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, OptionsDialogState};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input, select};

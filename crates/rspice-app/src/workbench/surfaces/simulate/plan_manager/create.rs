@@ -515,7 +515,7 @@ fn apply_new_plan_configuration(
         preferred_options
     };
     setup.session.options_draft =
-        crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
+        crate::simulation::plan::OptionsDialogState::from_options(&setup.options);
     if new_plan.inherit_model_closure {
         setup.model_bindings = inherited.model_bindings;
     }

@@ -65,7 +65,6 @@
     "model->run": 5,
     "model->session": 161,
     "model->settings": 9,
-    "model->simulate": 7,
     "run->code": 7,
     "run->framework": 26,
     "run->session": 126,

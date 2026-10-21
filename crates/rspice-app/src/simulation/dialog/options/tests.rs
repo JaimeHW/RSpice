@@ -32,7 +32,7 @@ fn resolve_through_the_deck(options: &SimulationOptions) -> rspice_core::engine:
 
 #[test]
 fn simulation_compatibility_survives_draft_persistence_and_execution_routes() {
-    use crate::simulation::dialog::OptionsDialogState;
+    use crate::simulation::plan::OptionsDialogState;
     for compatibility in SimulationCompatibility::ALL {
         let options = SimulationOptions {
             compatibility,
@@ -538,7 +538,7 @@ fn full_width_seed_survives_options_editing_and_prepared_deck_parsing() {
             statistical_seed: Some(seed),
             ..SimulationOptions::default()
         };
-        let draft = crate::simulation::dialog::OptionsDialogState::from_options(&options);
+        let draft = crate::simulation::plan::OptionsDialogState::from_options(&options);
         let restored = draft
             .to_options()
             .expect("the UI supports the complete u64 seed range");
@@ -562,7 +562,7 @@ fn solver_options_preserve_legal_zero_bounds_and_temperature_limits() {
     options
         .validate()
         .expect("these boundary values are allowed");
-    let draft = crate::simulation::dialog::OptionsDialogState::from_options(&options);
+    let draft = crate::simulation::plan::OptionsDialogState::from_options(&options);
     let restored = draft.to_options().unwrap();
     let parsed = parse_through_the_deck(&restored).options;
     for (name, authored, restored, parsed) in [

@@ -4,7 +4,7 @@
 //! convergence page edits these strings and commits them through the plan
 //! transaction; nothing else writes them.
 
-use super::{
+use rspice_simulation_contract::options::{
     DampingStrategy, IntegrationMethod, MatrixSolver, SimulationCompatibility, SimulationOptions,
     format_si_value, parse_si_value,
 };
