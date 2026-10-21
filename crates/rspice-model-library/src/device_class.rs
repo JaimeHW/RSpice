@@ -15,11 +15,12 @@
 //! not the project's, and searching `NMOS` found the project's and not the
 //! pack's.
 //!
-//! [`DEVICE_CLASS`] is the mirror of the generator's table, and it lives here
-//! rather than beside either reader so there is one of it. A test below reads
-//! the generator's own source and refuses to let the two drift.
+//! [`DEVICE_CLASS`] is the mirror of the generator's table, and it lives here,
+//! beside the card it classifies, rather than beside either reader so there is
+//! one of it. A test below reads the generator's own source and refuses to let
+//! the two drift.
 
-use super::{DeviceModel, ModelType};
+use crate::{DeviceModel, ModelType};
 
 /// The `.MODEL` type token to canonical device class map, mirrored from
 /// `tools/models/build_manifest.py`.
@@ -32,7 +33,7 @@ use super::{DeviceModel, ModelType};
 /// that hides its parts. `NVDMOS` and `PVDMOS` used to stand for themselves,
 /// which is exactly how the two foundation power MOSFETs ended up under
 /// classes no facet filtered on.
-pub(crate) const DEVICE_CLASS: &[(&str, &str)] = &[
+pub const DEVICE_CLASS: &[(&str, &str)] = &[
     ("d", "diode"),
     ("npn", "bjt-npn"),
     ("pnp", "bjt-pnp"),
@@ -72,7 +73,7 @@ pub(crate) const DEVICE_CLASS: &[(&str, &str)] = &[
 ///
 /// The generator's own word, so a project's subcircuits and a pack's land on
 /// the same chip.
-pub(crate) const SUBCIRCUIT_CLASS: &str = "subckt";
+pub const SUBCIRCUIT_CLASS: &str = "subckt";
 
 /// The catalog's device class for one parsed card.
 ///
@@ -80,7 +81,8 @@ pub(crate) const SUBCIRCUIT_CLASS: &str = "subckt";
 /// input too. A card that carries no token at all — a synthesized or partially
 /// migrated one — is classified from the type parsing settled on instead,
 /// which names the same families in a different spelling.
-pub(crate) fn card_device(card: &DeviceModel) -> String {
+#[must_use]
+pub fn card_device(card: &DeviceModel) -> String {
     let token = card
         .spice_type
         .as_deref()
@@ -94,7 +96,7 @@ pub(crate) fn card_device(card: &DeviceModel) -> String {
 }
 
 /// The generator's classification of one `.MODEL` type token.
-pub(crate) fn device_class(token: &str) -> String {
+fn device_class(token: &str) -> String {
     if let Some((_, device)) = DEVICE_CLASS
         .iter()
         .find(|(candidate, _)| *candidate == token)
@@ -121,7 +123,7 @@ pub(crate) fn device_class(token: &str) -> String {
 /// the same families the generator's table does. The variants that carry no
 /// device family — `Rf`, `Other` — answer `unknown` rather than inventing one,
 /// which keeps them off every class chip but on the shelf.
-pub(crate) const fn parsed_type_device(model_type: ModelType) -> &'static str {
+const fn parsed_type_device(model_type: ModelType) -> &'static str {
     match model_type {
         ModelType::Nmos => "mosfet-n",
         ModelType::Pmos => "mosfet-p",
@@ -156,7 +158,7 @@ mod tests {
     /// nobody checks is a mirror that has already drifted.
     #[test]
     fn the_device_class_mirror_matches_the_generator() {
-        const GENERATOR: &str = include_str!("../../../../../tools/models/build_manifest.py");
+        const GENERATOR: &str = include_str!("../../../tools/models/build_manifest.py");
 
         let table = GENERATOR
             .split_once("DEVICE_CLASS = {")

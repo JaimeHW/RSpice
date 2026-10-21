@@ -10,7 +10,6 @@
 //! - **Model**: Individual device model (nmos, pmos, npn, etc.)
 
 mod compatibility;
-mod device_class;
 mod manager;
 mod source_label;
 
@@ -18,7 +17,6 @@ pub(crate) use compatibility::{
     models_have_compatible_device_family, placement_component_for_model,
     validate_component_model_compatibility,
 };
-pub(crate) use device_class::{SUBCIRCUIT_CLASS, card_device};
 pub use rspice_model_library::ProjectModelDefinition;
 pub use rspice_model_library::RetainedClosure;
 pub use rspice_model_library::correlation::{
@@ -30,6 +28,7 @@ pub use rspice_model_library::correlation::{
     CorrelationReleaseRole, CorrelationReviewDecision, CorrelationSimulationProvenance,
     CorrelationSuite, MAX_CORRELATION_ROWS, MAX_CORRELATION_TEXT_BYTES, ModelCorrelationState,
 };
+pub(crate) use rspice_model_library::device_class::{SUBCIRCUIT_CLASS, card_device};
 pub use rspice_model_library::{
     CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures,
 };
@@ -41,13 +40,6 @@ pub use rspice_model_library::{
     TemperatureLawRepresentation,
 };
 // Metadata fixtures used by application integration tests.
-#[cfg(test)]
-pub use rspice_model_library::{StatisticalDefinition, StatisticalVariableDefinition};
-// Test-only alias: the class table itself is read only by the test that holds
-// the workspace's class chips to it, which cannot live down here because
-// `state` may not reference `workbench`.
-#[cfg(test)]
-pub(crate) use device_class::DEVICE_CLASS;
 pub(crate) use manager::model_library_source_digest;
 pub use manager::{
     ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
@@ -88,4 +80,6 @@ pub use rspice_model_library::{ModelLibrary, ModelSourceAuthority, PackPartPin};
 pub use rspice_model_library::{
     ModelSourceContent, ModelSourceEdge, ModelSourcePin, ModelSubcircuitInterface,
 };
+#[cfg(test)]
+pub use rspice_model_library::{StatisticalDefinition, StatisticalVariableDefinition};
 pub use source_label::short_digest;

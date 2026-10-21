@@ -18,6 +18,7 @@ winit, wgpu and rfd in its closure.
 | Module | Contents |
 | :--- | :--- |
 | `model`, `types` | `DeviceModel`; `ModelType`, with the device each maps onto, and `ModelLevel` |
+| `device_class` | The catalog's device class for a `.model` card (`card_device`), mirrored from the table in `tools/models/build_manifest.py`, so a project's own cards and a pack's land under the same class |
 | `library`, `source_paths` | `ModelLibrary` and `ModelSourceAuthority` (built-in, external, retained import, project-owned): where a library came from and what that entitles it to. The pinned source closure (`ModelSourcePin`), its retained bytes and authenticated include edges, Model Hub pack pins, and portable source-path identities |
 | `catalog`, `projection` | `ModelCatalog`, the project's library-name map, with atomic commits to project-owned definitions and `model_library_source_digest`; projection of `rspice-core`'s parsed library and subcircuit records into catalog entries and callable interfaces |
 | `source_bundle` | Authentication of an in-memory set of `(portable name, bytes)` members, such as a browser upload or a Model Hub pack part, into one model library |

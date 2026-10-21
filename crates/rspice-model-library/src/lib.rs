@@ -11,6 +11,7 @@ mod corner;
 mod corner_expansion;
 pub mod correlation;
 mod definition_metadata;
+pub mod device_class;
 mod execution;
 mod facts;
 mod library;

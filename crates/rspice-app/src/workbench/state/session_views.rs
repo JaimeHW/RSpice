@@ -2047,7 +2047,7 @@ mod tests {
             "piezo",
         ];
 
-        for (token, device) in crate::state::model_library::DEVICE_CLASS {
+        for (token, device) in rspice_model_library::device_class::DEVICE_CLASS {
             if NO_CHIP_OFFERS.contains(device) {
                 continue;
             }
