@@ -1,9 +1,15 @@
 * C6 digitally controlled buck converter, variant p3 (supply-aware gate-drive
-* connect module, P3.2), tran
+* connect module with a supply port), tran
+* The authored gate_drive module's supply port is wired to vdrv, which sags
+* from 5 V to 3.5 V over 1.0-1.1 ms and recovers over 1.3-1.4 ms; it drives
+* each 1 nF gate behind 20 ohm with a 1 ns transition().
 .param lv=22u cv=4.7u
-.hdl "../net/buck_ctrl_p3.vams"
-.include ../net/stage.cir
+.hdl "../net/buck_ctrl_p3.vams" module=buck_ctrl
 .options connectrules=gate_rules
+.include ../net/stage.cir
+vdrv vdrv 0 pwl(0 5 1.0m 5 1.1m 3.5 1.3m 3.5 1.4m 5)
+cghs ghs 0 1n
+cgls gls 0 1n
 xctrl vout ghs gls buck_ctrl
-.tran 50n 0.8m
+.tran 50n 1.6m
 .end

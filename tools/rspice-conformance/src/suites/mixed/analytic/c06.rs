@@ -24,6 +24,7 @@ pub const REGISTRY: Registry = &[
     ("ilmean", ilmean),
     ("vgate", vgate),
     ("tau_r", tau_r),
+    ("tau_r_ramp", tau_r_ramp),
     ("tau_f", tau_f),
 ];
 
@@ -152,6 +153,10 @@ const R_LOW: f64 = 5.0;
 const C_GATE: f64 = 1e-9;
 /// hs rises this many ticks into each period; ls falls at the period's end.
 const HS_RISE_TICKS: f64 = 2.0;
+/// The `p3` variant's authored gate drive (`net/buck_ctrl_p3.vams`): its
+/// resistance, and the duration of its `transition()` edge.
+const R_AUTHORED: f64 = 20.0;
+const AUTHORED_EDGE: f64 = 1e-9;
 
 fn drive_supply_at(time: f64) -> f64 {
     for pair in DRIVE_SUPPLY.windows(2) {
@@ -201,6 +206,22 @@ fn tau_r(context: &Context<'_>) -> Result<Expected, String> {
     ]))
 }
 
+/// The authored gate drive ramps its level over T = 1 ns into τ = 20 Ω·Cg =
+/// 20 ns. After the ramp the gate is V(1 − (τ/T)(e^{T/τ} − 1)e^{−t/τ}), so it
+/// passes 1 − 1/e of V(vdrv) at t = τ(1 + ln((τ/T)(e^{T/τ} − 1))) =
+/// 20.502 ns after hs rises.
+fn tau_r_ramp(context: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(vec![
+        window_period(context)? + HS_RISE_TICKS * TICK + ramp_crossing(),
+    ]))
+}
+
+/// The authored gate's 1 − 1/e crossing after its edge starts.
+fn ramp_crossing() -> f64 {
+    let tau = R_AUTHORED * C_GATE;
+    tau * (1.0 + ((tau / AUTHORED_EDGE) * ((AUTHORED_EDGE / tau).exp() - 1.0)).ln())
+}
+
 /// ls falls at the period's end, and v(gls) passes 1/e of V(vdrv) one rlo·Cg
 /// (5 ns) later.
 fn tau_f(context: &Context<'_>) -> Result<Expected, String> {
@@ -233,5 +254,11 @@ mod tests {
         assert!((R_HIGH * C_GATE - 10e-9).abs() < 1e-21);
         assert!((R_LOW * C_GATE - 5e-9).abs() < 1e-21);
         assert!((HS_RISE_TICKS * TICK - 62.5e-9).abs() < 1e-21);
+        // 20(1 + ln(20(e^0.05 − 1))) ns.
+        assert!(
+            (ramp_crossing() - 20.502_083e-9).abs() < 1e-15,
+            "{}",
+            ramp_crossing()
+        );
     }
 }

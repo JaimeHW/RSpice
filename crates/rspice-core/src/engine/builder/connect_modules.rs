@@ -52,8 +52,10 @@ use rspice_veriloga::disciplines::DisciplineDb;
 use crate::{ElaborationError, ElaborationErrorKind, SimulationError};
 
 mod parameters;
+pub(super) mod supply_ports;
 pub(super) use crate::circuit::{ConverterSource as ParameterSource, ConverterSupply};
 pub(super) use parameters::{ConverterLaw, RealConverterLaw, module_name};
+use supply_ports::{DeclaredSupplyPort, SupplyPortBinding};
 
 /// A clause-7 refusal about the deck's connect rules.
 ///
@@ -152,6 +154,12 @@ pub(super) struct PlannedConnectModule {
     /// Where that statement is written, `file:line`, when its source still
     /// prepares to the text the rules were read from.
     pub(super) location: Option<String>,
+    /// The selected module's supply ports, as its declaration and the
+    /// statement give them.
+    pub(super) supply_ports: Vec<DeclaredSupplyPort>,
+    /// The net each supply port is wired to at this boundary; see
+    /// [`supply_ports::bind`].
+    pub(super) supply_bindings: Vec<SupplyPortBinding>,
 }
 
 impl PlannedConnectModule {
@@ -318,6 +326,8 @@ pub(super) fn select_for_boundary(
             .map(|block| block.name.to_string())
             .unwrap_or_default(),
         location: None,
+        supply_ports: DeclaredSupplyPort::of_rule(rule),
+        supply_bindings: Vec::new(),
     }))
 }
 
@@ -458,12 +468,13 @@ pub(super) fn check_execution(
             super::connect_execution::ConnectExecution::Authored(_)
         )
     {
-        // An authored module receives its parameters as numbers; a net is a
-        // supply port, which authored connect modules do not have yet.
+        // An authored module receives its parameters as numbers; a net binds
+        // to a supply port, and this module has none named vsup.
         return Err(connect_refusal(format!(
             "node '{node_label}' selects the authored connect module '{}' with vsup naming net \
-             '{net}'; a supply net binds live only through the built-in connect modules. Give \
-             vsup a level for an authored module",
+             '{net}', but the module has no supply port named vsup; give vsup a level, or \
+             declare vsup as an inout electrical port of the module so the net can be wired \
+             to it",
             selected.name
         ))
         .instance(instance_name)
@@ -477,6 +488,24 @@ pub(super) fn check_execution(
         "node '{node_label}' selects connect module '{}' (instance '{}') without its prepared source execution binding",
         selected.name, selected.instance
     )).instance(instance_name).module(selected.name.as_str()).into())
+}
+
+/// Wire an authored module's supply ports at the boundary it is inserted on:
+/// `node_label`, bridging `instance`'s port `port`. `level` is the deck's
+/// supply for the boundary, a bound net's nominal level where no rail holds
+/// it. A module with no supply ports, or one the built-in converter executes,
+/// is left as it is.
+pub(super) fn bind_supply_ports(
+    circuit: &crate::CircuitData,
+    supplies: &super::boundary_supply::BoundarySupplies,
+    selected: &mut PlannedConnectModule,
+    boundary: &supply_ports::Boundary<'_>,
+) -> Result<(), SimulationError> {
+    if selected.supply_ports.is_empty() || selected.signature().is_some() {
+        return Ok(());
+    }
+    selected.supply_bindings = supply_ports::bind(circuit, supplies, selected, boundary)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -862,6 +891,7 @@ impl DesignConnectRules {
 pub(super) fn attach_to_planned_bridges(
     circuit: &crate::CircuitData,
     rules: &DesignConnectRules,
+    supplies: &super::boundary_supply::BoundarySupplies,
     bridges: &mut [super::PlannedXspiceAutoBridge],
 ) -> Result<(), SimulationError> {
     if bridges.is_empty() {
@@ -879,12 +909,23 @@ pub(super) fn attach_to_planned_bridges(
             .port
             .clone()
             .unwrap_or_else(|| (node_label.clone(), "d".to_string()));
-        let Some(selected) =
+        let Some(mut selected) =
             rules.select_for_boundary_node(bridge.kind, &node_label, &instance_name, &port_name)?
         else {
             continue;
         };
         check_execution(&selected, bridge.kind, &node_label, &instance_name)?;
+        bind_supply_ports(
+            circuit,
+            supplies,
+            &mut selected,
+            &supply_ports::Boundary {
+                node_label: &node_label,
+                instance: &instance_name,
+                port: &port_name,
+                level: bridge.vcc,
+            },
+        )?;
         bridge.connect_module = Some(selected);
     }
 

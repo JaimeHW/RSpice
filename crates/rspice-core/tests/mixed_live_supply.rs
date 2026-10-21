@@ -459,3 +459,226 @@ fn a_supply_ripple_reaches_a_held_output_through_its_live_level() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Supply ports on authored connect modules
+// ---------------------------------------------------------------------------
+
+/// An authored D/A with a supply port: a 1 drives V(vsup) behind 20 ohm, a 0
+/// drives ground. Into a 1k load a held 1 is V(vsup)·1000/1020.
+const D2A_SUP: &str = "\
+connectmodule d2a_sup(d, a, vsup);
+    input d; logic d;
+    output a; electrical a;
+    inout vsup; electrical vsup;
+    analog I(a) <+ (V(a) - (d ? V(vsup) : 0.0)) / 20.0;
+endmodule
+";
+
+/// [`D2A_SUP`] with its supply declared by `declaration`, selected by
+/// `statement`.
+fn d2a_sup_library(declaration: &str, statement: &str) -> SourceFile {
+    SourceFile::new(
+        "va",
+        &format!(
+            "{}connectrules supplied;\n    {statement}\nendconnectrules\n",
+            D2A_SUP.replace("electrical vsup;", declaration)
+        ),
+    )
+}
+
+/// A held 1 into 1k beside a 2.5 V rail `vdd` and a 1.8 V rail `v18`, with
+/// `extra` cards; `hold` is the HDL module holding the 1.
+fn supplied_deck(hold: &SourceFile, library: &SourceFile, supply: &str, extra: &str) -> Netlist {
+    parse(&format!(
+        "* supply port\n\
+         vdd vdd 0 {supply}\n\
+         v18 v18 0 1.8\n\
+         xh q hold1\n\
+         rl q 0 1k\n\
+         {extra}\
+         .hdl \"{}\"\n\
+         .veriloga \"{}\"\n\
+         .end\n",
+        hold.path(),
+        library.path()
+    ))
+}
+
+/// [`HOLD_ONE`] with its port's `supplySensitivity` naming `net`.
+fn hold_one_sensing(net: &str) -> String {
+    HOLD_ONE.replace(
+        " output q;",
+        &format!(" (* supplySensitivity = \"{net}\" *) output q;"),
+    )
+}
+
+/// Each way of binding the supply port wires it to `vdd`: the held 1 is
+/// 2.5·1000/1020 = 2.450980 V, and the record names what bound it. The
+/// statement outranks the port's attribute: `v18` against `vdd` gives
+/// 1.8·1000/1020 = 1.764706 V.
+#[test]
+fn every_binding_source_wires_the_supply_port_to_its_net() {
+    use rspice_core::circuit::ConverterSource;
+
+    let plain = SourceFile::new("v", HOLD_ONE);
+    let sensing = SourceFile::new("v", &hold_one_sensing("vdd"));
+    let bare = "connect d2a_sup;";
+    let cases = [
+        (
+            "statement",
+            &plain,
+            d2a_sup_library("electrical vsup;", "connect d2a_sup #(.vsup(vdd));"),
+            "",
+            ConverterSource::ConnectStatement,
+            "vdd",
+            2.5,
+        ),
+        (
+            "attribute",
+            &sensing,
+            d2a_sup_library("electrical vsup;", bare),
+            "",
+            ConverterSource::PortAttribute("supplySensitivity".into()),
+            "vdd",
+            2.5,
+        ),
+        (
+            "module default",
+            &plain,
+            d2a_sup_library(
+                "electrical (* integer inh_conn_def_value = \"cds_globals.\\\\vdd \"; *) vsup;",
+                bare,
+            ),
+            "",
+            ConverterSource::ModuleDefault,
+            "vdd",
+            2.5,
+        ),
+        (
+            // A 1e15 ohm leak is the resistive path that makes vdd the one
+            // rail reaching q; it moves v(q) by 2e-14 relative.
+            "inference",
+            &plain,
+            d2a_sup_library("electrical vsup;", bare),
+            "rleak q vdd 1e15\n",
+            ConverterSource::Inferred {
+                source: "VDD".into(),
+                level: 2.5,
+            },
+            "vdd",
+            2.5,
+        ),
+        (
+            "statement over attribute",
+            &sensing,
+            d2a_sup_library("electrical vsup;", "connect d2a_sup #(.vsup(v18));"),
+            "",
+            ConverterSource::ConnectStatement,
+            "v18",
+            1.8,
+        ),
+    ];
+    let engine = Engine::default();
+    for (case, hold, library, extra, source, net, supply) in cases {
+        let deck = supplied_deck(hold, &library, "2.5", extra);
+        let op = engine
+            .run_dc_op(&deck)
+            .unwrap_or_else(|error| panic!("{case}: the operating point solves: {error}"));
+        let held = op.try_voltage_named("q").expect("q is published");
+        let expected = supply * 1000.0 / 1020.0;
+        assert!(
+            (held - expected).abs() <= 1.0e-9 * expected,
+            "{case}: the held 1 is V({net})·1000/1020 = {expected}, got {held}"
+        );
+
+        let circuit = engine.build_circuit(&deck).expect("the deck builds");
+        let record = circuit
+            .converter_insertions()
+            .iter()
+            .find(|record| record.module == "d2a_sup")
+            .unwrap_or_else(|| panic!("{case}: d2a_sup is recorded"));
+        let [port] = record.supply_ports.as_slice() else {
+            panic!("{case}: one supply port: {record:?}");
+        };
+        assert_eq!(port.port.as_deref(), Some("vsup"), "{case}");
+        assert!(
+            port.net
+                .as_deref()
+                .is_some_and(|bound| bound.eq_ignore_ascii_case(net)),
+            "{case}: bound to {net}: {port:?}"
+        );
+        assert_eq!(port.source, source, "{case}");
+        assert_eq!(record.supply.as_ref(), Some(port), "{case}");
+    }
+}
+
+/// A supply port nothing binds is refused, naming the module, the port, the
+/// boundary node and the instance: a waveform source is stimulus, never an
+/// inferred rail, and no level is assumed.
+#[test]
+fn an_unbound_supply_port_is_refused_by_name() {
+    let hold = SourceFile::new("v", HOLD_ONE);
+    let library = d2a_sup_library("electrical vsup;", "connect d2a_sup;");
+    let deck = supplied_deck(&hold, &library, "pwl(0 0 1n 2.5)", "");
+    let error = Engine::default()
+        .run_dc_op(&deck)
+        .expect_err("an unbound supply port is refused")
+        .to_string();
+    let lower = error.to_ascii_lowercase();
+    for named in [
+        "'d2a_sup'",
+        "supply port 'vsup'",
+        "node 'q'",
+        "xh",
+        "supplysensitivity",
+        "inh_conn_def_value",
+    ] {
+        assert!(lower.contains(named), "names {named}: {error}");
+    }
+}
+
+/// A supply port that takes its net from a Cadence netSet property, with no
+/// default beside it, is refused naming the property.
+#[test]
+fn a_supply_port_asking_for_a_netset_property_is_refused_by_name() {
+    let hold = SourceFile::new("v", HOLD_ONE);
+    let library = d2a_sup_library(
+        "electrical (* integer inh_conn_prop_name = \"vdd\"; *) vsup;",
+        "connect d2a_sup;",
+    );
+    let deck = supplied_deck(&hold, &library, "2.5", "");
+    let error = Engine::default()
+        .run_dc_op(&deck)
+        .expect_err("a netSet binding is refused")
+        .to_string();
+    assert!(
+        error.contains("inherited-connection property 'vdd'") && error.contains("netSet"),
+        "names the property: {error}"
+    );
+}
+
+/// The supply port carries ripple: the held 1's output follows V(vdd) behind
+/// 20 ohm into 1k, so v(q)/v(vdd) = 1000/1020 = 0.980392 with no phase.
+#[test]
+fn a_supply_port_carries_the_supply_ripple() {
+    let hold = SourceFile::new("v", HOLD_ONE);
+    let library = d2a_sup_library("electrical vsup;", "connect d2a_sup #(.vsup(vdd));");
+    let deck = supplied_deck(&hold, &library, "dc 2.5 ac 1", "");
+    let gain = 1000.0 / 1020.0;
+    let points = Engine::default()
+        .run_ac(&deck, &[1.0e3, 1.0e6])
+        .expect(".ac runs on the held state");
+    for point in points {
+        let index = point
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("q"))
+            .expect("q is published");
+        let value = point.voltages[index];
+        assert!(
+            (value.re - gain).abs() <= 1.0e-9 && value.im.abs() <= 1.0e-9,
+            "v(q)/v(vdd) = {gain} with no phase, got {value}"
+        );
+    }
+}

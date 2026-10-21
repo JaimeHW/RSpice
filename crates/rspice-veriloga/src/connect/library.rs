@@ -29,8 +29,17 @@
 //! event-assigned scalar variables. Other analog event forms require further
 //! language support.
 //!
-//! An authored body can declare its own threshold and loading parameters. Clause
-//! 7.6's two-port shape still applies to connection declarations.
+//! An authored body can declare its own threshold and loading parameters, and
+//! supply ports: further `inout` or `input` electrical ports beside clause
+//! 7.6's conversion pair, which the engine wires to the net that powers the
+//! boundary. The conversion pair is the discrete port and the first continuous
+//! port whose direction completes one of Table 7-2's rows; a port marked with
+//! `inh_conn_prop_name` is a supply wherever it stands. Each supply port binds,
+//! highest first, to the net the connect statement names
+//! (`connect d2a_sup #(.vsup(vdd));`), the net the bridged HDL port's
+//! `supplySensitivity` (or `groundSensitivity`) attribute names, the net its
+//! own `inh_conn_def_value` names, or the one constant rail that reaches the
+//! boundary (the first supply port only), and is refused otherwise.
 //!
 //! # Two signatures per module
 //!

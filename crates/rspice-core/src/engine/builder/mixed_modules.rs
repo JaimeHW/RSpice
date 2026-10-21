@@ -240,6 +240,21 @@ pub(super) fn try_build_mixed_signal_instance(
             )
         })?;
 
+    // A port's supply attributes reach the converter the build inserts on
+    // it, which binds to the nets they name.
+    for port in &artifact.hir.ports {
+        if port.supply_sensitivity.is_some() || port.ground_sensitivity.is_some() {
+            circuit
+                .port_sensitivities
+                .push(crate::circuit::PortSensitivity {
+                    instance: element.name.clone(),
+                    port: port.name.to_string(),
+                    supply: port.supply_sensitivity.as_deref().map(str::to_owned),
+                    ground: port.ground_sensitivity.as_deref().map(str::to_owned),
+                });
+        }
+    }
+
     for port in boundary {
         host.declare_event_port(
             &port.signal,

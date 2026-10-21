@@ -734,6 +734,19 @@ impl ConnectionModules {
         rule: &InsertionRule,
         insertion: &ConnectModuleInsertion,
     ) -> CompileResult<SmolStr> {
+        // A supply port binds to a net of the deck, where the engine inserts
+        // the module; a boundary inside a design has no such net to name.
+        if let Some(supply) = rule.supplies.first() {
+            return Err(error(
+                format!(
+                    "connect module '{}' has supply port '{}', and this compiler binds a supply \
+                     port only where a deck node joins discrete and analog ports, not inside a \
+                     design; select a connect module without supply ports for this boundary",
+                    rule.connect_module, supply.name
+                ),
+                rule.span,
+            ));
+        }
         let key = format!(
             "{:?}:{:?}:{:?}:{:?}:{:?}:{:?}",
             rule.connect_module,

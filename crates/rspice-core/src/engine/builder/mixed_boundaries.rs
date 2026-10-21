@@ -107,6 +107,20 @@ pub(super) fn plan_conversions(
             } else {
                 (0.0, None)
             };
+            let mut selected = selected;
+            if let Some(selected) = selected.as_mut() {
+                connect_modules::bind_supply_ports(
+                    circuit,
+                    supplies,
+                    selected,
+                    &connect_modules::supply_ports::Boundary {
+                        node_label: &node_label,
+                        instance: host.instance_name(),
+                        port: signal,
+                        level: vcc,
+                    },
+                )?;
+            }
             let suffix = port.bit.map(|bit| format!("_{bit}")).unwrap_or_default();
             // Generated cards pass through the SPICE parser, which folds node
             // names. Allocate the same spelling here to retain node identity.

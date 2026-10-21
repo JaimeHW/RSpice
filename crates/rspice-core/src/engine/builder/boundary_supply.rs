@@ -132,17 +132,7 @@ impl BoundarySupplies {
             };
         }
 
-        let mut distinct: Vec<&crate::netlist::SupplyRail> = Vec::new();
-        for rail in self.reachability.rails_reaching(node_label) {
-            if !distinct
-                .iter()
-                .any(|kept| same_level(kept.level, rail.level))
-            {
-                distinct.push(rail);
-            }
-        }
-
-        match distinct.as_slice() {
+        match self.distinct_rails(node_label).as_slice() {
             [] => ResolvedSupply {
                 level: DEFAULT_BOUNDARY_SUPPLY,
                 derivation: SupplyDerivation::Defaulted,
@@ -165,6 +155,48 @@ impl BoundarySupplies {
                 },
             },
         }
+    }
+
+    /// The rails that reach `node_label`, one per distinct level.
+    fn distinct_rails(&self, node_label: &str) -> Vec<&crate::netlist::SupplyRail> {
+        let mut distinct: Vec<&crate::netlist::SupplyRail> = Vec::new();
+        for rail in self.reachability.rails_reaching(node_label) {
+            if !distinct
+                .iter()
+                .any(|kept| same_level(kept.level, rail.level))
+            {
+                distinct.push(rail);
+            }
+        }
+        distinct
+    }
+
+    /// The one constant rail that reaches `node_label`, if exactly one does.
+    ///
+    /// Unlike [`Self::resolve`], a deck parameter does not answer this: a
+    /// supply port needs a net to be wired to, and `.param vcc` is a level.
+    #[cfg(feature = "veriloga")]
+    pub(super) fn inferred_rail(&self, node_label: &str) -> Option<SupplyDerivation> {
+        // Only `Derived` is returned, so a caller matches it alone.
+        match self.distinct_rails(node_label).as_slice() {
+            [only] => Some(SupplyDerivation::Derived {
+                source: only.source.clone(),
+                level: only.level,
+                node: only.node.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// The DC level of the rail that holds `net` itself, if a constant source
+    /// does: the nominal level of a supply bound live to it.
+    #[cfg(feature = "veriloga")]
+    pub(super) fn rail_level(&self, net: &str) -> Option<crate::Value> {
+        self.reachability
+            .rails_reaching(net)
+            .iter()
+            .find(|rail| rail.node.eq_ignore_ascii_case(net))
+            .map(|rail| rail.level)
     }
 
     /// Say what a boundary net's supply was derived from, or refuse to guess.
@@ -394,6 +426,23 @@ pub(super) fn report_declared_live(node_label: &str, net: &str) {
     log::info!(
         "supply for boundary net '{node_label}' is net '{net}', bound live (declared by its \
          connect statement)"
+    );
+}
+
+/// Say which net an authored connect module's supply port is wired to, and
+/// what bound it.
+#[cfg(feature = "veriloga")]
+pub(super) fn report_supply_port(
+    node_label: &str,
+    module: &str,
+    binding: &super::connect_modules::supply_ports::SupplyPortBinding,
+) {
+    log::info!(
+        "supply port '{}' of connect module '{module}' at boundary net '{node_label}' is net \
+         '{}', bound live ({})",
+        binding.port,
+        binding.net,
+        binding.source
     );
 }
 

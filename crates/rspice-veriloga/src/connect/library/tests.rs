@@ -154,12 +154,33 @@ fn every_built_in_rule_is_merged() {
     }
 }
 
-/// A third port has nowhere to go, which is what makes a supply-sensitive
-/// connect module a `vsup` *parameter* rather than a supply rail port.
+/// A further electrical port is a supply: the conversion pair is the discrete
+/// port and the first continuous port that completes a Table 7-2 row, unless
+/// `inh_conn_prop_name` marks that port as a supply.
 #[test]
-fn a_third_port_is_refused_with_its_clause() {
+fn a_further_electrical_port_is_a_supply() {
     let db = DisciplineDb::with_standard();
-    let source = parse(
+    let decl = |source: &str| {
+        let table = build_connect_rule_table(&parse(source), &db);
+        table.map(|table| {
+            let decl = table.modules.values().next().expect("one module").clone();
+            (
+                decl.continuous.name.to_string(),
+                decl.discrete.name.to_string(),
+                decl.supplies
+                    .iter()
+                    .map(|port| {
+                        (
+                            port.name.to_string(),
+                            port.inherited_property.as_deref().map(str::to_owned),
+                            port.inherited_default.as_deref().map(str::to_owned),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+    };
+    let supplied = decl(
         "\
 connectmodule a2d_supplied(a, d, vdd);
     input a;
@@ -170,12 +191,59 @@ connectmodule a2d_supplied(a, d, vdd);
     electrical vdd;
 endmodule
 ",
+    )
+    .expect("a third electrical port is a supply");
+    assert_eq!(
+        supplied,
+        ("a".into(), "d".into(), vec![("vdd".into(), None, None)])
     );
-    let error = build_connect_rule_table(&source, &db).expect_err("three ports are refused");
-    assert!(
-        matches!(error, ConnectError::ConnectModulePortCount { found: 3, .. }),
-        "unexpected error: {error}"
+
+    // The marked port is the supply although it comes first and completes a
+    // Table 7-2 row; its default is the net its escaped global spelling names.
+    let marked = decl(
+        r#"
+connectmodule d2a_marked(vsup, d, a);
+    inout vsup;
+    input d;
+    output a;
+    electrical (* integer inh_conn_prop_name = "vdd"; integer inh_conn_def_value = "cds_globals.\\vdd! "; *) vsup;
+    logic d;
+    electrical a;
+endmodule
+"#,
+    )
+    .expect("the marked port is the supply");
+    assert_eq!(
+        marked,
+        (
+            "a".into(),
+            "d".into(),
+            vec![("vsup".into(), Some("vdd".into()), Some("vdd!".into()))]
+        )
     );
+
+    for (port, kind, source) in [
+        (
+            "vdd",
+            "an output",
+            "connectmodule m(a, d, vdd); input a; output d; output vdd; electrical a; logic d; electrical vdd; endmodule",
+        ),
+        (
+            "en",
+            "a discrete port",
+            "connectmodule m(a, d, en); input a; output d; input en; electrical a; logic d; logic en; endmodule",
+        ),
+    ] {
+        let error = decl(source).expect_err("refused");
+        assert!(
+            matches!(
+                &error,
+                ConnectError::ConnectModuleSupplyPort { port: refused, kind: why, .. }
+                    if refused == port && *why == kind
+            ),
+            "unexpected error: {error}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -177,6 +177,13 @@ pub(super) fn materialize(
                 Ok(continuous.clone())
             } else if port.name == body.discrete {
                 Ok(discrete.clone())
+            } else if let Some(binding) = selected
+                .supply_bindings
+                .iter()
+                .find(|binding| binding.port == port.name)
+            {
+                // A supply port reads the net it is bound to, live.
+                Ok(xspice_auto_bridge_node_label(Some(&names), binding.node))
             } else {
                 Err(refusal(format!(
                     "selected connect body declares unexpected port '{}'",
@@ -193,8 +200,8 @@ pub(super) fn materialize(
     {
         instance_name.push_str(&format!("__{event_node}"));
     }
-    // The body converts against whatever it reads; the supply is the
-    // record's only where the statement states one.
+    // The body converts against whatever it reads: its supply ports' nets,
+    // or a supply the statement states.
     let mut record = super::converter_record(
         continuous,
         bridge,
@@ -217,6 +224,21 @@ pub(super) fn materialize(
         )),
         (None, None) => None,
     };
+    record.supply_ports = selected
+        .supply_bindings
+        .iter()
+        .map(|binding| {
+            crate::circuit::ConverterSupply::new(
+                binding.level,
+                Some(binding.net.clone()),
+                binding.source.clone(),
+            )
+            .at_port(&binding.port)
+        })
+        .collect();
+    if let Some(first) = record.supply_ports.first() {
+        record.supply = Some(first.clone());
+    }
     record.parameters = selected
         .parameters
         .iter()

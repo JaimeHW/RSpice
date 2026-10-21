@@ -128,6 +128,13 @@ pub struct ConnectModulePort {
     pub name: SmolStr,
     pub discipline: SmolStr,
     pub direction: PortDirection,
+    /// The port's `inh_conn_prop_name` attribute: the inherited-connection
+    /// property Cadence's netSet would name its net by. It marks the port as
+    /// a supply whatever its position.
+    pub inherited_property: Option<SmolStr>,
+    /// The port's `inh_conn_def_value` attribute, reduced to the net it
+    /// names: the net the port binds to when nothing more specific does.
+    pub inherited_default: Option<SmolStr>,
 }
 
 /// A connect module declaration reduced to what selection needs.
@@ -136,6 +143,10 @@ pub struct ConnectModuleDecl {
     pub name: SmolStr,
     pub continuous: ConnectModulePort,
     pub discrete: ConnectModulePort,
+    /// Further `electrical` ports, in port-list order: the supplies the
+    /// module converts against. Each is bound to a deck net where the module
+    /// is inserted.
+    pub supplies: Vec<ConnectModulePort>,
     pub direction: ConnectDirection,
     pub span: Span,
 }
@@ -155,11 +166,38 @@ pub struct InsertionRule {
     pub continuous: ConnectModulePort,
     /// The discrete-side port, the same way.
     pub discrete: ConnectModulePort,
+    /// The connect module's supply ports, as its declaration gives them.
+    pub supplies: Vec<ConnectModulePort>,
     pub direction: ConnectDirection,
     pub span: Span,
 }
 
 impl InsertionRule {
+    /// Whether `parameter` binds one of the module's supply ports rather than
+    /// setting a parameter: `connect d2a_sup #(.vsup(vdd));` names the port
+    /// `vsup` when the module has one.
+    fn binds_supply_port(&self, parameter: &ParameterOverride) -> bool {
+        parameter.name.as_ref().is_some_and(|name| {
+            self.supplies
+                .iter()
+                .any(|port| port.name.eq_ignore_ascii_case(name))
+        })
+    }
+
+    /// The net this statement binds the supply port `port` to: a deck net's
+    /// name, or `0` for ground. `None` when the statement does not bind it.
+    pub fn supply_port_net(&self, port: &str) -> Option<SmolStr> {
+        self.parameters
+            .iter()
+            .filter(|parameter| {
+                parameter
+                    .name
+                    .as_ref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(port))
+            })
+            .find_map(|parameter| supply_port_value(&parameter.value))
+    }
+
     /// Section 7.7.3's parameter values, folded to numbers and named.
     ///
     /// The rule keeps them as written because folding is the instantiating
@@ -180,7 +218,9 @@ impl InsertionRule {
     pub fn numeric_parameters(&self) -> Result<Vec<(SmolStr, f64)>, ConnectError> {
         self.parameters
             .iter()
-            .filter(|parameter| supply_net_of(parameter).is_none())
+            .filter(|parameter| {
+                supply_net_of(parameter).is_none() && !self.binds_supply_port(parameter)
+            })
             .map(|parameter| {
                 let name = parameter.name.clone().ok_or_else(|| {
                     ConnectError::PositionalConnectParameter {
@@ -208,7 +248,23 @@ impl InsertionRule {
     /// boundary to that net's solved voltage; every other parameter, and a
     /// numeric `vsup`, still folds through [`Self::numeric_parameters`].
     pub fn supply_net(&self) -> Option<&SmolStr> {
-        self.parameters.iter().find_map(supply_net_of)
+        self.parameters
+            .iter()
+            .filter(|parameter| !self.binds_supply_port(parameter))
+            .find_map(supply_net_of)
+    }
+}
+
+/// A supply port's net as a connect statement writes it: a bare identifier,
+/// or `0` or `gnd` for ground.
+fn supply_port_value(value: &crate::ast::Expression) -> Option<SmolStr> {
+    match value {
+        crate::ast::Expression::Identifier(net) if net.name.eq_ignore_ascii_case("gnd") => {
+            Some("0".into())
+        }
+        crate::ast::Expression::Identifier(net) if net.name != "inf" => Some(net.name.clone()),
+        crate::ast::Expression::Number(number) if number.value == 0.0 => Some("0".into()),
+        _ => None,
     }
 }
 
@@ -1231,6 +1287,24 @@ fn insertion_rule(
         decl.direction
     };
 
+    // A statement value for a supply port names the net it binds to.
+    for parameter in &insertion.parameters {
+        let Some(port) = parameter.name.as_ref().and_then(|name| {
+            decl.supplies
+                .iter()
+                .find(|port| port.name.eq_ignore_ascii_case(name))
+        }) else {
+            continue;
+        };
+        if supply_port_value(&parameter.value).is_none() {
+            return Err(ConnectError::SupplyPortValue {
+                module: insertion.connect_module.clone(),
+                port: port.name.clone(),
+                span: parameter.span,
+            });
+        }
+    }
+
     Ok(InsertionRule {
         connect_module: insertion.connect_module.clone(),
         // Section 7.8.3: "The default is merged."
@@ -1238,6 +1312,7 @@ fn insertion_rule(
         parameters: insertion.parameters.clone(),
         continuous,
         discrete,
+        supplies: decl.supplies.clone(),
         direction,
         span: insertion.span,
     })
@@ -1297,11 +1372,34 @@ fn connect_module_decl(
                 name: name.clone(),
                 discipline: discipline.into(),
                 direction: declaration.direction,
+                inherited_property: inherited_attribute(
+                    module,
+                    declaration,
+                    name,
+                    "inh_conn_prop_name",
+                )
+                .map(|value| value.into()),
+                inherited_default: inherited_attribute(
+                    module,
+                    declaration,
+                    name,
+                    "inh_conn_def_value",
+                )
+                .map(inherited_net_name),
             });
         }
     }
+    // "First" is read from the port list, whatever order the declarations
+    // are written in.
+    ports.sort_by_key(|port| {
+        module
+            .ports
+            .iter()
+            .position(|header| header.name == port.name)
+            .unwrap_or(usize::MAX)
+    });
 
-    if ports.len() != 2 {
+    if ports.len() < 2 {
         return Err(ConnectError::ConnectModulePortCount {
             module: module.name.clone(),
             found: ports.len(),
@@ -1309,7 +1407,7 @@ fn connect_module_decl(
         });
     }
 
-    let mut domains = Vec::with_capacity(2);
+    let mut domains = Vec::with_capacity(ports.len());
     for port in &ports {
         domains.push(discipline_domain(db, &port.discipline).ok_or_else(|| {
             ConnectError::UnknownDiscipline {
@@ -1318,30 +1416,98 @@ fn connect_module_decl(
             }
         })?);
     }
-    let (continuous, discrete) = match (domains[0], domains[1]) {
-        (Domain::Continuous, Domain::Discrete) => (ports[0].clone(), ports[1].clone()),
-        (Domain::Discrete, Domain::Continuous) => (ports[1].clone(), ports[0].clone()),
-        _ => {
-            return Err(ConnectError::ConnectModuleDomains {
+    let domains_refusal = || ConnectError::ConnectModuleDomains {
+        module: module.name.clone(),
+        span: module.span,
+    };
+    let mut discrete_ports = (0..ports.len()).filter(|&index| domains[index] == Domain::Discrete);
+    let discrete = ports[discrete_ports.next().ok_or_else(domains_refusal)?].clone();
+    if let Some(second) = discrete_ports.next() {
+        // Two discrete ports and nothing else is section 7.6's refusal; a
+        // further discrete port beside a conversion pair is a supply that
+        // cannot be one.
+        if ports.len() == 2 {
+            return Err(domains_refusal());
+        }
+        return Err(ConnectError::ConnectModuleSupplyPort {
+            module: module.name.clone(),
+            port: ports[second].name.clone(),
+            kind: if ports[second].value_kind == Some(ConnectValueKind::Real) {
+                "a real-valued port"
+            } else {
+                "a discrete port"
+            },
+            span: module.span,
+        });
+    }
+
+    // Section 7.6's conversion pair is the discrete port and the first
+    // continuous port whose direction completes one of Table 7-2's rows. A
+    // port marked with `inh_conn_prop_name` is a supply wherever it stands.
+    let conversion = (0..ports.len()).find(|&index| {
+        domains[index] == Domain::Continuous
+            && ports[index].inherited_property.is_none()
+            && ConnectDirection::from_ports(ports[index].direction, discrete.direction).is_some()
+    });
+    let Some(conversion) = conversion else {
+        if domains.iter().all(|domain| *domain == Domain::Discrete) {
+            return Err(domains_refusal());
+        }
+        return Err(ConnectError::ConnectModuleDirections {
+            module: module.name.clone(),
+            span: module.span,
+        });
+    };
+    let continuous = ports[conversion].clone();
+    let direction = ConnectDirection::from_ports(continuous.direction, discrete.direction)
+        .expect("the conversion port completes a Table 7-2 row");
+
+    let mut supplies = Vec::new();
+    for (index, port) in ports.iter().enumerate() {
+        if index == conversion || domains[index] == Domain::Discrete {
+            continue;
+        }
+        if port.direction == PortDirection::Output {
+            return Err(ConnectError::ConnectModuleSupplyPort {
                 module: module.name.clone(),
+                port: port.name.clone(),
+                kind: "an output",
                 span: module.span,
             });
         }
-    };
-
-    let direction = ConnectDirection::from_ports(continuous.direction, discrete.direction)
-        .ok_or_else(|| ConnectError::ConnectModuleDirections {
-            module: module.name.clone(),
-            span: module.span,
-        })?;
+        supplies.push(port.clone());
+    }
 
     Ok(ConnectModuleDecl {
         name: module.name.clone(),
         continuous,
         discrete,
+        supplies,
         direction,
         span: module.span,
     })
+}
+
+/// The text of the attribute `name` on port `port`'s port declaration or on
+/// a net declaration of it.
+fn inherited_attribute<'a>(
+    module: &'a Module,
+    declaration: &'a crate::ast::PortDeclaration,
+    port: &str,
+    name: &str,
+) -> Option<&'a str> {
+    declaration
+        .attributes
+        .iter()
+        .chain(
+            module
+                .nets
+                .iter()
+                .filter(|net| net.names.iter().any(|declared| declared == port))
+                .flat_map(|net| net.attributes.iter()),
+        )
+        .find(|attribute| attribute.name == name)
+        .and_then(crate::ast::Attribute::text_value)
 }
 
 /// Everything clause 7's machinery refuses, each naming what it refused.
@@ -1369,11 +1535,33 @@ pub enum ConnectError {
 
     #[error(
         "connectmodule '{module}' declares {found} ports; Verilog-AMS LRM 2.4 section 7.6 \
-         bridges exactly one continuous and one discrete port"
+         bridges one continuous and one discrete port"
     )]
     ConnectModulePortCount {
         module: SmolStr,
         found: usize,
+        span: Span,
+    },
+
+    #[error(
+        "connectmodule '{module}' declares port '{port}' beside the two ports it converts \
+         between, as {kind}; a further port is a supply, an `inout` or `input` electrical port \
+         bound to the net that powers the boundary"
+    )]
+    ConnectModuleSupplyPort {
+        module: SmolStr,
+        port: SmolStr,
+        kind: &'static str,
+        span: Span,
+    },
+
+    #[error(
+        "the connect statement for '{module}' binds supply port '{port}' to a value that names \
+         no net; give the name of a deck net, or 0 for ground"
+    )]
+    SupplyPortValue {
+        module: SmolStr,
+        port: SmolStr,
         span: Span,
     },
 
@@ -1508,6 +1696,8 @@ impl ConnectError {
             Self::DuplicateConnectDeclaration { second: span, .. }
             | Self::UnknownConnectModule { span, .. }
             | Self::ConnectModulePortCount { span, .. }
+            | Self::ConnectModuleSupplyPort { span, .. }
+            | Self::SupplyPortValue { span, .. }
             | Self::ConnectModulePortDiscipline { span, .. }
             | Self::ConnectModuleDomains { span, .. }
             | Self::ConnectModuleDirections { span, .. }

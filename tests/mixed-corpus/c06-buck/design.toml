@@ -18,11 +18,12 @@ name = "vams"
 families = ["spice", "vams-digital", "vams-analog"]
 today = "runs"
 
-# A supply-aware gate-drive connect module with a supply port (P3.2).
+# A supply-aware gate-drive connect module with a supply port, wired to the
+# vdrv net by its connect statement; vdrv sags as in vsup. Runs to 1.6 ms.
 [[variant]]
 name = "p3"
 families = ["spice", "vams-digital", "vams-analog"]
-today = "refused:P3.2"
+today = "runs"
 
 # Gate drive under a varying supply: the shipped d2a converter with its supply
 # on the vdrv net, which sags from 5 V to 3.5 V and recovers, rhi = 10 ohm and

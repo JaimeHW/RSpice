@@ -2,9 +2,9 @@
 // controller of net/por_ctrl.v unchanged, with its boundaries converted by
 // authored supply-sensitive connect modules. Each converter has a third port,
 // the supply it converts against: a 1 drives V(vsup) behind 20 ohm and an
-// input compares against V(vsup)/2. P3.2 binds that port to the rail the
-// boundary sits on (vdd); until then a connect body with a third port is
-// refused.
+// input compares against V(vsup)/2. The port's inh_conn_def_value names the
+// net it binds to, vdd, as Cadence's connect modules name their supplies; vdd
+// is a PWL source, so nothing could infer it.
 `include "disciplines.vams"
 `timescale 1ns/1ps
 module por_ctrl(hi, lo_n, por_n, rst_n, tie_hi, clk);
@@ -33,16 +33,17 @@ endmodule
 connectmodule d2a_sup(d, a, vsup);
   input d; logic d;
   output a; electrical a;
-  inout vsup; electrical vsup;
+  inout vsup; electrical (* integer inh_conn_def_value = "vdd"; *) vsup;
   analog I(a) <+ (V(a) - (d ? V(vsup) : 0.0)) / 20.0;
 endmodule
 
 connectmodule a2d_sup(a, d, vsup);
   input a; electrical a;
   output d; logic d; reg d;
-  inout vsup; electrical vsup;
+  inout vsup; electrical (* integer inh_conn_def_value = "vdd"; *) vsup;
   initial d = 1'b0;
-  always #1 d = V(a) > 0.5 * V(vsup);
+  always @(above(V(a) - 0.5 * V(vsup)) or above(0.5 * V(vsup) - V(a)))
+    d = V(a) >= 0.5 * V(vsup);
 endmodule
 
 connectrules por_supply;

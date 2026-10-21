@@ -8,7 +8,7 @@ time_precision = 1e-12
 [[q]]
 id = "vss"
 analysis = "tran"
-variants = ["vdig", "vams", "vsup"]
+variants = ["vdig", "vams", "vsup", "p3"]
 kind = "mean"
 signal = "v(vout)"
 window = [4e-4, 5e-4]
@@ -20,7 +20,7 @@ why = "ADC LSB 1.95 mV + sampling-phase ripple ±3 mV (2 ohm load, settled)"
 [[q]]
 id = "vss_step"
 analysis = "tran"
-variants = ["vdig", "vams", "vsup"]
+variants = ["vdig", "vams", "vsup", "p3"]
 kind = "mean"
 signal = "v(vout)"
 window = [7.5e-4, 8e-4]
@@ -87,6 +87,40 @@ oracle = "O6"
 expect = "c06::tau_r"
 abs = 3e-10
 why = "v(ghs) passes 1 − 1/e of V(vdrv) = 5 V one rhi·Cg = 10 ns after hs rises at 900 us + 2 ticks"
+
+# --- authored gate drive with a supply port (variant p3) ---------------------
+# The authored gate_drive module (net/buck_ctrl_p3.vams) drives
+# transition(d ? V(vsup) : 0, 0, 1n, 1n) behind 20 ohm, its supply port wired
+# to vdrv by the connect statement, into the same 1 nF gates: tau = 20 ns, and
+# each edge is a T = 1 ns ramp. After the ramp a rising gate is
+# V(vdrv)·(1 − (tau/T)(e^{T/tau} − 1)e^{−t/tau}), so it passes 1 − 1/e of
+# V(vdrv) at tau·(1 + ln((tau/T)(e^{T/tau} − 1))) = 20.502 ns after hs rises.
+
+[[q]]
+id = "vgate"
+analysis = "tran"
+variants = ["p3"]
+kind = "held_at"
+signal = "v(ghs)"
+at = [9.004375e-4, 1.2004375e-3, 1.5004375e-3]
+oracle = "O6"
+expect = "c06::vgate"
+rel = 1e-3
+why = "14 ticks into the period, 12 after hs rises (18.75 tau), the high-side gate holds V(vdrv) through the supply port: 5, 3.5 and 5 V"
+
+[[q]]
+id = "tau_r"
+analysis = "tran"
+variants = ["p3"]
+kind = "cross"
+signal = "v(ghs)"
+level = 3.1606028
+edge = "rise"
+window = [9e-4, 9.001e-4]
+oracle = "O6"
+expect = "c06::tau_r_ramp"
+abs = 3e-10
+why = "v(ghs) passes 1 − 1/e of V(vdrv) = 5 V 20.502 ns after hs rises at 900 us + 2 ticks: the 1 ns ramp into 20 ohm·1 nF"
 
 [[q]]
 id = "tau_r_sag"

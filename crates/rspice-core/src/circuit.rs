@@ -39,6 +39,8 @@ mod construction;
 mod converter_insertion;
 #[cfg(feature = "veriloga")]
 pub(crate) use converter_insertion::BUILTIN_RULE_SET;
+#[cfg(feature = "veriloga")]
+pub(crate) use converter_insertion::PortSensitivity;
 pub(crate) use converter_insertion::record_text;
 pub use converter_insertion::{
     ConverterInsertion, ConverterKind, ConverterParameter, ConverterSource, ConverterSupply,
@@ -794,6 +796,10 @@ pub struct CircuitData {
     /// Every converter the build inserted on a mixed boundary; see
     /// [`CircuitData::converter_insertions`].
     pub(crate) converter_insertions: Vec<ConverterInsertion>,
+    /// The `supplySensitivity` and `groundSensitivity` attributes on mixed
+    /// modules' ports, for the converters the build inserts on those ports.
+    #[cfg(feature = "veriloga")]
+    pub(crate) port_sensitivities: Vec<PortSensitivity>,
 }
 
 /// Stable probe metadata for inductor-backed branch measurements.

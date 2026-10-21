@@ -17,6 +17,18 @@ use crate::xspice::models::connect_rule_parameter;
 /// The rule set whose defaults stand where no declaration states one.
 pub(crate) const BUILTIN_RULE_SET: &str = "rspice_builtin";
 
+/// A mixed module port's `supplySensitivity` and `groundSensitivity`
+/// attributes: the nets, in its instance's scope, that the converter on the
+/// port converts against.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PortSensitivity {
+    pub(crate) instance: String,
+    pub(crate) port: String,
+    pub(crate) supply: Option<String>,
+    pub(crate) ground: Option<String>,
+}
+
 /// One converter the build inserted on a mixed boundary, and where each of
 /// its values came from.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -46,6 +58,10 @@ pub struct ConverterInsertion {
     /// carries a number rather than a logic level, and for an authored module
     /// whose statement states none.
     pub supply: Option<ConverterSupply>,
+    /// An authored connect module's supply ports, each with the net it is
+    /// wired to and what bound it. The first is also `supply`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub supply_ports: Vec<ConverterSupply>,
     /// Every parameter, with its value and where the value came from.
     pub parameters: Vec<ConverterParameter>,
 }
@@ -100,6 +116,9 @@ pub enum ConverterSource {
     },
     /// The selected declaration's default.
     ModuleDefault,
+    /// The named attribute of the HDL port the converter bridges
+    /// (`supplySensitivity`).
+    PortAttribute(String),
     /// The named rule set's default.
     RuleSet(String),
     /// The deck's parameter (`.param vcc`).
@@ -123,6 +142,9 @@ pub struct ConverterSupply {
     /// The net it is bound to live, if it is.
     pub net: Option<String>,
     pub source: ConverterSource,
+    /// The authored connect module's supply port wired to `net`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
 }
 
 /// One resolved parameter of a converter.
@@ -145,7 +167,19 @@ pub struct ConverterParameter {
 
 impl ConverterSupply {
     pub(crate) fn new(level: f64, net: Option<String>, source: ConverterSource) -> Self {
-        Self { level, net, source }
+        Self {
+            level,
+            net,
+            source,
+            port: None,
+        }
+    }
+
+    /// The same supply, wired to the authored module's supply port `port`.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn at_port(mut self, port: &str) -> Self {
+        self.port = Some(port.to_owned());
+        self
     }
 }
 
@@ -191,6 +225,7 @@ impl ConverterInsertion {
             rules,
             location: None,
             supply: None,
+            supply_ports: Vec::new(),
             parameters: Vec::new(),
         }
     }
@@ -287,6 +322,7 @@ impl fmt::Display for ConverterSource {
                 "connect rule, earlier signature, defaults from rule set {BUILTIN_RULE_SET}"
             ),
             Self::ModuleDefault => f.write_str("module default"),
+            Self::PortAttribute(name) => write!(f, "{name} attribute"),
             Self::RuleSet(name) => write!(f, "rule set {name}"),
             Self::Parameter(name) => write!(f, ".param {name}"),
             Self::Inferred { source, level } => write!(f, "inferred from {source} = {level} V"),
@@ -324,7 +360,12 @@ impl fmt::Display for ConverterSupply {
         match (&self.net, f.alternate()) {
             (Some(net), true) => write!(f, "{net}, live"),
             (None, true) => f.write_str(&si(self.level, "V")),
-            (Some(net), false) => write!(f, "vsup=net {net}, live ({})", self.source),
+            (Some(net), false) => write!(
+                f,
+                "{}=net {net}, live ({})",
+                self.port.as_deref().unwrap_or("vsup"),
+                self.source
+            ),
             (None, false) => write!(f, "vsup={} ({}, static)", si(self.level, "V"), self.source),
         }
     }
@@ -371,10 +412,16 @@ pub(crate) fn record_text(group: &[ConverterInsertion]) -> String {
         return text;
     }
     match (&first.kind, &first.rules) {
-        (ConverterKind::Authored, _) => format!(
-            "Node '{}' bridges through connect module '{}' as instance '{}'",
-            first.boundary, first.module, first.instance
-        ),
+        (ConverterKind::Authored, _) => {
+            let mut text = format!(
+                "Node '{}' bridges through connect module '{}' as instance '{}'",
+                first.boundary, first.module, first.instance
+            );
+            for supply in &first.supply_ports {
+                text.push_str(&format!("; {supply}"));
+            }
+            text
+        }
         (ConverterKind::Template, ConverterSource::Template(key)) => {
             let nodes = group
                 .iter()

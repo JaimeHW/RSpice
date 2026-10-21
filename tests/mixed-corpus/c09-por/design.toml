@@ -11,11 +11,12 @@ name = "base"
 families = ["spice", "xspice", "vams-digital"]
 today = "runs"
 
-# p3: authored supply-sensitive connect modules with a supply port (A4).
+# p3: authored supply-sensitive connect modules with a supply port (A4),
+# bound to vdd by the port's inh_conn_def_value.
 [[variant]]
 name = "p3"
 families = ["spice", "xspice", "vams-digital", "vams-analog"]
-today = "refused:P3.2"
+today = "runs"
 
 # live: no .param vcc; the supply is the vdd net, bound live (A4b, plan D-C):
 # its connect rules (net/por_ctrl_live.vams) name vdd as vsup.

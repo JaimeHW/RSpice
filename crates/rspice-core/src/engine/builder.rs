@@ -3356,6 +3356,22 @@ fn report_planned_xspice_auto_bridge_supplies(
         }
         #[cfg(feature = "veriloga")]
         if let Some(selected) = bridge.connect_module.as_ref() {
+            // An authored module's supply ports say what they are wired to:
+            // an inferred rail as any inferred supply is, the rest as the
+            // statement, attribute or default that bound them.
+            if !selected.supply_bindings.is_empty() {
+                for binding in &selected.supply_bindings {
+                    match &binding.inferred {
+                        Some(derivation) => supplies.report(&node_label, derivation, true)?,
+                        None => boundary_supply::report_supply_port(
+                            &node_label,
+                            &selected.name,
+                            binding,
+                        ),
+                    }
+                }
+                continue;
+            }
             if let Some(net) = selected.supply_net() {
                 boundary_supply::report_declared_live(&node_label, net);
                 continue;
@@ -5382,17 +5398,17 @@ fn add_connect_rule_converter(
     let net = boundary_supply::live_supply_net(bridge).map(str::to_string);
     let stated = selected
         .is_some_and(|selected| selected.supply_net().is_some() || selected.states_supply());
-    let supply = connect_modules::ConverterSupply {
-        level: selected
+    let supply = connect_modules::ConverterSupply::new(
+        selected
             .and_then(connect_modules::PlannedConnectModule::stated_supply)
             .unwrap_or(bridge.vcc),
         net,
-        source: if stated {
+        if stated {
             connect_modules::ParameterSource::ConnectStatement
         } else {
             boundary_supply::supply_source(bridge.supply.as_ref())
         },
-    };
+    );
     let law = connect_modules::converter_law(selected, bridge.kind, supply)?;
     let tracking = live_supply.is_some();
 
@@ -10305,6 +10321,7 @@ impl Engine {
         connect_modules::attach_to_planned_bridges(
             &circuit,
             &design_connect_rules,
+            &boundary_supplies,
             &mut auto_bridges,
         )?;
         if !auto_bridges.is_empty() {

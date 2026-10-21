@@ -1,7 +1,7 @@
 // C6 p3: buck_ctrl.vams's controller with an authored, supply-aware gate-drive
 // connect module (RSpice-authored). The D/A drives the gate to the level of
-// its supply port `vsup`, read live; binding a connect module's supply port
-// is P3.2, so today the selection is refused.
+// its supply port `vsup`, read live, behind 20 ohm with a 1 ns transition();
+// the connect statement wires the port to the vdrv net.
 `include "disciplines.vams"
 `timescale 1ps/1ps
 module buck_ctrl(fb, hs, ls);
@@ -62,5 +62,5 @@ connectmodule gate_drive(d, a, vsup);
 endmodule
 
 connectrules gate_rules;
-  connect gate_drive;
+  connect gate_drive #(.vsup(vdrv));
 endconnectrules
