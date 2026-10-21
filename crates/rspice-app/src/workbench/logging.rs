@@ -12,7 +12,7 @@
 /// graphics-backend probe warnings stay out of normal desktop stderr.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn native_default_filter() -> &'static str {
-    "warn,rspice_ui=warn,rspice_core=warn,rspice_veriloga=warn,wgpu_core=error,wgpu_hal=error,naga=error"
+    "warn,rspice_core=warn,rspice_veriloga=warn,wgpu_core=error,wgpu_hal=error,naga=error"
 }
 
 /// Environment variable for native GUI log-filter overrides.
@@ -58,9 +58,7 @@ mod tests {
     fn native_default_filter_suppresses_gpu_backend_probe_warnings() {
         let filter = native_default_filter();
 
-        assert!(filter.contains("rspice_ui=warn"));
-        assert!(!filter.contains("rspice_ui=info"));
-        assert!(filter.contains("warn"));
+        assert!(filter.starts_with("warn,"));
         assert!(filter.contains("wgpu_core=error"));
         assert!(filter.contains("wgpu_hal=error"));
         assert!(filter.contains("naga=error"));
