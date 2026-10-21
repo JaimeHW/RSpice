@@ -3,6 +3,7 @@
 use crate::analysis_result::AnalysisResult;
 #[cfg(test)]
 use crate::analysis_type::AnalysisType;
+use crate::interpolation::linear_between;
 use crate::result_digest::ResultDigestEncoding;
 use crate::run::SimulationRun;
 use crate::visualization_document::{
@@ -341,8 +342,13 @@ fn interpolate_monotone(axis: &[f64], values: &[f64], target: f64) -> Result<f64
         Ok(index) => Ok(values[index]),
         Err(upper) if upper > 0 && upper < axis.len() => {
             let lower = upper - 1;
-            let fraction = (target - axis[lower]) / (axis[upper] - axis[lower]);
-            let value = values[lower] + fraction * (values[upper] - values[lower]);
+            let value = linear_between(
+                axis[lower],
+                axis[upper],
+                values[lower],
+                values[upper],
+                target,
+            );
             value.is_finite().then_some(value).ok_or_else(|| {
                 "Monotone linear interpolation produced a non-finite value.".to_owned()
             })
@@ -383,8 +389,8 @@ fn first_threshold_crossing(axis: &[f64], values: &[f64], threshold: f64) -> Res
             if left == right {
                 continue;
             }
-            let fraction = (threshold - left) / (right - left);
-            let crossing = axis[index] + fraction * (axis[index + 1] - axis[index]);
+            // The crossing interpolates the axis as a function of the values.
+            let crossing = linear_between(left, right, axis[index], axis[index + 1], threshold);
             if crossing.is_finite() {
                 return Ok(crossing);
             }

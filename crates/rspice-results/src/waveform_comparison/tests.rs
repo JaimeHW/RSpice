@@ -77,6 +77,85 @@ fn comparison_records_threshold_and_cross_correlation_alignment_parameters() {
 }
 
 #[test]
+fn interpolation_and_threshold_crossings_stay_finite_across_the_binary64_range() {
+    assert_eq!(
+        interpolate_monotone(&[-1e308, 1e308], &[0.0, 2.0], 0.0),
+        Ok(1.0)
+    );
+    assert_eq!(
+        interpolate_monotone(&[0.0, 1.0], &[-1e308, 1e308], 0.5),
+        Ok(0.0)
+    );
+    assert_eq!(
+        first_threshold_crossing(&[0.0, 1.0], &[-1e308, 1e308], 0.0),
+        Ok(0.5)
+    );
+    assert_eq!(
+        first_threshold_crossing(&[-1e308, 1e308], &[-1.0, 1.0], 0.0),
+        Ok(0.0)
+    );
+}
+
+#[test]
+fn ordinary_interpolation_and_crossings_keep_their_previous_bits() {
+    // The arithmetic the comparison used before it shared the overflow-safe
+    // kernel; wherever nothing overflows the results are bit-identical.
+    let previous = |x: [f64; 2], y: [f64; 2], at: f64| {
+        let fraction = (at - x[0]) / (x[1] - x[0]);
+        y[0] + fraction * (y[1] - y[0])
+    };
+    assert_eq!(
+        interpolate_monotone(&[0.0, 3.0], &[0.2, 5.0], 1.0),
+        Ok(1.7999999999999998)
+    );
+    // A convex combination would put 1-ULP noise on a flat segment.
+    for at in (1..1000).map(|step| f64::from(step) / 1000.0) {
+        assert_eq!(interpolate_monotone(&[0.0, 1.0], &[0.1, 0.1], at), Ok(0.1));
+    }
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut unit = || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (state >> 11) as f64 / (1_u64 << 53) as f64
+    };
+    for _ in 0..20_000 {
+        let x0 = unit() * 1e-6;
+        let x1 = x0 + 1e-12 + unit() * 1e-7;
+        let y0 = (unit() - 0.5) * 10.0;
+        let y1 = if unit() < 0.25 {
+            y0
+        } else {
+            y0 + (unit() - 0.5) * 10.0_f64.powi(-(unit() * 6.0) as i32)
+        };
+        let at = (x0 + unit() * (x1 - x0)).min(x1);
+        assert_eq!(
+            interpolate_monotone(&[x0, x1], &[y0, y1], at)
+                .unwrap()
+                .to_bits(),
+            previous([x0, x1], [y0, y1], at).to_bits(),
+            "x=[{x0:e}, {x1:e}] y=[{y0:e}, {y1:e}] at={at:e}"
+        );
+        if y0 == y1 {
+            continue;
+        }
+        let threshold = (y0 + unit() * (y1 - y0)).clamp(y0.min(y1), y0.max(y1));
+        let expected = if threshold.to_bits() == y0.to_bits() {
+            x0
+        } else {
+            previous([y0, y1], [x0, x1], threshold)
+        };
+        assert_eq!(
+            first_threshold_crossing(&[x0, x1], &[y0, y1], threshold)
+                .unwrap()
+                .to_bits(),
+            expected.to_bits(),
+            "x=[{x0:e}, {x1:e}] y=[{y0:e}, {y1:e}] threshold={threshold:e}"
+        );
+    }
+}
+
+#[test]
 fn comparison_fails_closed_for_nonmonotonic_source_coordinates() {
     let candidate = source(1, 17, vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0]);
     let baseline = source(2, 29, vec![0.0, 1.0, 0.5], vec![0.0, 1.0, 2.0]);

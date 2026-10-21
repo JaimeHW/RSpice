@@ -139,20 +139,8 @@ impl<'a> WaveformInterpolator<'a> {
 
     /// Linear interpolation within an interval
     fn interpolate_linear(&self, idx: usize, target_x: f64) -> f64 {
-        let x0 = self.x[idx];
-        let x1 = self.x[idx + 1];
-        let y0 = self.y[idx];
-        let y1 = self.y[idx + 1];
-
-        let width = x1 - x0;
-        let t = if width.is_finite() {
-            (target_x - x0) / width
-        } else {
-            (target_x * 0.5 - x0 * 0.5) / (x1 * 0.5 - x0 * 0.5)
-        };
-        // A convex combination avoids overflowing the difference between
-        // opposite-sign finite ordinates.
-        (1.0 - t) * y0 + t * y1
+        let t = interval_fraction(self.x[idx], self.x[idx + 1], target_x);
+        convex_combination(self.y[idx], self.y[idx + 1], t)
     }
 
     /// Cubic spline interpolation within an interval
@@ -197,6 +185,42 @@ impl<'a> WaveformInterpolator<'a> {
             index
         }]
     }
+}
+
+// =============================================================================
+// Linear Interpolation Kernel
+// =============================================================================
+
+/// Linear interpolation of `target` between the finite samples `(x0, y0)`
+/// and `(x1, y1)`, finite wherever the samples are. Where nothing overflows
+/// this is `y0 + t * (y1 - y0)`, which is exact on a flat segment and
+/// monotone in `t`.
+#[cfg(feature = "engine-evidence")]
+pub(crate) fn linear_between(x0: f64, x1: f64, y0: f64, y1: f64, target: f64) -> f64 {
+    let t = interval_fraction(x0, x1, target);
+    let rise = y1 - y0;
+    if rise.is_finite() {
+        y0 + t * rise
+    } else {
+        convex_combination(y0, y1, t)
+    }
+}
+
+/// The position of `target` in `[x0, x1]` as a fraction of the interval. An
+/// interval wider than `f64::MAX` is measured in halves.
+fn interval_fraction(x0: f64, x1: f64, target: f64) -> f64 {
+    let width = x1 - x0;
+    if width.is_finite() {
+        (target - x0) / width
+    } else {
+        (target * 0.5 - x0 * 0.5) / (x1 * 0.5 - x0 * 0.5)
+    }
+}
+
+/// A convex combination avoids overflowing the difference between
+/// opposite-sign finite ordinates.
+fn convex_combination(y0: f64, y1: f64, t: f64) -> f64 {
+    (1.0 - t) * y0 + t * y1
 }
 
 // =============================================================================
