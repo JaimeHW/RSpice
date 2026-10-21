@@ -318,35 +318,6 @@ pub(crate) struct BitDrive {
     pub(crate) one: DigitalStrengthLevel,
 }
 
-impl BitDrive {
-    /// The XSPICE value a converter reads, or `None` when the HDL drives
-    /// nothing: supply and strong are `Strong`; pull, large, weak, medium and
-    /// small are `Resistive`; and a value with components on both sides is
-    /// `Undetermined`. An `L` or `H` takes its one side's strength.
-    pub(crate) fn digital_value(self) -> Option<crate::xspice::DigitalValue> {
-        use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
-        let class = |level: DigitalStrengthLevel| {
-            if level >= DigitalStrengthLevel::Strong {
-                DigitalStrength::Strong
-            } else {
-                DigitalStrength::Resistive
-            }
-        };
-        let none = DigitalStrengthLevel::HighZ;
-        Some(match (self.value, self.zero, self.one) {
-            (FourStateBit::HighImpedance, _, _) => return None,
-            (FourStateBit::Zero, zero, _) => DigitalValue::new(DigitalState::Zero, class(zero)),
-            (FourStateBit::One, _, one) => DigitalValue::new(DigitalState::One, class(one)),
-            (FourStateBit::Unknown, zero, one) if zero != none && one != none => {
-                DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined)
-            }
-            (FourStateBit::Unknown, zero, one) => {
-                DigitalValue::new(DigitalState::Unknown, class(zero.max(one)))
-            }
-        })
-    }
-}
-
 /// What the plan makes of one net's resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum NetResolution {

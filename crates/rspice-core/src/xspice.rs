@@ -58,6 +58,10 @@ pub mod event_scheduler;
 mod external;
 pub mod ifspec;
 mod instance;
+// The XSPICE twelve-state values against IEEE 1364 strengths, for the nets and
+// boundaries the native Verilog host shares with XSPICE.
+#[cfg(feature = "veriloga")]
+pub(crate) mod logic_map;
 mod metadata;
 mod registry;
 mod resource_transaction;

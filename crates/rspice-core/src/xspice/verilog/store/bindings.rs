@@ -546,7 +546,9 @@ impl DigitalSignalStore {
         let net = &connected.topology.nets[net_index];
         // A design with strengths hands the converters its drive strength.
         if self.strengths.any {
-            return self.connected_strength(net).drive().digital_value();
+            let drive = self.connected_strength(net).drive();
+            return (drive.value != FourStateBit::HighImpedance)
+                .then(|| crate::xspice::logic_map::xspice_value(drive));
         }
         match self.connected_four_state(net) {
             FourStateBit::Zero => Some(DigitalValue::zero()),

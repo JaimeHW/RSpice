@@ -2162,10 +2162,13 @@ mod tests {
         let shown: Vec<_> = reads
             .iter()
             .map(|read| {
-                let value = read
-                    .digital_value()
-                    .map(|value| (value.state, value.strength));
-                (read.value, read.zero, read.one, value)
+                let value = crate::xspice::logic_map::xspice_value(*read);
+                (
+                    read.value,
+                    read.zero,
+                    read.one,
+                    (value.state, value.strength),
+                )
             })
             .collect();
         use FourStateBit::{One as I, Unknown as X, Zero as O};
@@ -2176,25 +2179,25 @@ mod tests {
                     I,
                     L::HighZ,
                     L::Pull,
-                    Some((DigitalState::One, DigitalStrength::Resistive))
+                    (DigitalState::OneR, DigitalStrength::Resistive)
                 ),
                 (
                     O,
                     L::Strong,
                     L::HighZ,
-                    Some((DigitalState::Zero, DigitalStrength::Strong))
+                    (DigitalState::Zero, DigitalStrength::Strong)
                 ),
                 (
                     I,
                     L::HighZ,
                     L::Pull,
-                    Some((DigitalState::One, DigitalStrength::Resistive))
+                    (DigitalState::OneR, DigitalStrength::Resistive)
                 ),
                 (
                     X,
                     L::Pull,
                     L::Pull,
-                    Some((DigitalState::Unknown, DigitalStrength::Undetermined))
+                    (DigitalState::UnknownR, DigitalStrength::Resistive)
                 ),
             ]
         );
