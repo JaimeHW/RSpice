@@ -91,40 +91,6 @@ pub(crate) use veriloga_interface::{
     symbol_standing,
 };
 
-/// Who owns the source bundle a language's editor is showing.
-///
-/// One owner for one fact, read by every host, command, dialog, and dock.
-/// Every Verilog-A source is a cell view, so the Verilog-A source in front of
-/// the reader is the active cell view's bundle, and there is none while the
-/// active view is not a Verilog-A view. Automation is the project's
-/// code-workspace bundle.
-pub(crate) fn active_source_owner(
-    workspace: &crate::state::ProjectWorkspace,
-    language: crate::state::ProjectSourceLanguage,
-) -> Option<crate::state::ProjectSourceOwner> {
-    match language {
-        crate::state::ProjectSourceLanguage::VerilogA => {
-            (workspace.content.active_view_type() == crate::state::ViewType::VerilogA).then(|| {
-                crate::state::ProjectSourceOwner::cell_view(workspace.content.active_view.clone())
-            })
-        }
-        crate::state::ProjectSourceLanguage::RSpiceAutomation => {
-            Some(crate::state::ProjectSourceOwner::code_workspace(language))
-        }
-    }
-}
-
-/// The bundle [`active_source_owner`] names, when the project holds one.
-pub(crate) fn active_source_bundle(
-    workspace: &crate::state::ProjectWorkspace,
-    language: crate::state::ProjectSourceLanguage,
-) -> Option<&crate::state::ProjectSourceBundle> {
-    workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&active_source_owner(workspace, language)?)
-}
-
 /// The cell view whose Verilog-A source a deck's `.veriloga` locator names.
 ///
 /// A deck reaches a module through the key its bundle derives, so the key is
@@ -214,7 +180,7 @@ pub(crate) fn active_bundle_path(
     code: &CodeWorkspaceRuntimeState,
     language: crate::state::ProjectSourceLanguage,
 ) -> Option<String> {
-    let bundle = active_source_bundle(workspace, language);
+    let bundle = workspace.active_source_bundle(language);
     let explicit = match language {
         crate::state::ProjectSourceLanguage::VerilogA => code
             .veriloga
@@ -269,8 +235,9 @@ pub(crate) fn select_source_document(
 ) -> Option<crate::state::ProjectSourceId> {
     use crate::state::ProjectSourceLanguage;
 
-    let bundle_id =
-        active_source_bundle(workspace, language).map(crate::state::ProjectSourceBundle::id)?;
+    let bundle_id = workspace
+        .active_source_bundle(language)
+        .map(crate::state::ProjectSourceBundle::id)?;
     match language {
         ProjectSourceLanguage::VerilogA => {
             code.veriloga.viewed_header = None;
@@ -416,13 +383,13 @@ mod tests {
     fn the_veriloga_source_in_front_is_the_active_cell_views_or_none() {
         let (mut workspace, _) = fixture();
         let language = crate::state::ProjectSourceLanguage::VerilogA;
-        assert_eq!(active_source_owner(&workspace, language), None);
-        assert!(active_source_bundle(&workspace, language).is_none());
+        assert_eq!(workspace.active_source_owner(language), None);
+        assert!(workspace.active_source_bundle(language).is_none());
 
         let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
         workspace.open_view(reference.clone(), crate::state::ViewType::VerilogA);
         assert_eq!(
-            active_source_owner(&workspace, language),
+            workspace.active_source_owner(language),
             Some(crate::state::ProjectSourceOwner::cell_view(reference))
         );
     }

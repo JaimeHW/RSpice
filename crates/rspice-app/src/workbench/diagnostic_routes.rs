@@ -116,7 +116,10 @@ fn open_code_document(
     // commit keeps the view it is editing — and the selection below is made
     // in whichever bundle is active, so it is made only once the bundle that
     // reported the finding is the one in front of the reader.
-    let active = code_workspace::active_source_bundle(&app.state.workspace, language)
+    let active = app
+        .state
+        .workspace
+        .active_source_bundle(language)
         .map(crate::state::ProjectSourceBundle::id);
     if active != Some(bundle) {
         app.state.prompt(format!(

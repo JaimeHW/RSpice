@@ -174,7 +174,10 @@ pub(crate) fn open_language_tools(
     active_path: &str,
     caret_char_index: usize,
 ) -> Result<(), String> {
-    let bundle_id = super::active_source_bundle(&app.state.workspace, language)
+    let bundle_id = app
+        .state
+        .workspace
+        .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
     open_language_tools_in_bundle(app, language, bundle_id, active_path, caret_char_index)

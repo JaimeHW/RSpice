@@ -362,8 +362,11 @@ pub(crate) fn source_document_is_editable(
     language: ProjectSourceLanguage,
     logical_path: &str,
 ) -> bool {
-    let Some(bundle_id) =
-        super::active_source_bundle(&app.state.workspace, language).map(ProjectSourceBundle::id)
+    let Some(bundle_id) = app
+        .state
+        .workspace
+        .active_source_bundle(language)
+        .map(ProjectSourceBundle::id)
     else {
         return false;
     };
@@ -439,7 +442,10 @@ pub(crate) fn open_source_file_dialog(
     source_path: &str,
     importer_path: &str,
 ) -> Result<(), String> {
-    let bundle_id = super::active_source_bundle(&app.state.workspace, language)
+    let bundle_id = app
+        .state
+        .workspace
+        .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
     open_source_file_dialog_in_bundle(app, language, bundle_id, action, source_path, importer_path)
@@ -664,7 +670,10 @@ pub(crate) fn open_source_history(
     language: ProjectSourceLanguage,
     source_path: &str,
 ) -> Result<(), String> {
-    let bundle_id = super::active_source_bundle(&app.state.workspace, language)
+    let bundle_id = app
+        .state
+        .workspace
+        .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
     open_source_history_in_bundle(app, language, bundle_id, source_path)

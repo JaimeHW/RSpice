@@ -82,7 +82,10 @@ pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), Stri
         "The netlist deck is served by its own completion and validation, not the project source index."
             .to_owned()
     })?;
-    let bundle_id = code_workspace::active_source_bundle(&app.state.workspace, language)
+    let bundle_id = app
+        .state
+        .workspace
+        .active_source_bundle(language)
         .map(crate::state::ProjectSourceBundle::id)
         .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     let logical_path = code_workspace::active_bundle_path(
@@ -140,7 +143,10 @@ pub(crate) fn navigate_active_source(
         }
         return Ok(());
     };
-    let bundle_id = code_workspace::active_source_bundle(&app.state.workspace, language)
+    let bundle_id = app
+        .state
+        .workspace
+        .active_source_bundle(language)
         .map(crate::state::ProjectSourceBundle::id)
         .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     let logical_path = code_workspace::active_bundle_path(

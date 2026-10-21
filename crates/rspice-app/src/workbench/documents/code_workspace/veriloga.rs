@@ -97,7 +97,10 @@ impl SelectedVerilogASource {
 
 pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilogASource, String> {
     let no_view = || "Open a Verilog-A cell view to work on its source.".to_owned();
-    let owner = super::active_source_owner(&app.state.workspace, ProjectSourceLanguage::VerilogA)
+    let owner = app
+        .state
+        .workspace
+        .active_source_owner(ProjectSourceLanguage::VerilogA)
         .ok_or_else(no_view)?;
     let ProjectSourceOwner::CellView { reference } = &owner else {
         return Err(no_view());

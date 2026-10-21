@@ -285,7 +285,7 @@ fn active_bundle(
     state: &AppState,
     language: ProjectSourceLanguage,
 ) -> Option<&crate::state::ProjectSourceBundle> {
-    code_workspace::active_source_bundle(&state.workspace, language)
+    state.workspace.active_source_bundle(language)
 }
 
 fn active_path(state: &AppState, language: ProjectSourceLanguage) -> Option<String> {
@@ -318,7 +318,7 @@ enum RailRequest {
 fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
     let messages = app.state.ui.messages();
     let language = rail.language;
-    let bundle = code_workspace::active_source_bundle(&app.state.workspace, language);
+    let bundle = app.state.workspace.active_source_bundle(language);
     let bundle_id = bundle.map(crate::state::ProjectSourceBundle::id);
     let navigation = match (rail.active.as_deref(), bundle) {
         (Some(path), Some(bundle)) => document_navigation(

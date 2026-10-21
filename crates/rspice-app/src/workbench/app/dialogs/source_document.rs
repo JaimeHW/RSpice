@@ -49,7 +49,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
         state.ui.code_workspace.source_document_dialog = true;
         return Ok(());
     };
-    if code_workspace::active_source_bundle(&state.workspace, language).is_none() {
+    if state.workspace.active_source_bundle(language).is_none() {
         return Err(format!(
             "This project owns no {} source workspace yet.",
             language.label()
@@ -63,9 +63,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
     match visible_language(state) {
         None => state.project_lifecycle.is_open(),
-        Some(language) => {
-            code_workspace::active_source_bundle(&state.workspace, language).is_some()
-        }
+        Some(language) => state.workspace.active_source_bundle(language).is_some(),
     }
 }
 
@@ -311,7 +309,7 @@ fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentF
         &app.state.ui.code_workspace,
         language,
     )?;
-    let bundle = code_workspace::active_source_bundle(&app.state.workspace, language)?;
+    let bundle = app.state.workspace.active_source_bundle(language)?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
     let identity = bundle.document_id(&logical_path).map_or_else(
         || messages.text(MessageId::CodeSourceIdentityNotRetained),

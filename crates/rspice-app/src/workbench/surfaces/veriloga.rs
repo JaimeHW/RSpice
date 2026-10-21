@@ -3,7 +3,7 @@
 //! A Verilog-A module is a view of a cell, so its editor is a Design-workspace
 //! document: [`show_in_design`] draws it, editor only, while the inspector
 //! dock states the module's facts. It edits the bundle
-//! `code_workspace::active_source_owner` names, which is the bundle every
+//! `ProjectWorkspace::active_source_owner` names, which is the bundle every
 //! command, dock and dialog resolves too.
 
 use egui::{Align, Layout, Sense, Stroke, Ui, Vec2};

@@ -166,6 +166,40 @@ impl ProjectWorkspace {
     pub(crate) fn into_parts(self) -> (rspice_project::ProjectWorkspace, WorkspaceSession) {
         (self.content, self.session)
     }
+
+    /// Who owns the source bundle a language's editor is showing.
+    ///
+    /// One owner for one fact, read by every host, command, dialog, and dock.
+    /// Every Verilog-A source is a cell view, so the Verilog-A source in front
+    /// of the reader is the active cell view's bundle, and there is none while
+    /// the active view is not a Verilog-A view. Automation is the project's
+    /// code-workspace bundle.
+    pub(crate) fn active_source_owner(
+        &self,
+        language: ProjectSourceLanguage,
+    ) -> Option<crate::state::ProjectSourceOwner> {
+        match language {
+            ProjectSourceLanguage::VerilogA => {
+                (self.content.active_view_type() == crate::state::ViewType::VerilogA).then(|| {
+                    crate::state::ProjectSourceOwner::cell_view(self.content.active_view.clone())
+                })
+            }
+            ProjectSourceLanguage::RSpiceAutomation => {
+                Some(crate::state::ProjectSourceOwner::code_workspace(language))
+            }
+        }
+    }
+
+    /// The bundle [`Self::active_source_owner`] names, when the project holds
+    /// one.
+    pub(crate) fn active_source_bundle(
+        &self,
+        language: ProjectSourceLanguage,
+    ) -> Option<&crate::state::ProjectSourceBundle> {
+        self.content
+            .project_sources
+            .bundle_for_owner(&self.active_source_owner(language)?)
+    }
 }
 
 #[cfg(test)]

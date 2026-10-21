@@ -856,10 +856,9 @@ fn code_collections(
         ));
     }
     if !code.automation.diagnostics.is_empty() || code.automation.receipt.is_some() {
-        let bundle = crate::workbench::documents::code_workspace::active_source_bundle(
-            &state.workspace,
-            crate::state::ProjectSourceLanguage::RSpiceAutomation,
-        );
+        let bundle = state
+            .workspace
+            .active_source_bundle(crate::state::ProjectSourceLanguage::RSpiceAutomation);
         let token = code
             .automation
             .receipt
@@ -1332,13 +1331,12 @@ mod tests {
         assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
 
         use crate::workbench::documents::code_workspace::{
-            AutomationValidationReceipt, SourceOperationToken, active_source_bundle,
+            AutomationValidationReceipt, SourceOperationToken,
         };
-        let bundle = active_source_bundle(
-            &state.workspace,
-            crate::state::ProjectSourceLanguage::RSpiceAutomation,
-        )
-        .expect("a project holds its automation bundle");
+        let bundle = state
+            .workspace
+            .active_source_bundle(crate::state::ProjectSourceLanguage::RSpiceAutomation)
+            .expect("a project holds its automation bundle");
         let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
         let root_content = bundle.root().content().to_owned();
         state.ui.code_workspace.automation.receipt = Some(AutomationValidationReceipt {
