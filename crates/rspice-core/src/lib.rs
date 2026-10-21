@@ -97,6 +97,8 @@ pub mod engine;
 mod event_net;
 pub mod execution;
 pub mod expr;
+#[doc(hidden)]
+pub mod family_features;
 /// Stable analysis and run-coordinate identities, named by both the engine's
 /// error taxonomy and the deck planner. A leaf, so neither has to reach for
 /// the other to say which analysis or sweep point a value belongs to.
@@ -177,6 +179,8 @@ pub use transient_observation::{
     VoltageImpulsePoint, VoltageImpulseTrace,
 };
 pub use xspice::{CmContext, CodeModel, CodeModelRegistry, XspiceInstance};
+
+family_features!();
 
 /// Error types for the simulation engine
 pub mod error {

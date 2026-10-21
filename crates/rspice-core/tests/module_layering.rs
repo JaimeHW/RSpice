@@ -141,6 +141,9 @@ const LAYERS: &[(&str, u32)] = &[
     // deck line reads down into it, so none of them reaches up into `netlist`.
     // `netlist` re-exports it.
     ("source_location", 0),
+    // The feature flags a crate of the family states for the crates above it
+    // to compare. It names nothing in the crate; the crate root invokes it.
+    ("family_features", 0),
     // SPICE RAW waveform files, read and written. A leaf by construction:
     // `raw_export` names nothing in the crate at all and the reader needs only
     // `resource` for its read limits, so a format module never has to move

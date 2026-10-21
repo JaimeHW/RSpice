@@ -266,7 +266,13 @@ use rspice_core::analysis::harmonic_balance::{
 // `Engine::run_small_signal_at_transient_state`, the card around the captured
 // state (engine_services/transient_state.rs). The census is 5,741, with no
 // slack.
-const MAX_PUBLIC_ITEMS: usize = 5741;
+// Two hidden statements let every crate of the split family compare its
+// feature flags with the crates below it at compile time: the
+// `family_features::FamilyFeatures` struct and the `FAMILY_FEATURES` constant
+// the `family_features!` macro declares at a crate's root. A crate above reads
+// both through the macro, so neither can be restricted. The census is 5,743,
+// with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5743;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
