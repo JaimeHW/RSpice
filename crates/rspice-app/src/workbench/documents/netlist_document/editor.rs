@@ -1068,7 +1068,7 @@ fn mapped_syntax_origin(
         if let Some(marker_start) = message.rfind(&marker)
             && marker_start > 0
         {
-            let source = PathBuf::from(&message[..marker_start]);
+            let source = canonical_diagnostic_source(PathBuf::from(&message[..marker_start]));
             let detail = message[marker_start + marker.len()..].to_owned();
             return (
                 detail,
@@ -1081,6 +1081,16 @@ fn mapped_syntax_origin(
         None => rspice_core::netlist::NetlistSourceLocation::in_memory(line),
     };
     (message, origin)
+}
+
+/// A source-mapped error shows an included file without the Windows verbatim
+/// `\\?\` prefix; every other diagnostic names the file by its canonical path.
+fn canonical_diagnostic_source(path: PathBuf) -> PathBuf {
+    #[cfg(not(target_arch = "wasm32"))]
+    if path.is_absolute() {
+        return path.canonicalize().unwrap_or(path);
+    }
+    path
 }
 
 fn device_initial_condition_diagnostic_origin(
