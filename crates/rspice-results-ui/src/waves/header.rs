@@ -3,7 +3,6 @@
 use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
 use crate::strip::HEADER_PADDING_X;
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_ui_kit::{
     icons::Icon,
     plot::sample::sample_at_with_shape,
@@ -11,6 +10,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::{IconButton, chip},
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::borrow::Cow;
 
 pub const WAVE_PANE_HEADER_HEIGHT: f32 = 25.0;

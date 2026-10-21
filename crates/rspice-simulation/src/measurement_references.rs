@@ -1,8 +1,8 @@
 //! Immutable comparison-table inputs shared by preparation and workers.
 
-use rspice_app_types::product::ContentDigest;
 use rspice_core::netlist::measure::MeasureType;
 use rspice_results::specification::{MeasurementReferenceSource, SpecificationDefinition};
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -134,7 +134,7 @@ impl PreparedMeasurementReferences {
     }
 
     pub fn digest(&self) -> ContentDigest {
-        rspice_app_types::canonical::content_digest(
+        rspice_vocabulary::canonical::content_digest(
             "rspice.prepared-measurement-references/v1",
             &serde_json::to_vec(&self.entries).expect("reference entries serialize"),
         )
@@ -142,7 +142,7 @@ impl PreparedMeasurementReferences {
 }
 
 pub fn reference_digest(reference: &MeasurementReferenceSource) -> ContentDigest {
-    rspice_app_types::canonical::content_digest(
+    rspice_vocabulary::canonical::content_digest(
         "rspice.measurement-reference/v1",
         &serde_json::to_vec(reference).expect("reference text serializes"),
     )

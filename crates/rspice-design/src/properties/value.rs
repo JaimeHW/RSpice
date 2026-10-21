@@ -1,7 +1,7 @@
 //! Schema-aware quantity and expression parsing, independent of editor state.
 
 use crate::properties::{PropertyDefinition, PropertyValue};
-use rspice_app_types::quantity::{
+use rspice_vocabulary::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
 
@@ -164,8 +164,8 @@ mod tests {
     /// a spelling, but never read one as another value.
     #[test]
     fn typed_fields_read_every_prefix_and_unit_the_way_the_engine_does() {
-        use rspice_app_types::quantity::EngineeringSuffixPolicy;
         use rspice_core::netlist::lexer::spice_suffix_scale;
+        use rspice_vocabulary::quantity::EngineeringSuffixPolicy;
 
         let locale = UiNumberLocale::default();
         let prefixes = [

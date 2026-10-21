@@ -1,13 +1,13 @@
 //! Band-integrated noise contributors, conversion provenance and noise-figure presentation.
 
 use egui::{Align2, Sense, Ui};
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::noise::NoiseSummary;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_readout;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::measurement_table;
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 mod figure;
 

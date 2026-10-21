@@ -1,5 +1,5 @@
 [package]
-name = "rspice-app-types"
+name = "rspice-vocabulary"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

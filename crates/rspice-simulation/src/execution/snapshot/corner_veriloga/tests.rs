@@ -2,10 +2,10 @@
 //! each corner runs its own, a section binding one alias twice is refused,
 //! and preflight refuses exactly what the run fails.
 
-use rspice_app_types::product::ProcessCorner;
 use rspice_core::NoAbort;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::family_metadata::AnalysisResultFamilyMetadata;
+use rspice_vocabulary::product::ProcessCorner;
 
 use crate::execution::{PreparedRunSnapshot, SavePolicy};
 use crate::model_sources::SealedModelExecutionSources;

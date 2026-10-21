@@ -12,9 +12,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use rspice_app_types::diagnostics::LogSeverity;
 use rspice_core::log_scope::{self, LogScope, LogScopeGuard};
 use rspice_core::notice::{NoticeCollector, RecordedNotice};
+use rspice_vocabulary::diagnostics::LogSeverity;
 
 mod forward;
 pub(crate) use forward::RunLineForwarder;

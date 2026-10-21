@@ -1,5 +1,5 @@
 //! Portable yield specifications, retained population evidence and statistics.
-use rspice_app_types::product::{DatasetId, RunId};
+use rspice_vocabulary::product::{DatasetId, RunId};
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

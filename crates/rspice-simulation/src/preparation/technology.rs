@@ -1,8 +1,8 @@
 //! Determine whether the authored plan and physical layouts require a signed technology.
 
-use rspice_app_types::product::ProcessCorner;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 use rspice_simulation_contract::setup_state::SimulationSetup;
+use rspice_vocabulary::product::ProcessCorner;
 
 /// One authored entity that requires an attached project technology.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use super::*;
 use crate::plan_model::AnalysisLifecycleState;
 use crate::run_set::RunSetDimensionKind;
-use rspice_app_types::product::AnalysisInstanceId;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 fn new_setup() -> SimulationSetupDocument {
     SimulationSetupDocument {
@@ -53,7 +53,7 @@ fn cloning_activates_a_fresh_plan_and_retains_an_independent_source() {
         .model_bindings
         .push(rspice_model_library::SimulationPlanModelBinding {
             library_name: "foundry-models".to_owned(),
-            source_digest: rspice_app_types::product::ContentDigest::from_bytes([7; 32]),
+            source_digest: rspice_vocabulary::product::ContentDigest::from_bytes([7; 32]),
             selected_corner: Some("TT".to_owned()),
         });
     setup

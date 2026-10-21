@@ -1,11 +1,11 @@
 //! Source queries and authoritative edits for report presentation.
 use super::*;
-use rspice_app_types::product::ResultDocumentId;
 use rspice_results_ui::report::preview::report_block_element_title;
 use rspice_results_ui::report::{
     inspector::InspectorHost,
     preview::{PreviewHost, SummaryMetrics},
 };
+use rspice_vocabulary::product::ResultDocumentId;
 
 pub(super) struct ReportHost<'a>(pub(super) &'a mut RSpiceApp);
 

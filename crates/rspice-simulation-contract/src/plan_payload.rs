@@ -1,6 +1,6 @@
 //! Persisted, per-plan authored payload independent of the project workspace.
 
-use rspice_app_types::product::{RunId, SimulationPlanId};
+use rspice_vocabulary::product::{RunId, SimulationPlanId};
 use serde::{Deserialize, Serialize};
 
 use crate::capture_group::CaptureGroup;

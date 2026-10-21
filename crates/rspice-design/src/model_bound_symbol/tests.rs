@@ -1,7 +1,7 @@
 //! Model-bound symbol tests.
 
 use super::*;
-use rspice_app_types::property::{DisplayMode, PropertyType};
+use rspice_vocabulary::property::{DisplayMode, PropertyType};
 
 fn definition(revision: u64) -> ModelBoundSymbolDefinition {
     let model = SymbolModelReference::new("vendor", "OPA189_A").with_source_path(

@@ -15,7 +15,7 @@ use std::io::{self, Write};
 
 use serde::{Deserialize, Serialize};
 
-use rspice_app_types::product::{ContentDigest, DatasetBinding, ObjectRevision, ResultDocumentId};
+use rspice_vocabulary::product::{ContentDigest, DatasetBinding, ObjectRevision, ResultDocumentId};
 
 use super::report_document::{
     FrozenReportArtifact, MAX_FROZEN_ARTIFACT_BYTES, ReportReferenceSnapshot, ReportSourceId,
@@ -408,7 +408,7 @@ pub enum VisualizationRasterError {
         actual: Vec<DatasetBinding>,
     },
     #[error("duplicate immutable binding for dataset {0}")]
-    DuplicateDatasetBinding(rspice_app_types::product::DatasetId),
+    DuplicateDatasetBinding(rspice_vocabulary::product::DatasetId),
     #[error("page {0} is not present in the selected document revision")]
     PageNotFound(u64),
     #[error("pane {0} is not present in the selected document revision")]
@@ -446,12 +446,12 @@ pub enum VisualizationRasterError {
         value: i64,
     },
     #[error("dataset {0} is not attached to the selected document revision")]
-    DatasetNotFound(rspice_app_types::product::DatasetId),
+    DatasetNotFound(rspice_vocabulary::product::DatasetId),
     #[error(
         "dataset {dataset_id} digest mismatch: trace binds {requested}, document contains {actual}"
     )]
     DatasetDigestMismatch {
-        dataset_id: rspice_app_types::product::DatasetId,
+        dataset_id: rspice_vocabulary::product::DatasetId,
         requested: ContentDigest,
         actual: ContentDigest,
     },
@@ -1428,7 +1428,7 @@ mod tests {
     use crate::visualization_document::{
         DocumentEdit, EntityRef, NewAxis, NewTrace, QueryCoordinate, SourceColumn, SourceRow,
     };
-    use rspice_app_types::product::{DatasetBinding, DatasetId};
+    use rspice_vocabulary::product::{DatasetBinding, DatasetId};
 
     struct Fixture {
         document: VisualizationDocument,

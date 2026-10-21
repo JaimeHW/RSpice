@@ -1,6 +1,5 @@
 #![cfg(feature = "project-results")]
 
-use rspice_app_types::product::ProjectId;
 use rspice_formats::project_results::{
     ProjectSimulationResults, ProjectSimulationResultsData, ProjectSimulationRun,
     ProjectWaveformData,
@@ -10,6 +9,7 @@ use rspice_results::analysis_type::AnalysisType;
 use rspice_results::run::{ExecutionTarget, SimulationRun, SimulationRunLifecycle};
 use rspice_results::run_receipt::SimulationRunProvenance;
 use rspice_results::waveform::RetainedWaveform;
+use rspice_vocabulary::product::ProjectId;
 
 fn project(sample: f64, complex: bool) -> ProjectSimulationResults {
     let mut waveform =

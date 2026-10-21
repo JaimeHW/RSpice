@@ -8,7 +8,7 @@ use crate::floquet::{
 };
 use crate::provenance::AnalysisResultProvenance;
 use crate::specification::{SpecEntry, SpecPointScope, SpecificationDefinition};
-use rspice_app_types::product::{ContentDigest, ObjectRevision, SimulationPlanId};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, SimulationPlanId};
 type AnalysisResult = crate::analysis_result::AnalysisResult;
 
 fn result(sequence: u64, source_id: AnalysisInstanceId, value: f64) -> AnalysisResult {

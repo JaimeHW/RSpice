@@ -1,4 +1,4 @@
-# rspice-app-types
+# rspice-vocabulary
 
 The portable value vocabulary of the RSpice application: product object
 identities, the hierarchical instance-path grammar, canonical content digests,
@@ -55,7 +55,7 @@ crate, egui or other GUI package, and simulator package.
 ## Testing
 
 ```bash
-cargo test -p rspice-app-types
+cargo test -p rspice-vocabulary
 ```
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).

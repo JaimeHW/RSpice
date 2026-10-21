@@ -1,8 +1,8 @@
 //! Portable accepted transient state shared by workers and retained projects.
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use rspice_app_types::product::ContentDigest;
 use rspice_core::engine::TransientCheckpoint;
 use rspice_core::{AbortSignal, NoAbort, ResourceKind, ResourceLimitError, ResourceLimits};
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ pub enum TransientCheckpointError {
 }
 
 pub fn checkpoint_digest(bytes: &[u8]) -> ContentDigest {
-    rspice_app_types::canonical::content_digest("rspice.transient-checkpoint/v1", bytes)
+    rspice_vocabulary::canonical::content_digest("rspice.transient-checkpoint/v1", bytes)
 }
 
 pub fn validate_bytes_size(

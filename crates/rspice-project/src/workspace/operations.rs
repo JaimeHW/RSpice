@@ -487,8 +487,8 @@ impl ProjectWorkspace {
     pub fn restore_project_source_bundle_revision(
         &mut self,
         bundle_id: rspice_design::project_sources::ProjectSourceId,
-        expected_current: rspice_app_types::product::ObjectRevision,
-        retained_revision: rspice_app_types::product::ObjectRevision,
+        expected_current: rspice_vocabulary::product::ObjectRevision,
+        retained_revision: rspice_vocabulary::product::ObjectRevision,
     ) -> Result<bool, ProjectSourceError> {
         let changed = self.project_sources.restore_bundle_revision(
             bundle_id,

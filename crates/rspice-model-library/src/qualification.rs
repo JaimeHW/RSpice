@@ -20,7 +20,7 @@ use std::{collections::BTreeSet, path::Path};
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision};
 
 pub use values::*;
 

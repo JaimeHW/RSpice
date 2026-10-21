@@ -3,12 +3,12 @@
 use crate::lifecycle::ProjectLifecycleError;
 use crate::results::ProjectSimulationResults;
 use crate::{ProjectExecutionContext, ProjectFile, ProjectLibraries, ProjectWorkspace};
-use rspice_app_types::product::ContentDigest;
 use rspice_design::{
     library::ViewType,
     schematic::owned::{CancelledOperation, Schematic},
 };
 use rspice_results::result_presentation::ResultPresentation;
+use rspice_vocabulary::product::ContentDigest;
 
 /// Saves capture committed edits; dirty comparison and execution provenance
 /// include the current preview without changing the live working set.

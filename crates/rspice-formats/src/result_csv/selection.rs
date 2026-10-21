@@ -3,11 +3,11 @@
 //! Source resolution and retained-evidence quarantine belong to the host.
 //! Vector shape checks here prevent indexing malformed storage during encoding.
 
-use rspice_app_types::product::DatasetId;
 use rspice_results::{
     analysis_result::AnalysisResult, operating_point::OperatingPointValue,
     waveform::RetainedWaveform,
 };
+use rspice_vocabulary::product::DatasetId;
 
 /// Encode the final real and optional complex sample as one
 /// `name<TAB>x=…<TAB>y=…` record.

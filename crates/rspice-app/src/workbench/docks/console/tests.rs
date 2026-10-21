@@ -1396,7 +1396,7 @@ fn console_page_review_renders() {
             "Transient: 0.42 s, 1,204 steps accepted, 37 rejected",
         ),
     ] {
-        run.log.push(rspice_app_types::run_log::RunLogLine {
+        run.log.push(rspice_vocabulary::run_log::RunLogLine {
             unix_ms: 1_760_000_000_000,
             severity,
             source: LogSource::Run,

@@ -32,10 +32,10 @@ fn autonomous_qpac_qpxf_dependency_worker_and_retention_preserve_phase_response(
     use crate::execution_artifact::ExecutionArtifactEnvelope;
     use crate::execution_artifact::PreparedDependencyBinding;
     use crate::runner::worker_contract::round_trip_response_for_test;
-    use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use rspice_core::engine::QpxfFrequencyAxis;
     use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicAcDraft;
     use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicTransferDraft;
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use std::f64::consts::{SQRT_2, TAU};
     let producer = QpssDraft {
         tones: format!("{},{}", 1.2 / TAU, SQRT_2 / TAU),
@@ -463,13 +463,13 @@ fn qpss_controls_direct_mode_retains_inactive_krylov_draft_buffers() {
 fn qpss_op_handoff_preserves_environment_and_consumers_across_worker_transport() {
     use crate::execution_artifact::ExecutionArtifactEnvelope;
     use crate::execution_artifact::PreparedDependencyBinding;
-    use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use rspice_simulation_contract::config::OpConfig;
     use rspice_simulation_contract::config::OpTemperatureMode;
     use rspice_simulation_contract::quasi_periodic_draft::QpnoiseSourceSelection;
     use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicAcDraft;
     use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicNoiseDraft;
     use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicTransferDraft;
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     let basis = "Bound QP OP\nV1 in 0 DC .2 AC .3 30\nI1 0 out DC 0 AC .001 -20\nRS in out {1000+10*(TEMP-37)} TC1=.01\nRL out 0 1k\nC1 out 0 100n\n.options TEMP=12 TNOM=27 GMIN=1e-10\n.end\n";
     let op_deck = crate::netlist_preparation::splice_before_terminal_end_card(
         basis,

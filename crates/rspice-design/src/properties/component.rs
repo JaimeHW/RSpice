@@ -385,7 +385,7 @@ fn property_value_from_schema(
 
     match &definition.default_value {
         PropertyValue::Number { .. } => {
-            if let Ok(number) = rspice_app_types::quantity::parse_engineering_value(&value) {
+            if let Ok(number) = rspice_vocabulary::quantity::parse_engineering_value(&value) {
                 PropertyValue::Number {
                     value: number,
                     unit: definition.unit.clone(),

@@ -63,7 +63,7 @@ impl From<WorkerCornerRunConfig> for super::CornerRunConfig {
             process_corners: value
                 .process_corners
                 .into_iter()
-                .map(rspice_app_types::product::ProcessCorner::from)
+                .map(rspice_vocabulary::product::ProcessCorner::from)
                 .collect(),
             voltages: value.voltages,
             supply_source_names: value.supply_source_names,
@@ -80,7 +80,7 @@ impl From<WorkerCornerRunConfig> for super::CornerRunConfig {
                 .points
                 .into_iter()
                 .map(|point| super::CornerPoint {
-                    process: rspice_app_types::product::ProcessCorner::from(point.process),
+                    process: rspice_vocabulary::product::ProcessCorner::from(point.process),
                     voltage: point.voltage,
                     temperature_c: point.temperature_c,
                 })

@@ -1,8 +1,8 @@
 //! Sweep configuration, validation, and point labels.
 
-use rspice_app_types::product::ProcessCorner;
 use rspice_core::Value;
 use rspice_model_library::CornerModelBinding;
+use rspice_vocabulary::product::ProcessCorner;
 
 /// Explicit configuration for temperature sweep execution.
 #[derive(Debug, Clone)]

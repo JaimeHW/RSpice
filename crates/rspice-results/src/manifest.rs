@@ -846,7 +846,7 @@ mod tests {
             PreparedSourceCheckReceipt,
         },
     };
-    use rspice_app_types::product::{
+    use rspice_vocabulary::product::{
         AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId,
     };
     type SimulationRun = crate::run::SimulationRun<AnalysisResult>;

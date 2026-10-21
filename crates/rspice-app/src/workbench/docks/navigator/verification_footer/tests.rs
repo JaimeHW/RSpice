@@ -1031,7 +1031,7 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
 
     // "Copy value" states the x unit and follows Copied values, at full
     // precision either way.
-    use rspice_app_types::quantity::{CopiedValueFormat, QuantityPresentationPolicy};
+    use rspice_vocabulary::quantity::{CopiedValueFormat, QuantityPresentationPolicy};
     let last = |copied_value_format| {
         let policy = QuantityPresentationPolicy {
             copied_value_format,

@@ -109,7 +109,6 @@ pub use rspice_results::transfer_function::{
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping};
-pub use rspice_app_types::hierarchy_path::OccurrenceProbeSpelling;
 pub use rspice_results::executed_deck::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason,
 };
@@ -140,6 +139,7 @@ pub use rspice_results::specification::PreparedSpecification;
 pub use rspice_results::specification::PreparedSpecificationPolicy;
 pub use rspice_results::specification_verdict::SpecificationVerdictStatus;
 pub use rspice_results::waveform::SharedWaveformValues;
+pub use rspice_vocabulary::hierarchy_path::OccurrenceProbeSpelling;
 pub use run::SimulationRun;
 pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
 pub(crate) use rspice_results::run_history::RunHistoryRevision;

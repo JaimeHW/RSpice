@@ -826,8 +826,8 @@ pub(crate) struct WorkerHbSpectrumTransport {
     node_name: String,
     real: WorkerF64Series,
     imaginary: WorkerF64Series,
-    real_digest: rspice_app_types::product::ContentDigest,
-    imaginary_digest: rspice_app_types::product::ContentDigest,
+    real_digest: rspice_vocabulary::product::ContentDigest,
+    imaginary_digest: rspice_vocabulary::product::ContentDigest,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -835,8 +835,8 @@ pub(crate) struct WorkerHbBranchSpectrumTransport {
     branch_name: String,
     real: WorkerF64Series,
     imaginary: WorkerF64Series,
-    real_digest: rspice_app_types::product::ContentDigest,
-    imaginary_digest: rspice_app_types::product::ContentDigest,
+    real_digest: rspice_vocabulary::product::ContentDigest,
+    imaginary_digest: rspice_vocabulary::product::ContentDigest,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -844,8 +844,8 @@ pub(crate) struct WorkerHbIntegralSpectrumTransport {
     name: String,
     real: WorkerF64Series,
     imaginary: WorkerF64Series,
-    real_digest: rspice_app_types::product::ContentDigest,
-    imaginary_digest: rspice_app_types::product::ContentDigest,
+    real_digest: rspice_vocabulary::product::ContentDigest,
+    imaginary_digest: rspice_vocabulary::product::ContentDigest,
 }
 
 /// Scalar HB basis metadata plus transferable complex spectral rows.
@@ -860,7 +860,7 @@ pub(crate) struct WorkerHbOperatingPointTransport {
     integral_spectra: Vec<WorkerHbIntegralSpectrumTransport>,
     iterations: usize,
     residual_norm: f64,
-    state_digest: rspice_app_types::product::ContentDigest,
+    state_digest: rspice_vocabulary::product::ContentDigest,
 }
 
 impl WorkerHbOperatingPointTransport {
@@ -1166,7 +1166,7 @@ pub(crate) enum WorkerSimulationResultTransport {
         mna_node_names: Vec<String>,
         mna_branch_names: Vec<String>,
         mna_solution: WorkerF64Series,
-        mna_solution_digest: rspice_app_types::product::ContentDigest,
+        mna_solution_digest: rspice_vocabulary::product::ContentDigest,
         node_voltages: HashMap<String, f64>,
         branch_currents: HashMap<String, f64>,
         device_report: Option<WorkerDeviceOpReport>,

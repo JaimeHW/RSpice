@@ -16,8 +16,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::preparation::{PreparationError, PreparationStage};
-use rspice_app_types::hierarchy_path::{InstancePath, OccurrenceProbeSpelling};
-use rspice_app_types::product::{SavedOutputId, SimulationPlanId};
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 use rspice_design::library::{LibraryCatalog, ViewType};
 use rspice_design::projection::DesignProjection;
@@ -32,6 +30,8 @@ use rspice_simulation_contract::output_policy::OutputSelectionMode;
 use rspice_simulation_contract::saved_output::{
     SavedOutput, SavedOutputCompatibility, SavedOutputOrigin,
 };
+use rspice_vocabulary::hierarchy_path::{InstancePath, OccurrenceProbeSpelling};
+use rspice_vocabulary::product::{SavedOutputId, SimulationPlanId};
 
 const AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT: usize = 16;
 const AUTOMATIC_OUTPUT_HARD_LIMIT: usize = 32;

@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-pub use rspice_app_types::property::{
+pub use rspice_vocabulary::property::{
     DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
     VisibilityCondition, format_engineering,
 };
@@ -45,7 +45,9 @@ impl Default for PropertyCatalog {
     }
 }
 
-pub use rspice_app_types::quantity::{format_engineering_display, format_engineering_display_with};
+pub use rspice_vocabulary::quantity::{
+    format_engineering_display, format_engineering_display_with,
+};
 
 // =============================================================================
 // Tests

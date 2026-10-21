@@ -10,7 +10,7 @@ use crate::visualization_document::{
     AccessibleColorPalette, FamilyAggregationMethod, FamilyDimension as DocumentFamilyDimension,
     FamilyEncodingMap, FamilyPresentationPolicy, FamilyXOrdering,
 };
-use rspice_app_types::product::DatasetId;
+use rspice_vocabulary::product::DatasetId;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};

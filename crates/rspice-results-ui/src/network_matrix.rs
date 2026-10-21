@@ -2,12 +2,12 @@
 
 use crate::waveform::WaveformData;
 use egui::Ui;
-use rspice_app_types::quantity::AngleDisplay;
 use rspice_results::{
     analysis_result::AnalysisResult,
     analysis_type::AnalysisType,
     network_matrix::{NetworkLayout, channel_label, channel_reference},
 };
+use rspice_vocabulary::quantity::AngleDisplay;
 
 /// Disposable local controls for one source-qualified matrix session.
 #[derive(Debug, Clone)]

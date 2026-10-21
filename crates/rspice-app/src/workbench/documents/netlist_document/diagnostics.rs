@@ -12,7 +12,7 @@ pub const MAX_NETLIST_DIAGNOSTICS: usize = 1_000_000;
 /// Severity levels shown by the gutter, strip, and syntax highlighter: the
 /// shared source-diagnostic severity, so an editor finding and a compiler
 /// service finding rank and serialize alike.
-pub use rspice_app_types::diagnostics::DiagnosticSeverity;
+pub use rspice_vocabulary::diagnostics::DiagnosticSeverity;
 
 /// A single quick fix candidate for a diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -26,7 +26,7 @@ pub struct DiagnosticFix {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Diagnostic {
     #[serde(flatten)]
-    pub(crate) canonical: rspice_app_types::diagnostics::CanonicalDiagnosticMetadata,
+    pub(crate) canonical: rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata,
     pub severity: DiagnosticSeverity,
     /// Physical source that owns this diagnostic. `None` identifies the
     /// in-memory editor buffer. Included-source diagnostics retain their path
@@ -58,7 +58,7 @@ impl Diagnostic {
     ) -> Self {
         let message = message.into();
         Self {
-            canonical: rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
+            canonical: rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata::current(
                 std::sync::Arc::<str>::from(producer.into()),
                 std::sync::Arc::<str>::from(code.into()),
                 "netlist-editor",
@@ -134,13 +134,13 @@ impl Diagnostic {
             || "netlist-editor".to_owned(),
             |path| path.to_string_lossy().into_owned(),
         );
-        let range = rspice_app_types::diagnostics::diagnostic_range(
+        let range = rspice_vocabulary::diagnostics::diagnostic_range(
             self.span.as_ref(),
             self.line.or(self.source_line),
             self.column,
         );
         let old = self.canonical.clone();
-        self.canonical = rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
+        self.canonical = rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata::current(
             old.source,
             old.code,
             document_id.clone(),
@@ -154,16 +154,16 @@ impl Diagnostic {
             .fix
             .as_ref()
             .and_then(|fix| {
-                let range = rspice_app_types::diagnostics::diagnostic_range(
+                let range = rspice_vocabulary::diagnostics::diagnostic_range(
                     Some(&fix.span),
                     self.line.or(self.source_line),
                     self.column,
                 )?;
-                Some(vec![rspice_app_types::diagnostics::CanonicalQuickFix {
+                Some(vec![rspice_vocabulary::diagnostics::CanonicalQuickFix {
                     fix_id: format!("{}:fix:0", self.canonical.diagnostic_id),
                     label: fix.label.clone(),
                     preferred: true,
-                    edits: vec![rspice_app_types::diagnostics::DiagnosticTextEdit {
+                    edits: vec![rspice_vocabulary::diagnostics::DiagnosticTextEdit {
                         document_id,
                         range,
                         replacement: fix.replacement.clone(),
@@ -293,7 +293,7 @@ impl NetlistDiagnosticCollection {
     pub fn mark_all_stale(&mut self) {
         for diagnostic in &mut self.records {
             diagnostic.canonical.mark_currentness(
-                rspice_app_types::diagnostics::DiagnosticCurrentness::StaleSource,
+                rspice_vocabulary::diagnostics::DiagnosticCurrentness::StaleSource,
             );
         }
         self.severity_by_line.clear();
@@ -820,7 +820,7 @@ mod tests {
         ];
         records[2]
             .canonical
-            .mark_currentness(rspice_app_types::diagnostics::DiagnosticCurrentness::StaleSource);
+            .mark_currentness(rspice_vocabulary::diagnostics::DiagnosticCurrentness::StaleSource);
         let diagnostics = NetlistDiagnosticCollection::try_new(records, "").unwrap();
 
         assert_eq!(
@@ -1025,7 +1025,7 @@ mod tests {
         let mut stale = Diagnostic::error("old").with_line(Some(3));
         stale
             .canonical
-            .mark_currentness(rspice_app_types::diagnostics::DiagnosticCurrentness::StaleSource);
+            .mark_currentness(rspice_vocabulary::diagnostics::DiagnosticCurrentness::StaleSource);
         let diagnostics = NetlistDiagnosticCollection::try_new(
             vec![
                 Diagnostic::current(

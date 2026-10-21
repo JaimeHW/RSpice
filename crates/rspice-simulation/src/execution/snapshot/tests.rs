@@ -57,7 +57,7 @@ fn pvt_selected_operating_point_controls_reach_each_worker_and_solve() {
             temperature_task(vec![27.0, 125.0])
         } else {
             corner_task(
-                vec![rspice_app_types::product::ProcessCorner::TT],
+                vec![rspice_vocabulary::product::ProcessCorner::TT],
                 vec![1.0],
                 vec![27.0, 125.0],
                 true,
@@ -194,7 +194,7 @@ fn monte_carlo_task() -> QueuedAnalysis {
 }
 
 fn corner_task(
-    process_corners: Vec<rspice_app_types::product::ProcessCorner>,
+    process_corners: Vec<rspice_vocabulary::product::ProcessCorner>,
     voltages: Vec<f64>,
     temperatures_c: Vec<f64>,
     full_matrix: bool,
@@ -222,7 +222,7 @@ fn corner_task(
 }
 
 fn corner_binding(
-    process: rspice_app_types::product::ProcessCorner,
+    process: rspice_vocabulary::product::ProcessCorner,
     source_label: &str,
     saturation_current: &str,
 ) -> rspice_model_library::CornerModelBinding {
@@ -799,7 +799,7 @@ fn reference_only_run_set_preserves_an_analysis_owned_temperature_declaration() 
 }
 
 fn project_runtime() -> crate::veriloga::PreparedVerilogARuntime {
-    let project_id = rspice_app_types::product::ProjectId::new();
+    let project_id = rspice_vocabulary::product::ProjectId::new();
     let bundle = rspice_design::project_sources::ProjectSourceBundle::try_new(
             rspice_design::project_sources::ProjectSourceOwner::code_workspace(
                 rspice_design::project_sources::ProjectSourceLanguage::VerilogA,
@@ -1321,7 +1321,7 @@ fn model_identity_set_order_does_not_change_snapshot_identity() {
 
 #[test]
 fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
     let mut matrix = parts();
     let mut corner = corner_task(
         vec![ProcessCorner::TT, ProcessCorner::FF],
@@ -1381,7 +1381,7 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
 /// every point — still pairs with any length.
 #[test]
 fn a_diagonal_corner_sweep_refuses_unequal_axes_and_shares_a_scalar_one() {
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
 
     let mut unequal = parts();
     let mut corner = corner_task(
@@ -1534,7 +1534,7 @@ fn pvt_operating_point_dispatches_three_exact_temperatures_and_retains_only_fina
 
 #[test]
 fn op_plus_ss_corner_has_no_unrequested_reference_point() {
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
 
     let mut ss_corner = corner_task(vec![ProcessCorner::SS], vec![0.9], vec![125.0], true);
     ss_corner
@@ -1565,7 +1565,7 @@ fn op_plus_ss_corner_has_no_unrequested_reference_point() {
 
 #[test]
 fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
 
     let mut corner = corner_task(
         vec![ProcessCorner::TT, ProcessCorner::SS],
@@ -1682,7 +1682,7 @@ fn downstream_ordering_dependency_targets_the_final_expanded_op_point() {
 
 #[test]
 fn identical_coordinates_with_different_model_contracts_do_not_deduplicate() {
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
 
     let corner_with = |label: &str, saturation_current: &str| {
         let mut corner = corner_task(vec![ProcessCorner::TT], vec![1.0], vec![27.0], true);
@@ -2217,7 +2217,7 @@ fn expanded_op_points_are_attributed_and_an_unexpanded_task_is_not() {
 /// scoped to nominal cannot be answered by a derated point.
 #[test]
 fn a_corner_axis_marks_exactly_one_point_nominal_and_names_its_contract() {
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
 
     let mut corner = corner_task(
         vec![ProcessCorner::TT, ProcessCorner::SS],
@@ -2284,7 +2284,7 @@ const CORNER_EVIDENCE_DECK: &str = "corner evidence\n\
 /// whole space.
 fn transient_corner_task() -> QueuedAnalysis {
     use crate::sweeps::{CornerBaseMode, CornerRunConfig};
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
 
     QueuedAnalysis {
         numeric_override: None,

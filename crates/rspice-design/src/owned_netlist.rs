@@ -37,7 +37,7 @@ impl OwnedNetlistEditStrategy {
 #[serde(deny_unknown_fields)]
 pub struct OwnedNetlistSaveRecord {
     pub document_revision: u64,
-    pub content_digest: rspice_app_types::product::ContentDigest,
+    pub content_digest: rspice_vocabulary::product::ContentDigest,
     pub message: String,
 }
 
@@ -51,7 +51,7 @@ pub const MAX_OWNED_NETLIST_HISTORY_BYTES: usize = 16 * 1024 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct OwnedNetlistRevisionSnapshot {
     pub document_revision: u64,
-    pub content_digest: rspice_app_types::product::ContentDigest,
+    pub content_digest: rspice_vocabulary::product::ContentDigest,
     pub source: String,
     #[serde(default)]
     pub dependencies: Vec<crate::netlist_document::DependencyMetadata>,
@@ -77,7 +77,7 @@ pub struct OwnedNetlistIncludeDescriptor {
     pub logical_identity: String,
     pub display_name: String,
     pub revision: u64,
-    pub content_digest: rspice_app_types::product::ContentDigest,
+    pub content_digest: rspice_vocabulary::product::ContentDigest,
 }
 
 impl OwnedNetlistIncludeDescriptor {

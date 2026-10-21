@@ -1,10 +1,10 @@
 //! Host file access and editor snapshots around the canonical project codec.
 
 pub use crate::state::project_snapshot::ProjectSnapshot;
-use rspice_app_types::product::ContentDigest;
 pub use rspice_formats::project_results::*;
 use rspice_project::persistence::ProjectBytes;
 pub use rspice_project::{MAX_PROJECT_FILE_BYTES, ProjectIoError};
+use rspice_vocabulary::product::ContentDigest;
 #[cfg(any(not(target_arch = "wasm32"), test))]
 use std::path::PathBuf;
 use std::{fs::File, path::Path};

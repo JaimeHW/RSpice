@@ -40,8 +40,6 @@ use super::sources::{
     SemanticPlot, SemanticPoint, SemanticReport, SemanticReportFigure, SemanticResultSummary,
     SemanticSchematic, SemanticTable,
 };
-use rspice_app_types::product::ContentDigest;
-use rspice_app_types::product::ObjectRevision;
 use rspice_design::schematic::{
     component::Component, documentation_shape::DocumentationShapeGeometry,
 };
@@ -63,6 +61,8 @@ use rspice_hardcopy_contract::{
 };
 use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyPlanId};
 use rspice_results::report_document::{FigureSizing, ReportBlock, ReportBlockKind, TableCell};
+use rspice_vocabulary::product::ContentDigest;
+use rspice_vocabulary::product::ObjectRevision;
 
 const MICROMETRES_PER_INCH: u64 = 25_400;
 const POINTS_PER_INCH: f64 = 72.0;

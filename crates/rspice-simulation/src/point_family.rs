@@ -29,10 +29,10 @@ use crate::sweeps::{
     CornerBaseMode, CornerPoint, SweepPointResult, corner_family_of_points, point_node_values,
     temperature_family_of_points,
 };
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::run::SimulationRun;
 use rspice_results::waveform::RetainedWaveform;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 /// Ground, which the sweep mappers require at index 0 and never plot.
 const GROUND_NODE: &str = "0";

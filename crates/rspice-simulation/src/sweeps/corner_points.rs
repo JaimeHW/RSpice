@@ -106,7 +106,7 @@ pub(super) fn expand_corner_points(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
 
     #[test]
     fn full_corner_matrix_obeys_configured_batch_limit_before_allocation() {

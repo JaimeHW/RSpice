@@ -14,43 +14,43 @@ ROOT = Path(__file__).resolve().parents[2]
 # their own boundaries; these rows forbid a new extracted crate reaching up.
 ALLOWED: dict[str, set[str]] = {
     "rspice-units": set(),
-    "rspice-app-types": set(),
-    "rspice-results": {"rspice-app-types", "rspice-units"},
-    "rspice-model-library": {"rspice-app-types", "rspice-results"},
+    "rspice-vocabulary": set(),
+    "rspice-results": {"rspice-vocabulary", "rspice-units"},
+    "rspice-model-library": {"rspice-vocabulary", "rspice-results"},
     "rspice-simulation-contract": {
-        "rspice-app-types", "rspice-results", "rspice-model-library",
+        "rspice-vocabulary", "rspice-results", "rspice-model-library",
     },
-    "rspice-hardcopy-contract": {"rspice-app-types", "rspice-results"},
+    "rspice-hardcopy-contract": {"rspice-vocabulary", "rspice-results"},
     "rspice-design": {
-        "rspice-app-types", "rspice-model-library", "rspice-hardcopy-contract",
+        "rspice-vocabulary", "rspice-model-library", "rspice-hardcopy-contract",
     },
     "rspice-project-contract": {
-        "rspice-app-types", "rspice-design", "rspice-model-library",
+        "rspice-vocabulary", "rspice-design", "rspice-model-library",
     },
     "rspice-project": {
         "rspice-project-contract",
-        "rspice-app-types", "rspice-design", "rspice-model-library",
+        "rspice-vocabulary", "rspice-design", "rspice-model-library",
         "rspice-simulation-contract", "rspice-results", "rspice-hardcopy-contract",
         "rspice-formats",
     },
-    "rspice-formats": {"rspice-app-types", "rspice-results", "rspice-model-library"},
+    "rspice-formats": {"rspice-vocabulary", "rspice-results", "rspice-model-library"},
     "rspice-simulation": {
         "rspice-project-contract",
-        "rspice-app-types", "rspice-design", "rspice-model-library",
+        "rspice-vocabulary", "rspice-design", "rspice-model-library",
         "rspice-simulation-contract", "rspice-results", "rspice-formats",
     },
     "rspice-hardcopy": {
-        "rspice-app-types", "rspice-hardcopy-contract", "rspice-design", "rspice-project-contract",
+        "rspice-vocabulary", "rspice-hardcopy-contract", "rspice-design", "rspice-project-contract",
         "rspice-results", "rspice-formats",
     },
-    "rspice-ui-kit": {"rspice-app-types", "rspice-results"},
+    "rspice-ui-kit": {"rspice-vocabulary", "rspice-results"},
     "rspice-schematic-editor": {
-        "rspice-app-types", "rspice-design", "rspice-model-library",
+        "rspice-vocabulary", "rspice-design", "rspice-model-library",
         "rspice-ui-kit", "rspice-simulation-contract",
     },
-    "rspice-results-ui": {"rspice-app-types", "rspice-results", "rspice-ui-kit"},
+    "rspice-results-ui": {"rspice-vocabulary", "rspice-results", "rspice-ui-kit"},
     "rspice-worker": {
-        "rspice-app-types", "rspice-results", "rspice-model-library",
+        "rspice-vocabulary", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
         "rspice-project-contract", "rspice-formats", "rspice-simulation", "rspice-hardcopy",
     },
@@ -88,7 +88,7 @@ def violations(
                 issues.append(f"{name} reaches GUI package {dep}")
         if name in {"rspice-simulation", "rspice-project-contract", "rspice-worker"} and "rspice-project" in closure:
             issues.append(f"{name} reaches project aggregate rspice-project")
-        if name in {"rspice-app-types", "rspice-units"}:
+        if name in {"rspice-vocabulary", "rspice-units"}:
             for dep in sorted(
                 dep for dep in closure
                 if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-")

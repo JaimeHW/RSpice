@@ -17,10 +17,6 @@ use crate::output_contract::precision_tag;
 use crate::output_contract::streaming_tag;
 use crate::preparation::QueuedAnalysis;
 pub use crate::preparation::touchstone::TouchstoneExportPolicy;
-use rspice_app_types::product::ProcessCorner;
-use rspice_app_types::product::{
-    AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId,
-};
 use rspice_results::run_receipt::HierarchyMapRow;
 use rspice_results::run_receipt::PreparedModelSourceIdentity;
 use rspice_results::run_receipt::PreparedSourceCheckReceipt;
@@ -29,6 +25,10 @@ use rspice_results::specification::PreparedSpecificationPolicy;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::numeric_override::AnalysisNumericOverride;
 use rspice_simulation_contract::run_set::{RunSetDimensionKind, RunSetState};
+use rspice_vocabulary::product::ProcessCorner;
+use rspice_vocabulary::product::{
+    AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId,
+};
 // The receipt's source domain is named by `snapshot/run_receipt.rs`; the
 // snapshot suite reaches it through this module's glob.
 #[cfg(test)]
@@ -42,7 +42,7 @@ use crate::execution_identity::analysis_config_digest;
 use crate::prepared_dependency::ExecutionArtifactError;
 use crate::prepared_dependency::ExecutionArtifactKind;
 use crate::prepared_dependency::validate_prepared_dependency_contract_with_options;
-use rspice_app_types::canonical::CanonicalWriter;
+use rspice_vocabulary::canonical::CanonicalWriter;
 
 pub(crate) mod bound_cards;
 mod corner_veriloga;
@@ -303,7 +303,7 @@ pub struct PreparedTask {
     instance_id: AnalysisInstanceId,
     /// How `instance_id` was derived, for a task the run expanded rather than
     /// the plan authored. See `snapshot/derived_identity.rs`.
-    derivation: Option<rspice_app_types::product::DerivedAnalysisIdentity>,
+    derivation: Option<rspice_vocabulary::product::DerivedAnalysisIdentity>,
     authored_instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
@@ -607,7 +607,7 @@ pub struct AuthorizedTaskDispatch {
     instance_id: AnalysisInstanceId,
     /// Carried through authorization so the receipt dispatch seals says the
     /// same thing about identity as the one preflight sealed.
-    derivation: Option<rspice_app_types::product::DerivedAnalysisIdentity>,
+    derivation: Option<rspice_vocabulary::product::DerivedAnalysisIdentity>,
     authored_instance_id: AnalysisInstanceId,
     source_revision: ObjectRevision,
     dependencies: Vec<AnalysisInstanceId>,
@@ -2153,11 +2153,11 @@ fn corner_contract_digest(contract: &crate::sweeps::CornerRunConfig) -> ContentD
     writer.sequence(contract.model_bindings.len());
     for binding in &contract.model_bindings {
         writer.u8(match binding.process {
-            rspice_app_types::product::ProcessCorner::TT => 0,
-            rspice_app_types::product::ProcessCorner::SS => 1,
-            rspice_app_types::product::ProcessCorner::FF => 2,
-            rspice_app_types::product::ProcessCorner::SF => 3,
-            rspice_app_types::product::ProcessCorner::FS => 4,
+            rspice_vocabulary::product::ProcessCorner::TT => 0,
+            rspice_vocabulary::product::ProcessCorner::SS => 1,
+            rspice_vocabulary::product::ProcessCorner::FF => 2,
+            rspice_vocabulary::product::ProcessCorner::SF => 3,
+            rspice_vocabulary::product::ProcessCorner::FS => 4,
         });
         writer.string(&binding.source_label);
         writer.option(binding.section.as_ref(), |writer, section| {

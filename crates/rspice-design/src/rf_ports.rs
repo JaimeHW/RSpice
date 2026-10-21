@@ -97,7 +97,7 @@ pub fn rf_ports(schematic: &impl AsRef<SchematicDocument>) -> Vec<RfPort> {
 fn port_number(params: &HashMap<String, String>) -> u32 {
     params
         .get("port")
-        .and_then(|raw| rspice_app_types::quantity::parse_engineering_value(raw).ok())
+        .and_then(|raw| rspice_vocabulary::quantity::parse_engineering_value(raw).ok())
         .filter(|number| *number >= 1.0)
         .map_or(1, |number| number.round() as u32)
 }
@@ -115,8 +115,8 @@ fn reference_impedance(params: &HashMap<String, String>) -> String {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .unwrap_or("50");
-    rspice_app_types::quantity::parse_engineering_value(raw)
-        .map(rspice_app_types::property::format_engineering)
+    rspice_vocabulary::quantity::parse_engineering_value(raw)
+        .map(rspice_vocabulary::property::format_engineering)
         .unwrap_or_else(|_| raw.to_owned())
 }
 

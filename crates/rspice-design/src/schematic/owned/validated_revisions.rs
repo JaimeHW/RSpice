@@ -1,7 +1,7 @@
 //! Validated revision records and guarded journal rollback belong to the design.
 use super::super::{document::SchematicDocument, validated_revision::*};
 use super::{Schematic, SchematicSnapshot};
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 impl Schematic {
     fn validated_revision_source(&self) -> ValidatedRevisionSource<'_> {
         ValidatedRevisionSource {

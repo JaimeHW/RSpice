@@ -16,9 +16,9 @@
 
 use std::sync::Arc;
 
-use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
 use rspice_design::connectivity::summary::DesignNet;
 use rspice_simulation::execution::{EngineRefusal, EngineRefusalKind, RefusedTask};
+use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
 
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::NumericOverrideOption;

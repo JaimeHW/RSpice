@@ -8,11 +8,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use egui::Ui;
-use rspice_app_types::product::DatasetId;
 #[cfg(test)]
 use rspice_results::network_matrix::channel_reference;
 use rspice_results::network_matrix::{NetworkLayout, resolve};
 use rspice_results_ui::network_matrix as view;
+use rspice_vocabulary::product::DatasetId;
 #[cfg(test)]
 use view::{formatted, magnitude_db};
 

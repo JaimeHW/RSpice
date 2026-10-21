@@ -110,7 +110,7 @@ pub enum AnalysisSpec {
         selected_devices: Vec<String>,
         previous_state: Option<OpPreviousState>,
         violation_devices: Vec<String>,
-        violation_source_content_digest: Option<rspice_app_types::product::ContentDigest>,
+        violation_source_content_digest: Option<rspice_vocabulary::product::ContentDigest>,
         run_point: OpRunPointContext,
     },
     /// DC sweep

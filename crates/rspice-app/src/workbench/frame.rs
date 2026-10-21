@@ -1228,8 +1228,11 @@ mod tests {
     }
 
     /// One line in a run's own log.
-    fn run_log_line(severity: LogSeverity, message: &str) -> rspice_app_types::run_log::RunLogLine {
-        rspice_app_types::run_log::RunLogLine {
+    fn run_log_line(
+        severity: LogSeverity,
+        message: &str,
+    ) -> rspice_vocabulary::run_log::RunLogLine {
+        rspice_vocabulary::run_log::RunLogLine {
             unix_ms: 0,
             severity,
             source: LogSource::Run,

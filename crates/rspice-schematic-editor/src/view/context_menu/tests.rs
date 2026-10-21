@@ -27,7 +27,7 @@ fn an_open_popup_cannot_retarget_its_action_when_the_source_or_selection_changes
         let mut view = ContextMenuView {
             binding: ContextMenuBinding {
                 source: EditorRequestSource {
-                    project: rspice_app_types::product::ProjectId::new(),
+                    project: rspice_vocabulary::product::ProjectId::new(),
                     document: rspice_design_model::cell_view::CellViewRef::new(
                         "work",
                         "amp",

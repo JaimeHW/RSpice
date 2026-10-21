@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use rspice_app_types::product::{ObjectRevision, ProcessCorner};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{
     IncludeProcessor, NetlistParseOptions, ParseError, ParseWithAbortError,
@@ -11,6 +10,7 @@ use rspice_core::netlist::{
 };
 use rspice_core::{ResourceKind, ResourceLimitError, ResourceLimits};
 use rspice_simulation_contract::saved_output::SavedOutput;
+use rspice_vocabulary::product::{ObjectRevision, ProcessCorner};
 
 use super::{
     ExecutionTargetCapabilities, HeadlessTaskRequest, PreparedRunSnapshot, PreparedTask,

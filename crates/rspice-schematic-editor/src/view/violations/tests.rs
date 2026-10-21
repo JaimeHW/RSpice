@@ -106,7 +106,7 @@ fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
         DrcViolationType::UnconnectedPin,
         "a finding in another cellview",
         DrcLocation::InsideInstance {
-            path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1").expect("path"),
+            path: rspice_vocabulary::hierarchy_path::InstancePath::parse("/X1").expect("path"),
             view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
             inner: Box::new(DrcLocation::Point { x: 4.0, y: 8.0 }),
         },

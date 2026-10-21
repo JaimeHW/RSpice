@@ -4,7 +4,6 @@ use super::HistogramState;
 use crate::presentation::{PlotView, well_hint};
 use crate::strip::{self, LegendChip};
 use egui::Ui;
-use rspice_app_types::source_revision::SourceRevision;
 use rspice_results::histogram::display::{HistogramDisplay, hist_axis};
 use rspice_results::histogram::{Histogram, HistogramDisplayMode, SampleMoments};
 use rspice_results::monte_carlo::{MonteCarloMeanConfidence, MonteCarloMeanInterval};
@@ -16,6 +15,7 @@ use rspice_ui_kit::panels::{
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si, fmt_si_readout};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_vocabulary::source_revision::SourceRevision;
 
 /// Why the host cannot supply a qualified selected distribution.
 #[derive(Clone, Copy)]

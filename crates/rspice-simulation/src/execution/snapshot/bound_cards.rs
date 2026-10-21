@@ -102,7 +102,7 @@ pub(crate) fn attach_bound_observation_cards(
 /// it is bound to, at its card's one time.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct BoundStateReader {
-    pub(crate) reader: rspice_app_types::product::AnalysisInstanceId,
+    pub(crate) reader: rspice_vocabulary::product::AnalysisInstanceId,
     pub(crate) time_s: f64,
 }
 
@@ -215,7 +215,7 @@ fn shared_transient_stop(
 /// the executed-deck archive shows, for the recorded spectrum, the deck that
 /// actually produced it.
 pub(crate) fn splice_bound_observation_cards(tasks: &mut [PreparedTask], run_level_deck: &str) {
-    let mut producer_decks: Vec<(rspice_app_types::product::AnalysisInstanceId, String)> =
+    let mut producer_decks: Vec<(rspice_vocabulary::product::AnalysisInstanceId, String)> =
         Vec::new();
     for task in tasks.iter_mut() {
         if task.bound_observation_cards().is_empty() {

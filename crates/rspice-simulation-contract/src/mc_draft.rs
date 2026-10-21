@@ -7,8 +7,8 @@
 
 use crate::mc_statistics::is_parameter_name;
 use crate::{mc_checkpoint as checkpoint, mc_statistics as statistics};
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_results::monte_carlo::MonteCarloMeanMethod;
+use rspice_vocabulary::product::AnalysisInstanceId;
 use serde::{Deserialize, Deserializer};
 use statistics::{McCorrelationDraft, McStatisticsConfig, McVariationDraft};
 

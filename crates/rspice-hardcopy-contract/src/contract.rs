@@ -22,7 +22,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision, RevisionError};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, RevisionError};
 
 const HARDCOPY_SCHEMA_VERSION: u32 = 1;
 const SETUP_STORE_SCHEMA_VERSION: u32 = 1;

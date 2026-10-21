@@ -8,7 +8,7 @@ retains. `rspice-project` stores these records in the project file, and
 `tools/ci/check_app_crate_dependencies.py` does not allow `rspice-project` to
 depend on `rspice-hardcopy`, which carries the PDF, SVG and raster backends;
 the contract is its own crate so the project file and the renderer read one
-definition. The check allows this crate only `rspice-app-types` and
+definition. The check allows this crate only `rspice-vocabulary` and
 `rspice-results` among the application crates, and refuses egui, eframe,
 winit, wgpu and rfd in its closure.
 

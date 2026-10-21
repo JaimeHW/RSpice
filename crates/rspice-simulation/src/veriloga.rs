@@ -73,8 +73,8 @@ impl From<PreparedRuntimeError> for String {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PreparedVerilogARuntime {
     source_key: String,
-    source_digest: rspice_app_types::product::ContentDigest,
-    artifact_digest: rspice_app_types::product::ContentDigest,
+    source_digest: rspice_vocabulary::product::ContentDigest,
+    artifact_digest: rspice_vocabulary::product::ContentDigest,
     module_name: String,
     netlist_alias: String,
     model_json: String,
@@ -101,7 +101,7 @@ impl PreparedVerilogARuntime {
     /// The host must validate live project or catalog authority before calling.
     pub fn try_from_runtime_report(
         source_key: String,
-        source_digest: rspice_app_types::product::ContentDigest,
+        source_digest: rspice_vocabulary::product::ContentDigest,
         module_name: &str,
         report: &rspice_veriloga::RuntimeCompileReport,
         netlist_alias: impl Into<String>,
@@ -134,7 +134,7 @@ impl PreparedVerilogARuntime {
 
     pub fn try_from_virtual_compilation(
         source_key: String,
-        source_digest: rspice_app_types::product::ContentDigest,
+        source_digest: rspice_vocabulary::product::ContentDigest,
         netlist_alias: String,
         compilation: &rspice_veriloga::VirtualRuntimeCompilation,
     ) -> Result<Self, PreparedRuntimeError> {
@@ -170,7 +170,7 @@ impl PreparedVerilogARuntime {
 
     fn try_from_signed_pdk_compilation(
         package: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
-        archive_digest: rspice_app_types::product::ContentDigest,
+        archive_digest: rspice_vocabulary::product::ContentDigest,
         binding: &crate::pdk::SealedPdkVerilogABinding,
         compilation: &rspice_veriloga::VirtualRuntimeCompilation,
     ) -> Result<Self, PreparedRuntimeError> {
@@ -249,11 +249,11 @@ impl PreparedVerilogARuntime {
         &self.source_key
     }
 
-    pub const fn source_digest(&self) -> rspice_app_types::product::ContentDigest {
+    pub const fn source_digest(&self) -> rspice_vocabulary::product::ContentDigest {
         self.source_digest
     }
 
-    pub const fn artifact_digest(&self) -> rspice_app_types::product::ContentDigest {
+    pub const fn artifact_digest(&self) -> rspice_vocabulary::product::ContentDigest {
         self.artifact_digest
     }
 
@@ -296,7 +296,7 @@ impl PreparedVerilogARuntime {
 pub struct PreparedVerilogASourceBinding<'a> {
     source_key: &'a str,
     netlist_alias: &'a str,
-    artifact_digest: rspice_app_types::product::ContentDigest,
+    artifact_digest: rspice_vocabulary::product::ContentDigest,
     is_connection_library: bool,
 }
 
@@ -307,7 +307,7 @@ impl<'a> PreparedVerilogASourceBinding<'a> {
     pub fn netlist_alias(&self) -> &'a str {
         self.netlist_alias
     }
-    pub fn artifact_digest(&self) -> rspice_app_types::product::ContentDigest {
+    pub fn artifact_digest(&self) -> rspice_vocabulary::product::ContentDigest {
         self.artifact_digest
     }
     pub fn provenance_label(&self) -> String {
@@ -368,7 +368,7 @@ impl PreparedVerilogARuntimeSet {
         }
         let mut keys = std::collections::HashSet::new();
         let mut aliases =
-            std::collections::HashMap::<String, rspice_app_types::product::ContentDigest>::new();
+            std::collections::HashMap::<String, rspice_vocabulary::product::ContentDigest>::new();
         for source in self.sources() {
             if !keys.insert(source.source_key.to_ascii_lowercase()) {
                 return Err(format!(
@@ -523,7 +523,7 @@ impl PreparedVerilogARuntimeSet {
 
 pub fn compile_signed_pdk_source_runtime(
     package: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
-    archive_digest: rspice_app_types::product::ContentDigest,
+    archive_digest: rspice_vocabulary::product::ContentDigest,
     artifacts: &[crate::pdk::SealedPdkVerilogAArtifact],
     binding: &crate::pdk::SealedPdkVerilogABinding,
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
@@ -536,7 +536,7 @@ pub fn compile_signed_pdk_source_runtime(
     let mut root_seen = false;
     let mut files = Vec::with_capacity(artifacts.len());
     for artifact in artifacts {
-        let actual = rspice_app_types::product::ContentDigest::from_bytes(
+        let actual = rspice_vocabulary::product::ContentDigest::from_bytes(
             Sha256::digest(artifact.source.as_bytes()).into(),
         );
         if actual != artifact.digest {
@@ -640,7 +640,7 @@ pub fn compile_model_library_source_runtimes(
                 ))
             })?;
         let module_names = prepared.module_names().collect::<Vec<_>>();
-        let root_identity = rspice_app_types::product::ContentDigest::from_bytes(
+        let root_identity = rspice_vocabulary::product::ContentDigest::from_bytes(
             Sha256::digest(root_path.as_bytes()).into(),
         );
         for root in roots {
@@ -819,12 +819,12 @@ where
 
 fn runtime_artifact_digest(
     source_key: &str,
-    source_digest: rspice_app_types::product::ContentDigest,
+    source_digest: rspice_vocabulary::product::ContentDigest,
     module_name: &str,
     netlist_alias: &str,
     model_json: &str,
     canonical_ir_json: &str,
-) -> rspice_app_types::product::ContentDigest {
+) -> rspice_vocabulary::product::ContentDigest {
     let mut hasher = Sha256::new();
     hasher.update(b"rspice.project-veriloga-runtime/v2\0");
     for bytes in [
@@ -838,7 +838,7 @@ fn runtime_artifact_digest(
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
     }
-    rspice_app_types::product::ContentDigest::from_bytes(hasher.finalize().into())
+    rspice_vocabulary::product::ContentDigest::from_bytes(hasher.finalize().into())
 }
 
 fn valid_sealed_source_key(key: &str) -> bool {

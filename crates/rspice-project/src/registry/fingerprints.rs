@@ -6,9 +6,9 @@ use super::{
     result_fingerprint,
 };
 use crate::ProjectFile;
-use rspice_app_types::product::ContentDigest;
 use rspice_design::project_sources::ProjectSourceOwner;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::product::ContentDigest;
 use std::collections::{HashMap, HashSet};
 
 #[cfg(any(test, feature = "document-fingerprint-observation"))]

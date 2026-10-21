@@ -24,8 +24,8 @@ use crate::schematic::component_references::{InstanceReference, resolve_instance
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::port::{PortDirection, PortSpec};
-use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::hierarchy_path::InstancePath;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 mod walk;
@@ -1116,8 +1116,8 @@ fn exact_numeric_constant(definition: &PropertyDefinition, value: &PropertyValue
     crate::properties::value::parse_expression_source(
         &unconstrained,
         source,
-        rspice_app_types::quantity::QuantityPresentationPolicy::default(),
-        rspice_app_types::quantity::UiNumberLocale::default(),
+        rspice_vocabulary::quantity::QuantityPresentationPolicy::default(),
+        rspice_vocabulary::quantity::UiNumberLocale::default(),
     )
     .ok()
     .and_then(|value| value.as_number())

@@ -41,9 +41,9 @@ use super::{
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 #[cfg(test)]
-use rspice_app_types::product::ProcessCorner as CornerProcess;
-#[cfg(test)]
 use rspice_model_library::CornerModelBinding;
+#[cfg(test)]
+use rspice_vocabulary::product::ProcessCorner as CornerProcess;
 
 pub use rspice_model_library::ProjectModelCommit;
 

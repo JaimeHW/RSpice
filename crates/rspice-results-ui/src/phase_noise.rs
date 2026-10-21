@@ -5,7 +5,6 @@ use crate::strip::{self, LegendChip};
 use crate::waveform::WaveformData;
 use crate::waves::ReadoutPolicy;
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::phase_noise::{
     exact_retained_value_at, retained_device_noise_shares, retained_measurement,
@@ -13,6 +12,7 @@ use rspice_results::phase_noise::{
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale};
 use rspice_ui_kit::tokens::Tokens;
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// A retained phase-noise trace qualified by the host's source gate.
 pub struct PhaseNoiseTrace<'a> {

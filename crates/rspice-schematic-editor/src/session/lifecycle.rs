@@ -110,7 +110,7 @@ mod tests {
             )
             .unwrap(),
             crate::requests::EditorRequestSource {
-                project: rspice_app_types::product::ProjectId::new(),
+                project: rspice_vocabulary::product::ProjectId::new(),
                 document: rspice_design_model::cell_view::CellViewRef::new(
                     "work",
                     "cell",

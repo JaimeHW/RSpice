@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use rspice_app_types::product::{ContentDigest, ProcessCorner};
 pub use rspice_results::operating_point::OpPreviousState;
+use rspice_vocabulary::product::{ContentDigest, ProcessCorner};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

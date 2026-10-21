@@ -27,8 +27,6 @@ use std::collections::{BTreeMap, HashMap};
 use rspice_design::connectivity::summary::design_nets_with_hierarchy;
 use rspice_design::schematic::document::SchematicDocument;
 
-use rspice_app_types::hierarchy_path::InstancePath;
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_design::schematic::component::Component;
 use rspice_design::schematic::component_type::ComponentType;
 #[cfg(test)]
@@ -38,6 +36,8 @@ use rspice_design::schematic::wire::Wire;
 use rspice_design_model::Point;
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_simulation_contract::design_variable::{DesignVariable, DesignVariableScope};
+use rspice_vocabulary::hierarchy_path::InstancePath;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 mod connectivity;
 mod formatting;

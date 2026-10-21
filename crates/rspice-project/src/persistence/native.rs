@@ -4,8 +4,8 @@ use super::{NativeBindingReceipt, PersistenceError, ProjectBytes, serialized_pro
 use crate::lifecycle::ProjectLifecycleError;
 use crate::registry::DocumentRegistry;
 use crate::{DecodedProject, ProjectFile, ProjectIoError};
-use rspice_app_types::product::ContentDigest;
 use rspice_design::hierarchy::HierarchySourceFiles;
+use rspice_vocabulary::product::ContentDigest;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

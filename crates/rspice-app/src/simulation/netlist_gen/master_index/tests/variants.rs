@@ -5,7 +5,7 @@ use crate::state::{
     AssemblyVariantDraft, ComponentSubstitution, SchematicObjectKey, VariantInheritance,
     VariantObjectOverride, VariantQualificationPlan, VariantQualificationState,
 };
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use std::collections::BTreeMap;
 
 fn fixture(configured: bool) -> (ProjectWorkspace, LibraryManager, SchematicState) {

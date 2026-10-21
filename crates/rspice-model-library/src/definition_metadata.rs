@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 use thiserror::Error;
 
 use crate::qualification::{ModelQualificationState, ModelSourceEvidenceBinding};
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 /// Current persisted schema for [`ModelDefinitionMetadata`].
 pub const MODEL_DEFINITION_METADATA_SCHEMA_VERSION: u16 = 1;

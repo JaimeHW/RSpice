@@ -57,7 +57,7 @@ impl From<&rspice_model_library::CornerModelBinding> for WorkerCornerModelBindin
 impl From<WorkerCornerModelBinding> for rspice_model_library::CornerModelBinding {
     fn from(value: WorkerCornerModelBinding) -> Self {
         Self {
-            process: rspice_app_types::product::ProcessCorner::from(value.process),
+            process: rspice_vocabulary::product::ProcessCorner::from(value.process),
             source_label: value.source_label,
             section: value.section,
             materialized_model_cards: value.materialized_model_cards,
@@ -210,19 +210,19 @@ pub enum WorkerCornerProcess {
     FS,
 }
 
-impl From<rspice_app_types::product::ProcessCorner> for WorkerCornerProcess {
-    fn from(value: rspice_app_types::product::ProcessCorner) -> Self {
+impl From<rspice_vocabulary::product::ProcessCorner> for WorkerCornerProcess {
+    fn from(value: rspice_vocabulary::product::ProcessCorner) -> Self {
         match value {
-            rspice_app_types::product::ProcessCorner::TT => Self::TT,
-            rspice_app_types::product::ProcessCorner::SS => Self::SS,
-            rspice_app_types::product::ProcessCorner::FF => Self::FF,
-            rspice_app_types::product::ProcessCorner::SF => Self::SF,
-            rspice_app_types::product::ProcessCorner::FS => Self::FS,
+            rspice_vocabulary::product::ProcessCorner::TT => Self::TT,
+            rspice_vocabulary::product::ProcessCorner::SS => Self::SS,
+            rspice_vocabulary::product::ProcessCorner::FF => Self::FF,
+            rspice_vocabulary::product::ProcessCorner::SF => Self::SF,
+            rspice_vocabulary::product::ProcessCorner::FS => Self::FS,
         }
     }
 }
 
-impl From<WorkerCornerProcess> for rspice_app_types::product::ProcessCorner {
+impl From<WorkerCornerProcess> for rspice_vocabulary::product::ProcessCorner {
     fn from(value: WorkerCornerProcess) -> Self {
         match value {
             WorkerCornerProcess::TT => Self::TT,

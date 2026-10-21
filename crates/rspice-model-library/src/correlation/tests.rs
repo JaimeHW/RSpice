@@ -5,7 +5,7 @@
 //! leave the existing history unrewritten.
 
 use super::*;
-use rspice_app_types::product::ModelSourceId;
+use rspice_vocabulary::product::ModelSourceId;
 
 fn source(byte: u8) -> ModelSourceEvidenceBinding {
     ModelSourceEvidenceBinding::try_new_project_bound(

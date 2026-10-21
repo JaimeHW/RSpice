@@ -1,6 +1,6 @@
 //! Durable model-validation evidence and its canonical integrity digest.
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 

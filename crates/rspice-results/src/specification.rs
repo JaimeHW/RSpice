@@ -8,12 +8,12 @@ mod prepared;
 pub use prepared::{PreparedSpecification, PreparedSpecificationPolicy};
 
 use crate::provenance::AnalysisResultPvtPoint;
-use rspice_app_types::product::{
+use rspice_vocabulary::product::{
     AnalysisInstanceId, ContentDigest, SimulationPlanId, SpecificationId,
 };
 use serde::{Deserialize, Serialize};
 
-use rspice_app_types::text_validation::{
+use rspice_vocabulary::text_validation::{
     validate_bounded_text, validate_parameter_name, validate_single_line_expression,
 };
 

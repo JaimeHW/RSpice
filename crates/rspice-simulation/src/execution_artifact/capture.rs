@@ -6,9 +6,9 @@ use super::{
 use crate::execution::AuthorizedTaskDispatch;
 use crate::prepared_dependency::{ExecutionArtifactError, ExecutionArtifactKind};
 use crate::results::SimulationResult;
-use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use rspice_simulation_contract::analysis_spec::{AnalysisSpec, PssMethod};
 use rspice_simulation_contract::config::AnalysisConfig;
+use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::sync::Arc;
 
 /// Immutable producer context captured before dispatch consumes its task.

@@ -1,7 +1,7 @@
 //! Sweep configuration, bounded point preparation, and retained family assembly.
 
 use crate::error::ServiceRunError;
-use rspice_app_types::product::ProcessCorner;
+use rspice_vocabulary::product::ProcessCorner;
 
 mod config;
 mod corner_points;

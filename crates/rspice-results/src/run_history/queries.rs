@@ -7,7 +7,7 @@ use crate::operating_point::OpPreviousState;
 use crate::result_digest::ResultDigestEncoding;
 use crate::run::SimulationRun;
 use crate::waveform::RetainedWaveform;
-use rspice_app_types::product::ObjectRevision;
+use rspice_vocabulary::product::ObjectRevision;
 
 /// Newest complete accepted OP, optionally admitting earlier source revisions.
 pub fn newest_retained_op_state<

@@ -12,9 +12,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision};
-use rspice_app_types::quantity::LayoutDatabaseUnit;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision};
+use rspice_vocabulary::quantity::LayoutDatabaseUnit;
 
 pub const PHYSICAL_LAYOUT_DOCUMENT_SCHEMA_VERSION: u16 = 1;
 pub const MAX_LAYOUT_OBJECTS: usize = 1_000_000;

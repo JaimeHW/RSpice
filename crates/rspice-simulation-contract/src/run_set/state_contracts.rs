@@ -1,6 +1,6 @@
 //! Persisted run-set forecast, transaction evidence, and nominal reference.
 
-use rspice_app_types::product::ProcessCorner;
+use rspice_vocabulary::product::ProcessCorner;
 
 /// What the composed space costs, exactly.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]

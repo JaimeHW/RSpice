@@ -25,7 +25,7 @@ pub const PDK_TECHNOLOGY_AUTHORING_BUNDLE_SCHEMA_VERSION: u32 = 1;
 #[serde(deny_unknown_fields)]
 pub struct PdkTechnologyDraftBaseline {
     pub binding: PdkTechnologyBinding,
-    pub archive_digest: rspice_app_types::product::ContentDigest,
+    pub archive_digest: rspice_vocabulary::product::ContentDigest,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

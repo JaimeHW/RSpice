@@ -418,21 +418,23 @@ pub(super) fn nondefault_op_config() -> rspice_simulation_contract::config::OpCo
         accuracy: OpAccuracy::Robust,
         selected_devices: vec!["M1".to_owned()],
         previous_state: Some(OpPreviousState {
-            source_content_digest: rspice_app_types::product::ContentDigest::from_bytes([1; 32]),
-            producer_snapshot_digest: rspice_app_types::product::ContentDigest::from_bytes([2; 32]),
-            producer_result_digest: rspice_app_types::product::ContentDigest::from_bytes([3; 32]),
+            source_content_digest: rspice_vocabulary::product::ContentDigest::from_bytes([1; 32]),
+            producer_snapshot_digest: rspice_vocabulary::product::ContentDigest::from_bytes(
+                [2; 32],
+            ),
+            producer_result_digest: rspice_vocabulary::product::ContentDigest::from_bytes([3; 32]),
             node_names: vec!["out".to_owned()],
             branch_names: vec!["V1".to_owned()],
             solution: vec![1.25, -1.0e-3],
         }),
         violation_devices: vec!["M1".to_owned()],
         violation_source_content_digest: Some(
-            rspice_app_types::product::ContentDigest::from_bytes([1; 32]),
+            rspice_vocabulary::product::ContentDigest::from_bytes([1; 32]),
         ),
         run_point: OpRunPointContext {
             index: 2,
             count: 3,
-            process: rspice_app_types::product::ProcessCorner::SS,
+            process: rspice_vocabulary::product::ProcessCorner::SS,
             supply_voltage: Some(0.9),
             nominal_supply_voltage: Some(1.0),
             supply_source_names: vec!["VDD".to_owned()],
@@ -693,7 +695,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
     use crate::execution_artifact::ExecutionArtifactEnvelope;
     use crate::execution_artifact::PreparedDependencyBinding;
     use crate::execution_artifact::ResolvedExecutionDependencies;
-    use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 
     let producer = AnalysisInstanceId::new();
     let source_revision = ObjectRevision::new(4).unwrap();
@@ -899,7 +901,7 @@ fn standalone_connection_worker_transport_retains_selected_physics() {
 
 #[test]
 fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
-    let project_id = rspice_app_types::product::ProjectId::new();
+    let project_id = rspice_vocabulary::product::ProjectId::new();
     let bundle = rspice_design::project_sources::ProjectSourceBundle::try_new(
             rspice_design::project_sources::ProjectSourceOwner::code_workspace(
                 rspice_design::project_sources::ProjectSourceLanguage::VerilogA,
@@ -2303,8 +2305,8 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
             postprocess: None,
             constraints: Vec::new(),
             objective_terms: Vec::new(),
-            instance_id: rspice_app_types::product::AnalysisInstanceId::new(),
-            source_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+            instance_id: rspice_vocabulary::product::AnalysisInstanceId::new(),
+            source_revision: rspice_vocabulary::product::ObjectRevision::INITIAL,
             analysis: AnalysisConfig::DcOp(nondefault_op_config()).into(),
             analysis_line: ".OP".into(),
             numeric_options: String::new(),

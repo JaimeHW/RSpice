@@ -36,8 +36,8 @@ fn open_state() -> AppState {
 }
 
 /// A waiver of a finding of `rule`, recorded at review.
-fn waiver(rule: &str) -> rspice_app_types::diagnostics::DiagnosticSuppression {
-    rspice_app_types::diagnostics::DiagnosticSuppression {
+fn waiver(rule: &str) -> rspice_vocabulary::diagnostics::DiagnosticSuppression {
+    rspice_vocabulary::diagnostics::DiagnosticSuppression {
         rule: rule.to_owned(),
         reason: "accepted at review".to_owned(),
         author: "ana".to_owned(),
@@ -48,7 +48,7 @@ fn waiver(rule: &str) -> rspice_app_types::diagnostics::DiagnosticSuppression {
 /// One finding from the test producer, about one node, saying `message`.
 fn record(state: &AppState, code: &str, level: DiagnosticLevel, message: &str) -> DiagnosticRecord {
     DiagnosticRecord::new(
-        rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
+        rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata::current(
             "rspice.test",
             code,
             "doc",
@@ -2190,7 +2190,7 @@ fn counts_name_their_severities_separately() {
 fn bare_row(
     level: DiagnosticLevel,
     standing: RowStanding,
-    suppression: Option<&rspice_app_types::diagnostics::DiagnosticSuppression>,
+    suppression: Option<&rspice_vocabulary::diagnostics::DiagnosticSuppression>,
 ) -> DiagnosticRow<'_> {
     DiagnosticRow {
         id: uuid::Uuid::nil(),

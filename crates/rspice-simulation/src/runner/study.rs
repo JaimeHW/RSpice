@@ -24,8 +24,6 @@ use crate::study::{
 };
 #[cfg(test)]
 use crate::study::{StudyPeriodicOptions, analysis_for_environment};
-#[cfg(test)]
-use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision};
 use rspice_core::abort_signal::{AbortReason, AbortSignal, ModelRunControl};
 #[cfg(test)]
 use rspice_core::analysis::monte_carlo::Distribution;
@@ -35,6 +33,8 @@ use rspice_core::engine::MonteCarloEnvironment;
 use rspice_core::engine::MonteCarloStudyConfig;
 use rspice_simulation_contract::config::AnalysisConfig;
 use rspice_simulation_contract::mc_draft::McVariationSource;
+#[cfg(test)]
+use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision};
 #[cfg(test)]
 use std::path::Path;
 use std::sync::{

@@ -606,7 +606,7 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
     // occurrences, are that cell's findings and not this sheet's.
     for occurrence in 1..=8 {
         let path =
-            rspice_app_types::hierarchy_path::InstancePath::parse(&format!("/X{occurrence}"))
+            rspice_vocabulary::hierarchy_path::InstancePath::parse(&format!("/X{occurrence}"))
                 .expect("an occurrence path");
         let view = crate::state::CellViewRef::new("work", "amp", "schematic");
         for (id, violation_type, inner) in [
@@ -680,7 +680,7 @@ fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
         terminals: Vec::new(),
     };
     let inside = |location: DrcLocation| DrcLocation::InsideInstance {
-        path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1")
+        path: rspice_vocabulary::hierarchy_path::InstancePath::parse("/X1")
             .expect("an occurrence path"),
         view: crate::state::CellViewRef::new("work", "amp", "schematic"),
         inner: Box::new(location),

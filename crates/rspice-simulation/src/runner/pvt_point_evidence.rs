@@ -17,8 +17,6 @@ use crate::execution::{
     RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
 };
 use crate::preparation::QueuedAnalysis;
-use rspice_app_types::product::ProcessCorner;
-use rspice_app_types::product::{ContentDigest, ObjectRevision, SimulationPlanId};
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::provenance::AnalysisResultProvenance;
@@ -26,6 +24,8 @@ use rspice_results::provenance::AnalysisResultSourceDomain;
 use rspice_results::run::SimulationRun;
 use rspice_results::run_receipt::SimulationRunProvenance;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_vocabulary::product::ProcessCorner;
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, SimulationPlanId};
 
 use crate::error::SimulationError;
 
@@ -60,7 +60,7 @@ pub(crate) fn run_hb_spec_with_op(deck: &str, spec: AnalysisSpec) -> super::Simu
         .unwrap();
     let snapshot = ContentDigest::from_bytes([91; 32]);
     let binding = PreparedDependencyBinding::dc_operating_point_seed(
-        rspice_app_types::product::AnalysisInstanceId::new(),
+        rspice_vocabulary::product::AnalysisInstanceId::new(),
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([92; 32]),
     );
@@ -213,7 +213,7 @@ fn prepare_declaration(
     outputs: &[rspice_simulation_contract::saved_output::SavedOutput],
     veriloga: DeclarationVerilogA,
 ) -> Result<PreparedRunSnapshot, String> {
-    let instance = rspice_app_types::product::AnalysisInstanceId::from_namespace(
+    let instance = rspice_vocabulary::product::AnalysisInstanceId::from_namespace(
         TEST_NAMESPACE,
         label.as_bytes(),
     );
@@ -400,7 +400,7 @@ pub(crate) fn op_dependencies(
     use crate::execution_artifact::ExecutionArtifactEnvelope;
     use crate::execution_artifact::PreparedDependencyBinding;
     use crate::execution_artifact::ResolvedExecutionDependencies;
-    use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     let snapshot = ContentDigest::from_bytes([91; 32]);
     let binding = PreparedDependencyBinding::dc_operating_point_seed(
         AnalysisInstanceId::new(),

@@ -25,7 +25,7 @@ pub struct CornerDialogState {
     pub base_analysis_idx: usize,
     /// Exact saved analysis used at every PVT point.
     #[serde(default)]
-    pub base_analysis: Option<rspice_app_types::product::AnalysisInstanceId>,
+    pub base_analysis: Option<rspice_vocabulary::product::AnalysisInstanceId>,
     /// The space a project authored back when this draft owned one.
     ///
     /// A migration alias, never an owner: it is only ever read out of a
@@ -53,7 +53,7 @@ struct CornerDialogStateRepr {
     #[serde(default)]
     base_analysis_idx: usize,
     #[serde(default)]
-    base_analysis: Option<rspice_app_types::product::AnalysisInstanceId>,
+    base_analysis: Option<rspice_vocabulary::product::AnalysisInstanceId>,
     #[serde(default)]
     process_tt: bool,
     #[serde(default)]

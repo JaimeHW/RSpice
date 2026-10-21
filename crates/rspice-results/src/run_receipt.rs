@@ -7,12 +7,12 @@
 use std::collections::HashSet;
 
 use crate::specification::{PreparedSpecification, PreparedSpecificationPolicy};
-use rspice_app_types::hierarchy_path::InstancePath;
-use rspice_app_types::product::{
+use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::hierarchy_path::InstancePath;
+use rspice_vocabulary::product::{
     AnalysisInstanceId, ContentDigest, DerivedAnalysisIdentity, ModelSourceId, ObjectRevision,
     SimulationPlanId,
 };
-use rspice_design_model::cell_view::CellViewRef;
 
 use crate::analysis_result::AnalysisResult;
 use crate::analysis_tag::CanonicalAnalysisKind;

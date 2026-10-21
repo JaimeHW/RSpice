@@ -31,8 +31,8 @@ use sha2::{Digest as _, Sha256};
 use crate::{
     ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
 };
-use rspice_app_types::product::ContentDigest;
 use rspice_core::library::{LibParser, ResolvedLibDependency};
+use rspice_vocabulary::product::ContentDigest;
 
 /// Bounds supplied by the importing project or host.
 #[derive(Debug, Clone, Copy)]
@@ -549,7 +549,7 @@ impl SourceBundlePreparation<'_> {
         // project-owned model has none. An import has neither, so recording it
         // as project-owned makes that check demand metadata that cannot exist.
         library.source_authority = ModelSourceAuthority::RetainedImport {
-            source_id: rspice_app_types::product::ModelSourceId::new(),
+            source_id: rspice_vocabulary::product::ModelSourceId::new(),
             digest: root_digest,
         };
         library.source_closure = sources

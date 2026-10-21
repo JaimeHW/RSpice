@@ -8,7 +8,7 @@ selects the retained source, decides whether it is current, and coordinates
 simulation, persistence and navigation; measurements, transforms and
 statistics keep their owners in `rspice-results` and `rspice-core`. The crate
 stands apart so that boundary can be enforced:
-`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-app-types`,
+`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-vocabulary`,
 `rspice-results` and `rspice-ui-kit` among the application crates, and
 refuses `rspice-app`, `rspice-project`, `rspice-project-contract`,
 `rspice-simulation`, `rspice-worker`, eframe, winit, wgpu and rfd in its

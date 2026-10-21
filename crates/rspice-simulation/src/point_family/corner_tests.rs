@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::sweeps::{CornerBaseMode, CornerFrequencySweep, CornerRunConfig};
-use rspice_app_types::product::ProcessCorner;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::family_metadata::AnalysisResultFamilyMetadata;
+use rspice_vocabulary::product::ProcessCorner;
 
 /// A 1:1 resistive divider on a supply the corner axis derates by 10%, so
 /// every reduction below has an answer that can be written down: the output

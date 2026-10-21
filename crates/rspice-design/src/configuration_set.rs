@@ -19,12 +19,12 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as ShaDigest, Sha256};
 use thiserror::Error;
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
-use rspice_app_types::hierarchy_path::{
+use rspice_design_model::cell_view::{CellViewRef, validate_cell_view_name_segment};
+use rspice_vocabulary::hierarchy_path::{
     HierarchyPathError, InstancePath, InstancePathPattern, PatternSegment,
 };
-use rspice_design_model::cell_view::{CellViewRef, validate_cell_view_name_segment};
 
 pub const CONFIGURATION_SET_CATALOG_SCHEMA_VERSION: u16 = 2;
 

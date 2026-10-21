@@ -14,13 +14,13 @@ workspace = true
 [features]
 # Versioned retained history, provenance and exact executed decks.
 project-results = [
-    "dep:rspice-app-types", "dep:rspice-core", "dep:rspice-design-model",
+    "dep:rspice-vocabulary", "dep:rspice-core", "dep:rspice-design-model",
     "dep:rspice-model-library", "dep:rspice-results", "dep:uuid",
 ]
 result-validation-observation = ["project-results"]
 table-schema = []
 # Reuse canonical retained results without enabling the engine in default codecs.
-result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results"]
+result-csv = ["dep:rspice-vocabulary", "dep:rspice-core", "dep:rspice-results"]
 result-digital = ["dep:rspice-core", "dep:rspice-results"]
 result-vcd = ["dep:rspice-core", "dep:rspice-results"]
 result-waveform = ["dep:rspice-results"]
@@ -51,7 +51,7 @@ py_literal = "0.4"
 parquet = { version = "60", default-features = false, features = ["arrow"], optional = true }
 rustyhdf5 = { version = "1.93", default-features = false, optional = true }
 rust_xlsxwriter = { version = "0.100", default-features = false, optional = true }
-rspice-app-types = { workspace = true, optional = true }
+rspice-vocabulary = { workspace = true, optional = true }
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, optional = true }
 rspice-design-model = { workspace = true, optional = true }
 rspice-model-library = { workspace = true, optional = true }

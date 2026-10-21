@@ -25,7 +25,7 @@ log.workspace = true
 web-time.workspace = true
 num-complex.workspace = true
 base64.workspace = true
-rspice-app-types.workspace = true
+rspice-vocabulary.workspace = true
 rspice-project-contract.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 rspice-design.workspace = true

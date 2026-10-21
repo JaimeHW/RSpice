@@ -1,8 +1,8 @@
 //! Property schemas for the active component-editing transaction.
 
-use rspice_app_types::property::{PropertySheet, PropertyType};
 use rspice_design::properties::PropertyCatalog;
 use rspice_design::schematic::component_type::ComponentType;
+use rspice_vocabulary::property::{PropertySheet, PropertyType};
 
 /// Built-in schemas and the checked parameter form of the cell being edited.
 #[derive(Debug, Clone)]

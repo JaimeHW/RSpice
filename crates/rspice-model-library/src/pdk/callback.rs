@@ -4,7 +4,7 @@
 
 use super::contracts::{PDK_CALLBACK_ABI_VERSION, PdkExecutionTarget, PdkTechnologyBinding};
 use super::{PdkTechnologyError, content_digest};
-use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId, SimulationPlanId};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, ProjectId, SimulationPlanId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

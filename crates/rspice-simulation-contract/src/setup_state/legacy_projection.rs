@@ -8,7 +8,7 @@ use crate::legacy_plan_migration::NoiseSetup;
 use crate::plan_model::{
     AnalysisInstance, FrozenAnalysisInstance, FrozenSimulationPlan, SimulationPlan,
 };
-use rspice_app_types::product::{AnalysisInstanceId, ProjectId};
+use rspice_vocabulary::product::{AnalysisInstanceId, ProjectId};
 use std::collections::HashSet;
 
 impl SimulationSetup {

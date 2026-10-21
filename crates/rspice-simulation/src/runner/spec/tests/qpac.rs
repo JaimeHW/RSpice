@@ -51,7 +51,7 @@ fn qpac_controls_survive_draft_worker_native_card_and_dependency_dispatch() {
     .operating_point;
     use crate::execution_artifact::ExecutionArtifactEnvelope;
     use crate::execution_artifact::PreparedDependencyBinding;
-    use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     let snapshot = ContentDigest::from_bytes([31; 32]);
     let binding = PreparedDependencyBinding::qpss_state(
         AnalysisInstanceId::new(),

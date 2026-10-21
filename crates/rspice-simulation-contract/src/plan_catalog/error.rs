@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use rspice_app_types::product::SimulationPlanId;
+use rspice_vocabulary::product::SimulationPlanId;
 
 use crate::plan_model::AnalysisPlanError;
 

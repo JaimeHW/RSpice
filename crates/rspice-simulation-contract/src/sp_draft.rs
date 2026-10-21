@@ -2,7 +2,7 @@
 
 use crate::options::parse_si_value;
 use crate::sp_config::{SpConfig, SpPortConfig, SpSweepType};
-use rspice_app_types::quantity::parse_engineering_value;
+use rspice_vocabulary::quantity::parse_engineering_value;
 use std::collections::HashMap;
 
 /// Borrowed schematic port fields needed to validate an S-parameter run.

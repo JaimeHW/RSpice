@@ -1,11 +1,11 @@
 //! Recorded FFT evidence, incomplete-history captions, logarithmic ordinate and inspector rows.
 
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::{
     analysis_payload::AnalysisResultPayload, analysis_result::AnalysisResult,
     fft::spectrum::FftSpectrumEvidence,
 };
 use rspice_ui_kit::plot::{Axis, fmt_si, fmt_si_readout};
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use crate::presentation::{frequency_readout, plain_readout};
 
@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn the_inspector_frequencies_follow_the_frequency_display() {
         let policy = QuantityPresentationPolicy {
-            frequency_display: rspice_app_types::quantity::FrequencyDisplay::RadiansPerSecond,
+            frequency_display: rspice_vocabulary::quantity::FrequencyDisplay::RadiansPerSecond,
             ..QuantityPresentationPolicy::default()
         };
         let rows = inspector_rows(

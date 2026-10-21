@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 
 /// Durable source domain for a prepared analysis identity.
 ///

@@ -12,7 +12,7 @@ use crate::envelope_policy::{
     EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
 };
 use crate::options::parse_si_value;
-use rspice_app_types::quantity::{
+use rspice_vocabulary::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
 

@@ -6,8 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::hierarchy_path::InstancePath;
 
 /// One descent: the instance stepped through, and the master it opened.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

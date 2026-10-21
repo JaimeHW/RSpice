@@ -13,7 +13,6 @@
 
 use crate::{presentation::well_hint, waveform::WaveformData, waves::StripModel};
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::{
     analysis_payload::AnalysisResultPayload,
     result_presentation::{AnalysisPresentationKey, TracePresentationKey},
@@ -23,6 +22,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::chip,
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::borrow::Cow;
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
 
@@ -1092,7 +1092,7 @@ mod tests {
     /// values chose, unit included, at full precision.
     #[test]
     fn a_copied_operating_point_row_follows_copied_values() {
-        use rspice_app_types::quantity::CopiedValueFormat;
+        use rspice_vocabulary::quantity::CopiedValueFormat;
 
         let row = TypedOpRow {
             source: "Node".to_owned(),
@@ -1235,13 +1235,13 @@ mod tests {
             rspice_results::operating_point::OperatingPointInitialGuessEvidence::PreviousCompatible;
         *previous_state = Some(
             rspice_results::operating_point::OperatingPointPreviousStateEvidence {
-                source_content_digest: rspice_app_types::product::ContentDigest::from_bytes(
+                source_content_digest: rspice_vocabulary::product::ContentDigest::from_bytes(
                     [1; 32],
                 ),
-                producer_snapshot_digest: rspice_app_types::product::ContentDigest::from_bytes(
+                producer_snapshot_digest: rspice_vocabulary::product::ContentDigest::from_bytes(
                     [2; 32],
                 ),
-                producer_result_digest: rspice_app_types::product::ContentDigest::from_bytes(
+                producer_result_digest: rspice_vocabulary::product::ContentDigest::from_bytes(
                     [3; 32],
                 ),
             },
@@ -1252,7 +1252,7 @@ mod tests {
         );
         assert_eq!(
             operating_point_row_at(&analysis, 4).unwrap().value,
-            rspice_app_types::product::ContentDigest::from_bytes([3; 32]).to_string()
+            rspice_vocabulary::product::ContentDigest::from_bytes([3; 32]).to_string()
         );
         let count = operating_point_row_count(&analysis);
         for index in 0..count {

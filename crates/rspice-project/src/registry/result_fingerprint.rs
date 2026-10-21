@@ -108,10 +108,10 @@ fn full_digest(
 mod tests {
     use super::*;
     use crate::results::{ProjectSimulationResultsData, ProjectSimulationRun};
-    use rspice_app_types::diagnostics::{LogSeverity, LogSource};
-    use rspice_app_types::run_log::RunLogLine;
     use rspice_results::run::{ExecutionTarget, SimulationRun};
     use rspice_results::waveform::RetainedWaveform;
+    use rspice_vocabulary::diagnostics::{LogSeverity, LogSource};
+    use rspice_vocabulary::run_log::RunLogLine;
 
     /// A run's log is not result content: neither the run's dataset digest
     /// nor the result history's fingerprint reads it.

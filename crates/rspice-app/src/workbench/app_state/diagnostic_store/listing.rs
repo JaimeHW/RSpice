@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use rspice_app_types::diagnostics::{
+use rspice_vocabulary::diagnostics::{
     CanonicalQuickFix, DiagnosticCurrentness, DiagnosticRelatedLocation, DiagnosticSuppression,
 };
 
@@ -884,7 +884,7 @@ mod tests {
     use crate::workbench::app_state::diagnostic_store::{
         DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticSubject,
     };
-    use rspice_app_types::diagnostics::CanonicalDiagnosticMetadata;
+    use rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata;
 
     fn open_state() -> AppState {
         let mut state = AppState::default();
@@ -1052,12 +1052,13 @@ mod tests {
     fn a_waived_finding_is_listed_without_counting_against_the_design() {
         let mut state = open_state();
         let mut waived = record(&state, "T-ERROR", DiagnosticLevel::Error);
-        waived.canonical.suppression = Some(rspice_app_types::diagnostics::DiagnosticSuppression {
-            rule: "T-ERROR".to_owned(),
-            reason: "accepted at review".to_owned(),
-            author: "ana".to_owned(),
-            waived_at_ms: 1,
-        });
+        waived.canonical.suppression =
+            Some(rspice_vocabulary::diagnostics::DiagnosticSuppression {
+                rule: "T-ERROR".to_owned(),
+                reason: "accepted at review".to_owned(),
+                author: "ana".to_owned(),
+                waived_at_ms: 1,
+            });
         state
             .publish_diagnostics(DiagnosticInputs::Dispatch, vec![waived])
             .expect("the dispatch digest is available");
@@ -1146,8 +1147,8 @@ mod tests {
         assert_eq!(row.location, reference.display_path());
     }
 
-    fn waiver() -> rspice_app_types::diagnostics::DiagnosticSuppression {
-        rspice_app_types::diagnostics::DiagnosticSuppression {
+    fn waiver() -> rspice_vocabulary::diagnostics::DiagnosticSuppression {
+        rspice_vocabulary::diagnostics::DiagnosticSuppression {
             rule: "TEST".to_owned(),
             reason: "accepted at review".to_owned(),
             author: "ana".to_owned(),
@@ -1164,7 +1165,7 @@ mod tests {
         use crate::workbench::documents::netlist_document::{
             Diagnostic, DiagnosticSeverity as NetlistSeverity,
         };
-        use rspice_app_types::diagnostics::{
+        use rspice_vocabulary::diagnostics::{
             DiagnosticCurrentness, DiagnosticSeverity, SourceDiagnostic,
         };
 
@@ -1231,7 +1232,7 @@ mod tests {
     /// the line it named, as no stale finding in another segment does.
     #[test]
     fn a_stale_code_finding_offers_no_route() {
-        use rspice_app_types::diagnostics::{
+        use rspice_vocabulary::diagnostics::{
             DiagnosticCurrentness, DiagnosticSeverity, SourceDiagnostic,
         };
 

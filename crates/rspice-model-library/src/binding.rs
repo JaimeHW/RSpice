@@ -1,6 +1,6 @@
 //! Materialized model cards bound to a named process corner.
 
-use rspice_app_types::product::ProcessCorner;
+use rspice_vocabulary::product::ProcessCorner;
 
 /// One explicit foundry/library model binding for a process point.
 ///

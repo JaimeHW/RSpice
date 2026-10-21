@@ -5299,7 +5299,6 @@ dependencies = [
  "rfd",
  "ron",
  "ropey",
- "rspice-app-types",
  "rspice-automation-protocol",
  "rspice-automation-runtime",
  "rspice-cloud-client",
@@ -5321,6 +5320,7 @@ dependencies = [
  "rspice-simulation-contract",
  "rspice-ui-kit",
  "rspice-veriloga",
+ "rspice-vocabulary",
  "rustyhdf5",
  "semver",
  "serde",
@@ -5349,18 +5349,6 @@ dependencies = [
  "winit",
  "winresource",
  "zip",
-]
-
-[[package]]
-name = "rspice-app-types"
-version = "0.1.0"
-dependencies = [
- "rspice-design-model",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.21",
- "uuid",
 ]
 
 [[package]]
@@ -5497,12 +5485,12 @@ dependencies = [
  "clap",
  "log",
  "num-complex",
- "rspice-app-types",
  "rspice-core",
  "rspice-results",
  "rspice-simulation",
  "rspice-simulation-contract",
  "rspice-veriloga",
+ "rspice-vocabulary",
  "rustix 1.1.5",
  "serde",
  "serde_json",
@@ -5556,10 +5544,10 @@ dependencies = [
  "log",
  "regex",
  "ron",
- "rspice-app-types",
  "rspice-core",
  "rspice-design-model",
  "rspice-model-library",
+ "rspice-vocabulary",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5617,11 +5605,11 @@ dependencies = [
  "num-complex",
  "parquet",
  "py_literal",
- "rspice-app-types",
  "rspice-core",
  "rspice-design-model",
  "rspice-model-library",
  "rspice-results",
+ "rspice-vocabulary",
  "rust_xlsxwriter",
  "rustyhdf5",
  "serde",
@@ -5641,7 +5629,6 @@ dependencies = [
  "lopdf",
  "png",
  "resvg",
- "rspice-app-types",
  "rspice-core",
  "rspice-design",
  "rspice-design-model",
@@ -5649,6 +5636,7 @@ dependencies = [
  "rspice-hardcopy-contract",
  "rspice-project-contract",
  "rspice-results",
+ "rspice-vocabulary",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5664,8 +5652,8 @@ dependencies = [
 name = "rspice-hardcopy-contract"
 version = "0.1.0"
 dependencies = [
- "rspice-app-types",
  "rspice-results",
+ "rspice-vocabulary",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5691,9 +5679,9 @@ dependencies = [
  "base64 0.23.1",
  "csv",
  "ed25519-dalek",
- "rspice-app-types",
  "rspice-core",
  "rspice-design-model",
+ "rspice-vocabulary",
  "semver",
  "serde",
  "serde_json",
@@ -5732,7 +5720,6 @@ name = "rspice-project"
 version = "0.1.0"
 dependencies = [
  "ron",
- "rspice-app-types",
  "rspice-core",
  "rspice-design",
  "rspice-design-model",
@@ -5742,6 +5729,7 @@ dependencies = [
  "rspice-project-contract",
  "rspice-results",
  "rspice-simulation-contract",
+ "rspice-vocabulary",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5754,10 +5742,10 @@ name = "rspice-project-contract"
 version = "0.1.0"
 dependencies = [
  "ron",
- "rspice-app-types",
  "rspice-design",
  "rspice-design-model",
  "rspice-model-library",
+ "rspice-vocabulary",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5808,10 +5796,10 @@ dependencies = [
  "once_cell",
  "png",
  "regex",
- "rspice-app-types",
  "rspice-core",
  "rspice-design-model",
  "rspice-units",
+ "rspice-vocabulary",
  "rustfft",
  "serde",
  "serde_json",
@@ -5827,10 +5815,10 @@ dependencies = [
  "egui",
  "egui_extras",
  "num-complex",
- "rspice-app-types",
  "rspice-core",
  "rspice-results",
  "rspice-ui-kit",
+ "rspice-vocabulary",
  "serde",
  "thiserror 2.0.21",
 ]
@@ -5841,10 +5829,10 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "log",
- "rspice-app-types",
  "rspice-design",
  "rspice-design-model",
  "rspice-ui-kit",
+ "rspice-vocabulary",
  "serde",
 ]
 
@@ -5870,7 +5858,6 @@ dependencies = [
  "log",
  "num-complex",
  "ron",
- "rspice-app-types",
  "rspice-core",
  "rspice-design",
  "rspice-design-model",
@@ -5879,6 +5866,7 @@ dependencies = [
  "rspice-results",
  "rspice-simulation-contract",
  "rspice-veriloga",
+ "rspice-vocabulary",
  "semver",
  "serde",
  "serde-wasm-bindgen",
@@ -5899,11 +5887,11 @@ dependencies = [
 name = "rspice-simulation-contract"
 version = "0.1.0"
 dependencies = [
- "rspice-app-types",
  "rspice-core",
  "rspice-design-model",
  "rspice-model-library",
  "rspice-results",
+ "rspice-vocabulary",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -5916,8 +5904,8 @@ name = "rspice-ui-kit"
 version = "0.1.0"
 dependencies = [
  "egui",
- "rspice-app-types",
  "rspice-results",
+ "rspice-vocabulary",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6336,6 +6324,18 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "rspice-vocabulary"
+version = "0.1.0"
+dependencies = [
+ "rspice-design-model",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]

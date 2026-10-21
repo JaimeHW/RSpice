@@ -7,7 +7,7 @@ and report documents a viewer presents. Producers (`rspice-simulation`),
 viewers (`rspice-results-ui`, `rspice-hardcopy`), persistence and interchange
 (`rspice-project`, `rspice-formats`) and the CLI all share these values, so a
 retained number has one owner and one validation rule.
-`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-app-types`
+`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-vocabulary`
 and `rspice-units` among the application crates, and refuses egui, eframe,
 winit, wgpu and rfd in its closure.
 

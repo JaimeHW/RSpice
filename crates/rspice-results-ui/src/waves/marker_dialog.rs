@@ -9,10 +9,10 @@
 use egui::RichText;
 
 use crate::session::{MarkerEditDraft, MarkerSelector, ResultViewerState};
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::result_presentation::{AnalysisPresentationKey, MarkerKind};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use super::{ReadoutPolicy, StripModel};
 

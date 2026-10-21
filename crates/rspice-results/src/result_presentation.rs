@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "engine-evidence")]
 use crate::{analysis_result::AnalysisResult, run::SimulationRun, waveform::RetainedWaveform};
-use rspice_app_types::product::{AnalysisInstanceId, DatasetId};
+use rspice_vocabulary::product::{AnalysisInstanceId, DatasetId};
 
 /// Whether a result viewer renders one waveform pane stack per analysis.
 pub const fn viewer_uses_wave_stack(viewer: ResultViewer) -> bool {

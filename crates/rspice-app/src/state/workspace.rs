@@ -63,9 +63,9 @@ use crate::state::schematic::SchematicEditorRef;
 use crate::state::{Cell, View};
 use crate::state::{Library, LibraryCellInstance, LibraryManager, SchematicState, ViewType};
 #[cfg(test)]
-use rspice_app_types::hierarchy_path::InstancePath;
-#[cfg(test)]
 use rspice_design::schematic::component_type::ComponentType;
+#[cfg(test)]
+use rspice_vocabulary::hierarchy_path::InstancePath;
 #[cfg(test)]
 use std::path::PathBuf;
 #[cfg(test)]

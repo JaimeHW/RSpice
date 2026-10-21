@@ -9,10 +9,10 @@ use super::{
     prepare_project_runtime,
 };
 use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime};
-use rspice_app_types::diagnostics::{insert_diagnostic_id, validate_diagnostic_count};
-use rspice_app_types::product::ProjectId;
 use rspice_design::project_sources::ProjectSourceBundle;
 use rspice_veriloga::RuntimeCompileReport;
+use rspice_vocabulary::diagnostics::{insert_diagnostic_id, validate_diagnostic_count};
+use rspice_vocabulary::product::ProjectId;
 use std::collections::HashSet;
 use std::sync::Arc;
 

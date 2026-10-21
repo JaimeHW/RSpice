@@ -10,7 +10,6 @@
 //! `rspice run` computes for the same deck: the engine's state entry, which
 //! the command line calls with the deck's own engine.
 
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_core::NoAbort;
 use rspice_core::engine::SmallSignalCardResult;
 use rspice_results::provenance::AnalysisResultProvenance;
@@ -23,6 +22,7 @@ use rspice_simulation::preparation::QueuedAnalysis;
 use rspice_simulation::results::{SimulationResult, TransferFunctionScalar};
 use rspice_simulation::runner::SimulationRunner;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_vocabulary::product::AnalysisInstanceId;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

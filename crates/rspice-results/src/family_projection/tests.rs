@@ -7,7 +7,7 @@ use crate::visualization_document::{
     FamilyDimension as DocumentFamilyDimension, FamilyEncodingMap, FamilyPresentationPolicy,
     FamilyXDimension, FamilyXOrdering, MissingPointPolicy,
 };
-use rspice_app_types::product::DatasetId;
+use rspice_vocabulary::product::DatasetId;
 
 fn corner_metadata() -> AnalysisResultFamilyMetadata {
     AnalysisResultFamilyMetadata::Corner {

@@ -1,8 +1,8 @@
 //! Probe flags are durable document edits; editor selection remains above them.
 use super::super::probe::SchematicProbe;
 use super::{DocumentEdit, Schematic};
-use rspice_app_types::product::{SavedOutputId, SimulationPlanId};
 use rspice_design_model::Point;
+use rspice_vocabulary::product::{SavedOutputId, SimulationPlanId};
 impl Schematic {
     pub fn bind_probe_saved_output(
         &mut self,

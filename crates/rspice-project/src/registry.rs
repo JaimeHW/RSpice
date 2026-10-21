@@ -11,9 +11,9 @@ pub use fingerprints::{
 pub mod result_fingerprint;
 pub use result_fingerprint::ResultFingerprintCache;
 
-use rspice_app_types::product::ContentDigest;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::product::ContentDigest;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 use std::collections::{HashMap, HashSet};

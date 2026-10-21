@@ -110,8 +110,8 @@ fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts
     );
     deferred.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
     outputs.push(deferred);
-    assert!(rspice_app_types::raw_probe::validate_raw_probe("@M1[gm]").is_err());
-    assert!(rspice_app_types::raw_probe::validate_raw_probe("@M1[ig]garbage").is_err());
+    assert!(rspice_vocabulary::raw_probe::validate_raw_probe("@M1[gm]").is_err());
+    assert!(rspice_vocabulary::raw_probe::validate_raw_probe("@M1[ig]garbage").is_err());
     let deck = "Terminal currents\nVG gate 0 SIN(-1 .001 8meg)\nX1 gate cell\n.subckt cell g\nM1 0 g 0 0 nm L=1u W=10u M=3\n.model nm NMOS LEVEL=1 VTO=.7 KP=2e-5 TOX=20n CGSO=1e-10 CGDO=1e-10 CGBO=1e-11\n.ends\n.options GMIN=0\n.end\n";
     let config = rspice_simulation_contract::hb_draft::HbConfig {
         fundamental_freq: 8e6,

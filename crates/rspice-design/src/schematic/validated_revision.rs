@@ -10,7 +10,7 @@ use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 use super::bus::{Bus, BusTap};
 use super::component::Component;

@@ -1,7 +1,7 @@
 //! Retained dataset ownership for plan-limit evidence.
 
 use super::SimulationRun;
-use rspice_app_types::product::SimulationPlanId;
+use rspice_vocabulary::product::SimulationPlanId;
 
 /// How the selected dataset relates to the plan whose limits are being read.
 ///

@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 
-use rspice_app_types::product::AnalysisInstanceId;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 use super::{
     AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt, AnalysisLifecycleState,

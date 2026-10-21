@@ -1,8 +1,8 @@
 //! Authenticated transient continuation and bounded snapshot publication.
 use crate::error::SimulationError;
-use rspice_app_types::product::ContentDigest;
 use rspice_core::engine::TransientCheckpoint;
 use rspice_core::{AbortSignal, NoAbort, ResourceLimits};
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 

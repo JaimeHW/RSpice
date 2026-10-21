@@ -7,7 +7,7 @@ use crate::state::SimulationRun;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::ConsolePage;
-use rspice_app_types::run_log::{RunLog, RunLogLine};
+use rspice_vocabulary::run_log::{RunLog, RunLogLine};
 
 const SIZE: egui::Vec2 = egui::vec2(900.0, 600.0);
 

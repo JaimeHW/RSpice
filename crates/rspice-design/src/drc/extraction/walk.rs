@@ -12,8 +12,8 @@ use crate::hierarchy::{HierarchySource, MasterKey};
 use crate::schematic::component::Component;
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::document::SchematicDocument;
-use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::hierarchy_path::InstancePath;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// The subject's index in the walk. It is the only cellview whose findings are

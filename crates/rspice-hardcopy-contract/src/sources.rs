@@ -15,8 +15,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision};
 use rspice_results::report_document::{ReportBlockId, ReportReferenceCurrentness};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision};
 
 use super::contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 

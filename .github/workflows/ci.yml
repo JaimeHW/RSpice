@@ -98,7 +98,7 @@ jobs:
           cargo test --locked -p rspice-formats --no-default-features --features hdf5 --lib
           cargo test --locked -p rspice-formats --no-default-features --features spice-raw --lib
           cargo test --locked -p rspice-formats --no-default-features --features xlsx --lib
-          cargo test --locked -p rspice-app-types -p rspice-results -p rspice-hardcopy-contract -p rspice-hardcopy -p rspice-model-library -p rspice-formats -p rspice-simulation-contract -p rspice-simulation -p rspice-design -p rspice-project-contract -p rspice-project --lib
+          cargo test --locked -p rspice-vocabulary -p rspice-results -p rspice-hardcopy-contract -p rspice-hardcopy -p rspice-model-library -p rspice-formats -p rspice-simulation-contract -p rspice-simulation -p rspice-design -p rspice-project-contract -p rspice-project --lib
       - name: Application slice coupling ratchet
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: |

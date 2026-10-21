@@ -1,7 +1,6 @@
 //! Symbol pointer input and local edit drafts. The host validates requests and publishes edits.
 
 use egui::Pos2;
-use rspice_app_types::product::ProjectId;
 use rspice_design::occurrence::DocumentOccurrence;
 use rspice_design::symbol::{
     SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin,
@@ -10,6 +9,7 @@ use rspice_design::symbol::{
 use rspice_design_model::{
     Point, cell_view::CellViewRef, port::PortDirection, symbol_pin::SymbolPinSide,
 };
+use rspice_vocabulary::product::ProjectId;
 
 use super::session::{SymbolEditorSession, SymbolSelection, SymbolTool};
 use super::{

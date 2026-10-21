@@ -7,7 +7,7 @@
 //! that ran and then finished. Both hand the facts to the session, which is
 //! where the records are built.
 
-use rspice_app_types::diagnostics::CanonicalDiagnosticMetadata;
+use rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata;
 
 use crate::diagnostics::LogAnchor;
 use crate::state::ConvergenceAttribution;

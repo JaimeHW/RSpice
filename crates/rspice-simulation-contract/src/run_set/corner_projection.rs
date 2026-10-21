@@ -5,7 +5,7 @@ use super::{
     parse_supply_source_authority, resolve, validate,
 };
 use crate::corner_config::{CornerBaseAnalysis, CornerConfig, CornerPointSpec};
-use rspice_app_types::product::ProcessCorner;
+use rspice_vocabulary::product::ProcessCorner;
 
 impl RunSetState {
     /// Derive the executable corner configuration this run set declares.

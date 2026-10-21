@@ -644,7 +644,7 @@ fn amp_divider() -> (
 /// without its `X` is read through the app's own addressing of the drawn path.
 #[test]
 fn a_cell_drawn_without_its_prefix_is_read_through_its_drawn_path() {
-    use rspice_app_types::hierarchy_path::{InstancePath, OccurrenceProbeSpelling, ProbeTarget};
+    use rspice_vocabulary::hierarchy_path::{InstancePath, OccurrenceProbeSpelling, ProbeTarget};
 
     let (top, buffers) = amp_divider();
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_buffers(&buffers);
@@ -1139,7 +1139,7 @@ fn run_form(
         selection_occurrence: None,
         runs: &[],
         active_run: None,
-        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+        project_revision: rspice_vocabulary::product::ObjectRevision::INITIAL,
         plan_payloads: &[],
     };
     let spec = analysis_draft_spec(&inputs, &draft).expect("the form builds a request");
@@ -1339,7 +1339,7 @@ fn an_sp_port_against_the_drawn_ground_is_a_port_to_node_zero() {
         selection_occurrence: None,
         runs: &[],
         active_run: None,
-        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+        project_revision: rspice_vocabulary::product::ObjectRevision::INITIAL,
         plan_payloads: &[],
     };
     let spec = analysis_draft_spec(&inputs, &draft).expect("the form builds a request");
@@ -1420,7 +1420,7 @@ fn periodic_ports_against_the_drawn_ground_bind_the_drawn_rf_ports() {
         selection_occurrence: None,
         runs: &[],
         active_run: None,
-        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+        project_revision: rspice_vocabulary::product::ObjectRevision::INITIAL,
         plan_payloads: &[],
     };
     for (analysis, draft, dependencies) in [

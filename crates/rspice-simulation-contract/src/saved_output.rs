@@ -2,18 +2,18 @@
 //!
 //! A saved output names a signal, how precisely to keep it, whether it may
 //! stream, and what makes a retained result compatible with the request.
-//! Shared lexical validation comes from `rspice-app-types`, independently
+//! Shared lexical validation comes from `rspice-vocabulary`, independently
 //! of a live project workspace.
 
-use rspice_app_types::text_validation::{validate_bounded_text, validate_parameter_name};
+use rspice_vocabulary::text_validation::{validate_bounded_text, validate_parameter_name};
 use std::collections::HashMap;
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
-use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
 use rspice_results::calculator::parser::Parser;
+use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
 
 pub use crate::output_policy::OutputSelectionMode;
 

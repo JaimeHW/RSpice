@@ -6,13 +6,13 @@ fn autonomous_qpnoise_preserves_options_correlations_worker_and_retained_results
     use crate::execution_artifact::ExecutionArtifactEnvelope;
     use crate::execution_artifact::PreparedDependencyBinding;
     use crate::runner::worker_contract::{WorkerAnalysisSpec, round_trip_response_for_test};
-    use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
     use rspice_core::engine::{QpnoiseFrequencyAxis, QpnoiseValue};
     use rspice_simulation_contract::quasi_periodic_draft::QpnoiseOutputDraft;
     use rspice_simulation_contract::quasi_periodic_draft::QpnoiseSourceSelection;
     use rspice_simulation_contract::quasi_periodic_draft::QpssDraft;
     use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicNoiseDraft;
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use std::f64::consts::{SQRT_2, TAU};
     let deck = "Studio oscillator noise\nCx x 0 1\nCy y 0 1\nRx x 0 1\nRy y 0 1\nIprobe 0 x DC 0\nBx 0 x I={(2-v(x)^2-v(y)^2)*v(x)-v(y)}\nBy 0 y I={(2-v(x)^2-v(y)^2)*v(y)+v(x)}\n.end\n";
     let producer = QpssDraft {
@@ -149,7 +149,7 @@ fn autonomous_qpnoise_preserves_options_correlations_worker_and_retained_results
 fn qpnoise_result_dependency_dispatch_requires_exact_retained_qpss_state() {
     use crate::execution_artifact::ExecutionArtifactEnvelope;
     use crate::execution_artifact::PreparedDependencyBinding;
-    use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     let deck = "Noise dispatch\nV1 in 0 DC 1\nRs in out 1k\nRl out 0 2k\n.end\n";
     let producer = rspice_simulation_contract::quasi_periodic_draft::QpssDraft {
         tones: "1000,1414.2135623730951".into(),

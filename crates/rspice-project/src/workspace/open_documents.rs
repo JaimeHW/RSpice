@@ -117,7 +117,7 @@ impl ProjectWorkspace {
     }
 
     /// The occurrence the active document is editing, as an instance path.
-    pub fn occurrence_path(&self) -> rspice_app_types::hierarchy_path::InstancePath {
+    pub fn occurrence_path(&self) -> rspice_vocabulary::hierarchy_path::InstancePath {
         self.active_occurrence_or_root().instance_path()
     }
 

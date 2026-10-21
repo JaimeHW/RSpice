@@ -1,9 +1,9 @@
 //! Add a pane to the open result document.
 
 use egui::Context;
-use rspice_app_types::product::DatasetId;
 use rspice_results::result_presentation::ResultViewer;
 use rspice_ui_kit::widgets::{CommandForm, DialogChoice};
+use rspice_vocabulary::product::DatasetId;
 
 use super::labels_and_selection;
 

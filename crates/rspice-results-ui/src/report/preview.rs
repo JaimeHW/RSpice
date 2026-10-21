@@ -2,7 +2,6 @@
 use super::*;
 use egui::{Color32, ScrollArea, Sense, Stroke, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
-use rspice_app_types::product::ResultDocumentId;
 use rspice_results::report_document::{
     ReportBlock, ReportBlockId, ReportBlockKind, ReportDocument, ReportPage, ReportPageId,
     ReportReferenceMode, ReportSourceId,
@@ -12,6 +11,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::{Button, Problem, paint_problem_mark},
 };
+use rspice_vocabulary::product::ResultDocumentId;
 use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy)]

@@ -13,11 +13,11 @@
 
 use std::sync::{Arc, OnceLock};
 
-use rspice_app_types::diagnostics::DiagnosticSuppression;
 use rspice_design::drc::{
     CheckWaivers, DrcResult, DrcViolation, DrcWaiver, DrcWaivers, waiver_site,
 };
 use rspice_design::schematic::document::SchematicDocument;
+use rspice_vocabulary::diagnostics::DiagnosticSuppression;
 
 use super::AppState;
 use super::diagnostic_store::{

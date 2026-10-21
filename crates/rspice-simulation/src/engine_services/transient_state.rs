@@ -18,12 +18,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rspice_app_types::product::{AnalysisInstanceId, ContentDigest};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{Engine, StateLinearizedResult, TransientCheckpoint, TransientState};
 use rspice_core::netlist::{AnalysisCommand, Netlist, SmallSignalStateSource};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::config::AnalysisConfig;
+use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest};
 
 use super::ServiceRunError;
 use crate::execution::BoundStateReader;

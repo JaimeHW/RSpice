@@ -3,11 +3,11 @@
 use crate::netlist_preparation::executable_logical_lines;
 use crate::preparation::{PreparationError, PreparationStage};
 use crate::project_veriloga::receipt::ProjectCompileReceipt;
-use rspice_app_types::product::ProjectId;
 use rspice_design::project_sources::{
     ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceRegistry,
 };
 use rspice_design::projection::ConfigurationExecutionProjection;
+use rspice_vocabulary::product::ProjectId;
 use std::collections::HashMap;
 
 pub fn prepared_configuration_veriloga_runtimes(
@@ -197,7 +197,7 @@ pub fn prepared_signed_pdk_veriloga_runtimes(
 /// sections name, which the run's own deck installs.
 pub fn prepared_model_library_veriloga_runtimes(
     sealed_models: &crate::model_sources::SealedModelExecutionSources,
-    reference_process: rspice_app_types::product::ProcessCorner,
+    reference_process: rspice_vocabulary::product::ProcessCorner,
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     compile_model_library_authority(
         sealed_models.reference_model_library_veriloga_authority(reference_process),
@@ -213,9 +213,9 @@ pub fn prepared_model_library_veriloga_runtimes(
 /// runtimes themselves.
 pub(crate) fn prepared_corner_veriloga_runtimes(
     sealed_models: &crate::model_sources::SealedModelExecutionSources,
-    reference_process: rspice_app_types::product::ProcessCorner,
+    reference_process: rspice_vocabulary::product::ProcessCorner,
     reference: &crate::veriloga::PreparedVerilogARuntimeSet,
-    processes: impl IntoIterator<Item = rspice_app_types::product::ProcessCorner>,
+    processes: impl IntoIterator<Item = rspice_vocabulary::product::ProcessCorner>,
 ) -> Result<crate::execution::CornerVerilogARuntimes, PreparationError> {
     let identity = |authority: Result<
         Option<crate::model_sources::SealedModelLibraryVerilogAAuthority>,

@@ -15,7 +15,6 @@ use std::fmt;
 use std::rc::Rc;
 
 use super::*;
-use rspice_app_types::product::ContentDigest;
 use rspice_design::hierarchy::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, MasterKey, assign_master_names,
     master_closure_digest,
@@ -23,6 +22,7 @@ use rspice_design::hierarchy::{
 use rspice_design::schematic::component::LibraryCellInstance;
 use rspice_design::schematic::interface_repair::same_terminal_contract;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::product::ContentDigest;
 
 /// Defensive bound on how many occurrences one deck may emit.
 ///

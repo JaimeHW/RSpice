@@ -16,7 +16,7 @@ fn spec_for_draft(draft: &AnalysisDraft) -> Result<AnalysisSpec, String> {
         selection_occurrence: None,
         runs: &[],
         active_run: None,
-        project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+        project_revision: rspice_vocabulary::product::ObjectRevision::INITIAL,
         plan_payloads: &[],
     };
     analysis_draft_spec(&inputs, draft)
@@ -342,7 +342,7 @@ fn op_selected_devices_are_requested_by_their_engine_names() {
             selection_occurrence,
             runs: &[],
             active_run: None,
-            project_revision: rspice_app_types::product::ObjectRevision::INITIAL,
+            project_revision: rspice_vocabulary::product::ObjectRevision::INITIAL,
             plan_payloads: &[],
         };
         let spec = crate::analysis_preparation::build_op_spec(&inputs, &Default::default())

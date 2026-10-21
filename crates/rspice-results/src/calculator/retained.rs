@@ -207,11 +207,11 @@ pub fn find_waveform<'a, W: AsRef<RetainedWaveform>>(
 ) -> Option<&'a RetainedWaveform> {
     find_literal_in(waveforms, signal).or_else(|| {
         let engine = if let Some(body) = bare_wrapped_signal_name(signal) {
-            let engine = rspice_app_types::hierarchy_path::ProbeTarget::engine_alias(body)?;
+            let engine = rspice_vocabulary::hierarchy_path::ProbeTarget::engine_alias(body)?;
             // The accessor keeps voltage and current namespaces distinct.
             format!("{}({engine})", &signal.trim_matches('|')[..1])
         } else {
-            rspice_app_types::hierarchy_path::ProbeTarget::engine_alias(signal)?
+            rspice_vocabulary::hierarchy_path::ProbeTarget::engine_alias(signal)?
         };
         find_literal_in(waveforms, &engine)
     })

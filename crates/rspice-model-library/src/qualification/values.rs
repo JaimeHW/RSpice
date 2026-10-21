@@ -2,7 +2,7 @@
 
 use std::{cmp::Ordering, fmt};
 
-use rspice_app_types::product::{ContentDigest, ModelSourceId, ObjectRevision};
+use rspice_vocabulary::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use serde::{Deserialize, Deserializer, Serialize};
 
 pub type QualificationResult<T> = Result<T, QualificationValidationError>;

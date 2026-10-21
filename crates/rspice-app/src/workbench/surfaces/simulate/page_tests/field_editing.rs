@@ -173,7 +173,7 @@ impl Route {
 /// both are asked.
 fn policies() -> [crate::quantity::QuantityPresentationPolicy; 2] {
     use crate::quantity::QuantityPresentationPolicy;
-    use rspice_app_types::quantity::TimeFrequencyInput;
+    use rspice_vocabulary::quantity::TimeFrequencyInput;
     let strict = QuantityPresentationPolicy::default();
     let inferring = QuantityPresentationPolicy {
         time_frequency_input: TimeFrequencyInput::InferFromFieldQuantity,

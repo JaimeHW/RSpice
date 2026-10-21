@@ -1,12 +1,12 @@
 //! Exact live-reference deltas shared by component and annotation transactions.
 
 use super::ProjectWorkspace;
-use rspice_app_types::product::{SavedOutputId, SimulationPlanId};
 use rspice_design::occurrence::DocumentOccurrence;
 use rspice_design::references::DesignReferenceChanges;
 use rspice_design::{configuration_set::ConfigurationSetCatalog, schematic::component::Component};
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_simulation_contract::saved_output::SavedOutput;
+use rspice_vocabulary::product::{SavedOutputId, SimulationPlanId};
 
 #[derive(Debug, Clone, Default)]
 pub struct ReferenceChanges {

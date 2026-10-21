@@ -5,8 +5,8 @@ use crate::configuration_set::{
 };
 use crate::occurrence::DocumentOccurrence;
 use crate::schematic::{component::Component, component_type::ComponentType};
-use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::hierarchy_path::InstancePath;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default)]

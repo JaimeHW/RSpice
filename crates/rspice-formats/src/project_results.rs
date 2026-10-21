@@ -12,11 +12,6 @@
 //! accept a tampered one. The version-specific validators are what let both
 //! be true at once.
 
-use rspice_app_types::product::{
-    AnalysisInstanceId, ContentDigest, DatasetId, DerivedAnalysisIdentity, JobId, ModelSourceId,
-    ObjectRevision, ProjectId, RunId, SimulationPlanId,
-};
-use rspice_app_types::run_log::RunLog;
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::analysis_result::AnalysisResult;
@@ -41,6 +36,11 @@ use rspice_results::specification::{
 };
 use rspice_results::specification_verdict::SpecificationVerdict;
 use rspice_results::waveform::RetainedWaveform;
+use rspice_vocabulary::product::{
+    AnalysisInstanceId, ContentDigest, DatasetId, DerivedAnalysisIdentity, JobId, ModelSourceId,
+    ObjectRevision, ProjectId, RunId, SimulationPlanId,
+};
+use rspice_vocabulary::run_log::RunLog;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashSet;
 

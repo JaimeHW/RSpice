@@ -8,7 +8,7 @@ pub use record::{SimulationPlanImportDocument, StoredSimulationPlan, validate_mo
 
 use std::fmt;
 
-use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
+use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
 use serde::{Deserialize, Deserializer, Serialize};
 
 const DEFAULT_PLAN_NAME: &str = "Lab characterization";

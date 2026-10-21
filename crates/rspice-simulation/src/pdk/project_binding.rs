@@ -107,7 +107,7 @@ pub fn validate_project_technology_inputs(
         .expect("validated signed project pin resolves to an exact package");
     let manifest = package.manifest();
     let database_unit =
-        rspice_app_types::quantity::LayoutDatabaseUnit::from_metres(manifest.database_unit_meters)
+        rspice_vocabulary::quantity::LayoutDatabaseUnit::from_metres(manifest.database_unit_meters)
             .map_err(|error| format!("Signed project PDK database unit is invalid: {error}"))?;
     let expected_layout_technology =
         rspice_design::physical_layout::LayoutTechnologyBinding::try_new(

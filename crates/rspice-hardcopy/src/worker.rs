@@ -14,12 +14,12 @@ use crate::render::{
     RenderedHardcopyPublication,
 };
 use crate::sources::{MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument};
-use rspice_app_types::product::ContentDigest;
 use rspice_formats::zip::deterministic_stored_zip;
 use rspice_hardcopy_contract::{
     HardcopyArtifactIdentity, HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup,
     MAX_PREVIEW_PAGES, OutputFormat,
 };
+use rspice_vocabulary::product::ContentDigest;
 
 pub const HARDCOPY_WORKER_PROTOCOL_VERSION: u32 = 1;
 const MAX_REQUEST_METADATA_BYTES: usize = MAX_WORKER_SNAPSHOT_BYTES;

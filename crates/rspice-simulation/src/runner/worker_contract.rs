@@ -150,13 +150,13 @@ pub(crate) struct WorkerRequestTransportMetadata {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkerOpPreviousStateTransport {
-    source_content_digest: rspice_app_types::product::ContentDigest,
-    producer_snapshot_digest: rspice_app_types::product::ContentDigest,
-    producer_result_digest: rspice_app_types::product::ContentDigest,
+    source_content_digest: rspice_vocabulary::product::ContentDigest,
+    producer_snapshot_digest: rspice_vocabulary::product::ContentDigest,
+    producer_result_digest: rspice_vocabulary::product::ContentDigest,
     node_names: Vec<String>,
     branch_names: Vec<String>,
     solution: WorkerF64Series,
-    solution_digest: rspice_app_types::product::ContentDigest,
+    solution_digest: rspice_vocabulary::product::ContentDigest,
 }
 
 /// Own the production transfer buffers for native transport round-trip tests.

@@ -14,7 +14,6 @@ use rspice_model_library::{ModelCatalog, ModelResolutionRecords};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use rspice_app_types::product::{ContentDigest, ProjectId};
 use rspice_model_library::{
     DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelResolutionRecord,
     ModelSectionQualification, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
@@ -24,6 +23,7 @@ use rspice_model_library::{
     is_portable_absolute_path, subcircuit_interface_key,
 };
 use rspice_simulation_contract::setup_state::SimulationSetup;
+use rspice_vocabulary::product::{ContentDigest, ProjectId};
 
 pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 18;
 const LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 0;
@@ -1395,7 +1395,7 @@ fn validate_model_libraries(libraries: &[ProjectModelLibrary]) -> Result<(), Str
                             pin.path.display()
                         ));
                     }
-                    let digest = rspice_app_types::product::ContentDigest::from_bytes(
+                    let digest = rspice_vocabulary::product::ContentDigest::from_bytes(
                         Sha256::digest(&content.bytes).into(),
                     );
                     if digest != pin.digest {

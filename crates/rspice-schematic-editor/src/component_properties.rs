@@ -14,11 +14,11 @@ pub use dialog::{
 pub use evidence::provenance_colour;
 pub use form::{PropertyBrowseRequest, render_component_parameters, section_band};
 
-use rspice_app_types::property::{
+use rspice_design::schematic::component_type::ComponentType;
+use rspice_vocabulary::property::{
     DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
 };
-use rspice_app_types::quantity::{QuantityPresentationPolicy, UiNumberLocale};
-use rspice_design::schematic::component_type::ComponentType;
+use rspice_vocabulary::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use std::collections::{HashMap, HashSet};
 
 use crate::property_values::{editor_source_text, numeric_source_text};

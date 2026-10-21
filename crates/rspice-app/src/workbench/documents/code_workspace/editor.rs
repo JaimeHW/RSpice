@@ -32,7 +32,7 @@ const CODE_LEFT_PADDING: f32 = 12.0;
 // path made commands such as fold-all change behavior at an arbitrary byte
 // boundary. Empty buffers alone use TextEdit until their first insertion.
 const VIRTUALIZATION_THRESHOLD_BYTES: usize = 1;
-use rspice_app_types::diagnostics::{
+use rspice_vocabulary::diagnostics::{
     MAX_DIAGNOSTICS, insert_diagnostic_id, validate_diagnostic_count,
 };
 
@@ -54,7 +54,7 @@ pub enum CodeEditorLanguage {
     Toml,
 }
 
-pub use rspice_app_types::diagnostics::{
+pub use rspice_vocabulary::diagnostics::{
     DiagnosticSeverity as CodeEditorSeverity, SourceDiagnostic as CodeEditorDiagnostic,
 };
 

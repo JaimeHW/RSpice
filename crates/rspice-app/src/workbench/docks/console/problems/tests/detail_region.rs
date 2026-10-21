@@ -133,7 +133,7 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
 #[test]
 fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
     let mut state = open_state();
-    let mut canonical = rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
+    let mut canonical = rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata::current(
         "rspice.test",
         "TEST-RELATED",
         "doc",
@@ -142,7 +142,7 @@ fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
         "validation",
         "two outputs drive this net",
     );
-    canonical.related_locations = vec![rspice_app_types::diagnostics::DiagnosticRelatedLocation {
+    canonical.related_locations = vec![rspice_vocabulary::diagnostics::DiagnosticRelatedLocation {
         document_id: "user/top/schematic".to_owned(),
         range: None,
         message: "M2 also drives it".to_owned(),

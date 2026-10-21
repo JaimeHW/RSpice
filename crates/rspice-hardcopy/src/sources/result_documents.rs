@@ -1,7 +1,6 @@
 //! Run-level publications over retained analysis evidence and frozen specifications.
 
 use super::*;
-use rspice_app_types::product::{ObjectRevision, ProjectId};
 use rspice_hardcopy_contract::sources::MAX_HARDCOPY_SOURCE_SET_MEMBERS;
 use rspice_results::{
     analysis_result::AnalysisResult,
@@ -12,6 +11,7 @@ use rspice_results::{
     specification::report::{resolved_specifications, result_rows},
     waveform::RetainedWaveform,
 };
+use rspice_vocabulary::product::{ObjectRevision, ProjectId};
 use uuid::Uuid;
 
 fn require_terminal_run<A>(run: &SimulationRun<A>) -> Result<(), HardcopySourceError> {

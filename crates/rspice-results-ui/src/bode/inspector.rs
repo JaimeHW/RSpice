@@ -2,11 +2,11 @@
 
 use crate::presentation::{angle_readout, frequency_readout, plain_readout};
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_core::engine::{QpacAnalysisResult, QpxfAnalysisResult};
 use rspice_results::bode::AcBodeMetrics;
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::panels::section_header;
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// The selected response and the evidence its inspector may display.
 pub enum BodeInspector<'a> {

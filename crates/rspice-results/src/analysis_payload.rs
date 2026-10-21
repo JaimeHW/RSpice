@@ -182,7 +182,7 @@ pub enum AnalysisResultPayload {
         #[serde(default)]
         violation_devices: Vec<String>,
         #[serde(default)]
-        violation_source_content_digest: Option<rspice_app_types::product::ContentDigest>,
+        violation_source_content_digest: Option<rspice_vocabulary::product::ContentDigest>,
         validated_startup_directives: u64,
         #[serde(default)]
         mna_node_names: Vec<String>,
@@ -194,7 +194,7 @@ pub enum AnalysisResultPayload {
         /// this state. Absent only on legacy retained results, which are not
         /// eligible for Previous-converged startup.
         #[serde(default)]
-        effective_source_content_digest: Option<rspice_app_types::product::ContentDigest>,
+        effective_source_content_digest: Option<rspice_vocabulary::product::ContentDigest>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         previous_state: Option<OperatingPointPreviousStateEvidence>,
         #[serde(default)]

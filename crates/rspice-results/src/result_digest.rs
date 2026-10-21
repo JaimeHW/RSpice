@@ -45,7 +45,7 @@ use crate::transfer_function::{
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 use crate::waveform::RetainedWaveform;
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 

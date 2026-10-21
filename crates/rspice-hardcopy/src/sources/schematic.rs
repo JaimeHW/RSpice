@@ -1,7 +1,6 @@
 //! Schematic hardcopy resolution over borrowed design content and captured selection.
 
 use super::*;
-use rspice_app_types::product::ObjectRevision;
 use rspice_design::resolved_symbol::{ResolvedSymbolIssueKind, ResolvedSymbolSource};
 use rspice_design::schematic::{component_type::ComponentType, owned::Schematic};
 use rspice_design::symbol::SymbolPin;
@@ -10,6 +9,7 @@ use rspice_design_model::design_management::{
     DesignSheet, DrawingSheetInheritance, DrawingSheetTitleFieldId, SheetCatalog, SheetId,
     validate_project_drawing_sheet_title_field_values,
 };
+use rspice_vocabulary::product::ObjectRevision;
 use std::collections::{BTreeMap, HashSet};
 use uuid::Uuid;
 

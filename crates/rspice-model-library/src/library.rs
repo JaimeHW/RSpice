@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::{DeviceModel, ModelDefinitionMetadata, ModelType, ProcessCorner};
-use rspice_app_types::product::{ContentDigest, ModelSourceId, ObjectRevision};
+use rspice_vocabulary::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
 /// The comment every materialized model block is sealed under in a deck.
 ///
@@ -133,7 +133,7 @@ pub fn project_owned_source_path(source_id: ModelSourceId) -> PathBuf {
 #[serde(deny_unknown_fields)]
 pub struct ModelSourcePin {
     pub path: PathBuf,
-    pub digest: rspice_app_types::product::ContentDigest,
+    pub digest: rspice_vocabulary::product::ContentDigest,
 }
 
 /// The published release a project part was taken from.
@@ -795,8 +795,8 @@ mod tests {
         );
 
         library.source_authority = ModelSourceAuthority::RetainedImport {
-            source_id: rspice_app_types::product::ModelSourceId::new(),
-            digest: rspice_app_types::product::ContentDigest::from_bytes([7; 32]),
+            source_id: rspice_vocabulary::product::ModelSourceId::new(),
+            digest: rspice_vocabulary::product::ContentDigest::from_bytes([7; 32]),
         };
         library.root_path = Some(PathBuf::from(
             "/rspice-browser/model-sources/9f2c/models/proving.lib",

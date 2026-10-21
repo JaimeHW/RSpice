@@ -9,7 +9,7 @@ use crate::plan_catalog::{
 };
 use crate::plan_model::SimulationPlan;
 use crate::run_set::{ReferencePoint as ReferencePvtPoint, RunSetState};
-use rspice_app_types::product::SimulationPlanId;
+use rspice_vocabulary::product::SimulationPlanId;
 use std::collections::HashSet;
 
 impl SimulationSetupDocument {

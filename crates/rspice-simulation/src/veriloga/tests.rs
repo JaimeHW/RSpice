@@ -44,7 +44,7 @@ pub(crate) fn standalone_connection_fixture() -> (super::PreparedVerilogARuntime
     )
     .unwrap();
     let authority = sealed
-        .reference_model_library_veriloga_authority(rspice_app_types::product::ProcessCorner::TT)
+        .reference_model_library_veriloga_authority(rspice_vocabulary::product::ProcessCorner::TT)
         .unwrap()
         .unwrap();
     let sources =
@@ -102,7 +102,7 @@ fn seal_runtime(file: &str, module: &str, source: &str) -> PreparedVerilogARunti
         .expect("fixture module compiles");
     PreparedVerilogARuntime::try_from_virtual_compilation(
         format!("__rspice_project__/fixture/{file}"),
-        rspice_app_types::product::ContentDigest::from_bytes([0x5a; 32]),
+        rspice_vocabulary::product::ContentDigest::from_bytes([0x5a; 32]),
         module.to_owned(),
         &compilation,
     )

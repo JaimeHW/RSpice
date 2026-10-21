@@ -529,7 +529,7 @@ pub fn show(
     locus: Option<&PolarLocus>,
     sheet: &PolarSheetState,
     samples: CursorSamples,
-    policy: &rspice_app_types::quantity::QuantityPresentationPolicy,
+    policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) -> Option<CanvasResponse> {
     let Some(locus) = locus else {
         well_hint(ui, ABSENT_STATE);
@@ -601,7 +601,7 @@ fn paint_canvas(
     rule: RadiusRule,
     samples: CursorSamples,
     sheet: &PolarSheetState,
-    policy: &rspice_app_types::quantity::QuantityPresentationPolicy,
+    policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) -> CanvasResponse {
     let c = &t.color;
     let area = ui.available_rect_before_wrap();
@@ -816,7 +816,7 @@ fn paint_canvas(
 fn sample_card_rows(
     locus: &PolarLocus,
     index: usize,
-    policy: &rspice_app_types::quantity::QuantityPresentationPolicy,
+    policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) -> Vec<crate::presentation::CardRow> {
     let magnitude = locus.magnitude(index);
     vec![
@@ -866,7 +866,7 @@ fn paint_decade_marks(
     t: &Tokens,
     locus: &PolarLocus,
     place: &impl Fn(usize) -> Option<egui::Pos2>,
-    policy: &rspice_app_types::quantity::QuantityPresentationPolicy,
+    policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) {
     let finite = (0..locus.len()).filter(|index| locus.is_finite(*index));
     let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -913,7 +913,7 @@ pub fn right_panel(
     ui: &mut Ui,
     locus: Option<&PolarLocus>,
     samples: CursorSamples,
-    policy: &rspice_app_types::quantity::QuantityPresentationPolicy,
+    policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) {
     section_header(ui, "Cursors", None);
     let Some(locus) = locus else {
@@ -940,7 +940,7 @@ fn row_hover(name: &str) -> Option<&'static str> {
 fn register_rows(
     locus: &PolarLocus,
     samples: CursorSamples,
-    policy: &rspice_app_types::quantity::QuantityPresentationPolicy,
+    policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) -> Vec<RegisterRow> {
     let dash = || "\u{2014}".to_owned();
     let at = |sample: Option<usize>, read: &dyn Fn(usize) -> String| sample.map_or_else(dash, read);
@@ -1380,7 +1380,7 @@ mod tests {
     #[test]
     fn the_register_states_a_dash_for_a_cursor_that_is_not_placed() {
         let locus = ramp_locus(0.25, 101);
-        let policy = rspice_app_types::quantity::QuantityPresentationPolicy::default();
+        let policy = rspice_vocabulary::quantity::QuantityPresentationPolicy::default();
         let rows = register_rows(
             &locus,
             CursorSamples {
@@ -1411,7 +1411,7 @@ mod tests {
     #[test]
     fn the_frequency_delta_is_stated_in_decades() {
         let locus = ramp_locus(0.5, 3);
-        let policy = rspice_app_types::quantity::QuantityPresentationPolicy::default();
+        let policy = rspice_vocabulary::quantity::QuantityPresentationPolicy::default();
         let rows = register_rows(
             &locus,
             CursorSamples {

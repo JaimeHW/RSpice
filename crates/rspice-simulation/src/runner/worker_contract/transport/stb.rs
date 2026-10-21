@@ -12,7 +12,7 @@ enum WorkerCircuitPoles {
     NotComputed,
     Available {
         roots: WorkerF64Series,
-        roots_digest: rspice_app_types::product::ContentDigest,
+        roots_digest: rspice_vocabulary::product::ContentDigest,
         evidence: RootSetEvidence,
     },
     Unavailable {

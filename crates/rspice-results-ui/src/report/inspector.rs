@@ -1,7 +1,6 @@
 //! Output profile controls and release handoff over an application-owned report.
 use super::{PaneSeparators, paint_pane_separators, paper_switch};
 use egui::{ScrollArea, Ui, Vec2};
-use rspice_app_types::product::ResultDocumentId;
 use rspice_results::report_document::{
     ReportDocument, ReportDraftMarking, ReportOutputFormats, ReportPageNumbering,
     ReportPublicationPageSize, ReportPublicationProfile, ReportPublicationTemplate,
@@ -16,6 +15,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::{Button, select},
 };
+use rspice_vocabulary::product::ResultDocumentId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentPublicationEdit {
     OutputFormats(ReportOutputFormats),

@@ -8,7 +8,7 @@
 //! element the engine files under its card's keyword.
 
 use super::{Component, ComponentType};
-use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
+use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
 
 /// What makes the deck write a controlled source as a behavioural `B` card: a
 /// polynomial or an output limit, neither of which a linear E/G/F/H card can

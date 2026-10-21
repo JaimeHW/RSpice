@@ -1,12 +1,12 @@
 //! Application corner fixtures and run-space executor integration.
 
-use rspice_app_types::product::ProcessCorner;
 use rspice_simulation_contract::corner_config::{CornerBaseAnalysis, CornerConfig};
 use rspice_simulation_contract::run_set::{
     NETLIST_SUPPLY_SOURCE_PREFIX, ReferencePoint, RunSetAction, RunSetBudgets, RunSetComposition,
     RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetState, compose, dispatch,
     resolve,
 };
+use rspice_vocabulary::product::ProcessCorner;
 
 /// Build a run set from an executable corner configuration.
 ///
@@ -174,8 +174,8 @@ fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
     let expanded = rspice_simulation::sweeps::expand_corner_pvt_points(
         &rspice_simulation::sweeps::CornerRunConfig {
             process_corners: vec![
-                rspice_app_types::product::ProcessCorner::TT,
-                rspice_app_types::product::ProcessCorner::SS,
+                rspice_vocabulary::product::ProcessCorner::TT,
+                rspice_vocabulary::product::ProcessCorner::SS,
             ],
             voltages: config.voltages.clone(),
             temperatures_c: config.temperatures.clone(),

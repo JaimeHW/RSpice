@@ -8,7 +8,7 @@
 
 use super::ModelCatalog;
 use crate::{ModelConsumerScope, model_library_source_digest};
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelDefinitionProvider {

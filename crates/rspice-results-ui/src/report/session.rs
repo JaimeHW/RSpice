@@ -1,8 +1,8 @@
 //! Report editor selection and drafts; canonical document edits remain app-owned.
-use rspice_app_types::product::ResultDocumentId;
 use rspice_results::report_document::{
     ReportBlockId, ReportPageId, ReportPageUpdatePolicy, ReportTemplate,
 };
+use rspice_vocabulary::product::ResultDocumentId;
 use serde::{Deserialize, Serialize};
 
 /// Report-composer selection and transactional editor presentation. The

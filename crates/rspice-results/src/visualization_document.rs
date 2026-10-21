@@ -27,7 +27,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::viewer_catalog::{ViewerArt, viewer_document};
-use rspice_app_types::product::{
+use rspice_vocabulary::product::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, ObjectRevision, ResultDocumentId,
     RevisionError, SimulationPlanId,
 };

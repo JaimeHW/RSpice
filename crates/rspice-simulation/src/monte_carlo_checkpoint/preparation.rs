@@ -1,8 +1,8 @@
 //! Checked selection and immutable inputs for resuming retained trial populations.
 
 use super::MonteCarloCheckpointInput;
-use rspice_app_types::canonical::CanonicalWriter;
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::canonical::CanonicalWriter;
+use rspice_vocabulary::product::ContentDigest;
 
 #[derive(Debug, Clone)]
 pub struct PreparedMonteCarloResume {

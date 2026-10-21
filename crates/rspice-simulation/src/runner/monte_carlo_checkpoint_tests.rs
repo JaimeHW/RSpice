@@ -7,11 +7,11 @@ use crate::monte_carlo_checkpoint::{
 use crate::runner::worker_contract::*;
 use crate::runner::*;
 use crate::study::StudyRunConfig;
-use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision};
 use rspice_core::{NoAbort, ResourceLimits};
 use rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::mc_draft::McVariationSource;
+use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 const DECK: &str = "Checkpoint dispatch\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\n.mc 3 uniform 0.2 seed 37\n.end\n";

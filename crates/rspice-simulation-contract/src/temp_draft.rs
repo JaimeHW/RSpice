@@ -12,7 +12,7 @@
 use serde::{Deserialize, Deserializer};
 
 use crate::run_set::{ReferencePoint, RunSetState};
-use rspice_app_types::product::AnalysisInstanceId;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 /// Where a temperature sweep's temperatures come from.
 ///

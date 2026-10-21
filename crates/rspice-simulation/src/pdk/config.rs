@@ -30,7 +30,7 @@ pub struct PdkConfig {
     /// PDK technology configuration. Absence is preserved rather than
     /// substituting a guessed manufacturing grid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layout_database_unit: Option<rspice_app_types::quantity::LayoutDatabaseUnit>,
+    pub layout_database_unit: Option<rspice_vocabulary::quantity::LayoutDatabaseUnit>,
 
     /// Signed technology-package revisions, exact active binding, and
     /// append-only administrative receipts. Persisted archives regain no

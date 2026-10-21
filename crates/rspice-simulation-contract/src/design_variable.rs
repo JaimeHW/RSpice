@@ -2,14 +2,14 @@
 
 use std::collections::HashMap;
 
-use rspice_app_types::product::{AnalysisInstanceId, DesignVariableId, ObjectRevision};
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::product::{AnalysisInstanceId, DesignVariableId, ObjectRevision};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use uuid::Uuid;
 
 use crate::design_variable_quantity::{DesignVariableQuantity, parse_design_quantity};
 use crate::saved_output::{deserialize_or_migrate_identity, missing_identity_sentinel};
-use rspice_app_types::text_validation::{
+use rspice_vocabulary::text_validation::{
     validate_bounded_text, validate_parameter_name, validate_single_line_expression,
 };
 

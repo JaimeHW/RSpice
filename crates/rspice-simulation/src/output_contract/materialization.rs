@@ -171,11 +171,11 @@ fn find_waveform<'a, W: OutputWaveform>(waveforms: &'a [W], requested: &str) -> 
         if let Some((device, quantity)) =
             rspice_results::saved_output::device_current_probe(requested)
         {
-            let engine = rspice_app_types::hierarchy_path::ProbeTarget::engine_alias(device)?;
+            let engine = rspice_vocabulary::hierarchy_path::ProbeTarget::engine_alias(device)?;
             return find_literal_waveform(waveforms, &format!("@{engine}[{quantity}]"));
         }
         let (current, node) = probe_identity(requested);
-        let engine = rspice_app_types::hierarchy_path::ProbeTarget::engine_alias(node)?;
+        let engine = rspice_vocabulary::hierarchy_path::ProbeTarget::engine_alias(node)?;
         find_literal_waveform(
             waveforms,
             &format!("{}({engine})", if current { "I" } else { "V" }),

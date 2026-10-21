@@ -3,12 +3,12 @@
 
 use egui::Ui;
 
-use rspice_app_types::quantity::{
-    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
-};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{Button, mono_input};
+use rspice_vocabulary::quantity::{
+    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
+};
 
 use super::data::{format_engineering_quantity, format_spice_number_lossless};
 use super::state::PwlEditorState;

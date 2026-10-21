@@ -12,7 +12,7 @@ the CLI's `rspice study` and the mixed-signal conformance corpus drive its
 headless preparation path. `tools/ci/check_app_crate_dependencies.py`
 refuses it any path to `rspice-project`, so it reads project records through
 `rspice-project-contract` and `rspice-simulation-contract`; the check allows
-it only those two, `rspice-app-types`, `rspice-design`,
+it only those two, `rspice-vocabulary`, `rspice-design`,
 `rspice-model-library`, `rspice-results` and `rspice-formats` among the
 application crates, and refuses egui, eframe, winit, wgpu and rfd in its
 closure.

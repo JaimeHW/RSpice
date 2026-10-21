@@ -6,9 +6,9 @@ use crate::execution_artifact::{
 use crate::execution_options::SpecExecutionOptions;
 use crate::prepared_dependency::validate_prepared_dependency_contract_with_options;
 use crate::results::SimulationResult;
-use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::config::FrequencySweep;
+use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::collections::HashMap;
 
 fn setup() -> (

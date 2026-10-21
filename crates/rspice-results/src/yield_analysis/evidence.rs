@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use super::{YieldAnalysisProvenance, YieldResult};
-use rspice_app_types::product::{DatasetId, RunId};
-use rspice_app_types::source_revision::SourceRevision;
+use rspice_vocabulary::product::{DatasetId, RunId};
+use rspice_vocabulary::source_revision::SourceRevision;
 
 #[derive(Debug, Clone, Default)]
 pub struct YieldEvidence {

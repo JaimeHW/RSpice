@@ -27,9 +27,6 @@ use crate::execution_options::SpecExecutionOptions;
 use crate::periodic::PnoiseReference;
 use crate::sweeps::CornerBaseMode;
 use crate::sweeps::CornerFrequencySweep;
-use rspice_app_types::product::AnalysisInstanceId;
-use rspice_app_types::product::ContentDigest;
-use rspice_app_types::product::manual_deck_analysis_instance_id_from_tag;
 use rspice_design::drc::DrcLocation;
 use rspice_design::drc::DrcResult;
 use rspice_design::drc::DrcSeverity;
@@ -55,8 +52,11 @@ use rspice_simulation_contract::numeric_override::AnalysisNumericOverride;
 use rspice_simulation_contract::numeric_override::NumericOverrideOption;
 use rspice_simulation_contract::numeric_override::OverrideValue;
 use rspice_simulation_contract::options::IntegrationMethod;
+use rspice_vocabulary::product::AnalysisInstanceId;
+use rspice_vocabulary::product::ContentDigest;
+use rspice_vocabulary::product::manual_deck_analysis_instance_id_from_tag;
 
-use rspice_app_types::canonical::CanonicalWriter;
+use rspice_vocabulary::canonical::CanonicalWriter;
 
 pub fn f64_sequence_digest(domain: &str, values: &[f64]) -> ContentDigest {
     let mut writer = CanonicalWriter::new(domain);
@@ -242,7 +242,7 @@ pub fn monte_carlo_evaluator_digest(base: &crate::study::StudyRunConfig) -> Cont
     // plan revision, including unchanged prerequisites. Compatibility follows
     // their full frozen configurations instead. Keep instance identities and
     // every saved OP source/snapshot/result digest and numerical value intact.
-    base.source_revision = rspice_app_types::product::ObjectRevision::INITIAL;
+    base.source_revision = rspice_vocabulary::product::ObjectRevision::INITIAL;
     let operating_point = match &mut base.analysis {
         StudyAnalysis::Pss(config) => Some(&mut config.operating_point),
         StudyAnalysis::Qpss(config) => Some(&mut config.operating_point),
@@ -250,10 +250,10 @@ pub fn monte_carlo_evaluator_digest(base: &crate::study::StudyRunConfig) -> Cont
         StudyAnalysis::Basic(_) | StudyAnalysis::Native(_) => None,
     };
     if let Some(operating_point) = operating_point {
-        operating_point.source_revision = rspice_app_types::product::ObjectRevision::INITIAL;
+        operating_point.source_revision = rspice_vocabulary::product::ObjectRevision::INITIAL;
     }
     if let Some(postprocess) = &mut base.postprocess {
-        postprocess.producer_source_revision = rspice_app_types::product::ObjectRevision::INITIAL;
+        postprocess.producer_source_revision = rspice_vocabulary::product::ObjectRevision::INITIAL;
     }
     // Unit-aware observations change how limits interpret a population. Old
     // journals remain readable, but cannot supply trials to this evaluator.
@@ -525,11 +525,11 @@ fn encode_op_fields(
     writer.usize(run_point.index);
     writer.usize(run_point.count);
     writer.u8(match run_point.process {
-        rspice_app_types::product::ProcessCorner::TT => 0,
-        rspice_app_types::product::ProcessCorner::SS => 1,
-        rspice_app_types::product::ProcessCorner::FF => 2,
-        rspice_app_types::product::ProcessCorner::SF => 3,
-        rspice_app_types::product::ProcessCorner::FS => 4,
+        rspice_vocabulary::product::ProcessCorner::TT => 0,
+        rspice_vocabulary::product::ProcessCorner::SS => 1,
+        rspice_vocabulary::product::ProcessCorner::FF => 2,
+        rspice_vocabulary::product::ProcessCorner::SF => 3,
+        rspice_vocabulary::product::ProcessCorner::FS => 4,
     });
     writer.option(run_point.supply_voltage.as_ref(), |writer, voltage| {
         writer.f64(*voltage);

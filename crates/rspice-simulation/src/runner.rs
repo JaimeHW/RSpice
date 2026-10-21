@@ -1375,7 +1375,7 @@ mod tests {
             });
         assert_eq!(
             receipt.severity,
-            rspice_app_types::diagnostics::LogSeverity::Info
+            rspice_vocabulary::diagnostics::LogSeverity::Info
         );
         assert!(
             receipt.message.contains("from seed 4242"),
@@ -1441,7 +1441,7 @@ mod tests {
         assert_eq!(edge.origin, crate::engine_log::EngineLogOrigin::Hdl);
         assert_eq!(
             edge.severity,
-            rspice_app_types::diagnostics::LogSeverity::Info
+            rspice_vocabulary::diagnostics::LogSeverity::Info
         );
         assert_eq!(
             lines
@@ -1502,7 +1502,7 @@ mod tests {
         assert_eq!(finding.origin, crate::engine_log::EngineLogOrigin::VerilogA);
         assert_eq!(
             finding.severity,
-            rspice_app_types::diagnostics::LogSeverity::Warning
+            rspice_vocabulary::diagnostics::LogSeverity::Warning
         );
         assert!(finding.message.contains("'$strobe'"), "{}", finding.message);
     }
@@ -1549,7 +1549,7 @@ mod tests {
         let traced = engine_log_of_run(spec(true), DECK);
         let iterations = traced
             .iter()
-            .filter(|line| line.severity == rspice_app_types::diagnostics::LogSeverity::Debug)
+            .filter(|line| line.severity == rspice_vocabulary::diagnostics::LogSeverity::Debug)
             .filter(|line| {
                 line.message.starts_with("HB exact matrix-free solve:")
                     || line.message.starts_with("HB Krylov solve:")
@@ -1565,7 +1565,7 @@ mod tests {
         assert!(
             quiet
                 .iter()
-                .all(|line| line.severity != rspice_app_types::diagnostics::LogSeverity::Debug),
+                .all(|line| line.severity != rspice_vocabulary::diagnostics::LogSeverity::Debug),
             "an ordinary HB solve traced its solver anyway: {:?}",
             quiet.iter().map(|line| &line.message).collect::<Vec<_>>()
         );

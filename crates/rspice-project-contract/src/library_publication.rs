@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, ProjectId};
 
 use super::{ProjectDescriptor, ProjectDescriptorError};
 use rspice_design::library::validate_library_audit_text;

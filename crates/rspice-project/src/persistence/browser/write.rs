@@ -2,7 +2,7 @@
 
 use super::{BrowserBindingBackend, BrowserWriteIntent};
 use crate::persistence::digest_bytes;
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use std::{fmt, future::Future};
 
 /// The host retains permissions, locks and handles for the whole operation.

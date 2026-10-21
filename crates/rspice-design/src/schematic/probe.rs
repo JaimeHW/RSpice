@@ -29,9 +29,9 @@ pub struct SchematicProbe {
     /// Plan/output identity that makes this marker an executable output
     /// request rather than a decorative annotation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan_id: Option<rspice_app_types::product::SimulationPlanId>,
+    pub plan_id: Option<rspice_vocabulary::product::SimulationPlanId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub saved_output_id: Option<rspice_app_types::product::SavedOutputId>,
+    pub saved_output_id: Option<rspice_vocabulary::product::SavedOutputId>,
     /// Disabled probes remain authored on the sheet but do not request future
     /// materialization. Legacy probes migrate enabled.
     #[serde(default = "enabled_by_default")]
@@ -80,7 +80,7 @@ impl SchematicProbe {
         }
         if let Some(expression) = &self.source_expression {
             let expression = expression.trim();
-            rspice_app_types::raw_probe::validate_raw_probe(expression)
+            rspice_vocabulary::raw_probe::validate_raw_probe(expression)
                 .map_err(|error| format!("probe source expression is invalid: {error}"))?;
         }
         Ok(())
@@ -88,8 +88,8 @@ impl SchematicProbe {
 
     pub fn bind_saved_output(
         &mut self,
-        plan_id: rspice_app_types::product::SimulationPlanId,
-        saved_output_id: rspice_app_types::product::SavedOutputId,
+        plan_id: rspice_vocabulary::product::SimulationPlanId,
+        saved_output_id: rspice_vocabulary::product::SavedOutputId,
     ) {
         self.plan_id = Some(plan_id);
         self.saved_output_id = Some(saved_output_id);

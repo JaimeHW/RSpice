@@ -21,8 +21,8 @@ wasm32 application image. Internal layering is checked by
 | `analysis/` | Calculator adaptation over retained application results |
 | `results/` | Result-document exports and application integration fixtures |
 | `properties/` | Project-bound property editing workflows |
-| `product/` | `CommandId`, plus the product identities `rspice-app-types` defines |
-| `quantity/` | Platform number-locale discovery, plus the quantity presentation and input policy `rspice-app-types` defines; values crossing this boundary are always in documented SI base units |
+| `product/` | `CommandId`, plus the product identities `rspice-vocabulary` defines |
+| `quantity/` | Platform number-locale discovery, plus the quantity presentation and input policy `rspice-vocabulary` defines; values crossing this boundary are always in documented SI base units |
 | `diagnostics/` | What the application reports about itself: the console message model and the structured, filterable application log |
 | `services/` | Service and platform adapters: license keys, cloud account, live-session protocol, Model Hub transport, model qualification |
 | `io/` | File workflows and platform I/O adapters: project load/save, file exchange, netlist and waveform export, project execution |
@@ -63,7 +63,7 @@ editor with completion and a parameter tuner).
   export belong to `rspice-schematic-editor`.
 - Portable value types (product identities, the instance-path grammar,
   diagnostics records, property values and quantity policy) belong to
-  `rspice-app-types`; this crate re-exports the ones its callers use.
+  `rspice-vocabulary`; this crate re-exports the ones its callers use.
 - Qualified desktop architectures take `rspice-core` with its default parallel
   and SIMD solver paths plus the native Verilog-A JIT; every other target takes
   the portable Verilog-A, and `wasm32` drops rayon and SIMD as well.

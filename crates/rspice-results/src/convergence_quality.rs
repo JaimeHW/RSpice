@@ -17,7 +17,7 @@ pub trait ConvergenceEncoder {
     fn tag(&mut self, value: u8);
 }
 
-impl ConvergenceEncoder for rspice_app_types::canonical::CanonicalWriter {
+impl ConvergenceEncoder for rspice_vocabulary::canonical::CanonicalWriter {
     fn u64(&mut self, value: u64) {
         Self::u64(self, value);
     }

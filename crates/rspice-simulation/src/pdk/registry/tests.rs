@@ -160,7 +160,7 @@ fn signed_model_sources_materialize_exact_process_sections_and_archive_identity(
     .with_pdk_model_sources(sealed)
     .expect("signed PDK closure merges");
     let tt = combined
-        .reference_process_model_cards(rspice_app_types::product::ProcessCorner::TT)
+        .reference_process_model_cards(rspice_vocabulary::product::ProcessCorner::TT)
         .expect("TT materializes");
     assert_eq!(tt.len(), 1);
     assert!(tt[0].contains("vto=0.55"));
@@ -169,8 +169,8 @@ fn signed_model_sources_materialize_exact_process_sections_and_archive_identity(
 
     let corner_bindings = combined
         .corner_model_bindings(&[
-            rspice_app_types::product::ProcessCorner::SS,
-            rspice_app_types::product::ProcessCorner::FF,
+            rspice_vocabulary::product::ProcessCorner::SS,
+            rspice_vocabulary::product::ProcessCorner::FF,
         ])
         .expect("explicit signed corner sections materialize");
     assert_eq!(corner_bindings.len(), 2);
@@ -386,7 +386,7 @@ fn signed_model_sections_close_package_relative_dependencies_in_memory() {
     .with_pdk_model_sources(sealed)
     .unwrap();
     let cards = combined
-        .reference_process_model_cards(rspice_app_types::product::ProcessCorner::TT)
+        .reference_process_model_cards(rspice_vocabulary::product::ProcessCorner::TT)
         .unwrap();
     assert!(cards[0].contains(".model pdk_helper d is=1e-14"));
     assert!(!cards[0].contains(".include"));

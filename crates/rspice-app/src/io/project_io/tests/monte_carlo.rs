@@ -11,7 +11,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
     let provenance = AnalysisResultProvenance::new_with_source_domain(
         AnalysisResultSourceDomain::ManualDeck,
-        rspice_app_types::product::manual_deck_analysis_instance_id_from_tag(
+        rspice_vocabulary::product::manual_deck_analysis_instance_id_from_tag(
             ContentDigest::from_bytes([82; 32]),
             crate::state::CanonicalAnalysisKind::MonteCarlo.tag(),
             0,
@@ -338,10 +338,10 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
 #[test]
 fn monte_carlo_checkpoint_file_round_trip_rejects_corruption_and_bounds() {
     use crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
-    use rspice_app_types::product::ContentDigest;
     use rspice_formats::monte_carlo_checkpoint::{self as checkpoint_file, CheckpointFileError};
     use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointEvidence;
     use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary;
+    use rspice_vocabulary::product::ContentDigest;
 
     let (_, bytes, _) = completed_checkpoint_fixture();
     let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();

@@ -2,9 +2,9 @@
 
 use super::{PreparationError, PreparationStage};
 use crate::netlist_preparation::dependencies::execution_current_directory;
-use rspice_app_types::canonical::{CanonicalWriter, content_digest};
-use rspice_app_types::product::ContentDigest;
 use rspice_simulation_contract::sp_draft::{SpDialogState, SpPlacedPort};
+use rspice_vocabulary::canonical::{CanonicalWriter, content_digest};
+use rspice_vocabulary::product::ContentDigest;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 

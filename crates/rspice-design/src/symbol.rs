@@ -34,7 +34,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as ShaDigest, Sha256};
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 pub use rspice_design_model::symbol_geometry::{
     SymbolShape, SymbolTextAlign, SymbolTextPlacement, SymbolTextSize, symbol_text_bounds,

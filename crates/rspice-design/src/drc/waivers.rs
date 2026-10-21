@@ -464,7 +464,7 @@ fn owner_key(cellview: &CellViewRef) -> CanonicalCellViewOwnerKey {
 mod tests {
     use super::*;
     use crate::drc::DrcSeverity;
-    use rspice_app_types::hierarchy_path::InstancePath;
+    use rspice_vocabulary::hierarchy_path::InstancePath;
 
     fn waiver(rule: &str, object: &str) -> DrcWaiver {
         DrcWaiver {

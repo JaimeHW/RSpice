@@ -14,7 +14,6 @@ use wasmi::{
     StoreLimitsBuilder, ValType,
 };
 
-use rspice_app_types::product::ContentDigest;
 use rspice_model_library::pdk::callback::{
     MAX_PDK_CALLBACK_METADATA_ENTRIES, MAX_PDK_CALLBACK_METADATA_KEY_BYTES,
     MAX_PDK_CALLBACK_METADATA_TOTAL_BYTES, MAX_PDK_CALLBACK_METADATA_VALUE_BYTES,
@@ -26,6 +25,7 @@ use rspice_model_library::pdk::callback::{
     PdkCallbackError, PdkCallbackExecutionInput, PdkCallbackExecutionReceipt,
 };
 use rspice_model_library::pdk::content_digest;
+use rspice_vocabulary::product::ContentDigest;
 
 use rspice_model_library::pdk::contracts::{
     MAX_PDK_ARTIFACT_BYTES, MAX_PDK_CALLBACK_ARTIFACT_BYTES, MAX_PDK_TOTAL_ARTIFACT_BYTES,

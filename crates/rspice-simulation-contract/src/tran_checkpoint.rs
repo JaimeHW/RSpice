@@ -1,5 +1,5 @@
 //! Authored checkpoint cadence and immutable images selected for continuation.
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

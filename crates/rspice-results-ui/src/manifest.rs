@@ -2,7 +2,6 @@
 
 use crate::{presentation::well_hint, virtual_rows::RowOffsets};
 use egui::{Ui, WidgetInfo, WidgetType};
-use rspice_app_types::product::RunId;
 use rspice_results::{
     executed_deck::absent_deck_reason,
     manifest::{ManifestRow, ManifestViewModel},
@@ -14,6 +13,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::measurement_table,
 };
+use rspice_vocabulary::product::RunId;
 const MIN_TABLE_WIDTH: f32 = 1_030.0;
 const TABLE_HEAD_HEIGHT: f32 = 27.0;
 const TABLE_ROW_HEIGHT: f32 = 44.0;

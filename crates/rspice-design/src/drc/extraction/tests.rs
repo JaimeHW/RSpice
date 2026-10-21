@@ -17,8 +17,8 @@ use crate::project_sources::{
 use crate::schematic::component::LibraryCellInstance;
 use crate::schematic::net_label::NetLabel;
 use crate::schematic::wire::Wire;
-use rspice_app_types::product::ProjectId;
 use rspice_design_model::Point;
+use rspice_vocabulary::product::ProjectId;
 use std::collections::HashMap;
 use std::path::Path;
 

@@ -9,7 +9,7 @@ that `rspice-app`, `rspice-schematic-editor` and `rspice-results-ui` paint from
 one token set, and so the boundary can be enforced:
 `tools/ci/check_app_crate_dependencies.py` refuses eframe, winit, wgpu, rfd,
 every simulator package and every application crate in its closure except
-`rspice-app-types`, `rspice-results` and the `rspice-units` beneath it, which
+`rspice-vocabulary`, `rspice-results` and the `rspice-units` beneath it, which
 `plot` needs.
 
 ## What's in here
@@ -58,7 +58,7 @@ every simulator package and every application crate in its closure except
 
 | Flag | Effect |
 | :--- | :--- |
-| `plot` | Compiles the `plot` module and depends on `rspice-app-types` and `rspice-results`, so plots share the results crate's exact axis and sampling contracts. `rspice-app` and `rspice-results-ui` enable it |
+| `plot` | Compiles the `plot` module and depends on `rspice-vocabulary` and `rspice-results`, so plots share the results crate's exact axis and sampling contracts. `rspice-app` and `rspice-results-ui` enable it |
 | `test-support` | Exposes `raster` and, off `wasm32`, `widgets::painted_runs`, which records every text run a headless pass painted with its clip rectangle. Enabled by the dev-dependencies of `rspice-app` and `rspice-schematic-editor` |
 
 ## Testing

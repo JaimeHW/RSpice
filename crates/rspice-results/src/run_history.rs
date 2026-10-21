@@ -9,7 +9,7 @@ use std::ops::{Deref, DerefMut};
 
 use crate::run::{RunRetention, SimulationRun};
 use crate::run_receipt::PreparedRunReceipt;
-use rspice_app_types::product::{RunId, SimulationPlanId};
+use rspice_vocabulary::product::{RunId, SimulationPlanId};
 
 #[cfg(test)]
 mod tests;
@@ -17,7 +17,7 @@ mod tests;
 mod queries;
 pub use queries::{has_retained_op_state, newest_retained_op_state};
 
-pub type RunHistoryRevision = rspice_app_types::source_revision::SourceRevision;
+pub type RunHistoryRevision = rspice_vocabulary::source_revision::SourceRevision;
 
 /// Retained runs with a revision that covers every mutable collection access.
 #[derive(Debug, Clone)]

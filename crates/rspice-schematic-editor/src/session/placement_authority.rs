@@ -35,9 +35,9 @@ mod tests {
 
     #[test]
     fn an_authority_matches_only_its_own_document() {
-        use rspice_app_types::product::ProjectId;
         use rspice_design::occurrence::DocumentOccurrence;
         use rspice_design_model::{cell_view::CellViewRef, design_management::SheetId};
+        use rspice_vocabulary::product::ProjectId;
 
         let document = CellViewRef::new("work", "ota_5t", "schematic");
         let source = EditorRequestSource {

@@ -11,7 +11,6 @@ use crate::{
     virtual_rows::RowOffsets,
 };
 use egui::{Sense, Ui};
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::sensitivity::{
     SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow, SensitivityValue,
 };
@@ -22,6 +21,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::measurement_table,
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::cmp::Ordering;
 
 const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + 360.0 + VALUE_WIDTH + PROFILE_WIDTH;
@@ -865,7 +865,7 @@ mod tests {
         );
         // The band and the point follow Frequency display.
         let radians = QuantityPresentationPolicy {
-            frequency_display: rspice_app_types::quantity::FrequencyDisplay::RadiansPerSecond,
+            frequency_display: rspice_vocabulary::quantity::FrequencyDisplay::RadiansPerSecond,
             ..policy
         };
         assert!(

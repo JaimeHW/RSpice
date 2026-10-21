@@ -15,10 +15,10 @@
 //! the sealer silently, and every deck in the project would quietly stop
 //! verifying.
 
-use rspice_app_types::product::ContentDigest;
 use rspice_results::provenance::AnalysisResultSourceDomain;
+use rspice_vocabulary::product::ContentDigest;
 
-use rspice_app_types::canonical::content_digest;
+use rspice_vocabulary::canonical::content_digest;
 
 /// Domain separator for the source a schematic-derived run executed.
 const GENERATED_EXECUTABLE_SOURCE: &str = "rspice.generated-executable-source/v1";

@@ -7,11 +7,11 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
-use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::{ResourceKind, ResourceLimitError, ResourceLimits};
 use rspice_results::provenance::AnalysisResultTransientState;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision};
 
 use super::PreparedTask;
 use super::task_preparation::{bind_prepared_task_dependencies, executes_via_spec};

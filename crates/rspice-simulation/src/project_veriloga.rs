@@ -102,7 +102,7 @@ pub fn compile_project_virtual_runtime(
 }
 
 pub fn compile_project_source_bundle_runtime(
-    project_id: rspice_app_types::product::ProjectId,
+    project_id: rspice_vocabulary::product::ProjectId,
     bundle: &rspice_design::project_sources::ProjectSourceBundle,
     module_name: &str,
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
@@ -155,18 +155,18 @@ pub fn project_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits
 /// that happen to contain identical root text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerilogASourceOperationToken {
-    pub project_id: rspice_app_types::product::ProjectId,
+    pub project_id: rspice_vocabulary::product::ProjectId,
     pub bundle_id: rspice_design::project_sources::ProjectSourceId,
     pub revision: u64,
-    pub closure_digest: rspice_app_types::product::ContentDigest,
+    pub closure_digest: rspice_vocabulary::product::ContentDigest,
     /// Exact explicit module selection requested by a cell-view contract.
     /// `None` preserves the Code Workspace's compiler-selected module mode.
-    pub requested_module_digest: Option<rspice_app_types::product::ContentDigest>,
+    pub requested_module_digest: Option<rspice_vocabulary::product::ContentDigest>,
 }
 
 impl VerilogASourceOperationToken {
     pub fn capture(
-        project_id: rspice_app_types::product::ProjectId,
+        project_id: rspice_vocabulary::product::ProjectId,
         bundle: &ProjectSourceBundle,
         selected_module: Option<&str>,
     ) -> Self {
@@ -182,7 +182,7 @@ impl VerilogASourceOperationToken {
 
 /// Bind a compile report only after checking its current project source token.
 pub fn prepare_project_runtime(
-    project_id: rspice_app_types::product::ProjectId,
+    project_id: rspice_vocabulary::product::ProjectId,
     bundle: &rspice_design::project_sources::ProjectSourceBundle,
     token: &VerilogASourceOperationToken,
     module_name: &str,
@@ -219,14 +219,14 @@ pub fn prepare_project_runtime(
 
 pub fn veriloga_selected_module_digest(
     module_name: &str,
-) -> rspice_app_types::product::ContentDigest {
+) -> rspice_vocabulary::product::ContentDigest {
     let mut hasher = Sha256::new();
     let domain = b"rspice.veriloga-selected-module/v1";
     hasher.update((domain.len() as u64).to_be_bytes());
     hasher.update(domain);
     hasher.update((module_name.len() as u64).to_be_bytes());
     hasher.update(module_name.as_bytes());
-    rspice_app_types::product::ContentDigest::from_bytes(hasher.finalize().into())
+    rspice_vocabulary::product::ContentDigest::from_bytes(hasher.finalize().into())
 }
 
 pub fn compile_model_library_source_runtimes(

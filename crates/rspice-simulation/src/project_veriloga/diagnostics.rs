@@ -1,11 +1,11 @@
 //! Compiler findings independent of editor state and transport metadata.
 
 use super::VerilogASourceOperationToken;
-use rspice_app_types::diagnostics::{
-    DiagnosticSeverity, SourceDiagnostic, diagnostic_range, stable_diagnostic_id,
-};
 use rspice_design::project_sources::ProjectSourceBundle;
 use rspice_veriloga::{CompileDiagnosticPhase, CompileDiagnosticSeverity, RuntimeCompileReport};
+use rspice_vocabulary::diagnostics::{
+    DiagnosticSeverity, SourceDiagnostic, diagnostic_range, stable_diagnostic_id,
+};
 use std::sync::Arc;
 
 pub type CompileResult = Result<Box<RuntimeCompileReport>, Vec<ProjectCompileDiagnostic>>;

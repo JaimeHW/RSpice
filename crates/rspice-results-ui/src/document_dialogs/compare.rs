@@ -2,13 +2,13 @@
 //! against an absolute and relative tolerance.
 
 use egui::{Context, RichText, Sense, Ui, vec2};
-use rspice_app_types::product::DatasetId;
 use rspice_results::waveform_comparison::ComparisonAlignmentDraft;
 use rspice_ui_kit::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{CommandForm, Dialog, DialogChoice, DialogSize, Problem, problem_line},
 };
+use rspice_vocabulary::product::DatasetId;
 
 use super::labels_and_selection;
 

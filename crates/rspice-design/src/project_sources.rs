@@ -15,7 +15,7 @@ use sha2::{Digest as _, Sha256};
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, ProjectId};
 
 use rspice_design_model::cell_view::CellViewRef;
 

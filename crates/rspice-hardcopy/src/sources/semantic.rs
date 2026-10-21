@@ -16,7 +16,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision};
 use rspice_design::schematic::{
     bus::{Bus, BusTap},
     component::Component,
@@ -40,6 +39,7 @@ use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::report_document::{
     FigureSizing, FrozenReportArtifact, ReportBlockId, ReportPage, ReportReferenceMode,
 };
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision};
 // The visualization document's own axis vocabulary, so the printed page and
 // the authored pane describe a logarithmic axis the same way.
 use rspice_results::result_presentation::ResultViewer;

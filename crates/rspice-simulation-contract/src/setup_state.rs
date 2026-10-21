@@ -14,7 +14,7 @@ use crate::plan_catalog::{
     SimulationPlanImportDocument,
 };
 use crate::run_set::{ReferencePoint as ReferencePvtPoint, RunSetDimensionKind};
-use rspice_app_types::product::SimulationPlanId;
+use rspice_vocabulary::product::SimulationPlanId;
 use std::collections::BTreeSet;
 
 /// Portable setup with the compatibility projections still used by legacy consumers.
@@ -200,7 +200,7 @@ impl SimulationSetup {
         setup.document.analysis_plan = Some(crate::plan_model::SimulationPlan::new());
         setup.document.run_set = default_global_run_set();
         setup
-            .set_reference_pvt(rspice_app_types::product::ProcessCorner::TT, 27.0)
+            .set_reference_pvt(rspice_vocabulary::product::ProcessCorner::TT, 27.0)
             .expect("the built-in reference PVT point is valid");
         setup
             .enabled
@@ -242,7 +242,7 @@ impl SimulationSetup {
     /// Select the nominal/reference PVT point consumed by subsequent runs.
     pub fn set_reference_pvt(
         &mut self,
-        process: rspice_app_types::product::ProcessCorner,
+        process: rspice_vocabulary::product::ProcessCorner,
         temperature_celsius: f64,
     ) -> Result<(), String> {
         if !temperature_celsius.is_finite() {

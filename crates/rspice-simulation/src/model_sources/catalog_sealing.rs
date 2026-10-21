@@ -1,8 +1,8 @@
 //! Validate catalog selection and seal exact execution-source bytes.
 
 use super::{SealedModelExecutionSources, seal_model_sources};
-use rspice_app_types::product::ContentDigest;
 use rspice_model_library::{ModelCatalog, ModelResolutionRecords, SimulationPlanModelBinding};
+use rspice_vocabulary::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 use std::path::Path;
 

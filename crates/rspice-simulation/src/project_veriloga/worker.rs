@@ -286,7 +286,7 @@ mod tests {
             .expect("fixture module compiles");
         PreparedVerilogARuntime::try_from_virtual_compilation(
             format!("__rspice_project__/fixture/{file}"),
-            rspice_app_types::product::ContentDigest::from_bytes([0x5a; 32]),
+            rspice_vocabulary::product::ContentDigest::from_bytes([0x5a; 32]),
             module.to_owned(),
             &compilation,
         )

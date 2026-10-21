@@ -16,7 +16,7 @@ use super::{
     DefinitionMetadataError, ModelDefinitionMetadata, ModelFileIdentity, ParameterDataType,
     ParameterValue, ProjectModelDefinition,
 };
-use rspice_app_types::product::{ContentDigest, ModelSourceId, ObjectRevision};
+use rspice_vocabulary::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
 /// A typed projection of the single retained source allowed to own a
 /// project-authored model revision.

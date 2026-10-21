@@ -2,11 +2,11 @@
 
 use super::design_view::object_is_on_active_sheet;
 use crate::session::EditorSession;
-use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
 use rspice_design::schematic::component::{Component, component_for_engine_device};
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design_model::Point;
 use rspice_design_model::design_management::SheetCatalog;
+use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
 use std::collections::HashMap;
 
 /// A synchronous view of the active drawing and its retained result geometry.

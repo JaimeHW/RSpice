@@ -24,7 +24,7 @@ work-observation = ["rspice-design-model/work-observation"]
 [dependencies]
 log.workspace = true
 regex.workspace = true
-rspice-app-types.workspace = true
+rspice-vocabulary.workspace = true
 # Authored source contracts reuse the engine's canonical lexer, AST and dialect rules.
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-design-model.workspace = true

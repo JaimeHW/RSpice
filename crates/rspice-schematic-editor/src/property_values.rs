@@ -7,16 +7,16 @@
 
 use egui::{Sense, Stroke, Ui, pos2, vec2};
 
-use rspice_app_types::property::{DisplayMode, PropertyDefinition, PropertyType, PropertyValue};
-use rspice_app_types::quantity::{
-    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, format_engineering_value,
-};
 use rspice_design::properties::value::{
     parse_expression_source, parse_number_source, property_quantity_kind,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{chip, mono_input, select_mono_with_response};
+use rspice_vocabulary::property::{DisplayMode, PropertyDefinition, PropertyType, PropertyValue};
+use rspice_vocabulary::quantity::{
+    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, format_engineering_value,
+};
 
 /// Whether the editor's own text carries this property's unit.
 ///

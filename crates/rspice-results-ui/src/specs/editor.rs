@@ -5,9 +5,6 @@ mod reference_import;
 pub use reference_import::{ReferenceCompletion, ReferenceExchange};
 
 use egui::Ui;
-use rspice_app_types::{
-    product::AnalysisInstanceId, quantity::engineering::parse_engineering_value,
-};
 use rspice_results::specification::{
     MeasurementReferenceSource, SpecEntry, SpecPointScope, SpecificationComparison,
     SpecificationDefinition, SpecificationRole,
@@ -16,6 +13,9 @@ use rspice_ui_kit::{
     panels::{WorkbenchIcon, icon_button},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
+};
+use rspice_vocabulary::{
+    product::AnalysisInstanceId, quantity::engineering::parse_engineering_value,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

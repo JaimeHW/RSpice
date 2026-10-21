@@ -27,9 +27,9 @@ use crate::state::{
 };
 use crate::state::{LibraryManager, ProjectWorkspace};
 use crate::workbench::app_state::AppState;
-use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_results::provenance::AnalysisResultSourceDomain;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
+use rspice_vocabulary::hierarchy_path::InstancePath;
 
 fn downgrade_result_digests_to_v6(results: &mut ProjectSimulationResults) {
     for persisted_run in &mut results.runs {

@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 
-use rspice_app_types::product::{ObjectRevision, SimulationPlanId};
 use rspice_model_library::SimulationPlanModelBinding;
+use rspice_vocabulary::product::{ObjectRevision, SimulationPlanId};
 use serde::{Deserialize, Serialize};
 
 use crate::options::SimulationOptions;

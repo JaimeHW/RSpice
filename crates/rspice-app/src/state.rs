@@ -110,7 +110,7 @@ pub use property_types::{
     ContractStrength, DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
     SourceContractFinding, format_engineering, format_engineering_display,
 };
-pub use rspice_app_types::hierarchy_path::{
+pub use rspice_vocabulary::hierarchy_path::{
     HierarchyPathError, InstancePath, InstancePathPattern, MAX_INSTANCE_PATH_BYTES,
     MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
 };

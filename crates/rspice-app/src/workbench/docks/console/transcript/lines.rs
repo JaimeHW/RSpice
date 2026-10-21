@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use rspice_app_types::run_log::RunLog;
+use rspice_vocabulary::run_log::RunLog;
 
 use crate::diagnostics::{LogAnchor, LogBuffer, LogSeverity};
 use crate::state::SimulationRun;
@@ -502,7 +502,7 @@ mod tests {
 
         let mut run = RunLog::default();
         for message in ["x", "y"] {
-            run.push(rspice_app_types::run_log::RunLogLine {
+            run.push(rspice_vocabulary::run_log::RunLogLine {
                 unix_ms: 0,
                 severity: LogSeverity::Info,
                 source: LogSource::Run,

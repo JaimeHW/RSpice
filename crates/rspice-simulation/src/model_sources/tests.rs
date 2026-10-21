@@ -1,9 +1,9 @@
 //! Exact retained-byte publication and tamper rejection across catalog and execution.
 
 use super::*;
-use rspice_app_types::product::ObjectRevision;
 use rspice_model_library::qualification::ModelQualificationState;
 use rspice_model_library::{ProjectModelDefinition, ProjectModelRevisionDefinition};
+use rspice_vocabulary::product::ObjectRevision;
 
 fn create_project_model(
     catalog: &mut rspice_model_library::ModelCatalog,

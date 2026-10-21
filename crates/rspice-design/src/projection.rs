@@ -53,11 +53,11 @@ use crate::schematic::{
 };
 use crate::stamped::Stamped;
 use crate::symbol_resolver::SymbolResolver;
-use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId};
 use rspice_design_model::{
     cell_view::CellViewRef,
     design_management::{DesignManagementCatalog, DesignManagementError, VariantObjectOverride},
 };
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, ProjectId};
 
 /// The live design and source metadata needed to freeze one schematic.
 #[derive(Clone, Copy)]

@@ -4,7 +4,7 @@ use egui::accesskit;
 
 fn source() -> EditorRequestSource {
     EditorRequestSource {
-        project: rspice_app_types::product::ProjectId::new(),
+        project: rspice_vocabulary::product::ProjectId::new(),
         document: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
         occurrence: None,
         design_epoch: 1,

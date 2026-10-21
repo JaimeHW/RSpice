@@ -9,8 +9,8 @@ use crate::projection::{ConfigurationExecutionProjection, DesignProjection};
 use crate::resolved_symbol::ResolvedCellSymbol;
 use crate::schematic::component::LibraryCellInstance;
 use crate::schematic::document::SchematicDocument;
-use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::hierarchy_path::InstancePath;
 use std::collections::HashMap;
 
 /// Borrow the source map's symbol and global declarations without copying it.

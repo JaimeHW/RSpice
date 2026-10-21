@@ -315,7 +315,7 @@ impl AppState {
         &self,
         project: crate::product::ProjectId,
         condition: &Gathered<'_>,
-        canonical: rspice_app_types::diagnostics::CanonicalDiagnosticMetadata,
+        canonical: rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata,
         manual_deck: bool,
     ) -> DiagnosticRecord {
         // A manual deck is not the drawing, so nothing it names is looked
@@ -451,7 +451,7 @@ impl AppState {
         element: &str,
     ) -> Option<DrawnElement> {
         let element = element.trim();
-        let scope = rspice_app_types::hierarchy_path::ProbeTarget::parse(element)
+        let scope = rspice_vocabulary::hierarchy_path::ProbeTarget::parse(element)
             .map_or_else(|_| InstancePath::root(), |target| target.scope);
         let projection = self
             .workspace

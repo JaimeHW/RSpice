@@ -555,7 +555,7 @@ fn is_default_value(value: &str, default: &str) -> bool {
 }
 
 fn parse_numeric(value: &str) -> Option<f64> {
-    rspice_app_types::quantity::parse_engineering_value(value)
+    rspice_vocabulary::quantity::parse_engineering_value(value)
         .ok()
         .or_else(|| value.parse::<f64>().ok())
 }

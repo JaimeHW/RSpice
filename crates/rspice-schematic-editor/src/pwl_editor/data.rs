@@ -4,7 +4,7 @@
 //! increasing, so the point list enforces ordering rather than leaving a
 //! non-monotonic source to be rejected by the engine.
 
-use rspice_app_types::quantity::{EngineeringPrecision, parse_engineering_value};
+use rspice_vocabulary::quantity::{EngineeringPrecision, parse_engineering_value};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -318,7 +318,7 @@ impl PwlData {
 /// parses. Zero takes no prefix and no unit, which is how every other readout
 /// in the product writes it.
 pub(super) fn format_engineering_quantity(value: f64, unit: &str) -> String {
-    let display = rspice_app_types::quantity::format_engineering_display_with(
+    let display = rspice_vocabulary::quantity::format_engineering_display_with(
         value,
         EngineeringPrecision::UpTo(6),
     );

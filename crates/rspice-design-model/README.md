@@ -35,7 +35,7 @@ implementation, and the signing tool links none of the desktop application.
   [`rspice-app`](../rspice-app); printed and exported sheets are rendered by
   [`rspice-hardcopy`](../rspice-hardcopy).
 - Several crates re-export these types under their own paths (the `product`
-  module of `rspice-app-types` re-exports `ContentDigest`); the definitions
+  module of `rspice-vocabulary` re-exports `ContentDigest`); the definitions
   are here.
 
 ## Entry points

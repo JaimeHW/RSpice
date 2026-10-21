@@ -5,7 +5,7 @@ use crate::ProjectFile;
 use crate::persistence::browser::{BrowserBinding, BrowserWriteIntent};
 use crate::persistence::{BrowserBindingBackend, BrowserBindingReceipt, serialized_project};
 use crate::registry::ProjectDocumentId;
-use rspice_app_types::product::{ContentDigest, TransactionId};
+use rspice_vocabulary::product::{ContentDigest, TransactionId};
 use std::path::PathBuf;
 
 /// Serialized content captured before binding lookup or platform interaction.

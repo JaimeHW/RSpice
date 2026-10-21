@@ -6,7 +6,6 @@
 //! The deck spells the reference three ways against mixed-case instances, so
 //! the canonical name (`xOut.xIn.MID`) matches none of them byte for byte.
 
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_core::NoAbort;
 use rspice_simulation::analysis_preparation::analysis_spec_to_config;
 use rspice_simulation::execution::{
@@ -16,6 +15,7 @@ use rspice_simulation::prepared_dependency::{ExecutionArtifactKind, required_art
 use rspice_simulation::results::SimulationResult;
 use rspice_simulation::runner::SimulationRunner;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_vocabulary::product::AnalysisInstanceId;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

@@ -17,7 +17,6 @@ use super::{
     SealedPdkModelSources, ValidatedPdkTechnologyPackage, validate_archive, validate_archive_bytes,
     validate_runtime_compatibility,
 };
-use rspice_app_types::product::ContentDigest;
 use rspice_model_library::pdk::contracts::*;
 use rspice_model_library::pdk::manifest::{PdkTechnologyManifest, validate_version};
 use rspice_model_library::pdk::package::decode_bounded;
@@ -25,6 +24,7 @@ use rspice_model_library::pdk::{
     PdkAdministrativeAuthority, PdkPublisherTrustStore, PdkTechnologyError, content_digest,
     validate_identifier, validate_text,
 };
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use std::collections::BTreeSet;

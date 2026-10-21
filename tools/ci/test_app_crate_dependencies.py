@@ -9,8 +9,8 @@ class DependencyPolicyTests(unittest.TestCase):
     def test_extracted_crates_accept_allowed_and_optional_lower_dependencies(self) -> None:
         self.assertEqual(
             violations(
-                {"rspice-app-types": {"rspice-design-model", "serde"}},
-                {"rspice-app-types": {"rspice-app-types", "rspice-design-model", "serde"}},
+                {"rspice-vocabulary": {"rspice-design-model", "serde"}},
+                {"rspice-vocabulary": {"rspice-vocabulary", "rspice-design-model", "serde"}},
             ),
             [],
         )
@@ -18,26 +18,26 @@ class DependencyPolicyTests(unittest.TestCase):
             violations(
                 {
                     "rspice-formats": {
-                        "rspice-app-types", "rspice-results", "rspice-core", "rspice-model-library",
+                        "rspice-vocabulary", "rspice-results", "rspice-core", "rspice-model-library",
                     },
                     "rspice-project": {"rspice-formats"},
                     "rspice-hardcopy": {"rspice-project-contract"},
                     "rspice-ui-kit": {"egui", "rspice-results"},
                     "rspice-schematic-editor": {"egui", "rspice-ui-kit", "rspice-design"},
-                    "rspice-results-ui": {"rspice-results", "rspice-core", "rspice-app-types"},
+                    "rspice-results-ui": {"rspice-results", "rspice-core", "rspice-vocabulary"},
                 },
                 {
                     "rspice-formats": {
-                        "rspice-app-types", "rspice-results", "rspice-core", "rspice-model-library",
+                        "rspice-vocabulary", "rspice-results", "rspice-core", "rspice-model-library",
                     },
                     "rspice-project": {"rspice-project", "rspice-formats", "rspice-results"},
                     "rspice-hardcopy": {"rspice-hardcopy", "rspice-project-contract", "rspice-design"},
-                    "rspice-ui-kit": {"egui", "rspice-results", "rspice-app-types", "rspice-units"},
+                    "rspice-ui-kit": {"egui", "rspice-results", "rspice-vocabulary", "rspice-units"},
                     "rspice-schematic-editor": {
                         "egui", "rspice-ui-kit", "rspice-design", "rspice-core", "rspice-model-library",
                     },
                     "rspice-results-ui": {
-                        "rspice-results", "rspice-core", "rspice-app-types", "rspice-design-model",
+                        "rspice-results", "rspice-core", "rspice-vocabulary", "rspice-design-model",
                     },
                 },
                 {"rspice-formats", "csv", "serde"},
@@ -49,8 +49,8 @@ class DependencyPolicyTests(unittest.TestCase):
 
     def test_an_upward_edge_or_transitive_gui_and_engine_dependency_fails(self) -> None:
         issues = violations(
-            {"rspice-app-types": {"rspice-results"}},
-            {"rspice-app-types": {"rspice-app-types", "egui", "rspice-core"},
+            {"rspice-vocabulary": {"rspice-results"}},
+            {"rspice-vocabulary": {"rspice-vocabulary", "egui", "rspice-core"},
              "rspice-worker": {"rspice-worker", "wgpu", "rspice-app"}},
         )
         self.assertEqual(len(issues), 5)

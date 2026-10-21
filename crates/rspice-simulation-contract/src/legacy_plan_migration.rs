@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, ProjectId, SimulationPlanId};
+use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision, ProjectId, SimulationPlanId};
 use uuid::Uuid;
 
 use crate::analysis_draft::AnalysisDraft;

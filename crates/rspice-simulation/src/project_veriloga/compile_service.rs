@@ -3,9 +3,9 @@
 //! Hosts select the exact source and check publication currentness. This service
 //! owns compilation, bounded worker transport, and structured diagnostic outcomes.
 
-use rspice_app_types::diagnostics::{DiagnosticSeverity, SourceDiagnostic};
 use rspice_design::project_sources::ProjectSourceBundle;
 use rspice_veriloga::RuntimeCompileReport;
+use rspice_vocabulary::diagnostics::{DiagnosticSeverity, SourceDiagnostic};
 use std::sync::mpsc;
 
 #[cfg(any(target_arch = "wasm32", test))]

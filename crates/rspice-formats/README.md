@@ -9,7 +9,7 @@ Parquet, HDF5, FST, XLSX), sit behind their own features, so a consumer links
 only the codecs it uses. Without optional features, and with only
 `native-bundle` or only `table-schema`, the crate reaches no simulator
 package; `tools/ci/check_app_crate_dependencies.py` checks those three builds,
-allows the crate only `rspice-app-types`, `rspice-results` and
+allows the crate only `rspice-vocabulary`, `rspice-results` and
 `rspice-model-library` among the application crates, and refuses egui,
 eframe, winit, wgpu and rfd in its closure.
 
@@ -74,7 +74,7 @@ eframe, winit, wgpu and rfd in its closure.
 
 | Flag | Effect |
 | :--- | :--- |
-| `project-results` | Builds `project_results`, pulling in `rspice-results`, `rspice-core`, `rspice-design-model`, `rspice-model-library` and `rspice-app-types`. Enabled by `rspice-project`, `rspice-hardcopy`, `rspice-cli` and `rspice-app` |
+| `project-results` | Builds `project_results`, pulling in `rspice-results`, `rspice-core`, `rspice-design-model`, `rspice-model-library` and `rspice-vocabulary`. Enabled by `rspice-project`, `rspice-hardcopy`, `rspice-cli` and `rspice-app` |
 | `result-validation-observation` | Implies `project-results` and exposes `project_results::RESULT_VALIDATIONS`, a per-thread count of result validations. Enabled by `rspice-app`'s dev-dependency |
 | `table-schema` | Builds `table_schema` |
 | `result-csv` | Builds `result_csv` |

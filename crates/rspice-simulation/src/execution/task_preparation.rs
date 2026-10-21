@@ -533,8 +533,8 @@ pub(super) fn executes_via_spec(spec: &AnalysisSpec) -> bool {
 }
 
 pub(crate) fn prepare_manual_tasks(
-    expanded_source_identity: rspice_app_types::product::ContentDigest,
-    source_revision: rspice_app_types::product::ObjectRevision,
+    expanded_source_identity: rspice_vocabulary::product::ContentDigest,
+    source_revision: rspice_vocabulary::product::ObjectRevision,
     tasks: Vec<QueuedAnalysis>,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
     let mut kind_occurrences = std::collections::HashMap::<u8, usize>::new();
@@ -651,14 +651,14 @@ pub(crate) fn prepare_manual_tasks(
             continue;
         }
         type ProducerIdentity = (
-            rspice_app_types::product::AnalysisInstanceId,
-            rspice_app_types::product::ObjectRevision,
-            rspice_app_types::product::ContentDigest,
+            rspice_vocabulary::product::AnalysisInstanceId,
+            rspice_vocabulary::product::ObjectRevision,
+            rspice_vocabulary::product::ContentDigest,
         );
         type BindingConstructor = fn(
-            rspice_app_types::product::AnalysisInstanceId,
-            rspice_app_types::product::ObjectRevision,
-            rspice_app_types::product::ContentDigest,
+            rspice_vocabulary::product::AnalysisInstanceId,
+            rspice_vocabulary::product::ObjectRevision,
+            rspice_vocabulary::product::ContentDigest,
         ) -> PreparedDependencyBinding;
         // The artifact kinds this request admits, in the order it prefers
         // them, and the producer list each one names. A periodic

@@ -11,7 +11,7 @@ fn technology_binding_fixture() -> ProjectTechnologyBinding {
         "root_source": root,
         "source_closure": [rspice_model_library::ModelSourcePin {
             path: root.clone(),
-            digest: rspice_app_types::product::ContentDigest::from_bytes([0x4a; 32]),
+            digest: rspice_vocabulary::product::ContentDigest::from_bytes([0x4a; 32]),
         }],
         "source_edges": [],
         "model_count": 14,
@@ -205,8 +205,8 @@ fn signed_technology_pin_is_strictly_validated_and_round_trips_with_the_project_
         "schema_version": PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION,
         "package_id": "demo180",
         "revision": "2.3.1",
-        "manifest_digest": rspice_app_types::product::ContentDigest::from_bytes([0x11; 32]),
-        "archive_digest": rspice_app_types::product::ContentDigest::from_bytes([0x22; 32]),
+        "manifest_digest": rspice_vocabulary::product::ContentDigest::from_bytes([0x11; 32]),
+        "archive_digest": rspice_vocabulary::product::ContentDigest::from_bytes([0x22; 32]),
         "technology_name": "Demo 180 nm",
         "publisher_id": "rspice-foundry-demo",
         "signing_key_id": "ceremony-01",
@@ -337,7 +337,7 @@ fn technology_change_receipts_are_checkpoint_bound_atomic_and_tamper_evident() {
         Uuid::new_v4(),
         initial_revision,
         1_785_430_000_000,
-        rspice_app_types::product::ContentDigest::from_bytes([0x71; 32]),
+        rspice_vocabulary::product::ContentDigest::from_bytes([0x71; 32]),
         4_096,
     )
     .expect("checkpoint context validates");
@@ -378,7 +378,7 @@ fn technology_change_receipts_are_checkpoint_bound_atomic_and_tamper_evident() {
         Uuid::new_v4(),
         replacement_from,
         1_785_430_100_000,
-        rspice_app_types::product::ContentDigest::from_bytes([0x72; 32]),
+        rspice_vocabulary::product::ContentDigest::from_bytes([0x72; 32]),
         8_192,
     )
     .expect("replacement checkpoint context validates");
@@ -428,7 +428,7 @@ fn attached_technology_detects_exact_catalog_drift() {
     let root = PathBuf::from(r"C:\qualified-pdk\models.lib");
     let bytes = b".model nch nmos level=1\n".to_vec();
     let digest =
-        rspice_app_types::product::ContentDigest::from_bytes(sha2::Sha256::digest(&bytes).into());
+        rspice_vocabulary::product::ContentDigest::from_bytes(sha2::Sha256::digest(&bytes).into());
     let mut library = rspice_model_library::ModelLibrary::new("qualified_analog")
         .with_technology("Qualified analog models", "180 nm");
     library.version = "2026.07".to_owned();

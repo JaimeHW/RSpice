@@ -2,7 +2,7 @@
 
 use super::SavedOutputKind;
 use crate::calculator::{ast::CalculatorExpr, parser::Parser};
-use rspice_app_types::raw_probe::{device_current_probe, validate_raw_probe};
+use rspice_vocabulary::raw_probe::{device_current_probe, validate_raw_probe};
 use std::collections::BTreeSet;
 use std::ops::Range;
 

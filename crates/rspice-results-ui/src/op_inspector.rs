@@ -118,7 +118,7 @@ fn reduced_scope_warning(
 }
 fn hierarchy_parts(name: &str, root: &str) -> (String, String) {
     let signal = signal_leaf(name);
-    match rspice_app_types::hierarchy_path::ProbeTarget::parse_legacy(signal) {
+    match rspice_vocabulary::hierarchy_path::ProbeTarget::parse_legacy(signal) {
         Ok(target) if !target.scope.is_root() => (target.scope.fold_key(), target.leaf),
         Ok(target) => (root.to_owned(), target.leaf),
         Err(_) => (root.to_owned(), signal.to_owned()),
@@ -1125,7 +1125,7 @@ fn show_device_card(
                             .find(|(candidate, _)| candidate == name)
                             .map(|(_, value)| {
                                 if unit.is_empty() {
-                                    rspice_app_types::property::format_engineering(*value)
+                                    rspice_vocabulary::property::format_engineering(*value)
                                 } else {
                                     fmt_si(*value, unit, 4)
                                 }

@@ -1,6 +1,8 @@
 //! Policies and source identities retained with saved engineering outputs.
 
-use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId};
+use rspice_vocabulary::product::{
+    AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId,
+};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "engine-evidence")]
@@ -8,7 +10,7 @@ mod expressions;
 #[cfg(feature = "engine-evidence")]
 pub use expressions::{respell_saved_output_nodes, saved_output_references};
 #[cfg(feature = "engine-evidence")]
-pub use rspice_app_types::raw_probe::{
+pub use rspice_vocabulary::raw_probe::{
     device_current_probe, parse_probe_target, raw_probe_unit, validate_raw_probe,
 };
 

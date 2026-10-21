@@ -16,7 +16,6 @@ use crate::{
     strip::{LegendChip, StripHeader},
 };
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, ExprTrace, ResultViewer, WavePanePresentationKey,
 };
@@ -24,6 +23,7 @@ use rspice_ui_kit::{
     plot::{self, CursorPair, DisplayDecimation},
     tokens::Tokens,
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
 /// Display preferences captured for one stack frame.

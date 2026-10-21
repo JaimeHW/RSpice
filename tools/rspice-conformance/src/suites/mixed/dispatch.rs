@@ -33,7 +33,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_simulation::execution::{
     HeadlessPreparationError, HeadlessRunInput, HeadlessSourceResolver, HeadlessTaskRequest,
@@ -46,6 +45,7 @@ use rspice_simulation::veriloga::{
     PreparedVerilogAConnectionLibrary, PreparedVerilogARuntime, PreparedVerilogARuntimeSet,
 };
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 use super::Route;
 use super::case::{CaseResult, ErrorRecord, Observation, canonical_signal};
@@ -333,7 +333,7 @@ fn seal_hdl(
             .prepare_virtual_runtime_source(&bundle, limits)
             .map_err(|failure| compile_refusal(&file_name, &path, failure.to_string()))?;
         let module_names: Vec<String> = prepared.module_names().map(str::to_owned).collect();
-        let digest = rspice_app_types::product::ContentDigest::from_bytes(
+        let digest = rspice_vocabulary::product::ContentDigest::from_bytes(
             <sha2::Sha256 as sha2::Digest>::digest(source.as_bytes()).into(),
         );
         // A source of connect rules and connect modules alone contributes

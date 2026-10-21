@@ -906,7 +906,7 @@ mod tests {
                 WaveformData::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
             ]);
         let analysis_key =
-            AnalysisPresentationKey::new(rspice_app_types::product::DatasetId::new(), &analysis);
+            AnalysisPresentationKey::new(rspice_vocabulary::product::DatasetId::new(), &analysis);
         let changed = event_rows(&analysis)[1]
             .selection(analysis_key, &[])
             .unwrap();

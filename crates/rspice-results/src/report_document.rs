@@ -20,7 +20,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use rspice_app_types::product::{
+use rspice_vocabulary::product::{
     ContentDigest, DatasetBinding, DatasetId, ObjectRevision, ResultDocumentId, RevisionError,
     VerificationEvidenceId,
 };

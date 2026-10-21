@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 use super::{
     PdkAdministrativeAuthority, contracts::PdkTechnologyBinding,

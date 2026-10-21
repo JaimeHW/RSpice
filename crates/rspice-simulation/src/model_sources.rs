@@ -14,7 +14,6 @@ pub use project_provenance::prepared_project_model_sources;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use rspice_app_types::product::{ContentDigest, ProcessCorner as CornerProcess};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_model_library::is_foreign_platform_absolute_path;
 use rspice_model_library::source_paths::{portable_dependency_target_key, portable_path_key};
@@ -23,6 +22,7 @@ use rspice_model_library::{
     ModelResolutionRecord, ModelSourceAuthority, ProcessCorner, first_unreachable_source,
     is_portable_absolute_path, resolve_materialized_definition_namespace,
 };
+use rspice_vocabulary::product::{ContentDigest, ProcessCorner as CornerProcess};
 use sha2::{Digest as _, Sha256};
 
 /// One immutable, authenticated model-source snapshot for a simulation run.

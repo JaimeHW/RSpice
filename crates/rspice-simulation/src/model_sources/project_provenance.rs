@@ -96,10 +96,10 @@ pub fn prepared_project_model_sources(
 /// editable and the run is not.
 fn model_qualification_at_preparation(
     catalog: &rspice_model_library::ModelCatalog,
-    source_id: rspice_app_types::product::ModelSourceId,
+    source_id: rspice_vocabulary::product::ModelSourceId,
     model_name: &str,
-    revision: rspice_app_types::product::ObjectRevision,
-    content_digest: rspice_app_types::product::ContentDigest,
+    revision: rspice_vocabulary::product::ObjectRevision,
+    content_digest: rspice_vocabulary::product::ContentDigest,
 ) -> rspice_results::run_receipt::PreparedModelQualification {
     use rspice_model_library::ModelSourceAuthority;
     use rspice_results::run_receipt::PreparedModelQualification;
@@ -135,7 +135,7 @@ fn model_qualification_at_preparation(
 fn canonical_project_model_definitions(
     catalog: &rspice_model_library::ModelCatalog,
 ) -> Vec<(
-    rspice_app_types::product::ModelSourceId,
+    rspice_vocabulary::product::ModelSourceId,
     String,
     rspice_core::netlist::ModelDef,
 )> {

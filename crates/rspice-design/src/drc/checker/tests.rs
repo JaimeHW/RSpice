@@ -1574,8 +1574,8 @@ fn an_ambiguous_reference_relates_the_instances_it_could_mean() {
 /// one in another occurrence by its path.
 #[test]
 fn related_objects_are_named_from_where_they_are() {
-    use rspice_app_types::hierarchy_path::InstancePath;
     use rspice_design_model::cell_view::CellViewRef;
+    use rspice_vocabulary::hierarchy_path::InstancePath;
 
     let inside = |path: &str, location: DrcLocation| DrcLocation::InsideInstance {
         path: InstancePath::parse(path).expect("path"),

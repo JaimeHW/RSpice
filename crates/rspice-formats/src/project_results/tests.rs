@@ -91,8 +91,8 @@ fn a_transient_state_names_one_of_its_dependencies_and_a_finite_time() {
 /// runs kept one is the same file.
 #[test]
 fn a_runs_log_survives_the_project_file_and_an_empty_one_is_not_written() {
-    use rspice_app_types::diagnostics::{LogSeverity, LogSource};
-    use rspice_app_types::run_log::RunLogLine;
+    use rspice_vocabulary::diagnostics::{LogSeverity, LogSource};
+    use rspice_vocabulary::run_log::RunLogLine;
 
     let mut run = SimulationRun::<AnalysisResult>::new(
         4,

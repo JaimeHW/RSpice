@@ -10,9 +10,6 @@
 //! bit-for-bit what dispatch seals rather than a second opinion about it.
 
 use crate::execution::SimulationRunIntent;
-use rspice_app_types::product::{
-    AnalysisInstanceId, ContentDigest, DerivedAnalysisIdentity, ObjectRevision, SimulationPlanId,
-};
 use rspice_results::provenance::AnalysisResultSourceDomain;
 use rspice_results::run_receipt::HierarchyMapRow;
 use rspice_results::run_receipt::PreparedModelSourceIdentity;
@@ -21,6 +18,9 @@ use rspice_results::run_receipt::PreparedRunTaskReceipt;
 use rspice_results::specification::PreparedSpecification;
 use rspice_results::specification::PreparedSpecificationPolicy;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_vocabulary::product::{
+    AnalysisInstanceId, ContentDigest, DerivedAnalysisIdentity, ObjectRevision, SimulationPlanId,
+};
 
 use super::{
     AuthorizedRunDispatch, PreparationError, PreparationStage, PreparedRunSnapshot,

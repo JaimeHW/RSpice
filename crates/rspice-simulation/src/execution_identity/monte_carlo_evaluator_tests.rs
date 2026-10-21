@@ -6,7 +6,7 @@ use crate::study::StudyOperatingPoint;
 use crate::study::StudyPostprocess;
 use crate::study::StudyQpssConfig;
 use crate::study::StudyRunConfig;
-use rspice_app_types::product::ObjectRevision;
+use rspice_vocabulary::product::ObjectRevision;
 
 fn base(analysis: StudyAnalysis) -> StudyRunConfig {
     StudyRunConfig {

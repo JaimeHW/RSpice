@@ -3,7 +3,6 @@
 use crate::presentation::well_hint;
 use crate::strip::StripHeader;
 use egui::Ui;
-use rspice_app_types::product::DatasetId;
 use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
@@ -13,6 +12,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::measurement_table,
 };
+use rspice_vocabulary::product::DatasetId;
 
 /// Borrowed retained values and provenance labels selected and validated by the host.
 pub struct TransferFunctionView<'a> {

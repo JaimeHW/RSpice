@@ -844,12 +844,12 @@ fn nested_dc_sweep_config(
 #[cfg(test)]
 mod operating_point_contract_tests {
     use super::*;
-    use rspice_app_types::product::ContentDigest;
     use rspice_results::operating_point::OpPreviousState;
     use rspice_simulation_contract::config::AnalysisConfig;
     use rspice_simulation_contract::config::OpInitialGuess;
     use rspice_simulation_contract::config::OpNodeInitialization;
     use rspice_simulation_contract::config::OpRunPointContext;
+    use rspice_vocabulary::product::ContentDigest;
 
     const DIVIDER: &str =
         "divider\nV1 in 0 10\nR1 in out 1k\nR2 out 0 1k\n.ic V(out)=2\n.op\n.end\n";

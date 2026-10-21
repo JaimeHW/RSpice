@@ -17,7 +17,7 @@ workspace = true
 engine-evidence = ["dep:rspice-core", "dep:rspice-design-model", "dep:rustfft", "dep:once_cell"]
 
 [dependencies]
-rspice-app-types.workspace = true
+rspice-vocabulary.workspace = true
 rspice-design-model = { workspace = true, optional = true }
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, optional = true }
 rspice-units.workspace = true

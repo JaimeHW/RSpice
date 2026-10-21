@@ -131,7 +131,7 @@ macro_rules! initialized_default {
 
 impl AnalysisDraft {
     /// Saved base used by a Temperature or Corner point expansion.
-    pub fn pvt_base_analysis(&self) -> Option<rspice_app_types::product::AnalysisInstanceId> {
+    pub fn pvt_base_analysis(&self) -> Option<rspice_vocabulary::product::AnalysisInstanceId> {
         match self {
             Self::Temperature(state) => state.base_analysis,
             Self::Corner(state) => state.base_analysis,

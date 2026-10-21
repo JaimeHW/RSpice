@@ -1,6 +1,6 @@
 //! Source-qualified provider decisions and ordered model-library bindings.
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 
 mod records;

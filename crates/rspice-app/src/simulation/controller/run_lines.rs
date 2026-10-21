@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};
-use rspice_app_types::run_log::RunLogLine;
+use rspice_vocabulary::run_log::RunLogLine;
 
 fn now_ms() -> u64 {
     crate::time_compat::checked_unix_time_ms().unwrap_or_default()
@@ -73,7 +73,7 @@ impl SimulationController {
     /// says only that the run failed.
     pub(crate) fn run_failure(
         run_sequence: u64,
-        log: &rspice_app_types::run_log::RunLog,
+        log: &rspice_vocabulary::run_log::RunLog,
     ) -> Option<&str> {
         let end_line = format!("Run {run_sequence} failed after ");
         log.lines()

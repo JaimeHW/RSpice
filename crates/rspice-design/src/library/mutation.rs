@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::project_sources::canonical_cell_view_owner_key;
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 /// Exact semantic operation retained by the project library audit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

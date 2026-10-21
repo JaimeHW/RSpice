@@ -1,10 +1,6 @@
 //! Project-owned documents, configuration and revisioned catalogs.
 
 use crate::OpenCellView;
-use rspice_app_types::product::{
-    AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision,
-    ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
-};
 use rspice_design::library::ViewType;
 use rspice_design::owned_netlist::*;
 use rspice_design::project_sources::*;
@@ -19,6 +15,10 @@ use rspice_simulation_contract::plan_payload::{
 };
 use rspice_simulation_contract::regression_policy::*;
 use rspice_simulation_contract::saved_output::*;
+use rspice_vocabulary::product::{
+    AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision,
+    ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;

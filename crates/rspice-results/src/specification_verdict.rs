@@ -1,6 +1,6 @@
 //! Immutable evaluation of the specifications sealed into a prepared run.
 
-use rspice_app_types::product::{AnalysisInstanceId, SpecificationId};
+use rspice_vocabulary::product::{AnalysisInstanceId, SpecificationId};
 
 use crate::analysis_result::AnalysisResult;
 use crate::analysis_type::AnalysisType;

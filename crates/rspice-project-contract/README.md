@@ -9,7 +9,7 @@ symbols for print. `tools/ci/check_app_crate_dependencies.py` refuses
 `rspice-simulation`, `rspice-worker` and this crate any path to
 `rspice-project`, so these records live here, where execution and hardcopy can
 read them without linking the project file and its save lifecycle. The check
-allows this crate only `rspice-app-types`, `rspice-design` and
+allows this crate only `rspice-vocabulary`, `rspice-design` and
 `rspice-model-library` among the application crates, and refuses egui,
 eframe, winit, wgpu and rfd in its closure.
 

@@ -492,7 +492,7 @@ impl ProjectWorkspace {
     pub fn transact_visualization_document(
         &mut self,
         document_id: ResultDocumentId,
-        expected_revision: rspice_app_types::product::ObjectRevision,
+        expected_revision: rspice_vocabulary::product::ObjectRevision,
         edits: Vec<rspice_results::visualization_document::DocumentEdit>,
     ) -> Result<
         rspice_results::visualization_document::VisualizationTransactionReceipt,

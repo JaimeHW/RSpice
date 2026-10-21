@@ -86,7 +86,7 @@ fn unreadable_symbol_finding(state: &mut AppState) {
         .expect("the fixture stores its symbol");
     let message = "Pin 'IN' has no port of that name in work/amp/schematic";
     let record = DiagnosticRecord::new(
-        rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
+        rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata::current(
             "rspice.design.symbol.pins",
             "SYM-PIN-WITHOUT-PORT",
             "work/amp/symbol",

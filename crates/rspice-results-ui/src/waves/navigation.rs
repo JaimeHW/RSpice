@@ -3,10 +3,10 @@
 use super::{StripModel, trace_key};
 use crate::derived::DerivedSeries;
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_ui_kit::plot::{Axis, CursorPair, XScale};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 pub const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
 

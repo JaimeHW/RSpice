@@ -10,7 +10,6 @@ use super::encode_dc_modes;
 use crate::periodic::PacFrequencySweep;
 use crate::periodic::PnoiseFrequencySweep;
 use crate::periodic::PxfFrequencySweep;
-use rspice_app_types::product::ProcessCorner;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::EnvelopeAdaptiveMode;
 use rspice_simulation_contract::analysis_spec::EnvelopeExtractionPath;
@@ -24,6 +23,7 @@ use rspice_simulation_contract::config::NoiseSweepType;
 use rspice_simulation_contract::config::OpConfig;
 use rspice_simulation_contract::options::IntegrationMethod;
 use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
+use rspice_vocabulary::product::ProcessCorner;
 
 use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_op_fields};
 

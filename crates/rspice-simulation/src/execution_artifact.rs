@@ -16,12 +16,12 @@ use crate::prepared_dependency::ExecutionArtifactKind;
 #[cfg(test)]
 use crate::prepared_dependency::validate_prepared_dependency_contract_with_options;
 use crate::results::SimulationResult;
-use rspice_app_types::canonical::CanonicalWriter;
-use rspice_app_types::product::AnalysisInstanceId;
-use rspice_app_types::product::ContentDigest;
-use rspice_app_types::product::ObjectRevision;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::analysis_spec::PssMethod;
+use rspice_vocabulary::canonical::CanonicalWriter;
+use rspice_vocabulary::product::AnalysisInstanceId;
+use rspice_vocabulary::product::ContentDigest;
+use rspice_vocabulary::product::ObjectRevision;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreparedDependencyBinding {

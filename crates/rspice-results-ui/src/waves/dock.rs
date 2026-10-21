@@ -10,13 +10,13 @@ use super::readout::{READOUT_PAD_X, READOUT_ROW_H, readout_rows, x_separation};
 use super::{ReadoutPolicy, StripModel, anchor_key, cursor_interpolation};
 use crate::session::{MarkerSelector, MarkerView, ResultViewerState};
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, MarkerKind, WaveformPresentationKey,
 };
 use rspice_ui_kit::plot::{fmt_si_significant, sample::sample_at_with_shape};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// Borrowed projections selected and validated by the host for this readout.
 #[derive(Clone, Copy)]

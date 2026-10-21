@@ -56,7 +56,6 @@ pub use result_view::{
     RetainedQuickViewSource, resolve_results_quick_view_parts, results_quick_view_identity,
 };
 pub use retained_results::{HardcopyRun, HardcopyWaveform, restore_hardcopy_runs};
-use rspice_app_types::product::ContentDigest;
 use rspice_design::schematic::component::Component;
 use rspice_design::symbol::{SymbolDocument, SymbolShape};
 use rspice_design_model::{Point, design_management::SchematicSheetFormat};
@@ -79,6 +78,7 @@ use rspice_results::visualization_document::{
 use rspice_results::visualization_raster::{
     ResolvedCartesianLineScene, VisualizationRasterError, resolve_cartesian_line_scene,
 };
+use rspice_vocabulary::product::ContentDigest;
 pub use schematic::{
     SchematicHardcopySelection, SchematicHardcopySource, SchematicSheetSetHardcopySource,
     resolve_all_schematic_sheets, resolve_schematic_source, schematic_sheet_identity,

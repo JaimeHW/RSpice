@@ -647,7 +647,7 @@ pub struct AnalysisInputs<'a, R, A> {
     pub selection_occurrence: Option<&'a rspice_design::occurrence::DocumentOccurrence>,
     pub runs: &'a [R],
     pub active_run: Option<&'a rspice_results::run::SimulationRun<A>>,
-    pub project_revision: rspice_app_types::product::ObjectRevision,
+    pub project_revision: rspice_vocabulary::product::ObjectRevision,
     pub plan_payloads:
         &'a [rspice_simulation_contract::plan_payload::SimulationPlanPayloadRecord],
 }
@@ -682,7 +682,7 @@ where
     // symbol that writes no card names no device, and neither does one whose
     // occurrence the engine cannot be asked about.
     let occurrence = state.selection_occurrence.map_or_else(
-        rspice_app_types::hierarchy_path::InstancePath::root,
+        rspice_vocabulary::hierarchy_path::InstancePath::root,
         rspice_design::occurrence::DocumentOccurrence::instance_path,
     );
     config.selected_devices = state

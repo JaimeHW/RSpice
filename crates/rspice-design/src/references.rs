@@ -4,8 +4,8 @@ use crate::hierarchy::HierarchyResolution;
 use crate::schematic::{
     component::Component, component_type::ComponentType, probe::SchematicProbe,
 };
-use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
 use std::collections::BTreeMap;
 
 mod changes;

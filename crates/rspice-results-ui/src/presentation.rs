@@ -1,11 +1,11 @@
 //! Shared result plot navigation, readout cards and status presentation.
 
 use egui::{Ui, WidgetInfo, WidgetType};
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_ui_kit::panels::inspector::toned_inspector_copy;
 use rspice_ui_kit::panels::{PANEL_ROW_H, panel_inset};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// User zoom/pan override for one plot. `None` per axis means automatic
 /// fit-to-data; gestures in the plot engine populate the ranges and a
@@ -269,7 +269,7 @@ pub fn angle_readout(
     radians: f64,
     significant_digits: usize,
 ) -> String {
-    use rspice_app_types::quantity::AngleDisplay;
+    use rspice_vocabulary::quantity::AngleDisplay;
     match quantity_policy.angle_display {
         AngleDisplay::Degrees => plain_readout(radians.to_degrees(), "°", significant_digits),
         AngleDisplay::Radians => plain_readout(radians, "rad", significant_digits),

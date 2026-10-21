@@ -9,7 +9,7 @@ dependency contracts between analyses, and the browser-worker wire types.
 `rspice-project` persists these values and `rspice-simulation` prepares and
 executes them; `tools/ci/check_app_crate_dependencies.py` does not allow
 `rspice-project` to depend on `rspice-simulation`, so the vocabulary is its own
-crate below both. The check allows it only `rspice-app-types`,
+crate below both. The check allows it only `rspice-vocabulary`,
 `rspice-results` and `rspice-model-library` among the application crates, and
 refuses egui, eframe, winit, wgpu and rfd in its closure. It takes
 `rspice-core` without default features, for the engine's netlist and solver

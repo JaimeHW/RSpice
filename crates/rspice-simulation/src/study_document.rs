@@ -7,12 +7,12 @@
 
 use std::path::PathBuf;
 
-use rspice_app_types::product::SimulationPlanId;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::numeric_override::AnalysisNumericOverride;
 use rspice_simulation_contract::output_policy::SimulationSavePolicy;
 use rspice_simulation_contract::saved_output::SavedOutput;
+use rspice_vocabulary::product::SimulationPlanId;
 use serde::{Deserialize, Serialize};
 
 use crate::periodic::{PacRunConfig, PnoiseRunConfig, PstbRunConfig, PxfRunConfig};

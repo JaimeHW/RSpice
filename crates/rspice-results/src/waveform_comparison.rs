@@ -14,7 +14,7 @@ use crate::visualization_document::{
     ValueType, compare_source_datasets,
 };
 use crate::waveform::RetainedWaveform;
-use rspice_app_types::product::DatasetBinding;
+use rspice_vocabulary::product::DatasetBinding;
 
 /// How the baseline and candidate series are brought onto one X axis before
 /// they are compared.

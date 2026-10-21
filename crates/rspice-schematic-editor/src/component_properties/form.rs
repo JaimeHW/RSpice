@@ -1,11 +1,11 @@
 //! Schema-driven component parameters and typed host browse requests.
 
 use egui::{Align, Id, Layout, Margin, Sense, Stroke, Ui, pos2, vec2};
-use rspice_app_types::property::{DisplayMode, PropertyDefinition, PropertySheet, PropertyValue};
-use rspice_app_types::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use rspice_design::properties::SourceContractFinding;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_vocabulary::property::{DisplayMode, PropertyDefinition, PropertySheet, PropertyValue};
+use rspice_vocabulary::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 
 use super::ComponentPropertyDraft;
 use crate::property_values::{render_value_editor, unit_is_part_of_value_text};
@@ -402,7 +402,7 @@ fn hint_layout_job(hint: &str, width: f32) -> egui::text::LayoutJob {
 }
 
 fn property_is_visible(definition: &PropertyDefinition, draft: &ComponentPropertyDraft) -> bool {
-    use rspice_app_types::property::VisibilityCondition;
+    use rspice_vocabulary::property::VisibilityCondition;
     match &definition.visibility_condition {
         VisibilityCondition::Always => true,
         VisibilityCondition::WhenNonDefault => draft

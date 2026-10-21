@@ -1,7 +1,6 @@
 //! Canonical execution identity and numerical control regressions.
 
 use super::*;
-use rspice_app_types::canonical::content_digest;
 use rspice_design::drc::DrcLocation;
 use rspice_design::drc::DrcRelation;
 use rspice_design::drc::DrcViolation;
@@ -14,6 +13,7 @@ use rspice_simulation_contract::config::FrequencySweep;
 use rspice_simulation_contract::config::NoiseContributionDetail;
 use rspice_simulation_contract::config::NoiseIntegrationMode;
 use rspice_simulation_contract::config::NoiseSweepType;
+use rspice_vocabulary::canonical::content_digest;
 
 #[test]
 fn analysis_kind_tags_are_append_only() {
@@ -493,7 +493,7 @@ fn noise_digest_changes_for_every_exact_execution_field() {
 fn corner_digest_changes_when_points_are_excluded_from_the_same_axes() {
     use crate::sweeps::CornerPoint;
     use crate::sweeps::CornerRunConfig;
-    use rspice_app_types::product::ProcessCorner;
+    use rspice_vocabulary::product::ProcessCorner;
 
     let axes = CornerRunConfig {
         process_corners: vec![ProcessCorner::TT],
@@ -1227,9 +1227,9 @@ fn drc_receipt_retains_full_durable_bus_identity() {
 /// findings that differ in any other field the location carries.
 #[test]
 fn drc_receipt_separates_terminals_and_occurrence_paths() {
-    use rspice_app_types::hierarchy_path::InstancePath;
     use rspice_design_model::Point;
     use rspice_design_model::cell_view::CellViewRef;
+    use rspice_vocabulary::hierarchy_path::InstancePath;
 
     let digest_for = |location| {
         let mut result = DrcResult::new();
@@ -1415,7 +1415,7 @@ fn drc_identity_tags_are_never_renumbered() {
         (terminal.clone(), 9),
         (
             DrcLocation::InsideInstance {
-                path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1")
+                path: rspice_vocabulary::hierarchy_path::InstancePath::parse("/X1")
                     .expect("instance path"),
                 view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
                 inner: Box::new(terminal),
@@ -1598,7 +1598,7 @@ fn drc_identity_bytes_are_pinned_for_every_location_kind() {
         (at_terminal.clone(), Box::new(terminal)),
         (
             DrcLocation::InsideInstance {
-                path: rspice_app_types::hierarchy_path::InstancePath::parse("/X1/XA")
+                path: rspice_vocabulary::hierarchy_path::InstancePath::parse("/X1/XA")
                     .expect("instance path"),
                 view: rspice_design_model::cell_view::CellViewRef::new("work", "amp", "schematic"),
                 inner: Box::new(at_terminal),

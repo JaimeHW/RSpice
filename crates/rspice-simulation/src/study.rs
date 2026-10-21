@@ -15,12 +15,12 @@ pub use qpss::StudyQpssConfig;
 pub use spectral::StudyPostprocess;
 
 use crate::error::SimulationError;
-use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::MonteCarloEnvironment;
 use rspice_simulation_contract::config::AnalysisConfig;
 use rspice_simulation_contract::study_measurement::validate_measurements;
 use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
+use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision};
 
 /// A study captures the selected instance's configuration before dispatch.
 /// Its Run Set point belongs to the study; its solver controls belong to the base.

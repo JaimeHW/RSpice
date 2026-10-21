@@ -8,7 +8,7 @@ pub mod report;
 
 use serde::{Deserialize, Serialize};
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 /// Operating point data for a single node or device terminal
 #[derive(Debug, Clone, PartialEq)]

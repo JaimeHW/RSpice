@@ -95,7 +95,7 @@ pub fn format_duration_ms(milliseconds: u64) -> String {
     if (seconds * 100.0).round() < 6_000.0 {
         format!("{seconds:.2} s")
     } else {
-        rspice_app_types::quantity::format_elapsed(seconds)
+        rspice_vocabulary::quantity::format_elapsed(seconds)
     }
 }
 

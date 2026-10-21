@@ -15,8 +15,8 @@ pub struct ProjectSignedTechnologyPin {
     schema_version: u16,
     package_id: String,
     revision: String,
-    manifest_digest: rspice_app_types::product::ContentDigest,
-    archive_digest: rspice_app_types::product::ContentDigest,
+    manifest_digest: rspice_vocabulary::product::ContentDigest,
+    archive_digest: rspice_vocabulary::product::ContentDigest,
     technology_name: String,
     publisher_id: String,
     signing_key_id: String,
@@ -103,12 +103,12 @@ impl ProjectSignedTechnologyPin {
     }
 
     #[must_use]
-    pub const fn manifest_digest(&self) -> rspice_app_types::product::ContentDigest {
+    pub const fn manifest_digest(&self) -> rspice_vocabulary::product::ContentDigest {
         self.manifest_digest
     }
 
     #[must_use]
-    pub const fn archive_digest(&self) -> rspice_app_types::product::ContentDigest {
+    pub const fn archive_digest(&self) -> rspice_vocabulary::product::ContentDigest {
         self.archive_digest
     }
 
@@ -395,7 +395,7 @@ fn validate_retained_model_sources(
         if pin.path != content.path {
             return Err(TechnologyBindingError::RetainedSourceIdentityMismatch);
         }
-        let digest = rspice_app_types::product::ContentDigest::from_bytes(
+        let digest = rspice_vocabulary::product::ContentDigest::from_bytes(
             sha2::Sha256::digest(&content.bytes).into(),
         );
         if digest != pin.digest {

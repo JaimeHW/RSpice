@@ -4,7 +4,7 @@ use super::*;
 use crate::analysis_kind::AnalysisKind;
 use crate::analysis_run_at::AnalysisRunAt;
 use crate::corner_config::CornerBaseAnalysis;
-use rspice_app_types::product::ProcessCorner;
+use rspice_vocabulary::product::ProcessCorner;
 
 fn reference() -> ReferencePoint {
     ReferencePoint {

@@ -12,7 +12,7 @@ pub use validation::{
     periodic_state_requirement,
 };
 
-use rspice_app_types::product::AnalysisInstanceId;
+use rspice_vocabulary::product::AnalysisInstanceId;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis_kind::AnalysisKind;

@@ -516,7 +516,7 @@ pub(super) fn validate_key(value: &str) -> Result<(), ()> {
 }
 
 pub(super) fn parse_engineering(value: &str) -> Result<f64, SymbolDefinitionError> {
-    rspice_app_types::quantity::parse_engineering_value(value).map_err(|error| {
+    rspice_vocabulary::quantity::parse_engineering_value(value).map_err(|error| {
         SymbolDefinitionError::InvalidForm(format!("invalid engineering value `{value}`: {error}"))
     })
 }

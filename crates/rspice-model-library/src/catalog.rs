@@ -7,7 +7,7 @@ use crate::{
     DeviceModel, ModelLevel, ModelLibrary, ModelSourceAuthority, ModelType, ProjectModelDefinition,
     ProjectModelRevisionDefinition,
 };
-use rspice_app_types::product::{ContentDigest, ModelSourceId, ObjectRevision};
+use rspice_vocabulary::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap};

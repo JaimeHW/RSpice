@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
-use rspice_app_types::diagnostics::{CanonicalDiagnosticMetadata, DiagnosticSeverity};
+use rspice_vocabulary::diagnostics::{CanonicalDiagnosticMetadata, DiagnosticSeverity};
 
 use crate::diagnostics::LogAnchor;
 use crate::product::{ContentDigest, ProjectId};

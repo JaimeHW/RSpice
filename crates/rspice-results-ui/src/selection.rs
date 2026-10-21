@@ -1,11 +1,11 @@
 //! Stable viewer selections over exact retained result identities.
-use rspice_app_types::product::DatasetId;
 use rspice_results::{
     analysis_result::AnalysisResult,
     result_presentation::{AnalysisPresentationKey, TracePresentationKey, WaveformPresentationKey},
     run::SimulationRun,
     waveform::RetainedWaveform,
 };
+use rspice_vocabulary::product::DatasetId;
 
 /// Stable identity of one retained source waveform whose quick-view
 /// visibility has been overridden for this session.

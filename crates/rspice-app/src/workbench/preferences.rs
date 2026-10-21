@@ -1800,11 +1800,11 @@ mod tests {
         let units = preferences.units().unwrap();
         assert_eq!(
             units.frequency_display(),
-            rspice_app_types::quantity::FrequencyDisplay::RadiansPerSecond
+            rspice_vocabulary::quantity::FrequencyDisplay::RadiansPerSecond
         );
         assert_eq!(
             units.temperature_display(),
-            rspice_app_types::quantity::TemperatureDisplay::Fahrenheit
+            rspice_vocabulary::quantity::TemperatureDisplay::Fahrenheit
         );
         assert_eq!(
             units.angle_display(),

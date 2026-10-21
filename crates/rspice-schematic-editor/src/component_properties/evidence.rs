@@ -338,7 +338,7 @@ fn evidence_row(ui: &mut Ui, label: &str, value: &str) {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use rspice_app_types::property::PropertyValue;
+    use rspice_vocabulary::property::PropertyValue;
 
     /// The Stimulus section's verbs, as a screen reader receives them.
     fn stimulus_verbs(

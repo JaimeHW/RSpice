@@ -1,8 +1,8 @@
 //! Printable pages resolved from a canonical visualization document.
 
 use super::*;
-use rspice_app_types::product::{ProjectId, ResultDocumentId};
 use rspice_results::report_document::ReportSourceId;
+use rspice_vocabulary::product::{ProjectId, ResultDocumentId};
 
 pub fn resolve_visualization_document_source(
     source_key: String,

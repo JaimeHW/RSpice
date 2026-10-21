@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use rspice_app_types::product::{AnalysisInstanceId, RevisionError};
+use rspice_vocabulary::product::{AnalysisInstanceId, RevisionError};
 use serde::{Deserialize, Serialize};
 
 use crate::analysis_kind::AnalysisKind;

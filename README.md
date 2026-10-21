@@ -457,7 +457,7 @@ use faer.
 
 | Crate | Purpose |
 | :--- | :--- |
-| [`rspice-app-types`](crates/rspice-app-types) | Portable value types every application crate shares |
+| [`rspice-vocabulary`](crates/rspice-vocabulary) | Portable value types every application crate shares |
 | [`rspice-design`](crates/rspice-design) | Schematic documents, connectivity, hierarchy, rule checks and symbols |
 | [`rspice-design-model`](crates/rspice-design-model) | Design-management data and the signed drawing-sheet package |
 | [`rspice-schematic-editor`](crates/rspice-schematic-editor) | Schematic and symbol editor painting and interaction |

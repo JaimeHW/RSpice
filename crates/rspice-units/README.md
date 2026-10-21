@@ -39,7 +39,7 @@ that fails any of them is rejected rather than truncated.
   `analysis::measure_units`, which re-exports these types rather than defining
   its own.
 - Formatting a value for a reader (engineering prefixes, decimal separators,
-  temperature and angle display preferences) is `rspice-app-types`'
+  temperature and angle display preferences) is `rspice-vocabulary`'
   `quantity`, which never rewrites a stored value.
 
 ## Entry points

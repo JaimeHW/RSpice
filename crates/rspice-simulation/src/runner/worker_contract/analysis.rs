@@ -183,8 +183,8 @@ impl From<WorkerStudyAnalysis> for crate::study::StudyAnalysis {
 pub(crate) struct WorkerStudyRunConfig {
     #[serde(default)]
     postprocess: Option<crate::study::StudyPostprocess>,
-    instance_id: rspice_app_types::product::AnalysisInstanceId,
-    source_revision: rspice_app_types::product::ObjectRevision,
+    instance_id: rspice_vocabulary::product::AnalysisInstanceId,
+    source_revision: rspice_vocabulary::product::ObjectRevision,
     pub(super) analysis: WorkerStudyAnalysis,
     analysis_line: String,
     numeric_options: String,

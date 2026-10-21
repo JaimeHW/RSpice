@@ -5,13 +5,13 @@
 //! receipts remain a provider concern and are never inferred from local state.
 
 use crate::library_publication::ProjectLibraryPublicationReceipt;
-use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId, RevisionError};
 use rspice_design::library::ProjectLibraryMutation;
 use rspice_design_model::cell_view::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
 pub use rspice_model_library::{
     PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION, PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
     ProjectSignedTechnologyPin, ProjectTechnologyBinding, TechnologyBindingError,
 };
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, ProjectId, RevisionError};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use sha2::Digest as _;
 use std::path::{Path, PathBuf};

@@ -1,6 +1,5 @@
 //! Retained QPNOISE integrals and contributor rankings alongside the plots.
 use crate::presentation::{frequency_readout, panel_note};
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_core::engine::{
     QpnoiseAnalysisResult, QpnoiseIntegrationMethod, QpnoiseObservation, QpnoiseUnavailable,
     QpnoiseValue, QpxfQuantity,
@@ -8,6 +7,7 @@ use rspice_core::engine::{
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_readout;
 use rspice_ui_kit::widgets::measurement_table;
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// The contributors a reader acts on. Below this the shares are rounding.
 const RANKED_CONTRIBUTORS: usize = 10;

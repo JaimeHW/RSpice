@@ -61,9 +61,9 @@ pub struct PdkTechnologyDiffEntry {
 #[serde(deny_unknown_fields)]
 pub struct PdkTechnologyRevisionDiff {
     pub baseline: PdkTechnologyBinding,
-    pub baseline_archive_digest: rspice_app_types::product::ContentDigest,
+    pub baseline_archive_digest: rspice_vocabulary::product::ContentDigest,
     pub candidate: PdkTechnologyBinding,
-    pub candidate_archive_digest: rspice_app_types::product::ContentDigest,
+    pub candidate_archive_digest: rspice_vocabulary::product::ContentDigest,
     pub same_package_lineage: bool,
     pub entries: Vec<PdkTechnologyDiffEntry>,
 }
@@ -80,10 +80,10 @@ pub const PDK_TECHNOLOGY_MIGRATION_EVIDENCE_SCHEMA_VERSION: u16 = 1;
 pub struct PdkTechnologyMigrationEvidence {
     schema_version: u16,
     baseline: PdkTechnologyBinding,
-    baseline_archive_digest: rspice_app_types::product::ContentDigest,
+    baseline_archive_digest: rspice_vocabulary::product::ContentDigest,
     candidate: PdkTechnologyBinding,
-    candidate_archive_digest: rspice_app_types::product::ContentDigest,
-    diff_digest: rspice_app_types::product::ContentDigest,
+    candidate_archive_digest: rspice_vocabulary::product::ContentDigest,
+    diff_digest: rspice_vocabulary::product::ContentDigest,
     entry_count: u32,
     breaking_count: u32,
     review_required_count: u32,
@@ -107,7 +107,7 @@ impl PdkTechnologyMigrationEvidence {
             baseline_archive_digest: diff.baseline_archive_digest,
             candidate: diff.candidate.clone(),
             candidate_archive_digest: diff.candidate_archive_digest,
-            diff_digest: rspice_app_types::product::ContentDigest::from_bytes(
+            diff_digest: rspice_vocabulary::product::ContentDigest::from_bytes(
                 Sha256::digest(encoded).into(),
             ),
             entry_count: u32::try_from(diff.entries.len()).map_err(|_| {
@@ -145,7 +145,7 @@ impl PdkTechnologyMigrationEvidence {
                 self.entry_count
             )));
         }
-        if self.diff_digest == rspice_app_types::product::ContentDigest::from_bytes([0; 32]) {
+        if self.diff_digest == rspice_vocabulary::product::ContentDigest::from_bytes([0; 32]) {
             return Err(PdkTechnologyDiffError::InvalidEvidence(
                 "migration-evidence diff digest is the zero sentinel".to_owned(),
             ));
@@ -161,7 +161,7 @@ impl PdkTechnologyMigrationEvidence {
         &self.baseline
     }
 
-    pub const fn baseline_archive_digest(&self) -> rspice_app_types::product::ContentDigest {
+    pub const fn baseline_archive_digest(&self) -> rspice_vocabulary::product::ContentDigest {
         self.baseline_archive_digest
     }
 
@@ -169,11 +169,11 @@ impl PdkTechnologyMigrationEvidence {
         &self.candidate
     }
 
-    pub const fn candidate_archive_digest(&self) -> rspice_app_types::product::ContentDigest {
+    pub const fn candidate_archive_digest(&self) -> rspice_vocabulary::product::ContentDigest {
         self.candidate_archive_digest
     }
 
-    pub const fn diff_digest(&self) -> rspice_app_types::product::ContentDigest {
+    pub const fn diff_digest(&self) -> rspice_vocabulary::product::ContentDigest {
         self.diff_digest
     }
 
@@ -643,7 +643,7 @@ mod tests {
 
     #[test]
     fn artifact_reclassification_is_breaking_if_either_side_is_executable() {
-        let digest = rspice_app_types::product::ContentDigest::from_bytes([7; 32]);
+        let digest = rspice_vocabulary::product::ContentDigest::from_bytes([7; 32]);
         let executable = PdkTechnologyArtifact {
             path: "models/device.lib".to_owned(),
             kind: PdkTechnologyArtifactKind::Model,

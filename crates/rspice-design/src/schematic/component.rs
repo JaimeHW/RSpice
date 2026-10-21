@@ -1115,7 +1115,7 @@ impl Component {
     /// [`Component::written_element_name`], which differs from this where the
     /// deck writes the component as another element.
     pub fn emitted_instance_name(&self) -> String {
-        rspice_app_types::hierarchy_path::written_instance_name(
+        rspice_vocabulary::hierarchy_path::written_instance_name(
             self.reference_prefix(),
             &self.spice_instance_name(),
         )

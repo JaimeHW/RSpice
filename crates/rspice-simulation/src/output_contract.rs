@@ -1,8 +1,6 @@
 //! Immutable saved-output contracts compiled against exact analysis identities.
 
 use crate::execution_identity::analysis_kind_tag;
-use rspice_app_types::canonical::content_digest;
-use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId};
 use rspice_results::saved_output::{
     SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputPrecision,
     SavedOutputReceipt, SavedOutputStreaming,
@@ -10,6 +8,10 @@ use rspice_results::saved_output::{
 use rspice_simulation_contract::analysis_run_type::AnalysisRunType;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::saved_output::{SavedOutput, SavedOutputCompatibility};
+use rspice_vocabulary::canonical::content_digest;
+use rspice_vocabulary::product::{
+    AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId,
+};
 use std::sync::Arc;
 
 mod bindings;

@@ -10,11 +10,11 @@ use rspice_veriloga::{CompilerOptions, InterpreterFallbackPolicy, RuntimeQualifi
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use rspice_app_types::product::ContentDigest;
 use rspice_design::project_sources::{
     MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, ProjectSourceBundle, ProjectSourceLanguage,
     ProjectSourceRole,
 };
+use rspice_vocabulary::product::ContentDigest;
 
 const VERILOGA_BUILD_PROFILE_SCHEMA: &str = "rspice.veriloga-build/v1";
 const MAX_BUILD_PROFILE_BYTES: usize = 1024 * 1024;

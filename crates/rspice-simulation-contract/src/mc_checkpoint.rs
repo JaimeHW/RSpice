@@ -1,5 +1,5 @@
 //! Authored retention policy and immutable references to prior trial journals.
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 

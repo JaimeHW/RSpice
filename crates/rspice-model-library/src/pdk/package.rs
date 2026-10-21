@@ -4,7 +4,7 @@
 //! this data boundary and cannot be authorized by deserialized metadata.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

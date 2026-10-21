@@ -20,7 +20,7 @@ use crate::simulation::execution::PreparedRunSnapshot;
 use crate::simulation::execution::TouchstoneExportPolicy;
 #[cfg(test)]
 use crate::simulation::execution::preparation::reject_deferred_corner_model_sources;
-use rspice_app_types::canonical::content_digest;
+use rspice_vocabulary::canonical::content_digest;
 
 #[cfg(test)]
 mod ground_expression_tests;

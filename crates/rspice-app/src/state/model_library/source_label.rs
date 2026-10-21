@@ -16,7 +16,7 @@ pub fn short_digest(digest: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_app_types::product::ContentDigest;
+    use rspice_vocabulary::product::ContentDigest;
 
     #[test]
     fn one_digest_rendering_keeps_the_head_and_the_tail() {

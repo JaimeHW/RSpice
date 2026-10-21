@@ -2,12 +2,12 @@
 //! installation.
 
 use super::LogSource;
-use rspice_app_types::run_log::{RunLog, RunLogLine};
 use rspice_simulation::engine_log::{EngineLogLine, EngineLogOrigin};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_simulation::engine_log::{
     admits, note_stderr_level, offer, with_canonical_metadata, with_canonical_target,
 };
+use rspice_vocabulary::run_log::{RunLog, RunLogLine};
 
 /// Write a run's drained lines into its own log, stamped `unix_ms`.
 ///

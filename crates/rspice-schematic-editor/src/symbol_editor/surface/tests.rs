@@ -53,7 +53,7 @@ fn click_label(label: &str, mut draw: impl FnMut(&mut Ui)) {
 #[test]
 fn generation_button_returns_its_source_only_when_enabled() {
     let source = SymbolRequestSource {
-        project: rspice_app_types::product::ProjectId::new(),
+        project: rspice_vocabulary::product::ProjectId::new(),
         document: CellViewRef::new("work", "amp", "symbol"),
         occurrence: None,
         design_epoch: 3,

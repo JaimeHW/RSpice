@@ -13,7 +13,6 @@ use crate::{
     soa::{SoaRuleFilter, SoaRuleSelection},
     specs::editor::SpecDraft,
 };
-use rspice_app_types::product::{DatasetId, ResultDocumentId};
 use rspice_results::{
     events::projection::BusRadix,
     family_projection::SourceSampleSelection,
@@ -24,6 +23,7 @@ use rspice_results::{
     visualization_document::{MarkerId, PaneId},
 };
 use rspice_ui_kit::plot::{CursorPair, DecimationCache};
+use rspice_vocabulary::product::{DatasetId, ResultDocumentId};
 use std::collections::{HashMap, HashSet};
 
 /// One axis interval, low then high, in data space.
@@ -282,7 +282,7 @@ pub struct ResultViewerState {
     /// visualization document. Stable document and page identities prevent a
     /// project reload or page reorder from selecting a different page.
     pub persistent_document_pages: std::collections::HashMap<
-        rspice_app_types::product::ResultDocumentId,
+        rspice_vocabulary::product::ResultDocumentId,
         rspice_results::visualization_document::PageId,
     >,
     /// Device-local pane selection for each project-owned result document.
@@ -293,7 +293,7 @@ pub struct ResultViewerState {
     /// with the same serial in every other open one, and switching documents
     /// forgot where the reader had been.
     pub persistent_document_panes:
-        std::collections::HashMap<rspice_app_types::product::ResultDocumentId, PaneId>,
+        std::collections::HashMap<rspice_vocabulary::product::ResultDocumentId, PaneId>,
     /// Exact retained pane currently projected through a native renderer.
     /// This scopes otherwise session-only plot state and routes edits back to
     /// the project-owned visualization document.
@@ -775,14 +775,14 @@ impl ResultViewerState {
 
     pub fn persistent_document_page(
         &self,
-        document_id: rspice_app_types::product::ResultDocumentId,
+        document_id: rspice_vocabulary::product::ResultDocumentId,
     ) -> Option<rspice_results::visualization_document::PageId> {
         self.persistent_document_pages.get(&document_id).copied()
     }
 
     pub fn select_persistent_document_page(
         &mut self,
-        document_id: rspice_app_types::product::ResultDocumentId,
+        document_id: rspice_vocabulary::product::ResultDocumentId,
         page_id: rspice_results::visualization_document::PageId,
     ) {
         self.persistent_document_pages.insert(document_id, page_id);
@@ -790,14 +790,14 @@ impl ResultViewerState {
 
     pub fn persistent_document_pane(
         &self,
-        document_id: rspice_app_types::product::ResultDocumentId,
+        document_id: rspice_vocabulary::product::ResultDocumentId,
     ) -> Option<PaneId> {
         self.persistent_document_panes.get(&document_id).copied()
     }
 
     pub fn select_persistent_document_pane(
         &mut self,
-        document_id: rspice_app_types::product::ResultDocumentId,
+        document_id: rspice_vocabulary::product::ResultDocumentId,
         pane_id: PaneId,
     ) {
         self.persistent_document_panes.insert(document_id, pane_id);

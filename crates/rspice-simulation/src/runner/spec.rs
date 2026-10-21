@@ -492,12 +492,12 @@ pub(in crate::runner) mod tests {
     use crate::execution_artifact::ExecutionArtifactEnvelope;
     use crate::execution_artifact::PreparedDependencyBinding;
     use crate::runner::pvt_point_evidence::op_dependencies;
-    use rspice_app_types::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use rspice_simulation_contract::analysis_spec::EnvelopeAdaptiveMode;
     use rspice_simulation_contract::analysis_spec::EnvelopeExtractionPath;
     use rspice_simulation_contract::analysis_spec::EnvelopeInitialPeriodicSolve;
     use rspice_simulation_contract::analysis_spec::HbToneSpec;
     use rspice_simulation_contract::analysis_spec::SpPort;
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 
     fn digest(byte: u8) -> ContentDigest {
         ContentDigest::from_bytes([byte; 32])

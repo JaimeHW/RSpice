@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::schematic::component_type::ComponentType;
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 /// Why a stimulus definition could not be built.
 #[derive(Debug, Clone, PartialEq, Eq)]

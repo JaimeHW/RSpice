@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::{ModelSourceEdge, ModelSourcePin, ModelType};
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 fn binned(name: &str, l_min: f64, l_max: f64, w_min: f64, w_max: f64) -> DeviceModel {
     DeviceModel::new(name, ModelType::Nmos).with_geometry(l_min, l_max, w_min, w_max)

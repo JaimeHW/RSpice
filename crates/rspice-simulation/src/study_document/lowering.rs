@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_core::{ResourceKind, ResourceLimitError, ResourceLimits};
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 use super::*;
 use crate::execution::{HeadlessRunInput, HeadlessSourceResolver, HeadlessTaskRequest, SavePolicy};

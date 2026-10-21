@@ -9,7 +9,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 
 /// Authorization-owned issuer for single-use execution permits.
 ///

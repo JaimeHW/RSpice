@@ -8,7 +8,7 @@ pub mod browser;
 pub mod native;
 
 use crate::{ProjectFile, ProjectIoError};
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 use std::path::PathBuf;
 

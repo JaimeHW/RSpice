@@ -1,9 +1,9 @@
 //! Adapter from completed simulation results to portable yield analysis.
 use crate::results::SimulationResult;
-use rspice_app_types::product::{DatasetId, RunId};
 use rspice_results::yield_analysis::{MonteCarloSamplingMode, YieldAnalysisProvenance, YieldInput};
 #[cfg(test)]
 use rspice_results::yield_analysis::{YieldAnalysisManager, YieldSpec};
+use rspice_vocabulary::product::{DatasetId, RunId};
 #[cfg(test)]
 use std::collections::BTreeMap;
 

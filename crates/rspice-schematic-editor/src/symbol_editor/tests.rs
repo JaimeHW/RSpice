@@ -46,7 +46,7 @@ fn print_symbol_editor_renders_for_review() {
         },
     ];
     let source = interaction::SymbolRequestSource {
-        project: rspice_app_types::product::ProjectId::new(),
+        project: rspice_vocabulary::product::ProjectId::new(),
         document: reference.clone(),
         occurrence: None,
         design_epoch: 1,

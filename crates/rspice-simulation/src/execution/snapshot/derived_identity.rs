@@ -14,7 +14,7 @@
 //! re-derives the identity from it. Nothing else in preparation may give a
 //! task an identity the plan did not author.
 
-use rspice_app_types::product::{AnalysisInstanceId, DerivedAnalysisIdentity, ObjectRevision};
+use rspice_vocabulary::product::{AnalysisInstanceId, DerivedAnalysisIdentity, ObjectRevision};
 
 use super::{PreparedPvtPoint, PreparedTask, QueuedAnalysis, corner_contract_digest, process_tag};
 

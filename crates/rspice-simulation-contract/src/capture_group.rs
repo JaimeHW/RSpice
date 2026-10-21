@@ -52,8 +52,8 @@ use uuid::Uuid;
 use crate::saved_output::{
     SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
 };
-use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
-use rspice_app_types::product::{
+use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
+use rspice_vocabulary::product::{
     CaptureGroupId, ObjectRevision, RevisionError, SavedOutputId, SimulationPlanId,
 };
 

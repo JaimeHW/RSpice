@@ -6,7 +6,7 @@
 use crate::{
     CornerModelBinding, ModelConsumerScope, ModelResolutionRecord, SEALED_MODEL_SOURCE_MARKER,
 };
-use rspice_app_types::product::{ContentDigest, ProcessCorner};
+use rspice_vocabulary::product::{ContentDigest, ProcessCorner};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 

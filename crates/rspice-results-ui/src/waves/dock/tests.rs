@@ -2,13 +2,13 @@
 use super::*;
 use crate::session::DocumentMarker;
 use crate::waves::TraceKind;
-use rspice_app_types::product::{DatasetId, ResultDocumentId};
 use rspice_results::{
     analysis_result::AnalysisResult,
     analysis_type::AnalysisType,
     result_presentation::{ResultMarker, TracePresentationKey},
     waveform::RetainedWaveform,
 };
+use rspice_vocabulary::product::{DatasetId, ResultDocumentId};
 fn retained_entity_id<T: serde::de::DeserializeOwned>(serial: u64) -> T {
     T::deserialize(serde::de::value::U64Deserializer::<serde::de::value::Error>::new(serial))
         .expect("a non-zero entity serial")

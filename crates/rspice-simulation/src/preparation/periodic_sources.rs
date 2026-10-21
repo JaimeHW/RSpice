@@ -1,8 +1,8 @@
 //! Validate periodic-source contracts against the prepared executable netlist.
 
 use super::{PreparationError, PreparationStage};
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 /// Authenticate every driven `.PSS` task's tone list against the executable
 /// netlist's elaborated source set.

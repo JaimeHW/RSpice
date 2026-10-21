@@ -1,6 +1,5 @@
 //! Complete PDK runtime validation and exact executable source closure sealing.
 
-use rspice_app_types::product::ContentDigest;
 use rspice_model_library::pdk::contracts::*;
 use rspice_model_library::pdk::manifest::{
     PdkTechnologyManifest, package_path_to_host_path, signed_model_virtual_root,
@@ -10,6 +9,7 @@ use rspice_model_library::pdk::package::{
     PdkTechnologyPackageMetadata, authenticate_archive, decode_bounded,
 };
 use rspice_model_library::pdk::{PdkPublisherTrustStore, PdkTechnologyError, content_digest};
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

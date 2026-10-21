@@ -94,7 +94,7 @@ impl OptimizationVariableConfig {
 /// Typed optimization configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptimizationConfig {
-    pub base_analysis: Option<rspice_app_types::product::AnalysisInstanceId>,
+    pub base_analysis: Option<rspice_vocabulary::product::AnalysisInstanceId>,
     pub objective_measurement: String,
     pub constraints: Vec<rspice_results::optimization::OptimizationConstraint>,
     pub objective_terms: Vec<OptimizationObjectiveTerm>,
@@ -369,7 +369,7 @@ pub struct OptimizationDialogState {
     #[serde(default)]
     pub variable_domains: Vec<OptimizationVariableDomainDraft>,
     #[serde(default)]
-    pub base_analysis: Option<rspice_app_types::product::AnalysisInstanceId>,
+    pub base_analysis: Option<rspice_vocabulary::product::AnalysisInstanceId>,
     #[serde(default)]
     pub objective_measurement: String,
     #[serde(default = "default_gradient_tolerance")]

@@ -1,7 +1,7 @@
 //! Solver integration tests for cooperative qualification sessions.
 
 use super::*;
-use rspice_app_types::product::{ContentDigest, ObjectRevision};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision};
 use sha2::{Digest as _, Sha256};
 
 fn digest_bytes(bytes: &[u8]) -> ContentDigest {

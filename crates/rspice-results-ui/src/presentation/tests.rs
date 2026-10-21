@@ -13,7 +13,7 @@ fn plain_readouts_count_significant_digits_without_a_prefix() {
 /// Angles read at the chosen digits in the unit Angle display chose.
 #[test]
 fn angle_readouts_follow_the_angle_display_at_significant_digits() {
-    use rspice_app_types::quantity::AngleDisplay;
+    use rspice_vocabulary::quantity::AngleDisplay;
     let degrees = QuantityPresentationPolicy {
         angle_display: AngleDisplay::Degrees,
         ..QuantityPresentationPolicy::default()

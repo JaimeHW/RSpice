@@ -10,7 +10,6 @@
 #![allow(clippy::large_enum_variant)]
 
 use super::*;
-use rspice_app_types::product::{ObjectRevision, ProjectId};
 use rspice_design::schematic::{
     bus::{Bus, BusTap},
     design_note::DesignNote,
@@ -26,6 +25,7 @@ use rspice_design_model::design_management::{
 use rspice_formats::project_results::ProjectSimulationResults;
 use rspice_hardcopy_contract::sources::MAX_HARDCOPY_SOURCE_SET_MEMBERS;
 use rspice_results::report_document::{ReportDocument, ReportReferenceInventory};
+use rspice_vocabulary::product::{ObjectRevision, ProjectId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 

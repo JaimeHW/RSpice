@@ -6,7 +6,6 @@ use super::{
     ReadoutPolicy, StripModel, StripTrace, UnitPane, anchor_key, cursor_interpolation, trace_key,
 };
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::family_projection::FamilyTraceStyle;
 use rspice_results::result_presentation::{MarkerKind, WaveformPresentationKey};
 use rspice_results::waveform::SharedWaveformValues;
@@ -17,6 +16,7 @@ use rspice_ui_kit::plot::{
     self, Axis, CursorPair, DisplayDecimation, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation,
     Trace, XScale, fmt_si_significant,
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
 /// One expression trace resolved for plotting.
@@ -319,10 +319,10 @@ pub fn show_plot<'a>(
     };
     let y_axis = if pane.unit == "rad" {
         match quantity_policy.angle_display {
-            rspice_app_types::quantity::AngleDisplay::Degrees => {
+            rspice_vocabulary::quantity::AngleDisplay::Degrees => {
                 y_axis.with_display_transform(180.0 / std::f64::consts::PI, 0.0, "°")
             }
-            rspice_app_types::quantity::AngleDisplay::Radians => y_axis,
+            rspice_vocabulary::quantity::AngleDisplay::Radians => y_axis,
         }
     } else if pane.unit == "°" {
         let (scale, offset, unit) = quantity_policy.degree_axis_transform();

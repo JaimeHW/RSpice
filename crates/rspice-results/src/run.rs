@@ -14,10 +14,10 @@ use crate::result_digest::ResultDigestEncoding;
 use crate::run_receipt::{PreparedRunReceipt, SimulationRunProvenance};
 use crate::specification_verdict::SpecificationVerdict;
 use crate::waveform::RetainedWaveform;
-use rspice_app_types::product::{
+use rspice_vocabulary::product::{
     AnalysisInstanceId, ContentDigest, DatasetId, JobId, RunId, SimulationCampaignId,
 };
-use rspice_app_types::run_log::RunLog;
+use rspice_vocabulary::run_log::RunLog;
 
 /// Immutable membership of one run in a reviewed multi-plan campaign.
 ///
@@ -791,8 +791,8 @@ impl<A> SimulationRun<A> {
     /// Canonical SOA warning/violation devices for an exact project revision.
     pub fn soa_violation_context<W: AsRef<RetainedWaveform>>(
         &self,
-        project_revision: rspice_app_types::product::ObjectRevision,
-    ) -> Option<(rspice_app_types::product::ContentDigest, Vec<String>)>
+        project_revision: rspice_vocabulary::product::ObjectRevision,
+    ) -> Option<(rspice_vocabulary::product::ContentDigest, Vec<String>)>
     where
         A: AsRef<AnalysisResult<W>>,
     {

@@ -1,7 +1,7 @@
 //! Tests proving a copied sample reads back as the double it was stored as.
 
 use super::copied_sample_value;
-use rspice_app_types::quantity::{AngleDisplay, CopiedValueFormat, QuantityPresentationPolicy};
+use rspice_vocabulary::quantity::{AngleDisplay, CopiedValueFormat, QuantityPresentationPolicy};
 
 /// A phase sample is stored in degrees. Its copy went through radians and
 /// back, which landed a unit in the last place off for about one degree

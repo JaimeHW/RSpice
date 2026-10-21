@@ -9,8 +9,8 @@ use crate::{
     ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
     first_unreachable_source,
 };
-use rspice_app_types::product::ContentDigest;
 use rspice_core::library::{LibParseResult, ResolvedLibDependency, ResolvedLibSource};
+use rspice_vocabulary::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};

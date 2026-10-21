@@ -14,8 +14,8 @@ use crate::family_metadata::AnalysisResultFamilyMetadata;
 use crate::provenance::AnalysisResultProvenance;
 use crate::result_import::ResultImportSource;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use rspice_app_types::product::ContentDigest;
 use rspice_core::{NoAbort, ResourceLimits};
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::sync::Arc;
 
@@ -29,7 +29,7 @@ pub struct MonteCarloCheckpointValidationRef<'a> {
 }
 
 pub fn checkpoint_digest(bytes: &[u8]) -> ContentDigest {
-    rspice_app_types::canonical::content_digest("rspice.studio-monte-carlo-checkpoint/v1", bytes)
+    rspice_vocabulary::canonical::content_digest("rspice.studio-monte-carlo-checkpoint/v1", bytes)
 }
 
 /// Exact portable bytes shared by retained snapshots. Construction validates

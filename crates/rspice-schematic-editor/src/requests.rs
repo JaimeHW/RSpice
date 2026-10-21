@@ -1,9 +1,9 @@
 //! Editor intents bound to the source view that produced them.
 
-use rspice_app_types::product::ProjectId;
 use rspice_design::occurrence::DocumentOccurrence;
 use rspice_design::schematic::selection::Selection;
 use rspice_design_model::{cell_view::CellViewRef, design_management::SheetId};
+use rspice_vocabulary::product::ProjectId;
 
 use crate::session::selection::SchematicKeyboardFocus;
 use crate::view::pointer_target::PointerTarget;

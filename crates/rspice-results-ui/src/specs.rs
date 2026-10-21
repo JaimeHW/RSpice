@@ -4,7 +4,6 @@ pub mod editor;
 
 use crate::presentation::well_hint;
 use egui::Ui;
-use rspice_app_types::product::{self, DatasetId};
 use rspice_results::{
     analysis_result::AnalysisResult,
     run::{SimulationRun, SimulationRunLifecycle},
@@ -24,6 +23,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::{Problem, measurement_table, paint_problem_mark},
 };
+use rspice_vocabulary::product::{self, DatasetId};
 
 /// How a status cell reads: a failure in the error tone behind its mark, a
 /// pass in plain text with nothing to say it passed, and an unbound or missing

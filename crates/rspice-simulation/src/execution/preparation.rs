@@ -32,8 +32,8 @@ use crate::project_veriloga::preparation::{
     project_veriloga_runtimes_referenced_by, rebind_project_veriloga_source_keys,
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
-use rspice_app_types::canonical::content_digest;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_vocabulary::canonical::content_digest;
 use std::path::Path;
 
 pub struct RunPreparationInputs<'a, R, A> {
@@ -88,7 +88,7 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
 
     fn plan_data(
         &self,
-        plan_id: rspice_app_types::product::SimulationPlanId,
+        plan_id: rspice_vocabulary::product::SimulationPlanId,
     ) -> Option<&rspice_simulation_contract::plan_payload::SimulationPlanPayload> {
         self.analysis
             .plan_payloads

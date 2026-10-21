@@ -13,7 +13,7 @@ use crate::{
     registry::{DocumentRegistry, ProjectDocumentId, ResultFingerprintCache},
 };
 
-use rspice_app_types::product::{ContentDigest, TransactionId};
+use rspice_vocabulary::product::{ContentDigest, TransactionId};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

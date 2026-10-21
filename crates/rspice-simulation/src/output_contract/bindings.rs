@@ -35,7 +35,7 @@ impl PreparedSavedOutput {
                     None
                 } else {
                     Some(
-                        rspice_app_types::hierarchy_path::ProbeTarget::engine_alias(node)
+                        rspice_vocabulary::hierarchy_path::ProbeTarget::engine_alias(node)
                             .unwrap_or_else(|| node.to_owned()),
                     )
                 }
@@ -70,7 +70,7 @@ fn candidates(
 ) -> Vec<SourceCandidate> {
     if let Some((device, quantity)) = rspice_results::saved_output::device_current_probe(signal) {
         let mut result = vec![SourceCandidate::Trace(signal.to_owned())];
-        if let Some(engine) = rspice_app_types::hierarchy_path::ProbeTarget::engine_alias(device) {
+        if let Some(engine) = rspice_vocabulary::hierarchy_path::ProbeTarget::engine_alias(device) {
             let candidate = SourceCandidate::Trace(format!("@{engine}[{quantity}]"));
             if !result.contains(&candidate) {
                 result.push(candidate);
@@ -92,7 +92,7 @@ fn candidates(
     };
     // Literal slash/dotted nodes win before hierarchy and formal-port aliases.
     add(node);
-    let engine = rspice_app_types::hierarchy_path::ProbeTarget::engine_alias(node);
+    let engine = rspice_vocabulary::hierarchy_path::ProbeTarget::engine_alias(node);
     if let Some(engine) = &engine {
         add(engine);
     }

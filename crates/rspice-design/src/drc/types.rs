@@ -2,9 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::Point;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::hierarchy_path::InstancePath;
 
 /// Severity level for DRC violations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

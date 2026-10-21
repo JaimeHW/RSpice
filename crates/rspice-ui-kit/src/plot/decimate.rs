@@ -32,7 +32,7 @@ pub enum DisplayDecimation {
 pub struct DecimationCache {
     map: HashMap<CacheKey, Entry>,
     /// Retained source identity when trace keys are scoped to a source owner.
-    source: Option<rspice_app_types::source_revision::SourceRevision>,
+    source: Option<rspice_vocabulary::source_revision::SourceRevision>,
     /// Data version the cache contents belong to.
     version: u64,
     /// Frame tick, advanced once per frame by `ensure_version` — eviction
@@ -140,7 +140,7 @@ impl DecimationCache {
     /// Bind logical trace keys to their current source before reading them.
     /// A restored source or an edited clone can reuse numeric IDs and versions;
     /// retaining this small revision prevents either from reusing old samples.
-    pub fn ensure_source(&mut self, source: &rspice_app_types::source_revision::SourceRevision) {
+    pub fn ensure_source(&mut self, source: &rspice_vocabulary::source_revision::SourceRevision) {
         if self.source.as_ref() != Some(source) {
             self.invalidate();
             self.source = Some(source.clone());

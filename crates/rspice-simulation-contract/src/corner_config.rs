@@ -16,7 +16,7 @@
 //!
 //! Run transient analysis at SS corner with reduced voltage and hot temperature.
 
-use rspice_app_types::product::ProcessCorner;
+use rspice_vocabulary::product::ProcessCorner;
 
 // =============================================================================
 // Base Analysis Type

@@ -7,7 +7,7 @@ views, and the embedded component-symbol artwork. The application, project,
 simulation, hardcopy, worker and schematic-editor crates all read a design
 through this crate, so the emitted deck, the net summary and the rule checker
 cannot disagree about what is connected.
-`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-app-types`,
+`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-vocabulary`,
 `rspice-model-library` and `rspice-hardcopy-contract` among the application
 crates, and refuses egui, eframe, winit, wgpu and rfd in its closure.
 

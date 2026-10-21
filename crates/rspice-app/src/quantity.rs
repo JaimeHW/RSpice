@@ -1,6 +1,6 @@
 //! Unit-safe presentation and interactive quantity parsing.
 //!
-//! Portable policy comes from `rspice-app-types`. Platform locale discovery,
+//! Portable policy comes from `rspice-vocabulary`. Platform locale discovery,
 //! authored-deck parsing, and result-import units stay with their consumers.
 
 mod locale;
@@ -8,9 +8,9 @@ pub(crate) use rspice_simulation_contract::spice_value;
 
 pub use locale::platform_number_locale;
 #[cfg(test)]
-pub use rspice_app_types::quantity::AngleDisplay;
-pub(crate) use rspice_app_types::quantity::engineering;
-pub use rspice_app_types::quantity::{
+pub use rspice_vocabulary::quantity::AngleDisplay;
+pub(crate) use rspice_vocabulary::quantity::engineering;
+pub use rspice_vocabulary::quantity::{
     EngineeringPrecision, LayoutDatabaseUnit, QuantityInputKind, QuantityPresentationPolicy,
     UiNumberLocale, UnitsPreferences, format_elapsed, format_engineering_value,
     parse_engineering_value, parse_ui_quantity,
@@ -51,7 +51,7 @@ pub(crate) fn temperature_list_label(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_app_types::quantity::TemperatureDisplay;
+    use rspice_vocabulary::quantity::TemperatureDisplay;
 
     /// A Celsius temperature reads in the chosen unit, with nothing after
     /// the point that is not there.

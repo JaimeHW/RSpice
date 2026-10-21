@@ -6,14 +6,14 @@ use super::{
     PropertyBrowseRequest, render_component_parameters,
 };
 use egui::{Align, Layout, Margin, Stroke, Ui};
-use rspice_app_types::property::{PropertySheet, PropertyValue};
-use rspice_app_types::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use rspice_design::properties::SourceContractFinding;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{
     Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize,
 };
+use rspice_vocabulary::property::{PropertySheet, PropertyValue};
+use rspice_vocabulary::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 
 /// Live host inputs for one component dialog frame.
 pub struct ComponentPropertyDialogView<'a> {

@@ -2,7 +2,7 @@
 //!
 //! These retained declarations do not grant installation or execution authority.
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 
 pub const PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION: u32 = 1;

@@ -7,7 +7,6 @@ use super::{
 };
 use crate::derived::{DerivedSeries, WindowStats};
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_at_with_shape,
@@ -18,6 +17,7 @@ use rspice_ui_kit::plot::{
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 pub const READOUT_ROW_H: f32 = 20.0;
 pub const READOUT_PAD_X: f32 = 10.0;
@@ -629,7 +629,7 @@ fn copied_trace_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_app_types::quantity::{AngleDisplay, CopiedValueFormat};
+    use rspice_vocabulary::quantity::{AngleDisplay, CopiedValueFormat};
 
     /// A phase trace holds degrees. Its copy went through radians and back,
     /// which landed a unit in the last place off for about one degree value

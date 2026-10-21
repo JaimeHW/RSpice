@@ -2,7 +2,7 @@
 //!
 //! Installation and source compilation remain with their consuming services.
 
-use rspice_app_types::product::ContentDigest;
+use rspice_vocabulary::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 
 pub mod callback;

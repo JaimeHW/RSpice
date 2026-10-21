@@ -5,7 +5,7 @@
 //! deterministic and excludes disabled positions.
 
 use super::*;
-use rspice_app_types::product::RevisionError;
+use rspice_vocabulary::product::RevisionError;
 
 fn snapshot(plan: &SimulationPlan) -> String {
     serde_json::to_string(plan).expect("plan serializes")

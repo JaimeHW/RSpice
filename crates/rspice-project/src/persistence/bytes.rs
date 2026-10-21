@@ -1,8 +1,8 @@
 //! Bounded project byte snapshots and decoding against their exact identity.
 
 use crate::{DecodedProject, MAX_PROJECT_FILE_BYTES, ProjectIoError, decode_project_text};
-use rspice_app_types::product::ContentDigest;
 use rspice_design::hierarchy::HierarchySourceFiles;
+use rspice_vocabulary::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 use std::{io::Read, path::Path};
 

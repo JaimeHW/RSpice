@@ -96,9 +96,9 @@ impl FamilyMemberId {
             }
             Self::SweepPoint { value, .. } => format!(
                 "Point {}",
-                rspice_app_types::quantity::format_engineering_display_with(
+                rspice_vocabulary::quantity::format_engineering_display_with(
                     *value,
-                    rspice_app_types::quantity::EngineeringPrecision::UpTo(9),
+                    rspice_vocabulary::quantity::EngineeringPrecision::UpTo(9),
                 )
             ),
             Self::Corner { label, .. } => label.clone(),

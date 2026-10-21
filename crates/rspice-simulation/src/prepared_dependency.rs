@@ -1,12 +1,12 @@
 //! Required producer kinds and compatibility of frozen analysis requests.
 use crate::execution_options::SpecExecutionOptions;
-use rspice_app_types::product::{AnalysisInstanceId, ContentDigest};
 use rspice_simulation_contract::analysis_spec::{AnalysisSpec, PssMethod};
 use rspice_simulation_contract::dependency_contract::{
     FourierTransientRequirement, PeriodicStateCapability, TransientCapability,
     validate_fourier_transient_contract, validate_harmonic_balance_carrier_contract,
     validate_periodic_state_contract,
 };
+use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

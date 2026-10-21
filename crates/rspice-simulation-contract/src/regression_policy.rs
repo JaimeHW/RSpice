@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_results::provenance::AnalysisResultSourceDomain;
+use rspice_vocabulary::product::AnalysisInstanceId;
 use serde::{Deserialize, Serialize};
 use unicode_segmentation::UnicodeSegmentation;
 

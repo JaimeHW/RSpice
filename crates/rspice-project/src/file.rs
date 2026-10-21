@@ -2,10 +2,6 @@
 
 use crate::results::*;
 use crate::{ProjectExecutionContext, ProjectHierarchy, ProjectLibraries, ProjectWorkspace};
-use rspice_app_types::hierarchy_path::{InstancePath, InstancePathPattern, PatternSegment};
-use rspice_app_types::product::{
-    AnalysisInstanceId, DerivedAnalysisIdentity, ObjectRevision, ProjectId, SimulationPlanId,
-};
 use rspice_design::{
     configuration_set::ConfigurationSet,
     library::ViewType,
@@ -15,6 +11,10 @@ use rspice_design::{
 use rspice_design_model::cell_view::{CellViewRef, validate_cell_view_name_segment};
 use rspice_results::provenance::AnalysisResultSourceDomain;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
+use rspice_vocabulary::hierarchy_path::{InstancePath, InstancePathPattern, PatternSegment};
+use rspice_vocabulary::product::{
+    AnalysisInstanceId, DerivedAnalysisIdentity, ObjectRevision, ProjectId, SimulationPlanId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -893,7 +893,7 @@ impl ProjectFile {
                         }
                         let occurrence = occurrences.entry(task.analysis_kind_tag).or_default();
                         let expected =
-                            rspice_app_types::product::manual_deck_analysis_instance_id_from_tag(
+                            rspice_vocabulary::product::manual_deck_analysis_instance_id_from_tag(
                                 receipt.source_content_digest,
                                 task.analysis_kind_tag,
                                 *occurrence,

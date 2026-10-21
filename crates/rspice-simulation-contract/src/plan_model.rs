@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, RunId, SimulationPlanId};
+use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision, RunId, SimulationPlanId};
 
 use crate::analysis_draft::AnalysisDraft;
 use crate::analysis_kind::AnalysisKind;

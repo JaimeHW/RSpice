@@ -655,7 +655,7 @@ fn parse_range(query: &str) -> Option<(f64, f64)> {
 /// `>= 10k` or either end of `1p..5p` — or the displayed text of a cell that
 /// carries no already-parsed number.
 ///
-/// The crate keeps one engineering parser, in [`rspice_app_types::quantity`], and this is
+/// The crate keeps one engineering parser, in [`rspice_vocabulary::quantity`], and this is
 /// an adapter onto it rather than a second dialect of the same notation. All
 /// the adapter does is exchange the parser's message for the `Option` that
 /// [`filter_matches`] reads: `None` is how an operand that is not an
@@ -671,7 +671,7 @@ fn parse_range(query: &str) -> Option<(f64, f64)> {
 /// `1N4148` parsed as 1e-9 and was then compared against the user's
 /// threshold, dropping the row on a number nobody had written.
 fn parse_engineering_number(value: &str) -> Option<f64> {
-    rspice_app_types::quantity::parse_engineering_value(value).ok()
+    rspice_vocabulary::quantity::parse_engineering_value(value).ok()
 }
 
 fn compare_number(value: f64, operator: &str, target: f64) -> bool {

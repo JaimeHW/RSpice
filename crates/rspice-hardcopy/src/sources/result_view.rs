@@ -6,7 +6,6 @@
 //! under the same presentation always resolves the same page.
 
 use super::*;
-use rspice_app_types::product::{DatasetId, ObjectRevision, ProjectId, RunId};
 use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 use rspice_results::noise_spectrum::{
     RetainedNoiseReference, retained_noise_contributor, retained_noise_reference,
@@ -17,6 +16,7 @@ use rspice_results::{
     analysis_result::AnalysisResult, analysis_type::AnalysisType,
     family_metadata::AnalysisResultFamilyMetadata, run::SimulationRun, waveform::RetainedWaveform,
 };
+use rspice_vocabulary::product::{DatasetId, ObjectRevision, ProjectId, RunId};
 use uuid::Uuid;
 
 mod presentation;

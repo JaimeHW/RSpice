@@ -1429,7 +1429,7 @@ endmodule
         .unwrap();
         let runtime = crate::veriloga::PreparedVerilogARuntime::try_from_virtual_compilation(
             format!("__rspice_project__/sealed-pss/{file}"),
-            rspice_app_types::canonical::content_digest("sealed-pss-source/v1", MODEL.as_bytes()),
+            rspice_vocabulary::canonical::content_digest("sealed-pss-source/v1", MODEL.as_bytes()),
             module.into(),
             &compilation,
         )

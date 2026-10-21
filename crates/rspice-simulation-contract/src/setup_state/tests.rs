@@ -4,7 +4,7 @@ use super::*;
 use crate::analysis_draft::AnalysisDraft;
 use crate::analysis_kind::AnalysisKind;
 use crate::drafts::{DistoDraft, NoiseDraft};
-use rspice_app_types::product::ProjectId;
+use rspice_vocabulary::product::ProjectId;
 use uuid::Uuid;
 
 fn legacy_setup() -> SimulationSetup {

@@ -442,7 +442,7 @@ pub fn placed_loop_probe_names(document: &SchematicDocument) -> Vec<String> {
 /// answers to the reference.
 pub fn placed_loop_probe<'a>(placed: &'a [String], reference: &str) -> Option<&'a str> {
     let reference = reference.trim();
-    let written = rspice_app_types::hierarchy_path::written_instance_name(
+    let written = rspice_vocabulary::hierarchy_path::written_instance_name(
         ComponentType::LoopProbe.spice_prefix(),
         reference,
     );

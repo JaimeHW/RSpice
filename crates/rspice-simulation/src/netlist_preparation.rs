@@ -137,7 +137,7 @@ pub fn source_with_run_temperature_with_abort(
 pub fn materialize_corner_process_source(
     source: &str,
     config: &CornerRunConfig,
-    process: rspice_app_types::product::ProcessCorner,
+    process: rspice_vocabulary::product::ProcessCorner,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<String> {
     ensure_not_aborted(abort)?;
@@ -158,7 +158,7 @@ pub fn materialize_corner_process_source(
 fn materialize_corner_process_source_from_stripped(
     stripped_source: &str,
     config: &CornerRunConfig,
-    process: rspice_app_types::product::ProcessCorner,
+    process: rspice_vocabulary::product::ProcessCorner,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<String> {
     let mut model_cards = Vec::new();
@@ -397,8 +397,8 @@ mod tests {
 
     use super::*;
     use crate::sweeps::CornerBaseMode;
-    use rspice_app_types::product::ProcessCorner;
     use rspice_model_library::CornerModelBinding;
+    use rspice_vocabulary::product::ProcessCorner;
 
     struct AbortOnPoll {
         abort_on: usize,

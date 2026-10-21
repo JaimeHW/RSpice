@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use rspice_app_types::product::{ContentDigest, ObjectRevision, RevisionError};
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, RevisionError};
 
 use super::outline::{IncludeDirective, parse_include_directives};
 use super::search::{FindError, FindOptions, ReplaceOutcome, ReplaceScope, replace_in_source};

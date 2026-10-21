@@ -461,7 +461,6 @@ mod tests {
         resolve_retained_hardcopy_source,
     };
     use crate::workbench::state::WorkspaceDocumentId;
-    use rspice_app_types::product::ContentDigest;
     use rspice_formats::zip::deterministic_stored_zip;
     use rspice_hardcopy::render::{HardcopyPreviewPage, RenderedHardcopyPublication};
     use rspice_hardcopy::render::{HardcopyRenderer, HardcopySceneMetadata};
@@ -475,6 +474,7 @@ mod tests {
     use rspice_hardcopy_contract::{
         HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup, OutputFormat,
     };
+    use rspice_vocabulary::product::ContentDigest;
     use sha2::{Digest as _, Sha256};
 
     struct WorkerFixture {

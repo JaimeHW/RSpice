@@ -5,7 +5,6 @@ use crate::{
     strip::{self, LegendChip},
 };
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::pole_zero::{
     data::{ComplexRoot, PoleZeroData},
     metrics::{pole_stability, summarize_roots},
@@ -15,6 +14,7 @@ use rspice_ui_kit::{
     plot::{self, Axis, PlotSpec, XScale, fmt_si_readout},
     tokens::Tokens,
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// The plot response and header reset request to apply to the host's shared view.
 pub struct PoleZeroResponse {

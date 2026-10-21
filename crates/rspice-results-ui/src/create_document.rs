@@ -1,7 +1,6 @@
 //! Create Result Document presentation with immediate host validation.
 
 use egui::{RichText, Sense, Ui, UiBuilder, vec2};
-use rspice_app_types::product::DatasetId;
 use rspice_results::{
     document_creation::{ResultDocumentFamily, ResultDocumentLayout},
     viewer_catalog::{
@@ -9,6 +8,7 @@ use rspice_results::{
     },
 };
 use rspice_ui_kit::tokens::Tokens;
+use rspice_vocabulary::product::DatasetId;
 use std::borrow::Cow;
 
 /// Runtime draft for the dataset-driven Create Result Document transaction.

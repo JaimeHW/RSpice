@@ -1,11 +1,11 @@
 //! Smith chart rendering and retained trace readouts.
 
 use egui::Ui;
-use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::{network_matrix::impedance_from_gamma, waveform::SharedWaveformValues};
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout};
 use rspice_ui_kit::tokens::Tokens;
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use super::{SmithChartState, state::SParamTrace};
 use crate::presentation::{PlotView, angle_readout, frequency_readout, plain_readout, well_hint};

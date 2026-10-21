@@ -259,7 +259,7 @@ impl StripModel {
         &self,
         x: f64,
         significant_digits: usize,
-        quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+        quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
     ) -> String {
         units::as_readout(&self.format_x_exact(x, significant_digits, quantity_policy))
     }
@@ -270,7 +270,7 @@ impl StripModel {
         &self,
         x: f64,
         significant_digits: usize,
-        quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+        quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
     ) -> String {
         if self.x_unit == "Hz" {
             // The digit preference counts significant digits, in whichever
@@ -299,7 +299,7 @@ impl StripModel {
         trace: &StripTrace,
         value: f64,
         significant_digits: usize,
-        quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+        quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
     ) -> String {
         units::as_readout(&self.format_trace_sample(
             trace,
@@ -316,7 +316,7 @@ impl StripModel {
         trace: &StripTrace,
         value: f64,
         significant_digits: usize,
-        quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+        quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
     ) -> String {
         match trace.kind {
             // A strip mixing voltages and currents has no single Y unit, so
@@ -448,7 +448,7 @@ impl StripModel {
         &self,
         index: usize,
         significant_digits: usize,
-        quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+        quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
     ) -> String {
         self.sample_grid()
             .and_then(|grid| grid.get(index).copied())
@@ -468,7 +468,7 @@ impl StripModel {
         trace_index: usize,
         sample: usize,
         significant_digits: usize,
-        quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+        quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
     ) -> Option<String> {
         let trace = self.traces.get(trace_index)?;
         let value = trace.y.as_slice().get(sample).copied()?;
@@ -493,9 +493,9 @@ impl StripModel {
 fn phase_sample(
     radians: f64,
     significant_digits: usize,
-    quantity_policy: rspice_app_types::quantity::QuantityPresentationPolicy,
+    quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
 ) -> String {
-    use rspice_app_types::quantity::AngleDisplay;
+    use rspice_vocabulary::quantity::AngleDisplay;
     match quantity_policy.angle_display {
         AngleDisplay::Degrees => fmt_significant(radians.to_degrees(), significant_digits, " °"),
         AngleDisplay::Radians => fmt_significant(radians, significant_digits, " rad"),
@@ -568,7 +568,7 @@ pub(crate) fn grid_is_ascending(model: &StripModel) -> bool {
 #[cfg(test)]
 mod phase_digit_tests {
     use super::*;
-    use rspice_app_types::quantity::{AngleDisplay, QuantityPresentationPolicy};
+    use rspice_vocabulary::quantity::{AngleDisplay, QuantityPresentationPolicy};
 
     /// The digit preference counts significant digits in a phase, not
     /// places after the point: four digits of 45.678° is 45.68.

@@ -15,7 +15,7 @@ workspace = true
 library-test-fixtures = ["rspice-design/schematic-test-fixtures"]
 
 [dependencies]
-rspice-app-types.workspace = true
+rspice-vocabulary.workspace = true
 rspice-design.workspace = true
 rspice-design-model.workspace = true
 rspice-model-library.workspace = true

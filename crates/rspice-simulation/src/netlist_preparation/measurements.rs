@@ -3,9 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::preparation::{PreparationError, PreparationStage};
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_results::specification::SpecificationDefinition;
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 fn failure(message: impl Into<String>) -> PreparationError {
     PreparationError::new(PreparationStage::AnalysisPlan, message)

@@ -9,7 +9,7 @@ filesystems, browsers and printer APIs. It is its own crate because the
 renderer brings krilla, resvg, usvg, tiff and embedded fonts that the
 persisted contract does not need; `rspice-app` links it directly and the
 browser `rspice-worker` runs it through the `worker` protocol.
-`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-app-types`,
+`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-vocabulary`,
 `rspice-hardcopy-contract`, `rspice-design`, `rspice-project-contract`,
 `rspice-results` and `rspice-formats` among the application crates, and
 refuses egui, eframe, winit, wgpu and rfd in its closure.

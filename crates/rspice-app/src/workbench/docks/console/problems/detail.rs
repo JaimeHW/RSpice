@@ -522,7 +522,9 @@ fn waiver_reason(ui: &mut Ui, draft: &mut WaiverDraft) -> Option<WaiverStep> {
 /// The waiver covering a finding: why it was accepted, by whom and when. The
 /// time is UTC, so a library mailed across a border states one time for one
 /// decision.
-pub(super) fn waiver_text(waiver: &rspice_app_types::diagnostics::DiagnosticSuppression) -> String {
+pub(super) fn waiver_text(
+    waiver: &rspice_vocabulary::diagnostics::DiagnosticSuppression,
+) -> String {
     format!(
         "{} \u{00b7} {} \u{00b7} {}",
         waiver.reason,
@@ -555,7 +557,7 @@ fn standing(row: &DiagnosticRow<'_>) -> Option<String> {
 /// range of the text in front of the reader to offer.
 fn applicable_fix<'a>(
     row: &'a DiagnosticRow<'_>,
-) -> Option<&'a rspice_app_types::diagnostics::CanonicalQuickFix> {
+) -> Option<&'a rspice_vocabulary::diagnostics::CanonicalQuickFix> {
     (row.current() && matches!(row.route, Some(DiagnosticRoute::NetlistDiagnostic(_))))
         .then(|| row.quick_fixes.first())
         .flatten()
@@ -569,7 +571,7 @@ fn applicable_fix<'a>(
 /// somewhere else.
 fn related_route(
     row: &DiagnosticRow<'_>,
-    related: &rspice_app_types::diagnostics::DiagnosticRelatedLocation,
+    related: &rspice_vocabulary::diagnostics::DiagnosticRelatedLocation,
 ) -> Option<DiagnosticRoute> {
     match &row.route {
         Some(DiagnosticRoute::CodeDocument { bundle, .. }) => Some(DiagnosticRoute::CodeDocument {
@@ -591,7 +593,7 @@ fn related_route(
 fn related_line(
     ui: &mut Ui,
     ends: &mut Ends,
-    related: &rspice_app_types::diagnostics::DiagnosticRelatedLocation,
+    related: &rspice_vocabulary::diagnostics::DiagnosticRelatedLocation,
     followable: bool,
 ) -> bool {
     let position = related.range.map_or_else(String::new, |range| {
@@ -650,10 +652,10 @@ fn line(ui: &mut Ui, ends: &mut Ends, text: &str, color: egui::Color32, weight: 
 mod tests {
     use super::*;
     use crate::workbench::app_state::diagnostic_store::listing::RowStanding;
-    use rspice_app_types::diagnostics::{DiagnosticPosition, DiagnosticRange};
+    use rspice_vocabulary::diagnostics::{DiagnosticPosition, DiagnosticRange};
 
-    fn related() -> rspice_app_types::diagnostics::DiagnosticRelatedLocation {
-        rspice_app_types::diagnostics::DiagnosticRelatedLocation {
+    fn related() -> rspice_vocabulary::diagnostics::DiagnosticRelatedLocation {
+        rspice_vocabulary::diagnostics::DiagnosticRelatedLocation {
             document_id: "models/opamp.va".to_owned(),
             range: Some(DiagnosticRange {
                 start: DiagnosticPosition {
@@ -737,7 +739,7 @@ mod tests {
     /// netlist finding carries a fix control.
     #[test]
     fn a_fix_is_applicable_only_where_its_owner_can_apply_it() {
-        let fix = rspice_app_types::diagnostics::CanonicalQuickFix {
+        let fix = rspice_vocabulary::diagnostics::CanonicalQuickFix {
             fix_id: "fix".to_owned(),
             label: "Replace with nch".to_owned(),
             preferred: true,

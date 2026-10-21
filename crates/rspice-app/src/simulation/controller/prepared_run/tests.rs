@@ -1221,9 +1221,9 @@ fn statistical_deferred_file_waveforms_are_rejected_before_dispatch() {
 
 #[test]
 fn corner_waveforms_are_checked_after_materialization_and_scope_resolution() {
-    use rspice_app_types::product::ProcessCorner;
     use rspice_model_library::CornerModelBinding;
     use rspice_simulation::sweeps::CornerRunConfig;
+    use rspice_vocabulary::product::ProcessCorner;
 
     let root = "deck\n.param file=2\nX1 out source level=3\nR1 out 0 1k\n.op\n.end\n";
     for (waveform, file_backed) in [
@@ -1267,9 +1267,9 @@ fn corner_waveforms_are_checked_after_materialization_and_scope_resolution() {
 
 #[test]
 fn every_materialized_corner_binding_is_audited_before_dispatch() {
-    use rspice_app_types::product::ProcessCorner;
     use rspice_model_library::CornerModelBinding;
     use rspice_simulation::sweeps::CornerRunConfig;
+    use rspice_vocabulary::product::ProcessCorner;
 
     let task = QueuedAnalysis {
         numeric_override: None,

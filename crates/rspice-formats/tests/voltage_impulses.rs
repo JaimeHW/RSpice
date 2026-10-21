@@ -151,12 +151,12 @@ fn every_voltage_history_field_participates_in_identity_and_retention_accounting
 #[cfg(feature = "project-results")]
 #[test]
 fn project_schema_rejects_voltage_evidence_relabelled_as_a_legacy_document() {
-    use rspice_app_types::product::ProjectId;
     use rspice_formats::project_results::{
         ProjectSimulationResults, ProjectSimulationResultsData, ProjectSimulationRun,
     };
     use rspice_results::run::{ExecutionTarget, SimulationRun, SimulationRunLifecycle};
     use rspice_results::run_receipt::SimulationRunProvenance;
+    use rspice_vocabulary::product::ProjectId;
     let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
     run.add_analysis(analysis(Some(history())));
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)

@@ -1,8 +1,8 @@
 //! Long-form CSV preserves each selected analysis and its independent coordinate grid.
 
 use crate::table::{escape_csv_field as csv_text, sanitize_column_label};
-use rspice_app_types::product::DatasetId;
 use rspice_results::analysis_result::AnalysisResult;
+use rspice_vocabulary::product::DatasetId;
 
 #[derive(Debug)]
 pub enum AnalysisStackCsvError {

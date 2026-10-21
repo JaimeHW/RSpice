@@ -11,7 +11,7 @@ use crate::{
     DeviceModel, ModelLibrary, ModelSectionQualification, ModelSourceAuthority, ModelSourceContent,
     ModelSourcePin, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
 };
-use rspice_app_types::product::{ContentDigest, ModelSourceId, ObjectRevision};
+use rspice_vocabulary::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use sha2::{Digest as _, Sha256};
 use std::path::{Path, PathBuf};
 

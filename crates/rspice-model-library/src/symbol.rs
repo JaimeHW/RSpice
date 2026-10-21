@@ -5,13 +5,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::{fmt, path::Path};
 
-use rspice_app_types::property::{
-    DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
-};
 use rspice_design_model::{
     Point,
     port::{PortDirection, PortSpec},
     symbol_geometry::SymbolShape,
+};
+use rspice_vocabulary::property::{
+    DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
 };
 use serde::{Deserialize, Serialize};
 

@@ -2,12 +2,12 @@
 
 use super::CaptureLedger;
 use crate::preparation::{PreparationError, PreparationStage};
-use rspice_app_types::product::AnalysisInstanceId;
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::capture_group::{CaptureGroup, CaptureGroupMembership};
 use rspice_simulation_contract::output_policy::SimulationSavePolicy;
 use rspice_simulation_contract::saved_output::SavedOutput;
+use rspice_vocabulary::product::AnalysisInstanceId;
 
 /// How many Run Set points each queued task is executed at.
 ///

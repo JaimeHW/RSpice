@@ -3,9 +3,9 @@
 pub mod preparation;
 
 use crate::error::SimulationError;
-use rspice_app_types::product::ContentDigest;
 use rspice_core::{NoAbort, ResourceKind, ResourceLimits, abort_signal::AbortSignal};
 use rspice_results::monte_carlo_checkpoint::{StudyMonteCarloCheckpoint, checkpoint_digest};
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 

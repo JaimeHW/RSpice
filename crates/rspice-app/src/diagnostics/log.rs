@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-pub use rspice_app_types::diagnostics::{LogSeverity, LogSource};
+pub use rspice_vocabulary::diagnostics::{LogSeverity, LogSource};
 
 // =============================================================================
 // Log Entry

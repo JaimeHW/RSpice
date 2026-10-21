@@ -132,7 +132,7 @@ fn dc_project_round_trip_preserves_coordinates_units_selection_and_immutable_own
         historic.schema_version = schema;
         assert!(
             historic
-                .migrate_to_current(rspice_app_types::product::ProjectId::new())
+                .migrate_to_current(rspice_vocabulary::product::ProjectId::new())
                 .unwrap_err()
                 .contains("DC curve evidence")
         );
@@ -165,12 +165,12 @@ fn schema_21_dc_history_authenticates_without_inventing_traversal() {
         serde_json::from_value(corrupt).unwrap();
     assert!(
         corrupt
-            .migrate_to_current(rspice_app_types::product::ProjectId::new())
+            .migrate_to_current(rspice_vocabulary::product::ProjectId::new())
             .unwrap_err()
             .contains("digest")
     );
     snapshot
-        .migrate_to_current(rspice_app_types::product::ProjectId::new())
+        .migrate_to_current(rspice_vocabulary::product::ProjectId::new())
         .unwrap();
     let mut restored = crate::state::SimulationState::default();
     crate::io::restore_simulation_results(snapshot, &mut restored).unwrap();
@@ -236,7 +236,7 @@ fn filtered_dc_curves_and_derived_aliases_keep_exact_projection_evidence() {
     .unwrap();
     let contract = PreparedSavedOutput::prepare(
         &output,
-        rspice_app_types::product::AnalysisInstanceId::new(),
+        rspice_vocabulary::product::AnalysisInstanceId::new(),
         &spec,
     )
     .unwrap()

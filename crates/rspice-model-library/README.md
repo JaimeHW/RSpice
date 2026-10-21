@@ -9,7 +9,7 @@ vocabulary with its publisher trust store. `rspice-design`, `rspice-formats`,
 `rspice-project`, `rspice-simulation` and the project and simulation contract
 crates read the same definitions, so a model's identity is decided once. It
 sits below `rspice-design`, whose model-bound symbols name these definitions.
-`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-app-types`
+`tools/ci/check_app_crate_dependencies.py` allows it only `rspice-vocabulary`
 and `rspice-results` among the application crates, and refuses egui, eframe,
 winit, wgpu and rfd in its closure.
 
