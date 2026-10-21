@@ -680,6 +680,9 @@ contract:
 - a finite sample passes when its absolute error is at most `--abstol`
   (default `1e-9`) or its error relative to the golden value is at most
   `--reltol` (default `1e-6`); against a golden zero only `--abstol` applies;
+- the scale (time, frequency or sweep) is not in signal units, so it passes
+  only within `--reltol` of the golden value and never by `--abstol`, and a
+  golden zero needs an exact zero;
 - NaN never matches, undefined samples must sit at the same positions on both
   sides, and every compared signal needs at least one pair of defined samples;
 - units must match exactly, including the case of SI prefixes (`mV` is not

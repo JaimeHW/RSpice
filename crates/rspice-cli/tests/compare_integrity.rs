@@ -99,6 +99,64 @@ fn interpolation_cannot_extend_a_picosecond_trace_to_half_a_nanosecond() {
 }
 
 #[test]
+fn the_scale_is_judged_relative_to_the_golden_coordinate_not_in_signal_units() {
+    // A ramp 500 times slower: every time differs by less than --abstol.
+    let golden = "time,V(x)\n0,0\n1e-12,1\n2e-12,2\n";
+    let slower = "time,V(x)\n0,0\n5e-10,1\n1e-9,2\n";
+    let json = failed(compare(slower, golden, &[]));
+    assert_eq!(json["num_differences"], 2);
+    assert_eq!(json["differences"][0]["variable"], "time");
+    failed(compare(slower, golden, &["--abstol", "1"]));
+    // A golden zero coordinate needs an exact zero.
+    failed(compare(
+        "time,V(x)\n1e-30,0\n1,1\n",
+        "time,V(x)\n0,0\n1,1\n",
+        &["--abstol", "1", "--reltol", "0.5"],
+    ));
+    // Within --reltol the coordinate agrees; signals keep --abstol.
+    let output = compare(
+        "time,V(x)\n0,1e-10\n1.0000009e-9,1\n",
+        "time,V(x)\n0,0\n1e-9,1\n",
+        &[],
+    );
+    assert!(output.status.success(), "{output:?}");
+    failed(compare(
+        "time,V(x)\n0,0\n1.0000011e-9,1\n",
+        "time,V(x)\n0,0\n1e-9,1\n",
+        &[],
+    ));
+}
+
+#[test]
+fn a_scale_rounded_to_seven_significant_digits_still_compares_equal() {
+    // Text writers that keep seven significant digits move a coordinate by
+    // at most half a unit in the seventh digit, inside the default --reltol.
+    let times: Vec<f64> = (0..200)
+        .map(|step| f64::from(step) * 1.000_000_5e-9 + f64::from(step % 7) * 1.234_567_49e-12)
+        .chain([9.999_999_5e-6, 1.000_000_5e-3, 1.234_567_5e3])
+        .collect();
+    let table = |format: fn(f64) -> String| {
+        times
+            .iter()
+            .enumerate()
+            .fold(String::from("time,V(x)\n"), |table, (step, time)| {
+                table + &format!("{},{step}\n", format(*time))
+            })
+    };
+    let full = table(|time| format!("{time:.17e}"));
+    let rounded = table(|time| format!("{time:.6e}"));
+    for (result, golden) in [(&full, &rounded), (&rounded, &full)] {
+        let output = compare(result, golden, &[]);
+        assert!(output.status.success(), "{output:?}");
+    }
+    assert!(
+        !compare(&full, &rounded, &["--reltol", "0"])
+            .status
+            .success()
+    );
+}
+
+#[test]
 fn signal_selection_still_compares_the_independent_coordinate() {
     let json = failed(compare(
         "time,V(x)\n0,1\n2,1\n",

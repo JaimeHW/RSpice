@@ -649,6 +649,13 @@ fn compare_waveforms(
         reltol: 0.0,
         ..Default::default()
     };
+    // `--abstol` is in signal units, not seconds, hertz or sweep units, so the
+    // scale agrees only within `--reltol` of the golden coordinate.
+    let scale_args = CompareArgs {
+        abstol: 0.0,
+        reltol: args.reltol,
+        ..Default::default()
+    };
     for (evidence, data) in [
         (&result_determinations, result),
         (&golden_determinations, golden),
@@ -755,6 +762,8 @@ fn compare_waveforms(
                         i,
                         if status || (discrete_population && var_idx == 0) {
                             &exact_args
+                        } else if var_idx == 0 {
+                            &scale_args
                         } else {
                             args
                         },

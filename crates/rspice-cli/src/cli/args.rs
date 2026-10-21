@@ -876,7 +876,8 @@ pub struct CompareArgs {
     #[arg(value_name = "GOLDEN")]
     pub golden: PathBuf,
 
-    /// Absolute tolerance (default: 1e-9)
+    /// Absolute tolerance in signal units (default: 1e-9); the scale (time,
+    /// frequency or sweep) never uses it and must agree within --reltol
     #[arg(long, value_name = "TOL", default_value = "1e-9", value_parser = spice_value)]
     pub abstol: f64,
 
