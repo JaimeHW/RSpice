@@ -91,11 +91,11 @@ impl VoltageSeed {
             }
         }
         let constrained: Vec<_> = (1..=nodes)
-            .filter(|&node| reducer.pivots[node].is_some())
+            .filter(|&node| reducer.pivots()[node].is_some())
             .collect();
         for node in 1..=nodes {
             check_abort(abort)?;
-            if reducer.pivots[node].is_some() {
+            if reducer.pivots()[node].is_some() {
                 continue;
             }
             let mut row = ExactRow::default();
