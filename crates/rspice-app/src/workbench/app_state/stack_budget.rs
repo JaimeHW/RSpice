@@ -74,7 +74,10 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
             "model_browser_state",
             size_of::<crate::properties::model_browser::ModelBrowserState>(),
         ),
-        ("analysis", size_of::<a::AnalysisWorkspaceState>()),
+        (
+            "analysis",
+            size_of::<a::viewer_capabilities::AnalysisWorkspaceState>(),
+        ),
         (
             "shortcut_resolver",
             size_of::<a::session::shortcuts::ShortcutResolverState>(),

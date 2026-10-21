@@ -13,6 +13,35 @@ use crate::simulation::controller::{
 use crate::workbench::app_state::{ActiveViewer, AppState};
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
+/// Provenance for the mutable specialized result caches.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SpecializedViewerCacheAuthority {
+    pub(crate) bode: Option<SpecializedViewerCacheProvenance>,
+    pub(crate) nyquist: Option<SpecializedViewerCacheProvenance>,
+    pub(crate) smith: Option<SpecializedViewerCacheProvenance>,
+    pub(crate) fft: Option<SpecializedViewerCacheProvenance>,
+    pub(crate) eye: Option<SpecializedViewerCacheProvenance>,
+}
+
+/// Analysis viewer state grouped behind a dedicated workspace surface.
+#[derive(Clone, Default)]
+pub struct AnalysisWorkspaceState {
+    /// Bode viewer state
+    pub(crate) bode_plot_state: rspice_results_ui::bode::BodePlotState,
+    /// Nyquist viewer state
+    pub(crate) nyquist_state: rspice_results_ui::nyquist::NyquistState,
+    /// Eye diagram viewer state
+    pub(crate) eye_diagram_state: rspice_results_ui::eye_diagram::EyeDiagramState,
+    /// FFT viewer state
+    pub(crate) fft_state: rspice_results_ui::fft::FftState,
+    /// Smith chart viewer state
+    pub(crate) smith_chart_state: rspice_results_ui::smith_chart::SmithChartState,
+    /// Histogram viewer state
+    pub(crate) histogram_state: rspice_results_ui::histogram::HistogramState,
+    /// Exact immutable result that owns each mutable viewer cache.
+    pub(crate) cache_authority: SpecializedViewerCacheAuthority,
+}
+
 /// Availability metadata for a specialized viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewerCapability {
@@ -469,7 +498,6 @@ fn eye_timebase_key(provenance: SpecializedViewerCacheProvenance) -> EyeTimebase
 mod tests {
     use super::*;
     use crate::diagnostics::{LogSeverity, LogSource};
-    use crate::workbench::app_state::SpecializedViewerCacheAuthority;
     use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
     use rspice_results_ui::{
         bode::BodeData,

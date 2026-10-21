@@ -17,6 +17,52 @@ use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 pub(super) mod fact_grid;
 pub(in crate::workbench) mod report_problem;
 
+#[derive(Debug, Clone)]
+pub(crate) struct HelpCenterDialogState {
+    pub(crate) open: bool,
+    pub(crate) page: HelpCenterPage,
+    pub(crate) query: String,
+    pub(crate) include_session_log: bool,
+    pub(crate) disclosure_reviewed: bool,
+    /// Whether this dialog owns the canonical `?surface=help-center` route.
+    pub(crate) route_owned: bool,
+}
+
+impl Default for HelpCenterDialogState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            page: HelpCenterPage::Help,
+            query: String::new(),
+            include_session_log: true,
+            disclosure_reviewed: false,
+            route_owned: false,
+        }
+    }
+}
+
+impl HelpCenterDialogState {
+    pub(crate) fn open(&mut self, page: HelpCenterPage) {
+        self.open = true;
+        self.page = page;
+        if page != HelpCenterPage::SupportBundle {
+            self.disclosure_reviewed = false;
+        }
+    }
+
+    pub(crate) fn open_routed(&mut self, page: HelpCenterPage) {
+        self.open(page);
+        self.route_owned = true;
+    }
+
+    pub(crate) fn close(&mut self) {
+        self.open = false;
+        self.query.clear();
+        self.disclosure_reviewed = false;
+        self.route_owned = false;
+    }
+}
+
 const PRODUCT_LICENSE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE"));
 const THIRD_PARTY_NOTICES: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../NOTICE"));

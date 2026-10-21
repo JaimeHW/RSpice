@@ -37,52 +37,6 @@ impl HelpCenterPage {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct HelpCenterDialogState {
-    pub(crate) open: bool,
-    pub(crate) page: HelpCenterPage,
-    pub(crate) query: String,
-    pub(crate) include_session_log: bool,
-    pub(crate) disclosure_reviewed: bool,
-    /// Whether this dialog owns the canonical `?surface=help-center` route.
-    pub(crate) route_owned: bool,
-}
-
-impl Default for HelpCenterDialogState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            page: HelpCenterPage::Help,
-            query: String::new(),
-            include_session_log: true,
-            disclosure_reviewed: false,
-            route_owned: false,
-        }
-    }
-}
-
-impl HelpCenterDialogState {
-    pub(crate) fn open(&mut self, page: HelpCenterPage) {
-        self.open = true;
-        self.page = page;
-        if page != HelpCenterPage::SupportBundle {
-            self.disclosure_reviewed = false;
-        }
-    }
-
-    pub(crate) fn open_routed(&mut self, page: HelpCenterPage) {
-        self.open(page);
-        self.route_owned = true;
-    }
-
-    pub(crate) fn close(&mut self) {
-        self.open = false;
-        self.query.clear();
-        self.disclosure_reviewed = false;
-        self.route_owned = false;
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum WindowSessionPage {
     #[default]
@@ -197,7 +151,7 @@ pub struct DialogState {
     /// Shortcuts help filter text — nobody reads 45 unfiltered rows
     pub shortcuts_filter: String,
     /// Versioned help, migration, diagnostics, support, and notices manager.
-    pub(crate) help_center: HelpCenterDialogState,
+    pub(crate) help_center: crate::workbench::app::dialogs::help::HelpCenterDialogState,
     /// Device-local window, document, and session presentation manager.
     pub(crate) window_session: WindowSessionDialogState,
     /// New Cell creation dialog

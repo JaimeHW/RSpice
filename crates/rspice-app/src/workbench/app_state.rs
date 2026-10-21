@@ -37,7 +37,6 @@ pub(in crate::workbench) mod viewer_capabilities;
 pub(in crate::workbench) mod waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
-use crate::simulation::controller::SpecializedViewerCacheProvenance;
 use crate::state::{SchematicState, SimulationState};
 use crate::workbench::app::DialogState;
 
@@ -64,35 +63,6 @@ pub use sim_setup::plan_catalog::{
 pub use sim_setup::{
     AcSetup, DcSetup, ReferencePvtPoint, SimSetupState, SimulationSavePolicy, TranSetup,
 };
-
-/// Provenance for the mutable specialized result caches.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SpecializedViewerCacheAuthority {
-    pub(crate) bode: Option<SpecializedViewerCacheProvenance>,
-    pub(crate) nyquist: Option<SpecializedViewerCacheProvenance>,
-    pub(crate) smith: Option<SpecializedViewerCacheProvenance>,
-    pub(crate) fft: Option<SpecializedViewerCacheProvenance>,
-    pub(crate) eye: Option<SpecializedViewerCacheProvenance>,
-}
-
-/// Analysis viewer state grouped behind a dedicated workspace surface.
-#[derive(Clone, Default)]
-pub struct AnalysisWorkspaceState {
-    /// Bode viewer state
-    pub(crate) bode_plot_state: rspice_results_ui::bode::BodePlotState,
-    /// Nyquist viewer state
-    pub(crate) nyquist_state: rspice_results_ui::nyquist::NyquistState,
-    /// Eye diagram viewer state
-    pub(crate) eye_diagram_state: rspice_results_ui::eye_diagram::EyeDiagramState,
-    /// FFT viewer state
-    pub(crate) fft_state: rspice_results_ui::fft::FftState,
-    /// Smith chart viewer state
-    pub(crate) smith_chart_state: rspice_results_ui::smith_chart::SmithChartState,
-    /// Histogram viewer state
-    pub(crate) histogram_state: rspice_results_ui::histogram::HistogramState,
-    /// Exact immutable result that owns each mutable viewer cache.
-    pub(crate) cache_authority: SpecializedViewerCacheAuthority,
-}
 
 /// Main application state container
 #[derive(Clone)]
@@ -184,7 +154,7 @@ pub struct AppState {
     /// The verified grant behind `license_key` (derived, never persisted).
     pub(crate) license: Option<crate::services::license::LicenseInfo>,
     /// Specialized analysis viewer state grouped by analysis workspace.
-    pub(crate) analysis: AnalysisWorkspaceState,
+    pub(crate) analysis: viewer_capabilities::AnalysisWorkspaceState,
     /// Document-engine and interaction session state (theme, canvas, result
     /// viewers, symbol editor, and netlist editor).
     pub(crate) ui: Box<crate::workbench::UiSessionState>,

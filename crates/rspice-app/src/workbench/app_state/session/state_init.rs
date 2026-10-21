@@ -4,7 +4,8 @@
 //! viewers behind it.
 
 use crate::workbench::app::DialogState;
-use crate::workbench::app_state::{AnalysisWorkspaceState, AppState};
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
 
 pub(crate) fn default_model_library_manager() -> crate::state::model_library::ModelLibraryManager {
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
