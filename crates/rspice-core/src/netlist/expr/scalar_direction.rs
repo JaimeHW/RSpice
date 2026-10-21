@@ -6,7 +6,7 @@ use super::eval::PreparedEvaluation;
 use super::{BinOpKind, ComplexValue, ExprError, ParamContext, UnaryOpKind, is_real};
 use crate::Value;
 use crate::config::ExpressionDialect;
-use crate::device::behavioral::{
+use crate::expr::behavioral_derivative::{
     BehavioralEnvironment, compiled_expression_node_direction, eval_binary_with_derivative,
 };
 use crate::expr::{BinaryOp, CompiledExpr, Derivative, Expr, Function, LogarithmDomain, compile};

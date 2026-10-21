@@ -8,6 +8,7 @@
 //! evaluates the expression using node voltages and branch currents.
 
 mod ast;
+pub(crate) mod behavioral_derivative;
 mod compiler;
 mod derivative;
 mod file_table;
