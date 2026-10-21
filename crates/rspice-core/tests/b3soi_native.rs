@@ -1134,8 +1134,8 @@ fn native_level57_pd_self_heating_inverse_mode_temp_rise_is_non_negative() {
 }
 
 /// The gain stage's AC against Xyce 7.10's regression gold. RSpice stamps
-/// the derivatives of Xyce's charges (`derivative_tests` holds every entry to
-/// a difference quotient); Xyce's CAPMOD 2 capacitances leave terms out of
+/// the derivatives of Xyce's charges (`device_engine_roundtrip` holds every
+/// entry to a difference quotient); Xyce's CAPMOD 2 capacitances leave terms out of
 /// those derivatives, so the response sits 1.3e-6 from Xyce's.
 #[test]
 fn xyce_level10_soimod1_capmod2_dd_ac_bounds_xyce710_delta() {

@@ -1229,6 +1229,20 @@ impl CircuitData {
         &self.current_sources
     }
 
+    /// The native BSIM4 v4.8 instances in build order, for the device
+    /// models' checks against the built circuit.
+    #[doc(hidden)]
+    pub fn bsim4v8_devices(&self) -> &[crate::device::Bsim4v8Device] {
+        &self.bsim4v8.devices
+    }
+
+    /// The native B3SOIDD instances in build order, for the device models'
+    /// checks against the built circuit.
+    #[doc(hidden)]
+    pub fn b3soi_dd_devices(&self) -> &[crate::device::B3SoiDd] {
+        &self.b3soi.devices
+    }
+
     /// Native diode terminal nodes by instance name, if present.
     pub fn diode_terminal_nodes(&self, name: &str) -> Option<(NodeId, NodeId)> {
         self.diodes

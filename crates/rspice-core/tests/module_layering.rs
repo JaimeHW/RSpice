@@ -245,17 +245,15 @@ const LAYERS: &[(&str, u32)] = &[
 ///
 /// The rest were found through the crate root's names.
 ///
-/// - `analysis -> engine`, 3; `circuit -> engine`, 11; `device -> engine`, 3.
-///   Unit tests that run a deck through `crate::Engine` to get a circuit or a
-///   result to check: `analysis/measure_signals.rs`; six in
+/// - `analysis -> engine`, 3; `circuit -> engine`, 11. Unit tests that run a
+///   deck through `crate::Engine` to get a circuit or a result to check:
+///   `analysis/measure_signals.rs`; six in
 ///   `circuit/mixed_signal/coupled_tests.rs` and one each in
 ///   `circuit/mixed_checkpoint/tests.rs`, `circuit/force_accept.rs`,
 ///   `circuit/net_kind.rs`, `circuit/storage/passive/thermal_tests.rs` and
-///   `circuit/xyce_dae.rs`; and in `device/mosfet`, two in
-///   `bsim4v8/device/charge_tests.rs` and one in `b3soi/dd/derivative_tests.rs`,
-///   which read the built circuit's crate-private device stores and probes.
-///   They retire as `netlist -> engine` did, by moving the half that needs
-///   the facade into an integration test.
+///   `circuit/xyce_dae.rs`. They retire as `netlist -> engine` and
+///   `device -> engine` did, by moving the half that needs the facade into an
+///   integration test.
 /// - `device -> analysis`, 3. Unit tests in `device/veriloga.rs` that check a
 ///   `StampError` keeps its classification when it widens to
 ///   `crate::SimulationError`. `device/veriloga.rs` moves up with `circuit`
@@ -282,7 +280,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("circuit", "analysis", 21),
     ("circuit", "engine", 11),
     ("device", "analysis", 3),
-    ("device", "engine", 3),
 ];
 
 /// `rspice-core`'s own `src/`, whose root re-exports the engine's names.

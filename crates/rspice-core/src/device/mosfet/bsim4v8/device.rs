@@ -37,8 +37,6 @@ use crate::{Complex64, NodeId, Value};
 const TRNQS_SCALING: Value = 1.0e-9;
 
 mod ac_response;
-#[cfg(test)]
-mod charge_tests;
 #[doc(hidden)]
 pub mod checkpoint;
 mod continuation;
@@ -228,6 +226,12 @@ impl Bsim4v8Device {
         } else {
             0.0
         };
+    }
+
+    /// The junction GMIN [`Self::set_eval_gmin`] last set.
+    #[doc(hidden)]
+    pub fn eval_gmin(&self) -> Value {
+        self.gmin
     }
 
     /// Device-polarity branch voltages from the solution vector

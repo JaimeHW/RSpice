@@ -374,8 +374,13 @@ const MAX_PUBLIC_ITEMS: usize = 5753;
 // `BuiltinVerilogADevices::operating_point_analysis_override` adds one, under
 // `test-support` as well as `cfg(test)`: the circuit's test that an analysis
 // start reaches its generated instances reads it, from above the device
-// models. The census is 1,312, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1312;
+// models.
+// `CircuitData::bsim4v8_devices`, `CircuitData::b3soi_dd_devices` and
+// `Bsim4v8Device::eval_gmin` add three: the BSIM4 charge-companion and B3SOIDD
+// stamp-derivative checks build their instances through `Engine`, so they run
+// from an integration test, outside the crate, and read the built instances
+// back through these. The census is 1,315, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1315;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
