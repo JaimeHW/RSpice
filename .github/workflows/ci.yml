@@ -104,6 +104,11 @@ jobs:
         run: |
           python3 tools/ci/test_check_app_slices.py
           python3 tools/ci/check_app_slices.py
+      - name: Engine crate family manifests
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          python3 tools/ci/test_core_family.py
+          python3 tools/ci/core_family.py
       - name: UI incremental build identity regressions
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         run: python3 tools/ci/test_ui_build_identity.py
