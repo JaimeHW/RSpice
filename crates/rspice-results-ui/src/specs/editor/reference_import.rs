@@ -143,4 +143,65 @@ impl ReferenceImport {
             Err(error) => self.message = Some(error),
         }
     }
+
+    /// Take over `from`'s in-flight picker, unless one of this import's own
+    /// is already waiting.
+    pub(super) fn adopt(&mut self, from: &mut Self) {
+        if self.pending.is_none() {
+            self.pending = from.pending.take();
+        }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(super) fn is_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(super) fn await_exchange(&mut self, exchange: Box<dyn ReferenceExchange>) {
+        self.pending = Some(exchange);
+        self.message = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::SpecDraft;
+    use super::*;
+
+    #[derive(Debug)]
+    struct Waiting;
+
+    impl ReferenceExchange for Waiting {
+        fn poll(&self, _: &egui::Context) -> Option<Result<Option<ReferenceCompletion>, String>> {
+            None
+        }
+    }
+
+    /// A copy never shares its original's picker, and takes it over only
+    /// when it is the copy of the draft that opened it.
+    #[test]
+    fn a_picker_moves_only_to_the_copy_of_its_own_draft() {
+        let mut live = SpecDraft::default();
+        live.await_reference_exchange(Box::new(Waiting));
+        let mut copy = live.clone();
+        assert!(!copy.reference_exchange_pending());
+
+        let mut authored = SpecDraft {
+            measurement: "gain".to_owned(),
+            ..SpecDraft::default()
+        };
+        let definition = authored
+            .parse()
+            .expect("a tracked measurement parses")
+            .expect("a named measurement is a definition");
+        authored = SpecDraft::from_definition(&definition);
+        authored.adopt_reference_exchange(&mut live);
+        assert!(!authored.reference_exchange_pending());
+        assert!(live.reference_exchange_pending());
+
+        copy.adopt_reference_exchange(&mut live);
+        assert!(copy.reference_exchange_pending());
+        assert!(!live.reference_exchange_pending());
+    }
 }

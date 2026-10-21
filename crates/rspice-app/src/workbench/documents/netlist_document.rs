@@ -580,7 +580,7 @@ fn replace_owned_sources_atomically_impl(
             },
         );
     }
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(changed_count)
 }
 
@@ -778,7 +778,7 @@ pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> b
     {
         return false;
     }
-    *state = candidate;
+    state.commit_candidate(candidate);
     true
 }
 
@@ -820,7 +820,7 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
         .content
         .validate_simulation_configuration()
     else {
-        *state = candidate;
+        state.commit_candidate(candidate);
         return true;
     };
     state.prompt(format!(
@@ -1048,7 +1048,7 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     candidate.ui.netlist.completion_open = false;
     invalidate_source_evidence(&mut candidate.ui.netlist);
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(document_id)
 }
 
@@ -1093,7 +1093,7 @@ pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<()
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(())
 }
 
@@ -1169,7 +1169,7 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     {
         return false;
     }
-    *state = candidate;
+    state.commit_candidate(candidate);
     true
 }
 
@@ -1499,7 +1499,7 @@ pub(crate) fn commit_owned_include_lifecycle_action(
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(format!(
         "{} project-owned include as {proposed} without changing its retained source bytes.",
         if transaction.action == CodeSourceFileAction::Rename {
@@ -1734,7 +1734,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(message)
 }
 
@@ -1772,7 +1772,7 @@ pub(crate) fn select_retained_top_deck(
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(())
 }
 

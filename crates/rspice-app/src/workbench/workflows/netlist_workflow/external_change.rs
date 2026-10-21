@@ -387,7 +387,7 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(())
 }
 

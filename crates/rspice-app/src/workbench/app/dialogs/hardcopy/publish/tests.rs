@@ -697,6 +697,247 @@ fn default_printer_resolution_prefers_600_then_a_bounded_highest_mode() {
     assert_eq!(preferred_resolution(Vec::new()), None);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+const PEER_DECK: &str = "* owned deck\n* a peer's edit\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+#[cfg(not(target_arch = "wasm32"))]
+const EDITED_DECK: &str = "* owned deck\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n";
+
+/// Export open on the active schematic of a project that owns a top deck,
+/// with a sealed preview plan and no publication started.
+#[cfg(not(target_arch = "wasm32"))]
+fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
+    use crate::state::{Point, Wire};
+    use crate::workbench::documents::CodeSourceFileAction;
+    use crate::workbench::documents::netlist_document::{
+        begin_netlist_lifecycle_action, commit_netlist_lifecycle_action,
+    };
+    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+
+    let mut app = RSpiceApp::test_instance();
+    begin_netlist_lifecycle_action(&mut app.state, CodeSourceFileAction::New)
+        .expect("a new top deck is offered");
+    commit_netlist_lifecycle_action(&mut app.state).expect("the project owns a top deck");
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
+    let reference = app.state.workspace.content.active_view.clone();
+    app.state.workbench.activate(Workspace::Design);
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::CellView(reference));
+    let resolved =
+        crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(
+            &app.state,
+        )
+        .expect("active schematic resolves");
+    apply_open_resolved(&mut app, HardcopyWorkflow::Export, resolved).expect("dialog opens");
+    app
+}
+
+/// The export as it stood before `transaction` committed, still in place
+/// after it: open, busy with its job, and holding the same sealed plan.
+#[cfg(not(target_arch = "wasm32"))]
+fn assert_export_survived(app: &RSpiceApp, plan: &std::sync::Arc<HardcopyPlan>, transaction: &str) {
+    let hardcopy = &app.state.dialogs.hardcopy;
+    assert!(hardcopy.open, "{transaction} closed the export");
+    assert!(hardcopy.busy, "{transaction} dropped the export's job");
+    assert!(
+        hardcopy
+            .preview_plan
+            .as_ref()
+            .is_some_and(|kept| std::sync::Arc::ptr_eq(kept, plan)),
+        "{transaction} dropped the export's sealed plan"
+    );
+}
+
+/// A live-session update and a netlist editor edit each commit a project
+/// transaction. Neither may take the export the operator started with it.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn netlist_transactions_keep_an_export_in_flight() {
+    use crate::workbench::documents::netlist_document::{
+        apply_live_owned_source, replace_owned_source,
+    };
+
+    let mut app = export_open_on_a_netlist_owned_project();
+    app.state.dialogs.hardcopy.busy = true;
+    let plan = app
+        .state
+        .dialogs
+        .hardcopy
+        .preview_plan
+        .clone()
+        .expect("sealed preview");
+
+    assert!(apply_live_owned_source(
+        &mut app.state,
+        PEER_DECK.to_owned()
+    ));
+    assert_eq!(
+        app.state.workspace.content.netlist_source.as_deref(),
+        Some(PEER_DECK)
+    );
+    assert_export_survived(&app, &plan, "a live-session update");
+
+    assert!(replace_owned_source(&mut app.state, EDITED_DECK.to_owned()));
+    assert_eq!(
+        app.state.workspace.content.netlist_source.as_deref(),
+        Some(EDITED_DECK)
+    );
+    assert_export_survived(&app, &plan, "a netlist editor edit");
+}
+
+/// Reverting a document is a project transaction too, and one with nothing
+/// to do with the netlist.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn reverting_a_document_keeps_an_export_in_flight() {
+    use crate::state::{Point, Wire};
+    use crate::workbench::lifecycle::project_lifecycle::{
+        accept_loaded_project, confirm_revert_active_document, prepare_revert_active_document,
+        snapshot,
+    };
+
+    let mut app = export_open_on_a_netlist_owned_project();
+    let baseline = snapshot(&app.state).expect("the project snapshots");
+    accept_loaded_project(&mut app.state, baseline, None);
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .push(Wire::segment(72, Point::new(0, 10), Point::new(20, 10)));
+    app.state.dialogs.hardcopy.busy = true;
+    let plan = app
+        .state
+        .dialogs
+        .hardcopy
+        .preview_plan
+        .clone()
+        .expect("sealed preview");
+
+    let review =
+        prepare_revert_active_document(&app.state).expect("the edited schematic can be reverted");
+    confirm_revert_active_document(&mut app.state, &review).expect("the revert commits");
+    assert_eq!(
+        app.state.schematic.document().wires.len(),
+        1,
+        "the revert restored the accepted schematic"
+    );
+    assert_export_survived(&app, &plan, "a revert");
+}
+
+/// An export started before a live-session update still writes its file and
+/// records its receipt, frame by frame, the way the application drives it.
+///
+/// The export starts where `publish_export` hands over once the save picker
+/// has answered: the destination is observed by the application's own export
+/// backend and the publication is authenticated from the sealed plan.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-hardcopy-live-update-{}-{}.pdf",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    let mut app = export_open_on_a_netlist_owned_project();
+    let destination = app
+        .export_workflow_io
+        .observe_destination(&path)
+        .expect("the destination is observed");
+    let source = app
+        .state
+        .dialogs
+        .hardcopy
+        .resolved_document
+        .clone()
+        .expect("the dialog holds its source");
+    let plan = current_plan(&app, &source).expect("the sealed plan publishes");
+    let (_, media_type, _) =
+        format_file_contract(plan.setup().render().format()).expect("an export format");
+    let staged_mapping = stage_print_mapping_persistence(&app, plan.setup().print_mapping())
+        .expect("the print mapping stages");
+    let metadata = current_metadata(&app).expect("the identity block is validated");
+    app.state.dialogs.hardcopy.busy = true;
+    begin_publication_authentication(
+        &mut app,
+        PendingNativePublication {
+            plan,
+            opened_source: source,
+            metadata,
+            staged_mapping,
+            operation: super::super::execution::ExecutionOperation::Publication,
+            destination: NativePublicationDestination::Export {
+                path: path.clone(),
+                destination,
+                media_type,
+                multi_part: false,
+            },
+        },
+    )
+    .expect("the export starts");
+
+    assert!(
+        crate::workbench::documents::netlist_document::apply_live_owned_source(
+            &mut app.state,
+            PEER_DECK.to_owned(),
+        )
+    );
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1_440.0, 900.0),
+        )),
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(input(), |ui| app.render_hardcopy_dialog(ui));
+    let job_active = PENDING_PUBLICATION.with(|slot| slot.borrow().is_some())
+        || PUBLICATION.with(|slot| slot.borrow().is_some())
+        || FINALIZATION.with(|slot| slot.borrow().is_some());
+    assert!(
+        app.state.dialogs.hardcopy.open && app.state.dialogs.hardcopy.busy && job_active,
+        "the frame after the live update cancelled the export: {:?}",
+        app.state.dialogs.hardcopy.error
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while app.state.dialogs.hardcopy.busy {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the export never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let _ = ctx.run_ui(input(), |ui| app.render_hardcopy_dialog(ui));
+    }
+
+    assert_eq!(app.state.dialogs.hardcopy.error, None);
+    assert!(
+        !app.state.dialogs.hardcopy.open,
+        "a finished export closes its dialog"
+    );
+    let receipt = app
+        .state
+        .dialogs
+        .hardcopy
+        .last_receipt
+        .as_ref()
+        .expect("the export recorded a receipt");
+    assert!(matches!(
+        receipt.outcome(),
+        HardcopyOutcome::ArtifactExported { .. }
+    ));
+    assert!(app.state.workspace.content.hardcopy_receipts_dirty);
+    let written = std::fs::read(&path).expect("the export wrote its file");
+    std::fs::remove_file(&path).expect("remove the exported fixture");
+    assert!(written.starts_with(b"%PDF"), "the export wrote a PDF");
+}
+
 /// A hardcopy write that failed after its dialog was closed is said, once;
 /// one the reader cancelled by closing the dialog is not, and an open dialog
 /// shows its own failure.

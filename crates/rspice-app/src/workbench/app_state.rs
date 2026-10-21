@@ -33,6 +33,7 @@ pub(in crate::workbench) mod sim_setup;
 mod stack_budget;
 #[cfg(test)]
 mod technology_demand_tests;
+mod transaction;
 pub(in crate::workbench) mod viewer_capabilities;
 pub(in crate::workbench) mod waivers;
 

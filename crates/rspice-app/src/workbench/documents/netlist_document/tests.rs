@@ -133,6 +133,59 @@ fn reactivating_the_active_owned_root_preserves_validation_evidence() {
     assert_eq!(state.simulation.source.netlist_content, ROOT);
 }
 
+/// A netlist commit keeps the reference picker a specification draft is
+/// waiting on. The draft's copy takes the picker over, so the original drops
+/// without discarding the file the operator is choosing.
+#[test]
+fn netlist_commits_keep_a_specification_drafts_reference_picker() {
+    use rspice_results_ui::specs::editor::{ReferenceCompletion, ReferenceExchange, SpecDraft};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[derive(Debug)]
+    struct Picker(Arc<AtomicBool>);
+
+    impl ReferenceExchange for Picker {
+        fn poll(&self, _: &egui::Context) -> Option<Result<Option<ReferenceCompletion>, String>> {
+            None
+        }
+    }
+
+    impl Drop for Picker {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let mut state = owned_dependency_state();
+    let discarded = Arc::new(AtomicBool::new(false));
+    let mut draft = SpecDraft::default();
+    draft.await_reference_exchange(Box::new(Picker(Arc::clone(&discarded))));
+    state.ui.results.session.spec_drafts = Some(vec![draft]);
+
+    assert!(apply_live_owned_source(
+        &mut state,
+        format!("{ROOT}* a peer's card\n")
+    ));
+    assert!(replace_owned_source(
+        &mut state,
+        format!("{ROOT}* an editor's card\n")
+    ));
+
+    let drafts = state
+        .ui
+        .results
+        .session
+        .spec_drafts
+        .as_ref()
+        .expect("the drafts stay open");
+    assert!(drafts[0].reference_exchange_pending());
+    assert!(
+        !discarded.load(Ordering::SeqCst),
+        "a commit discarded the picker"
+    );
+}
+
 #[test]
 fn dependency_is_read_only_until_copy_then_edits_the_execution_closure() {
     let mut state = owned_dependency_state();

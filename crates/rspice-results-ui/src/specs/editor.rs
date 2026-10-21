@@ -126,6 +126,31 @@ impl SpecDraft {
         }
     }
 
+    /// Take over the reference picker `from` is waiting on, when `from` is the
+    /// draft this one copies.
+    ///
+    /// A copied draft starts without its original's picker, because a picker
+    /// answers one draft. A host that replaces its live drafts with copies
+    /// therefore moves each picker across before the originals drop, or the
+    /// file the operator is choosing is discarded with them.
+    pub fn adopt_reference_exchange(&mut self, from: &mut Self) {
+        if self.original == from.original {
+            self.reference_import.adopt(&mut from.reference_import);
+        }
+    }
+
+    /// Whether a reference picker opened from this draft is still waiting.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn reference_exchange_pending(&self) -> bool {
+        self.reference_import.is_pending()
+    }
+
+    /// Wait on `exchange` as the picker the operator opened from this draft.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn await_reference_exchange(&mut self, exchange: Box<dyn ReferenceExchange>) {
+        self.reference_import.await_exchange(exchange);
+    }
+
     /// Parse into a complete governed definition. `Err` identifies the field
     /// or domain invariant that refused the draft.
     pub fn parse(&self) -> Result<Option<SpecificationDefinition>, String> {

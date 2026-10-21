@@ -1030,7 +1030,7 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
         }
         return false;
     }
-    *state = committed;
+    state.commit_candidate(committed);
     true
 }
 
@@ -1084,7 +1084,7 @@ pub(super) fn commit_owned_netlist_profile_review(
         }
         return false;
     }
-    *state = committed;
+    state.commit_candidate(committed);
     state.record(
         LogSeverity::Info,
         LogSource::Studio,

@@ -168,7 +168,7 @@ fn install_imported_netlist(
         .content
         .validate_simulation_configuration()
         .map_err(|error| ImportFailure::Failed(error.to_string()))?;
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(())
 }
 
@@ -265,7 +265,7 @@ pub(super) fn apply_opened_netlist_project(
         );
         return false;
     }
-    *state = candidate;
+    state.commit_candidate(candidate);
     true
 }
 

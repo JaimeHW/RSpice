@@ -184,7 +184,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(())
 }
 

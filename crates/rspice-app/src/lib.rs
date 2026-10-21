@@ -495,7 +495,7 @@ impl RSpiceApp {
             .project
             .validate()
             .map_err(|error| format!("project library rollback metadata is invalid: {error}"))?;
-        self.state = candidate;
+        self.state.commit_candidate(candidate);
         for warning in execution_warnings {
             self.state.record(
                 crate::diagnostics::LogSeverity::Warning,

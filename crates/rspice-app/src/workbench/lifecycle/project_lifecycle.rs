@@ -1343,7 +1343,7 @@ fn revert_document(
     let mut candidate = state.clone();
     revert_document_in_place(&mut candidate, id)?;
     refresh_registry(&mut candidate)?;
-    *state = candidate;
+    state.commit_candidate(candidate);
     Ok(())
 }
 
