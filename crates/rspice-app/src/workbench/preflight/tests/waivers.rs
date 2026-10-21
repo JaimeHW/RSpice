@@ -69,7 +69,7 @@ fn a_waived_error_is_run_and_an_unwaived_one_is_refused() {
     assert!(!waived);
     let target = target.expect("a case collision may be waived");
 
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     assert!(blocked(&app), "the error blocks preflight");
     assert!(
         !app.state.simulation.execution.trigger_simulation,
@@ -88,7 +88,7 @@ fn a_waived_error_is_run_and_an_unwaived_one_is_refused() {
     // Clean of local blockers, the pass ends with the engine building the
     // decks on a worker, and the run is queued when the frame loop finds
     // its verdict.
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     app.settle_preflight();
     assert!(!blocked(&app), "{:?}", app.state.workbench.preflight.report);
     assert!(

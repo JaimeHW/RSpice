@@ -30,7 +30,6 @@ use crate::state::{
     ModelsPage, PreflightAdvisory, PreflightIssue, PreflightRemediation, PreflightReport,
     PreparedPreflightContract,
 };
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::CheckScope;
 
@@ -54,13 +53,29 @@ use super::state::{PreflightCheck, Workspace};
 ///
 /// When the checks before it pass, the pass ends on a worker, which prepares
 /// the run and has the engine build its decks; [`poll`] finishes it.
-pub(crate) fn run(app: &mut RSpiceApp) {
-    start(&mut app.state, &mut app.simulation_controller, false);
-}
+///
+/// `queue` is Run's press: the same governed pass the explicit Preflight
+/// command starts, queueing only the exact immutable snapshot it authorizes.
+/// A retained current report is reusable; when it consumes the one-shot
+/// permit, the controller still refuses the snapshot if anything it was
+/// prepared from has moved. While the engine builds the decks, the run is
+/// queued when [`poll`] finds that they authorize it, and not before.
+pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController, queue: bool) {
+    if queue {
+        if state.simulation.execution.has_active_execution()
+            || state.simulation.execution.trigger_simulation
+        {
+            state.prompt("A simulation is already running or waiting to start.");
+            return;
+        }
 
-/// Start a pass. `queue` asks for the run to be queued once the pass
-/// authorizes it.
-fn start(state: &mut AppState, controller: &mut SimulationController, queue: bool) {
+        // A report retained while a check is building decks is the one that
+        // check will replace, so it authorizes nothing.
+        if state.workbench.preflight.checking.is_none() && queue_retained_run(state) {
+            return;
+        }
+    }
+
     if let Some(check) = &state.workbench.preflight.checking {
         let revision = check.report.project_revision;
         if checks_the_design_as_it_stands(state, controller, &check.report) {
@@ -379,31 +394,6 @@ fn conclude(
     }
 }
 
-/// Run the same governed preflight used by the explicit Preflight command and
-/// queue only the exact immutable snapshot it authorizes. A retained current
-/// report is reusable; when it consumes the one-shot permit, the controller
-/// still refuses the snapshot if anything it was prepared from has moved.
-///
-/// While the engine builds the decks, the run is queued when [`poll`] finds
-/// that they authorize it, and not before.
-pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
-    if app.state.simulation.execution.has_active_execution()
-        || app.state.simulation.execution.trigger_simulation
-    {
-        app.state
-            .prompt("A simulation is already running or waiting to start.");
-        return;
-    }
-
-    // A report retained while a check is building decks is the one that
-    // check will replace, so it authorizes nothing.
-    if app.state.workbench.preflight.checking.is_none() && queue_retained_run(&mut app.state) {
-        return;
-    }
-
-    start(&mut app.state, &mut app.simulation_controller, true);
-}
-
 /// Queue a retained authorized report only while every revision it names is
 /// still current.
 fn queue_retained_run(state: &mut AppState) -> bool {
@@ -431,23 +421,6 @@ fn queue_retained_run(state: &mut AppState) -> bool {
     state.request_run_set_simulation();
     state.workbench.activate(Workspace::Simulate);
     true
-}
-
-#[cfg(test)]
-impl RSpiceApp {
-    /// Block until the pass in flight has a verdict, and finish it, as the
-    /// frame loop would on the frame that finds it.
-    pub(crate) fn settle_preflight(&mut self) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
-        while self.state.workbench.preflight.checking.is_some() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the engine pass did not finish"
-            );
-            poll(&mut self.state, &mut self.simulation_controller);
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-    }
 }
 
 /// Check Design over the configured design, unless a check of it still

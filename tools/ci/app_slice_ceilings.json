@@ -69,7 +69,6 @@
     "run->code": 7,
     "run->framework": 26,
     "run->session": 126,
-    "run->shell": 4,
     "services->project": 15,
     "services->results": 1,
     "services->session": 101,
@@ -78,7 +77,7 @@
   },
   "whole-app": {
     "&RSpiceApp params outside shell": 323,
-    "&mut RSpiceApp params outside shell": 670,
+    "&mut RSpiceApp params outside shell": 668,
     "impl AppState methods outside session": 342,
     "impl RSpiceApp methods outside shell": 224
   }

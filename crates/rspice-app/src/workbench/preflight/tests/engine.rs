@@ -102,7 +102,7 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
         .expect("the inverter draws MN")
         .id;
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let blockers = preflight_blockers(&app);
@@ -321,7 +321,7 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
     let (mut app, top, placed) =
         app_with_a_moded_device("connectrules only_d2a; connect d2a; endconnectrules\n");
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let blockers = preflight_blockers(&app);
@@ -376,7 +376,7 @@ const TWO_RULE_BLOCKS: &str = "connectrules Low; connect a2d #(.vsup(1.0)); endc
 fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
     let (mut app, _, _) = app_with_a_moded_device(TWO_RULE_BLOCKS);
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let blockers = preflight_blockers(&app);
@@ -433,7 +433,7 @@ fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusa
     assert!(deck.contains("+ CONNECTRULES=\"High\""), "{deck}");
 
     app.invalidate_simulation_preflight();
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let report = app
@@ -566,7 +566,7 @@ fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
         schematic.add_net_label(Point::new(0, -10), "isl".to_owned());
     });
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let blockers = preflight_blockers(&app);
@@ -619,7 +619,7 @@ fn a_winding_loop_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
         }
     });
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let blockers = preflight_blockers(&app);

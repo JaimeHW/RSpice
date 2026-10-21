@@ -5,6 +5,7 @@
 //! separate concerns, and the file was at its line budget.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::diagnostic_routes::apply_remediation;
 use crate::workbench::state::ConsolePage;
@@ -14,6 +15,22 @@ mod pipeline;
 mod rule_deck;
 mod variants;
 mod waivers;
+
+impl RSpiceApp {
+    /// Block until the pass in flight has a verdict, and finish it, as the
+    /// frame loop would on the frame that finds it.
+    pub(crate) fn settle_preflight(&mut self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while self.state.workbench.preflight.checking.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the engine pass did not finish"
+            );
+            poll(&mut self.state, &mut self.simulation_controller);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+}
 
 fn prepared_contract() -> PreparedPreflightContract {
     PreparedPreflightContract {
@@ -60,7 +77,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
         app.state.workbench.preflight.take_run_and_queue_request(),
         "Run must record a preflight-and-queue request for the frame loop"
     );
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     app.settle_preflight();
 
     assert!(!app.state.simulation.execution.trigger_simulation);
@@ -128,7 +145,7 @@ fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
     app.state.project_lifecycle.authority.open_session();
     app.state.workbench.console_visible = false;
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let outcome = app
@@ -728,7 +745,7 @@ fn preflight_blockers(app: &RSpiceApp) -> &[PreflightIssue] {
 fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
     let (mut app, root) = app_with_a_forced_capacitor_island(true);
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let blockers = preflight_blockers(&app);
@@ -782,7 +799,7 @@ fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
 #[test]
 fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
     let (mut app, _) = app_with_a_forced_capacitor_island(true);
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
     let island = preflight_blockers(&app)
         .iter()
@@ -805,7 +822,7 @@ fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .expect("the plan takes the shunt");
     app.invalidate_simulation_preflight();
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let report = app
@@ -826,7 +843,7 @@ fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
 fn a_transient_only_plan_is_not_refused_for_a_forced_island() {
     let (mut app, _) = app_with_a_forced_capacitor_island(false);
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let blockers = preflight_blockers(&app);
@@ -845,7 +862,7 @@ fn a_transient_only_plan_is_not_refused_for_a_forced_island() {
 fn stop_during_the_engine_pass_authorizes_and_queues_nothing() {
     let (mut app, _) = app_with_a_forced_capacitor_island(false);
 
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     assert!(
         app.state.workbench.preflight.run_awaits_check(),
         "the press waits on the engine's pass over its decks"
@@ -889,7 +906,7 @@ fn an_unforced_coupling_node_is_not_refused() {
         true,
     );
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let report = app
@@ -924,7 +941,7 @@ fn a_source_across_a_winding_is_refused_on_the_winding() {
         true,
     );
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let blockers = preflight_blockers(&app);
@@ -964,7 +981,7 @@ fn a_voltage_source_loop_is_stated_once_by_the_rule_that_owns_it() {
         true,
     );
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let report = app
@@ -1016,7 +1033,7 @@ fn a_source_loop_the_design_rule_does_not_see_is_the_engines_refusal() {
         true,
     );
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let report = app
@@ -1626,7 +1643,7 @@ fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
     let (mut app, root) = app_with_a_failing_root_and_an_unrelated_open_view();
     let open_view = app.state.workspace.content.active_view.clone();
 
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let rules = app
@@ -1728,7 +1745,7 @@ fn invalidating_the_report_stales_the_findings_it_published() {
     use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticOwner};
 
     let (mut app, _) = app_with_a_failing_root_and_an_unrelated_open_view();
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
     let dispatch = app
         .state
@@ -1758,7 +1775,7 @@ fn invalidating_the_report_stales_the_findings_it_published() {
 #[test]
 fn the_design_rule_blocker_opens_the_findings_without_re_running_them() {
     let (mut app, root) = app_with_a_failing_root_and_an_unrelated_open_view();
-    run(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
     let worst = app
         .state

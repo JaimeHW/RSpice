@@ -59,7 +59,7 @@ fn a_press_returns_before_its_run_is_prepared_or_checked() {
     let mut app = inverter_over_a_run_set();
     let release = app.simulation_controller.hold_next_preflight_worker();
 
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
 
     assert!(app.state.workbench.preflight.run_awaits_check());
     assert_eq!(
@@ -121,7 +121,7 @@ fn stop_during_preparation_queues_nothing_and_leaves_nothing_behind() {
 
     let mut app = inverter_over_a_run_set();
     let release = app.simulation_controller.hold_next_preflight_worker();
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     assert!(matches!(
         app.simulation_controller.preflight_stage(),
         Some(PreflightStage::Preparing(_))
@@ -169,7 +169,7 @@ fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
 
     let (mut app, _) = app_with_a_forced_capacitor_island(true);
     let release = app.simulation_controller.hold_next_preflight_worker();
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
 
     app.state
         .schematic
@@ -216,8 +216,8 @@ fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
 fn a_second_run_press_on_the_unedited_design_joins_the_pass_in_flight() {
     let mut app = inverter_over_a_run_set();
     let release = app.simulation_controller.hold_next_preflight_worker();
-    run(&mut app);
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, false);
+    start(&mut app.state, &mut app.simulation_controller, true);
     assert!(
         app.state.workbench.preflight.run_awaits_check(),
         "the press asks the pass in flight for its run"
@@ -248,7 +248,7 @@ fn a_second_run_press_on_the_unedited_design_joins_the_pass_in_flight() {
 fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
     let mut app = inverter_over_a_run_set();
     let release = app.simulation_controller.hold_next_preflight_worker();
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
 
     app.state
         .schematic
@@ -260,7 +260,7 @@ fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
         .value = "3.25".to_owned();
     app.state.schematic.bump_topology_version();
     app.invalidate_simulation_preflight();
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     release.send(()).expect("the stale worker waits to prepare");
     app.settle_preflight();
 
@@ -313,7 +313,7 @@ impl RSpiceApp {
     /// before the one that dispatches it would. Returns the digest it
     /// authorized.
     fn queued_by_its_check(&mut self) -> crate::product::ContentDigest {
-        run_and_queue(self);
+        start(&mut self.state, &mut self.simulation_controller, true);
         self.settle_preflight();
         assert!(
             self.state.simulation.execution.trigger_simulation,
@@ -976,7 +976,7 @@ fn a_run_prepared_off_the_ui_thread_is_the_one_the_frame_would_have_prepared() {
         ("RC lowpass", lowpass, 1),
         ("inverter over a Run Set", inverter_over_a_run_set(), 9),
     ] {
-        run(&mut app);
+        start(&mut app.state, &mut app.simulation_controller, false);
         app.settle_preflight();
         let prepared = app
             .state

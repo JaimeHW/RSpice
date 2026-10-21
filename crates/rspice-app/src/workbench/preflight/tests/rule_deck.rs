@@ -163,7 +163,7 @@ fn run_with_the_rules_edited_in_flight(edit: impl FnOnce(&mut AppState)) -> RSpi
         .add_net_label(Point::new(600, 600), "spare".to_owned());
     app.state.sync_active_schematic_to_workspace();
     let release = app.simulation_controller.hold_next_preflight_worker();
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     edit(&mut app.state);
     release.send(()).expect("the worker waits to prepare");
     app.settle_preflight();
@@ -260,9 +260,9 @@ fn run_again_with_the_rules_edited_in_flight(edit: impl FnOnce(&mut AppState)) -
         .add_net_label(Point::new(600, 600), "spare".to_owned());
     app.state.sync_active_schematic_to_workspace();
     let release = app.simulation_controller.hold_next_preflight_worker();
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     edit(&mut app.state);
-    run_and_queue(&mut app);
+    start(&mut app.state, &mut app.simulation_controller, true);
     release.send(()).expect("the stale worker waits to prepare");
     app.settle_preflight();
     app

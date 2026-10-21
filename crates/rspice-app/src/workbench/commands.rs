@@ -1272,7 +1272,9 @@ impl Command {
                 }
             }
             Self::JobsManager => crate::workbench::tools::jobs_manager::open(&mut app.state),
-            Self::PreflightChecks => super::preflight::run(app),
+            Self::PreflightChecks => {
+                super::preflight::start(&mut app.state, &mut app.simulation_controller, false);
+            }
             // Sole owner of "open the plan manager". The toolbar plan chip,
             // the palette and the Simulation Studio title row all route here
             // instead of building the draft themselves.

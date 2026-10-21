@@ -262,7 +262,7 @@ mod tests {
         assert!(Command::RunSimulation.is_enabled(&app));
         Command::RunSimulation.execute(&mut app);
         assert!(app.state.workbench.preflight.take_run_and_queue_request());
-        crate::workbench::preflight::run_and_queue(&mut app);
+        crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
         app.settle_preflight();
         let blockers = app
             .state

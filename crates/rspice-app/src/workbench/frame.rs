@@ -154,7 +154,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // to the frame loop, so a caller never has to name the workflow to ask
     // for it. Consumed before the dialog so a blocked report opens this frame.
     if app.state.workbench.preflight.take_run_and_queue_request() {
-        preflight::run_and_queue(app);
+        preflight::start(&mut app.state, &mut app.simulation_controller, true);
     }
     // A finding the reader chose to follow. The page that offered it holds
     // the session, not the application root, so the jump happens here.
