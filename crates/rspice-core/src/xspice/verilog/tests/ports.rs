@@ -109,3 +109,41 @@ endmodule
          1 10 0 1 0 z10z0010 zzz1\n"
     );
 }
+
+/// Arrays of instances (IEEE 1364-2005 section 12.1.2): one instance per
+/// element, named after its index, each taking its share of a connection as
+/// wide as all the ports together, the leftmost element the leftmost bits
+/// (section 12.1.3), and the whole of a connection as wide as one port.
+#[test]
+fn an_array_of_instances_shares_out_its_connections_as_icarus_does() {
+    let report = bench(
+        r#"module inv2(input [1:0] a, input en, output [1:0] y);
+  parameter D = 3;
+  assign y = en ? ~a : a;
+  initial #D if (a == 2'b01) $display("%0t %m holds 01", $time);
+endmodule
+module top;
+  parameter N = 3;
+  reg [5:0] a; reg en; wire [5:0] y; wire [0:5] z; wire [3:0] w;
+  inv2 u[N-1:0] (.a(a), .en(en), .y(y));
+  inv2 #(.D(4)) v[0:2] (a, en, z);
+  inv2 #(5) b[1:0] (.a(a[5:2]), .en(en), .y(w));
+  initial begin
+    a = 6'b110100; en = 0;
+    #1 $display("%b %b %b", y, z, w);
+    en = 1;
+    #1 $display("%b %b %b", y, z, w);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "110100 110100 1101\n\
+         001011 001011 0010\n\
+         3 top.u[1] holds 01\n\
+         4 top.v[1] holds 01\n\
+         5 top.b[0] holds 01\n"
+    );
+}

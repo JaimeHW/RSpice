@@ -1891,14 +1891,28 @@ fn a_named_port_connection_list_parses_with_its_port_names() {
 }
 
 /// IEEE 1364-2005 section 12.1.2 lets a range after the instance name declare
-/// an array of instances. Nothing downstream can be told how many instances
-/// exist, so it is refused on the bracket rather than misreported as a missing
-/// `(`.
+/// an array of instances: one instance per element, named after its index
+/// from the left bound, with bounds this module's constants fold.
 #[test]
-fn an_instance_array_range_is_refused_by_name() {
+fn an_instance_array_becomes_one_instance_per_element() {
+    let parsed = parse(&hierarchy(
+        NAND2,
+        "    parameter N = 2;\n    wire a, b, y;\n     nand2 g[N-1:-1](y, a, b);",
+    ));
+    let names: Vec<&str> = top_module(&parsed)
+        .instances
+        .iter()
+        .map(|instance| instance.name.as_str())
+        .collect();
+    assert_eq!(names, ["g[1]", "g[0]", "g[-1]"]);
+}
+
+/// The bounds of an array of instances are constant expressions.
+#[test]
+fn an_instance_array_with_a_variable_bound_is_refused_by_name() {
     let message = parse_error(&hierarchy(
         NAND2,
-        "    wire a, b, y;\n     nand2 g[1:0](y, a, b);",
+        "    wire a, b, y; reg [1:0] n;\n     nand2 g[n:0](y, a, b);",
     ));
     assert!(
         message.contains("instance array range") && message.contains("12.1.2"),

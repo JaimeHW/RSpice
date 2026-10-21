@@ -647,6 +647,7 @@ fn prepare_boundaries(
                     },
                 ],
                 span,
+                array: None,
             });
         }
     }
@@ -854,6 +855,7 @@ impl ConnectionModules {
                     parameters: insertion.parameters.clone(),
                     connections: Vec::new(),
                     span: rule.span,
+                    array: None,
                 },
             )?;
             for source in occurrences {

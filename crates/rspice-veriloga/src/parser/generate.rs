@@ -325,7 +325,7 @@ impl Parser<'_> {
 /// loop body gets an identity no source-level process was given.
 pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(), ParseError> {
     if module.generates.is_empty() && module.hierarchical_names.is_empty() {
-        return Ok(());
+        return expand_instance_arrays(module);
     }
     let hierarchy = hierarchy::Bindings::new(module);
     let constructs = std::mem::take(&mut module.generates);
@@ -357,6 +357,7 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
         unroller.construct(construct, "", &mut expanded)?;
     }
     absorb(module, expanded);
+    expand_instance_arrays(module)?;
     if !unroller.hierarchy.authored.is_empty() {
         unroller.rewrite_items(module);
         let (resolved, pending) = unroller.hierarchy.resolve()?;
@@ -367,6 +368,77 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
     }
     module.hierarchical_scopes = unroller.hierarchy.scopes;
     scope::sort_analog_items(module);
+    Ok(())
+}
+
+/// Whether the module declares an array of instances outside a generate
+/// region, which expansion must still unroll.
+pub(super) fn declares_instance_arrays(module: &Module) -> bool {
+    module.instances.iter().any(|instance| {
+        matches!(
+            instance.array,
+            Some(crate::ast::InstanceArray::Range { .. })
+        )
+    })
+}
+
+/// Replace each array of instances with one instance per element (IEEE
+/// 1364-2005 section 12.1.2), named `u[3]` after its index as `%m` prints it.
+///
+/// The bounds are constants of this module, so a parameter override reaches
+/// them through the same re-expansion a generate region takes. Each element
+/// keeps the array's connections and its position in the array; elaboration
+/// takes its slice of each once the port widths are known (section 12.1.3).
+fn expand_instance_arrays(module: &mut Module) -> Result<(), ParseError> {
+    if !declares_instance_arrays(module) {
+        return Ok(());
+    }
+    let constants = module_constants(module);
+    let bound =
+        |expression: &Expression| match crate::canonical_ir::digital_lower::elaboration_constant(
+            expression,
+            &constants,
+            module.time_scale,
+        ) {
+            Some(crate::numeric_literal::NumericLiteralValue::Integer(value)) => Ok(value),
+            _ => Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "instance array range".to_string(),
+                    found: "an expression this compiler cannot fold to a constant; IEEE \
+                            1364-2005 section 12.1.2 bounds an array of instances by constant \
+                            expressions"
+                        .to_string(),
+                },
+                expression.span(),
+            )),
+        };
+    let mut instances = Vec::with_capacity(module.instances.len());
+    for instance in std::mem::take(&mut module.instances) {
+        let Some(crate::ast::InstanceArray::Range { left, right }) = &instance.array else {
+            instances.push(instance);
+            continue;
+        };
+        let (left, right) = (bound(left)?, bound(right)?);
+        let count = left.abs_diff(right) + 1;
+        let Some(count) = u32::try_from(count).ok().filter(|count| *count <= 1 << 16) else {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "instance array range".to_string(),
+                    found: format!("{count} instances, more than this compiler elaborates"),
+                },
+                instance.span,
+            ));
+        };
+        let step = if left >= right { -1 } else { 1 };
+        for position in 0..count {
+            let index = left + step * i64::from(position);
+            let mut element = instance.clone();
+            element.name = format!("{}[{index}]", instance.name).into();
+            element.array = Some(crate::ast::InstanceArray::Element { position, count });
+            instances.push(element);
+        }
+    }
+    module.instances = instances;
     Ok(())
 }
 
@@ -760,6 +832,10 @@ impl Unroller<'_> {
             }
             for override_ in &mut copy.parameters {
                 self.substitute(&mut override_.value);
+            }
+            if let Some(crate::ast::InstanceArray::Range { left, right }) = &mut copy.array {
+                self.substitute(left);
+                self.substitute(right);
             }
             out.instances.push(copy);
         }

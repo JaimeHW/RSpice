@@ -114,6 +114,101 @@ impl ConnectionScope {
         integer(expression, &self.constants, self.time_scale)
     }
 
+    /// One element's share of a discrete-domain connection to an array of
+    /// instances (IEEE 1364-2005 section 12.1.3): the whole connection when
+    /// it is as wide as the port, otherwise the element's `port_width` bits,
+    /// the leftmost element taking the leftmost bits.
+    fn array_slice(
+        &self,
+        actual: &Expression,
+        port_width: u32,
+        (position, count): (u32, u32),
+        port: &str,
+    ) -> CompileResult<Expression> {
+        let vector = |name: &SmolStr| {
+            self.digital
+                .get(name)
+                .filter(|shape| shape.dimensions.is_empty() && !shape.real)
+        };
+        let (name, bounds, span) = match actual {
+            Expression::Identifier(identifier) if vector(&identifier.name).is_some() => (
+                identifier.name.clone(),
+                vector(&identifier.name)
+                    .and_then(|shape| shape.range)
+                    .unwrap_or(VectorBounds::SCALAR),
+                identifier.span,
+            ),
+            Expression::ArrayAccess(access) if vector(&access.array).is_some() => {
+                let index = self.coordinate(&access.index)?;
+                (
+                    access.array.clone(),
+                    VectorBounds {
+                        msb: index,
+                        lsb: index,
+                    },
+                    access.span,
+                )
+            }
+            Expression::Digital(crate::ast::DigitalExpr::PartSelect(select))
+                if vector(&select.name).is_some() =>
+            {
+                (
+                    select.name.clone(),
+                    VectorBounds {
+                        msb: self.coordinate(&select.msb)?,
+                        lsb: self.coordinate(&select.lsb)?,
+                    },
+                    select.span,
+                )
+            }
+            _ => {
+                return Err(SemanticError::new(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "instance array connection: port '{port}' of an array of instances is \
+                         connected to an expression; IEEE 1364-2005 section 12.1.3 shares it \
+                         out by width, which this compiler does for a net or a constant \
+                         select of one"
+                    )),
+                    actual.span(),
+                )
+                .into());
+            }
+        };
+        let width = bounds.width();
+        if width == port_width {
+            return Ok(actual.clone());
+        }
+        if u64::from(width) != u64::from(port_width) * u64::from(count) {
+            return Err(error(
+                format!(
+                    "port '{port}' of an array of {count} instances is {port_width} bits and its \
+                     connection is {width}; IEEE 1364-2005 section 12.1.3 requires the \
+                     connection to be as wide as the port or as all the ports together"
+                ),
+                span,
+            ));
+        }
+        let coordinate = |bit: u32| {
+            if bounds.msb >= bounds.lsb {
+                bounds.lsb + i64::from(bit)
+            } else {
+                bounds.lsb - i64::from(bit)
+            }
+        };
+        let low = (count - 1 - position) * port_width;
+        Ok(Expression::Digital(crate::ast::DigitalExpr::PartSelect(
+            crate::ast::PartSelectExpr {
+                name,
+                msb: Box::new(exact_integer_expression(
+                    coordinate(low + port_width - 1),
+                    span,
+                )),
+                lsb: Box::new(exact_integer_expression(coordinate(low), span)),
+                span,
+            },
+        )))
+    }
+
     fn selected(&self, name: &SmolStr, index: i64, span: Span) -> CompileResult<Expression> {
         if let Some(vector) = self.nodes.get(name) {
             Ok(Expression::Identifier(Identifier {
@@ -356,6 +451,16 @@ pub(in crate::semantic) fn bind(
         .iter()
         .map(|signal| &signal.name)
         .collect();
+    let element = match instance.array {
+        None => None,
+        Some(crate::ast::InstanceArray::Element { position, count }) => Some((position, count)),
+        Some(crate::ast::InstanceArray::Range { .. }) => {
+            return Err(error(
+                format!("instance array '{path}' reached elaboration unexpanded"),
+                instance.span,
+            ));
+        }
+    };
     let mut bound = vec![None; child.ports.len()];
     let mut seen = HashSet::new();
     for (ordinal, connection) in instance.connections.iter().enumerate() {
@@ -392,6 +497,23 @@ pub(in crate::semantic) fn bind(
             }
         }
         let Some(actual) = actual else { continue };
+        let discrete_lane = lanes.len() == 1
+            && discrete.contains(&lanes[0])
+            && !child.physical_nodes.real_buses.contains_key(formal);
+        let sliced;
+        let actual = match (element, discrete_lane) {
+            (Some(element), true) => {
+                let width = child
+                    .digital
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == lanes[0])
+                    .map_or(0, |signal| signal.width);
+                sliced = parent.array_slice(actual, width, element, formal)?;
+                &sliced
+            }
+            _ => actual,
+        };
         if child.ports[positions[&lanes[0]]].direction != PortDirection::Input
             && matches!(actual, Expression::ArrayLiteral(concat) if concat.first_replication().is_some())
         {
@@ -400,10 +522,7 @@ pub(in crate::semantic) fn bind(
                 actual.span(),
             ));
         }
-        if lanes.len() == 1
-            && discrete.contains(&lanes[0])
-            && !child.physical_nodes.real_buses.contains_key(formal)
-        {
+        if discrete_lane {
             // Mixed input expressions retain their digital operands until the
             // connection planner has the parent's complete type environment.
             let mut real_lanes = Vec::new();
@@ -433,6 +552,15 @@ pub(in crate::semantic) fn bind(
         }
         let mut actuals = Vec::new();
         parent.append(actual, &mut actuals, 0)?;
+        if let Some((position, count)) = element
+            && actuals.len() != lanes.len()
+            && actuals.len() == lanes.len() * count as usize
+        {
+            // Section 12.1.3 for physical lanes: the leftmost element takes
+            // the leftmost lanes.
+            let start = position as usize * lanes.len();
+            actuals = actuals.drain(start..start + lanes.len()).collect();
+        }
         if actuals.len() != lanes.len()
             && lanes.len() == 1
             && child.digital.signals.is_empty()

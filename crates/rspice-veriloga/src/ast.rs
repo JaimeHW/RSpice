@@ -2016,6 +2016,24 @@ pub struct ModuleInstance {
     pub connections: Vec<Connection>,
     pub parameters: Vec<ParameterOverride>,
     pub span: Span,
+    /// Set when the instance is declared as, or is one element of, an array
+    /// of instances (IEEE 1364-2005 section 12.1.2).
+    pub(crate) array: Option<InstanceArray>,
+}
+
+/// An array of instances (IEEE 1364-2005 section 12.1.2).
+#[derive(Debug, Clone)]
+pub(crate) enum InstanceArray {
+    /// `u[left:right]` as written. Generate expansion replaces the instance
+    /// with one instance per element once the bounds are constant.
+    Range {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    /// One element, `position` counting from the left bound, of `count`.
+    /// Its connections are still the array's own; elaboration takes this
+    /// element's slice of each, by section 12.1.3, once port widths are known.
+    Element { position: u32, count: u32 },
 }
 
 /// One `hierarchical_parameter_identifier = constant_expression` of a

@@ -609,13 +609,15 @@ impl<'a> Parser<'a> {
         // reads the module the author would have had to write by hand, and
         // needs no arm for a construct that contributes no run-time behaviour
         // of its own.
-        let template = (!module.generates.is_empty() || !module.hierarchical_names.is_empty())
-            .then(|| {
-                Box::new(GenerateTemplate {
-                    module: module.clone(),
-                    next_process_id: self.next_process_id,
-                })
-            });
+        let template = (!module.generates.is_empty()
+            || !module.hierarchical_names.is_empty()
+            || generate::declares_instance_arrays(&module))
+        .then(|| {
+            Box::new(GenerateTemplate {
+                module: module.clone(),
+                next_process_id: self.next_process_id,
+            })
+        });
         generate::expand(&mut module, &mut self.next_process_id)?;
         module.generate_template = template;
         Ok(module)
@@ -1075,22 +1077,20 @@ impl<'a> Parser<'a> {
             let instance_start = self.current_span();
             let name: SmolStr = self.expect_identifier("module instance name")?.into();
             // IEEE 1364-2005 section 12.1.2 lets a range after the instance
-            // name declare an array of instances. It has no elaborated form
-            // here — the range decides how many instances exist, and nothing
-            // downstream can be told a count — so it is refused on the bracket
-            // rather than reported as a missing `(`.
-            if self.check(TokenKind::LBracket) {
-                return Err(ParseError::new(
-                    ParseErrorKind::UnsupportedConstruct {
-                        context: format!("module instance `{name}`"),
-                        found: "an instance array range; IEEE 1364-2005 section 12.1.2 \
-                                declares one instance per element, and this compiler \
-                                elaborates only a single named instance — write them out"
-                            .to_string(),
-                    },
-                    self.current_span(),
-                ));
-            }
+            // name declare an array of instances; generate expansion makes
+            // one instance per element once the bounds are constant.
+            let array = if self.match_token(TokenKind::LBracket) {
+                let left = self.parse_expression()?;
+                self.expect(TokenKind::Colon)?;
+                let right = self.parse_expression()?;
+                self.expect(TokenKind::RBracket)?;
+                Some(crate::ast::InstanceArray::Range {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                })
+            } else {
+                None
+            };
             let connections = self.parse_instance_connections()?;
             instances.push(ModuleInstance {
                 module: module.clone(),
@@ -1098,6 +1098,7 @@ impl<'a> Parser<'a> {
                 connections,
                 parameters: parameters.clone(),
                 span: instance_start.extend(self.previous_span()),
+                array,
             });
             if !self.match_token(TokenKind::Comma) {
                 break;
