@@ -1690,4 +1690,24 @@ mod tests {
         );
         assert_eq!(error.run_coordinate(), Some(coordinate));
     }
+
+    #[test]
+    fn a_widened_string_stamping_failure_is_not_a_rejectable_trial() {
+        let error = crate::device::StampError::from("no such branch".to_string());
+        assert!(
+            SimulationError::from(error)
+                .nonfinite_trial_detail()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_widened_nonfinite_trial_keeps_its_whole_diagnostic() {
+        let error =
+            crate::device::StampError::nonfinite_trial("x1", "Verilog-A device 'x1' ... [p=-1.0]");
+        assert_eq!(
+            SimulationError::from(error).nonfinite_trial_detail(),
+            Some("Verilog-A device 'x1' ... [p=-1.0]")
+        );
+    }
 }

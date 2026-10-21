@@ -101,11 +101,6 @@ mod tests {
         let error = StampError::from("no such branch".to_string());
         assert!(matches!(error, StampError::Structural(_)));
         assert_eq!(error.to_string(), "no such branch");
-        assert!(
-            crate::SimulationError::from(error)
-                .nonfinite_trial_detail()
-                .is_none()
-        );
     }
 
     #[test]
@@ -115,9 +110,5 @@ mod tests {
             panic!("a non-finite trial must keep its variant: {error}");
         };
         assert_eq!(trial.instance, "x1");
-        assert_eq!(
-            crate::SimulationError::from(error).nonfinite_trial_detail(),
-            Some("Verilog-A device 'x1' ... [p=-1.0]")
-        );
     }
 }
