@@ -235,6 +235,28 @@ pub enum ResultScalarError {
     },
 }
 
+impl ResultScalarError {
+    /// Hand the finding's fields to the constructor of its own name.
+    ///
+    /// The result document converts each finding into its error of the same
+    /// name; the match is exhaustive only here, so a finding added later
+    /// fails to compile until it is named, and then the conversion until it
+    /// says what the finding becomes.
+    #[doc(hidden)]
+    pub fn fold<T>(
+        self,
+        empty_name: impl FnOnce(&'static str) -> T,
+        non_finite: impl FnOnce(String, f64) -> T,
+        source_result: impl FnOnce(&'static str, String) -> T,
+    ) -> T {
+        match self {
+            Self::EmptyName { location } => empty_name(location),
+            Self::NonFinite { location, value } => non_finite(location, value),
+            Self::SourceResult { location, detail } => source_result(location, detail),
+        }
+    }
+}
+
 impl fmt::Display for ResultScalarError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

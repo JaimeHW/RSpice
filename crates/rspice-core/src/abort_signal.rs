@@ -224,6 +224,22 @@ pub enum AbortReason {
     TimeLimit,
 }
 
+impl AbortReason {
+    /// What a stop becomes for this reason: `cancelled` when a caller asked
+    /// the run to stop, `time_limit` when its budget expired.
+    ///
+    /// The match is here, beside the enum, because it is exhaustive only
+    /// here: a reason added later fails to compile until this names it, and
+    /// then every caller until it says what that reason becomes.
+    #[doc(hidden)]
+    pub fn select<T>(self, cancelled: T, time_limit: T) -> T {
+        match self {
+            Self::Cancelled => cancelled,
+            Self::TimeLimit => time_limit,
+        }
+    }
+}
+
 //=============================================================================
 // AbortSignal Trait
 //=============================================================================

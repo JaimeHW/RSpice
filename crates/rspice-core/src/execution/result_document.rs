@@ -2217,12 +2217,10 @@ impl std::error::Error for ResultDocumentError {}
 
 impl From<ResultScalarError> for ResultDocumentError {
     fn from(error: ResultScalarError) -> Self {
-        match error {
-            ResultScalarError::EmptyName { location } => Self::EmptyName { location },
-            ResultScalarError::NonFinite { location, value } => Self::NonFinite { location, value },
-            ResultScalarError::SourceResult { location, detail } => {
-                Self::SourceResult { location, detail }
-            }
-        }
+        error.fold(
+            |location| Self::EmptyName { location },
+            |location, value| Self::NonFinite { location, value },
+            |location, detail| Self::SourceResult { location, detail },
+        )
     }
 }

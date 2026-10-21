@@ -18,7 +18,7 @@
 
 use thiserror::Error;
 
-use crate::abort_signal::{AbortReason, AbortSignal};
+use crate::abort_signal::AbortSignal;
 use crate::identity::{AnalysisInstanceId, AnalysisKind, RunCoordinateId};
 use crate::netlist::NetlistSourceLocation;
 use crate::resource::ResourceLimitError;
@@ -1408,10 +1408,9 @@ impl SimulationError {
     /// cannot know why the flag is set. The surface that owns the signal can,
     /// so it re-labels once at its boundary rather than every check guessing.
     pub(crate) fn from_abort(abort: &dyn AbortSignal) -> Self {
-        match abort.abort_reason() {
-            AbortReason::Cancelled => Self::Aborted,
-            AbortReason::TimeLimit => Self::TimeLimitExceeded,
-        }
+        abort
+            .abort_reason()
+            .select(Self::Aborted, Self::TimeLimitExceeded)
     }
 
     /// Re-label a propagated stop with the reason its signal recorded.
@@ -1479,6 +1478,7 @@ impl From<crate::netlist::OutputScheduleError> for SimulationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abort_signal::AbortReason;
 
     #[test]
     fn unavailable_signal_descriptor_and_message_preserve_authored_symbol() {

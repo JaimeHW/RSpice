@@ -301,9 +301,14 @@ const MAX_PUBLIC_ITEMS: usize = 5749;
 // reads the two `family_features` statements. The census was 349, with no
 // slack.
 // `log_scope::warn_line` adds one: the macro is exported so that every crate
-// of the family logs through the one definition. The census is 350, with no
+// of the family logs through the one definition. The census was 350, with no
 // slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 350;
+// `AbortReason::select`, `AnalysisKind::control_command`,
+// `AnalysisKind::from_tag` and `ResultScalarError::fold` add four: a match on
+// a non-exhaustive base enum is exhaustive only in the enum's own crate, so
+// each moved beside its enum and the engine calls it there. The census is 354,
+// with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 354;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

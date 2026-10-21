@@ -9,41 +9,7 @@ impl ControlCircuit {
     pub const fn analysis_command_name(
         kind: crate::identity::AnalysisKind,
     ) -> Option<&'static str> {
-        use crate::identity::AnalysisKind;
-        match kind {
-            AnalysisKind::Op => Some("op"),
-            AnalysisKind::Dc => Some("dc"),
-            AnalysisKind::Ac => Some("ac"),
-            AnalysisKind::Noise => Some("noise"),
-            AnalysisKind::Tran => Some("tran"),
-            AnalysisKind::TransferFunction => Some("tf"),
-            AnalysisKind::PoleZero => Some("pz"),
-            AnalysisKind::Sensitivity => Some("sens"),
-            AnalysisKind::Distortion => Some("disto"),
-            AnalysisKind::Stb => Some("stb"),
-            AnalysisKind::DcMatch => Some("dcmatch"),
-            AnalysisKind::ImplicitOp
-            | AnalysisKind::Sp
-            | AnalysisKind::Pss
-            | AnalysisKind::Pac
-            | AnalysisKind::Pxf
-            | AnalysisKind::PNoise
-            | AnalysisKind::Pstb
-            | AnalysisKind::HarmonicBalance
-            | AnalysisKind::Envelope
-            | AnalysisKind::MonteCarlo
-            | AnalysisKind::Fourier
-            | AnalysisKind::Fft
-            | AnalysisKind::Soa
-            | AnalysisKind::Optimize
-            | AnalysisKind::Psp
-            | AnalysisKind::Hbsp
-            | AnalysisKind::HbNoise
-            | AnalysisKind::Qpss
-            | AnalysisKind::Qpac
-            | AnalysisKind::Qpnoise
-            | AnalysisKind::Qpxf => None,
-        }
+        kind.control_command()
     }
 
     /// Check host availability without executing a command or its arguments.

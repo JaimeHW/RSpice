@@ -64,40 +64,27 @@ macro_rules! tagged_enum_adapter {
     };
 }
 
-tagged_enum_adapter!(analysis_kind, AnalysisKind, {
-    ImplicitOp => "implicit-op",
-    Op => "op",
-    Dc => "dc",
-    Ac => "ac",
-    Tran => "tran",
-    Noise => "noise",
-    Sp => "sp",
-    Stb => "stb",
-    Distortion => "disto",
-    PoleZero => "pz",
-    Sensitivity => "sens",
-    TransferFunction => "tf",
-    Pss => "pss",
-    Pac => "pac",
-    Pxf => "pxf",
-    PNoise => "pnoise",
-    Pstb => "pstb",
-    HarmonicBalance => "hb",
-    Envelope => "env",
-    MonteCarlo => "mc",
-    Fourier => "four",
-    Fft => "fft",
-    Soa => "soa",
-    Optimize => "optimize",
-    Psp => "psp",
-    Hbsp => "hbsp",
-    HbNoise => "hbnoise",
-    Qpss => "qpss",
-    Qpac => "qpac",
-    Qpnoise => "qpnoise",
-    Qpxf => "qpxf",
-    DcMatch => "dcmatch",
-});
+/// An analysis kind travels by the tag it declares itself. The table lives
+/// beside `AnalysisKind`, the one place a match on it is exhaustive, so a new
+/// kind still cannot compile without a wire tag.
+pub(super) mod analysis_kind {
+    use super::*;
+
+    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
+        value: &AnalysisKind,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(value.tag())
+    }
+
+    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<AnalysisKind, D::Error> {
+        let tag = String::deserialize(deserializer)?;
+        AnalysisKind::from_tag(&tag)
+            .ok_or_else(|| D::Error::custom(format!("unknown AnalysisKind tag {tag:?}")))
+    }
+}
 
 tagged_enum_adapter!(
     analysis_result_kind,

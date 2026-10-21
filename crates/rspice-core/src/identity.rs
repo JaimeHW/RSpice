@@ -89,42 +89,110 @@ impl AnalysisKind {
         Self::DcMatch,
     ];
 
-    pub const fn tag(self) -> &'static str {
+    /// The control command that runs this analysis directly, if the control
+    /// host has one; `ControlCircuit::analysis_command_name` publishes it.
+    ///
+    /// The table sits beside the enum because the match is exhaustive only
+    /// here: a kind added later fails to compile until it says whether the
+    /// control host runs it.
+    #[doc(hidden)]
+    pub const fn control_command(self) -> Option<&'static str> {
         match self {
-            Self::ImplicitOp => "implicit-op",
-            Self::Op => "op",
-            Self::Dc => "dc",
-            Self::Ac => "ac",
-            Self::Tran => "tran",
-            Self::Noise => "noise",
-            Self::Sp => "sp",
-            Self::Stb => "stb",
-            Self::Distortion => "disto",
-            Self::PoleZero => "pz",
-            Self::Sensitivity => "sens",
-            Self::TransferFunction => "tf",
-            Self::Pss => "pss",
-            Self::Pac => "pac",
-            Self::Pxf => "pxf",
-            Self::PNoise => "pnoise",
-            Self::Pstb => "pstb",
-            Self::HarmonicBalance => "hb",
-            Self::Envelope => "env",
-            Self::MonteCarlo => "mc",
-            Self::Fourier => "four",
-            Self::Fft => "fft",
-            Self::Soa => "soa",
-            Self::Optimize => "optimize",
-            Self::Psp => "psp",
-            Self::Hbsp => "hbsp",
-            Self::HbNoise => "hbnoise",
-            Self::Qpss => "qpss",
-            Self::Qpac => "qpac",
-            Self::Qpnoise => "qpnoise",
-            Self::Qpxf => "qpxf",
-            Self::DcMatch => "dcmatch",
+            Self::Op => Some("op"),
+            Self::Dc => Some("dc"),
+            Self::Ac => Some("ac"),
+            Self::Noise => Some("noise"),
+            Self::Tran => Some("tran"),
+            Self::TransferFunction => Some("tf"),
+            Self::PoleZero => Some("pz"),
+            Self::Sensitivity => Some("sens"),
+            Self::Distortion => Some("disto"),
+            Self::Stb => Some("stb"),
+            Self::DcMatch => Some("dcmatch"),
+            Self::ImplicitOp
+            | Self::Sp
+            | Self::Pss
+            | Self::Pac
+            | Self::Pxf
+            | Self::PNoise
+            | Self::Pstb
+            | Self::HarmonicBalance
+            | Self::Envelope
+            | Self::MonteCarlo
+            | Self::Fourier
+            | Self::Fft
+            | Self::Soa
+            | Self::Optimize
+            | Self::Psp
+            | Self::Hbsp
+            | Self::HbNoise
+            | Self::Qpss
+            | Self::Qpac
+            | Self::Qpnoise
+            | Self::Qpxf => None,
         }
     }
+}
+
+/// Declare each kind's tag once: the spelling and its reading back are the
+/// same table, so a kind added later cannot compile without a tag, and no tag
+/// can name a kind that does not read back as it.
+macro_rules! analysis_kind_tags {
+    ($($variant:ident => $tag:literal,)+) => {
+        impl AnalysisKind {
+            pub const fn tag(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $tag,)+
+                }
+            }
+
+            /// The kind [`Self::tag`] spells as `tag`, or `None` for a tag no
+            /// kind carries. Result documents read their analysis back
+            /// through it.
+            #[doc(hidden)]
+            pub fn from_tag(tag: &str) -> Option<Self> {
+                match tag {
+                    $($tag => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+analysis_kind_tags! {
+    ImplicitOp => "implicit-op",
+    Op => "op",
+    Dc => "dc",
+    Ac => "ac",
+    Tran => "tran",
+    Noise => "noise",
+    Sp => "sp",
+    Stb => "stb",
+    Distortion => "disto",
+    PoleZero => "pz",
+    Sensitivity => "sens",
+    TransferFunction => "tf",
+    Pss => "pss",
+    Pac => "pac",
+    Pxf => "pxf",
+    PNoise => "pnoise",
+    Pstb => "pstb",
+    HarmonicBalance => "hb",
+    Envelope => "env",
+    MonteCarlo => "mc",
+    Fourier => "four",
+    Fft => "fft",
+    Soa => "soa",
+    Optimize => "optimize",
+    Psp => "psp",
+    Hbsp => "hbsp",
+    HbNoise => "hbnoise",
+    Qpss => "qpss",
+    Qpac => "qpac",
+    Qpnoise => "qpnoise",
+    Qpxf => "qpxf",
+    DcMatch => "dcmatch",
 }
 
 /// Stable identity of one authored analysis card.
@@ -221,8 +289,7 @@ mod tests {
     /// analysis on the wire and an instance in every output name, so two
     /// kinds sharing one — or one carrying a capital that a reader would
     /// type in lower case — is a collision rather than a cosmetic slip.
-    /// There is no parse-from-tag to round-trip through; this is the
-    /// property such a parser would need.
+    /// Every tag also reads back as its own kind.
     #[test]
     fn every_analysis_kind_tag_is_a_distinct_lower_case_token() {
         let kinds = [
@@ -261,6 +328,9 @@ mod tests {
         ];
 
         assert_eq!(AnalysisKind::ALL, kinds);
+        for kind in kinds {
+            assert_eq!(AnalysisKind::from_tag(kind.tag()), Some(kind));
+        }
         let mut tags = kinds.map(AnalysisKind::tag).to_vec();
         tags.sort_unstable();
         let distinct = tags.len();
