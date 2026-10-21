@@ -213,6 +213,7 @@ jobs:
           --test capability_refusals
           --test connect_module_insertion
           --test connect_rule_parameters
+          --test diode_native
           --test expression_stack_safety
           --test mixed_bit_aliases
           --test mixed_dc_sweep_state
@@ -404,6 +405,7 @@ jobs:
           --test capability_refusals
           --test connect_module_insertion
           --test connect_rule_parameters
+          --test diode_native
           --test mixed_bit_aliases
           --test mixed_dc_sweep_state
           --test mixed_live_supply
