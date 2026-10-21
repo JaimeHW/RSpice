@@ -2553,7 +2553,8 @@ enum XspiceAutoBridgeKind {
     Bidi,
     RealToV,
     VToReal,
-    /// Bidirectional real conversion requires an authored body or template.
+    /// Bidirectional real conversion requires a connect rule (the shipped
+    /// `rbidir` or an authored body) or a template.
     #[cfg(feature = "veriloga")]
     RealBidi,
 }
@@ -5203,8 +5204,9 @@ fn add_planned_xspice_auto_bridge(
                 crate::ElaborationErrorKind::PortDiscipline,
                 format!(
                     "its real-valued inout port '{port}' reaches node '{node}', which needs a \
-                     bidirectional real/electrical converter: select an authored bidirectional \
-                     real connect module, or give real inout boundaries a bridge template"
+                     bidirectional real/electrical converter: select the shipped rbidir or an \
+                     authored bidirectional real connect module, or give real inout boundaries a \
+                     bridge template"
                 ),
             )
             .instance(instance)

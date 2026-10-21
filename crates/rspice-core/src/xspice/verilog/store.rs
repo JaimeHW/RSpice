@@ -1368,8 +1368,12 @@ impl DigitalSignalStore {
     fn resolve_real(&self, signal: DigitalSignalId) -> f64 {
         let index = usize::from(signal);
         let members = self.real_members(&signal);
+        // A receiving converter's sample of the node is the net's value while
+        // none of the net's own drivers has produced one, and nothing after.
+        let receiving = self.receives_fallback(members);
         let mut contributions = members
             .iter()
+            .filter(|_| !receiving)
             .flat_map(|member| {
                 let span = self.spans[usize::from(*member)];
                 self.contributions[span.start..span.start + span.count].iter()
@@ -1385,7 +1389,7 @@ impl DigitalSignalStore {
             .chain(
                 members
                     .iter()
-                    .flat_map(|member| self.external_real_values(*member)),
+                    .flat_map(|member| self.resolving_external_reals(*member, receiving)),
             )
             .peekable();
 
@@ -1563,9 +1567,11 @@ impl DigitalEnvironment for DigitalSignalStore {
             debug_assert!(false, "drive from a driver the plan does not declare");
             return;
         };
+        let was_receiving = self.receives_fallback(self.real_members(&drive.driver.signal));
         self.contributions[slot].value = ContributionValue::Real(Some(drive.value));
         let resolved = self.resolve_real(drive.driver.signal);
         self.publish_real(drive.driver.signal, resolved);
+        self.note_real_drive(drive.driver.signal, was_receiving);
     }
 
     fn procedural_override(

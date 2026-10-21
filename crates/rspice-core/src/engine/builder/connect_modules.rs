@@ -396,7 +396,7 @@ pub(super) fn expected_library_module(kind: super::XspiceAutoBridgeKind) -> Opti
         Kind::Bidi => Some("bidir"),
         Kind::RealToV => Some("r2e"),
         Kind::VToReal => Some("e2r"),
-        Kind::RealBidi => None,
+        Kind::RealBidi => Some("rbidir"),
     }
 }
 
@@ -414,11 +414,11 @@ pub(super) fn real_converter_law(
 }
 
 /// Whether a planned boundary converts through a shipped real-valued
-/// converter: a real port whose connect rule selects `r2e` or `e2r`. A real
-/// port no connect rule reaches keeps the stock converters.
+/// converter: a real port whose connect rule selects `r2e`, `e2r` or
+/// `rbidir`. A real port no connect rule reaches keeps the stock converters.
 pub(super) fn converts_real_built_in(bridge: &super::PlannedXspiceAutoBridge) -> bool {
     use super::XspiceAutoBridgeKind as Kind;
-    matches!(bridge.kind, Kind::RealToV | Kind::VToReal)
+    matches!(bridge.kind, Kind::RealToV | Kind::VToReal | Kind::RealBidi)
         && bridge
             .connect_module
             .as_ref()

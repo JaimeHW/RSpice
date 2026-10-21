@@ -1,6 +1,7 @@
-//! The real-valued connect-rule converters: the `r2e` and `e2r` a connect
-//! rule naming the shipped real modules inserts where a `wreal` port meets an
-//! electrical node.
+//! The real-valued connect-rule converters: the `r2e`, `e2r` and `rbidir` a
+//! connect rule naming the shipped real modules inserts where a `wreal` port
+//! meets an electrical node. `rbidir` is the two halves on one port; see
+//! [`ConnectRbidir`].
 //!
 //! - **`r2e`:** the port's resolved value behind `rout`, a Thevenin source
 //!   whose conductance is `1/rout`; `rout = 0` is an ideal source. A change
@@ -432,5 +433,155 @@ impl CodeModel for ConnectE2r {
         let sample = ctx.input("in");
         sample_node(ctx, law, sample, "out", 0);
         Ok(())
+    }
+}
+
+//=============================================================================
+// rbidir
+//=============================================================================
+
+/// The drive half's activity state, after its ramp.
+const RBIDIR_ACTIVE: usize = RAMP_STATES;
+/// The receive half's sampling states, after the activity state.
+const RBIDIR_SAMPLE: usize = RAMP_STATES + 1;
+
+/// The bidirectional real converter: an `r2e` driving `out` from the port's
+/// resolved net on `in`, and an `e2r` sampling `sense` onto `d`, the port's
+/// receiving driver.
+///
+/// The drive half is active once the port's own drivers have produced a
+/// value (LRM 2.4 section 3.7: a driver that has not run contributes
+/// nothing). The circuit says so through the other-drivers observation on
+/// `d` (see [`CodeModel::receives_real_output`]); the converter never infers
+/// it from the values it sees. Until then the port reads the node: `d` is
+/// the net's only value and `out` drives nothing. From then on the net
+/// resolves its own drivers, `d` no longer counts, and `out` seizes the node
+/// from its present voltage and drives the resolved value behind `rout`,
+/// which is finite because the node has other sources. A driver cannot
+/// release a real net, so the drive half stays active.
+#[derive(Debug, Default)]
+pub(crate) struct ConnectRbidir;
+
+impl ConnectRbidir {
+    /// Whether the port's own drivers drive its net, and since when.
+    fn driven(ctx: &CmContext) -> Option<Value> {
+        ctx.other_digital_drivers("d", 0)
+            .filter(|(state, _)| *state != crate::xspice::DigitalValue::high_z())
+            .map(|(_, since)| since)
+    }
+
+    /// The drive half's ramp and whether it drives: a pure read of the
+    /// context, so the noise analysis can ask for it without committing.
+    fn drive(ctx: &CmContext, law: RampLaw) -> Option<Ramp> {
+        let since = Self::driven(ctx)?;
+        let target = ctx.input_real("in").unwrap_or(0.0);
+        if !ctx.is_transient() || ctx.time == 0.0 {
+            return Some(Ramp::settled(ctx.time, target));
+        }
+        if ctx.state_prev(RBIDIR_ACTIVE) > 0.5 {
+            return Some(drive_ramp(ctx, law, "in", 0));
+        }
+        // Seizing the node: from its voltage, where the port took it over.
+        Some(Ramp {
+            start: since.min(ctx.time),
+            from: ctx.input("sense"),
+            target,
+        })
+    }
+}
+
+impl CodeModel for ConnectRbidir {
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_converter_descriptor()
+    }
+
+    fn name(&self) -> &str {
+        "__rspice_connect_rbidir"
+    }
+
+    fn description(&self) -> &str {
+        "Connect-rule bidirectional real/electrical converter"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        static PORTS: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
+        PORTS.get_or_init(|| {
+            vec![
+                PortSpec::input("in", PortType::Real),
+                PortSpec::output("d", PortType::Real),
+                conductance_output("out"),
+                PortSpec::input("sense", PortType::Voltage),
+            ]
+        })
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        static PARAMS: std::sync::OnceLock<Vec<ParamSpec>> = std::sync::OnceLock::new();
+        PARAMS.get_or_init(|| {
+            let mut parameters = ramp_parameters(20.0);
+            parameters.extend(sample_parameters());
+            parameters
+        })
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ctx.allocate_states(RBIDIR_SAMPLE + SAMPLE_STATES);
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let law = RampLaw::from_params(ctx, self.name())?;
+        let sampling = SampleLaw::from_params(ctx, self.name())?;
+        let conductance = rout_conductance(ctx, self.name())?;
+        let drive = Self::drive(ctx, law);
+        let ramp = drive.unwrap_or_else(|| Ramp::settled(ctx.time, 0.0));
+        commit_ramp(ctx, ramp, law, 0);
+        let active = if drive.is_some() { 1.0 } else { 0.0 };
+        if !ctx.is_transient() {
+            ctx.set_initial_state(RBIDIR_ACTIVE, active);
+        } else if committed(ctx) {
+            ctx.set_state(RBIDIR_ACTIVE, active);
+        }
+        match drive {
+            // The receive half publishes while the port reads the node.
+            None => {
+                let sample = ctx.input("sense");
+                sample_node(ctx, sampling, sample, "d", RBIDIR_SAMPLE);
+            }
+            Some(_) if ctx.is_transient() && committed(ctx) => {
+                for index in RBIDIR_SAMPLE..RBIDIR_SAMPLE + SAMPLE_STATES {
+                    let kept = ctx.state_prev(index);
+                    ctx.set_state(index, kept);
+                }
+            }
+            Some(_) => {}
+        }
+        let (level, g) = match drive {
+            Some(ramp) => (ramp.at(ctx.time, law), conductance),
+            None => (0.0, 0.0),
+        };
+        ctx.set_output_vector_element_with_partial("out", 0, -g * level, g)
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, port: &str) -> bool {
+        port.eq_ignore_ascii_case("out")
+    }
+
+    fn converter_noise_conductances(&self, ctx: &CmContext) -> Vec<(usize, Value)> {
+        let Ok(law) = RampLaw::from_params(ctx, self.name()) else {
+            return Vec::new();
+        };
+        match (Self::drive(ctx, law), rout_conductance(ctx, self.name())) {
+            (Some(_), Ok(conductance)) => vec![(0, conductance)],
+            _ => Vec::new(),
+        }
+    }
+
+    fn receives_real_output(&self, port: &str) -> bool {
+        port.eq_ignore_ascii_case("d")
     }
 }

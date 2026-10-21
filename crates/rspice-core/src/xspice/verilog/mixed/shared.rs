@@ -832,14 +832,16 @@ impl MixedDigitalCoordinator {
         &self.real_event_nodes
     }
 
+    /// `fallbacks` names the receiving drivers by index into `drivers`.
     pub(crate) fn attach_external_reals(
         &mut self,
         observed: &[DigitalSignalId],
         drivers: &[(DigitalSignalId, EventTarget)],
+        fallbacks: &[usize],
     ) -> Result<Vec<super::super::store::ExternalRealDriverId>, DigitalRunError> {
         self.digital
             .make_mut()
-            .attach_external_reals(observed, drivers)
+            .attach_external_reals_with_fallbacks(observed, drivers, fallbacks)
     }
 
     pub(crate) fn attach_external_bits(

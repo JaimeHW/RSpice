@@ -1505,3 +1505,96 @@ fn e2r_publishes_once_per_vdelta_on_a_ramp() {
         assert!((point.value - point.time * 1e3).abs() < 1e-9, "{point:?}");
     }
 }
+
+/// An HDL real inout `p` on node `n`, which `supply` feeds through 1 kΩ with
+/// 1 kΩ to ground, through `rbidir` at its default `rout` = 20 Ω. `drive` is
+/// the port's own driver, if it has one; `q` copies what the port reads onto
+/// `qn` through the stock converter (`r2e` at its defaults).
+fn rbidir_deck(directory: &TempDirectory, drive: &str, supply: &str) -> Netlist {
+    let path = real_library(
+        directory,
+        &format!(
+            "module port(p, q);\n  inout p; wreal p;\n  output q; wreal q;\n{drive}  assign q = p;\nendmodule\n"
+        ),
+        "connectrules deck;\n    connect rbidir;\n    connect r2e;\nendconnectrules\n",
+    );
+    Netlist::parse(&format!(
+        "* rbidir\n.hdl \"{path}\" module=port\n.options connectrules=deck\nvs s 0 {supply}\nrs s n 1k\nrg n 0 1k\nx1 n qn port\nrq qn 0 1k\n.end\n"
+    ))
+    .expect("deck parses")
+}
+
+/// While its port's own drivers have not driven (here: it has none),
+/// `rbidir` reads the node into it, 1.2 V, and drives nothing. A port that
+/// drives 1.0 V is driven behind 20 Ω: (2.4/1k + 1.0/20)/(1/1k + 1/1k +
+/// 1/20) = 0.0524/0.052 = 1.007692 V, and the port reads the net its drivers
+/// resolve, 1.0. A port that drives exactly the voltage it would read takes
+/// the node over all the same: when the supply steps to 3.6 V the node is
+/// (3.6/1k + 1.2/20)/0.052 = 1.223077 V and the port reads 1.2, where a
+/// port still reading the node would see 1.8 V.
+///
+/// A continuous assignment drives from time zero, and an assignment delay
+/// has no lowered form yet, so a port's drivers have run from the start or
+/// never; the store's own test drives a receiving net mid-run.
+#[test]
+fn rbidir_reads_the_node_until_its_port_drives_and_then_drives_behind_rout() {
+    let directory = TempDirectory::new("rbidir");
+    let netlist = rbidir_deck(&directory, "", "2.4");
+    let records = insertions(&netlist);
+    let record = only_on(&records, "n", "x1.p");
+    assert_eq!(record.kind, ConverterKind::Rbidir);
+    assert_eq!(record.direction, PortDirection::InOut);
+    let rout = parameter(record, "rout");
+    assert_eq!(
+        (rout.value, &rout.source),
+        (20.0, &ConverterSource::ModuleDefault)
+    );
+
+    let engine = Engine::default();
+    let step = "pwl(0 2.4 20n 2.4 21n 3.6)";
+    let driven = 0.0524 / 0.052;
+    // Each deck rewrites the one library file, so each runs before the next
+    // is written.
+    for (drive, supply, before, after) in [
+        ("", "2.4", (1.2, 1.2), (1.2, 1.2)),
+        ("  assign p = 1.0;\n", "2.4", (driven, 1.0), (driven, 1.0)),
+        (
+            "  assign p = 1.2;\n",
+            step,
+            (1.2, 1.2),
+            ((3.6e-3 + 1.2 / 20.0) / 0.052, 1.2),
+        ),
+        ("", step, (1.2, 1.2), (1.8, 1.8)),
+    ] {
+        let deck = rbidir_deck(&directory, drive, supply);
+        let result = engine
+            .run_tran(&deck, 40e-9, 0.1e-9)
+            .expect("transient solves");
+        for (time, (node, read)) in [(10e-9, before), (35e-9, after)] {
+            let (n, qn) = (value_at(&result, "n", time), value_at(&result, "qn", time));
+            assert!((n - node).abs() < 1e-9, "n at {time:e}: {n} against {node}");
+            assert!(
+                (qn - read).abs() < 1e-9,
+                "qn at {time:e}: {qn} against {read}"
+            );
+        }
+    }
+}
+
+/// `rbidir` refuses an ideal drive: its node has other sources.
+#[test]
+fn rbidir_refuses_an_ideal_drive_by_name() {
+    let directory = TempDirectory::new("rbidir-ideal");
+    let path = real_library(
+        &directory,
+        "module port(p);\n  inout p; wreal p;\n  assign p = 1.0;\nendmodule\n",
+        "connectrules deck;\n    connect rbidir #(.rout(0));\nendconnectrules\n",
+    );
+    let error = build_error(&format!(
+        "* rbidir ideal\n.hdl \"{path}\" module=port\n.options connectrules=deck\nvs n 0 1\nx1 n port\n.end\n"
+    ));
+    assert!(
+        error.contains("rout = 0") && error.contains("rbidir"),
+        "{error}"
+    );
+}

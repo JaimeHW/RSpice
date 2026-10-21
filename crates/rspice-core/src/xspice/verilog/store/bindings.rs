@@ -438,7 +438,9 @@ impl DigitalSignalStore {
             .into_iter()
             .filter_map(|change| match change {
                 ExternalNetChange::Bits(change) => Some(change),
-                ExternalNetChange::Real { .. } | ExternalNetChange::DriverInput { .. } => None,
+                ExternalNetChange::Real { .. }
+                | ExternalNetChange::DriverInput { .. }
+                | ExternalNetChange::RealDrive { .. } => None,
             })
             .collect()
     }

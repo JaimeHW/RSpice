@@ -200,3 +200,39 @@ endmodule
     );
     assert_eq!(restarted.read_real(id(&plan, "b")), Some(2.0));
 }
+
+/// A receiving driver is the net's value until the net's own driver
+/// produces one, even the same value; from then on it does not count; and a
+/// rolled-back trial restores the undriven net.
+#[test]
+fn a_receiving_driver_stands_for_its_net_until_the_net_is_driven() {
+    let plan = compiled("module top; wreal p; assign p=1.2; endmodule");
+    let p = id(&plan, "p");
+    let mut store = DigitalSignalStore::new(&plan);
+    // A plain wreal with its own driver takes a receiving driver beside it.
+    let receiver = store
+        .attach_external_reals_with_fallbacks(&[p], &[(p, target("rbidir"))], &[0])
+        .unwrap()[0];
+    store.publish_external_bank(&[], &[(receiver, 1.2)]);
+    assert_eq!(store.real_value(p), Some(1.2));
+    assert_eq!(store.real_fallback_driven(receiver), Some(false));
+    store.take_external_changes();
+    let trial = store.clone();
+
+    // The net's driver drives exactly the value the receiver read.
+    drive(&mut store, p, 1.2);
+    assert_eq!(store.real_value(p), Some(1.2));
+    assert_eq!(store.real_fallback_driven(receiver), Some(true));
+    assert!(matches!(
+        store.take_external_changes().as_slice(),
+        [ExternalNetChange::RealDrive { driver, driven: true, .. }] if *driver == receiver
+    ));
+    store.publish_external_bank(&[], &[(receiver, 3.0)]);
+    assert_eq!(store.real_value(p), Some(1.2));
+
+    store.clone_from(&trial);
+    assert_eq!(store.real_fallback_driven(receiver), Some(false));
+    assert_eq!(store.real_value(p), Some(1.2));
+    store.publish_external_bank(&[], &[(receiver, 3.0)]);
+    assert_eq!(store.real_value(p), Some(3.0));
+}

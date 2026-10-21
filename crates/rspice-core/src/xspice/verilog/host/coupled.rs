@@ -170,6 +170,18 @@ impl DigitalActiveExchange<'_> {
             }
         })
     }
+    /// Whether the net a receiving real driver samples into is driven by its
+    /// own drivers.
+    pub(crate) fn read_real_drive(
+        &self,
+        driver: ExternalRealDriverId,
+    ) -> Result<bool, DigitalRunError> {
+        self.host.store.real_fallback_driven(driver).ok_or_else(|| {
+            DigitalRunError::ExternalExecution {
+                detail: format!("unknown receiving real driver {}", driver.index()),
+            }
+        })
+    }
     #[cfg(test)]
     pub(crate) fn take_changes(&mut self) -> Vec<DigitalBitChange> {
         self.host.store.take_external_bit_changes()
@@ -358,10 +370,21 @@ impl DigitalHost {
             .map_err(|detail| DigitalRunError::ExternalExecution { detail })
     }
 
+    #[cfg(test)]
     pub(crate) fn attach_external_reals(
         &mut self,
         observed: &[DigitalSignalId],
         drivers: &[(DigitalSignalId, EventTarget)],
+    ) -> Result<Vec<ExternalRealDriverId>, DigitalRunError> {
+        self.attach_external_reals_with_fallbacks(observed, drivers, &[])
+    }
+
+    /// `fallbacks` names the receiving drivers by index into `drivers`.
+    pub(crate) fn attach_external_reals_with_fallbacks(
+        &mut self,
+        observed: &[DigitalSignalId],
+        drivers: &[(DigitalSignalId, EventTarget)],
+        fallbacks: &[usize],
     ) -> Result<Vec<ExternalRealDriverId>, DigitalRunError> {
         if self.elaboration_closed {
             return Err(DigitalRunError::ExternalExecution {
@@ -370,7 +393,7 @@ impl DigitalHost {
         }
         let ids = self
             .store
-            .attach_external_reals(observed, drivers)
+            .attach_external_reals_with_fallbacks(observed, drivers, fallbacks)
             .map_err(|detail| DigitalRunError::ExternalExecution { detail })?;
         self.external_real_targets = drivers
             .iter()

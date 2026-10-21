@@ -26,6 +26,9 @@ pub(crate) struct XspiceDigitalBindings {
     real_by_node: BTreeMap<NodeId, DigitalSignalId>,
     real_by_signal: BTreeMap<DigitalSignalId, NodeId>,
     real_drivers: BTreeMap<EventTarget, ExternalRealDriverId>,
+    /// Receiving real driver id -> code-model owner and original port: told
+    /// whether the net it samples into is driven by its own drivers.
+    real_receivers: BTreeMap<usize, (usize, EventTarget)>,
 }
 
 impl XspiceDigitalBindings {
@@ -104,7 +107,8 @@ impl XspiceDigitalBindings {
         let offered: BTreeMap<_, _> = coordinator.real_event_bindings().iter().copied().collect();
         let mut connected = BTreeSet::new();
         let mut targets = Vec::new();
-        for instance in &circuit.xspice_instances {
+        let mut receivers = BTreeMap::new();
+        for (index, instance) in circuit.xspice_instances.iter().enumerate() {
             instance.for_each_event_input_net(|kind, node| {
                 if kind == EventInputKind::Real && offered.contains_key(&node) {
                     connected.insert(node);
@@ -113,6 +117,9 @@ impl XspiceDigitalBindings {
             instance.for_each_real_output_driver(|target| {
                 if offered.contains_key(&target.node_id) {
                     connected.insert(target.node_id);
+                    if instance.receives_real_output(&target.port_name) {
+                        receivers.insert(target.clone(), index);
+                    }
                     targets.push(target);
                 }
             });
@@ -128,6 +135,7 @@ impl XspiceDigitalBindings {
             real_by_node: BTreeMap::new(),
             real_by_signal: BTreeMap::new(),
             real_drivers: BTreeMap::new(),
+            real_receivers: BTreeMap::new(),
         });
         result.real_by_node = connected
             .into_iter()
@@ -143,10 +151,23 @@ impl XspiceDigitalBindings {
             .into_iter()
             .map(|target| (offered[&target.node_id], target))
             .collect();
+        let fallbacks: Vec<_> = targets
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, (_, target))| receivers.contains_key(target).then_some(slot))
+            .collect();
         let ids = coordinator.attach_external_reals(
             &result.real_by_node.values().copied().collect::<Vec<_>>(),
             &targets,
+            &fallbacks,
         )?;
+        result.real_receivers = fallbacks
+            .into_iter()
+            .map(|slot| {
+                let target = &targets[slot].1;
+                (ids[slot].index(), (receivers[target], target.clone()))
+            })
+            .collect();
         result.real_drivers = targets
             .into_iter()
             .map(|(_, target)| target)
@@ -252,6 +273,7 @@ impl XspiceDigitalBindings {
             real_by_node: BTreeMap::new(),
             real_by_signal: BTreeMap::new(),
             real_drivers: BTreeMap::new(),
+            real_receivers: BTreeMap::new(),
         }))
     }
     pub(crate) fn contains_node(&self, node: NodeId) -> bool {
@@ -259,6 +281,16 @@ impl XspiceDigitalBindings {
     }
     pub(crate) fn contains_real_node(&self, node: NodeId) -> bool {
         self.real_by_node.contains_key(&node)
+    }
+}
+
+/// What a receiving real driver is told about its net: high impedance while
+/// the net's own drivers have not driven it, a strong one once they have.
+fn drive_state(driven: bool) -> DigitalValue {
+    if driven {
+        DigitalValue::one()
+    } else {
+        DigitalValue::high_z()
     }
 }
 
@@ -654,6 +686,27 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                 self.circuit
                     .observe_xspice_shared_inout(wave, *owner, target, value);
             }
+            for (&id, (owner, target)) in &self.bindings.real_receivers {
+                // A pending change is the net starting to be driven, so the
+                // receiver starts from undriven.
+                let driven = self
+                    .pending
+                    .iter()
+                    .find_map(|change| match change {
+                        ExternalNetChange::RealDrive { driver, driven, .. }
+                            if driver.index() == id =>
+                        {
+                            Some(!*driven)
+                        }
+                        _ => None,
+                    })
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        exchange.read_real_drive(self.bindings.real_drivers[target])
+                    })?;
+                self.circuit
+                    .observe_xspice_shared_inout(wave, *owner, target, drive_state(driven));
+            }
             self.initialized = true;
         }
         let mut observed = Vec::new();
@@ -697,6 +750,21 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                             ))
                         })?;
                     observed_real.push((node, value));
+                }
+                ExternalNetChange::RealDrive { driver, driven, .. } => {
+                    let (owner, target) = self
+                        .bindings
+                        .real_receivers
+                        .get(&driver.index())
+                        .ok_or_else(|| {
+                            external_error(format!("unbound real receiver {}", driver.index()))
+                        })?;
+                    self.circuit.observe_xspice_shared_inout(
+                        wave,
+                        *owner,
+                        target,
+                        drive_state(driven),
+                    );
                 }
             }
             if self

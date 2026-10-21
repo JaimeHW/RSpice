@@ -188,7 +188,7 @@ pub(crate) use bridges::{TrackingAdcBridge, TrackingDacBridge};
 #[cfg(feature = "veriloga")]
 pub(crate) use connect_bridges::{ConnectAdc, ConnectBidi, ConnectDac, is_connect_converter};
 #[cfg(feature = "veriloga")]
-pub(crate) use connect_real::{ConnectE2r, ConnectR2e};
+pub(crate) use connect_real::{ConnectE2r, ConnectR2e, ConnectRbidir};
 
 pub use digital_output::{
     XyceDAdd, XyceDGate, XyceDLegacyDff, XyceDLegacyGate, XyceDSequential, XyceDTff,

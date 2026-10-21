@@ -26,6 +26,13 @@ pub(crate) enum ExternalNetChange {
         value: f64,
         starts_publication: bool,
     },
+    /// A receiving driver's net has started being driven by its own drivers:
+    /// the receiver's sample no longer stands for it.
+    RealDrive {
+        driver: ExternalRealDriverId,
+        driven: bool,
+        starts_publication: bool,
+    },
 }
 impl ExternalNetChange {
     pub(crate) fn starts_publication(self) -> bool {
@@ -35,6 +42,9 @@ impl ExternalNetChange {
                 starts_publication, ..
             }
             | Self::Real {
+                starts_publication, ..
+            }
+            | Self::RealDrive {
                 starts_publication, ..
             } => starts_publication,
         }
@@ -46,6 +56,9 @@ impl ExternalNetChange {
                 starts_publication, ..
             }
             | Self::Real {
+                starts_publication, ..
+            }
+            | Self::RealDrive {
                 starts_publication, ..
             } => *starts_publication = start,
         }
@@ -98,6 +111,17 @@ pub(super) struct RealTopology {
     pub(super) sources: Vec<(DigitalSignalId, EventTarget)>,
     pub(super) observed: BTreeSet<DigitalSignalId>,
     by_signal: Vec<Vec<usize>>,
+    /// The receiving drivers, ascending: a converter's sample of its node,
+    /// which stands for the net only while nothing else drives it. Empty for
+    /// every net without one, which keeps their topology's fingerprint.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fallbacks: Vec<usize>,
+}
+
+impl RealTopology {
+    fn is_fallback(&self, slot: usize) -> bool {
+        self.fallbacks.binary_search(&slot).is_ok()
+    }
 }
 pub(super) struct ExternalReals {
     pub(super) topology: Arc<RealTopology>,
@@ -170,13 +194,32 @@ impl DigitalSignalStore {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn attach_external_reals(
         &mut self,
         observed: &[DigitalSignalId],
         drivers: &[(DigitalSignalId, EventTarget)],
     ) -> Result<Vec<ExternalRealDriverId>, String> {
+        self.attach_external_reals_with_fallbacks(observed, drivers, &[])
+    }
+
+    /// Attach external real drivers, `fallbacks` naming (by index into
+    /// `drivers`) the receiving ones: each stands for its net only while no
+    /// other driver of the net drives it, so it is never a second driver.
+    pub(crate) fn attach_external_reals_with_fallbacks(
+        &mut self,
+        observed: &[DigitalSignalId],
+        drivers: &[(DigitalSignalId, EventTarget)],
+        fallbacks: &[usize],
+    ) -> Result<Vec<ExternalRealDriverId>, String> {
         if self.external_reals.is_some() {
             return Err("external real participants are already attached".into());
+        }
+        let mut fallbacks = fallbacks.to_vec();
+        fallbacks.sort_unstable();
+        fallbacks.dedup();
+        if fallbacks.last().is_some_and(|slot| *slot >= drivers.len()) {
+            return Err("a receiving real driver is not one of the drivers".into());
         }
         let observed: BTreeSet<_> = observed
             .iter()
@@ -209,7 +252,11 @@ impl DigitalSignalStore {
                 .iter()
                 .map(|member| {
                     let member = usize::from(*member);
-                    self.spans[member].count + by_signal[member].len()
+                    let external = by_signal[member]
+                        .iter()
+                        .filter(|slot| fallbacks.binary_search(slot).is_err())
+                        .count();
+                    self.spans[member].count + external
                 })
                 .sum();
             if self.kinds[index].resolution() == Some(DigitalRealResolution::Single)
@@ -230,6 +277,7 @@ impl DigitalSignalStore {
                 sources: drivers.to_vec(),
                 observed,
                 by_signal,
+                fallbacks,
             }),
             values: vec![0.0; drivers.len()],
         });
@@ -263,6 +311,90 @@ impl DigitalSignalStore {
                 .iter()
                 .map(|&slot| reals.values[slot])
         })
+    }
+
+    /// The external values that resolve `signal`: the receiving drivers'
+    /// when `receiving`, every other driver's otherwise.
+    pub(super) fn resolving_external_reals(
+        &self,
+        signal: DigitalSignalId,
+        receiving: bool,
+    ) -> impl Iterator<Item = f64> + '_ {
+        self.external_reals.iter().flat_map(move |reals| {
+            reals.topology.by_signal[usize::from(signal)]
+                .iter()
+                .filter(move |&&slot| reals.topology.is_fallback(slot) == receiving)
+                .map(|&slot| reals.values[slot])
+        })
+    }
+
+    /// Whether the net `members` join resolves to its receiving drivers'
+    /// sample: it has one, no other external driver, and none of its HDL
+    /// drivers has produced a value (LRM 2.4 section 3.7: a driver that has
+    /// not run contributes nothing).
+    pub(super) fn receives_fallback(&self, members: &[DigitalSignalId]) -> bool {
+        let Some(reals) = self.external_reals.as_ref() else {
+            return false;
+        };
+        let topology = &reals.topology;
+        if topology.fallbacks.is_empty() {
+            return false;
+        }
+        let slots = || {
+            members
+                .iter()
+                .flat_map(|member| &topology.by_signal[usize::from(*member)])
+        };
+        let ran = || {
+            members.iter().any(|member| {
+                let span = self.spans[usize::from(*member)];
+                self.contributions[span.start..span.start + span.count]
+                    .iter()
+                    .any(|contribution| {
+                        matches!(contribution.value, ContributionValue::Real(Some(_)))
+                    })
+            })
+        };
+        slots().any(|&slot| topology.is_fallback(slot))
+            && !slots().any(|&slot| !topology.is_fallback(slot))
+            && !ran()
+    }
+
+    /// Whether the net the receiving driver `driver` samples into is driven
+    /// by its own drivers; `None` for a driver that is not a receiving one.
+    pub(crate) fn real_fallback_driven(&self, driver: ExternalRealDriverId) -> Option<bool> {
+        let topology = &self.external_reals.as_ref()?.topology;
+        if !topology.is_fallback(driver.0) {
+            return None;
+        }
+        let (signal, _) = topology.sources.get(driver.0)?;
+        Some(!self.receives_fallback(self.real_members(signal)))
+    }
+
+    /// Tell each receiving driver of `signal`'s net that its net is now
+    /// driven by its own drivers, after `was_receiving` said it was not.
+    pub(super) fn note_real_drive(&mut self, signal: DigitalSignalId, was_receiving: bool) {
+        if !was_receiving || self.receives_fallback(self.real_members(&signal)) {
+            return;
+        }
+        let Some(reals) = self.external_reals.as_ref() else {
+            return;
+        };
+        let topology = &reals.topology;
+        let receivers: Vec<_> = self
+            .real_members(&signal)
+            .iter()
+            .flat_map(|member| &topology.by_signal[usize::from(*member)])
+            .copied()
+            .filter(|&slot| topology.is_fallback(slot))
+            .collect();
+        for slot in receivers {
+            self.external_changes.push(ExternalNetChange::RealDrive {
+                driver: ExternalRealDriverId(slot),
+                driven: true,
+                starts_publication: true,
+            });
+        }
     }
     pub(crate) fn check_external_real_drives(
         &self,

@@ -73,6 +73,9 @@ pub enum ConverterKind {
     /// The built-in electrical-to-real converter a connect rule selecting
     /// `e2r` inserts.
     E2r,
+    /// The built-in bidirectional real/electrical converter a connect rule
+    /// selecting `rbidir` inserts.
+    Rbidir,
     /// An authored connect module, executing its own body.
     Authored,
     /// The card an auto-bridge template generates.
@@ -199,6 +202,7 @@ impl ConverterInsertion {
                 | ConverterKind::Bidir
                 | ConverterKind::R2e
                 | ConverterKind::E2r
+                | ConverterKind::Rbidir
         )
     }
 

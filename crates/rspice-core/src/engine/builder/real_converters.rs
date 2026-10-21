@@ -1,12 +1,12 @@
-//! Materialize the shipped real-valued connect modules (`r2e`, `e2r`): the
-//! converter a connect rule selecting one inserts on a real boundary, and its
-//! insertion record.
+//! Materialize the shipped real-valued connect modules (`r2e`, `e2r`,
+//! `rbidir`): the converter a connect rule selecting one inserts on a real
+//! boundary, and its insertion record.
 //!
 //! The declaration's defaults convert exactly as a real port no connect rule
 //! reaches: `r2e` with an ideal drive and equal edges is the stock
 //! `real_to_v` with that transition time, and `e2r` publishing every change
-//! is the stock `v_to_real`. Anything else converts through
-//! `xspice/models/connect_real.rs`.
+//! is the stock `v_to_real`. Anything else, and every `rbidir`, converts
+//! through `xspice/models/connect_real.rs`.
 
 use std::sync::Arc;
 
@@ -110,6 +110,24 @@ pub(super) fn materialize(
                 branch: false,
             }
         }
+        XspiceAutoBridgeKind::RealBidi => Converter {
+            label: "rbidir",
+            kind: crate::circuit::ConverterKind::Rbidir,
+            model: Arc::new(crate::xspice::models::ConnectRbidir),
+            // The resolved net in, the receiving sample out on the same net,
+            // the drive onto the node, and the node read back.
+            connections: vec![
+                PortConnection::Real(event_node),
+                PortConnection::Real(event_node),
+                PortConnection::AnalogVector(vec![bridge.node]),
+                PortConnection::Analog(bridge.node),
+            ],
+            parameters: ["rout", "trise", "tfall", "vdelta", "ttol"]
+                .into_iter()
+                .map(|name| (name.to_string(), law.value(name)))
+                .collect(),
+            branch: false,
+        },
         _ => {
             return Err(SimulationError::from(crate::ElaborationError::new(
                 crate::ElaborationErrorKind::Internal,

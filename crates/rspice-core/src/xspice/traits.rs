@@ -807,6 +807,16 @@ pub trait CodeModel: Send + Sync {
         Vec::new()
     }
 
+    /// Whether the real output `port` is a receiving converter's sample of
+    /// its node, which drives the HDL net it meets only while none of the
+    /// net's own drivers has produced a value. The circuit tells the model
+    /// which holds through [`super::CmContext::other_digital_drivers`] on
+    /// `port`: high impedance while the net's drivers have not driven, and a
+    /// strong one once they have. The default is an ordinary driver.
+    fn receives_real_output(&self, _port: &str) -> bool {
+        false
+    }
+
     /// Effective static input thresholds after instance parameter resolution.
     /// A mixed circuit uses these observations to localize analog crossings
     /// before publishing this model's event outputs. An empty list declares
