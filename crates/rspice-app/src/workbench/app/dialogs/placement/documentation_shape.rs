@@ -9,6 +9,34 @@ use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
 
+/// Isolated draft for the Draw documentation shape transaction.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DocumentationShapeDialogState {
+    pub(crate) open: bool,
+    pub(crate) kind: crate::state::DocumentationShapeKind,
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+    pub(crate) expected_shapes: Vec<crate::state::DocumentationShape>,
+}
+
+impl DocumentationShapeDialogState {
+    pub(crate) fn open(
+        &mut self,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        expected_shapes: Vec<crate::state::DocumentationShape>,
+    ) {
+        *self = Self {
+            open: true,
+            kind: crate::state::DocumentationShapeKind::Rectangle,
+            source: Some(source),
+            expected_shapes,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 const TITLE: &str = "Draw documentation shape";
 const PRIMARY: &str = "Draw";
 const DESCRIPTION: &str = "Pick the shape, then drag it on the sheet.";

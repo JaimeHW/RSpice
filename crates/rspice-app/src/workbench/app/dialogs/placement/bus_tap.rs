@@ -11,6 +11,40 @@ use rspice_schematic_editor::{
     session::bus::PendingBusTapPlacement,
 };
 
+/// Retained, isolated draft for the bus-tap placement transaction. The parsed
+/// electrical contract is not published to the schematic until the primary
+/// action validates every field.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BusTapDialogState {
+    pub(crate) open: bool,
+    pub(crate) fields: rspice_schematic_editor::bus_tap_placement::BusTapFields,
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+}
+
+impl BusTapDialogState {
+    /// `bus` is the declaration the sheet leaves no doubt about, or empty.
+    /// Nothing else is prefilled: a sample written into a field is a tap the
+    /// reader never asked for.
+    pub(crate) fn open(
+        &mut self,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        bus: String,
+    ) {
+        *self = Self {
+            open: true,
+            fields: rspice_schematic_editor::bus_tap_placement::BusTapFields {
+                bus,
+                ..Default::default()
+            },
+            source: Some(source),
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 const TITLE: &str = "Place bus tap";
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Connect one bit or a range of a bus.";
@@ -114,7 +148,6 @@ fn placement_source(state: &AppState) -> Result<&EditorRequestSource, String> {
 mod tests {
     use super::*;
     use crate::state::{Bus, BusDeclaration, BusTapOrientation, Point};
-    use crate::workbench::app::dialogs::state::BusTapDialogState;
 
     fn test_source() -> EditorRequestSource {
         crate::workbench::app::schematic_editor_request_source(&AppState::default())

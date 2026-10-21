@@ -7,6 +7,48 @@ use crate::state::{builtin_xspice_library_binding_with_vector_widths, engine_onl
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 
+/// Isolated pre-placement contract for a registry-backed XSPICE device with
+/// one or more vector ports. Width edits remain runtime-only until the
+/// primary action materializes and validates the exact durable binding.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BuiltinXspicePlacementDialogState {
+    pub(crate) open: bool,
+    pub(crate) stable_id: String,
+    pub(crate) display_name: String,
+    pub(crate) vector_ports: Vec<crate::state::CatalogXspiceVectorPort>,
+    pub(crate) widths: std::collections::BTreeMap<String, usize>,
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+    pub(crate) validation_error: Option<String>,
+}
+
+impl BuiltinXspicePlacementDialogState {
+    pub(crate) fn open(
+        &mut self,
+        stable_id: impl Into<String>,
+        display_name: impl Into<String>,
+        vector_ports: Vec<crate::state::CatalogXspiceVectorPort>,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+    ) {
+        let widths = vector_ports
+            .iter()
+            .map(|port| (port.name.clone(), port.default_width))
+            .collect();
+        *self = Self {
+            open: true,
+            stable_id: stable_id.into(),
+            display_name: display_name.into(),
+            vector_ports,
+            widths,
+            source: Some(source),
+            validation_error: None,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Choose how many pins each vector port has.";
 

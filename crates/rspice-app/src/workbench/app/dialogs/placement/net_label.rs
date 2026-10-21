@@ -20,6 +20,55 @@ use crate::ui::widgets::{CanvasEntry, CanvasEntryChoice};
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
+/// Isolated draft for one snapped, typed net-label placement.
+///
+/// The canvas click supplies only the anchor and immutable document
+/// authority. No durable schematic object exists until the dialog's primary
+/// action validates and publishes the complete label.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NetLabelPlacementDialogState {
+    pub(crate) open: bool,
+    pub(crate) name: String,
+    pub(crate) anchor: Option<crate::state::Point>,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    /// Which label the armed tool is placing. The direction of an off-sheet
+    /// connector is part of the draft, so it publishes with the name in one
+    /// transaction rather than needing a second edit.
+    pub(crate) kind: crate::state::NetLabelKind,
+    /// Where on the screen the entry sits, taken from the click that opened
+    /// it. Kept, so the card does not follow the pointer once it is up.
+    pub(crate) screen_anchor: Option<egui::Pos2>,
+    pub(crate) validation_error: Option<String>,
+}
+
+impl NetLabelPlacementDialogState {
+    pub(crate) fn open(
+        &mut self,
+        anchor: crate::state::Point,
+        authority: SchematicEditAuthority,
+        kind: crate::state::NetLabelKind,
+    ) {
+        *self = Self {
+            open: true,
+            name: String::new(),
+            anchor: Some(anchor),
+            authority: Some(authority),
+            kind,
+            screen_anchor: None,
+            validation_error: None,
+        };
+    }
+
+    /// The entry's place on the screen, fixed the first frame it is drawn.
+    pub(crate) fn screen_anchor_or(&mut self, pointer: egui::Pos2) -> egui::Pos2 {
+        *self.screen_anchor.get_or_insert(pointer)
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 const TITLE: &str = "Net label";
 const CONNECTOR_TITLE: &str = "Off-sheet connector";
 

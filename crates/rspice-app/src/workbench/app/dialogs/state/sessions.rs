@@ -388,13 +388,15 @@ pub struct DialogState {
     pub command_palette: CommandPaletteState,
 
     /// Validated configuration transaction for Place bus tap.
-    pub(crate) bus_tap: BusTapDialogState,
+    pub(crate) bus_tap: crate::workbench::app::dialogs::placement::bus_tap::BusTapDialogState,
 
     /// Exact vector-port widths for a built-in XSPICE placement.
-    pub(crate) builtin_xspice_placement: BuiltinXspicePlacementDialogState,
+    pub(crate) builtin_xspice_placement:
+        crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacementDialogState,
 
     /// Snapped, typed net-label placement transaction.
-    pub(crate) net_label_placement: NetLabelPlacementDialogState,
+    pub(crate) net_label_placement:
+        crate::workbench::app::dialogs::placement::net_label::NetLabelPlacementDialogState,
 
     /// Display options: device-local schematic visibility and drawing-sheet
     /// layers, neither of which modifies project-owned design data.
@@ -420,13 +422,15 @@ pub struct DialogState {
         crate::workbench::app::dialogs::engineering_table::EngineeringTableDialogState,
 
     /// Typed interface-port placement transaction.
-    pub(crate) pin_port: PinPortDialogState,
+    pub(crate) pin_port: crate::workbench::app::dialogs::placement::pin_port::PinPortDialogState,
 
     /// Non-electrical typed design-note placement transaction.
-    pub(crate) design_note: DesignNoteDialogState,
+    pub(crate) design_note:
+        crate::workbench::app::dialogs::placement::design_note::DesignNoteDialogState,
 
     /// Non-electrical typed documentation-shape placement transaction.
-    pub(crate) documentation_shape: DocumentationShapeDialogState,
+    pub(crate) documentation_shape:
+        crate::workbench::app::dialogs::placement::documentation_shape::DocumentationShapeDialogState,
 
     /// Connectivity-aware selected-object movement transaction.
     pub(crate) move_selection: MoveSelectionDialogState,

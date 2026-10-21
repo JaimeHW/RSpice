@@ -21,6 +21,36 @@ use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
 use rspice_schematic_editor::vector_preview::deck_bits;
 
+/// Draft for Create pins.
+///
+/// The contract fields outlive a close, as they do in Virtuoso: a reader who
+/// has just placed four logic inputs is far more likely to place a fifth than
+/// to want the form's defaults back. The names and the document authority do
+/// not — those belong to one batch, in one document.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PinPortDialogState {
+    pub(crate) open: bool,
+    pub(crate) fields: rspice_schematic_editor::pin_placement::PinPlacementFields,
+    /// The document this batch was named for.
+    pub(crate) authority: Option<crate::state::PlacementAuthority>,
+    /// The last name armed this session, which the next open suggests from.
+    pub(crate) last_name: String,
+}
+
+impl PinPortDialogState {
+    pub(crate) fn open(&mut self, names: String, authority: crate::state::PlacementAuthority) {
+        self.open = true;
+        self.fields.names = names;
+        self.authority = Some(authority);
+    }
+
+    pub(crate) fn close(&mut self) {
+        self.open = false;
+        self.fields.names.clear();
+        self.authority = None;
+    }
+}
+
 const TITLE: &str = "Create pins";
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Name the pins of this cell, then click to place each one.";

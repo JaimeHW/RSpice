@@ -9,6 +9,34 @@ use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
 
+/// Isolated draft for the Place text or design note transaction.
+///
+/// The text starts empty. The sample the form used to open holding was
+/// written into the field as a value, so an untouched form placed a note that
+/// said it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DesignNoteDialogState {
+    pub(crate) open: bool,
+    pub(crate) kind: crate::state::DesignNoteKind,
+    pub(crate) text: String,
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+}
+
+impl DesignNoteDialogState {
+    pub(crate) fn open(&mut self, source: rspice_schematic_editor::requests::EditorRequestSource) {
+        *self = Self {
+            open: true,
+            kind: crate::state::DesignNoteKind::PlainText,
+            text: String::new(),
+            source: Some(source),
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 const TITLE: &str = "Place text or design note";
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Write the note, then click to place it.";
