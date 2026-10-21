@@ -425,7 +425,7 @@ impl PreparedComponentRename {
         )?;
         self.references.publish(&mut state.workspace.content);
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-        state.ui.netlist.current_generation_input_digest = None;
+        state.netlist_artifacts.current_generation_input_digest = None;
         if let Some(change) = &mut record.annotation {
             let restored = if forward {
                 &mut change.after_revision

@@ -2138,8 +2138,7 @@ fn empty_diagnostic_row(ui: &mut Ui, message: &str) {
 /// deck, and a marked line when the deck is not the one the schematic implies.
 fn generated_provenance(ui: &mut Ui, state: &AppState) {
     let source = state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()
         .and_then(|document| document.generated_artifact())
@@ -2273,7 +2272,7 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
 /// What is wrong with the generated deck, or nothing when it matches the
 /// schematic. A deck that is current — validated or not — says nothing.
 fn generated_state(state: &AppState) -> Option<(&'static str, Problem)> {
-    let netlist = &state.ui.netlist;
+    let netlist = &state.netlist_artifacts;
     if netlist.generated_source.is_empty() {
         Some(("Not generated yet", Problem::Warning))
     } else if netlist.generation_error.is_some() {

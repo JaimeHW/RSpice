@@ -26,7 +26,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
     let current_available = if owned {
         app.state.ui.netlist.owned_document.is_some()
     } else {
-        app.state.ui.netlist.generated_document.is_some()
+        app.state.netlist_artifacts.generated_document.is_some()
     };
     if history_len == 0 || !current_available {
         app.state.ui.netlist.comparison_dialog.open = false;

@@ -123,7 +123,7 @@ pub(crate) fn open_source_search_in_bundle(
         closure_digest: bundle.closure_digest(),
         generated_reference_revision: app.state.ui.netlist.revision,
         generated_reference_digest: ContentDigest::from_bytes(
-            Sha256::digest(app.state.ui.netlist.generated_source.as_bytes()).into(),
+            Sha256::digest(app.state.netlist_artifacts.generated_source.as_bytes()).into(),
         ),
         language,
         active_path,
@@ -403,7 +403,7 @@ fn current_bundle<'a>(
     if search.include_generated_references
         && (app.state.ui.netlist.revision != search.generated_reference_revision
             || ContentDigest::from_bytes(
-                Sha256::digest(app.state.ui.netlist.generated_source.as_bytes()).into(),
+                Sha256::digest(app.state.netlist_artifacts.generated_source.as_bytes()).into(),
             ) != search.generated_reference_digest)
     {
         return Err(
@@ -464,9 +464,9 @@ fn search_documents<'a>(
             .collect::<Vec<_>>();
     if search.include_generated_references
         && search.scope == CodeSourceSearchScope::ActiveLanguageProject
-        && !app.state.ui.netlist.generated_source.is_empty()
+        && !app.state.netlist_artifacts.generated_source.is_empty()
     {
-        let generated = app.state.ui.netlist.generated_source.as_str();
+        let generated = app.state.netlist_artifacts.generated_source.as_str();
         documents.push(SearchDocument {
             logical_path: GENERATED_REFERENCE_PATH,
             searchable_source: generated,
@@ -1088,7 +1088,7 @@ mod tests {
     #[test]
     fn generated_references_are_find_only_and_stale_bound() {
         let mut app = veriloga_view_app();
-        app.state.ui.netlist.generated_source = "XMODEL generated_reference\n".to_owned();
+        app.state.netlist_artifacts.generated_source = "XMODEL generated_reference\n".to_owned();
         app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
         let active_path = app
             .state
@@ -1114,8 +1114,7 @@ mod tests {
         assert!(!results.matches[0].editable);
 
         app.state
-            .ui
-            .netlist
+            .netlist_artifacts
             .generated_source
             .push_str("* changed\n");
         app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);

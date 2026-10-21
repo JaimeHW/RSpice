@@ -100,13 +100,13 @@ pub(crate) fn action_export_netlist_with_io(
 ) {
     let netlist_content =
         if state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
-            if state.ui.netlist.generated_source.is_empty() {
+            if state.netlist_artifacts.generated_source.is_empty() {
                 state.prompt("There is no generated netlist to export.");
                 return;
             }
-            if state.ui.netlist.generation_error.is_some()
-                || state.ui.netlist.generated_input_digest
-                    != state.ui.netlist.current_generation_input_digest
+            if state.netlist_artifacts.generation_error.is_some()
+                || state.netlist_artifacts.generated_input_digest
+                    != state.netlist_artifacts.current_generation_input_digest
             {
                 state.prompt("The generated netlist is out of date; regenerate it to export.");
                 return;
@@ -114,10 +114,10 @@ pub(crate) fn action_export_netlist_with_io(
             match format {
                 crate::io::NetlistFormat::Spectre => {
                     super::netlist_compat::spice_to_ahdl_compatible_netlist(
-                        &state.ui.netlist.generated_source,
+                        &state.netlist_artifacts.generated_source,
                     )
                 }
-                _ => state.ui.netlist.generated_source.clone(),
+                _ => state.netlist_artifacts.generated_source.clone(),
             }
         } else {
             if state.schematic.document().components.is_empty() {
@@ -193,7 +193,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     include_source_map: bool,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
-    let Some(document) = state.ui.netlist.generated_document.as_ref() else {
+    let Some(document) = state.netlist_artifacts.generated_document.as_ref() else {
         state.prompt("There is no generated netlist to export.");
         return false;
     };
@@ -201,10 +201,11 @@ pub(crate) fn action_export_generated_netlist_with_options(
         state.prompt("The selected document is not a generated netlist.");
         return false;
     };
-    if state.ui.netlist.generation_error.is_some()
-        || state.ui.netlist.generated_input_digest
-            != state.ui.netlist.current_generation_input_digest
-        || state.ui.netlist.generated_input_digest != Some(artifact.provenance().input().digest())
+    if state.netlist_artifacts.generation_error.is_some()
+        || state.netlist_artifacts.generated_input_digest
+            != state.netlist_artifacts.current_generation_input_digest
+        || state.netlist_artifacts.generated_input_digest
+            != Some(artifact.provenance().input().digest())
     {
         state.prompt("The generated netlist is out of date; regenerate it to export.");
         return false;

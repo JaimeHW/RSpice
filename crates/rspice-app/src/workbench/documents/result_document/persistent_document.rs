@@ -334,7 +334,7 @@ fn compatible_active_viewer(
 }
 
 fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
-    let netlist = &state.ui.netlist;
+    let netlist = &state.netlist_artifacts;
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest

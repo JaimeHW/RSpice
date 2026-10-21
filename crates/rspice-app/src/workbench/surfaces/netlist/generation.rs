@@ -50,7 +50,9 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
         .and_then(crate::state::DependencyMetadata::source)
         .map(str::to_owned)
         .or_else(|| match app.state.ui.netlist.active_document {
-            ActiveNetlistDocument::Generated => Some(app.state.ui.netlist.generated_source.clone()),
+            ActiveNetlistDocument::Generated => {
+                Some(app.state.netlist_artifacts.generated_source.clone())
+            }
             ActiveNetlistDocument::OwnedSource => {
                 app.state.workspace.content.netlist_source.clone()
             }
@@ -64,9 +66,7 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
     {
         app.state.simulation.source.netlist_content = projected;
         app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
-        crate::workbench::documents::netlist_document::invalidate_source_evidence(
-            &mut app.state.ui.netlist,
-        );
+        crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut app.state);
     }
 }
 
@@ -77,24 +77,21 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         ) {
             Ok(digest) => digest,
             Err(error) => {
-                app.state.ui.netlist.current_generation_input_digest = None;
-                app.state.ui.netlist.generation_error = Some(error.to_string());
+                app.state.netlist_artifacts.current_generation_input_digest = None;
+                app.state.netlist_artifacts.generation_error = Some(error.to_string());
                 return;
             }
         };
     let authoritative_input_changed = app
         .state
-        .ui
-        .netlist
+        .netlist_artifacts
         .current_generation_input_digest
         .is_some_and(|previous| previous != input_digest);
-    app.state.ui.netlist.current_generation_input_digest = Some(input_digest);
+    app.state.netlist_artifacts.current_generation_input_digest = Some(input_digest);
     if authoritative_input_changed {
         app.invalidate_simulation_preflight();
-        crate::workbench::documents::netlist_document::invalidate_source_evidence(
-            &mut app.state.ui.netlist,
-        );
-        if let Some(document) = app.state.ui.netlist.generated_document.as_mut() {
+        crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut app.state);
+        if let Some(document) = app.state.netlist_artifacts.generated_document.as_mut() {
             let _ = document.invalidate_validation(document.content_digest());
         }
         if let Some(document) = app.state.ui.netlist.owned_document.as_mut() {
@@ -102,13 +99,13 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
             app.state.workspace.content.netlist_document = Some(document.clone());
         }
     }
-    if app.state.ui.netlist.generated_input_digest == Some(input_digest)
-        && !app.state.ui.netlist.generated_source.is_empty()
+    if app.state.netlist_artifacts.generated_input_digest == Some(input_digest)
+        && !app.state.netlist_artifacts.generated_source.is_empty()
     {
         return;
     }
     if app.state.schematic.document().components.is_empty() {
-        app.state.ui.netlist.generation_error =
+        app.state.netlist_artifacts.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
         return;
     }
@@ -120,20 +117,17 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
 
     let generated =
         crate::workbench::menu_bar::build_menu_netlist(&app.state, crate::io::NetlistFormat::Spice);
-    let failed =
-        |netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
-         error: String| {
-            netlist.failed_generation_input_digest = Some(input_digest);
-            netlist.generation_error = Some(error);
-        };
+    let failed = |state: &mut AppState, error: String| {
+        state.ui.netlist.failed_generation_input_digest = Some(input_digest);
+        state.netlist_artifacts.generation_error = Some(error);
+    };
     match generated {
         Ok(generated) => {
             match publish_generated_document(&app.state, input_digest, generated.source) {
                 Ok((generated_document, owned_document)) => {
                     if let (Some(previous), Some(current)) = (
                         app.state
-                            .ui
-                            .netlist
+                            .netlist_artifacts
                             .generated_document
                             .as_ref()
                             .and_then(crate::state::NetlistDocument::generated_artifact),
@@ -167,25 +161,26 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                     }
                     let Some(generated_artifact) = generated_document.generated_artifact() else {
                         failed(
-                            &mut app.state.ui.netlist,
+                            &mut app.state,
                             "Generated document publication returned no generated artifact."
                                 .to_owned(),
                         );
                         return;
                     };
-                    app.state.ui.netlist.generated_source = generated_artifact.source().to_owned();
-                    app.state.ui.netlist.generated_document = Some(generated_document);
+                    app.state.netlist_artifacts.generated_source =
+                        generated_artifact.source().to_owned();
+                    app.state.netlist_artifacts.generated_document = Some(generated_document);
                     app.state.workspace.content.netlist_document = owned_document.clone();
                     app.state.ui.netlist.owned_document = owned_document;
-                    app.state.ui.netlist.generated_input_digest = Some(input_digest);
-                    app.state.ui.netlist.generation_error = None;
+                    app.state.netlist_artifacts.generated_input_digest = Some(input_digest);
+                    app.state.netlist_artifacts.generation_error = None;
                     app.state.ui.netlist.failed_generation_input_digest = None;
                     crate::workbench::menu_bar::record_netlist_warnings(
                         &mut app.state,
                         generated.warnings,
                     );
                 }
-                Err(error) => failed(&mut app.state.ui.netlist, error),
+                Err(error) => failed(&mut app.state, error),
             }
         }
         Err(reasons) => {
@@ -194,7 +189,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                 LogSource::Studio,
                 crate::workbench::menu_bar::netlist_failure_text("Netlist generation", &reasons),
             );
-            failed(&mut app.state.ui.netlist, reasons.join("; "));
+            failed(&mut app.state, reasons.join("; "));
         }
     }
 }
@@ -215,7 +210,7 @@ pub(super) fn publish_generated_document(
         GeneratedArtifact::try_from_utf8(provenance, source.into_bytes(), dependencies, source_map)
             .map_err(|error| error.to_string())?;
 
-    let generated_document = if let Some(existing) = &state.ui.netlist.generated_document {
+    let generated_document = if let Some(existing) = &state.netlist_artifacts.generated_document {
         let mut next = existing.clone();
         let expected_digest = existing
             .generated_artifact()
@@ -591,8 +586,7 @@ mod tests {
         refresh_generated_artifact(&mut app);
         let error = app
             .state
-            .ui
-            .netlist
+            .netlist_artifacts
             .generation_error
             .clone()
             .expect("the failure is stated on the page");
@@ -620,7 +614,7 @@ mod tests {
             "the same inputs are neither rebuilt nor reported again"
         );
         assert_eq!(
-            app.state.ui.netlist.generation_error.as_deref(),
+            app.state.netlist_artifacts.generation_error.as_deref(),
             Some(error.as_str())
         );
     }

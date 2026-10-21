@@ -141,6 +141,7 @@ fn install_imported_netlist(
     // not delete immutable datasets or a previously active top deck.
     candidate.design_execution_epoch = candidate.design_execution_epoch.wrapping_add(1);
     candidate.ui.netlist = Default::default();
+    *candidate.netlist_artifacts = Default::default();
     candidate.workbench.netlist_open_documents.clear();
     let source_digest = crate::state::content_digest(&source);
     let reopenable_import = source_path.is_some();
@@ -157,9 +158,7 @@ fn install_imported_netlist(
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     candidate.ui.netlist.active_document_initialized = true;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    crate::workbench::documents::netlist_document::invalidate_source_evidence(
-        &mut candidate.ui.netlist,
-    );
+    crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut candidate);
     candidate
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);

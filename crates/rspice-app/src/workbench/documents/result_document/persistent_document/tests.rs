@@ -1214,9 +1214,9 @@ fn latest_tracking_fixture() -> LatestFixture {
     app.state.simulation.source.netlist_content =
         "* latest tracking\nV1 out 0 1\n.end\n".to_owned();
     let input_digest = digest(0x60);
-    app.state.ui.netlist.generation_error = None;
-    app.state.ui.netlist.generated_input_digest = Some(input_digest);
-    app.state.ui.netlist.current_generation_input_digest = Some(input_digest);
+    app.state.netlist_artifacts.generation_error = None;
+    app.state.netlist_artifacts.generated_input_digest = Some(input_digest);
+    app.state.netlist_artifacts.current_generation_input_digest = Some(input_digest);
     let source_digest = current_result_source_digest(&app.state)
         .expect("the fixture states a current authored source");
 

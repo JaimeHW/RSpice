@@ -203,7 +203,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
             utf8_source.to_owned(),
         )
     );
-    assert!(app.state.ui.netlist.validation.is_none());
+    assert!(app.state.netlist_artifacts.validation.is_none());
     let imported_digest = app.state.ui.netlist.externally_saved_content_digest;
     let bytes = Rc::new(RefCell::new(Vec::new()));
     let io = CaptureIo {
@@ -219,7 +219,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
     ));
 
     assert_eq!(bytes.borrow().as_slice(), utf8_source.as_bytes());
-    assert!(app.state.ui.netlist.validation.is_none());
+    assert!(app.state.netlist_artifacts.validation.is_none());
     assert_eq!(
         app.state
             .workspace
@@ -1464,7 +1464,7 @@ fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding()
         "standalone.cir",
     ));
     assert!(validate_visible_netlist_source(&mut app));
-    assert!(app.state.ui.netlist.validation.is_some());
+    assert!(app.state.netlist_artifacts.validation.is_some());
     assert!(
         app.state
             .ui

@@ -198,14 +198,13 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
         return;
     }
     let mut dialog = app.state.ui.netlist.export_dialog.clone();
-    let current = app.state.ui.netlist.generation_error.is_none()
-        && app.state.ui.netlist.generated_document.is_some()
-        && app.state.ui.netlist.generated_input_digest
-            == app.state.ui.netlist.current_generation_input_digest;
+    let current = app.state.netlist_artifacts.generation_error.is_none()
+        && app.state.netlist_artifacts.generated_document.is_some()
+        && app.state.netlist_artifacts.generated_input_digest
+            == app.state.netlist_artifacts.current_generation_input_digest;
     let (dependency_count, dependencies_sealed) = app
         .state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()
         .map(|document| {

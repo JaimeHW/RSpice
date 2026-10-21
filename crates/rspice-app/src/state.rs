@@ -14,6 +14,7 @@ pub(crate) mod library_browser;
 mod model_bound_symbol;
 pub(crate) mod model_hub;
 pub(crate) mod model_library;
+mod netlist_artifacts;
 pub(crate) use rspice_design::netlist_document;
 pub(crate) mod netlist_diagnostics;
 pub(crate) mod notices;
@@ -79,6 +80,7 @@ pub use model_bound_symbol::{
     load_model_bound_symbol, materialize_symbol_document, prepare_symbol_construction,
 };
 pub use model_library::ModelLibraryManager;
+pub(crate) use netlist_artifacts::{NetlistArtifacts, NetlistValidationReceipt};
 #[cfg(test)]
 pub use netlist_document::DocumentOwnership;
 pub use netlist_document::{

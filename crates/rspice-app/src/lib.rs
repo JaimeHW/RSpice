@@ -344,7 +344,7 @@ impl RSpiceApp {
             .map_err(|error| format!("project library publication failed: {error}"))?;
         self.state.workspace.content.project_metadata_dirty = true;
         self.state.design_execution_epoch = self.state.design_execution_epoch.wrapping_add(1);
-        self.state.ui.netlist.current_generation_input_digest = None;
+        self.state.netlist_artifacts.current_generation_input_digest = None;
         self.state.clear_project_design_history();
         Ok(receipt)
     }

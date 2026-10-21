@@ -1850,12 +1850,12 @@ mod tests {
         )
         .expect("artifact");
 
-        app.state.ui.netlist.generated_source = SHOW_IN_NETLIST_DECK.to_owned();
-        app.state.ui.netlist.generated_document = Some(
+        app.state.netlist_artifacts.generated_source = SHOW_IN_NETLIST_DECK.to_owned();
+        app.state.netlist_artifacts.generated_document = Some(
             NetlistDocument::from_generated(NetlistDocumentId::new(), artifact).expect("document"),
         );
-        app.state.ui.netlist.generated_input_digest = Some(digest);
-        app.state.ui.netlist.current_generation_input_digest = Some(digest);
+        app.state.netlist_artifacts.generated_input_digest = Some(digest);
+        app.state.netlist_artifacts.current_generation_input_digest = Some(digest);
         app.state.ui.netlist.active_document_initialized = true;
         (app, load_id, unmapped_id)
     }
@@ -1923,8 +1923,8 @@ mod tests {
             .editor
             .selection
             .select_only_component(load_id);
-        app.state.ui.netlist.generated_document = None;
-        app.state.ui.netlist.generated_source.clear();
+        app.state.netlist_artifacts.generated_document = None;
+        app.state.netlist_artifacts.generated_source.clear();
         assert_eq!(
             Command::ShowInNetlist.availability(&app),
             CommandAvailability::Disabled(

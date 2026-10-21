@@ -228,7 +228,7 @@ pub(in crate::workbench) fn apply_remediation(
             // active. Routing itself goes through the same resolution the
             // Problems rows use, so a netlist finding lands the same way
             // wherever it was reported from.
-            if app.state.ui.netlist.generated_document.is_some() {
+            if app.state.netlist_artifacts.generated_document.is_some() {
                 netlist_document::open_generated_primary(&mut app.state);
             } else {
                 app.state.prompt(

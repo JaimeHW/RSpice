@@ -11,7 +11,7 @@ use crate::product::ObjectRevision;
 use crate::state::netlist_diagnostics::Diagnostic;
 use crate::state::{
     DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
-    NetlistDocumentId, SourceLocator,
+    NetlistDocumentId, NetlistValidationReceipt, SourceLocator,
 };
 
 const ROOT: &str = "owned dependency fixture\n.include \"models/resistor.inc\"\nV1 out 0 1\nR1 out 0 rmodel\n.op\n.end\n";
@@ -66,8 +66,8 @@ fn owned_dependency_state() -> AppState {
         revision_history: Vec::new(),
         owned_includes: Vec::new(),
     });
-    state.ui.netlist.generated_source = ROOT.to_owned();
-    state.ui.netlist.generated_document = Some(generated);
+    state.netlist_artifacts.generated_source = ROOT.to_owned();
+    state.netlist_artifacts.generated_document = Some(generated);
     state.ui.netlist.owned_document = Some(owned);
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
@@ -115,7 +115,7 @@ fn reactivating_the_active_owned_root_preserves_validation_evidence() {
     let mut state = owned_dependency_state();
     state.ui.netlist.revision = 9;
     let digest = crate::state::content_digest(ROOT);
-    state.ui.netlist.validation = Some(NetlistValidationReceipt {
+    state.netlist_artifacts.validation = Some(NetlistValidationReceipt {
         visible_content_digest: digest,
         executable_source_digest: crate::product::ContentDigest::from_bytes([0x51; 32]),
         prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x52; 32]),
@@ -123,13 +123,13 @@ fn reactivating_the_active_owned_root_preserves_validation_evidence() {
         task_count: 1,
         advisory_count: 0,
     });
-    let validation = state.ui.netlist.validation.clone();
+    let validation = state.netlist_artifacts.validation.clone();
 
     assert!(open_owned_primary(&mut state));
     assert!(open_owned_primary(&mut state));
 
     assert_eq!(state.ui.netlist.revision, 9);
-    assert_eq!(state.ui.netlist.validation, validation);
+    assert_eq!(state.netlist_artifacts.validation, validation);
     assert_eq!(state.simulation.source.netlist_content, ROOT);
 }
 

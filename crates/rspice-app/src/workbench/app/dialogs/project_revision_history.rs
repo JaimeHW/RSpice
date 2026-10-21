@@ -425,7 +425,7 @@ impl RSpiceApp {
                 .map_err(|error| error.to_string())?;
             self.state.sync_active_schematic_to_workspace();
             self.invalidate_simulation_preflight();
-            self.state.ui.netlist.current_generation_input_digest = None;
+            self.state.netlist_artifacts.current_generation_input_digest = None;
             Ok::<(), String>(())
         })();
 

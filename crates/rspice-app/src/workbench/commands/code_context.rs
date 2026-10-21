@@ -141,7 +141,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             return None;
         }
         let root_document = match root {
-            ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
+            ActiveNetlistDocument::Generated => state.netlist_artifacts.generated_document.as_ref(),
             ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
             ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
         }?;
@@ -189,8 +189,8 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
     let (document_kind, ownership, document_identity, logical_path, revision, source, compare) =
         match active {
             ActiveNetlistDocument::Generated => {
-                let document = state.ui.netlist.generated_document.as_ref()?;
-                if state.ui.netlist.generated_source != document.source()
+                let document = state.netlist_artifacts.generated_document.as_ref()?;
+                if state.netlist_artifacts.generated_source != document.source()
                     || state.simulation.source.netlist_content != document.source()
                 {
                     return None;
@@ -228,7 +228,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                 )
             }
             ActiveNetlistDocument::GeneratedDiff => {
-                let document = state.ui.netlist.generated_document.as_ref()?;
+                let document = state.netlist_artifacts.generated_document.as_ref()?;
                 if state.ui.netlist.generated_diff_source.is_empty() {
                     return None;
                 }
@@ -279,9 +279,9 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
         };
     let source_is_present = !source.trim().is_empty();
     let generated_current = active != ActiveNetlistDocument::Generated
-        || (state.ui.netlist.generation_error.is_none()
-            && state.ui.netlist.generated_input_digest
-                == state.ui.netlist.current_generation_input_digest);
+        || (state.netlist_artifacts.generation_error.is_none()
+            && state.netlist_artifacts.generated_input_digest
+                == state.netlist_artifacts.current_generation_input_digest);
     let editable = ownership == CodeDocumentOwnership::ProjectOwned
         && !state.workbench.safe_mode.project_read_only();
     Some(CodeCommandContext {

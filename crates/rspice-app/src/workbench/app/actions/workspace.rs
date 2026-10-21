@@ -2218,12 +2218,11 @@ fn selected_instance_generated_line(
         .selection
         .single_component()
         .ok_or("select one instance")?;
-    if state.ui.netlist.generated_source.trim().is_empty() {
+    if state.netlist_artifacts.generated_source.trim().is_empty() {
         return Err(NO_DECK);
     }
     let artifact = state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()
         .and_then(crate::state::NetlistDocument::generated_artifact)
@@ -2244,8 +2243,8 @@ fn selected_instance_generated_line(
             .and_then(crate::state::GeneratedSourceMapEntry::instance_identity)
             .unwrap_or_default()
             .to_owned(),
-        stale: state.ui.netlist.generated_input_digest
-            != state.ui.netlist.current_generation_input_digest,
+        stale: state.netlist_artifacts.generated_input_digest
+            != state.netlist_artifacts.current_generation_input_digest,
     })
 }
 

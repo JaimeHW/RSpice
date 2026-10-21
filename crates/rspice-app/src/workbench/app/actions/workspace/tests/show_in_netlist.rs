@@ -71,12 +71,12 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
     )
     .expect("artifact");
 
-    state.ui.netlist.generated_source = DECK.to_owned();
-    state.ui.netlist.generated_document = Some(
+    state.netlist_artifacts.generated_source = DECK.to_owned();
+    state.netlist_artifacts.generated_document = Some(
         NetlistDocument::from_generated(NetlistDocumentId::new(), artifact).expect("document"),
     );
-    state.ui.netlist.generated_input_digest = Some(digest);
-    state.ui.netlist.current_generation_input_digest = Some(digest);
+    state.netlist_artifacts.generated_input_digest = Some(digest);
+    state.netlist_artifacts.current_generation_input_digest = Some(digest);
     // The engineer is looking at their own deck, so the jump has a document
     // transition to make rather than a no-op reactivation to skip.
     state.ui.netlist.active_document =
@@ -148,8 +148,8 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
         .editor
         .selection
         .select_only_component(source_id);
-    state.ui.netlist.generated_document = None;
-    state.ui.netlist.generated_source.clear();
+    state.netlist_artifacts.generated_document = None;
+    state.netlist_artifacts.generated_source.clear();
     assert_eq!(
         state.selected_instance_netlist_block(),
         Some("no generated netlist yet — open the Netlist workspace to generate one")
@@ -197,7 +197,7 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
         .editor
         .selection
         .select_only_component(source_id);
-    state.ui.netlist.current_generation_input_digest =
+    state.netlist_artifacts.current_generation_input_digest =
         Some(crate::state::content_digest("edited-schematic"));
 
     assert_eq!(state.selected_instance_netlist_block(), None);
@@ -233,8 +233,7 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
     // does: the active line, its map entry, and the component it names.
     let active_line = state.ui.netlist.cursor_line.saturating_add(1);
     let revealed = state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()
         .and_then(crate::state::NetlistDocument::generated_artifact)

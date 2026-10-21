@@ -19,7 +19,7 @@ pub(super) fn open_ownership_dialog(
         let _ = open_owned_source(state);
         return;
     }
-    if state.ui.netlist.generated_document.is_none() {
+    if state.netlist_artifacts.generated_document.is_none() {
         state.prompt("Generate the netlist before making an editable copy.");
         return;
     }
@@ -83,7 +83,7 @@ pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) 
     if !app.state.ui.netlist.ownership_dialog.open {
         return;
     }
-    let Some(generated) = app.state.ui.netlist.generated_document.as_ref() else {
+    let Some(generated) = app.state.netlist_artifacts.generated_document.as_ref() else {
         app.state.ui.netlist.ownership_dialog.open = false;
         return;
     };
@@ -178,8 +178,7 @@ pub(super) fn create_owned_source(
         return Err("An owned SPICE source artifact already exists.".to_owned());
     }
     let generated = state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()
         .ok_or_else(|| "No current generated artifact is available.".to_owned())?;
@@ -217,9 +216,7 @@ pub(super) fn create_owned_source(
     state.ui.netlist.externally_saved_content_digest = None;
     state.simulation.source.netlist_content = source;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    crate::workbench::documents::netlist_document::invalidate_source_evidence(
-        &mut state.ui.netlist,
-    );
+    crate::workbench::documents::netlist_document::invalidate_source_evidence(state);
     Ok(())
 }
 
@@ -311,7 +308,7 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
         return false;
     }
     if state.ui.netlist.owned_document.is_none() {
-        let Some(generated) = state.ui.netlist.generated_document.as_ref() else {
+        let Some(generated) = state.netlist_artifacts.generated_document.as_ref() else {
             return false;
         };
         let source = state
@@ -400,8 +397,6 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
-    crate::workbench::documents::netlist_document::invalidate_source_evidence(
-        &mut state.ui.netlist,
-    );
+    crate::workbench::documents::netlist_document::invalidate_source_evidence(state);
     true
 }

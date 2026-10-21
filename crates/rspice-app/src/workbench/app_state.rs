@@ -101,6 +101,9 @@ pub struct AppState {
     /// already in [`Self::log_buffer`]; the shell raises the toasts. Runtime
     /// only: never persisted, and a clone starts empty.
     pub(crate) notices: NoticeQueue,
+    /// The generated deck and its validation evidence. Runtime only. Boxed,
+    /// as it was inside [`Self::ui`], so a moved state stays the same size.
+    pub(crate) netlist_artifacts: Box<crate::state::NetlistArtifacts>,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Runtime collaboration-lock authority for governed project library
@@ -245,7 +248,7 @@ impl AppState {
             .expect("the library mutation receipt was fully preflighted");
         self.workspace.content.project_metadata_dirty = true;
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.ui.netlist.current_generation_input_digest = None;
+        self.netlist_artifacts.current_generation_input_digest = None;
         self.clear_project_design_history();
     }
 
@@ -676,7 +679,7 @@ impl AppState {
 
         self.workspace.content.project_metadata_dirty = true;
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.ui.netlist.current_generation_input_digest = None;
+        self.netlist_artifacts.current_generation_input_digest = None;
         self.clear_project_design_history();
         Ok(receipt)
     }
@@ -879,13 +882,12 @@ impl AppState {
         let current_digest = crate::state::content_digest(source);
         if active_document
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-            && (self.ui.netlist.generation_error.is_some()
-                || self.ui.netlist.generated_input_digest
-                    != self.ui.netlist.current_generation_input_digest)
+            && (self.netlist_artifacts.generation_error.is_some()
+                || self.netlist_artifacts.generated_input_digest
+                    != self.netlist_artifacts.current_generation_input_digest)
         {
             return Some(
-                self.ui
-                    .netlist
+                self.netlist_artifacts
                     .generation_error
                     .clone()
                     .unwrap_or_else(|| "Regenerate the stale netlist before running".to_owned()),

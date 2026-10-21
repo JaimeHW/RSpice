@@ -151,7 +151,7 @@ fn netlist_search_documents(
         dependency_identity: None,
         editable: false,
         label: "generated.sp".to_owned(),
-        source: state.ui.netlist.generated_source.as_str(),
+        source: state.netlist_artifacts.generated_source.as_str(),
         search_byte_range: None,
     };
     let owned = || NetlistSearchDocument {
@@ -272,7 +272,7 @@ fn netlist_search_documents(
         NetlistFindScope::ProjectReferences => {
             let mut documents = Vec::new();
             if state.ui.netlist.find.include_generated_references
-                && !state.ui.netlist.generated_source.is_empty()
+                && !state.netlist_artifacts.generated_source.is_empty()
             {
                 documents.push(generated());
                 documents.extend(dependency_search_documents(
@@ -302,14 +302,14 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
     use crate::workbench::state::WorkspaceDocumentId;
 
     let mut documents = Vec::new();
-    if let Some(generated) = state.ui.netlist.generated_document.as_ref() {
+    if let Some(generated) = state.netlist_artifacts.generated_document.as_ref() {
         documents.push(NetlistSearchDocument {
             active_document: ActiveNetlistDocument::Generated,
             deck_id: None,
             dependency_identity: None,
             editable: false,
             label: "generated.sp".to_owned(),
-            source: state.ui.netlist.generated_source.as_str(),
+            source: state.netlist_artifacts.generated_source.as_str(),
             search_byte_range: None,
         });
         if state.ui.netlist.find.include_generated_references {
@@ -387,7 +387,7 @@ fn dependency_search_documents(
     owned_only: bool,
 ) -> Vec<NetlistSearchDocument<'_>> {
     let document = match root {
-        ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
+        ActiveNetlistDocument::Generated => state.netlist_artifacts.generated_document.as_ref(),
         ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     };

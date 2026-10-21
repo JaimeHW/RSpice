@@ -220,8 +220,8 @@ mod tests {
             revision_history: Vec::new(),
             owned_includes: Vec::new(),
         });
-        state.ui.netlist.generated_source = root.to_owned();
-        state.ui.netlist.generated_document = Some(generated);
+        state.netlist_artifacts.generated_source = root.to_owned();
+        state.netlist_artifacts.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned);
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;

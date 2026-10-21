@@ -295,7 +295,7 @@ fn activate_configuration(app: &mut RSpiceApp, id: ConfigurationSetId) -> Result
         .replace_configuration_sets(candidate)
         .map_err(|error| error.to_string())?;
     app.invalidate_simulation_preflight();
-    app.state.ui.netlist.current_generation_input_digest = None;
+    app.state.netlist_artifacts.current_generation_input_digest = None;
     Ok(format!(
         "Activated {name} at project revision {}.",
         revision.get()

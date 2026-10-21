@@ -565,7 +565,7 @@ impl Command {
             Self::CompareGeneratedRevisions => {
                 netlist_page_is_visible(state)
                     && !state.ui.netlist.generated_history.is_empty()
-                    && state.ui.netlist.generated_document.is_some()
+                    && state.netlist_artifacts.generated_document.is_some()
             }
             Self::StopSimulation => {
                 state.workbench.preflight.checking.is_some()

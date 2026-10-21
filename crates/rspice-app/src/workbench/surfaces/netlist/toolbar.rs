@@ -275,8 +275,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                 .count()
                 + app
                     .state
-                    .ui
-                    .netlist
+                    .netlist_artifacts
                     .validation
                     .as_ref()
                     .map_or(0, |receipt| receipt.advisory_count)
@@ -1179,7 +1178,8 @@ mod tests {
             &mut app.state,
             "generated\nR1 out 0 1k\n.op\n.end\n",
         );
-        app.state.simulation.source.netlist_content = app.state.ui.netlist.generated_source.clone();
+        app.state.simulation.source.netlist_content =
+            app.state.netlist_artifacts.generated_source.clone();
         app.state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
         app.state.ui.netlist.active_document_initialized = true;
         app

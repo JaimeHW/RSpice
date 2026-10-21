@@ -25,7 +25,7 @@ pub(crate) fn open_netlist_comparison(state: &mut AppState) -> bool {
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
     true
 }
 
@@ -37,8 +37,7 @@ pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<
         .get(index)
         .ok_or_else(|| "The selected generated revision is no longer retained.".to_owned())?;
     let current = state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()
         .and_then(crate::state::NetlistDocument::generated_artifact)
@@ -63,7 +62,7 @@ pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<
     state.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
     Ok(())
 }
 
@@ -109,7 +108,7 @@ pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
     state.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
     Ok(())
 }
 
@@ -178,7 +177,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
     candidate.simulation.source.netlist_content = snapshot.source;
     candidate.ui.netlist.generated_diff_source.clear();
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     candidate
         .workspace
         .content
@@ -203,13 +202,14 @@ fn return_to_working_deck(state: &mut AppState, root: ActiveNetlistDocument) {
         }
         _ => {
             state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-            state.simulation.source.netlist_content = state.ui.netlist.generated_source.clone();
+            state.simulation.source.netlist_content =
+                state.netlist_artifacts.generated_source.clone();
         }
     }
     state.ui.netlist.active_document_initialized = true;
     state.ui.netlist.completion_open = false;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
 }
 
 pub fn close_revision_comparison(state: &mut AppState) -> bool {
@@ -351,7 +351,7 @@ fn project_run_snapshot(state: &mut AppState) {
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
 }
 
 /// Leave the run snapshot for the working deck it was opened from.
@@ -412,13 +412,12 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
             }
             _ => {
                 let document = state
-                    .ui
-                    .netlist
+                    .netlist_artifacts
                     .generated_document
                     .as_ref()
                     .ok_or_else(|| "No current generated artifact is available.".to_owned())?;
                 (
-                    state.ui.netlist.generated_source.clone(),
+                    state.netlist_artifacts.generated_source.clone(),
                     format!("generated-{}", short_digest(document.content_digest())),
                 )
             }
@@ -442,6 +441,6 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
     state.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
     Ok(())
 }

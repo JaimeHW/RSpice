@@ -407,14 +407,13 @@ fn compatible_result_trace(
 
 fn current_generated_artifact(state: &AppState) -> Option<&GeneratedArtifact> {
     let artifact = state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()?
         .generated_artifact()?;
     let input = artifact.provenance().input();
-    let retained = state.ui.netlist.generated_input_digest?;
-    if state.ui.netlist.current_generation_input_digest != Some(retained)
+    let retained = state.netlist_artifacts.generated_input_digest?;
+    if state.netlist_artifacts.current_generation_input_digest != Some(retained)
         || input.digest() != retained
         || input.revision() != state.workspace.content.project.revision()
     {

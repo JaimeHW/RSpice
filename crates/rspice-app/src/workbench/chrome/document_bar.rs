@@ -560,7 +560,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
         return vec![code_workspace_document(state)];
     }
     let mut documents = Vec::new();
-    if let Some(generated) = state.ui.netlist.generated_document.as_ref() {
+    if let Some(generated) = state.netlist_artifacts.generated_document.as_ref() {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistGenerated(generated.id()),
             label: "Generated netlist".to_owned(),
@@ -775,7 +775,7 @@ fn active_netlist_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
         .active_dependency_root
         .unwrap_or(netlist.active_document);
     let document = match root {
-        ActiveNetlistDocument::Generated => netlist.generated_document.as_ref(),
+        ActiveNetlistDocument::Generated => state.netlist_artifacts.generated_document.as_ref(),
         ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }?;
@@ -1004,8 +1004,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
             }),
         WorkspaceDocumentId::NetlistGenerated(document_id) => {
             let available = state
-                .ui
-                .netlist
+                .netlist_artifacts
                 .generated_document
                 .as_ref()
                 .is_some_and(|document| document.id() == *document_id);
@@ -1030,8 +1029,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
         } => {
             use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
             let root_kind = if state
-                .ui
-                .netlist
+                .netlist_artifacts
                 .generated_document
                 .as_ref()
                 .is_some_and(|document| document.id() == *root)
@@ -1462,8 +1460,8 @@ mod tests {
         state.workbench.workspace = Workspace::Netlist;
         state.ui.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        state.ui.netlist.generated_source = ROOT.to_owned();
-        state.ui.netlist.generated_document = Some(generated);
+        state.netlist_artifacts.generated_source = ROOT.to_owned();
+        state.netlist_artifacts.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned.clone());
         state.workspace.content.netlist_source = Some(ROOT.to_owned());
         state.workspace.content.netlist_document = Some(owned);

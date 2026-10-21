@@ -1217,8 +1217,7 @@ impl RSpiceApp {
                 self.state.workbench.set_navigator_filter("source mapping");
                 if let Some(line) = self
                     .state
-                    .ui
-                    .netlist
+                    .netlist_artifacts
                     .generated_document
                     .as_ref()
                     .and_then(|document| document.generated_artifact())
@@ -1400,7 +1399,7 @@ impl RSpiceApp {
             self.state.workspace.content.project_metadata_dirty = true;
         }
         self.invalidate_simulation_preflight();
-        self.state.ui.netlist.current_generation_input_digest = None;
+        self.state.netlist_artifacts.current_generation_input_digest = None;
         let count = selected.len();
         let policy = self.state.workspace.content.connectivity.policy.clone();
         let report = build_report(&self.state, &policy)?;

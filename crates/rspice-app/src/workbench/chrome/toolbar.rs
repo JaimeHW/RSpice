@@ -1129,7 +1129,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
 }
 
 fn current_result_source_digest(app: &RSpiceApp) -> Option<ContentDigest> {
-    let netlist = &app.state.ui.netlist;
+    let netlist = &app.state.netlist_artifacts;
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
@@ -2216,8 +2216,8 @@ mod tests {
         let source_digest = crate::state::content_digest(source);
         let generation_input = digest(0x81);
         app.state.simulation.source.netlist_content = source.to_owned();
-        app.state.ui.netlist.generated_input_digest = Some(generation_input);
-        app.state.ui.netlist.current_generation_input_digest = Some(generation_input);
+        app.state.netlist_artifacts.generated_input_digest = Some(generation_input);
+        app.state.netlist_artifacts.current_generation_input_digest = Some(generation_input);
         let revision = app.state.workspace.content.project.revision();
         let run = completed_prepared_run(revision, source_digest);
         let dataset_id = run.dataset_id;

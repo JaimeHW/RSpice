@@ -91,10 +91,14 @@ pub(crate) fn owned_netlist_publication_state(
 ) -> OwnedNetlistPublicationState {
     let saved_digest = state.ui.netlist.externally_saved_content_digest;
     let saved = saved_digest == Some(digest);
-    let validated = state.ui.netlist.validation.as_ref().is_some_and(|receipt| {
-        receipt.visible_content_digest == digest
-            && receipt.project_revision == state.workspace.content.project.revision().get()
-    });
+    let validated = state
+        .netlist_artifacts
+        .validation
+        .as_ref()
+        .is_some_and(|receipt| {
+            receipt.visible_content_digest == digest
+                && receipt.project_revision == state.workspace.content.project.revision().get()
+        });
     OwnedNetlistPublicationState {
         project_modified: state.workspace.content.netlist_source_dirty,
         source_modified: saved_digest.is_some() && !saved,
@@ -109,9 +113,9 @@ pub(crate) fn owned_netlist_publication_state(
 }
 
 /// Invalidate byte-bound review evidence after any ownership or source edit.
-pub fn invalidate_source_evidence(document: &mut NetlistDocumentState) {
-    document.validation = None;
-    document.validation_error = None;
+pub fn invalidate_source_evidence(state: &mut AppState) {
+    state.netlist_artifacts.validation = None;
+    state.ui.netlist.validation_error = None;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -559,7 +563,7 @@ fn replace_owned_sources_atomically_impl(
             .unwrap_or(next_root_source);
     }
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     candidate
         .workspace
         .content
@@ -768,7 +772,7 @@ pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> b
         candidate.ui.netlist.owned_document = Some(document);
     }
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     clear_netlist_edit_journal(&mut candidate.ui.netlist);
     if candidate
         .workspace
@@ -813,7 +817,7 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
         candidate.ui.netlist.owned_document = Some(document);
     }
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     clear_netlist_edit_journal(&mut candidate.ui.netlist);
     let Err(error) = candidate
         .workspace
@@ -834,7 +838,7 @@ fn canonical_root_document(
     root: ActiveNetlistDocument,
 ) -> Option<&crate::state::NetlistDocument> {
     match root {
-        ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
+        ActiveNetlistDocument::Generated => state.netlist_artifacts.generated_document.as_ref(),
         ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }
@@ -971,7 +975,7 @@ pub(crate) fn open_netlist_dependency_from_root(
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
     Ok(())
 }
 
@@ -983,7 +987,7 @@ pub fn close_active_dependency(state: &mut AppState) -> bool {
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_document = root;
     state.simulation.source.netlist_content = match root {
-        ActiveNetlistDocument::Generated => state.ui.netlist.generated_source.clone(),
+        ActiveNetlistDocument::Generated => state.netlist_artifacts.generated_source.clone(),
         ActiveNetlistDocument::OwnedSource => state
             .ui
             .netlist
@@ -999,7 +1003,7 @@ pub fn close_active_dependency(state: &mut AppState) -> bool {
     state.ui.netlist.cursor_line = 0;
     state.ui.netlist.completion_open = false;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
     refresh_diff_pips_from_baseline(state);
     true
 }
@@ -1047,7 +1051,7 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
         .map_err(|error| error.to_string())?;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     candidate.ui.netlist.completion_open = false;
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     state.commit_candidate(candidate);
     Ok(document_id)
 }
@@ -1086,7 +1090,7 @@ pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<()
     candidate.workspace.content.netlist_source_dirty = true;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     candidate.ui.netlist.completion_open = false;
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     clear_netlist_edit_journal(&mut candidate.ui.netlist);
     candidate
         .workspace
@@ -1159,7 +1163,7 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     candidate.ui.netlist.owned_document = Some(next_document);
     candidate.simulation.source.netlist_content = source;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     clear_netlist_edit_journal(&mut candidate.ui.netlist);
     if candidate
         .workspace
@@ -1189,8 +1193,8 @@ pub(crate) fn show_generated_deck(state: &mut AppState) {
 }
 
 pub fn open_generated_primary(state: &mut AppState) -> bool {
-    if state.ui.netlist.generated_document.is_none()
-        || state.ui.netlist.generated_source.trim().is_empty()
+    if state.netlist_artifacts.generated_document.is_none()
+        || state.netlist_artifacts.generated_source.trim().is_empty()
     {
         return false;
     }
@@ -1203,11 +1207,11 @@ pub fn open_generated_primary(state: &mut AppState) -> bool {
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.source.netlist_content = state.ui.netlist.generated_source.clone();
+    state.simulation.source.netlist_content = state.netlist_artifacts.generated_source.clone();
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
     true
 }
 
@@ -1243,21 +1247,8 @@ pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut state.ui.netlist);
+    invalidate_source_evidence(state);
     true
-}
-
-/// Runtime evidence that the exact visible deck passed the same preparation
-/// contract used by execution. The receipt is invalid as soon as the visible
-/// content digest changes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NetlistValidationReceipt {
-    pub visible_content_digest: crate::product::ContentDigest,
-    pub executable_source_digest: crate::product::ContentDigest,
-    pub prepared_snapshot_digest: crate::product::ContentDigest,
-    pub project_revision: u64,
-    pub task_count: usize,
-    pub advisory_count: usize,
 }
 
 /// Code-workspace document currently projected into the central editor.
@@ -1492,7 +1483,7 @@ pub(crate) fn commit_owned_include_lifecycle_action(
     candidate.ui.netlist.active_dependency_identity = Some(proposed.clone());
     candidate.ui.netlist.lifecycle_dialog.include_transaction = None;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     clear_netlist_edit_journal(&mut candidate.ui.netlist);
     candidate
         .workspace
@@ -1705,9 +1696,8 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
             } else {
                 candidate.workspace.content.return_to_generated_netlist();
                 candidate.ui.netlist.owned_document = None;
-                candidate.ui.netlist.generated_source = candidate
-                    .ui
-                    .netlist
+                candidate.netlist_artifacts.generated_source = candidate
+                    .netlist_artifacts
                     .generated_document
                     .as_ref()
                     .map_or_else(String::new, |generated| generated.source().to_owned());
@@ -1715,7 +1705,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
                 candidate.ui.netlist.active_dependency_identity = None;
                 candidate.ui.netlist.active_dependency_root = None;
                 candidate.simulation.source.netlist_content =
-                    candidate.ui.netlist.generated_source.clone();
+                    candidate.netlist_artifacts.generated_source.clone();
                 candidate.ui.netlist.externally_saved_content_digest = None;
             }
             format!(
@@ -1727,7 +1717,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     candidate.ui.netlist.completion_open = false;
     candidate.ui.netlist.selected_byte_range = None;
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     clear_netlist_edit_journal(&mut candidate.ui.netlist);
     candidate
         .workspace
@@ -1765,7 +1755,7 @@ pub(crate) fn select_retained_top_deck(
     candidate.workspace.content.netlist_source_dirty = true;
     candidate.ui.netlist.lifecycle_dialog.transaction = None;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     clear_netlist_edit_journal(&mut candidate.ui.netlist);
     candidate
         .workspace
@@ -2239,9 +2229,6 @@ impl Default for NetlistOwnershipDialogState {
 /// Transient state for one netlist document.
 #[derive(Debug, Clone, Default)]
 pub struct NetlistDocumentState {
-    /// Canonical immutable document, including generated provenance,
-    /// dependency identities, source map, outline, and validation state.
-    pub generated_document: Option<crate::state::NetlistDocument>,
     /// Canonical project-owned document retained independently from the
     /// generated primary.
     pub owned_document: Option<crate::state::NetlistDocument>,
@@ -2251,9 +2238,6 @@ pub struct NetlistDocumentState {
     pub generated_diff_source: String,
     /// Document selected before entering a read-only revision comparison.
     pub comparison_return_document: ActiveNetlistDocument,
-    /// Runtime-generated primary artifact retained independently from any
-    /// project-owned source document.
-    pub generated_source: String,
     /// Active central document.
     pub active_document: ActiveNetlistDocument,
     /// Logical identity of the exact retained dependency projected into the
@@ -2266,21 +2250,10 @@ pub struct NetlistDocumentState {
     /// Whether initial active-document selection has been reconciled with a
     /// just-opened project's persisted owned source.
     pub active_document_initialized: bool,
-    /// Exact project-input digest used to produce the retained generated
-    /// artifact. `None` means the current bytes have no generated authority.
-    pub generated_input_digest: Option<crate::product::ContentDigest>,
-    /// Input digest observed this frame. A mismatch with
-    /// `generated_input_digest` makes the retained artifact stale and blocks
-    /// execution until generation succeeds.
-    pub current_generation_input_digest: Option<crate::product::ContentDigest>,
-    /// Diagnostic from the latest failed generation attempt.
-    pub generation_error: Option<String>,
     /// Input digest of the latest generation that failed. The same inputs
     /// fail the same way, so they are not rebuilt, and the failure is not
     /// recorded again, until one of them changes.
     pub failed_generation_input_digest: Option<crate::product::ContentDigest>,
-    /// Receipt for the latest exact visible source validation.
-    pub validation: Option<NetlistValidationReceipt>,
     /// Exact validation failure retained until the bytes change or validation
     /// succeeds.
     pub validation_error: Option<String>,

@@ -107,7 +107,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         if generated_primary_unavailable(&app.state) {
             let messages = app.state.ui.messages();
             if app.state.workspace.content.netlist_source.is_none()
-                && app.state.ui.netlist.generated_document.is_none()
+                && app.state.netlist_artifacts.generated_document.is_none()
             {
                 let mut action = None;
                 empty_state_with_actions(
@@ -159,8 +159,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                     WorkbenchIcon::Netlist,
                     &title,
                     app.state
-                        .ui
-                        .netlist
+                        .netlist_artifacts
                         .generation_error
                         .as_deref()
                         .unwrap_or(&default_description),
@@ -876,29 +875,29 @@ fn format_owned_netlist(app: &mut RSpiceApp) {
         return;
     }
     let digest = crate::state::content_digest(&source);
-    let validation_current = app
-        .state
-        .ui
-        .netlist
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision == app.state.workspace.content.project.revision().get()
-        });
+    let validation_current =
+        app.state
+            .netlist_artifacts
+            .validation
+            .as_ref()
+            .is_some_and(|receipt| {
+                receipt.visible_content_digest == digest
+                    && receipt.project_revision
+                        == app.state.workspace.content.project.revision().get()
+            });
     if !validation_current {
         crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
     }
-    let validation_current = app
-        .state
-        .ui
-        .netlist
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision == app.state.workspace.content.project.revision().get()
-        });
+    let validation_current =
+        app.state
+            .netlist_artifacts
+            .validation
+            .as_ref()
+            .is_some_and(|receipt| {
+                receipt.visible_content_digest == digest
+                    && receipt.project_revision
+                        == app.state.workspace.content.project.revision().get()
+            });
     if !validation_current {
         let message = app
             .state
@@ -972,7 +971,8 @@ fn generated_primary_unavailable(state: &AppState) -> bool {
 }
 
 fn generated_primary_ready(state: &AppState) -> bool {
-    state.ui.netlist.generated_document.is_some() && !state.ui.netlist.generated_source.is_empty()
+    state.netlist_artifacts.generated_document.is_some()
+        && !state.netlist_artifacts.generated_source.is_empty()
 }
 
 fn active_document_available(state: &AppState) -> bool {
@@ -991,8 +991,7 @@ fn active_document_available(state: &AppState) -> bool {
 
 fn generation_block_reason(state: &AppState) -> String {
     state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generation_error
         .clone()
         .unwrap_or_else(|| {
@@ -1017,10 +1016,10 @@ fn document_syntax_status(state: &AppState) -> Option<(String, Problem)> {
         return None;
     }
     if state.ui.netlist.active_document == ActiveNetlistDocument::Generated
-        && (state.ui.netlist.generation_error.is_some()
+        && (state.netlist_artifacts.generation_error.is_some()
             || !generated_primary_ready(state)
-            || state.ui.netlist.generated_input_digest
-                != state.ui.netlist.current_generation_input_digest)
+            || state.netlist_artifacts.generated_input_digest
+                != state.netlist_artifacts.current_generation_input_digest)
     {
         let retained_artifact = generated_primary_ready(state);
         return Some((
@@ -1176,19 +1175,19 @@ mod tests {
         let (document, owned) =
             generation::publish_generated_document(state, input_digest, source.clone())
                 .expect("canonical generated fixture");
-        state.ui.netlist.generated_source = source;
-        state.ui.netlist.generated_document = Some(document);
+        state.netlist_artifacts.generated_source = source;
+        state.netlist_artifacts.generated_document = Some(document);
         state.ui.netlist.owned_document = owned;
-        state.ui.netlist.generated_input_digest = Some(input_digest);
-        state.ui.netlist.current_generation_input_digest = Some(input_digest);
+        state.netlist_artifacts.generated_input_digest = Some(input_digest);
+        state.netlist_artifacts.current_generation_input_digest = Some(input_digest);
     }
 
     #[test]
     fn editable_source_and_generated_primary_coexist_without_overwrite() {
         let mut state = AppState::default();
         retain_generated(&mut state, "generated\n.end\n");
-        let retained_generated = state.ui.netlist.generated_source.clone();
-        state.simulation.source.netlist_content = state.ui.netlist.generated_source.clone();
+        let retained_generated = state.netlist_artifacts.generated_source.clone();
+        state.simulation.source.netlist_content = state.netlist_artifacts.generated_source.clone();
 
         ownership::create_owned_source(
             &mut state,
@@ -1280,7 +1279,7 @@ mod tests {
     fn empty_generated_primary_reports_blocked_without_claiming_staleness() {
         let mut state = AppState::default();
         state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.ui.netlist.generation_error =
+        state.netlist_artifacts.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
 
         assert!(generated_primary_unavailable(&state));
@@ -1296,7 +1295,7 @@ mod tests {
         let mut state = AppState::default();
         retain_generated(&mut state, "retained\n.end\n");
         state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.ui.netlist.generation_error = Some("Regeneration failed.".to_owned());
+        state.netlist_artifacts.generation_error = Some("Regeneration failed.".to_owned());
 
         assert!(!generated_primary_unavailable(&state));
         assert!(generated_primary_ready(&state));
@@ -1311,10 +1310,10 @@ mod tests {
         let mut state = AppState::default();
         retain_generated(&mut state, "retained\n.end\n");
         state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.ui.netlist.generated_source.clear();
-        state.ui.netlist.generation_error = None;
+        state.netlist_artifacts.generated_source.clear();
+        state.netlist_artifacts.generation_error = None;
 
-        assert!(state.ui.netlist.generated_document.is_some());
+        assert!(state.netlist_artifacts.generated_document.is_some());
         assert!(generated_primary_unavailable(&state));
         assert!(!generated_primary_ready(&state));
         assert!(!active_document_available(&state));

@@ -771,20 +771,20 @@ fn netlist_diagnostic_locations_are_one_based_and_exact() {
 #[test]
 fn generated_provenance_speaks_only_when_the_deck_is_not_the_schematic() {
     let mut state = AppState::default();
-    state.ui.netlist.generated_source = "generated\n.end\n".to_owned();
+    state.netlist_artifacts.generated_source = "generated\n.end\n".to_owned();
     let input = crate::product::ContentDigest::from_bytes([0x31; 32]);
-    state.ui.netlist.generated_input_digest = Some(input);
-    state.ui.netlist.current_generation_input_digest = Some(input);
+    state.netlist_artifacts.generated_input_digest = Some(input);
+    state.netlist_artifacts.current_generation_input_digest = Some(input);
     assert_eq!(generated_state(&state), None);
 
-    state.ui.netlist.current_generation_input_digest =
+    state.netlist_artifacts.current_generation_input_digest =
         Some(crate::product::ContentDigest::from_bytes([0x32; 32]));
     assert_eq!(
         generated_state(&state),
         Some(("Older than the schematic", Problem::Warning))
     );
 
-    state.ui.netlist.generated_source.clear();
+    state.netlist_artifacts.generated_source.clear();
     assert_eq!(
         generated_state(&state),
         Some(("Not generated yet", Problem::Warning))
@@ -798,16 +798,14 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
     let project_revision = state.workspace.content.project.revision().get();
     let digest = crate::state::content_digest(&state.simulation.source.netlist_content);
     state.ui.netlist.externally_saved_content_digest = Some(digest);
-    state.ui.netlist.validation = Some(
-        crate::workbench::documents::netlist_document::NetlistValidationReceipt {
-            visible_content_digest: digest,
-            executable_source_digest: digest,
-            prepared_snapshot_digest: digest,
-            project_revision,
-            task_count: 1,
-            advisory_count: 0,
-        },
-    );
+    state.netlist_artifacts.validation = Some(crate::state::NetlistValidationReceipt {
+        visible_content_digest: digest,
+        executable_source_digest: digest,
+        prepared_snapshot_digest: digest,
+        project_revision,
+        task_count: 1,
+        advisory_count: 0,
+    });
 
     // Saved and validated is the ordinary state, and so is a dirty project —
     // the document tab's marker owns that one.

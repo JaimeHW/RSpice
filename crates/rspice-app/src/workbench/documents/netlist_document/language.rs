@@ -483,8 +483,7 @@ pub(crate) fn project_index(state: &mut AppState) -> Option<Arc<NetlistProjectIn
         },
     );
     let generated_id = state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()
         .map(crate::state::NetlistDocument::id);
@@ -2071,7 +2070,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             revision_history: Vec::new(),
             owned_includes: vec![owned_include],
         });
-        state.ui.netlist.generated_document = Some(generated);
+        state.netlist_artifacts.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned);
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.simulation.source.netlist_content = root.to_owned();
@@ -2186,7 +2185,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             revision_history: Vec::new(),
             owned_includes: Vec::new(),
         });
-        state.ui.netlist.generated_document = Some(generated);
+        state.netlist_artifacts.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned);
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.simulation.source.netlist_content = FIX_DECK.to_owned();

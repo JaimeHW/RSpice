@@ -824,7 +824,7 @@ impl RSpiceApp {
                     // resolves to, so the deck's diagnostics are no longer
                     // evidence about the chain that is now in force.
                     crate::workbench::documents::netlist_document::invalidate_source_evidence(
-                        &mut self.state.ui.netlist,
+                        &mut self.state,
                     );
                 }
             }

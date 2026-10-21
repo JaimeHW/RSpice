@@ -612,7 +612,7 @@ impl RSpiceApp {
             .replace_configuration_sets(candidate)
             .map_err(|error| error.to_string())?;
         self.invalidate_simulation_preflight();
-        self.state.ui.netlist.current_generation_input_digest = None;
+        self.state.netlist_artifacts.current_generation_input_digest = None;
         self.state
             .record(LogSeverity::Info, LogSource::Studio, message);
         let dialog = &mut self.state.dialogs.configuration_sets;

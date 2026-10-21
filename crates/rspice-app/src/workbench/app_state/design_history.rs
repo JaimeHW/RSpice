@@ -323,7 +323,7 @@ pub(crate) fn publish_model_definition_candidate(
     state.workspace.content.project_metadata_dirty = true;
     if commit.affects_execution {
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-        state.ui.netlist.current_generation_input_digest = None;
+        state.netlist_artifacts.current_generation_input_digest = None;
     }
     state.record_model_definition_transaction(ModelDefinitionRecord {
         description: description.into(),
@@ -393,7 +393,7 @@ pub(crate) fn publish_model_library_candidate(
     state.model_library_manager = candidate;
     state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist.current_generation_input_digest = None;
+    state.netlist_artifacts.current_generation_input_digest = None;
     state.record_model_definition_transaction(ModelDefinitionRecord {
         description: description.into(),
         library: library_name.to_owned(),
@@ -439,7 +439,7 @@ pub(crate) fn publish_model_library_set_candidate(
     state.model_library_manager = candidate;
     state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist.current_generation_input_digest = None;
+    state.netlist_artifacts.current_generation_input_digest = None;
     state.record_model_libraries_transaction(ModelLibrariesRecord {
         description: description.into(),
         before,
@@ -489,7 +489,7 @@ pub(crate) fn publish_model_resolution_candidate(
     state.model_library_manager = candidate;
     state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist.current_generation_input_digest = None;
+    state.netlist_artifacts.current_generation_input_digest = None;
     state.record_model_resolution_transaction(ModelResolutionRecordsRecord {
         description: description.into(),
         before,
@@ -1498,7 +1498,7 @@ fn replace_model_library_snapshot(
     debug_assert_eq!(state.workspace.content.project.revision(), revision);
     state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist.current_generation_input_digest = None;
+    state.netlist_artifacts.current_generation_input_digest = None;
     Ok(revision)
 }
 
@@ -1527,7 +1527,7 @@ fn replace_model_resolution_records(
     debug_assert_eq!(state.workspace.content.project.revision(), revision);
     state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist.current_generation_input_digest = None;
+    state.netlist_artifacts.current_generation_input_digest = None;
     Ok(revision)
 }
 
@@ -1587,7 +1587,7 @@ fn replace_model_library(
     debug_assert_eq!(state.workspace.content.project.revision(), revision);
     state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-    state.ui.netlist.current_generation_input_digest = None;
+    state.netlist_artifacts.current_generation_input_digest = None;
     Ok(revision)
 }
 

@@ -73,7 +73,8 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
         .active_dependency_root
         .unwrap_or(netlist.active_document);
     let document_id = match root {
-        super::ActiveNetlistDocument::Generated => netlist
+        super::ActiveNetlistDocument::Generated => state
+            .netlist_artifacts
             .generated_document
             .as_ref()
             .map(|document| document.id()),

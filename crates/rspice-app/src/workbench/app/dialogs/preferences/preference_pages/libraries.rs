@@ -84,7 +84,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
                     // A validated deck was validated through the folders
                     // that were, the way a change to a project's own search
                     // paths leaves its validation behind.
-                    Ok(()) => invalidate_source_evidence(&mut state.ui.netlist),
+                    Ok(()) => invalidate_source_evidence(state),
                     Err(refusal) => {
                         state.prompt(format!("The library folders were not changed: {refusal}."));
                     }

@@ -645,7 +645,7 @@ pub(super) fn active_canonical_netlist_document(
     state: &crate::workbench::AppState,
 ) -> Option<&crate::state::NetlistDocument> {
     match state.ui.netlist.active_document {
-        ActiveNetlistDocument::Generated => state.ui.netlist.generated_document.as_ref(),
+        ActiveNetlistDocument::Generated => state.netlist_artifacts.generated_document.as_ref(),
         ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }
@@ -2131,8 +2131,7 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
     let t = Tokens::get(ui.ctx());
     let mapping = app
         .state
-        .ui
-        .netlist
+        .netlist_artifacts
         .generated_document
         .as_ref()
         .and_then(|document| document.generated_artifact())

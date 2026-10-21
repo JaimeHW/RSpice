@@ -375,7 +375,7 @@ impl RSpiceApp {
         if let Some(reason) = self.state.manual_deck_run_block_reason() {
             return Some(reason);
         }
-        let receipt = self.state.ui.netlist.validation.as_ref()?;
+        let receipt = self.state.netlist_artifacts.validation.as_ref()?;
         if !self
             .simulation_controller
             .has_retained_manual_authorization(receipt.prepared_snapshot_digest)

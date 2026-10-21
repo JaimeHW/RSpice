@@ -94,8 +94,8 @@ pub(crate) fn commit_dependency_relink(
     let mut candidate = state.clone();
     match transaction.root {
         ActiveNetlistDocument::Generated => {
-            candidate.ui.netlist.generated_document = Some(next.clone());
-            candidate.ui.netlist.generated_source = next.source().to_owned();
+            candidate.netlist_artifacts.generated_document = Some(next.clone());
+            candidate.netlist_artifacts.generated_source = next.source().to_owned();
         }
         ActiveNetlistDocument::OwnedSource => {
             if let Some(include) = candidate
@@ -137,7 +137,7 @@ pub(crate) fn commit_dependency_relink(
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     candidate.ui.netlist.completion_open = false;
     candidate.ui.netlist.edited_lines.clear();
-    invalidate_source_evidence(&mut candidate.ui.netlist);
+    invalidate_source_evidence(&mut candidate);
     state.commit_candidate(candidate);
     Ok(())
 }

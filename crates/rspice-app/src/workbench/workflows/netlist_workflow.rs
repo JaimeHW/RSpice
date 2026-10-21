@@ -40,9 +40,8 @@ pub(crate) fn poll_browser_netlist_workflow(state: &mut AppState) {
 /// sealed dependency closure and execution-target contract. A later Run must
 /// match this one-shot authorized snapshot byte for byte.
 pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
-    use crate::workbench::documents::netlist_document::{
-        ActiveNetlistDocument, NetlistValidationReceipt,
-    };
+    use crate::state::NetlistValidationReceipt;
+    use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 
     if app.state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         app.state
@@ -59,18 +58,17 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
         return false;
     }
     if app.state.ui.netlist.active_document == ActiveNetlistDocument::Generated
-        && (app.state.ui.netlist.generation_error.is_some()
-            || app.state.ui.netlist.generated_input_digest
-                != app.state.ui.netlist.current_generation_input_digest)
+        && (app.state.netlist_artifacts.generation_error.is_some()
+            || app.state.netlist_artifacts.generated_input_digest
+                != app.state.netlist_artifacts.current_generation_input_digest)
     {
         let error = app
             .state
-            .ui
-            .netlist
+            .netlist_artifacts
             .generation_error
             .clone()
             .unwrap_or_else(|| "Generated netlist is stale.".to_owned());
-        app.state.ui.netlist.validation = None;
+        app.state.netlist_artifacts.validation = None;
         record_validation_failure(&mut app.state, &error);
         app.state.ui.netlist.validation_error = Some(error);
         return false;
@@ -87,19 +85,19 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 &metadata.sealed_source_dependencies,
             ) {
                 app.invalidate_simulation_preflight();
-                app.state.ui.netlist.validation = None;
+                app.state.netlist_artifacts.validation = None;
                 record_validation_failure(&mut app.state, &error);
                 app.state.ui.netlist.validation_error = Some(error);
                 return false;
             }
             if let Err(error) = acknowledge_canonical_validation(&mut app.state) {
                 app.invalidate_simulation_preflight();
-                app.state.ui.netlist.validation = None;
+                app.state.netlist_artifacts.validation = None;
                 record_validation_failure(&mut app.state, &error);
                 app.state.ui.netlist.validation_error = Some(error);
                 return false;
             }
-            app.state.ui.netlist.validation = Some(NetlistValidationReceipt {
+            app.state.netlist_artifacts.validation = Some(NetlistValidationReceipt {
                 visible_content_digest: visible_digest,
                 executable_source_digest: metadata.source_digest,
                 prepared_snapshot_digest: metadata.snapshot_digest,
@@ -122,7 +120,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
         Err(error) => {
             let message = error.to_string();
             invalidate_canonical_validation(&mut app.state);
-            app.state.ui.netlist.validation = None;
+            app.state.netlist_artifacts.validation = None;
             record_validation_failure(&mut app.state, &message);
             app.state.ui.netlist.validation_error = Some(message);
             false
@@ -177,7 +175,7 @@ fn acknowledge_canonical_dependencies(
             });
     let document = match state.ui.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
-            state.ui.netlist.generated_document.as_mut()
+            state.netlist_artifacts.generated_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
@@ -522,7 +520,7 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
     };
     let document = match state.ui.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
-            state.ui.netlist.generated_document.as_mut()
+            state.netlist_artifacts.generated_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
@@ -543,7 +541,7 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
 fn invalidate_canonical_validation(state: &mut AppState) {
     let document = match state.ui.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
-            state.ui.netlist.generated_document.as_mut()
+            state.netlist_artifacts.generated_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
