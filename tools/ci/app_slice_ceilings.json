@@ -68,7 +68,6 @@
     "services->project": 15,
     "services->results": 1,
     "services->session": 101,
-    "services->settings": 1,
     "services->shell": 8
   },
   "whole-app": {

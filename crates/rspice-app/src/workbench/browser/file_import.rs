@@ -50,9 +50,7 @@ impl BrowserTextImportKind {
     #[cfg(target_arch = "wasm32")]
     pub(crate) const fn max_bytes(self) -> u64 {
         match self {
-            Self::ShortcutProfile => {
-                crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES
-            }
+            Self::ShortcutProfile => crate::io::file_exchange::MAX_SHORTCUT_PROFILE_BYTES,
             Self::EngineeringTableView => 512 * 1024,
             Self::ResultDataset => crate::io::file_exchange::MAX_RESULT_DATASET_BYTES,
             Self::SymbolDefinition => crate::io::file_exchange::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,

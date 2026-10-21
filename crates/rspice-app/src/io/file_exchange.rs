@@ -77,6 +77,11 @@ pub(crate) const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
 /// applied before parsing on both native and browser builds.
 pub(crate) const MAX_SYMBOL_DEFINITION_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
 
+/// Largest shortcut profile, or shortcut artifact source, that an import reads
+/// or an export writes. The browser picker refuses a larger file before it
+/// reads one.
+pub(crate) const MAX_SHORTCUT_PROFILE_BYTES: u64 = 512 * 1024;
+
 /// What a picker offers, and how its refusals name the file.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FileKind {

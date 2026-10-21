@@ -868,8 +868,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // The live-session engine closes the project through the project
     // workflow, which ranks above the application that owns the engine.
     ("live_session", "workflows/project_workflow", 5),
-    // The browser import reads the shortcut profile's size limit.
-    ("browser/file_import", "shortcuts/profile_workflow", 1),
     // Result import opens the imported result's tab through the document
     // bar, and the dispatcher that starts an import ranks below the bar.
     ("workflows/result_import_workflow", "chrome", 1),

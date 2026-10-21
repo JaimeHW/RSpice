@@ -13,7 +13,7 @@ use super::pdf::serialize_shortcut_reference_pdf;
 use super::projection::{ShortcutReferenceModel, serialize_shortcut_reference_json};
 
 pub const MAX_SHORTCUT_JSON_ARTIFACT_BYTES: u64 =
-    crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES;
+    crate::io::file_exchange::MAX_SHORTCUT_PROFILE_BYTES;
 pub const MAX_SHORTCUT_MARKDOWN_ARTIFACT_BYTES: u64 = 4 * 1024 * 1024;
 pub const MAX_SHORTCUT_PDF_ARTIFACT_BYTES: u64 = 16 * 1024 * 1024;
 

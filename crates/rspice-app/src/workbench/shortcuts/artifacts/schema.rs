@@ -11,10 +11,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{canonical_json_bytes, canonicalize_value, sha256};
+use crate::io::file_exchange::MAX_SHORTCUT_PROFILE_BYTES;
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::shortcuts::profile_workflow::{
-    MAX_SHORTCUT_PROFILE_BYTES, SHORTCUT_PROFILE_FORMAT, stage_shortcut_profile_json,
+    SHORTCUT_PROFILE_FORMAT, stage_shortcut_profile_json,
 };
 
 pub const SHORTCUT_ARTIFACT_FORMAT: &str = SHORTCUT_PROFILE_FORMAT;

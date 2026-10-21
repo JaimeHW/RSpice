@@ -16,13 +16,13 @@ use super::schema::{
     ShortcutArtifactSchemaError, decode_shortcut_artifact_json_with_provenance,
 };
 use super::{canonical_json_bytes, sha256};
+use crate::io::file_exchange::MAX_SHORTCUT_PROFILE_BYTES;
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::{
     CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding, ShortcutBindingSlot,
     ShortcutSequence, ShortcutStroke, shortcut_context_precedence_rank, shortcut_contexts_overlap,
 };
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES;
 
 /// Version of the audited VS Code-to-RSpice command identity table.
 pub const VSCODE_MAPPING_VERSION: u16 = 1;

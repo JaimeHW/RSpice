@@ -9,10 +9,10 @@ use std::fmt;
 
 use serde_json::Value;
 
+use crate::io::file_exchange::MAX_SHORTCUT_PROFILE_BYTES;
 use crate::state::shortcuts::{MAX_SHORTCUT_SEQUENCE_STROKES, ShortcutPreferences};
 
 pub const SHORTCUT_PROFILE_FORMAT: &str = "rspice.shortcuts/1";
-pub const MAX_SHORTCUT_PROFILE_BYTES: u64 = 512 * 1024;
 pub const MAX_SHORTCUT_COMMAND_RECORDS: usize = 2_048;
 pub const MAX_SHORTCUT_BINDING_RECORDS: usize = 4_096;
 
