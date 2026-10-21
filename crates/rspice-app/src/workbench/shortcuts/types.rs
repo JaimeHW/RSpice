@@ -7,7 +7,7 @@ use egui::{Key, os::OperatingSystem};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
 use serde_json::Value;
 
-use crate::workbench::commands::vocabulary::CommandPlatform;
+use crate::state::command_catalog::CommandPlatform;
 
 pub const MAX_SHORTCUT_SEQUENCE_STROKES: usize = 4;
 

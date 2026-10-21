@@ -697,7 +697,7 @@ mod tests {
             CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutSequence,
             ShortcutStroke,
         };
-        use crate::workbench::commands::vocabulary::CommandPlatform;
+        use crate::state::command_catalog::CommandPlatform;
 
         let edit = CommandShortcutOverride::new(vec![
             ProfileShortcutBinding::new(

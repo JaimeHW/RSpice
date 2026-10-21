@@ -81,7 +81,7 @@ impl ShortcutCategory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::vocabulary::CommandPlatform;
+    use crate::state::command_catalog::CommandPlatform;
 
     #[test]
     fn command_reference_is_a_lossless_projection_of_discoverable_commands() {

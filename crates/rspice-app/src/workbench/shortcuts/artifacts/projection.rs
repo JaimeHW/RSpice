@@ -15,9 +15,9 @@ use super::schema::{
     SHORTCUT_ARTIFACT_FORMAT, SHORTCUT_ARTIFACT_SCHEMA_VERSION, ShortcutArtifactCoverage,
     ShortcutArtifactManifest, portable_profile_value, scrub_private_profile_state,
 };
+use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::ShortcutContext;
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandPlatform};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
     ShortcutSequence,

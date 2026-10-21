@@ -8,16 +8,14 @@ use std::time::Duration;
 
 use egui::{Context, Key, Modifiers, Response, Stroke, Ui, WidgetInfo, WidgetType};
 
+use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
 };
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::commands::{
-    ShortcutContext,
-    vocabulary::{COMMAND_REGISTRY, Command, CommandPlatform},
-};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
 use crate::workbench::{
     ChordTimeoutPolicy, ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutPreferences,

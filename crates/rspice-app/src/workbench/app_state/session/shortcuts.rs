@@ -8,8 +8,9 @@
 
 use egui::{InputState, Key, Modifiers};
 
+use crate::state::command_catalog::CommandPlatform;
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
+use crate::workbench::commands::vocabulary::Command;
 
 mod canvas_focus;
 mod category;

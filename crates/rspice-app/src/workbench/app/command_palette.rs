@@ -17,11 +17,12 @@ use egui::{
     UiBuilder, UiKind, WidgetInfo, WidgetType, pos2, vec2,
 };
 
+use crate::state::command_catalog::CommandPlatform;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Mode, Tokens};
 use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::{Command, CommandPlatform, command_catalog};
+use crate::workbench::commands::vocabulary::{Command, command_catalog};
 
 use crate::workbench::app::RSpiceApp;
 

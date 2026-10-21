@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use crate::state::ViewType;
-use crate::workbench::commands::ShortcutContext;
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandPlatform};
+use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 use crate::workbench::state::Workspace;
 use crate::workbench::{
     ChordTimeoutPolicy, ContextPrecedencePolicy, ShortcutPreferences, SingleKeyCanvasPolicy,

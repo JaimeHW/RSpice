@@ -7,6 +7,7 @@
 
 use egui::{Context, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
+use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -14,8 +15,7 @@ use crate::ui::widgets::{
 };
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::commands::ShortcutContext;
-use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::shortcuts::artifacts::{
     DecodedShortcutArtifact, DetectedShortcutArtifact, ImportBindingClass,

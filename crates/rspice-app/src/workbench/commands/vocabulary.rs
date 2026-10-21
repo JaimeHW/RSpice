@@ -12,33 +12,6 @@
 
 use crate::state::{ComponentType, ModelsPage};
 use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage, Workspace};
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CommandPlatform {
-    Desktop,
-    Browser,
-    Tablet,
-    Phone,
-}
-
-impl CommandPlatform {
-    pub const ALL: [Self; 4] = [Self::Desktop, Self::Browser, Self::Tablet, Self::Phone];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Desktop => "Desktop",
-            Self::Browser => "Browser",
-            Self::Tablet => "Tablet",
-            Self::Phone => "Phone",
-        }
-    }
-
-    pub(super) const fn has_browser_reserved_primary(self) -> bool {
-        matches!(self, Self::Browser)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // `CommandPalette` is the feature's name, the same one the shortcut

@@ -191,7 +191,7 @@ fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityVie
 
 fn schematic_accessibility_shortcuts(
     state: &AppState,
-    platform: crate::workbench::commands::vocabulary::CommandPlatform,
+    platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
     use crate::workbench::commands::vocabulary::Command;
@@ -951,7 +951,7 @@ mod tests {
             &canvas_accessibility_view(&state),
             &schematic_accessibility_shortcuts(
                 &state,
-                crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+                crate::state::command_catalog::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,
             ),
         );
@@ -978,7 +978,7 @@ mod tests {
                 &canvas_accessibility_view(&state),
                 &schematic_accessibility_shortcuts(
                     &state,
-                    crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+                    crate::state::command_catalog::CommandPlatform::Desktop,
                     egui::os::OperatingSystem::Windows,
                 )
             ),

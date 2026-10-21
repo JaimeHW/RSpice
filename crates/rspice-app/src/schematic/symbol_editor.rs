@@ -24,7 +24,7 @@ fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
     state: &AppState,
     read_only: bool,
-    platform: crate::workbench::commands::vocabulary::CommandPlatform,
+    platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
     use crate::workbench::commands::vocabulary::Command;

@@ -543,7 +543,7 @@ pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app:
 
 pub(super) fn shortcut_for_occurrence(
     shortcuts: &crate::workbench::ShortcutPreferences,
-    platform: crate::workbench::commands::vocabulary::CommandPlatform,
+    platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
     command: Command,
     shortcut_override: Option<&str>,
@@ -565,10 +565,10 @@ pub(super) fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
 }
 
 pub(super) const fn file_menu_shows_exit(
-    platform: crate::workbench::commands::vocabulary::CommandPlatform,
+    platform: crate::state::command_catalog::CommandPlatform,
 ) -> bool {
     matches!(
         platform,
-        crate::workbench::commands::vocabulary::CommandPlatform::Desktop
+        crate::state::command_catalog::CommandPlatform::Desktop
     )
 }

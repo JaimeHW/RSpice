@@ -8,8 +8,8 @@
 //! extension.
 
 use crate::product::{ContentDigest, ProjectId};
+use crate::state::command_catalog::CommandPlatform;
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
-use crate::workbench::commands::vocabulary::CommandPlatform;
 use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::{RSpiceApp, state::Workspace};
 

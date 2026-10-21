@@ -7,8 +7,8 @@
 //! bind either key on its own.
 
 use super::*;
+use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
 use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
-use crate::workbench::commands::vocabulary::CommandPlatform;
 
 const SHEET_COMMANDS: [Command; 4] = [
     Command::NextSheet,

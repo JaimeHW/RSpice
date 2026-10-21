@@ -12,10 +12,8 @@ use serde_json::Value;
 
 use super::schema::DecodedShortcutArtifact;
 use super::{canonical_json_bytes, sha256};
-use crate::workbench::commands::{
-    ShortcutContext,
-    vocabulary::{COMMAND_REGISTRY, Command, CommandPlatform},
-};
+use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutPreferences,
     ShortcutProfileAudit, ShortcutProfileIssueCode, ShortcutProfileIssueSeverity,

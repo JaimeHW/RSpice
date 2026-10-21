@@ -3,6 +3,7 @@
 //! Application state for simulation, project, and UI state.
 //! Core data structures that are shared across multiple modules.
 
+pub(crate) mod command_catalog;
 use rspice_design::configuration_set;
 pub(crate) mod code_diagnostics;
 use rspice_design::connectivity_contract;

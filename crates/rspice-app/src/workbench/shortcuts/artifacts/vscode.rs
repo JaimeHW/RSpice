@@ -16,7 +16,8 @@ use super::schema::{
     ShortcutArtifactSchemaError, decode_shortcut_artifact_json_with_provenance,
 };
 use super::{canonical_json_bytes, sha256};
-use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
+use crate::state::command_catalog::CommandPlatform;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES;
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding, ShortcutBindingSlot,

@@ -11,7 +11,7 @@ pub(crate) mod workspace_layout_manager;
 use egui::{Context, Id};
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::commands::ShortcutContext;
+use crate::state::command_catalog::ShortcutContext;
 use crate::workbench::shortcuts::artifacts::{
     ShortcutArtifactExportOutcome, ShortcutArtifactImportOutcome, ShortcutImportReceipt,
     apply_shortcut_import, export_shortcut_artifact,

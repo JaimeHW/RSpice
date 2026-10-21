@@ -4,13 +4,14 @@
 use egui::{Context, Grid, RichText};
 
 use crate::services::license::LicenseInfo;
+use crate::state::command_catalog::CommandPlatform;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
-use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 

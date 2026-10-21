@@ -2219,7 +2219,7 @@ mod tests {
             .set_binding(
                 crate::workbench::commands::vocabulary::Command::Save,
                 crate::workbench::shortcuts::ShortcutBindingSlot::Primary,
-                crate::workbench::commands::vocabulary::CommandPlatform::ALL.to_vec(),
+                crate::state::command_catalog::CommandPlatform::ALL.to_vec(),
                 Some(crate::workbench::shortcuts::ShortcutSequence::single(
                     crate::workbench::shortcuts::ShortcutStroke::new(
                         egui::Key::F6,

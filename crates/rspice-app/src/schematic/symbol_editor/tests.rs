@@ -91,7 +91,7 @@ fn symbol_canvas_accessibility_label_reports_editing_contract() {
         &document,
         &state,
         false,
-        crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+        crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
 

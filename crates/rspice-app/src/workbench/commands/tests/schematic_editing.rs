@@ -309,7 +309,7 @@ fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
 /// a placed selection before, and there was no counter-clockwise turn.
 #[test]
 fn rotate_and_mirror_have_their_keys_on_the_canvas() {
-    use crate::workbench::commands::vocabulary::CommandPlatform;
+    use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
 
     let counter_clockwise =
         Command::from_stable_id("rotate-selection-ccw").expect("a counter-clockwise rotate");
@@ -1650,7 +1650,8 @@ fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
 /// (audit G-11).
 #[test]
 fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
-    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, CommandPlatform};
+    use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+    use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
 
     let repeat = Command::RepeatLastCommand;
     assert_eq!(repeat.default_shortcut_label(CommandPlatform::Desktop), ".");

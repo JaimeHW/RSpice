@@ -12,10 +12,11 @@ use std::time::Duration;
 
 use super::result_navigation::{RunOrigin, app_with_prepared_run};
 use super::*;
+use crate::state::command_catalog::{CommandPlatform, ShortcutBinding, ShortcutKind};
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, CommandPlatform};
+use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
 use crate::workbench::{
     ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
     shortcut_context_precedence_rank,
@@ -154,7 +155,7 @@ fn state_row(command: Command, app: &RSpiceApp) -> StateRow {
 }
 
 /// `primary O+primary+shift "Ctrl+Shift+O" on Desktop,Browser,Tablet,Phone`.
-fn binding_row(binding: &crate::workbench::commands::registry::ShortcutBinding) -> String {
+fn binding_row(binding: &ShortcutBinding) -> String {
     let kind = match binding.kind {
         ShortcutKind::Primary => "primary",
         ShortcutKind::Alternate => "alternate",

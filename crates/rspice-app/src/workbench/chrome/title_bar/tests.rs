@@ -521,7 +521,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
     assert_eq!(
         shortcut_for_occurrence(
             &shortcuts,
-            crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+            crate::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
             Command::KeyboardShortcuts,
             Some("")
@@ -531,7 +531,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
     assert_eq!(
         shortcut_for_occurrence(
             &shortcuts,
-            crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+            crate::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
             Command::KeyboardShortcuts,
             Some("Ctrl+Alt+R")
@@ -547,7 +547,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
 
 #[test]
 fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
-    use crate::workbench::commands::vocabulary::CommandPlatform;
+    use crate::state::command_catalog::CommandPlatform;
 
     assert!(file_menu_shows_exit(CommandPlatform::Desktop));
     for platform in [
@@ -581,7 +581,7 @@ fn application_menu_height_is_viewport_bounded() {
 
 #[test]
 fn menu_shortcuts_are_projected_from_the_typed_registry() {
-    let platform = crate::workbench::commands::vocabulary::CommandPlatform::Desktop;
+    let platform = crate::state::command_catalog::CommandPlatform::Desktop;
     let shortcuts = crate::workbench::ShortcutPreferences::default();
     for command in [
         Command::OpenProject,
@@ -1045,7 +1045,7 @@ fn menu_pin(entries: &[MenuEntry], app: &RSpiceApp) -> Vec<String> {
     menu_entries::resolve_menu_rows(
         entries,
         app,
-        crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+        crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     )
     .iter()
@@ -1167,7 +1167,7 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
     let rows = menu_entries::resolve_menu_rows(
         ApplicationMenu::File.entries(),
         &app,
-        crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+        crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
     let shown = visible_row_names(&rows);
@@ -1361,7 +1361,7 @@ fn shown_rows(menu: ApplicationMenu, app: &RSpiceApp) -> Vec<(String, bool)> {
     let rows = menu_entries::resolve_menu_rows(
         menu.entries(),
         app,
-        crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+        crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
     menu_entries::visible_rows(&rows)
@@ -2014,7 +2014,7 @@ fn no_menu_draws_a_rule_at_its_edge_or_two_rules_together() {
             let rows = menu_entries::resolve_menu_rows(
                 menu.entries(),
                 &app,
-                crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+                crate::state::command_catalog::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,
             );
             let shown = visible_row_names(&rows);

@@ -1396,7 +1396,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn restoring_shortcuts_saves_the_shipped_profile_before_it_goes_live() {
-        use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
+        use crate::state::command_catalog::CommandPlatform;
+        use crate::workbench::commands::vocabulary::Command;
         use crate::workbench::{
             ChordTimeoutPolicy, ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence,
             ShortcutStroke,

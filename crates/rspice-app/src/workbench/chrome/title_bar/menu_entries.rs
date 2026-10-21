@@ -10,7 +10,7 @@ use egui::containers::menu::{MenuState, SubMenu};
 use egui::os::OperatingSystem;
 
 use super::*;
-use crate::workbench::commands::vocabulary::CommandPlatform;
+use crate::state::command_catalog::CommandPlatform;
 
 /// One entry of a menu, as the menu is written down.
 #[derive(Clone, Copy)]

@@ -357,7 +357,7 @@ pub(crate) fn close_model_editor_workflow() {
     });
 }
 
-pub use registry::{CommandAvailability, ShortcutContext, ShortcutKind};
+pub use registry::CommandAvailability;
 
 impl Command {
     /// What this command asks of a source editor when one is the document on
