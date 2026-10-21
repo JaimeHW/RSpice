@@ -59,13 +59,16 @@ impl OpLabel {
 
     /// A label supplied by the compiled Verilog-A catalog.
     ///
-    /// Restricted to this crate because the catalog is the only authority that
-    /// can vouch for such a label: [`resolve_op_label`] resolves it by asking
-    /// the same catalog, and a caller outside the engine has nothing to check
-    /// against.
+    /// Only the engine's circuit introspection, which holds that catalog, may
+    /// call this: the catalog is the only authority that can vouch for such a
+    /// label, `circuit::resolve_op_label` resolves it by asking the same
+    /// catalog, and any other caller has nothing to check against. It is
+    /// hidden rather than restricted only because the catalog lives in a
+    /// crate above this one.
     #[cfg(feature = "veriloga-builtins-base")]
     #[inline]
-    pub(crate) const fn generated(text: &'static str) -> Self {
+    #[doc(hidden)]
+    pub const fn generated(text: &'static str) -> Self {
         Self(text)
     }
 }
