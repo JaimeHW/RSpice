@@ -567,6 +567,14 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
         if event_only.get(index).copied().unwrap_or(false) {
             continue;
         }
+        // A column the run did not retain carries no samples, so it is no
+        // spelling either: a converter's private event endpoint keeps an
+        // empty column and, unless `.ESAVE` lists it, no trace that would
+        // mark it event-only. Inserting it would fail the whole table's
+        // length check, and every card with it, over a name no card asked for.
+        if !result.time.is_empty() && waveform.is_empty() {
+            continue;
+        }
         let fallback = (index + 1).to_string();
         let raw = if let Some(name) = result.node_names.get(index).filter(|name| !name.is_empty()) {
             name.clone()
