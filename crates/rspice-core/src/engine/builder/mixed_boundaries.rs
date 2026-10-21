@@ -28,6 +28,7 @@ pub(super) fn plan_conversions(
     }
 
     let names = circuit.node_names_sorted();
+    let merged = merged_real_drivers(circuit, &physical)?;
     let mut pending = Vec::new();
     for (host_index, host) in circuit.mixed_signal_hosts.iter().enumerate() {
         for (port_index, (port, signal)) in host.direct_event_ports().enumerate() {
@@ -37,6 +38,17 @@ pub(super) fn plan_conversions(
             {
                 continue;
             }
+            // The real ports driving one electrical node are one net: its
+            // first port plans the one converter, and the rest join it.
+            let members = match merged.get(&port.node) {
+                Some(group) if is_real_output(port.bit, port.direction) => {
+                    if group.first() != Some(&(host_index, port_index)) {
+                        continue;
+                    }
+                    group.clone()
+                }
+                _ => vec![(host_index, port_index)],
+            };
             let node_label = xspice_auto_bridge_node_label(Some(&names), port.node);
             // A converter's electrical side would land on a net that already
             // carries XSPICE event values, which is two domains on one node
@@ -101,8 +113,7 @@ pub(super) fn plan_conversions(
             let event_name =
                 format!("{}.{}__event{suffix}", host.instance_name(), signal).to_uppercase();
             pending.push((
-                host_index,
-                port_index,
+                members,
                 event_name,
                 PlannedXspiceAutoBridge {
                     node: port.node,
@@ -119,20 +130,71 @@ pub(super) fn plan_conversions(
     }
 
     let mut bridges = Vec::with_capacity(pending.len());
-    for (host_index, port_index, name, mut bridge) in pending {
+    for (members, name, mut bridge) in pending {
         if circuit.get_node_by_name(&name).is_some() {
             return Err(SimulationError::Circuit(format!(
                 "generated mixed event endpoint '{name}' conflicts with an existing circuit node"
             )));
         }
         let event_node = circuit.get_or_create_node(&name);
-        circuit.mixed_signal_hosts[host_index]
-            .rebind_event_port(port_index, event_node)
-            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        for (host_index, port_index) in members {
+            circuit.mixed_signal_hosts[host_index]
+                .rebind_event_port(port_index, event_node)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        }
         bridge.event_node = Some(event_node);
         bridges.push(bridge);
     }
     Ok(bridges)
+}
+
+/// A real-valued `output` port. A real `inout` converts on its own, because
+/// its receivers read the node through its own converter.
+fn is_real_output(bit: Option<u32>, direction: DigitalLinkDirection) -> bool {
+    bit.is_none() && direction == DigitalLinkDirection::Output
+}
+
+/// The real-valued ports that drive each electrical node, where more than one
+/// does: `(host, port)` in instance order.
+///
+/// Verilog-AMS LRM 2.4 section 7.8.3 merges the discrete ports on one node
+/// into a single connection. Real ports that drive one node therefore join one
+/// real net, which their declared resolution combines, and one converter
+/// carries the resolved value onto the node. A converter per port would put
+/// several ideal sources in parallel on it. A net that two plain `wreal`
+/// ports drive, or that ports of different resolutions join, is refused here,
+/// naming both instances and the node.
+fn merged_real_drivers(
+    circuit: &CircuitData,
+    physical: &BTreeSet<usize>,
+) -> Result<BTreeMap<usize, Vec<(usize, usize)>>, SimulationError> {
+    let mut groups: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
+    let mut ports = Vec::new();
+    for (host_index, host) in circuit.mixed_signal_hosts.iter().enumerate() {
+        for (port_index, (port, signal)) in host.direct_event_ports().enumerate() {
+            if port.node == 0
+                || !physical.contains(&port.node)
+                || !is_real_output(port.bit, port.direction)
+            {
+                continue;
+            }
+            let Some((resolution, drives)) = host.real_output_net(port) else {
+                continue;
+            };
+            groups
+                .entry(port.node)
+                .or_default()
+                .push((host_index, port_index));
+            ports.push((port.node, host.instance_name(), signal, resolution, drives));
+        }
+    }
+    groups.retain(|_, group| group.len() > 1);
+    circuit.refuse_unresolvable_real_nets(
+        ports
+            .into_iter()
+            .filter(|(node, ..)| groups.contains_key(node)),
+    )?;
+    Ok(groups)
 }
 
 /// Construction resolves template parameters and expands subcircuits. Bind

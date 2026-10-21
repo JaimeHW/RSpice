@@ -423,44 +423,96 @@ impl CircuitData {
     }
 
     /// Refuse an event net that two instances drive through plain `wreal`
-    /// ports.
+    /// ports, or that their ports join under different resolutions.
     ///
     /// Verilog-AMS LRM 2.4 section 6.5.3 permits a maximum of one driver of a
     /// real-valued net. The front end refuses a second inside one module; two
     /// instances meet only on a deck net the linker joins them on, which is
     /// one of `event_nodes`, where the linked design would otherwise fail its
-    /// own validation in words about driver indices.
+    /// own validation in words about driver indices. The real ports that drive
+    /// one electrical node join one net the same way, and the bridge planner
+    /// asks the same question of them (`refuse_unresolvable_real_nets`).
     fn refuse_overdriven_real_nets(
         &self,
         event_nodes: &std::collections::BTreeSet<usize>,
     ) -> Result<(), SimulationError> {
+        self.refuse_unresolvable_real_nets(self.mixed_signal_hosts.iter().flat_map(|host| {
+            host.real_output_ports()
+                .into_iter()
+                .filter(|(node, ..)| event_nodes.contains(node))
+                .map(|(node, port, resolution, drives)| {
+                    (node, host.instance_name(), port, resolution, drives)
+                })
+        }))
+    }
+
+    /// Refuse a real-valued net its ports cannot resolve: a second driver of
+    /// a plain `wreal`, which Verilog-AMS LRM 2.4 section 6.5.3 does not
+    /// permit, or ports whose net types name different resolutions, since a
+    /// net combines its drivers one way.
+    ///
+    /// Each item is one port joining the net on `node`: the node, the
+    /// instance, the port, the resolution its net type names and whether the
+    /// instance drives it. The refusal names the second port's instance, and
+    /// the first port and instance it meets.
+    pub(crate) fn refuse_unresolvable_real_nets<'a>(
+        &self,
+        ports: impl IntoIterator<
+            Item = (
+                usize,
+                &'a str,
+                &'a str,
+                rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+                bool,
+            ),
+        >,
+    ) -> Result<(), SimulationError> {
+        use rspice_veriloga::canonical_ir::digital::DigitalRealResolution;
+        let mut first_port = std::collections::BTreeMap::new();
         let mut first_driver: std::collections::BTreeMap<usize, (&str, &str)> =
             std::collections::BTreeMap::new();
-        for host in &self.mixed_signal_hosts {
-            for (node, port) in host.single_driver_real_outputs() {
-                if !event_nodes.contains(&node) {
-                    continue;
-                }
-                let Some(&(instance, first_port)) = first_driver.get(&node) else {
-                    first_driver.insert(node, (host.instance_name(), port));
-                    continue;
-                };
-                let node_names = self.node_names_sorted();
-                let node_name = node_names
-                    .get(node - 1)
-                    .map(String::as_str)
-                    .unwrap_or("<unnamed>");
+        let node_name = |node: usize| {
+            self.node_names_sorted()
+                .get(node.wrapping_sub(1))
+                .cloned()
+                .unwrap_or_else(|| "<unnamed>".to_owned())
+        };
+        for (node, instance, port, resolution, drives) in ports {
+            let &mut (first_instance, first, first_resolution) = first_port
+                .entry(node)
+                .or_insert((instance, port, resolution));
+            if first_resolution != resolution {
+                let node_name = node_name(node);
                 return Err(port_discipline_refusal(
-                    host.instance_name(),
+                    instance,
                     format!(
-                        "its port '{port}' drives the wreal net '{node_name}', which port \
-                         '{first_port}' of instance '{instance}' drives as well; Verilog-AMS LRM \
-                         2.4 section 6.5.3 permits one driver of a real-valued net, so give \
-                         '{node_name}' one driver, or give both ports the resolution that \
-                         combines them: `wrealsum`, `wrealavg`, `wrealmin` or `wrealmax`"
+                        "its `{}` port '{port}' joins the real-valued net '{node_name}', which \
+                         the `{}` port '{first}' of instance '{first_instance}' joins as well; \
+                         a net combines its drivers one way, so declare both ports with the \
+                         same net type",
+                        resolution.keyword(),
+                        first_resolution.keyword(),
                     ),
                 ));
             }
+            if !drives || resolution != DigitalRealResolution::Single {
+                continue;
+            }
+            let Some(&(first_instance, first)) = first_driver.get(&node) else {
+                first_driver.insert(node, (instance, port));
+                continue;
+            };
+            let node_name = node_name(node);
+            return Err(port_discipline_refusal(
+                instance,
+                format!(
+                    "its port '{port}' drives the wreal net '{node_name}', which port \
+                     '{first}' of instance '{first_instance}' drives as well; Verilog-AMS LRM \
+                     2.4 section 6.5.3 permits one driver of a real-valued net, so give \
+                     '{node_name}' one driver, or give both ports the resolution that \
+                     combines them: `wrealsum`, `wrealavg`, `wrealmin` or `wrealmax`"
+                ),
+            ));
         }
         Ok(())
     }

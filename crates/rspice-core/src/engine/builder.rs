@@ -5184,10 +5184,20 @@ fn add_planned_xspice_auto_bridge(
         ),
         #[cfg(feature = "veriloga")]
         XspiceAutoBridgeKind::RealBidi => {
-            let label = xspice_auto_bridge_node_label(node_names, bridge.node);
-            return Err(SimulationError::Circuit(format!(
-                "real inout on node '{label}' requires an authored bidirectional real connect module or a real inout bridge template defining its electrical conversion"
-            )));
+            let node = circuit
+                .node_name_by_id(bridge.node)
+                .map_or_else(|| bridge.node.to_string(), str::to_owned);
+            let (instance, port) = bridge.port.clone().unwrap_or_default();
+            return Err(crate::ElaborationError::new(
+                crate::ElaborationErrorKind::PortDiscipline,
+                format!(
+                    "its real-valued inout port '{port}' reaches node '{node}', which needs a \
+                     bidirectional real/electrical converter: select an authored bidirectional \
+                     real connect module, or give real inout boundaries a bridge template"
+                ),
+            )
+            .instance(instance)
+            .into());
         }
     };
 

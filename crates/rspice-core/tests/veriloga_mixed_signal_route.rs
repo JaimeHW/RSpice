@@ -4221,6 +4221,111 @@ endmodule
     }
 }
 
+const REAL_DRIVERS: &str = "\
+`timescale 1ns/1ps
+module rs(y);
+  output y;
+  wrealsum y;
+  parameter real val = 1.0;
+  assign y = val;
+endmodule
+module ro(y);
+  output y;
+  wreal y;
+  parameter real val = 1.0;
+  assign y = val;
+endmodule
+module rm(y);
+  output y;
+  wrealmin y;
+  parameter real val = 1.0;
+  assign y = val;
+endmodule
+";
+
+/// Two real drivers on one loaded electrical node, `first` and `second`
+/// naming their modules.
+fn real_drivers_deck(model: &ModelFile, first: &str, second: &str, options: &str) -> String {
+    let path = model.deck_path();
+    format!(
+        "* two real drivers on one electrical node\n\
+         xa out {first} val=1.0\n\
+         xb out {second} val=2.0\n\
+         rload out 0 1k\n\
+         {options}\
+         .va \"{path}\" rs module=rs\n\
+         .va \"{path}\" ro module=ro\n\
+         .va \"{path}\" rm module=rm\n\
+         .end\n"
+    )
+}
+
+fn operating_point_at(deck: &str, node: &str) -> Result<f64, String> {
+    let netlist = Netlist::parse(deck).expect("the deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .map_err(|error| error.to_string())?;
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} is absent from {:?}", result.node_names));
+    Ok(result.node_voltages[index])
+}
+
+/// Real ports driving one electrical node join one real net, which their
+/// declared resolution combines, and one converter carries the resolved value
+/// onto the node: two `wrealsum` drivers of 1.0 and 2.0 put 3.0 V on it. A
+/// converter per port would put two ideal sources of 1 V and 2 V in parallel.
+#[test]
+fn real_drivers_on_one_electrical_node_resolve_before_one_converter() {
+    let model = ModelFile::new("real_drivers_sum", REAL_DRIVERS);
+    let deck = real_drivers_deck(&model, "rs", "rs", "");
+    let voltage = operating_point_at(&deck, "out").expect("the merged net has an operating point");
+    assert!(
+        (voltage - 3.0).abs() < 1e-9,
+        "V(out) = {voltage}, expected 3.0"
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for value in waveform(&result, "out") {
+        assert!((value - 3.0).abs() < 1e-9, "V(out) = {value}, expected 3.0");
+    }
+}
+
+/// The merged net keeps the LRM's rules for a net: two plain `wreal` drivers
+/// are refused on an electrical node as on an event net, and so are two
+/// drivers whose net types combine differently. Each refusal names both
+/// instances, both ports and the node.
+#[test]
+fn real_drivers_on_one_electrical_node_are_refused_when_the_net_cannot_resolve_them() {
+    let model = ModelFile::new("real_drivers_refused", REAL_DRIVERS);
+    let error = operating_point_at(&real_drivers_deck(&model, "ro", "ro", ""), "out")
+        .expect_err("two plain wreal drivers are refused");
+    for expected in [
+        "instance 'xb'",
+        "port 'y' drives the wreal net 'out'",
+        "port 'y' of instance 'xa'",
+        "one driver of a real-valued net",
+    ] {
+        assert!(
+            error.to_ascii_lowercase().contains(expected),
+            "{expected}: {error}"
+        );
+    }
+    let error = operating_point_at(&real_drivers_deck(&model, "rs", "rm", ""), "out")
+        .expect_err("unlike resolutions are refused");
+    for expected in [
+        "instance 'xb'",
+        "`wrealmin` port 'y' joins the real-valued net 'out'",
+        "`wrealsum` port 'y' of instance 'xa'",
+    ] {
+        assert!(
+            error.to_ascii_lowercase().contains(expected),
+            "{expected}: {error}"
+        );
+    }
+}
+
 #[test]
 fn typed_event_boundaries_resolve_bidirectional_contention_and_release() {
     let model = ModelFile::new(

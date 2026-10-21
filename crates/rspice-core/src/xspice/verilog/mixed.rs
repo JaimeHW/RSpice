@@ -2699,31 +2699,57 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    /// The deck nodes this instance drives through a plain `wreal` port, each
-    /// with the port's name: a single-driver real net the module drives by a
-    /// continuous assignment, or a real variable output.
-    pub(crate) fn single_driver_real_outputs(&self) -> Vec<(usize, &str)> {
-        use rspice_veriloga::canonical_ir::digital::{DigitalRealResolution, DigitalSignalKind};
+    /// The real-valued net a port that is not an input joins, as its
+    /// declaration states it: the resolution its net type names, and whether
+    /// this instance drives it — by a continuous assignment, or as a real
+    /// variable output. `None` for an input, and for a four-state port.
+    pub(crate) fn real_output_net(
+        &self,
+        port: &EventPort,
+    ) -> Option<(
+        rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+        bool,
+    )> {
+        use rspice_veriloga::canonical_ir::digital::DigitalSignalKind;
         use rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection;
+        if port.bit.is_some() || port.direction == DigitalLinkDirection::Input {
+            return None;
+        }
         let plan = self.state.digital.plan();
-        let mut driven: Vec<(usize, &str)> = self
-            .event_ports
-            .iter()
-            .filter(|port| port.bit.is_none() && port.direction != DigitalLinkDirection::Input)
-            .filter_map(|port| {
-                let signal = plan.signal(port.signal)?;
-                let drives = signal.procedurally_assignable
-                    || plan
-                        .drivers
-                        .iter()
-                        .any(|driver| driver.target.signal == port.signal);
-                (signal.kind == DigitalSignalKind::Real(DigitalRealResolution::Single) && drives)
-                    .then_some((port.node, signal.name.as_str()))
+        let signal = plan.signal(port.signal)?;
+        let DigitalSignalKind::Real(resolution) = signal.kind else {
+            return None;
+        };
+        let drives = signal.procedurally_assignable
+            || plan
+                .drivers
+                .iter()
+                .any(|driver| driver.target.signal == port.signal);
+        Some((resolution, drives))
+    }
+
+    /// The deck nodes this instance's real-valued ports that are not inputs
+    /// reach, each with the port's name, its resolution and whether this
+    /// instance drives it; one entry per node.
+    pub(crate) fn real_output_ports(
+        &self,
+    ) -> Vec<(
+        usize,
+        &str,
+        rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+        bool,
+    )> {
+        let mut ports: Vec<_> = self
+            .direct_event_ports()
+            .filter_map(|(port, name)| {
+                let (resolution, drives) = self.real_output_net(port)?;
+                Some((port.node, name, resolution, drives))
             })
             .collect();
-        driven.sort_unstable();
-        driven.dedup_by_key(|&mut (node, _)| node);
-        driven
+        // A driving port speaks for the node before one that only declares it.
+        ports.sort_by_key(|&(node, _, _, drives)| (node, !drives));
+        ports.dedup_by_key(|&mut (node, ..)| node);
+        ports
     }
 
     pub(crate) fn direct_real_nodes(&self) -> impl Iterator<Item = usize> + '_ {
