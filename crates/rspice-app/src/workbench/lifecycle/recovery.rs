@@ -27,7 +27,8 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, RecentKind};
 use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
-use crate::workbench::state::{LocalSafeModeOptions, Workspace};
+use crate::state::write_policy::LocalSafeModeOptions;
+use crate::workbench::state::Workspace;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::recovery_checkpoint::{

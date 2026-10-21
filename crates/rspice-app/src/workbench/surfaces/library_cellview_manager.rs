@@ -1327,9 +1327,9 @@ mod tests {
     fn safe_mode_disables_every_symbol_mutation_but_keeps_editor_handoff() {
         let mut app = app_with_typed_symbol();
         app.state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions {
+            crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
-                ..crate::workbench::state::LocalSafeModeOptions::default()
+                ..crate::state::write_policy::LocalSafeModeOptions::default()
             },
             "{}".to_owned(),
         );

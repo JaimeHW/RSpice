@@ -275,7 +275,7 @@ fn build_settings_undo_refuses_after_a_later_source_edit() {
 fn build_settings_save_is_refused_on_a_read_only_project() {
     let mut app = veriloga_view_holding(TWO_MODULES);
     app.state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },

@@ -354,10 +354,11 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
+    use crate::state::write_policy::LocalSafeModeOptions;
     use crate::state::{
         Point, SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat, Wire,
     };
-    use crate::workbench::state::{LocalSafeModeOptions, WorkspaceDocumentId};
+    use crate::workbench::state::WorkspaceDocumentId;
 
     let mut app = RSpiceApp::test_instance();
     app.state

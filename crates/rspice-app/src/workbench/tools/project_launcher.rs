@@ -17,6 +17,7 @@ use egui::{
 };
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::write_policy::LocalSafeModeOptions;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -36,8 +37,7 @@ use crate::workbench::lifecycle::recovery::{
     start_local_safe_mode,
 };
 use crate::workbench::state::{
-    LocalSafeModeOptions, ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
-    Workspace,
+    ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort, Workspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

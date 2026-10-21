@@ -82,7 +82,7 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
     assert!(drawing_sheet_editable(&app.state));
 
     app.state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },

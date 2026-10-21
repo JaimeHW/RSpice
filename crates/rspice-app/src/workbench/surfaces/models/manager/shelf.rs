@@ -1608,7 +1608,7 @@ mod tests {
             "a placeable part on an open sheet offers Place"
         );
         state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions {
+            crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()
             },
@@ -1637,7 +1637,7 @@ mod tests {
             let mut state = AppState::default();
             if read_only {
                 state.workbench.safe_mode.activate(
-                    crate::workbench::state::LocalSafeModeOptions {
+                    crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()
                     },

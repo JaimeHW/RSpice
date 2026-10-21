@@ -1452,7 +1452,7 @@ mod tests {
 
         app.state.project_lifecycle.authority.open_session();
         app.state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions {
+            crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()
             },
@@ -1934,7 +1934,7 @@ mod tests {
         request_automation_source_import(&mut app, &importer).unwrap();
         let request = app.state.ui.code_workspace.source_import.take().unwrap();
         app.state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions {
+            crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()
             },

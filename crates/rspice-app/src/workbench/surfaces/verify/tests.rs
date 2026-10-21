@@ -519,7 +519,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     let can_undo_before = app.state.schematic.can_undo();
 
     app.state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },

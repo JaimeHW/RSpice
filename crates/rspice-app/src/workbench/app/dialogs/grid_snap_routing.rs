@@ -330,8 +330,8 @@ const fn routing_label(mode: WireRoutingMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::write_policy::LocalSafeModeOptions;
     use crate::state::{SchematicGridPitch, SchematicWireRoutingStyle, Tool};
-    use crate::workbench::state::LocalSafeModeOptions;
 
     #[test]
     fn open_captures_an_isolated_exact_draft_and_models_free_without_fake_pitch() {

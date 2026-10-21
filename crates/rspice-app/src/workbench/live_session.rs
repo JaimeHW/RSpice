@@ -30,9 +30,9 @@ use crate::services::live_protocol::{
     content_digest, replace_messages,
 };
 use crate::state::SchematicState;
+use crate::state::write_policy::LiveWriteLocks;
 use crate::time_compat::Instant;
 use crate::workbench::AppState;
-use crate::workbench::state::LiveWriteLocks;
 
 /// Presence cadence; doubles as the relay keepalive under its idle timeout.
 const PRESENCE_PERIOD: Duration = Duration::from_secs(15);

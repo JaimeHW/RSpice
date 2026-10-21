@@ -151,7 +151,7 @@ fn library_cell_placement_rejects_changed_context_or_permission_without_an_edit(
             }
             "read-only" => state.schematic.session.read_only = true,
             "safe-mode" => state.workbench.safe_mode.activate(
-                crate::workbench::state::LocalSafeModeOptions {
+                crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },
@@ -813,9 +813,9 @@ fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
 fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
     let mut state = AppState::default();
     state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
-            ..crate::workbench::state::LocalSafeModeOptions::default()
+            ..crate::state::write_policy::LocalSafeModeOptions::default()
         },
         String::new(),
     );
@@ -1324,7 +1324,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
                 }
                 "read-only" => state.schematic.session.read_only = true,
                 "safe-mode" => state.workbench.safe_mode.activate(
-                    crate::workbench::state::LocalSafeModeOptions {
+                    crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()
                     },
@@ -1664,7 +1664,7 @@ fn stale_design_note_authority_is_consumed_without_document_mutation() {
             }
             "read-only" => state.schematic.session.read_only = true,
             "safe-mode" => state.workbench.safe_mode.activate(
-                crate::workbench::state::LocalSafeModeOptions {
+                crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },
@@ -1805,7 +1805,7 @@ fn a_changed_document_ends_the_sequence_without_placing() {
             }
             "read-only" => state.schematic.session.read_only = true,
             "safe-mode" => state.workbench.safe_mode.activate(
-                crate::workbench::state::LocalSafeModeOptions {
+                crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },

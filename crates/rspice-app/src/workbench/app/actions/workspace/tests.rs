@@ -143,7 +143,7 @@ fn schematic_edit_authority_includes_late_safe_mode_project_read_only() {
     assert!(!state.schematic_edit_read_only());
 
     state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },

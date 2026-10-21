@@ -365,7 +365,7 @@ mod tests {
                 }
                 "read-only" => app.state.schematic.session.read_only = true,
                 "safe-mode" => app.state.workbench.safe_mode.activate(
-                    crate::workbench::state::LocalSafeModeOptions {
+                    crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()
                     },

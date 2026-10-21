@@ -7,8 +7,8 @@
 //! see on screen.
 
 use super::*;
+use crate::state::write_policy::LocalSafeModeOptions;
 use crate::state::{Cell, ComponentType, LibraryCellInstance, Point, View, ViewType};
-use crate::workbench::state::LocalSafeModeOptions;
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 
 #[test]

@@ -24,6 +24,7 @@ pub(crate) mod stimulus_library;
 use rspice_design::symbol;
 pub(crate) mod symbol_resolver;
 pub(crate) mod workspace;
+pub(crate) mod write_policy;
 
 #[cfg(test)]
 pub(crate) use rspice_design::symbol::SYMBOL_VIEW_PARSES;

@@ -1475,7 +1475,7 @@ mod tests {
             .rename("Isolated session")
             .unwrap();
         state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions::default(),
+            crate::state::write_policy::LocalSafeModeOptions::default(),
             before.clone(),
         );
         let persisted = serde_json::to_string(&state).expect("safe-mode session serializes");

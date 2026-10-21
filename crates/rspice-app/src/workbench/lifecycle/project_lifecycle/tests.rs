@@ -681,7 +681,7 @@ fn safe_mode_read_only_policy_blocks_native_project_writes_before_publication() 
     let path = unique_path("safe-mode-read-only");
     let mut state = AppState::default();
     state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             disable_third_party_extensions: false,
             disable_gpu_acceleration: false,
             isolate_prior_documents: false,

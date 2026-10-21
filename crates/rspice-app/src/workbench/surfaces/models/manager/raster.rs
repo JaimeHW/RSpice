@@ -672,7 +672,7 @@ fn render_every_model_hub_state() {
             "shelf-detail-place-refused",
             raster(ModelsCatalogScope::RSpiceLibrary, catalog(false), |state| {
                 state.workbench.safe_mode.activate(
-                    crate::workbench::state::LocalSafeModeOptions {
+                    crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()
                     },

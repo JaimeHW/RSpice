@@ -144,8 +144,8 @@ pub(crate) fn symbol_context_revision(state: &AppState) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::write_policy::LocalSafeModeOptions;
     use crate::state::{ComponentType, Point};
-    use crate::workbench::state::LocalSafeModeOptions;
 
     #[test]
     fn authority_rejects_another_occurrence_or_sheet_of_the_same_master() {

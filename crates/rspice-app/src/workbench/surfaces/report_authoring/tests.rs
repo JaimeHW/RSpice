@@ -55,9 +55,9 @@ fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
     assert!(Command::ReportPageProperties.is_enabled(&app));
 
     app.state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
-            ..crate::workbench::state::LocalSafeModeOptions::default()
+            ..crate::state::write_policy::LocalSafeModeOptions::default()
         },
         "report command authority test".to_owned(),
     );
@@ -637,9 +637,9 @@ fn report_page_markers_remain_semantically_stable_after_reordering() {
 fn direct_report_creation_fails_closed_in_read_only_safe_mode() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
-            ..crate::workbench::state::LocalSafeModeOptions::default()
+            ..crate::state::write_policy::LocalSafeModeOptions::default()
         },
         "report authoring test".to_owned(),
     );

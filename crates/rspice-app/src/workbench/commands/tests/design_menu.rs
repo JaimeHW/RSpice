@@ -156,9 +156,9 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
 
     app.state.schematic.session.read_only = false;
     app.state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
-            ..crate::workbench::state::LocalSafeModeOptions::default()
+            ..crate::state::write_policy::LocalSafeModeOptions::default()
         },
         "test session".to_owned(),
     );

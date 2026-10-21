@@ -1172,7 +1172,7 @@ mod tests {
             open_design_review_comments(&mut app.state);
             if case == "read-only" {
                 app.state.workbench.safe_mode.activate(
-                    crate::workbench::state::LocalSafeModeOptions {
+                    crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()
                     },

@@ -1428,7 +1428,7 @@ fn a_netlist_project_that_cannot_open_states_why() {
 fn importing_a_deck_refuses_read_only_projects_without_mutation() {
     let mut state = AppState::default();
     state.workbench.safe_mode.active = true;
-    state.workbench.safe_mode.applied = crate::workbench::state::LocalSafeModeOptions {
+    state.workbench.safe_mode.applied = crate::state::write_policy::LocalSafeModeOptions {
         open_project_read_only: true,
         ..Default::default()
     };

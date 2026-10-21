@@ -12,7 +12,7 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state.workbench.safe_mode.activate(
-        crate::workbench::state::LocalSafeModeOptions {
+        crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },
