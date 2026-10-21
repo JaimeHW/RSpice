@@ -638,6 +638,7 @@ pub(super) fn run_transient(
     tstart: f64,
     max_step: Option<f64>,
     uic: bool,
+    state_times: &[f64],
 ) -> Result<TransientOutcome, CliError> {
     // --tran-stop overrides the deck's stop time so checkpoint segments can
     // share byte-identical source (the checkpoint fingerprint covers it).
@@ -896,6 +897,22 @@ pub(super) fn run_transient(
             }
             Err(e) => Err(e),
         }
+    } else if !state_times.is_empty() {
+        // The `ACTIMES=` cards that share this run: it lands on their times,
+        // captures each state there for them, and runs on to its stop.
+        let result = ctx.engine.run_tran_capturing_states_to_stop(
+            ctx.netlist,
+            tstop,
+            internal_max_step,
+            startup_mode,
+            state_times,
+            &crate::abort::ProgressAbort::new(&pb),
+        );
+        pb.finish_and_clear();
+        result.map(|(result, states)| {
+            ctx.hold_shared_transient_states(state_times, states);
+            result
+        })
     } else {
         let result = ctx.engine.run_tran_with_startup_mode_and_abort(
             ctx.netlist,

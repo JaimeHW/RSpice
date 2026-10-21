@@ -62,6 +62,74 @@ fn card_label(card: &AnalysisCommand) -> &'static str {
     }
 }
 
+/// The times the deck's first `.TRAN` card's run lands on and captures for
+/// the `ACTIMES=` cards after it, so the transient runs once for the card and
+/// for them; empty for any other `.TRAN` card.
+///
+/// A card's own state transient is the run of the deck's first `.TRAN` card,
+/// so a later card finds its states in that run. It still runs its own when
+/// that run is not the plain one its own would be: a `--tran-stop` that moves
+/// the stop time, a checkpoint, a resume or an authored restart, a compressed
+/// run, or a deck with an `.FFT` card, whose sample times are solver stops.
+/// So does a `.SENS` card, whose state moves with each perturbation. A time
+/// outside the run, or a hair from another card's, stays its card's own too:
+/// the shared run must never fail where the card's own would not.
+pub(in crate::commands::run) fn shared_state_times(
+    ctx: &RunContext<'_>,
+    transient: &AnalysisCommand,
+) -> Vec<f64> {
+    let analyses = &ctx.netlist.analyses;
+    let Some(first) = analyses
+        .iter()
+        .position(|card| matches!(card, AnalysisCommand::Tran { .. }))
+    else {
+        return Vec::new();
+    };
+    let AnalysisCommand::Tran { stop, .. } = &analyses[first] else {
+        return Vec::new();
+    };
+    let stop = *stop;
+    if !std::ptr::eq(&analyses[first], transient)
+        || ctx
+            .args
+            .tran_stop
+            .is_some_and(|tran_stop| tran_stop != stop)
+        || ctx.args.checkpoint.is_some()
+        || ctx.args.resume.is_some()
+        || ctx.netlist.options.restart.is_some()
+        || ctx.compress
+        || !ctx.netlist.fft_analyses.is_empty()
+    {
+        return Vec::new();
+    }
+    let mut times = analyses
+        .iter()
+        .enumerate()
+        .skip(first + 1)
+        .filter(|(_, card)| !matches!(card, AnalysisCommand::Sensitivity { .. }))
+        .filter_map(|(index, _)| match ctx.netlist.small_signal_state(index) {
+            Some(SmallSignalStateSource::TransientTimes(times)) => Some(times.iter().copied()),
+            _ => None,
+        })
+        .flatten()
+        .filter(|time| time.is_finite() && (0.0..=stop).contains(time))
+        .collect::<Vec<_>>();
+    times.sort_by(f64::total_cmp);
+    times.dedup();
+    // Far wider than any breakpoint merge window, which is a fraction of the
+    // maximum step, so every shared time is landed on as its own.
+    let mut shared: Vec<f64> = Vec::with_capacity(times.len());
+    for time in times {
+        if shared
+            .last()
+            .is_none_or(|&previous| time - previous > 1.0e-9 * stop)
+        {
+            shared.push(time);
+        }
+    }
+    shared
+}
+
 /// Run the small-signal card at `index` around the transient state it names
 /// and publish one result per state.
 pub(in crate::commands::run) fn run_at_transient_state(
@@ -79,12 +147,33 @@ pub(in crate::commands::run) fn run_at_transient_state(
                     times.len()
                 ))?;
             }
-            ctx.engine.run_small_signal_at_transient_times(
-                ctx.netlist,
-                index,
-                times,
-                &crate::abort::ProcessAbort,
-            )
+            // The states the deck's first `.TRAN` run captured for the card,
+            // when that run served it: the same transient, landed on the
+            // same times. Otherwise the card runs its own.
+            let shared = if matches!(card, AnalysisCommand::Sensitivity { .. }) {
+                None
+            } else {
+                ctx.shared_transient_states(times)
+            };
+            match shared {
+                Some(states) => states
+                    .iter()
+                    .map(|state| {
+                        ctx.engine.run_small_signal_at_transient_state(
+                            ctx.netlist,
+                            index,
+                            state,
+                            &crate::abort::ProcessAbort,
+                        )
+                    })
+                    .collect(),
+                None => ctx.engine.run_small_signal_at_transient_times(
+                    ctx.netlist,
+                    index,
+                    times,
+                    &crate::abort::ProcessAbort,
+                ),
+            }
         }
         SmallSignalStateSource::CheckpointFile(name) => {
             if !ctx.quiet {

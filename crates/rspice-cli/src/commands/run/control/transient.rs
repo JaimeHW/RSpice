@@ -70,7 +70,15 @@ pub(super) fn run(
             message: "control transient callback received another analysis".into(),
         });
     };
-    let outcome = basic::run_transient(&ctx, *stop, *step, start.unwrap_or(0.0), *max_step, *uic)?;
+    let outcome = basic::run_transient(
+        &ctx,
+        *stop,
+        *step,
+        start.unwrap_or(0.0),
+        *max_step,
+        *uic,
+        &[],
+    )?;
     let result = ctx.finish_control_transient(outcome)?;
     Ok(Completed {
         result,

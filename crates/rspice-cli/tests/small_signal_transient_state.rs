@@ -15,6 +15,11 @@ use std::process::Command;
 /// with it its conductance, falls as the capacitor charges (time constant
 /// about 10 us), so each state linearizes differently.
 fn deck(cards: &str) -> String {
+    deck_around("", cards)
+}
+
+/// The deck with `before` above its `.TRAN` card and `after` below it.
+fn deck_around(before: &str, after: &str) -> String {
     format!(
         "* diode-RC charging\n\
          v1 in 0 pulse(0 1 0 100n 100n 1 2) ac 1\n\
@@ -23,10 +28,43 @@ fn deck(cards: &str) -> String {
          c1 out 0 1n\n\
          r2 out 0 1meg\n\
          .model dmod d is=1e-14 n=1.2 cjo=5p\n\
+         {before}\
          .tran 0.1u 20u 0 0.1u\n\
-         {cards}\
+         {after}\
          .end\n"
     )
+}
+
+/// Run `deck` with the engine's records on stderr, and count the transients
+/// it ran.
+fn run_counting_transients(deck: &Path, output: &Path) -> usize {
+    let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--log-level",
+            "info",
+            "run",
+            deck.to_str().expect("UTF-8 deck path"),
+            "--output",
+            output.to_str().expect("UTF-8 output path"),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run rspice");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        result.status.success(),
+        "rspice run failed:\nstdout:\n{}\nstderr:\n{stderr}",
+        String::from_utf8_lossy(&result.stdout),
+    );
+    stderr.matches("Transient complete:").count()
+}
+
+/// A document's first axis, which a transient's is its time.
+fn axis(document: &Value) -> Vec<f64> {
+    let mut values = Vec::new();
+    collect_numbers(&document["axes"][0]["values"]["values"], &mut values);
+    values
 }
 
 fn run(deck: &Path, output: &Path) {
@@ -225,4 +263,98 @@ fn a_checkpoint_file_publishes_the_state_it_holds() {
             );
         }
     }
+}
+
+/// An `ACTIMES=` card below the deck's `.TRAN` card reads its states from
+/// that card's run, which lands on its times and runs on to its stop, so the
+/// deck runs one transient. Above it, the card runs before the `.TRAN` card
+/// and so runs its own, as every card did before; its results are the same,
+/// sample for sample, and the `.TRAN` card's run is the plain one.
+#[test]
+fn a_card_below_its_transient_reads_its_states_from_that_run() {
+    let directory = test_dir("small_signal_actimes_shared");
+    let card = ".ac dec 2 1k 1meg actimes=10u,20u\n";
+    let shared = directory.join("shared.cir");
+    std::fs::write(&shared, deck_around("", card)).expect("write deck");
+    let own = directory.join("own.cir");
+    std::fs::write(&own, deck_around(card, "")).expect("write deck");
+    assert_eq!(
+        run_counting_transients(&shared, &directory.join("shared.json")),
+        1,
+        "the card shares the .TRAN card's run"
+    );
+    assert_eq!(
+        run_counting_transients(&own, &directory.join("own.json")),
+        2,
+        "a card above the .TRAN card runs its own"
+    );
+
+    for dataset in ["ac-001@t=1e-5", "ac-001@t=2e-5"] {
+        let read = |run: &str| read_json(&directory.join(format!("{run}.{dataset}.json")));
+        let (shared, own) = (read("shared"), read("own"));
+        assert_eq!(state_time(&shared).to_bits(), state_time(&own).to_bits());
+        assert_eq!(signal_samples(&shared), signal_samples(&own), "{dataset}");
+    }
+
+    let read = |run: &str| read_json(&directory.join(format!("{run}.tran-001.json")));
+    let (shared, plain) = (read("shared"), read("own"));
+    let (time, plain_time) = (axis(&shared), axis(&plain));
+    assert!(time.contains(&10.0e-6), "the run lands on the card's time");
+    assert_eq!(time.last(), plain_time.last(), "and runs on to its stop");
+    // Up to its last step before the card's time, which it shortens to land
+    // there, the run is the plain one.
+    let before = plain_time.iter().take_while(|&&t| t < 10.0e-6).count() - 1;
+    assert!(before > 2, "the comparison spans accepted points");
+    assert_eq!(time[..before], plain_time[..before]);
+    for ((name, shared), (plain_name, plain)) in
+        signal_samples(&shared).iter().zip(&signal_samples(&plain))
+    {
+        assert_eq!(name, plain_name);
+        assert_eq!(shared[..before], plain[..before], "{name}");
+    }
+}
+
+/// With two cards below the `.TRAN` card the one run lands on both cards'
+/// times, so each card's state comes from a run with the other's breakpoint in
+/// it: within tolerance of its own transient's, and still one transient.
+#[test]
+fn cards_below_their_transient_share_its_run() {
+    let directory = test_dir("small_signal_actimes_shared_cards");
+    let cards = ".ac dec 2 1k 1meg actimes=5u\n.ac dec 2 1k 1meg actimes=15u\n";
+    let shared = directory.join("shared.cir");
+    std::fs::write(&shared, deck_around("", cards)).expect("write deck");
+    let own = directory.join("own.cir");
+    std::fs::write(&own, deck_around(cards, "")).expect("write deck");
+    assert_eq!(
+        run_counting_transients(&shared, &directory.join("shared.json")),
+        1
+    );
+    assert_eq!(
+        run_counting_transients(&own, &directory.join("own.json")),
+        3
+    );
+
+    let mut largest: f64 = 0.0;
+    for dataset in ["ac-001@t=5e-6", "ac-002@t=1.5e-5"] {
+        let read = |run: &str| read_json(&directory.join(format!("{run}.{dataset}.json")));
+        let (shared, own) = (
+            signal_samples(&read("shared")),
+            signal_samples(&read("own")),
+        );
+        assert_eq!(shared.len(), own.len(), "{dataset}");
+        for ((name, shared), (own_name, own)) in shared.iter().zip(&own) {
+            assert_eq!(name, own_name);
+            assert_eq!(shared.len(), own.len(), "{dataset} {name}");
+            let scale = own
+                .iter()
+                .fold(0.0_f64, |scale, value| scale.max(value.abs()));
+            for (shared, own) in shared.iter().zip(own) {
+                largest = largest.max((shared - own).abs() / scale.max(f64::MIN_POSITIVE));
+            }
+        }
+    }
+    eprintln!(
+        "largest deviation of a shared card from its own run, relative to its signal: {largest:e}"
+    );
+    assert!(largest <= 1.0e-6, "{largest:e}");
 }

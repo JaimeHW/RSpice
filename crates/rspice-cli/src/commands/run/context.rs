@@ -112,6 +112,10 @@ pub(super) struct RunContext<'a> {
     /// The transient state the result being published linearized around,
     /// while a card that names one (`ACTIMES=`/`CHECKPOINT=`) publishes it.
     transient_state: std::cell::RefCell<Option<super::frequency::StatePublication>>,
+    /// The states the deck's first `.TRAN` run captured for the `ACTIMES=`
+    /// cards that share it, by the time each card names, so those cards
+    /// linearize around them instead of running the transient again.
+    shared_transient_states: std::cell::RefCell<Vec<(f64, rspice_core::engine::TransientState)>>,
 }
 
 /// The canonical identity of one planned `.FOUR` operand and the authored
@@ -332,6 +336,7 @@ impl<'a> RunContext<'a> {
             next_transient_ordinal: std::cell::Cell::new(0),
             next_fourier_ordinal: std::cell::Cell::new(0),
             transient_state: std::cell::RefCell::new(None),
+            shared_transient_states: std::cell::RefCell::new(Vec::new()),
         })
     }
 
@@ -694,6 +699,39 @@ impl<'a> RunContext<'a> {
             })
     }
 
+    /// Hold the states the deck's first `.TRAN` run captured at `times`
+    /// for the `ACTIMES=` cards that share it, in place of any an earlier
+    /// run held.
+    pub(super) fn hold_shared_transient_states(
+        &self,
+        times: &[f64],
+        states: Vec<rspice_core::engine::TransientState>,
+    ) {
+        *self.shared_transient_states.borrow_mut() = times.iter().copied().zip(states).collect();
+    }
+
+    /// The states the deck's first `.TRAN` run captured at each of a card's
+    /// `times`, when it captured every one; the card runs its own transient
+    /// otherwise. Its times are in increasing order, as its own run takes
+    /// them.
+    pub(super) fn shared_transient_states(
+        &self,
+        times: &[f64],
+    ) -> Option<Vec<rspice_core::engine::TransientState>> {
+        if times.is_empty() || times.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return None;
+        }
+        let held = self.shared_transient_states.borrow();
+        times
+            .iter()
+            .map(|time| {
+                held.iter()
+                    .find(|(held_time, _)| held_time.to_bits() == time.to_bits())
+                    .map(|(_, state)| state.clone())
+            })
+            .collect()
+    }
+
     /// The `.TRAN` analysis a small-signal state belongs to: the deck's
     /// first, whose trajectory `ACTIMES=` runs and `CHECKPOINT=` resumes.
     pub(super) fn state_transient_identity(&self) -> Result<AnalysisInstanceId, CliError> {
@@ -969,6 +1007,7 @@ impl<'a> RunContext<'a> {
                         message: "authored transient ordinal overflowed u32".to_string(),
                     })?;
                 self.next_transient_ordinal.set(next);
+                let state_times = frequency::shared_state_times(self, analysis);
                 let outcome = basic::run_transient(
                     self,
                     *stop,
@@ -976,6 +1015,7 @@ impl<'a> RunContext<'a> {
                     start.unwrap_or(0.0),
                     *max_step,
                     *uic,
+                    &state_times,
                 )?;
                 let analysis = self.current_transient_instance()?;
                 // Only a transient a planned `.FOUR` card names is kept:

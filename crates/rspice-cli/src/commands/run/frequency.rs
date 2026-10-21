@@ -21,7 +21,7 @@ use crate::report::format_spice_exponent;
 use super::payload_report as report;
 mod state;
 mod table;
-pub(super) use state::{StatePublication, run_at_transient_state};
+pub(super) use state::{StatePublication, run_at_transient_state, shared_state_times};
 
 fn map_frequency_error(
     ctx: &RunContext<'_>,
