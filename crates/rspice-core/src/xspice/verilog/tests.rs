@@ -1455,6 +1455,7 @@ mod hierarchical;
 mod overrides;
 mod ports;
 mod threads;
+mod values;
 
 fn testbench(files: &[(&str, &str)], options: &HdlTestbenchOptions) -> HdlTestbenchReport {
     let sources: Vec<_> = files

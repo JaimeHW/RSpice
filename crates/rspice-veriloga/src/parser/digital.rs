@@ -232,8 +232,26 @@ impl Parser<'_> {
         }
         self.expect(TokenKind::Wire)?;
         let discipline = self.parse_discrete_discipline(true)?;
+        // IEEE 1364-2005 section 4.3.2: `vectored` and `scalared` say whether
+        // a tool may expand a vector net into bits. Neither changes what the
+        // net holds or how it resolves, so the keyword is read past.
+        let expansion = (self.digital_keyword_is("vectored")
+            || self.digital_keyword_is("scalared"))
+        .then(|| {
+            let keyword = self.current().text.clone().unwrap_or_default();
+            self.advance();
+            keyword
+        });
         let signedness = self.parse_signedness();
         let range = self.parse_optional_vector_range()?;
+        if let Some(keyword) = expansion
+            && range.is_none()
+        {
+            return Err(self.error(ParseErrorKind::UnexpectedToken(format!(
+                "`{keyword}` declares a vector net, so a range must follow it (IEEE 1364-2005 \
+                 section 4.3.2)"
+            ))));
+        }
         let items = self.parse_digital_decl_items()?;
         Self::retain_discrete_discipline(
             module,

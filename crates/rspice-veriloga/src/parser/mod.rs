@@ -106,6 +106,8 @@ pub struct Parser<'a> {
     nesting: [usize; 2],
     /// See [`SourceFile::ignored_directives`].
     ignored_directives: Vec<(SmolStr, Span)>,
+    /// The `` `unconnected_drive `` in force; see [`Module::unconnected_drive`].
+    unconnected_drive: Option<bool>,
 }
 
 impl<'a> Parser<'a> {
@@ -140,6 +142,7 @@ impl<'a> Parser<'a> {
             library_order: None,
             nesting: [0; 2],
             ignored_directives: Vec::new(),
+            unconnected_drive: None,
         }
     }
 
@@ -175,6 +178,13 @@ impl<'a> Parser<'a> {
 
             if self.check_identifier_text("__rspice_default_nettype") {
                 self.parse_default_nettype()?;
+                continue;
+            }
+            // `` `resetall `` also ends an `` `unconnected_drive ``.
+            if self.check_identifier_text("__rspice_nounconnected_drive") {
+                self.advance();
+                self.expect(TokenKind::Semicolon)?;
+                self.unconnected_drive = None;
                 continue;
             }
             if self.check_identifier_text(crate::preprocessor::LIBRARY_MARKER) {
@@ -555,6 +565,7 @@ impl<'a> Parser<'a> {
         self.reference_symbols.clear();
         let mut module = Module::new(name, start);
         module.time_scale = self.time_scale;
+        module.unconnected_drive = self.unconnected_drive;
 
         let port_parameters = if self.check(TokenKind::Hash) {
             self.parse_parameter_port_list(&mut module)?;
@@ -4100,13 +4111,27 @@ impl<'a> Parser<'a> {
     fn skip_directive(&mut self) -> Result<(), ParseError> {
         let directive = self.current_span();
         let name = self.current().text.clone();
-        // Section 19.9 pulls the unconnected input ports of the modules that
-        // follow; skipping it would leave them floating, a different answer.
-        if name.as_deref() == Some("`unconnected_drive") {
-            return Err(self.unsupported_current("compiler directive"));
-        }
         self.advance();
-        if name.as_deref() == Some("`default_nettype") {
+        if name.as_deref() == Some("`unconnected_drive") {
+            // Section 19.9: the unconnected input ports of the modules that
+            // follow are pulled to the operand's value.
+            let operand = (!self.at_end() && self.current_span().start < directive.end)
+                .then(|| self.current().text.clone())
+                .flatten();
+            self.unconnected_drive = match operand.as_deref() {
+                Some("pull0") => Some(false),
+                Some("pull1") => Some(true),
+                _ => {
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(
+                        "`unconnected_drive takes `pull0` or `pull1` (IEEE 1364-2005 section \
+                         19.9)"
+                            .into(),
+                    )));
+                }
+            };
+        } else if name.as_deref() == Some("`nounconnected_drive") {
+            self.unconnected_drive = None;
+        } else if name.as_deref() == Some("`default_nettype") {
             if self.at_end() || self.current_span().start >= directive.end {
                 return Err(self.error(ParseErrorKind::UnexpectedToken(
                     "missing default net type".into(),
@@ -4125,10 +4150,21 @@ impl<'a> Parser<'a> {
             self.net_defaults.push((directive.start, enabled));
         } else if name.as_deref() == Some("`resetall") {
             self.net_defaults.push((directive.start, true));
+            self.unconnected_drive = None;
         } else if let Some(ignored) = name.as_deref().and_then(ignored_directive) {
             self.ignored_directives.push((ignored.into(), directive));
         }
+        let mut operands = 0;
         while !self.at_end() && self.current_span().start < directive.end {
+            self.advance();
+            operands += 1;
+        }
+        // `` `begin_keywords `` always takes its version string (section
+        // 19.11), which a comment may have pushed onto a later line.
+        if operands == 0
+            && name.as_deref() == Some("`begin_keywords")
+            && self.check(TokenKind::StringLiteral)
+        {
             self.advance();
         }
         Ok(())

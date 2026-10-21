@@ -1211,7 +1211,7 @@ impl Preprocessor {
                                 line_num + 1,
                             );
                             if directive == "resetall" {
-                                output.push_source(&format!("__rspice_default_nettype (wire); __rspice_default_discipline (); __rspice_default_transition ({});", crate::semantic::SemanticAnalyzer::SIMULATOR_DEFAULT_TRANSITION), &current_path, line_num + 1);
+                                output.push_source(&format!("__rspice_default_nettype (wire); __rspice_default_discipline (); __rspice_default_transition ({}); __rspice_nounconnected_drive;", crate::semantic::SemanticAnalyzer::SIMULATOR_DEFAULT_TRANSITION), &current_path, line_num + 1);
                             }
                         }
                         output.push_source("\n", &current_path, line_num + 1);
@@ -1382,17 +1382,18 @@ impl Preprocessor {
 
     /// Directive names processed by the preprocessor itself. Anything else
     /// starting with a backtick is a macro invocation, one of the directives
-    /// the parser reads ([`IGNORED_DIRECTIVES`] and `` `unconnected_drive ``),
-    /// or an error.
+    /// the parser reads ([`IGNORED_DIRECTIVES`] and [`DRIVE_DIRECTIVES`]), or
+    /// an error.
     fn is_known_directive(name: &str) -> bool {
         KNOWN_DIRECTIVES.contains(&name)
     }
 
     /// Whether `name` is a directive the preprocessor leaves in the text for
-    /// the parser: one it ignores with a warning, or `` `unconnected_drive ``,
-    /// which it refuses by name.
+    /// the parser: one it ignores with a warning, or one of the pair that
+    /// pulls unconnected input ports, which the parser applies to the modules
+    /// that follow.
     fn is_parser_directive(name: &str) -> bool {
-        IGNORED_DIRECTIVES.contains(&name) || name == "unconnected_drive"
+        IGNORED_DIRECTIVES.contains(&name) || DRIVE_DIRECTIVES.contains(&name)
     }
 
     /// Whether `trimmed` opens with a parser directive that no macro shadows.
@@ -1445,7 +1446,11 @@ impl Preprocessor {
         let directive_position = opens_line && !invoked;
         let directive = closest_name(
             name,
-            KNOWN_DIRECTIVES.iter().chain(&IGNORED_DIRECTIVES).copied(),
+            KNOWN_DIRECTIVES
+                .iter()
+                .chain(&IGNORED_DIRECTIVES)
+                .chain(&DRIVE_DIRECTIVES)
+                .copied(),
         )
         .filter(|_| directive_position);
         let message = if Self::is_known_directive(name) || Self::is_parser_directive(name) {
@@ -2126,19 +2131,22 @@ const KNOWN_DIRECTIVES: [&str; 13] = [
 /// IEEE 1364-2005 clause 19 directives that change nothing an analog model
 /// computes: cell marking, keyword-set selection, the line-number remapping of
 /// `` `line `` (which only moves where diagnostics point), the implementation
-/// pragmas section 19.10 says an unrecognized tool shall ignore, and
-/// `` `nounconnected_drive ``, which restores the floating default this
-/// compiler never leaves. The preprocessor leaves each in the text and the
-/// parser reads past it with a warning.
-pub(crate) const IGNORED_DIRECTIVES: [&str; 7] = [
+/// pragmas section 19.10 says an unrecognized tool shall ignore. The
+/// preprocessor leaves each in the text and the parser reads past it with a
+/// warning.
+pub(crate) const IGNORED_DIRECTIVES: [&str; 6] = [
     "begin_keywords",
     "celldefine",
     "end_keywords",
     "endcelldefine",
     "line",
-    "nounconnected_drive",
     "pragma",
 ];
+
+/// Section 19.9's pair, which pulls the unconnected input ports of the
+/// modules that follow and restores the floating default. The preprocessor
+/// leaves both in the text for the parser to apply.
+const DRIVE_DIRECTIVES: [&str; 2] = ["unconnected_drive", "nounconnected_drive"];
 
 /// The macro or directive name at the start of `text`, which follows its
 /// backtick; empty when no name does.
@@ -2454,7 +2462,7 @@ value = `KEEP("a, \"quoted\", {braces}, [brackets], (parentheses)");
 
     /// The IEEE 1364 directives that change nothing an analog model computes
     /// reach the parser as written, operand and all, for it to read past with
-    /// a warning; `` `unconnected_drive `` reaches it to be refused by name.
+    /// a warning, and the `` `unconnected_drive `` pair reaches it to apply.
     #[test]
     fn ignorable_directives_pass_to_the_parser_unexpanded() {
         let source = "`celldefine\n`pragma tool option `UNDEFINED\n`line 3 \"a.v\" 0\n\

@@ -325,6 +325,10 @@ pub struct Module {
     /// The library the source declaring this module was read into, when a
     /// library map placed it; `None` is the library `work`.
     pub(crate) library: Option<SmolStr>,
+    /// What an unconnected input port of this module's instances is pulled
+    /// to under `` `unconnected_drive `` (IEEE 1364-2005 section 19.9):
+    /// `Some(true)` for `pull1`, `Some(false)` for `pull0`, `None` to float.
+    pub(crate) unconnected_drive: Option<bool>,
     /// The library binding this module stands for, once bound.
     pub(crate) binding: Option<ModuleBinding>,
     /// Module attributes
@@ -429,6 +433,7 @@ impl Module {
             hierarchical_parameter_values: Default::default(),
             hierarchical_parameter_given: Default::default(),
             library: None,
+            unconnected_drive: None,
             binding: None,
             attributes: Vec::new(),
             span,

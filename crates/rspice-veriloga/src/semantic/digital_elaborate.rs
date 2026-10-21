@@ -641,8 +641,17 @@ impl DigitalElaborator<'_> {
             .last()
             .and_then(|parent| self.source_modules.get(&parent.key.module))
             .copied();
-        let (signals, mut scope, port_drivers, bit_aliases) =
-            self.bind_ports(child, parent_scope, parent_source, path, &borrowed)?;
+        let unconnected = child_source
+            .unconnected_drive
+            .map(|pull| (pull, instance.span));
+        let (signals, mut scope, port_drivers, bit_aliases) = self.bind_ports(
+            child,
+            parent_scope,
+            parent_source,
+            path,
+            &borrowed,
+            unconnected,
+        )?;
         scope.connections = super::node_vectors::ConnectionScope::new(child_source, child);
         scope.constants = super::DigitalConstants::from_module(child_source);
         scope.time_scale = child_source.time_scale;
@@ -734,6 +743,7 @@ impl DigitalElaborator<'_> {
         parent_source: Option<&Module>,
         path: &str,
         connections: &[Option<&Expression>],
+        unconnected: Option<(bool, Span)>,
     ) -> CompileResult<(
         Vec<ElaboratedDigitalSignal>,
         Scope,
@@ -765,15 +775,31 @@ impl DigitalElaborator<'_> {
             let binding = match form {
                 // An unconnected port is a net of its own. IEEE 1364-2005
                 // section 12.3.9 leaves an unconnected input at high
-                // impedance, which is what a net nothing drives already is.
-                None => Binding {
-                    elaborated: own,
-                    width: declared.width,
-                    range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
-                    signed: declared.signedness.is_signed(),
-                    is_variable,
-                    is_input_port: port.direction == PortDirection::Input,
-                },
+                // impedance, which is what a net nothing drives already is,
+                // unless `` `unconnected_drive `` (section 19.9) pulls it.
+                None => {
+                    if let Some((pull, span)) = unconnected
+                        && port.direction == PortDirection::Input
+                        && declared.width != 0
+                    {
+                        port_drivers.push(assignment(
+                            DigitalLValue::Identifier {
+                                name: own.clone(),
+                                span,
+                            },
+                            pulled_value(declared.width, pull, span)?,
+                            span,
+                        ));
+                    }
+                    Binding {
+                        elaborated: own,
+                        width: declared.width,
+                        range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
+                        signed: declared.signedness.is_signed(),
+                        is_variable,
+                        is_input_port: port.direction == PortDirection::Input,
+                    }
+                }
                 // Input/output selections keep their assignment semantics;
                 // an inout selection joins normalized wire bits directly.
                 Some(ConnectionForm::Select { name, select, span }) => {
@@ -1546,6 +1572,24 @@ fn input_port_connection_error(
         )),
         span,
     )
+}
+
+/// The value `` `unconnected_drive pull0 `` or `pull1 `` drives into an
+/// unconnected input port `width` bits wide: every bit 0 or every bit 1.
+///
+/// The pull strength itself is not modelled; nothing else can drive an input
+/// port from inside its module, so the resolved value is the same.
+fn pulled_value(width: u32, pull: bool, span: Span) -> CompileResult<Expression> {
+    let bit = if pull { "1" } else { "0" };
+    let spelling = format!("{width}'b{}", bit.repeat(width as usize));
+    let value = crate::four_state::decode(&spelling).map_err(|message| {
+        internal_error(format!(
+            "unconnected_drive value {spelling} did not decode: {message}"
+        ))
+    })?;
+    Ok(Expression::Digital(DigitalExpr::FourState(
+        crate::ast::FourStateLit { value, span },
+    )))
 }
 
 /// The implicit continuous assignment of a variable output port.
