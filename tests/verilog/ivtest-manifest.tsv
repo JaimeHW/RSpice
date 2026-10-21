@@ -277,9 +277,9 @@ br_gh632c	vlg	passed	L1	pass	PASSED
 br_gh674	vlg	passed	L3	refused:feature	Semantic error: Unsupported feature: parameter `av0`: an array declared inside a task or function has no executable form yet
 br_gh7	vlg	passed	L1	pass	PASSED
 br_gh732	vlg	gold	L6	fail	compile error: Parse error: Expected LParen, found Assign_
-br_gh782c	vlg	passed	L4	refused:compiler-directive	Parse error: Unsupported compiler directive: `unconnected_drive
+br_gh782c	vlg	passed	L4	pass	PASSED
 br_gh782d	vlg	passed	L4	pass	PASSED
-br_gh782e	vlg	passed	L4	fail	compile error: Parse error: Unexpected token: StringLiteral
+br_gh782e	vlg	passed	L4	pass	PASSED
 br_gh782f	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 3: unsupported `default_nettype `; supported net defaults are wire, tri and none
 br_gh788	vlg	gold	-	excluded:flag-gno-io-range-error	
 br_gh79	vlg	ce	L1	pass	language error: Lexer error: Invalid number literal: 4'b_: '4'b_' is missing digits after its base
@@ -1714,7 +1714,7 @@ unary_or	vlg	passed	L1	pass	PASSED
 unary_xnor1	vlg	passed	L1	pass	PASSED
 unary_xnor2	vlg	passed	L1	pass	PASSED
 unary_xor	vlg	passed	L1	pass	PASSED
-uncon_drive	vlg	passed	L4	refused:compiler-directive	Parse error: Unsupported compiler directive: `unconnected_drive
+uncon_drive	vlg	passed	L4	pass	PASSED
 undef	vlg	gold	L1	fail	compile error: Parse error: Invalid expression
 undef_lval_select	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
 undef_lval_select2	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
