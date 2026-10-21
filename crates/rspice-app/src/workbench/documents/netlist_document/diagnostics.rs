@@ -9,20 +9,10 @@ use rspice_core::netlist::{NetlistDefinition, NetlistReference, ReferenceKind};
 
 pub const MAX_NETLIST_DIAGNOSTICS: usize = 1_000_000;
 
-/// Severity levels shown by the gutter, strip, and syntax highlighter.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-pub enum DiagnosticSeverity {
-    #[serde(rename = "hint")]
-    Hint,
-    #[serde(rename = "information")]
-    Info,
-    #[serde(rename = "warning")]
-    Warning,
-    #[serde(rename = "error")]
-    Error,
-}
+/// Severity levels shown by the gutter, strip, and syntax highlighter: the
+/// shared source-diagnostic severity, so an editor finding and a compiler
+/// service finding rank and serialize alike.
+pub use rspice_app_types::diagnostics::DiagnosticSeverity;
 
 /// A single quick fix candidate for a diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

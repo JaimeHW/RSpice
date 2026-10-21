@@ -112,18 +112,6 @@ impl From<DiagnosticSeverity> for DiagnosticLevel {
     }
 }
 
-impl From<crate::workbench::documents::netlist_document::DiagnosticSeverity> for DiagnosticLevel {
-    fn from(severity: crate::workbench::documents::netlist_document::DiagnosticSeverity) -> Self {
-        use crate::workbench::documents::netlist_document::DiagnosticSeverity as Netlist;
-        match severity {
-            Netlist::Hint => Self::Hint,
-            Netlist::Info => Self::Info,
-            Netlist::Warning => Self::Warning,
-            Netlist::Error => Self::Error,
-        }
-    }
-}
-
 impl From<rspice_design::drc::DrcSeverity> for DiagnosticLevel {
     fn from(severity: rspice_design::drc::DrcSeverity) -> Self {
         use rspice_design::drc::DrcSeverity;

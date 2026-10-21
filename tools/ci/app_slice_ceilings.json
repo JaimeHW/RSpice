@@ -50,7 +50,7 @@
   },
   "lower->upper": {
     "framework->cloud": 29,
-    "framework->code": 105,
+    "framework->code": 76,
     "framework->design": 16,
     "framework->hardcopy": 6,
     "framework->project": 7,
@@ -60,7 +60,7 @@
     "framework->sheets": 9,
     "framework->shell": 211,
     "framework->simulate": 5,
-    "model->code": 20,
+    "model->code": 17,
     "model->design": 2,
     "model->run": 5,
     "model->session": 215,
