@@ -550,6 +550,9 @@ impl<T: Copy> StoredPolicy<T> {
     }
 }
 
+/// A policy is written as the JSON value it reads back through, so every
+/// format stores its kebab-case name as a string. Written as an enum, RON
+/// stores a bare identifier, which an untyped reader takes for unit.
 impl<T: Serialize> Serialize for StoredPolicy<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -557,11 +560,16 @@ impl<T: Serialize> Serialize for StoredPolicy<T> {
     {
         match &self.unknown {
             Some(raw) => raw.serialize(serializer),
-            None => self.effective.serialize(serializer),
+            None => serde_json::to_value(&self.effective)
+                .map_err(serde::ser::Error::custom)?
+                .serialize(serializer),
         }
     }
 }
 
+/// A null policy reads as the shipped value. No build writes one on purpose:
+/// it is what an identifier written into the RON session read back as, and
+/// that session then saved it as `()`.
 impl<'de, T> Deserialize<'de> for StoredPolicy<T>
 where
     T: Default + DeserializeOwned,
@@ -571,6 +579,9 @@ where
         D: Deserializer<'de>,
     {
         let raw = Value::deserialize(deserializer)?;
+        if raw.is_null() {
+            return Ok(Self::default());
+        }
         match serde_json::from_value(raw.clone()) {
             Ok(effective) => Ok(Self {
                 effective,
@@ -733,5 +744,91 @@ mod tests {
             Err(ShortcutProfileError::InvalidBinding(message))
                 if message.contains("Primary") && message.contains("Browser")
         ));
+    }
+
+    /// The options `AppState::from_session_ron` reads the eframe session
+    /// with. The session is written by `ron::ser::to_string`.
+    fn session_ron_options() -> ron::Options {
+        ron::Options::default().with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+    }
+
+    fn non_default_policies() -> ShortcutPolicies {
+        let mut policies = ShortcutPolicies::default();
+        policies.set_single_key_canvas(SingleKeyCanvasPolicy::RequireAlt);
+        policies.set_chord_timeout(ChordTimeoutPolicy::NoTimeout);
+        policies.set_protected_shortcuts(ProtectedShortcutPolicy::AllowWithConfirmation);
+        policies.set_context_precedence(ContextPrecedencePolicy::EditorModalWorkspaceGlobal);
+        policies
+    }
+
+    /// The session carries the shortcut library, which reads its policies
+    /// through an untyped value. Each must come back as it was chosen, and
+    /// save again as it was written.
+    #[test]
+    fn non_default_policies_survive_the_ron_session() {
+        let mut library = super::super::ShortcutProfileLibrary::default();
+        library
+            .replace_active({
+                let mut profile = super::super::ShortcutPreferences::default();
+                *profile.policies_mut() = non_default_policies();
+                profile
+            })
+            .expect("a new library is compatible");
+
+        let written = ron::ser::to_string(&library).expect("the library encodes as RON");
+        let read: super::super::ShortcutProfileLibrary = session_ron_options()
+            .from_str(&written)
+            .expect("the session reads the library back");
+
+        assert!(
+            written.contains(r#""require-alt""#),
+            "a policy is written as its name: {written}"
+        );
+        assert_eq!(read.active().policies(), &non_default_policies());
+        assert!(
+            read.active()
+                .policies()
+                .unknown_execution_policy_names()
+                .is_empty()
+        );
+        assert_eq!(
+            ron::ser::to_string(&read).expect("the library encodes as RON"),
+            written
+        );
+    }
+
+    /// The shortcut store and the settings file are JSON, and keep the bytes
+    /// they had before policies were written as JSON values.
+    #[test]
+    fn policies_write_the_json_they_always_wrote() {
+        assert_eq!(
+            serde_json::to_string(&non_default_policies()).expect("policies encode as JSON"),
+            r#"{"single-key-canvas":"require-alt","chord-timeout":"no-timeout","protected-shortcuts":"allow-with-confirmation","context-precedence":"editor-modal-workspace-global"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&ShortcutPolicies::default()).expect("policies encode as JSON"),
+            r#"{"single-key-canvas":"canvas-focus-only","chord-timeout":"one-point-five-seconds","protected-shortcuts":"require-conflict-free-alternate","context-precedence":"modal-editor-workspace-global"}"#
+        );
+    }
+
+    /// A session an earlier build saved holds each policy as `()`. It reads
+    /// as the shipped policies, so the profile is not refused as one this
+    /// build does not understand.
+    #[test]
+    fn a_policy_saved_as_unit_reads_as_the_shipped_policy() {
+        let saved = r#"{"library-version":1,"active":{"policies":{"single-key-canvas":(),"chord-timeout":(),"protected-shortcuts":(),"context-precedence":()},"commands":{},"protected-override-acknowledgements":[]},"named-presets":{},"revision":3}"#;
+
+        let read: super::super::ShortcutProfileLibrary = session_ron_options()
+            .from_str(saved)
+            .expect("the session reads the library back");
+
+        assert_eq!(read.active().policies(), &ShortcutPolicies::default());
+        assert!(
+            read.active()
+                .policies()
+                .unknown_execution_policy_names()
+                .is_empty()
+        );
+        assert!(read.active().audit().is_valid());
     }
 }
