@@ -167,12 +167,12 @@ pub(crate) use dialogs::symbol_definition::{
 
 pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
 
+pub use dialogs::state::DialogState;
 pub(crate) use dialogs::state::{
     DatasetExportPicker, GridSnapSpacingChoice, HelpCenterPage, NewWindowInitialContent,
     PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone, RunDetailsDialogState,
     TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
-pub use dialogs::state::{DialogState, LicensePhase};
 
 /// Test-only: the studio pins this against its own hop label, and the dialog
 /// module it lives in is private to the shell.

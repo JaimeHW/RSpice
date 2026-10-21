@@ -5,7 +5,7 @@ mod preferences_shell;
 #[cfg(test)]
 mod raster;
 pub(crate) mod shortcut_portability_dialogs;
-mod shortcut_preferences;
+pub(in crate::workbench) mod shortcut_preferences;
 pub(crate) mod workspace_layout_manager;
 
 use egui::{Context, Id};

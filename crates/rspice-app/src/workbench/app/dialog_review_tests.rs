@@ -711,10 +711,11 @@ fn render_the_help_dialogs_for_review() {
                         Command::License.execute(&mut reader.app);
                         let dialog = &mut reader.app.state.dialogs.license_dialog;
                         dialog.text = license::SAMPLE_KEY.to_owned();
-                        dialog.phase = crate::workbench::app::LicensePhase::Verified(
-                            license::parse_and_verify(license::SAMPLE_KEY)
-                                .expect("the sample key verifies in a test build"),
-                        );
+                        dialog.phase =
+                            crate::workbench::app::dialogs::license::LicensePhase::Verified(
+                                license::parse_and_verify(license::SAMPLE_KEY)
+                                    .expect("the sample key verifies in a test build"),
+                            );
                     }
                     Opens::Examples => reader.app.state.workbench.open_examples(),
                 }

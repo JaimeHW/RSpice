@@ -29,9 +29,88 @@ use super::preferences_shell::{
     action_buttons, control_width, preference_row, searchable_row, section_heading, value_column,
 };
 use super::{AppState, PreferencePageActions};
-use crate::workbench::app::dialogs::state::{
-    ShortcutCaptureTarget, ShortcutEditorContext, ShortcutEditorState,
-};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ShortcutEditorContext {
+    #[default]
+    All,
+    Global,
+    Schematic,
+    Simulation,
+    Results,
+    Verification,
+    SourceEditor,
+}
+
+impl ShortcutEditorContext {
+    pub(crate) const ALL: [Self; 7] = [
+        Self::All,
+        Self::Global,
+        Self::Schematic,
+        Self::Simulation,
+        Self::Results,
+        Self::Verification,
+        Self::SourceEditor,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All contexts",
+            Self::Global => "Global",
+            Self::Schematic => "Schematic",
+            Self::Simulation => "Simulation",
+            Self::Results => "Results",
+            Self::Verification => "Verification",
+            Self::SourceEditor => "Source editor",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShortcutCaptureTarget {
+    pub(crate) command: crate::workbench::commands::vocabulary::Command,
+    pub(crate) slot: crate::workbench::ShortcutBindingSlot,
+}
+
+/// Retained transaction state for the command-binding editor. Visible
+/// controls mutate `draft`; the live profile is replaced only by validated
+/// Save.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ShortcutEditorState {
+    pub(crate) open: bool,
+    pub(crate) original: Option<crate::workbench::ShortcutPreferences>,
+    pub(crate) draft: Option<crate::workbench::ShortcutPreferences>,
+    pub(crate) query: String,
+    pub(crate) context: ShortcutEditorContext,
+    pub(crate) selected_command: Option<crate::workbench::commands::vocabulary::Command>,
+    pub(crate) recording: Option<ShortcutCaptureTarget>,
+    pub(crate) capture_strokes: Vec<crate::workbench::ShortcutStroke>,
+    pub(crate) capture_last_input_at: Option<f64>,
+    pub(crate) dirty: bool,
+    /// A browser CAS is in flight. The draft remains isolated and the editor
+    /// cannot close or launch a second publication until completion.
+    pub(crate) persistence_pending: bool,
+    pub(crate) discard_confirmation: bool,
+    pub(crate) error_summary: Option<String>,
+    pub(crate) repair_receipt: Option<String>,
+    pub(crate) focus_error: Option<ShortcutCaptureTarget>,
+    pub(crate) body_scroll_offset: f32,
+}
+
+impl ShortcutEditorState {
+    pub(crate) fn open(&mut self, profile: &crate::workbench::ShortcutPreferences) {
+        *self = Self {
+            open: true,
+            original: Some(profile.clone()),
+            draft: Some(profile.clone()),
+            ..Self::default()
+        };
+    }
+
+    pub(crate) fn close_and_discard(&mut self) {
+        *self = Self::default();
+    }
+}
 
 const RESPONSIVE_TABLE_BREAKPOINT: f32 = 760.0;
 const ENGINEERING_TABLE_BREAKPOINT: f32 = 820.0;

@@ -357,14 +357,15 @@ pub struct DialogState {
     pub(crate) shortcut_portability: crate::workbench::app::dialogs::preferences::shortcut_portability_dialogs::ShortcutPortabilityDialogsState,
 
     /// Transactional keyboard shortcut editor.
-    pub(crate) shortcut_editor: ShortcutEditorState,
+    pub(crate) shortcut_editor:
+        crate::workbench::app::dialogs::preferences::shortcut_preferences::ShortcutEditorState,
 
     /// Browser-only persist-before-live policy candidate. Native publication
     /// completes in the initiating frame, while browser storage is async.
     pub(crate) shortcut_policy_candidate: Option<crate::workbench::ShortcutPreferences>,
 
     /// License activation dialog state
-    pub license_dialog: LicenseDialogState,
+    pub license_dialog: crate::workbench::app::dialogs::license::LicenseDialogState,
 
     /// Reviewed identity for the project File > New is about to create.
     pub(crate) new_project:

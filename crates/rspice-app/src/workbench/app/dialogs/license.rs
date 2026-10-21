@@ -15,7 +15,30 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 
-use crate::workbench::app::{LicensePhase, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+
+/// Where the license-activation flow stands.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum LicensePhase {
+    /// Waiting for a key.
+    #[default]
+    Entry,
+    /// Last verification failed; the message renders under the field.
+    Error(String),
+    /// Key verified — summary pane with the grant, primary = Activate.
+    Verified(crate::services::license::LicenseInfo),
+}
+
+/// License activation dialog state.
+#[derive(Debug, Clone, Default)]
+pub struct LicenseDialogState {
+    /// Whether the dialog is showing.
+    pub open: bool,
+    /// The pasted key text.
+    pub text: String,
+    /// Current phase of the flow.
+    pub phase: LicensePhase,
+}
 
 /// Lines the key field shows: a whole key, wrapped, without scrolling.
 const KEY_LINES: usize = 3;
