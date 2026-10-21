@@ -687,6 +687,86 @@ mod tests {
         assert_eq!(serde_json::to_value(library).unwrap(), source);
     }
 
+    /// preferences.json, the shortcut library store and the session all hold
+    /// the library, and an edit stores its bindings through the binding types.
+    /// A populated library, with entries this build does not understand, keeps
+    /// the bytes each of them writes.
+    #[test]
+    fn a_populated_library_keeps_the_bytes_it_is_stored_with() {
+        use super::super::{
+            CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutSequence,
+            ShortcutStroke,
+        };
+        use crate::workbench::commands::vocabulary::CommandPlatform;
+
+        let edit = CommandShortcutOverride::new(vec![
+            ProfileShortcutBinding::new(
+                ShortcutBindingSlot::Alternate,
+                vec![CommandPlatform::Phone, CommandPlatform::Desktop],
+                ShortcutSequence::new(vec![
+                    ShortcutStroke::new(egui::Key::K, true, false, false),
+                    ShortcutStroke::new(egui::Key::OpenBracket, false, true, true),
+                ])
+                .unwrap(),
+            )
+            .unwrap(),
+        ])
+        .unwrap();
+        let edit_json = serde_json::to_string(&edit).unwrap();
+        assert_eq!(
+            edit_json,
+            r#"{"bindings":[{"slot":"alternate","platforms":["desktop","phone"],"sequence":[{"key":"K","primary":true},{"key":"OpenBracket","alt":true,"shift":true}]}]}"#
+        );
+
+        let source = serde_json::json!({
+            "library-version": 1,
+            "active": {
+                "policies": {
+                    "single-key-canvas": "require-alt",
+                    "chord-timeout": "future-timeout",
+                    "future-policy-field": 7
+                },
+                "commands": {
+                    "save-project": edit,
+                    "fit-canvas": edit,
+                    "future-command": {"bindings": [], "future-data": true},
+                    "Bad Id": {"bindings": []}
+                },
+                "protected-override-acknowledgements": ["save-project"],
+                "future-domain": {"version": 2}
+            },
+            "named-presets": {
+                "RF Review": {"commands": {"toggle-navigator": edit}},
+                "bad/name": {"commands": {}}
+            },
+            "revision": 9,
+            "future-library": {"mode": "portable"}
+        });
+        let library: ShortcutProfileLibrary = serde_json::from_value(source).unwrap();
+        // The session writes the same text: every level is a map of names.
+        let stored = r#"{"library-version":1,"active":{"policies":{"single-key-canvas":"require-alt","chord-timeout":"future-timeout","protected-shortcuts":"require-conflict-free-alternate","context-precedence":"modal-editor-workspace-global","future-policy-field":7},"commands":{"Bad Id":{"bindings":[]},"fit-canvas":{"bindings":[{"platforms":["desktop","phone"],"sequence":[{"key":"K","primary":true},{"alt":true,"key":"OpenBracket","shift":true}],"slot":"alternate"}]},"future-command":{"bindings":[],"future-data":true},"save-project":{"bindings":[{"platforms":["desktop","phone"],"sequence":[{"key":"K","primary":true},{"alt":true,"key":"OpenBracket","shift":true}],"slot":"alternate"}]}},"protected-override-acknowledgements":["save-project"],"future-domain":{"version":2}},"named-presets":{"RF Review":{"commands":{"toggle-navigator":{"bindings":[{"platforms":["desktop","phone"],"sequence":[{"key":"K","primary":true},{"alt":true,"key":"OpenBracket","shift":true}],"slot":"alternate"}]}},"policies":{"chord-timeout":"one-point-five-seconds","context-precedence":"modal-editor-workspace-global","protected-shortcuts":"require-conflict-free-alternate","single-key-canvas":"canvas-focus-only"},"protected-override-acknowledgements":[]},"bad/name":{"commands":{}}},"revision":9,"future-library":{"mode":"portable"}}"#;
+
+        let json = serde_json::to_string(&library).unwrap();
+        assert_eq!(json, stored);
+
+        let ron = ron::ser::to_string(&library).unwrap();
+        assert_eq!(ron, stored);
+        let read: ShortcutProfileLibrary = ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str(&ron)
+            .unwrap();
+        assert_eq!(read, library);
+        assert_eq!(ron::ser::to_string(&read).unwrap(), ron);
+
+        let mut preferences = crate::workbench::UserPreferences::default();
+        *preferences.shortcut_profiles_mut() = library;
+        assert!(
+            serde_json::to_string(&preferences)
+                .unwrap()
+                .contains(&format!(r#""shortcuts":{json}"#))
+        );
+    }
+
     #[test]
     fn final_usable_revision_refuses_mutation_without_partial_state_change() {
         let source = serde_json::json!({
