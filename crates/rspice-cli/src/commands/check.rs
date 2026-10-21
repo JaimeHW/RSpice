@@ -10,6 +10,9 @@ use std::sync::Arc;
 pub struct ValidationResult {
     pub errors: Vec<ValidationIssue>,
     pub warnings: Vec<ValidationIssue>,
+    /// Each converter the build inserted on a mixed boundary, with the run
+    /// coordinate whose build inserted it.
+    pub converters: Vec<(String, rspice_core::circuit::ConverterInsertion)>,
 }
 
 #[derive(Debug)]
@@ -75,9 +78,12 @@ pub fn execute(
     };
 
     if args.json {
-        output_json(&result)?;
+        output_json(&result, args.converters)?;
     } else {
         output_text(&result, quiet)?;
+        if args.converters {
+            output_converters(&result.converters)?;
+        }
     }
 
     if !result.is_ok() {
@@ -233,6 +239,12 @@ fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult,
             }
             result.errors.extend(local.errors);
             result.warnings.extend(local.warnings);
+            result.converters.extend(
+                local
+                    .converters
+                    .into_iter()
+                    .map(|(_, converter)| (label.clone(), converter)),
+            );
         }
     }
     Ok(result)
@@ -365,7 +377,15 @@ fn check_circuit_build(
                 }),
         );
     match build {
-        Ok(circuit) => Ok(Some(circuit)),
+        Ok(circuit) => {
+            result.converters.extend(
+                circuit
+                    .converter_insertions()
+                    .iter()
+                    .map(|converter| (String::new(), converter.clone())),
+            );
+            Ok(Some(circuit))
+        }
         Err(rspice_core::SimulationError::Aborted) => Err(CliError::Interrupted),
         Err(error @ rspice_core::SimulationError::ResourceLimit(_)) => Err(error.into()),
         Err(rspice_core::SimulationError::Elaboration(error))
@@ -758,8 +778,8 @@ fn check_model_references(netlist: &Netlist, result: &mut ValidationResult) {
     }
 }
 
-fn output_json(result: &ValidationResult) -> Result<(), CliError> {
-    let json = serde_json::json!({
+fn output_json(result: &ValidationResult, converters: bool) -> Result<(), CliError> {
+    let mut json = serde_json::json!({
         "valid": result.is_ok(),
         "strict_valid": result.is_ok() && result.warnings.is_empty(),
         "errors": result.errors.iter().map(|e| serde_json::json!({
@@ -777,8 +797,103 @@ fn output_json(result: &ValidationResult) -> Result<(), CliError> {
             "diagnostic": &w.compiler_diagnostic,
         })).collect::<Vec<_>>(),
     });
+    if converters {
+        // Each record as the engine keeps it, with the run coordinate whose
+        // build inserted it.
+        let records = result
+            .converters
+            .iter()
+            .map(|(deck, converter)| {
+                let mut record = serde_json::to_value(converter)?;
+                if let Some(record) = record.as_object_mut() {
+                    record.insert("deck".into(), deck.as_str().into());
+                }
+                Ok(record)
+            })
+            .collect::<Result<Vec<_>, serde_json::Error>>()
+            .map_err(|error| CliError::InternalError {
+                message: format!("converter records could not be written: {error}"),
+            })?;
+        json["converters"] = records.into();
+    }
     let json = crate::observability::envelope("rspice.check", json);
     crate::console::json(&json, true)
+}
+
+/// One dense row per converter: the boundary net, the port that meets it,
+/// the port's direction, what converts and its instance, the supply, and the
+/// parameters the connect statement set.
+fn output_converters(
+    converters: &[(String, rspice_core::circuit::ConverterInsertion)],
+) -> Result<(), CliError> {
+    use rspice_core::circuit::ConverterSource;
+    use rspice_core::xspice::PortDirection;
+
+    if converters.is_empty() {
+        return crate::console::line(format_args!("No converters inserted"));
+    }
+    let several_decks = converters.iter().any(|(deck, _)| *deck != converters[0].0);
+    let mut rows = vec![[
+        "NODE".to_owned(),
+        "PORT".to_owned(),
+        "DIR".to_owned(),
+        "MODULE".to_owned(),
+        "INSTANCE".to_owned(),
+        "SUPPLY".to_owned(),
+        "PARAMETERS".to_owned(),
+    ]];
+    for (deck, converter) in converters {
+        let set = converter
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.source == ConverterSource::ConnectStatement)
+            .map(|parameter| format!("{parameter:#}"))
+            .collect::<Vec<_>>();
+        rows.push([
+            if several_decks {
+                format!("[{deck}] {}", converter.boundary)
+            } else {
+                converter.boundary.clone()
+            },
+            converter.port.clone().unwrap_or_else(|| "-".into()),
+            match converter.direction {
+                PortDirection::In => "input",
+                PortDirection::Out => "output",
+                PortDirection::InOut => "inout",
+            }
+            .to_owned(),
+            converter.module.clone(),
+            converter.instance.clone(),
+            converter
+                .supply
+                .as_ref()
+                .map_or_else(|| "-".into(), |supply| format!("{supply:#}")),
+            if set.is_empty() {
+                "-".into()
+            } else {
+                set.join(" ")
+            },
+        ]);
+    }
+    let mut widths = [0usize; 7];
+    for row in &rows {
+        for (width, cell) in widths.iter_mut().zip(row) {
+            *width = (*width).max(cell.chars().count());
+        }
+    }
+    crate::console::line(format_args!("Converters: {}", converters.len()))?;
+    for row in &rows {
+        let mut line = String::from(" ");
+        for (index, cell) in row.iter().enumerate() {
+            line.push(' ');
+            line.push_str(cell);
+            if index + 1 < row.len() {
+                line.push_str(&" ".repeat(widths[index] - cell.chars().count() + 1));
+            }
+        }
+        crate::console::line(format_args!("{line}"))?;
+    }
+    Ok(())
 }
 
 fn output_text(result: &ValidationResult, quiet: bool) -> Result<(), CliError> {
@@ -829,6 +944,7 @@ mod tests {
             connectivity: true,
             models: true,
             strict: false,
+            converters: false,
             json: false,
         };
         for mode in ["default", "fast", "robust"] {
@@ -875,6 +991,7 @@ mod tests {
                 connectivity: true,
                 models: true,
                 strict: false,
+                converters: false,
                 json: false,
             },
             &Config::default(),
@@ -922,6 +1039,7 @@ mod tests {
                 connectivity: true,
                 models: true,
                 strict: false,
+                converters: false,
                 json: false,
             },
             &Config::default(),

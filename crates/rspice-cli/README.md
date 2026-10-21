@@ -636,6 +636,7 @@ of convergence.
 | `--connectivity` | Also warn about nodes with one device terminal (`TOPOLOGY_ONE_DEVICE_TERMINAL`) or no DC path to ground (`TOPOLOGY_NO_DC_PATH`) |
 | `--models` | Also warn about undefined model references |
 | `--strict` | Fail on any warning (exit 2) |
+| `--converters` | Also list the converters the build inserts on mixed-signal boundaries, one row each: the net, the port that meets it, its direction, the module and instance, the supply, and the parameters the connect statement set. With `--json`, the document's `converters` array holds each record with every parameter's value and source (an infinite value is `null`) |
 | `--json` | Print one `rspice.check` document: `valid` follows the non-strict verdict, and `strict_valid` is false whenever there are warnings |
 
 Validation errors exit 65, and the process error lists every issue, so the cause

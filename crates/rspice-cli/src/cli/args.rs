@@ -811,6 +811,10 @@ pub struct CheckArgs {
     #[arg(long)]
     pub strict: bool,
 
+    /// List the converters the build inserts on mixed-signal boundaries
+    #[arg(long)]
+    pub converters: bool,
+
     /// Output in JSON format
     #[arg(long)]
     pub json: bool,
