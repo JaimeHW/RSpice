@@ -62,7 +62,8 @@ pub(super) fn refine(
                 | SimulationError::ParameterDomain(_)
                 | SimulationError::Solver(_)
                 | SimulationError::ConvergenceFailed(_)
-                | SimulationError::ContinuationFailed(_),
+                | SimulationError::ContinuationFailed(_)
+                | SimulationError::MixedConvergenceFailed { .. },
             ) if errors.iter().all(|error| error.is_finite()) => break,
             Err(failure) => return Err(failure),
         };

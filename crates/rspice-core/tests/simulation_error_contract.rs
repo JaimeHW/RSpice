@@ -96,6 +96,21 @@ fn convergence_metadata_covers_engine_and_nested_solver_failures() {
         "Convergence failed: pseudo-transient continuation stopped at pseudo-timestep = \
          1.000e-3 s; the closing Newton solve of the unmodified circuit did not converge"
     );
+
+    // What a mixed boundary adds to a convergence failure leaves it one.
+    let mixed = SimulationError::MixedConvergenceFailed {
+        iterations: 12,
+        context: "the failed step follows an accepted digital edge".to_owned(),
+    };
+    let descriptor = mixed.descriptor();
+    assert_eq!(descriptor.code, SimulationErrorCode::ConvergenceError);
+    assert_eq!(descriptor.category, SimulationErrorCategory::Convergence);
+    assert_eq!(descriptor.iterations, Some(12));
+    assert!(!descriptor.retryable);
+    assert_eq!(
+        mixed.to_string(),
+        "Convergence failed after 12 iterations: the failed step follows an accepted digital edge"
+    );
 }
 
 #[test]
@@ -399,7 +414,9 @@ fn expected_descriptor(
         SimulationError::OutputCommitFailed(_) => {
             (Code::OutputCommitFailed, Category::OutputCommit, false)
         }
-        SimulationError::ConvergenceFailed(_) | SimulationError::ContinuationFailed(_) => {
+        SimulationError::ConvergenceFailed(_)
+        | SimulationError::ContinuationFailed(_)
+        | SimulationError::MixedConvergenceFailed { .. } => {
             (Code::ConvergenceError, Category::Convergence, false)
         }
         SimulationError::Aborted => (Code::Aborted, Category::Cancellation, true),
@@ -502,6 +519,10 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             iterations: 14,
             cause: None,
         }),
+        SimulationError::MixedConvergenceFailed {
+            iterations: 6,
+            context: "the failed step follows an accepted digital edge".to_owned(),
+        },
         SimulationError::Aborted,
         SimulationError::TimeLimitExceeded,
     ]

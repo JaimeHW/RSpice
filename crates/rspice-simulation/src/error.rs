@@ -377,6 +377,13 @@ impl From<rspice_core::SimulationError> for SimulationError {
                     message: failure.to_string(),
                 }
             }
+            rspice_core::SimulationError::MixedConvergenceFailed {
+                iterations,
+                context,
+            } => SimulationError::ConvergenceFailed {
+                iterations,
+                message: context,
+            },
             rspice_core::SimulationError::Aborted => SimulationError::Aborted,
             // An expired time budget is a stop, not a failed circuit; the UI
             // treats it exactly as it treats a user cancellation until it

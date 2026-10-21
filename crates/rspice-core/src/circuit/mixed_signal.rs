@@ -174,15 +174,17 @@ fn analog_input_net(
 impl CircuitData {
     /// Enrich a terminal solver failure without changing convergence recovery
     /// or accepting any speculative boundary state.
+    ///
+    /// `after_edge` says the failure followed an accepted boundary edge, which
+    /// makes a single switch in the rejected probes evidence; otherwise a net
+    /// is named only once it has switched repeatedly.
     pub(crate) fn annotate_mixed_convergence_failure(
         &self,
         error: SimulationError,
         time: Value,
+        after_edge: bool,
     ) -> SimulationError {
-        if !matches!(
-            error,
-            SimulationError::ConvergenceFailed(_) | SimulationError::ContinuationFailed(_)
-        ) {
+        if !error.is_convergence_failure() {
             return error;
         }
         // Read from the parked ledgers rather than from the instances: the
@@ -193,11 +195,13 @@ impl CircuitData {
             .mixed_signal_hosts
             .iter()
             .zip(&self.scheduler.ledgers)
-            .filter_map(|(host, ledger)| host.rejected_probe_activity(ledger, time));
+            .filter_map(|(host, ledger)| {
+                host.rejected_probe_activity(ledger, time, if after_edge { 1 } else { 3 })
+            });
         let Some(first) = context.next() else {
             return error;
         };
-        let mut detail = format!("{error}; {first}");
+        let mut detail = first;
         // Bound the rendered context even when a design has many instances.
         for item in context.by_ref().take(7) {
             detail.push_str("; ");
@@ -206,7 +210,7 @@ impl CircuitData {
         if context.next().is_some() {
             detail.push_str("; additional switching instances omitted");
         }
-        SimulationError::Circuit(detail)
+        error.with_convergence_context(&detail)
     }
 
     /// The cross-domain loop the instances' accepted boundary histories show,

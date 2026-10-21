@@ -54,7 +54,7 @@ impl DigitalHost {
             // process's owner next finds it.
             target.node_id = index;
             target.instance = process_label(process.kind, usize::from(process.id));
-            target.port_name = writes(process)
+            target.port_name = process_writes(process)
                 .into_iter()
                 .map(|signal| signal_name(&self.plan, signal))
                 .collect::<Vec<_>>()
@@ -84,7 +84,7 @@ pub(crate) fn process_label(kind: DigitalProcessKind, ordinal: usize) -> String 
 }
 
 /// Every net or variable a process writes, from its lowered body.
-fn writes(process: &CfgDigitalProcess) -> BTreeSet<DigitalSignalId> {
+pub(crate) fn process_writes(process: &CfgDigitalProcess) -> BTreeSet<DigitalSignalId> {
     process
         .function
         .values
@@ -133,7 +133,10 @@ fn reads(process: &CfgDigitalProcess) -> BTreeSet<DigitalSignalId> {
 /// statically, which is itself worth knowing (a loop through a routine or a
 /// computed event expression).
 fn zero_delay_loop(plan: &CanonicalDigitalPlan, members: &[&CfgDigitalProcess]) -> Vec<String> {
-    let written: Vec<_> = members.iter().map(|process| writes(process)).collect();
+    let written: Vec<_> = members
+        .iter()
+        .map(|process| process_writes(process))
+        .collect();
     let read: Vec<_> = members.iter().map(|process| reads(process)).collect();
     // The lowest net through which `from` wakes `to`, if any.
     let link = |from: usize, to: usize| written[from].intersection(&read[to]).next().copied();

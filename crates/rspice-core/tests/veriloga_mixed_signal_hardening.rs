@@ -1477,7 +1477,12 @@ fn newton_work_never_reaches_the_module() {
                 completed_constrained_runs += 1;
                 result
             }
-            Err(rspice_core::SimulationError::ConvergenceFailed(_)) => continue,
+            // A failure the boundary explains names what it shows there, and
+            // is still a convergence failure.
+            Err(
+                SimulationError::ConvergenceFailed(_)
+                | SimulationError::MixedConvergenceFailed { .. },
+            ) => continue,
             Err(error) => {
                 panic!(
                     "with {label} the run must still complete or refuse with a convergence \
@@ -1864,6 +1869,93 @@ fn a_zero_delay_loop_names_every_member_and_the_loop_they_close() {
     ] {
         assert!(error.contains(expected), "missing `{expected}`: {error}");
     }
+}
+
+/// A register that steps from 0 to 1 at 10 ns, converted by the inserted
+/// D/A, whose default `trise`/`tfall` are zero: an ideal step.
+const IDEAL_STEP: &str = "`timescale 1ns/1ps
+module step(q);
+  output q;
+  reg q;
+  initial begin q = 1'b0; #10 q = 1'b1; end
+endmodule
+";
+
+fn step_deck(model: &ModelFile, load: &str) -> String {
+    format!(
+        "* an ideal D/A step\n\
+         .hdl \"{}\"\n\
+         xs q step\n\
+         {load}\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// The seconds a diagnostic prints after `label`, as in `t=1e-8s`.
+fn seconds_after(text: &str, label: &str) -> f64 {
+    let start = text
+        .find(label)
+        .unwrap_or_else(|| panic!("`{label}` is missing: {text}"))
+        + label.len();
+    let rest = &text[start..];
+    let end = rest.find('s').expect("a time ends in its unit");
+    rest[..end]
+        .parse()
+        .unwrap_or_else(|error| panic!("`{}`: {error}: {text}", &rest[..end]))
+}
+
+/// **A Newton failure at an edge names the edge and the converter.** `bq`
+/// has no solution once `q` is driven above 1 V (no current below it, 1 A
+/// above it), so the first step after the ideal edge fails however small it
+/// is. The failure names the edge with its values and time, the instance
+/// driving it, and the converter with the parameters that made the step
+/// ideal, and says what to change. The failed step lies within a minimum
+/// step of the edge.
+#[test]
+fn a_newton_failure_at_an_ideal_dac_edge_names_the_edge_and_the_converter() {
+    let model = ModelFile::hdl("ideal_step", IDEAL_STEP);
+    let error = error_for(
+        &step_deck(&model, "bq q 0 i = v(q) > 1 ? 1 : 0"),
+        20.0e-9,
+        1.0e-9,
+    );
+    // Node and instance names print canonically, in upper case.
+    let lowered = error.to_lowercase();
+    for expected in [
+        "on net `q` 0s -> 1s at t=1e-8s driven by xs.initial#0 (initial)",
+        "into converter __rspice_auto_dac_",
+        "(d2a: trise=0, tfall=0, tdelay=0, rlo=20, rhi=20)",
+        "the converter's step is ideal, which no solver timestep can resolve: give it a nonzero \
+         trise and tfall",
+    ] {
+        assert!(lowered.contains(expected), "missing `{expected}`: {error}");
+    }
+    let edge = seconds_after(&error, "1s at t=");
+    let failed = seconds_after(&error, "the failed step to t=");
+    assert!(
+        failed > edge && failed - edge < 1.0e-18,
+        "failed at {failed:e}, edge at {edge:e}: {error}"
+    );
+}
+
+/// The control: the same ideal edge into a load that has a solution runs, to
+/// the Thevenin level the converter sets, 3.3 V behind 20 ohm into 1 kohm.
+#[test]
+fn the_same_ideal_edge_into_a_solvable_load_runs() {
+    let model = ModelFile::hdl("ideal_step_control", IDEAL_STEP);
+    let result = run(&step_deck(&model, "rl q 0 1k"), 20.0e-9, 1.0e-9);
+    let q = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("q"))
+        .expect("q is published");
+    let last = *result.voltages[q].last().expect("the run has points");
+    assert!(
+        (last - 3.3 * 1000.0 / 1020.0).abs() < 1.0e-9,
+        "q ends at {last}"
+    );
 }
 
 /// The control: one tick of delay in the loop makes it a ring oscillator,

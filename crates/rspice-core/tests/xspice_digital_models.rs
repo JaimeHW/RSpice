@@ -4943,3 +4943,66 @@ fn the_dc_refusals_carriers_name_a_surface_that_really_publishes_them() {
         "and the real one"
     );
 }
+
+/// The seconds a diagnostic prints after `label`, as in `t=1.1e-8s`.
+fn seconds_after(text: &str, label: &str) -> f64 {
+    let start = text
+        .find(label)
+        .unwrap_or_else(|| panic!("`{label}` is missing: {text}"))
+        + label.len();
+    let rest = &text[start..];
+    let end = rest.find('s').expect("a time ends in its unit");
+    rest[..end]
+        .parse()
+        .unwrap_or_else(|error| panic!("`{}`: {error}: {text}", &rest[..end]))
+}
+
+/// **A Newton failure an edge caused names the edge and the converter.**
+///
+/// `bn` has no solution once `n` is driven above 1 V: below it no current
+/// flows and the node would sit at the D/A level, above it 1 A flows and the
+/// node would be far below 1 V. So the run fails on the D/A's 1 ps ramp after
+/// `din` rises, and the failure says which edge, who drove it, and which
+/// converter turned it into a step too fast for the load.
+#[test]
+fn a_newton_failure_on_a_dac_ramp_names_the_edge_and_the_converter() {
+    let deck = "* a d/a step into a node with no solution above 1 V\n\
+                vin ain 0 pulse(0 1 10n 1p 1p 100n 200n)\n\
+                a0 [ain] [din] adc1\n\
+                .model adc1 adc_bridge(in_low=0.4 in_high=0.6)\n\
+                a1 [din] [q] dac1\n\
+                .model dac1 dac_bridge(out_low=0 out_high=3.3 t_rise=1e-12 t_fall=1e-12)\n\
+                rq q n 20\n\
+                bn n 0 i = v(n) > 1 ? 1 : 0\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let error = Engine::default()
+        .run_tran(&netlist, 20.0e-9, 1.0e-9)
+        .expect_err("the node has no solution after the edge")
+        .to_string();
+    // Instance and node names print canonically, in upper case.
+    let lowered = error.to_lowercase();
+    for expected in [
+        "on net `din` 0s -> 1s at t=",
+        "driven by a0",
+        "into converter a1 (dac_bridge: t_rise=1e-12, t_fall=1e-12, out_low=0, out_high=3.3)",
+    ] {
+        assert!(lowered.contains(expected), "missing `{expected}`: {error}");
+    }
+    assert!(
+        !error.contains("ideal"),
+        "a 1 ps ramp is not an ideal step: {error}"
+    );
+    // The A/D publishes 1 ns after its input crosses during the 1 ps rise at
+    // 10 ns, and the failed step lies on the D/A's 1 ps ramp after that.
+    let edge = seconds_after(&error, "1s at t=");
+    let failed = seconds_after(&error, "the failed step to t=");
+    assert!(
+        (11.0e-9..11.001e-9).contains(&edge),
+        "edge at {edge:e}: {error}"
+    );
+    assert!(
+        failed > edge && failed - edge <= 1.0e-12,
+        "failed at {failed:e}, edge at {edge:e}: {error}"
+    );
+}

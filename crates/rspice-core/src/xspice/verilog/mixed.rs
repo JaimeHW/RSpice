@@ -2889,6 +2889,32 @@ impl MixedSignalHost {
         }
     }
 
+    /// The deck net of the converted port bit on event node `endpoint`, and
+    /// the processes that write it, each as `xs.initial#0 (initial)`: what a
+    /// failure after an edge there names, since the endpoint is
+    /// elaboration's private copy of the bit. The instance alone stands for
+    /// the writer when no process writes the port signal directly.
+    pub(crate) fn converted_bit_origin(&self, endpoint: usize) -> Option<(usize, Vec<String>)> {
+        let port = self.event_ports.iter().find(|port| port.node == endpoint)?;
+        let (_, deck) = port.converted_bit()?;
+        let mut writers: Vec<String> = self
+            .state
+            .digital
+            .plan()
+            .processes
+            .iter()
+            .filter(|process| super::host::process_writes(process).contains(&port.signal))
+            .map(|process| {
+                let label = super::host::process_label(process.kind, usize::from(process.id));
+                format!("{}.{label}", self.instance)
+            })
+            .collect();
+        if writers.is_empty() {
+            writers.push(self.instance.clone());
+        }
+        Some((deck, writers))
+    }
+
     /// The event endpoints of this module's converted port bits, each with
     /// its deck net: the node elaboration moved the bit to, whose value
     /// [`Self::boundary_trace_bindings`] also records on the deck net.
@@ -4917,10 +4943,14 @@ impl MixedSignalHost {
     /// between trials: the caller that renders this is asking after the trial
     /// that recorded the samples has already handed them back. A standalone
     /// host answers with [`Self::candidate_ledger`], which is its own.
+    ///
+    /// A net is named once it has switched `minimum_run` times: repeatedly
+    /// for a failure on its own, once for one that followed an accepted edge.
     pub(crate) fn rejected_probe_activity(
         &self,
         ledger: &CandidateLedger,
         time: f64,
+        minimum_run: u32,
     ) -> Option<String> {
         let history = ledger;
         if history.probe_time != Some(time) {
@@ -4932,7 +4962,7 @@ impl MixedSignalHost {
         // spelling of one that did not is never built.
         let mut note = |entry: &BoundaryNetHistory,
                         net: &dyn Fn() -> (String, Option<usize>, bool)| {
-            if entry.run < 3 {
+            if entry.run < minimum_run.max(1) {
                 return;
             }
             if nets.len() == 32 {
@@ -4981,8 +5011,9 @@ impl MixedSignalHost {
         } else {
             format!("; {elided} additional switching nets omitted")
         };
+        let repeated = if minimum_run > 1 { "repeated " } else { "" };
         Some(format!(
-            "mixed Verilog-AMS instance '{}' observed repeated boundary switching at t={time:e}s during {} rejected solver probes (retaining the last transition values): {}{omitted}",
+            "mixed Verilog-AMS instance '{}' observed {repeated}boundary switching at t={time:e}s during {} rejected solver probes (retaining the last transition values): {}{omitted}",
             self.instance,
             history.probes,
             nets.join("; "),
@@ -7129,7 +7160,7 @@ endmodule
             sample(&mut host, 0.0, 0.0);
         }
         let detail = host
-            .rejected_probe_activity(host.candidate_ledger(), 0.0)
+            .rejected_probe_activity(host.candidate_ledger(), 0.0, 3)
             .unwrap();
         assert!(detail.contains("0 1 0 1"), "{detail}");
         assert!(detail.contains("28 rejected solver probes"), "{detail}");
@@ -7143,7 +7174,7 @@ endmodule
         let after_probes = host.checkpoint().unwrap();
         host.restore(&after_probes).unwrap();
         assert!(
-            host.rejected_probe_activity(host.candidate_ledger(), 0.0)
+            host.rejected_probe_activity(host.candidate_ledger(), 0.0, 3)
                 .is_none()
         );
 
@@ -7153,11 +7184,11 @@ endmodule
         }
         sample(&mut host, 1e-9, 0.0);
         assert!(
-            host.rejected_probe_activity(host.candidate_ledger(), 0.0)
+            host.rejected_probe_activity(host.candidate_ledger(), 0.0, 3)
                 .is_none()
         );
         assert!(
-            host.rejected_probe_activity(host.candidate_ledger(), 1e-9)
+            host.rejected_probe_activity(host.candidate_ledger(), 1e-9, 3)
                 .is_none()
         );
         host.restore(&checkpoint).unwrap();
@@ -7168,7 +7199,7 @@ endmodule
         begin(&mut host, 0);
         settle_and_accept(&mut host, &[0.0; 4]);
         assert!(
-            host.rejected_probe_activity(host.candidate_ledger(), 0.0)
+            host.rejected_probe_activity(host.candidate_ledger(), 0.0, 3)
                 .is_none()
         );
     }

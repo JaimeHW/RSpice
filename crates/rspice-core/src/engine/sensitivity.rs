@@ -89,6 +89,7 @@ fn sensitivity_trial<T>(
                     | SimulationError::Solver(_)
                     | SimulationError::ConvergenceFailed(_)
                     | SimulationError::ContinuationFailed(_)
+                    | SimulationError::MixedConvergenceFailed { .. }
             ) =>
         {
             Err(error)

@@ -51,6 +51,7 @@ mod terminals;
 pub use terminals::{BjtTerminalLayout, MosTerminalLayout};
 mod terminal_meters;
 pub(crate) use terminal_meters::VerilogATerminalMeter;
+mod boundary_edges;
 pub(crate) mod dae;
 pub(crate) mod device_noise;
 mod external_models;

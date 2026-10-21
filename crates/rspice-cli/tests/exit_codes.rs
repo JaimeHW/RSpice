@@ -1310,10 +1310,11 @@ fn failed_measurement_marks_run_verdict_in_machine_reports() {
 // - `result_schema` is an internal consistency failure no authored deck can
 //   produce; it is covered by `rspice-core`'s `simulation_error_contract`,
 //   and its exit code by `exit_code_for`'s own table test.
-// - `solver` and `convergence` need a deck that defeats every convergence aid
-//   the engine applies, which is a moving target: pinning one here would make
-//   this suite fail for the wrong reason whenever the aids improve. Their
-//   descriptors are pinned in `rspice-core` and their codes in `cli::error`.
+// - `solver` needs a deck that defeats every convergence aid the engine
+//   applies, which is a moving target: pinning one here would make this suite
+//   fail for the wrong reason whenever the aids improve. Its descriptor is
+//   pinned in `rspice-core` and its code in `cli::error`. `convergence` is
+//   driven by a deck that has no solution at all, which no aid can change.
 //
 // `cancellation` needs a real interrupt; its sibling path is covered by
 // `--timeout` rather than by sending a signal from a test.
@@ -1405,6 +1406,50 @@ fn capability_refusals_exit_sixty_nine_with_their_token() {
     assert_eq!(analysis["observed_exit_code"], 69);
     assert_eq!(analysis["error"]["capability"], "analysis.pz.device");
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A Newton failure the engine names a digital edge for is still a
+/// convergence failure: it exits 82 with its iteration count, and its message
+/// carries the edge and the converter. `bn` has no solution once `n` is
+/// driven above 1 V, so the run fails on the D/A ramp after `din` rises
+/// whatever aid the engine applies.
+#[test]
+fn a_newton_failure_at_a_digital_edge_exits_eighty_two_naming_the_edge() {
+    let dir = test_dir("category_convergence_edge");
+    let diagnostic = run_json(
+        &dir,
+        "edge.cir",
+        "* a d/a step into a node with no solution above 1 V\n\
+         vin ain 0 pulse(0 1 10n 1p 1p 100n 200n)\n\
+         a0 [ain] [din] adc1\n\
+         .model adc1 adc_bridge(in_low=0.4 in_high=0.6)\n\
+         a1 [din] [q] dac1\n\
+         .model dac1 dac_bridge(out_low=0 out_high=3.3 t_rise=1e-12 t_fall=1e-12)\n\
+         rq q n 20\n\
+         bn n 0 i = v(n) > 1 ? 1 : 0\n\
+         .tran 1n 20n\n\
+         .end\n",
+        &[],
+    );
+    assert_eq!(diagnostic["observed_exit_code"], 82, "{diagnostic}");
+    assert_eq!(diagnostic["error"]["category"], "convergence");
+    assert_eq!(diagnostic["error"]["code"], "convergence_error");
+    assert!(diagnostic["error"]["iterations"].is_u64(), "{diagnostic}");
+    let message = diagnostic["error"]["message"]
+        .as_str()
+        .expect("the diagnostic has a message")
+        .to_lowercase();
+    for expected in [
+        "convergence failed after",
+        "follows an accepted digital edge on net `din`",
+        "into converter a1 (dac_bridge:",
+    ] {
+        assert!(
+            message.contains(expected),
+            "missing `{expected}`: {message}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1741,6 +1786,7 @@ fn every_reachable_category_has_a_distinct_status_and_never_exits_one() {
         ("persistence", 76),
         ("configuration", 78),
         ("simulation", 80),
+        ("convergence", 82),
         ("signal_unavailable", 83),
         ("materialization", 85),
         ("timeout", 124),

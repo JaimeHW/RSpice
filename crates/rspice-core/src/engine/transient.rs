@@ -743,6 +743,50 @@ fn exhausted_step_failure(
     }
 }
 
+/// The value `net` held before `edge` in the run's accepted digital traces,
+/// which is what a terminal failure names an edge's starting value from.
+fn digital_value_before(
+    traces: &[crate::analysis::transient::DigitalTrace],
+    net: &str,
+    edge: Value,
+) -> Option<crate::xspice::DigitalValue> {
+    traces
+        .iter()
+        .find(|trace| trace.node_name.eq_ignore_ascii_case(net))?
+        .points
+        .iter()
+        .rev()
+        .find(|point| point.time < edge)
+        .map(|point| point.value)
+}
+
+/// A terminal transient convergence failure at `time`, with what the
+/// boundary shows about it: the mixed instances' rejected-probe switching,
+/// and the accepted edge it followed when there is one (see
+/// `CircuitData::boundary_edge_before_failure`), whose earlier value
+/// `traces` records. Any other error is unchanged.
+fn annotate_terminal_convergence_failure(
+    circuit: &crate::circuit::CircuitData,
+    error: SimulationError,
+    time: Value,
+    step: Value,
+    traces: &[crate::analysis::transient::DigitalTrace],
+) -> SimulationError {
+    if !error.is_convergence_failure() {
+        return error;
+    }
+    let edge = circuit.boundary_edge_before_failure(time, step, &|net, edge| {
+        digital_value_before(traces, net, edge)
+    });
+    // After an edge one switch is evidence; without one it takes a run.
+    #[cfg(feature = "veriloga")]
+    let error = circuit.annotate_mixed_convergence_failure(error, time, edge.is_some());
+    match edge {
+        Some(edge) => error.with_convergence_context(&edge),
+        None => error,
+    }
+}
+
 /// A rescue that could not evaluate a device finitely has not rescued the
 /// step: it rejected its own trial, and the caller's dt cut is the next move.
 /// Any other rescue failure still ends the run.
@@ -4923,8 +4967,8 @@ impl Engine {
                     abort,
                 );
                 #[cfg(feature = "veriloga")]
-                let initial =
-                    initial.map_err(|error| circuit.annotate_mixed_convergence_failure(error, 0.0));
+                let initial = initial
+                    .map_err(|error| circuit.annotate_mixed_convergence_failure(error, 0.0, false));
                 initial?
             };
         let mut origin_model_finish = None;
@@ -9892,9 +9936,13 @@ impl Engine {
                             dt,
                             retry_count
                         );
-                        let error = SimulationError::ConvergenceFailed(total_step_attempts);
-                        #[cfg(feature = "veriloga")]
-                        let error = circuit.annotate_mixed_convergence_failure(error, step_time);
+                        let error = annotate_terminal_convergence_failure(
+                            &circuit,
+                            SimulationError::ConvergenceFailed(total_step_attempts),
+                            step_time,
+                            dt.max(timestep.hard_min_dt()),
+                            &result.digital_traces,
+                        );
                         let error = exhausted_step_failure(
                             error,
                             attempt_rejected_nonfinite_trial,
@@ -9950,9 +9998,13 @@ impl Engine {
                         dt,
                         retry_count
                     );
-                    let error = SimulationError::ConvergenceFailed(total_step_attempts);
-                    #[cfg(feature = "veriloga")]
-                    let error = circuit.annotate_mixed_convergence_failure(error, step_time);
+                    let error = annotate_terminal_convergence_failure(
+                        &circuit,
+                        SimulationError::ConvergenceFailed(total_step_attempts),
+                        step_time,
+                        dt.max(timestep.hard_min_dt()),
+                        &result.digital_traces,
+                    );
                     let error = exhausted_step_failure(
                         error,
                         attempt_rejected_nonfinite_trial,

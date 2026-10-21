@@ -1037,6 +1037,15 @@ pub enum SimulationError {
     #[error("Convergence failed: {0}")]
     ContinuationFailed(Box<ContinuationFailure>),
 
+    /// A convergence failure at a mixed analog/digital boundary, with what
+    /// the boundary shows about it: the digital edge the failed step
+    /// followed and the converter that turned it into a step, or the nets
+    /// that switched in the rejected solves. `context` begins with an
+    /// operating-point aid's own account when one stopped short. It is a
+    /// convergence failure to every frontend.
+    #[error("Convergence failed after {iterations} iterations: {context}")]
+    MixedConvergenceFailed { iterations: usize, context: String },
+
     #[error("Simulation aborted by user")]
     Aborted,
 
@@ -1303,7 +1312,9 @@ impl SimulationError {
                 SimulationErrorCategory::OutputCommit,
                 false,
             ),
-            Self::ConvergenceFailed(_) | Self::ContinuationFailed(_) => (
+            Self::ConvergenceFailed(_)
+            | Self::ContinuationFailed(_)
+            | Self::MixedConvergenceFailed { .. } => (
                 SimulationErrorCode::ConvergenceError,
                 SimulationErrorCategory::Convergence,
                 false,
@@ -1326,7 +1337,8 @@ impl SimulationError {
             retryable,
             iterations: match self {
                 Self::ConvergenceFailed(iterations)
-                | Self::Solver(SolverError::ConvergenceFailed(iterations)) => Some(*iterations),
+                | Self::Solver(SolverError::ConvergenceFailed(iterations))
+                | Self::MixedConvergenceFailed { iterations, .. } => Some(*iterations),
                 Self::ContinuationFailed(failure) => Some(failure.iterations),
                 _ => None,
             },
@@ -1400,6 +1412,42 @@ impl SimulationError {
     /// contract that every propagation site cares about.
     pub(crate) const fn is_stopped(&self) -> bool {
         matches!(self, Self::Aborted | Self::TimeLimitExceeded)
+    }
+
+    /// Whether this is a convergence failure that a mixed boundary's context
+    /// can be added to.
+    pub(crate) const fn is_convergence_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::ConvergenceFailed(_)
+                | Self::ContinuationFailed(_)
+                | Self::MixedConvergenceFailed { .. }
+        )
+    }
+
+    /// This convergence failure with `detail` added to what it says, still a
+    /// convergence failure with its own iteration count; an operating-point
+    /// aid's account leads the context. Any other error is unchanged.
+    #[must_use]
+    pub(crate) fn with_convergence_context(self, detail: &str) -> Self {
+        match self {
+            Self::ConvergenceFailed(iterations) => Self::MixedConvergenceFailed {
+                iterations,
+                context: detail.to_owned(),
+            },
+            Self::ContinuationFailed(failure) => Self::MixedConvergenceFailed {
+                iterations: failure.iterations,
+                context: format!("{failure}; {detail}"),
+            },
+            Self::MixedConvergenceFailed {
+                iterations,
+                context,
+            } => Self::MixedConvergenceFailed {
+                iterations,
+                context: format!("{context}; {detail}"),
+            },
+            other => other,
+        }
     }
 
     /// The typed stop error for whichever reason `abort` recorded.
