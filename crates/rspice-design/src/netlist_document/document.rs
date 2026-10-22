@@ -845,14 +845,6 @@ impl ValidationDiagnostic {
         })
     }
 
-    pub fn with_code(mut self, code: impl Into<String>) -> Result<Self, DocumentError> {
-        let code = code.into();
-        validate_nonempty_text("diagnostic code", &code)
-            .map_err(|error| DocumentError::InvalidDiagnostic(error.to_string()))?;
-        self.code = Some(code);
-        Ok(self)
-    }
-
     #[must_use]
     pub const fn severity(&self) -> DiagnosticSeverity {
         self.severity

@@ -368,11 +368,6 @@ pub fn placed_pins(document: &SchematicDocument) -> Vec<Point> {
         .collect()
 }
 
-/// Where a dot belongs in `document`; see [`JunctionRule`].
-pub fn junction_points(document: &SchematicDocument) -> Vec<Point> {
-    JunctionRule::for_document(document).points(document)
-}
-
 /// Bring the dots in line with [`JunctionRule`]: drop each one that marks
 /// nothing, then add one wherever a dot belongs and none is.
 pub fn auto_place_junctions(

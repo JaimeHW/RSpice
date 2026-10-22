@@ -183,29 +183,6 @@ impl Point {
         Self { x: 0, y: 0 }
     }
 
-    /// Convert to pixel coordinates
-    ///
-    /// # Arguments
-    /// * `grid_size` - Size of each grid cell in pixels
-    #[inline]
-    pub fn to_pixels(self, grid_size: i32) -> (f64, f64) {
-        ((self.x * grid_size) as f64, (self.y * grid_size) as f64)
-    }
-
-    /// Create from pixel coordinates (snaps to nearest grid point)
-    ///
-    /// # Arguments
-    /// * `px` - X coordinate in pixels
-    /// * `py` - Y coordinate in pixels
-    /// * `grid_size` - Size of each grid cell in pixels
-    #[inline]
-    pub fn from_pixels(px: f64, py: f64, grid_size: i32) -> Self {
-        Self {
-            x: (px / grid_size as f64).round() as i32,
-            y: (py / grid_size as f64).round() as i32,
-        }
-    }
-
     /// Get the 4 adjacent points (cardinal directions)
     ///
     /// Returns neighbors in order: left, right, up, down

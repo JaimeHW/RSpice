@@ -306,12 +306,6 @@ impl Selection {
         }
     }
 
-    /// Deselect a wire segment
-    pub fn deselect_wire_segment(&mut self, wire_id: u64, segment_index: usize) {
-        self.wire_segments
-            .retain(|s| s.wire_id != wire_id || s.segment_index != segment_index);
-    }
-
     /// Select only a single wire segment
     pub fn select_only_wire_segment(&mut self, wire_id: u64, segment_index: usize) {
         self.clear();
@@ -356,12 +350,6 @@ impl Selection {
             self.wire_vertices
                 .push(WireVertexSelection::new(wire_id, vertex_index));
         }
-    }
-
-    /// Deselect a wire vertex
-    pub fn deselect_wire_vertex(&mut self, wire_id: u64, vertex_index: usize) {
-        self.wire_vertices
-            .retain(|v| v.wire_id != wire_id || v.vertex_index != vertex_index);
     }
 
     /// Select only a single wire vertex
@@ -450,10 +438,6 @@ impl Selection {
         self.buses.insert(id);
     }
 
-    pub fn deselect_bus(&mut self, id: u64) {
-        self.buses.remove(&id);
-    }
-
     pub fn toggle_bus(&mut self, id: u64) {
         if !self.buses.remove(&id) {
             self.buses.insert(id);
@@ -477,10 +461,6 @@ impl Selection {
 
     pub fn select_bus_tap(&mut self, id: u64) {
         self.bus_taps.insert(id);
-    }
-
-    pub fn deselect_bus_tap(&mut self, id: u64) {
-        self.bus_taps.remove(&id);
     }
 
     pub fn toggle_bus_tap(&mut self, id: u64) {
@@ -551,10 +531,6 @@ impl Selection {
         self.design_notes.insert(id);
     }
 
-    pub fn deselect_design_note(&mut self, id: u64) {
-        self.design_notes.remove(&id);
-    }
-
     pub fn toggle_design_note(&mut self, id: u64) {
         if !self.design_notes.remove(&id) {
             self.design_notes.insert(id);
@@ -582,10 +558,6 @@ impl Selection {
 
     pub fn select_documentation_shape(&mut self, id: u64) {
         self.documentation_shapes.insert(id);
-    }
-
-    pub fn deselect_documentation_shape(&mut self, id: u64) {
-        self.documentation_shapes.remove(&id);
     }
 
     pub fn toggle_documentation_shape(&mut self, id: u64) {
@@ -617,10 +589,6 @@ impl Selection {
         self.probes.insert(id);
     }
 
-    pub fn deselect_probe(&mut self, id: u64) {
-        self.probes.remove(&id);
-    }
-
     pub fn toggle_probe(&mut self, id: u64) {
         if !self.probes.remove(&id) {
             self.probes.insert(id);
@@ -641,41 +609,6 @@ impl Selection {
     // =========================================================================
     // Query Methods
     // =========================================================================
-
-    /// Check if selection contains multiple items
-    pub fn is_multi_selection(&self) -> bool {
-        self.count() > 1
-    }
-
-    /// Check if only components are selected (no wires or other items)
-    pub fn only_components(&self) -> bool {
-        !self.components.is_empty()
-            && self.wires.is_empty()
-            && self.wire_segments.is_empty()
-            && self.wire_vertices.is_empty()
-            && self.junctions.is_empty()
-            && self.buses.is_empty()
-            && self.bus_taps.is_empty()
-            && self.net_labels.is_empty()
-            && self.design_notes.is_empty()
-            && self.documentation_shapes.is_empty()
-            && self.probes.is_empty()
-    }
-
-    /// Check if only wires are selected (no components or other items)
-    pub fn only_wires(&self) -> bool {
-        self.components.is_empty()
-            && !self.wires.is_empty()
-            && self.wire_segments.is_empty()
-            && self.wire_vertices.is_empty()
-            && self.junctions.is_empty()
-            && self.buses.is_empty()
-            && self.bus_taps.is_empty()
-            && self.net_labels.is_empty()
-            && self.design_notes.is_empty()
-            && self.documentation_shapes.is_empty()
-            && self.probes.is_empty()
-    }
 
     /// Check if any wire-related items are selected
     pub fn has_any_wire_selection(&self) -> bool {

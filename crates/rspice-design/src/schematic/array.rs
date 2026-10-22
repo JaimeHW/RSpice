@@ -805,17 +805,6 @@ impl SchematicArrayImpact {
             && self.documentation_shapes == 0
             && self.connections == 0
     }
-
-    pub fn added_object_count(self) -> usize {
-        self.components
-            .saturating_add(self.wires)
-            .saturating_add(self.junctions)
-            .saturating_add(self.buses)
-            .saturating_add(self.bus_taps)
-            .saturating_add(self.net_labels)
-            .saturating_add(self.design_notes)
-            .saturating_add(self.documentation_shapes)
-    }
 }
 
 /// Identities of the retained source and generated objects in an array.

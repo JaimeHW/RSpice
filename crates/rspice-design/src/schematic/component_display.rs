@@ -29,13 +29,6 @@ pub enum ComponentDisplayMode {
 }
 
 impl ComponentDisplayMode {
-    pub const ALL_EXPLICIT: [Self; 4] = [
-        Self::NameAndValue,
-        Self::NameOnly,
-        Self::ValueOnly,
-        Self::Hidden,
-    ];
-
     pub const fn label(self) -> &'static str {
         match self {
             Self::Inherit => "inherit",

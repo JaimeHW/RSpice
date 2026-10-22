@@ -139,12 +139,6 @@ impl WireSegment {
         point_x >= min_x && point_x <= max_x && point_y >= min_y && point_y <= max_y
     }
 
-    /// Check if a point is within tolerance of this segment
-    pub fn contains_point_with_tolerance(&self, p: Point, tolerance: i32) -> bool {
-        let dist = self.distance_to_point(p);
-        dist <= tolerance as f64
-    }
-
     /// Calculate the squared distance from a point to this segment
     /// This is more efficient than distance_to_point when comparing distances
     pub fn squared_distance_to_point(&self, p: Point) -> f64 {
@@ -301,25 +295,6 @@ impl WireSegment {
             end: self.start,
         }
     }
-
-    /// Check if this segment shares an endpoint with another
-    pub fn shares_endpoint(&self, other: &WireSegment) -> bool {
-        self.start == other.start
-            || self.start == other.end
-            || self.end == other.start
-            || self.end == other.end
-    }
-
-    /// Get the shared endpoint with another segment, if any
-    pub fn shared_endpoint(&self, other: &WireSegment) -> Option<Point> {
-        if self.start == other.start || self.start == other.end {
-            Some(self.start)
-        } else if self.end == other.start || self.end == other.end {
-            Some(self.end)
-        } else {
-            None
-        }
-    }
 }
 
 // =============================================================================
@@ -357,12 +332,6 @@ pub enum WireHitResult {
 }
 
 impl WireHitResult {
-    /// Check if this is a hit (not None)
-    #[inline]
-    pub fn is_hit(&self) -> bool {
-        !matches!(self, WireHitResult::None)
-    }
-
     /// Get the distance to the hit point (infinity if no hit)
     pub fn distance(&self) -> f64 {
         match self {

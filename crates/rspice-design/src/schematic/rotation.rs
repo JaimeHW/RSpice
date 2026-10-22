@@ -84,12 +84,6 @@ impl Rotation {
         }
     }
 
-    /// Check if rotated 180 degrees (vertical flip for horizontal components)
-    #[inline]
-    pub fn is_flipped(self) -> bool {
-        matches!(self, Rotation::R180 | Rotation::R270)
-    }
-
     /// Check if rotated 90 or 270 degrees (horizontal becomes vertical)
     #[inline]
     pub fn is_vertical(self) -> bool {

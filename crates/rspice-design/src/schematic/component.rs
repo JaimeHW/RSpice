@@ -112,10 +112,6 @@ impl PersistedGeneratedIdentity {
     pub const fn is_missing(&self) -> bool {
         matches!(self, Self::Missing)
     }
-
-    pub const fn is_value(&self) -> bool {
-        matches!(self, Self::Value(_))
-    }
 }
 
 impl Serialize for PersistedGeneratedIdentity {

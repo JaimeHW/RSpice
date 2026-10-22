@@ -21,11 +21,6 @@ impl LabelPosition {
         LabelPosition::Custom { x_offset, y_offset }
     }
 
-    /// Check if this is an auto-positioned label
-    pub fn is_auto(&self) -> bool {
-        matches!(self, LabelPosition::Auto)
-    }
-
     /// Get the custom offsets, or (0, 0) if auto
     pub fn offsets(&self) -> (f64, f64) {
         match self {

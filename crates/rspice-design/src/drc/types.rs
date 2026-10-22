@@ -849,11 +849,6 @@ impl DrcResult {
             .count()
     }
 
-    /// How many findings a waiver covers.
-    pub fn waived_count(&self) -> usize {
-        self.violations.iter().filter(|v| !v.counts()).count()
-    }
-
     /// Get summary statistics
     pub fn summary(&self) -> DrcSummary {
         DrcSummary {

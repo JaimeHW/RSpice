@@ -717,53 +717,6 @@ impl SheetCatalog {
         Ok(id)
     }
 
-    pub fn update_sheet(
-        &mut self,
-        id: SheetId,
-        expected_sheet_revision: u64,
-        definition: SheetDefinition,
-    ) -> Result<u64, DesignManagementError> {
-        self.validate()?;
-        let definition = normalize_sheet_definition(definition);
-        validate_sheet_definition(&definition)?;
-        if self
-            .sheets
-            .iter()
-            .any(|sheet| sheet.id != id && case_fold(sheet.name()) == case_fold(&definition.name))
-        {
-            return Err(DesignManagementError::DuplicateName {
-                domain: "sheet",
-                name: definition.name,
-            });
-        }
-        let mut candidate = self.clone();
-        let sheet = candidate
-            .sheets
-            .iter_mut()
-            .find(|sheet| sheet.id == id)
-            .ok_or_else(|| DesignManagementError::MissingReference {
-                domain: "sheet",
-                identity: id.to_string(),
-            })?;
-        require_revision(
-            expected_sheet_revision,
-            sheet.revision,
-            "sheet",
-            id.to_string(),
-        )?;
-        if sheet.definition == definition {
-            return Err(DesignManagementError::NoChanges("sheet"));
-        }
-        sheet.revision = next_revision(sheet.revision, "sheet", id.to_string())?;
-        sheet.semantic_digest = digest("rspice-design-sheet-semantic/v1", &definition)?;
-        sheet.definition = definition;
-        let committed_revision = sheet.revision;
-        candidate.bump_revision("sheet catalog")?;
-        candidate.validate()?;
-        *self = candidate;
-        Ok(committed_revision)
-    }
-
     /// Rename one sheet.
     ///
     /// The sheet name and the sheet-owned title-block value are one authored

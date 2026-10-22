@@ -61,23 +61,6 @@ impl Wire {
         (self.start(), self.end())
     }
 
-    /// Check if this wire connects to another at any endpoint
-    pub fn connects_to(&self, other: &Wire) -> bool {
-        let self_endpoints = [self.start(), self.end()];
-        let other_endpoints = [other.start(), other.end()];
-
-        for se in &self_endpoints {
-            for oe in &other_endpoints {
-                if let (Some(s), Some(o)) = (se, oe)
-                    && s == o
-                {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     /// Get the total length of the wire in grid units
     pub fn length(&self) -> i32 {
         let mut total = 0;
@@ -160,37 +143,10 @@ impl Wire {
     // Vertex Operations (for corner manipulation)
     // =========================================================================
 
-    /// Get a vertex by index
-    pub fn vertex_at(&self, index: usize) -> Option<Point> {
-        self.points.get(index).copied()
-    }
-
     /// Get the number of vertices in the wire
     #[inline]
     pub fn vertex_count(&self) -> usize {
         self.points.len()
-    }
-
-    /// Remove a vertex at the specified index
-    /// Returns the removed point, or None if index is invalid
-    /// Will not remove if it would make the wire invalid (< 2 points)
-    pub fn remove_vertex(&mut self, index: usize) -> Option<Point> {
-        if index < self.points.len() && self.points.len() > 2 {
-            Some(self.points.remove(index))
-        } else {
-            None
-        }
-    }
-
-    /// Move a vertex to a new position
-    /// Returns true if successful
-    pub fn move_vertex(&mut self, index: usize, new_pos: Point) -> bool {
-        if index < self.points.len() {
-            self.points[index] = new_pos;
-            true
-        } else {
-            false
-        }
     }
 
     /// Check if a vertex is near a point within tolerance
@@ -298,36 +254,6 @@ impl Wire {
 
         // Then check segments
         if let Some((idx, segment, dist)) = self.segment_near_point(pos, tolerance) {
-            return WireHitResult::Segment {
-                index: idx,
-                closest_point: segment.closest_point(pos),
-                distance: dist,
-                segment,
-            };
-        }
-
-        WireHitResult::None
-    }
-
-    /// Hit test with separate tolerances for vertices and segments
-    /// This allows for larger vertex hit zones for easier corner manipulation
-    pub fn hit_test_with_tolerances(
-        &self,
-        pos: Point,
-        vertex_tolerance: f64,
-        segment_tolerance: f64,
-    ) -> WireHitResult {
-        // First check vertices with vertex tolerance
-        if let Some((idx, vertex, dist)) = self.vertex_near(pos, vertex_tolerance as i32) {
-            return WireHitResult::Vertex {
-                index: idx,
-                point: vertex,
-                distance: dist,
-            };
-        }
-
-        // Then check segments with segment tolerance
-        if let Some((idx, segment, dist)) = self.segment_near_point(pos, segment_tolerance) {
             return WireHitResult::Segment {
                 index: idx,
                 closest_point: segment.closest_point(pos),

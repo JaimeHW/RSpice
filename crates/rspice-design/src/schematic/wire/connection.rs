@@ -66,11 +66,6 @@ impl WireConnection {
         self.wire_id == wire_id
     }
 
-    /// Check if this connection belongs to a specific component
-    pub fn is_component(&self, component_id: u64) -> bool {
-        self.component_id == component_id
-    }
-
     /// Check if this connection is to a specific terminal
     pub fn is_terminal(&self, terminal_name: &str) -> bool {
         self.terminal_name == terminal_name

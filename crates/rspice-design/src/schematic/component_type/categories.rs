@@ -3,23 +3,6 @@
 use super::ComponentType;
 
 impl ComponentType {
-    /// Check if this is a passive component (R, L, C).
-    pub fn is_passive(&self) -> bool {
-        matches!(
-            self,
-            ComponentType::Resistor
-                | ComponentType::Capacitor
-                | ComponentType::Inductor
-                | ComponentType::SaturableInductor
-                | ComponentType::Transformer
-                | ComponentType::CoupledInductor
-                | ComponentType::TransmissionLine
-                | ComponentType::LossyTransmissionLine
-                | ComponentType::CoupledTransmissionLine
-                | ComponentType::Memristor
-        )
-    }
-
     /// Check if this is a semiconductor device.
     pub fn is_semiconductor(&self) -> bool {
         matches!(

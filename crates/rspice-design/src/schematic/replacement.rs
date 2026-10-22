@@ -245,11 +245,6 @@ impl SchematicReplacementTargetSpec {
         self
     }
 
-    pub fn with_value_policy(mut self, policy: SchematicReplacementValuePolicy) -> Self {
-        self.value_policy = policy;
-        self
-    }
-
     pub const fn kind(&self) -> ComponentType {
         self.kind
     }
