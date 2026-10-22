@@ -504,30 +504,6 @@ impl PacResult {
         self.conversion_matrix.image_rejection_db(freq_idx)
     }
 
-    /// Get magnitude vs frequency at a specific node and sideband
-    pub fn magnitude_vs_frequency(
-        &self,
-        node: usize,
-        sideband: i32,
-    ) -> Result<Vec<(Value, Value)>, PacError> {
-        let mut values = Vec::new();
-        values
-            .try_reserve_exact(self.frequencies.len())
-            .map_err(|error| {
-                PacError::AllocationFailed(format!(
-                    "cannot reserve {} PAC magnitude points: {error}",
-                    self.frequencies.len()
-                ))
-            })?;
-        for (idx, &frequency) in self.frequencies.iter().enumerate() {
-            values.push((
-                frequency,
-                complex_magnitude(self.voltage(node, idx, sideband)?, "PAC voltage spectrum")?,
-            ));
-        }
-        Ok(values)
-    }
-
     /// Set the input source name
     pub fn set_input_source(&mut self, name: &str) {
         self.input_source = Some(name.to_uppercase());
@@ -625,14 +601,11 @@ mod tests {
         assert!(result.voltage(1, 0, 0).is_err());
         assert!(result.voltage(0, 1, 0).is_err());
         assert!(result.voltage(0, 0, 2).is_err());
-        assert!(result.magnitude_vs_frequency(1, 0).is_err());
-        assert!(result.magnitude_vs_frequency(0, 2).is_err());
         result
             .get_sideband_data_mut(0, 0)
             .expect("sideband exists")
             .node_voltages[0] = Complex64::new(Value::NAN, 0.0);
         assert!(result.voltage(0, 0, 0).is_err());
-        assert!(result.magnitude_vs_frequency(0, 0).is_err());
     }
 
     #[test]

@@ -1183,27 +1183,6 @@ impl Capacitors {
             .map(|expression| expression.evaluate(solution, time))
     }
 
-    /// Evaluate the effective capacitance, applying the static instance/model
-    /// scale stored in `capacitances` to a retained solution-dependent value.
-    /// Static capacitors simply return their stored numeric capacitance.
-    pub fn evaluate_effective_capacitance(
-        &mut self,
-        index: usize,
-        solution: &[Value],
-        time: Value,
-    ) -> Option<Value> {
-        let scale = *self.capacitances.get(index)?;
-        Some(
-            self.evaluate_value_expression(index, solution, time)
-                .unwrap_or(scale)
-                * if self.value_expression(index).is_some() {
-                    scale
-                } else {
-                    1.0
-                },
-        )
-    }
-
     /// Linearize an effective solution-dependent capacitance, including the
     /// static instance/model scale. Returns `None` for a static capacitor.
     pub fn linearize_effective_capacitance(
@@ -2288,29 +2267,6 @@ impl Capacitors {
             self.i_prev[i] = i_curr;
         }
     }
-
-    /// Update capacitor state with explicit accepted-timestep history.
-    ///
-    /// `previous_accepted_dt` is the interval from the two solution points
-    /// preceding this accepted step. Variable-step Gear2 uses it to construct
-    /// its nonuniform BDF2 stencil. `None` deliberately restarts Gear2 at
-    /// backward Euler order instead of inventing an equal previous step.
-    pub fn update_state_with_previous_step(
-        &mut self,
-        solution: &[Value],
-        dt: Value,
-        method: IntegrationMethod,
-        previous_accepted_dt: Option<Value>,
-    ) {
-        let coeff = match previous_accepted_dt {
-            Some(previous_dt) => {
-                CompanionCoefficients::for_method_with_previous_step(method, dt, previous_dt)
-            }
-            None if method == IntegrationMethod::Gear2 => CompanionCoefficients::backward_euler(),
-            None => CompanionCoefficients::for_method(method),
-        };
-        self.update_state_with_coefficients(solution, dt, &coeff);
-    }
 }
 
 #[cfg(test)]
@@ -2423,11 +2379,14 @@ mod capacitor_state_tests {
         let capacitance = 0.25;
         let mut capacitors = capacitor_with_history(capacitance, previous_voltage, older_voltage);
 
-        capacitors.update_state_with_previous_step(
+        capacitors.update_state_with_coefficients(
             &[current_voltage],
             dt,
-            IntegrationMethod::Gear2,
-            Some(previous_dt),
+            &CompanionCoefficients::for_method_with_previous_step(
+                IntegrationMethod::Gear2,
+                dt,
+                previous_dt,
+            ),
         );
 
         assert_close(capacitors.i_prev[0], capacitance * slope);
@@ -2437,20 +2396,19 @@ mod capacitor_state_tests {
     }
 
     #[test]
-    fn gear2_without_previous_timestep_history_commits_with_backward_euler() {
+    fn backward_euler_commit_reads_no_older_history() {
         let dt = 2.0;
         let previous_voltage = 4.0;
         let current_voltage = 10.0;
         let capacitance = 0.5;
-        // An intentionally unrelated older value proves that startup does not
-        // manufacture an equal-step BDF2 stencil from invalid history.
+        // An intentionally unrelated older value proves that a startup commit
+        // does not build a BDF2 stencil from invalid history.
         let mut capacitors = capacitor_with_history(capacitance, previous_voltage, -100.0);
 
-        capacitors.update_state_with_previous_step(
+        capacitors.update_state_with_coefficients(
             &[current_voltage],
             dt,
-            IntegrationMethod::Gear2,
-            None,
+            &CompanionCoefficients::backward_euler(),
         );
 
         assert_close(
@@ -2529,7 +2487,7 @@ mod capacitor_state_tests {
         // The next interval integrates an input changing from 2 to 4. The
         // initial accepted input must not be zero or the last derivative probe.
         let value = capacitors
-            .evaluate_effective_capacitance(0, &[4.0, 0.5], 1.0)
+            .evaluate_value_expression(0, &[4.0, 0.5], 1.0)
             .unwrap();
         assert_close(value, 4.0);
     }
@@ -2793,10 +2751,6 @@ mod capacitor_state_tests {
         assert_eq!(
             capacitors.evaluate_value_expression(1, &[2.5], 0.0),
             Some(2.5)
-        );
-        assert_eq!(
-            capacitors.evaluate_effective_capacitance(1, &[2.5], 0.0),
-            Some(5.0)
         );
         let linearization = capacitors
             .linearize_effective_capacitance(1, &[2.5], 0.0)

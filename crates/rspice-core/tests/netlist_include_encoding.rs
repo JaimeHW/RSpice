@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rspice_core::Netlist;
+use rspice_core::netlist::NetlistParseOptions;
 
 struct TempDeckDir(PathBuf);
 
@@ -85,7 +86,12 @@ fn parsed_include_inventory_retains_empty_nested_and_selected_library_sources() 
     expected.sort();
     for netlist in [
         Netlist::parse_file(&deck).unwrap(),
-        Netlist::parse_file_with_search_paths(&deck, &[dir.path().to_path_buf()]).unwrap(),
+        Netlist::parse_file_with_search_paths_and_options(
+            &deck,
+            &[dir.path().to_path_buf()],
+            NetlistParseOptions::default(),
+        )
+        .unwrap(),
     ] {
         assert_eq!(netlist.included_source_paths(), expected);
         assert_eq!(netlist.clone().included_source_paths(), expected);

@@ -340,37 +340,11 @@ impl FourierAnalysis {
         self.analyze_observation(&result.time, values, &impulses, abort)
     }
 
-    /// Analyze sampled node voltage together with its complete singular history.
-    /// Voltage actions retain volt-seconds and higher derivative coefficients;
-    /// they are never converted into current charge or sampled voltage spikes.
-    pub fn analyze_voltage_with_abort(
-        &self,
-        time: &[Value],
-        values: &[Value],
-        trace: &crate::VoltageImpulseTrace,
-        abort: &dyn AbortSignal,
-    ) -> Result<FourierResult, FourierError> {
-        self.analyze_impulse_trace(
-            time,
-            values,
-            crate::transient_observation::ImpulseTraceRef::Voltage(trace),
-            abort,
-        )
-    }
-
-    fn analyze_impulse_trace(
-        &self,
-        time: &[Value],
-        values: &[Value],
-        trace: crate::transient_observation::ImpulseTraceRef<'_>,
-        abort: &dyn AbortSignal,
-    ) -> Result<FourierResult, FourierError> {
-        self.analyze_impulses_with_abort(time, values, &[(trace, 1.0)], abort)
-    }
-
     /// Analyze a finite signal and a real, time-independent linear combination
     /// of typed singular histories. For V(a,b), pass voltage traces with weights
     /// +1 and -1. Every supplied history must cover the full sampled extent.
+    /// Voltage actions retain volt-seconds and higher derivative coefficients;
+    /// they are never converted into current charge or sampled voltage spikes.
     pub fn analyze_impulses_with_abort(
         &self,
         time: &[Value],

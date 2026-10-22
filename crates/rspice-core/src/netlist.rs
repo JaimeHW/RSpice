@@ -2258,22 +2258,11 @@ impl Netlist {
     }
 
     /// Parse a netlist from a file with additional include search directories
+    /// and an explicit resource policy.
     ///
     /// Like [`Netlist::parse_file`], but `.include`/`.lib` references that do
     /// not resolve relative to the including file are also searched in
     /// `search_paths`, in order.
-    pub fn parse_file_with_search_paths(
-        path: &std::path::Path,
-        search_paths: &[std::path::PathBuf],
-    ) -> Result<Self, ParseError> {
-        Self::parse_file_with_search_paths_and_options(
-            path,
-            search_paths,
-            NetlistParseOptions::default(),
-        )
-    }
-
-    /// Parse a file with include search paths and an explicit resource policy.
     pub fn parse_file_with_search_paths_and_options(
         path: &std::path::Path,
         search_paths: &[std::path::PathBuf],
@@ -2308,25 +2297,6 @@ impl Netlist {
             options,
             abort,
         )
-    }
-
-    /// Parse source text with search paths and explicit parsing options.
-    ///
-    /// The process working directory is captured once as Xyce's execution-
-    /// directory fallback and retained alongside the search paths for replay.
-    pub fn parse_with_search_paths_and_options(
-        input: &str,
-        path: &std::path::Path,
-        search_paths: &[std::path::PathBuf],
-        options: NetlistParseOptions,
-    ) -> Result<Self, ParseError> {
-        finish_non_aborting_parse(Self::parse_with_search_paths_and_options_and_abort(
-            input,
-            path,
-            search_paths,
-            options,
-            &NoAbort,
-        ))
     }
 
     /// Parse a frontend's root source with include search paths and root-scope
@@ -2370,6 +2340,9 @@ impl Netlist {
     }
 
     /// Parse source text with search paths, explicit options, and cancellation.
+    ///
+    /// The process working directory is captured once as Xyce's execution-
+    /// directory fallback and retained alongside the search paths for replay.
     pub fn parse_with_search_paths_and_options_and_abort(
         input: &str,
         path: &std::path::Path,
@@ -4284,11 +4257,12 @@ mod tests {
         std::fs::write(&deck_path, &source).expect("write search-path deck");
         let search_paths = vec![search_dir];
 
-        let parsed = Netlist::parse_with_search_paths_and_options(
+        let parsed = Netlist::parse_with_search_paths_and_options_and_abort(
             &source,
             &deck_path,
             &search_paths,
             NetlistParseOptions::default(),
+            &NoAbort,
         )
         .expect("search-path parse resolves execution and configured fallbacks");
         assert_eq!(resistor_value(&parsed, "REXEC"), 3.0);

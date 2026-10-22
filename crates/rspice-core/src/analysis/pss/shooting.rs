@@ -4,7 +4,7 @@
 //! The core algorithm solves the boundary value problem: find x(0) such that x(T) = x(0).
 
 use crate::Value;
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::analysis::{FloquetSpectrumCertificate, FloquetSpectrumEvidence};
 use crate::numerics::eigenspectrum::{OrdinarySpectrumError, qualified_real_eigenspectrum};
 use crate::solver::{SolverError, StaticMatrix};
@@ -77,34 +77,6 @@ impl ShootingState {
     /// Get residual norm (L2)
     pub fn residual_norm(&self) -> Value {
         self.residual.iter().fold(0.0, |norm, &r| norm.hypot(r))
-    }
-
-    /// Get the relative L2 residual. A zero initial state has zero relative
-    /// error only for an exact zero residual; otherwise the absolute
-    /// convergence criterion must decide whether the orbit has closed.
-    pub fn relative_residual_norm(&self) -> Value {
-        let Some(scale) = self
-            .x0
-            .iter()
-            .chain(&self.residual)
-            .try_fold(0.0_f64, |scale, &x| {
-                x.is_finite().then_some(scale.max(x.abs()))
-            })
-        else {
-            return Value::NAN;
-        };
-        if scale == 0.0 {
-            return 0.0;
-        }
-        // Normalize both vectors by the same maximum component before
-        // taking either norm. Either L2 norm may exceed f64 while the ratio
-        // fits; every normalized component is bounded by one.
-        let norm = |values: &[Value]| {
-            values
-                .iter()
-                .fold(0.0_f64, |norm, &x| norm.hypot(x / scale))
-        };
-        norm(&self.residual) / norm(&self.x0)
     }
 
     /// Update initial state estimate
@@ -330,21 +302,13 @@ impl ShootingNewtonSolver {
         }
     }
 
-    /// Extract Floquet multipliers from Monodromy matrix
+    /// Extract and strictly residual-qualify the complete Floquet spectrum,
+    /// checking for cooperative cancellation around the atomic eigensolve.
     ///
     /// Floquet multipliers are eigenvalues of the Monodromy matrix.
     /// For a stable orbit, all multipliers should have |λ| ≤ 1.
     /// An autonomous orbit has a unit phase multiplier corresponding to
     /// perturbations along the orbit; a driven periodic solution need not.
-    pub fn compute_floquet_multipliers(
-        &self,
-        monodromy: &[Vec<Value>],
-    ) -> Result<Vec<num_complex::Complex64>, FloquetSpectrumError> {
-        self.compute_floquet_multipliers_with_abort(monodromy, &NoAbort)
-    }
-
-    /// Extract and strictly residual-qualify the complete Floquet spectrum,
-    /// checking for cooperative cancellation around the atomic eigensolve.
     pub fn compute_floquet_multipliers_with_abort(
         &self,
         monodromy: &[Vec<Value>],
@@ -352,14 +316,6 @@ impl ShootingNewtonSolver {
     ) -> Result<Vec<num_complex::Complex64>, FloquetSpectrumError> {
         let (multipliers, _) = self.compute_floquet_spectrum_with_abort(monodromy, abort)?;
         Ok(multipliers)
-    }
-
-    /// Extract a complete Floquet spectrum together with strict evidence.
-    pub fn compute_floquet_spectrum(
-        &self,
-        monodromy: &[Vec<Value>],
-    ) -> Result<(Vec<num_complex::Complex64>, FloquetSpectrumEvidence), FloquetSpectrumError> {
-        self.compute_floquet_spectrum_with_abort(monodromy, &NoAbort)
     }
 
     /// Extract a complete Floquet spectrum and retain its canonical residual
@@ -395,7 +351,7 @@ impl Default for ShootingNewtonSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abort_signal::ImmediateAbort;
+    use crate::abort_signal::{ImmediateAbort, NoAbort};
 
     #[test]
     fn shooting_relative_tolerance_never_becomes_an_absolute_small_signal_floor() {
@@ -407,9 +363,6 @@ mod tests {
         state.x_t[0] = 5e-13;
         state.compute_residual();
         assert!(solver.check_convergence(&state));
-        state.x_t[0] = 0.0;
-        state.compute_residual();
-        assert_eq!(state.relative_residual_norm(), 0.0);
     }
 
     #[test]
@@ -452,8 +405,10 @@ mod tests {
                 let mut state = ShootingState::new(vec![initial], 1.0);
                 state.residual[0] = residual;
                 state.x_t[0] = initial + residual;
+                // A single coordinate closes below the absolute tolerance or
+                // below the relative tolerance of its initial value.
                 let expected =
-                    state.relative_residual_norm() < 1e-6 || state.residual_norm() < 1e-12;
+                    residual.abs() / initial.abs() < 1e-6 || state.residual_norm() < 1e-12;
                 assert_eq!(
                     ShootingNewtonSolver::default().check_convergence(&state),
                     expected,
@@ -470,16 +425,7 @@ mod tests {
             state.residual = vec![3e-5 * scale, 4e-5 * scale];
             let expected = 5e-5 * scale;
             assert!((state.residual_norm() / expected - 1.0).abs() < 1e-14);
-            assert!((state.relative_residual_norm() / 1e-5 - 1.0).abs() < 1e-14);
         }
-        // The initial norm itself exceeds f64, although the state entries,
-        // residual norm and relative error are all representable.
-        let mut state = ShootingState::new(vec![1e308; 4], 1.0);
-        state.residual = vec![1e298; 4];
-        assert!((state.relative_residual_norm() / 1e-10 - 1.0).abs() < 1e-14);
-        let mut state = ShootingState::new(vec![1.0; 4], 1.0);
-        state.residual = vec![1e308; 4];
-        assert!((state.relative_residual_norm() / 1e308 - 1.0).abs() < 1e-14);
     }
 
     #[test]
@@ -541,15 +487,19 @@ mod tests {
     #[test]
     fn floquet_spectrum_rejects_empty_ragged_and_nonfinite_monodromy() {
         let solver = ShootingNewtonSolver::default();
-        assert!(solver.compute_floquet_multipliers(&[]).is_err());
         assert!(
             solver
-                .compute_floquet_multipliers(&[vec![1.0, 0.0], vec![0.0]])
+                .compute_floquet_multipliers_with_abort(&[], &NoAbort)
                 .is_err()
         );
         assert!(
             solver
-                .compute_floquet_multipliers(&[vec![Value::NAN]])
+                .compute_floquet_multipliers_with_abort(&[vec![1.0, 0.0], vec![0.0]], &NoAbort)
+                .is_err()
+        );
+        assert!(
+            solver
+                .compute_floquet_multipliers_with_abort(&[vec![Value::NAN]], &NoAbort)
                 .is_err()
         );
     }
@@ -566,7 +516,9 @@ mod tests {
     #[test]
     fn floquet_spectrum_retains_canonical_qualification_evidence() {
         let solver = ShootingNewtonSolver::default();
-        let (multipliers, evidence) = solver.compute_floquet_spectrum(&[vec![0.5]]).unwrap();
+        let (multipliers, evidence) = solver
+            .compute_floquet_spectrum_with_abort(&[vec![0.5]], &NoAbort)
+            .unwrap();
         assert_eq!(multipliers, vec![num_complex::Complex64::new(0.5, 0.0)]);
         let certificate = evidence.certificate().unwrap();
         assert_eq!(certificate.problem_order, 1);

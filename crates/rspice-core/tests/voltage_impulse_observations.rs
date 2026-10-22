@@ -97,16 +97,16 @@ fn fourier_voltage_actions_use_exact_time_sign_and_derivative_order() {
                 close((actual - expected).norm(), 0.0);
             }
         }
+        let histories = result.voltage_impulses.as_ref().unwrap();
         let direct = FourierAnalysis::new(FourierConfig::new(1.0).with_harmonics(4))
-            .analyze_voltage_with_abort(
+            .analyze_impulses_with_abort(
                 &result.time,
                 &result.voltages[0],
-                &result.voltage_impulses.as_ref().unwrap()[0],
+                &[(rspice_core::ImpulseTraceRef::Voltage(&histories[0]), 1.0)],
                 &NoAbort,
             )
             .unwrap();
         close(direct.dc_component, 0.002);
-        let histories = result.voltage_impulses.as_ref().unwrap();
         let weighted = FourierAnalysis::new(FourierConfig::new(1.0).with_harmonics(4))
             .analyze_impulses_with_abort(
                 &result.time,
