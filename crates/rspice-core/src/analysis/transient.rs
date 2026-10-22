@@ -1107,6 +1107,9 @@ pub struct TransientPostResults {
     pub measurements: Vec<MeasureResult>,
     /// Source-authored `TRAN_CONT` streams evaluated before waveform decimation.
     pub continuous_measurements: Vec<ContinuousMeasureResult>,
+    /// `.ASSERT` reports over the accepted trajectory, in card order, one per
+    /// checked instance.
+    pub assertions: Vec<super::AssertionReport>,
 }
 
 impl TransientPostResults {
@@ -1116,6 +1119,7 @@ impl TransientPostResults {
             && self.fourier.is_empty()
             && self.measurements.is_empty()
             && self.continuous_measurements.is_empty()
+            && self.assertions.is_empty()
     }
 }
 

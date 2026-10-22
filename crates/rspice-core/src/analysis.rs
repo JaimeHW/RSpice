@@ -23,6 +23,7 @@
 // enforced: `distortion` and `stb` are no less advanced than `noise`, and
 // deciding which of the two to open was guesswork.
 pub mod ac;
+mod assertions;
 pub mod corner;
 pub mod dc;
 pub mod dcmatch;
@@ -106,6 +107,10 @@ pub use temperature::{ResistorTempCoeffs, TemperatureContext};
 pub use transfer::{TransferFunctionConfig, TransferFunctionResult};
 pub use {
     ac::AcResult,
+    assertions::{
+        AssertViolation, AssertionReport, evaluate_dc_assertions, evaluate_op_assertions,
+        evaluate_tran_assertions,
+    },
     corner::{
         CornerConfig, CornerPoint, CornerResult, CornerRunner, CornerSimResult, CornerSummary,
         ProcessCorner,

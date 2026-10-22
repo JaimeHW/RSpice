@@ -136,7 +136,7 @@ fn waveform_operands(statement: &MeasureStatement) -> Vec<&str> {
 
 /// One value of a step function.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Level {
+pub(crate) enum Level {
     Known(Value),
     /// X (`'x'`) or Z (`'z'`).
     Undefined(char),
@@ -207,8 +207,13 @@ impl Steps {
         self.instants[0]
     }
 
+    /// The instants the function steps at, the start of the span first.
+    pub(crate) fn instants(&self) -> &[Value] {
+        &self.instants
+    }
+
     /// The level at `time`: at a step instant, the new one.
-    fn level_at(&self, time: Value) -> Level {
+    pub(crate) fn level_at(&self, time: Value) -> Level {
         let index = self
             .instants
             .partition_point(|instant| *instant <= time)
@@ -299,6 +304,33 @@ impl EventOperands {
         let (domain, name) = event_operand(text)?;
         self.series.get(&operand_key(domain, name))
     }
+}
+
+/// The step function `D(name)` (`digital`) or `E(name)` reads over the span
+/// of `result`, or the sentence refusing the operand.
+pub(crate) fn event_steps(
+    digital: bool,
+    name: &str,
+    result: &TransientResult,
+) -> Result<Steps, String> {
+    let (domain, accessor) = if digital {
+        (Domain::Digital, 'D')
+    } else {
+        (Domain::Real, 'E')
+    };
+    let Some((&start, &end)) = result.time.first().zip(result.time.last()) else {
+        return Err(format!(
+            "{accessor}({name}) has no accepted time span to read"
+        ));
+    };
+    resolve(
+        domain,
+        name,
+        &format!("{accessor}({name})"),
+        result,
+        start,
+        end,
+    )
 }
 
 fn resolve(

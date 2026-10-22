@@ -321,8 +321,15 @@ use rspice_core::analysis::harmonic_balance::{
 // `AssertLevel` and `AssertAnalysis` its fields are typed by, and the
 // re-export that names them under `netlist`. The assertion evaluator
 // (`analysis::assertions`) reads all five, and the CLI's report and exit
-// status read the level. The census is 5,691, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5691;
+// status read the level. The census was 5,691, with no slack.
+// The assertion evaluator adds five: `analysis::AssertionReport` and the
+// `AssertViolation` it lists, which `TransientPostResults::assertions` and
+// rspice-results' saved checks carry, and `evaluate_tran_assertions`,
+// `evaluate_op_assertions` and `evaluate_dc_assertions`, which the CLI calls
+// after each analysis (the transient one also from the post-results pass).
+// They join the existing `analysis` re-export. The census is 5,696, with no
+// slack.
+const MAX_PUBLIC_ITEMS: usize = 5696;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

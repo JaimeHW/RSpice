@@ -1510,8 +1510,10 @@ impl TransientCapturePlan {
         // Measurement evaluation currently happens after integration. Until
         // measurements become online reducers, retain all analog operands for
         // measurement decks so output projection cannot change their result.
+        // An assertion reads its operands after integration the same way.
         let retain_all = netlist.saves.keeps_everything()
             || !netlist.measurements.is_empty()
+            || !netlist.assertions.is_empty()
             || netlist.options.output_snapshots.unwrap_or(false);
         // P()/W() are terminal quantities, not merely branch-current aliases:
         // evaluating them after integration needs both terminal voltage
@@ -3835,6 +3837,14 @@ impl Engine {
             .signals
             .iter()
             .any(|signal| matches!(signal, SaveSignal::DeviceParam { .. }))
+            // An assertion on a device quantity reads its trace afterwards.
+            || netlist.assertions.iter().any(|assertion| match &assertion.check {
+                crate::netlist::AssertCheck::Device { .. } => true,
+                crate::netlist::AssertCheck::Expression {
+                    expression: text, ..
+                }
+                | crate::netlist::AssertCheck::Condition { condition: text } => text.contains('@'),
+            })
             || netlist.output_requests.iter().any(|request| {
                 request.dependencies.iter().any(|dependency| {
                     dependency.kind == OutputSymbolKind::Device

@@ -319,6 +319,9 @@ pub(crate) fn rebuild_compressed_transient(
                 .into_iter()
                 .map(rebuild_continuous_measurement)
                 .collect::<PyResult<Vec<_>>>()?,
+            // The pickle carries no `.ASSERT` reports; the Python binding
+            // does not publish them.
+            assertions: Vec::new(),
         },
         identity: rebuild_identity(identity)?,
         compression_ratio,
