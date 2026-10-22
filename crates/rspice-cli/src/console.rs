@@ -62,7 +62,13 @@ pub(crate) struct HdlConsole {
     failures: AtomicU32,
     warnings: AtomicU32,
     transcript: Mutex<Transcript>,
+    /// The severity-task records, for the JSON summary, up to
+    /// [`MAX_DIAGNOSTIC_RECORDS`]; the transcript keeps every one.
+    diagnostics: Mutex<Vec<HdlOutputRecord>>,
 }
+
+/// How many severity-task records the JSON summary lists.
+const MAX_DIAGNOSTIC_RECORDS: usize = 10_000;
 
 #[derive(Debug, Default)]
 struct Transcript {
@@ -88,6 +94,15 @@ impl HdlConsole {
     /// How many `$error` and `$fatal` reports the designs made.
     pub(crate) fn failures(&self) -> u32 {
         self.failures.load(Ordering::Relaxed)
+    }
+
+    /// The severity-task records so far (`$info`, `$warning`, `$error`,
+    /// `$fatal`), in emission order.
+    pub(crate) fn diagnostics(&self) -> Vec<HdlOutputRecord> {
+        self.diagnostics
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// The transcript so far, or `None` if the designs printed nothing.
@@ -139,6 +154,14 @@ impl HdlOutputSink for HdlConsole {
                     }
                     HdlSeverity::Info => {}
                 }
+                let mut diagnostics = self
+                    .diagnostics
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if diagnostics.len() < MAX_DIAGNOSTIC_RECORDS {
+                    diagnostics.push(record.clone());
+                }
+                drop(diagnostics);
                 let task = format!("${}", severity.label().to_ascii_lowercase());
                 (
                     format!("{task} {}: {}\n", located(record), record.text),

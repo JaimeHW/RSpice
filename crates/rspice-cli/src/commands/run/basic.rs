@@ -145,6 +145,12 @@ pub(super) fn finish_dc_op_result(
         print_device_op_report(op_report, ctx.verbose)?;
     }
 
+    ctx.record_assertions(rspice_core::analysis::evaluate_op_assertions(
+        ctx.netlist,
+        result,
+        op_report,
+    ));
+
     if let Some(output) = ctx.resolve_output("op") {
         let analysis_id = output.analysis("op")?;
         super::document::publish_analysis_result(
@@ -477,6 +483,10 @@ pub(super) fn finish_dc_sweep_result(
             analysis: Some("DC continuous measurement projection".to_string()),
         })?;
     super::shared::record_continuous_measurements(ctx, "DC_CONT", continuous_measurements)?;
+    ctx.record_assertions(rspice_core::analysis::evaluate_dc_assertions(
+        ctx.netlist,
+        &results,
+    ));
 
     // Resolve the authored output contract even when the caller did
     // not request a file. A valid `.SAVE @device[param]` is part of
@@ -1043,6 +1053,19 @@ pub(super) fn finish_transient_result(
         })?,
     };
     super::shared::record_continuous_measurements(ctx, "TRAN_CONT", continuous_measurements)?;
+    let assertions = match post_results {
+        Some(post) => post.assertions.clone(),
+        None => rspice_core::analysis::evaluate_tran_assertions(
+            ctx.netlist,
+            result,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("Transient assertions".to_string()),
+        })?,
+    };
+    ctx.record_assertions(assertions);
 
     // Perform checked SAVE/PRINT materialization independently of
     // file publication, matching OP and DC behavior.

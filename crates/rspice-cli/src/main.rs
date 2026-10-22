@@ -30,6 +30,7 @@ use std::process::ExitCode;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod abort;
+mod checks;
 mod cli;
 mod commands;
 mod console;

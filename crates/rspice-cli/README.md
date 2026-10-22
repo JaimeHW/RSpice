@@ -261,7 +261,10 @@ For a deck that instantiates Verilog designs:
 | `--hdl-delay-select WHICH` | `typ` (default); `min` and `max` are refused with capability `hdl.option.delay_select`, because every HDL delay uses its typical value |
 
 A positional argument after the netlist that does not begin with `+` is a usage
-error. An HDL `$error` or `$fatal` fails the run with exit 3. With `-o`, the
+error. An HDL `$error` or `$fatal` fails the run with exit 3. So does an
+`.ASSERT` card at `LEVEL=ERROR` that is violated, or any assertion that could
+not be evaluated; the run's results are kept, and the text report ends with one
+row per violated assertion. With `-o`, the
 designs' console transcript is also written as `<output stem>.hdl.log`; when
 `--summary -` reserves stdout, design text goes to stderr.
 
@@ -893,6 +896,12 @@ run-coordinate IDs, the deck path and line, the refused capability token, and
 numeric resource or convergence details; it also covers argument-parsing and
 timeout failures. `check --json`, `compare --json` and `run --summary -`
 reserve stdout for one JSON document without needing `--quiet`.
+
+The `--summary` document is at `schema_version: 2`. Beside each run's status
+and measurements it lists every `.ASSERT` report (`assertions`: name,
+analysis, level, the card's file and line, and each violation's start, end or
+`open`, extreme and where it was reached) and every HDL severity-task record
+(`hdl_diagnostics`: severity, text, time, scope, file and line).
 
 ## Configuration file
 

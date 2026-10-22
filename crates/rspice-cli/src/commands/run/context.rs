@@ -413,6 +413,12 @@ impl<'a> RunContext<'a> {
         Ok(())
     }
 
+    /// Record the `.ASSERT` reports one analysis published, for the text
+    /// report, the JSON summary and the exit status.
+    pub(super) fn record_assertions(&self, reports: Vec<rspice_core::analysis::AssertionReport>) {
+        crate::checks::record(self.run_label.as_deref(), reports);
+    }
+
     /// Convert .MEAS statements whose analysis never evaluated them into
     /// explicit failures, so automation cannot mistake a skipped check for
     /// a passing one.

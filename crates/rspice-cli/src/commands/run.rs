@@ -422,9 +422,18 @@ fn execute_with_destinations(
         .collect();
     // An HDL `$error` or `$fatal` fails a self-checking testbench run.
     let hdl_failures = hdl_console.failures();
+    // So does an ERROR-level `.ASSERT` violation, or an assertion that could
+    // not be evaluated; the run's results are kept either way.
+    let assertions = crate::checks::assertions();
+    let failed_assertions = assertions
+        .iter()
+        .filter(|entry| crate::checks::fails(&entry.report))
+        .map(|entry| entry.report.name.as_str())
+        .collect::<Vec<_>>();
     let passed = first_error.is_none()
         && abort_reason.is_none()
         && hdl_failures == 0
+        && failed_assertions.is_empty()
         && (failed_measurements.is_empty() || args.allow_failed_meas);
     // The designs' transcript is published beside the result.
     if let (Some(output), Some(text)) = (
@@ -442,6 +451,7 @@ fn execute_with_destinations(
             &args,
             &reports,
             &outputs,
+            (&assertions, &hdl_console.diagnostics()),
             duration,
             passed,
             abort_reason,
@@ -472,6 +482,7 @@ fn execute_with_destinations(
 
     // A run that failed did not complete: the error follows instead.
     if !quiet && first_error.is_none() {
+        crate::checks::print_rows(&assertions)?;
         crate::console::line(format_args!("\nSimulation complete in {:.3}s.", duration))?;
     }
 
@@ -482,6 +493,16 @@ fn execute_with_destinations(
     if hdl_failures > 0 {
         return Err(CliError::VerificationFailed {
             message: format!("the HDL design reported {hdl_failures} $error/$fatal message(s)"),
+        });
+    }
+
+    if !failed_assertions.is_empty() {
+        return Err(CliError::VerificationFailed {
+            message: format!(
+                "{} assertion(s) failed: {}",
+                failed_assertions.len(),
+                failed_assertions.join(", ")
+            ),
         });
     }
 
@@ -589,14 +610,23 @@ fn ensure_cancellation_report(
     });
 }
 
+/// The JSON run summary's schema. Version 2 added `assertions` and
+/// `hdl_diagnostics`.
+const RUN_SUMMARY_SCHEMA_VERSION: u32 = 2;
+
 /// Write the one-artifact JSON contract for automation: tool identity,
-/// per-run status with every measurement, and the overall verdict that the
+/// per-run status with every measurement, the deck's checks (`.ASSERT`
+/// reports and HDL severity-task records), and the overall verdict that the
 /// exit code will reflect. `-` writes to stdout.
 fn write_run_summary(
     path: &std::path::Path,
     args: &RunArgs,
     reports: &[SimulationReport],
     outputs: &[PathBuf],
+    (assertions, hdl): (
+        &[crate::checks::RunAssertion],
+        &[rspice_core::config::HdlOutputRecord],
+    ),
     duration: f64,
     passed: bool,
     abort_reason: Option<crate::abort::AbortReason>,
@@ -620,7 +650,7 @@ fn write_run_summary(
         .filter(|measurement| measurement.passed)
         .count();
     let json = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": RUN_SUMMARY_SCHEMA_VERSION,
         "tool": {
             "name": "rspice",
             "version": env!("CARGO_PKG_VERSION"),
@@ -645,6 +675,11 @@ fn write_run_summary(
             "measurements": measurement_count,
             "passed_measurements": passed_measurements,
             "failed_measurements": measurement_count.saturating_sub(passed_measurements),
+            "assertions": assertions.len(),
+            "failed_assertions": assertions
+                .iter()
+                .filter(|entry| crate::checks::fails(&entry.report))
+                .count(),
             "outputs": outputs.len(),
         },
         "resource_limits": resource_limits_summary(resource_limits),
@@ -663,6 +698,8 @@ fn write_run_summary(
                 "measurements": report.measurements,
             })
         }).collect::<Vec<_>>(),
+        "assertions": assertions.iter().map(crate::checks::assertion_json).collect::<Vec<_>>(),
+        "hdl_diagnostics": hdl.iter().filter_map(crate::checks::hdl_json).collect::<Vec<_>>(),
     });
 
     if path.as_os_str() == "-" {

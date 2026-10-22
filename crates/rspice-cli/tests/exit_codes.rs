@@ -1166,7 +1166,7 @@ fn summary_json_carries_the_verdict() {
     );
     assert_eq!(json["tool"]["name"], "rspice");
     assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
-    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["schema_version"], 2);
     assert_eq!(json["status"], "failed");
     assert_eq!(json["counts"]["runs"], 1);
     assert_eq!(json["counts"]["failed_measurements"], 1);
@@ -1175,6 +1175,86 @@ fn summary_json_carries_the_verdict() {
     assert_eq!(
         json["runs"][0]["measurements"][0]["passed"], false,
         "failed measurement recorded: {json}"
+    );
+    assert_eq!(json["assertions"], serde_json::json!([]));
+    assert_eq!(json["hdl_diagnostics"], serde_json::json!([]));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// RC with τ = 1 µs charged by a 1 V step: an ERROR-level `.ASSERT` on
+/// V(out) ≤ 0.5 is violated from τ·ln 2 to the stop time. The run completes
+/// and keeps its results, the summary lists the violation, and the process
+/// exits 3; a WARNING-level card is reported only.
+#[test]
+fn an_error_level_assertion_violation_exits_3_and_the_summary_lists_it() {
+    let dir = test_dir("assertion");
+    let deck = |level: &str| {
+        format!(
+            "* rc\nV1 in 0 PULSE(0 1 0 1p 1p 1 2)\nR1 in out 1k\nC1 out 0 1n\n\
+             .options reltol=1e-6\n.tran 1n 2u\n\
+             .ASSERT a EXPR='V(out)' MAX=0.5 LEVEL={level} MESSAGE='out above half'\n.end\n"
+        )
+    };
+    let path = dir.join("rc.sp");
+    std::fs::write(&path, deck("ERROR")).expect("write deck");
+    let summary = dir.join("summary.json");
+    let csv = dir.join("rc.csv");
+
+    let output = run_rspice(&[
+        "run",
+        path.to_str().unwrap(),
+        "-o",
+        csv.to_str().unwrap(),
+        "--summary",
+        summary.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert!(csv.is_file(), "the run keeps its results");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("a (error, tran): 1 violation, first [693.14")
+            && stdout.contains(", open)")
+            && stdout.contains("out above half"),
+        "the text report ends with the violated assertion: {stdout}"
+    );
+
+    let json = common::read_json(&summary);
+    assert_eq!(json["passed"], false);
+    assert_eq!(json["counts"]["assertions"], 1);
+    assert_eq!(json["counts"]["failed_assertions"], 1);
+    let assertion = &json["assertions"][0];
+    assert_eq!(assertion["name"], "a");
+    assert_eq!(assertion["analysis"], "tran");
+    assert_eq!(assertion["level"], "error");
+    assert_eq!(assertion["target"], "V(out)");
+    assert_eq!(assertion["line"], 7);
+    assert_eq!(assertion["passed"], false);
+    let violations = assertion["violations"].as_array().expect("violations");
+    assert_eq!(violations.len(), 1, "{json}");
+    let start = violations[0]["start"].as_f64().expect("a start");
+    let tau_ln2 = 1.0e-6 * std::f64::consts::LN_2;
+    assert!((start - tau_ln2).abs() <= 0.05e-9, "{start:e}");
+    assert_eq!(violations[0]["end"], serde_json::Value::Null);
+    assert_eq!(violations[0]["open"], true);
+
+    std::fs::write(&path, deck("WARNING")).expect("write deck");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        path.to_str().unwrap(),
+        "--summary",
+        summary.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(0), "a warning is reported only");
+    let json = common::read_json(&summary);
+    assert_eq!(json["passed"], true);
+    assert_eq!(
+        json["assertions"][0]["violations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
 
     let _ = std::fs::remove_dir_all(&dir);
