@@ -2092,6 +2092,36 @@ impl CmContext {
         });
     }
 
+    /// Set one element of a real vector output, scheduling an event on that
+    /// element alone.
+    pub(crate) fn set_output_real_vector_element(
+        &mut self,
+        name: &str,
+        index: usize,
+        value: Value,
+        delay: Value,
+    ) {
+        let width = self.port_width(name).max(index + 1);
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::RealVector(values)) => {
+                values.resize(width, 0.0);
+                values[index] = value;
+            }
+            _ => {
+                let mut values = vec![0.0; width];
+                values[index] = value;
+                self.outputs
+                    .insert(name.to_string(), OutputValue::RealVector(values));
+            }
+        }
+        self.pending_real_events.push(PendingRealEvent {
+            port_name: name.to_string(),
+            start_index: index,
+            values: vec![value],
+            delay,
+        });
+    }
+
     /// Set one element of a digital vector output.
     pub fn set_output_digital_vector_element(
         &mut self,

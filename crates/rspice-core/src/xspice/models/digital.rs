@@ -16,6 +16,7 @@ mod process;
 mod pspice_stim;
 mod sequential;
 mod sources;
+mod vcd_source;
 
 pub use cosim::DigitalCosim;
 pub(crate) use cosim::unhosted_cosim_refusal;
@@ -33,3 +34,4 @@ pub use sequential::{
     DFlipFlop, DLatch, DigitalFrequencyDivider, JkFlipFlop, SrFlipFlop, SrLatch, TFlipFlop,
 };
 pub use sources::{DigitalSource, DigitalStateMachine};
+pub(crate) use vcd_source::{DigitalVcdSource, vcd_source_digest, vcd_source_file};

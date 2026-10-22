@@ -28,7 +28,7 @@ const BUILTIN_MODEL_BASELINE_COUNT: usize = 113;
 /// These are not merely names used to adjust the expected count. Each entry is
 /// matched below and its executable port/parameter contract is pinned by
 /// [`validate_added_builtin_contract`].
-const BUILTIN_ADDITIONS_SINCE_BASELINE: &[&str] = &["pspice_d_stim", "v_to_real"];
+const BUILTIN_ADDITIONS_SINCE_BASELINE: &[&str] = &["d_vcd", "pspice_d_stim", "v_to_real"];
 
 const EXPECTED_BUILTIN_MODEL_COUNT: usize =
     BUILTIN_MODEL_BASELINE_COUNT + BUILTIN_ADDITIONS_SINCE_BASELINE.len();
@@ -326,6 +326,44 @@ fn validate_added_builtin_contract(model: &dyn CodeModel, errors: &mut Vec<Strin
                         .to_owned(),
                 );
             }
+        }
+        "d_vcd" => {
+            expect_description(model, "Digital stimulus replayed from a VCD file", errors);
+            expect_ports(
+                model,
+                &[
+                    ExpectedPort {
+                        name: "out",
+                        direction: PortDirection::Out,
+                        default_type: PortType::Digital,
+                        allowed_types: &[PortType::Digital],
+                        is_vector: true,
+                        null_allowed: true,
+                        vector_min_len: None,
+                        vector_max_len: None,
+                    },
+                    ExpectedPort {
+                        name: "real_out",
+                        direction: PortDirection::Out,
+                        default_type: PortType::Real,
+                        allowed_types: &[PortType::Real],
+                        is_vector: true,
+                        null_allowed: true,
+                        vector_min_len: None,
+                        vector_max_len: None,
+                    },
+                ],
+                errors,
+            );
+            expect_parameters(
+                model,
+                &[
+                    ("file", ParamType::String),
+                    ("signals", ParamType::String),
+                    ("toffset", ParamType::Real),
+                ],
+                errors,
+            );
         }
         name => errors.push(format!(
             "post-baseline interface '{name}' has no identity-specific catalog contract"

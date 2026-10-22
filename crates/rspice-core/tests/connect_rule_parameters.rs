@@ -1232,12 +1232,11 @@ fn an_image_without_the_model_breakpoints_resumes_only_stock_converters() {
         )
         .expect("canonical text");
         let (header, body) = text.split_once('\n').expect("a header line");
-        assert_eq!(header, "RSPICE-CHECKPOINT 61");
+        assert_eq!(header, "RSPICE-CHECKPOINT 62");
         let mut older = String::from("RSPICE-CHECKPOINT 60\n");
-        for line in body
-            .lines()
-            .filter(|line| !line.starts_with("pending_model_breakpoints "))
-        {
+        for line in body.lines().filter(|line| {
+            !line.starts_with("pending_model_breakpoints ") && !line.starts_with("vcd_files ")
+        }) {
             older.push_str(line);
             older.push('\n');
         }

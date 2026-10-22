@@ -969,6 +969,13 @@ mod tests {
                 )
                 .is_none()
         );
+        // A deck-level stimulus that replays a VCD file. The Stimulus
+        // workspace's VCD import is where it reaches the UI, not a symbol.
+        assert!(
+            dispositions
+                .insert("d_vcd", "non-device.deck-stimulus.d_vcd")
+                .is_none()
+        );
 
         let mut missing = registry
             .model_names()

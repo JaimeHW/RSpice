@@ -260,6 +260,7 @@ jobs:
           --test veriloga_source_directive_spellings
           --test veriloga_timestep
           --test veriloga_transient
+          --test xspice_vcd_source
       # A second invocation rather than five more names above: these suites
       # need a generated model compiled in, and adding `veriloga-model-diode-cmc`
       # to the list above would reroute cards the suites there assert about
@@ -453,6 +454,7 @@ jobs:
           --test veriloga_source_directive_spellings
           --test veriloga_timestep
           --test veriloga_transient
+          --test xspice_vcd_source
           -- --test-threads=1
       # The generated-model half of the interpreter lane's pair, same reason.
       - name: Test the tri-family and generated-route suites through the native JIT (Linux x64)

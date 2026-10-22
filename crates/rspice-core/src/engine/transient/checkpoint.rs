@@ -53,6 +53,7 @@ mod record_limit_tests;
 mod requested;
 mod solver_state;
 mod switch;
+mod vcd;
 use crate::device::behavioral::BehavioralAcceptedState;
 
 use crate::Value;
@@ -216,12 +217,14 @@ fn checkpoint_operation_result<T>(
 /// Version 59 retains accepted voltage- and current-controlled switch state.
 /// Version 60 retains the pending completions of zero-duration edges.
 /// Version 61 retains the other breakpoints the code models asked for.
-const FORMAT_VERSION: u32 = requested::FORMAT_VERSION;
+/// Version 62 binds the files the `d_vcd` stimuli replay.
+const FORMAT_VERSION: u32 = vcd::FORMAT_VERSION;
 // The newest section's format is the file format; the sections before it
 // were added in order.
 const _: () = assert!(mixed::FORMAT_VERSION < switch::FORMAT_VERSION);
 const _: () = assert!(switch::FORMAT_VERSION < edge::FORMAT_VERSION);
-const _: () = assert!(edge::FORMAT_VERSION < FORMAT_VERSION);
+const _: () = assert!(edge::FORMAT_VERSION < requested::FORMAT_VERSION);
+const _: () = assert!(requested::FORMAT_VERSION < FORMAT_VERSION);
 const CAPACITOR_INCREMENT_FORMAT_VERSION: u32 = 56;
 const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
 const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
@@ -669,6 +672,9 @@ pub struct TransientCheckpoint {
     /// of `time`, ascending (see `requested.rs`). `None` in files older than
     /// format 61, which did not record them.
     requested_breakpoints: Option<Vec<Value>>,
+    /// The file each `d_vcd` stimulus replays and the digest of the bytes it
+    /// read (see `vcd.rs`). Empty in files older than format 62.
+    vcd_files: Vec<vcd::ReplayedFile>,
 
     cap_v_prev: Vec<Value>,
     cap_v_prev_prev: Vec<Value>,
@@ -6886,6 +6892,7 @@ impl TransientCheckpoint {
             dynamic_tline_breakpoints_added,
             edge_completions: edge::capture(edge_completions, time),
             requested_breakpoints: Some(requested::capture(requested_breakpoints, time)),
+            vcd_files: vcd::capture(circuit),
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
@@ -7448,6 +7455,9 @@ impl TransientCheckpoint {
     /// Validate this checkpoint against a netlist before resuming.
     pub(crate) fn validate_for(&self, netlist: &Netlist) -> Result<(), String> {
         self.validate_numeric_state()?;
+        // Before the identity, which hashes the files too: this refusal names
+        // the file.
+        vcd::validate_files(&self.vcd_files)?;
         let target_identity = netlist_checkpoint_identity(netlist)
             .expect("semantic netlist identity is available for every elaborated AST");
         let Some(captured_identity) = self.netlist_identity.as_deref() else {
@@ -7483,6 +7493,7 @@ impl TransientCheckpoint {
     /// transient controls remain identity-bound.
     pub(crate) fn validate_for_restart(&self, netlist: &Netlist) -> Result<(), String> {
         self.validate_numeric_state()?;
+        vcd::validate_files(&self.vcd_files)?;
         let target_identity = restart_checkpoint_identity(netlist)
             .expect("restart identity is available for every elaborated AST");
         let Some(captured_identity) = self.restart_identity.as_deref() else {
@@ -8152,6 +8163,7 @@ impl TransientCheckpoint {
         count = count.saturating_add(requested::retained_values(
             self.requested_breakpoints.as_deref(),
         ));
+        count = count.saturating_add(vcd::retained_values(&self.vcd_files));
         for instance in &self.xspice_instance_states {
             count = count
                 .saturating_add(2)
@@ -8933,6 +8945,7 @@ impl TransientCheckpoint {
         switch::write(&mut out, self.switch_states.as_deref(), abort)?;
         edge::write(&mut out, &self.edge_completions, abort)?;
         requested::write(&mut out, self.requested_breakpoints.as_deref(), abort)?;
+        vcd::write(&mut out, &self.vcd_files, abort)?;
         check_checkpoint_abort(abort)?;
         Ok(out)
     }
@@ -9778,6 +9791,7 @@ impl TransientCheckpoint {
         let switch_states = switch::read(lines, version, budget)?;
         let edge_completions = edge::read(lines, version, budget)?;
         let requested_breakpoints = requested::read(lines, version, budget)?;
+        let vcd_files = vcd::read(lines, version, budget)?;
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -9808,6 +9822,7 @@ impl TransientCheckpoint {
             dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
+            vcd_files,
             cap_v_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
@@ -11940,6 +11955,48 @@ mod tests {
         }
     }
 
+    /// The files the `d_vcd` stimuli replay round-trip, a path with a space,
+    /// a quote and a backslash included; a file from before the section reads
+    /// with none; and a row whose digest is not BLAKE3 hex is refused.
+    #[test]
+    fn replayed_vcd_files_round_trip_and_read_empty_from_older_files() {
+        let mut checkpoint = sample();
+        checkpoint.vcd_files = vec![
+            vcd::ReplayedFile {
+                instance: "a1".into(),
+                path: "C:\\stimuli\\two \"words\".vcd".into(),
+                digest: blake3::hash(b"first"),
+            },
+            vcd::ReplayedFile {
+                instance: "x1.a2".into(),
+                path: "/runs/stim.vcd".into(),
+                digest: blake3::hash(b"second"),
+            },
+        ];
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let bytes = checkpoint.to_bytes(encoding).unwrap();
+            assert_eq!(TransientCheckpoint::from_bytes(&bytes).unwrap(), checkpoint);
+        }
+        let text = checkpoint.to_text();
+        assert!(text.ends_with(&format!(
+            "vcd_files 2\nvcd_file a1 {} \"C:\\\\stimuli\\\\two \\\"words\\\".vcd\"\n\
+             vcd_file x1.a2 {} \"/runs/stim.vcd\"\n",
+            blake3::hash(b"first").to_hex(),
+            blake3::hash(b"second").to_hex()
+        )));
+
+        let legacy =
+            TransientCheckpoint::from_text(&legacy_text(&checkpoint, requested::FORMAT_VERSION))
+                .unwrap();
+        assert!(legacy.vcd_files.is_empty());
+
+        let corrupt = text.replace(&blake3::hash(b"first").to_hex().to_string(), "not-hex");
+        assert!(TransientCheckpoint::from_text(&corrupt).is_err());
+    }
+
     /// The breakpoints the code models asked for round-trip bit for bit; a
     /// file from before the section reads as one that did not record them,
     /// and so does a current file that says so; and a request that is not
@@ -12073,6 +12130,7 @@ mod tests {
             dynamic_tline_breakpoints_added: 3,
             edge_completions: EdgeCompletionSchedule::default(),
             requested_breakpoints: Some(Vec::new()),
+            vcd_files: Vec::new(),
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
             cap_v_prev_prev_prev: vec![0.08, -0.18],
@@ -12372,6 +12430,11 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < vcd::FORMAT_VERSION
+                && (line.starts_with("vcd_files ") || line.starts_with("vcd_file "))
+            {
+                continue;
+            }
             if version < requested::FORMAT_VERSION && line.starts_with("pending_model_breakpoints ")
             {
                 continue;
@@ -14995,7 +15058,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 45] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 46] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -15041,6 +15104,7 @@ mod tests {
         (59, 13),
         (60, 13),
         (61, 13),
+        (62, 13),
     ];
 
     #[cfg(feature = "veriloga")]

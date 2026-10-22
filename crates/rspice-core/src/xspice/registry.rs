@@ -184,6 +184,7 @@ impl CodeModelRegistry {
         // Digital sources
         self.register(Arc::new(super::models::DigitalSource));
         self.register(Arc::new(super::models::PspiceDigitalStimulus));
+        self.register(Arc::new(super::models::DigitalVcdSource));
 
         // Digital gates
         self.register(Arc::new(super::models::DigitalInverter));

@@ -205,6 +205,7 @@ pub use digital::{
 
 pub(crate) use digital::PspiceDigitalStimulus;
 pub(crate) use digital::unhosted_cosim_refusal;
+pub(crate) use digital::{DigitalVcdSource, vcd_source_digest, vcd_source_file};
 
 pub use lookup::{PiecewiseLinear, PiecewiseLinearTimeSeries};
 

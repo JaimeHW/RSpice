@@ -57,6 +57,7 @@ pub const BUILTIN_MODEL_NAMES: &[&str] = &[
     "d_tff",
     "d_to_real",
     "d_tristate",
+    "d_vcd",
     "d_xnor",
     "d_xor",
     "dac_bridge",
