@@ -13,62 +13,6 @@ pub use crate::optimization::{
 };
 use rspice_core::{Value, abort_signal::AbortSignal, engine::Engine};
 use std::collections::HashMap;
-#[cfg(test)]
-use std::path::Path;
-
-/// Run optimization analysis with default configuration and no source path.
-///
-/// Test-only. The shipping path is
-/// [`run_optimization_analysis_with_context`], which
-/// the device spec calls with the configuration the user set.
-#[cfg(test)]
-pub fn run_optimization_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<OptimizationData> {
-    run_optimization_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        &OptimizationRunConfig::default(),
-        None,
-        abort,
-    )
-}
-
-/// Run explicitly configured optimization analysis with source-path
-/// resolution and cooperative cancellation through every objective trial and
-/// outer iteration.
-#[cfg(test)]
-pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &OptimizationRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<OptimizationData> {
-    run_optimization_analysis_with_environment_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        None,
-        abort,
-    )
-}
-
-/// Apply the Studio Run Set to every operating-point objective candidate.
-#[cfg(test)]
-pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &OptimizationRunConfig,
-    source_path: Option<&Path>,
-    environment: Option<&rspice_core::engine::MonteCarloEnvironment>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<OptimizationData> {
-    run_optimization_analysis_with_context(
-        netlist_text,
-        config,
-        environment,
-        ServiceContext::with_defaults(source_path, abort),
-    )
-}
 
 /// Apply one captured execution policy to materialization and every candidate.
 pub(crate) fn run_optimization_analysis_with_context(
@@ -282,6 +226,7 @@ fn resolve_node_index_case_insensitive(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::test_entry::ctx;
     use super::*;
 
     struct AbortOnPoll {
@@ -317,11 +262,11 @@ R2 out 0 1k
     #[test]
     fn optimization_seed_temperature_cooling_and_gradient_threshold_govern_the_search() {
         let run = |config: &OptimizationRunConfig| {
-            run_optimization_analysis_with_config_and_source_path_and_abort(
+            run_optimization_analysis_with_context(
                 OPTIMIZATION_DECK,
                 config,
                 None,
-                &rspice_core::NoAbort,
+                ctx(&rspice_core::NoAbort),
             )
             .unwrap()
         };
@@ -353,7 +298,12 @@ R2 out 0 1k
     #[test]
     fn optimization_honors_early_abort_before_invalid_input() {
         let abort = AbortOnPoll::new(1);
-        let result = run_optimization_analysis_with_abort("invalid", &abort);
+        let result = run_optimization_analysis_with_context(
+            "invalid",
+            &OptimizationRunConfig::default(),
+            None,
+            ctx(&abort),
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -361,7 +311,12 @@ R2 out 0 1k
     #[test]
     fn optimization_honors_abort_during_objective_trials() {
         let abort = AbortOnPoll::new(12);
-        let result = run_optimization_analysis_with_abort(OPTIMIZATION_DECK, &abort);
+        let result = run_optimization_analysis_with_context(
+            OPTIMIZATION_DECK,
+            &OptimizationRunConfig::default(),
+            None,
+            ctx(&abort),
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 12);
@@ -391,13 +346,9 @@ RREF GND! 0 1k
             target: Some(0.2),
             ..Default::default()
         };
-        let data = run_optimization_analysis_with_config_and_source_path_and_abort(
-            DECK,
-            &config,
-            None,
-            &rspice_core::NoAbort,
-        )
-        .unwrap();
+        let data =
+            run_optimization_analysis_with_context(DECK, &config, None, ctx(&rspice_core::NoAbort))
+                .unwrap();
 
         let [objective] = data.best_objectives.as_slice() else {
             panic!("one objective: {:?}", data.best_objectives);
@@ -414,6 +365,7 @@ RREF GND! 0 1k
 
 #[cfg(test)]
 mod variable_domain_tests {
+    use super::super::test_entry::ctx;
     use super::*;
     use rspice_core::NoAbort;
     use rspice_simulation_contract::optimization_search::OptimizationVariableDomain as Domain;
@@ -462,10 +414,8 @@ mod variable_domain_tests {
                 .search
                 .variable_domains
                 .insert("x".into(), domain.clone());
-            let data = run_optimization_analysis_with_config_and_source_path_and_abort(
-                deck, &config, None, &NoAbort,
-            )
-            .unwrap();
+            let data =
+                run_optimization_analysis_with_context(deck, &config, None, ctx(&NoAbort)).unwrap();
             assert!(data.converged, "{domain:?}: {data:?}");
             assert!(
                 (data.best_variables["X"] - expected).abs() <= expected.abs().max(1e-12) * 1e-5,

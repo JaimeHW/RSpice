@@ -1,5 +1,6 @@
 //! Numerical and scope regressions for configurable terminal-stress rules.
 
+use super::super::test_entry::ctx;
 use super::*;
 
 fn rule(parameter: SoAParameter, limit: f64, devices: &[&str], models: &[&str]) -> SoaRuleConfig {
@@ -32,7 +33,7 @@ fn config(rules: Vec<SoaRuleConfig>) -> SoaRunConfig {
 #[test]
 fn soa_additional_voltage_and_current_rules_retain_complete_physical_evidence() {
     let deck = "Scoped stress\nVd d 0 3\nVg g 0 2\nVc c 0 2\nVb b 0 0.6\nM1 d g 0 0 NM W=10u L=1u\nQ1 c b 0 NPN\n.model NM NMOS LEVEL=1 VTO=1 KP=1m LAMBDA=0\n.model NPN NPN IS=1e-14 BF=100\n.save V(d)\n.end\n";
-    let data = run_soa_analysis_with_config_and_source_path_and_abort(
+    let data = run_soa_analysis_with_context(
         deck,
         &config(vec![
             rule(SoAParameter::Vgd, 0.8, &[], &[]),
@@ -40,8 +41,7 @@ fn soa_additional_voltage_and_current_rules_retain_complete_physical_evidence() 
             rule(SoAParameter::Id, 0.004, &[], &[]),
             rule(SoAParameter::Ic, 1e-6, &[], &[]),
         ]),
-        None,
-        &NoAbort,
+        ctx(&NoAbort),
     )
     .unwrap();
     assert_eq!(data.evaluations.len(), 4);
@@ -92,8 +92,7 @@ fn soa_current_limits_measure_accepted_displacement_current_inside_subcircuits()
     let deck = "SOA charge stress\nVd d 0 0\nVg g 0 PWL(0 -1 1n -1 6n -0.5 10n -0.5)\nX1 d g CELL\n.subckt CELL d g\nM1 d g 0 0 NM W=1u L=1u\n.model NM NMOS LEVEL=1 VTO=1 KP=1u CGDO=1u\n.ends CELL\n.save V(d)\n.end\n";
     let mut cfg = config(vec![rule(SoAParameter::Id, 50e-6, &["X1:M1"], &[])]);
     cfg.observation.models = vec!["CELL::NM".into()];
-    let full =
-        run_soa_analysis_with_config_and_source_path_and_abort(deck, &cfg, None, &NoAbort).unwrap();
+    let full = run_soa_analysis_with_context(deck, &cfg, ctx(&NoAbort)).unwrap();
     assert_eq!(full.evaluations.len(), 1);
     let stress = &full.evaluations[0];
     // Channel is off. The gate-drain overlap alone supplies about 100 uA
@@ -103,7 +102,7 @@ fn soa_current_limits_measure_accepted_displacement_current_inside_subcircuits()
         "{stress:?}"
     );
     assert!(full.stress_history[0].values[0] < 1e-10);
-    let settled = run_soa_analysis_with_config_and_source_path_and_abort(
+    let settled = run_soa_analysis_with_context(
         deck,
         &SoaRunConfig {
             observation: SoaObservationConfig {
@@ -112,8 +111,7 @@ fn soa_current_limits_measure_accepted_displacement_current_inside_subcircuits()
             },
             ..cfg
         },
-        None,
-        &NoAbort,
+        ctx(&NoAbort),
     )
     .unwrap();
     assert!(
@@ -135,8 +133,7 @@ fn soa_scoped_rules_override_defaults_without_ambiguous_precedence() {
         step_time: 1e-9,
         ..Default::default()
     };
-    let result =
-        run_soa_analysis_with_config_and_source_path_and_abort(deck, &cfg, None, &NoAbort).unwrap();
+    let result = run_soa_analysis_with_context(deck, &cfg, ctx(&NoAbort)).unwrap();
     assert_eq!(result.evaluations.len(), 4);
     for (name, limit) in [("M1", 3.0), ("M2", 1.0)] {
         assert_eq!(
@@ -152,7 +149,7 @@ fn soa_scoped_rules_override_defaults_without_ambiguous_precedence() {
     let mut conflict = cfg.clone();
     conflict.rules.push(rule(SoAParameter::Vgs, 2.0, &[], &[]));
     assert!(
-        run_soa_analysis_with_config_and_source_path_and_abort(deck, &conflict, None, &NoAbort)
+        run_soa_analysis_with_context(deck, &conflict, ctx(&NoAbort))
             .unwrap_err()
             .to_string()
             .contains("overlapping")
@@ -162,13 +159,7 @@ fn soa_scoped_rules_override_defaults_without_ambiguous_precedence() {
         rule(SoAParameter::Id, 1e-3, &["typo"], &[]),
     ] {
         assert!(
-            run_soa_analysis_with_config_and_source_path_and_abort(
-                deck,
-                &config(vec![unmatched]),
-                None,
-                &NoAbort
-            )
-            .is_err()
+            run_soa_analysis_with_context(deck, &config(vec![unmatched]), ctx(&NoAbort)).is_err()
         );
     }
 }
@@ -182,8 +173,7 @@ fn soa_checks_grounded_devices_without_retaining_unrelated_voltage_columns() {
     ]);
     cfg.observation.devices = vec!["M1".into()];
     cfg.observation.start_time = 5e-9;
-    let data =
-        run_soa_analysis_with_config_and_source_path_and_abort(deck, &cfg, None, &NoAbort).unwrap();
+    let data = run_soa_analysis_with_context(deck, &cfg, ctx(&NoAbort)).unwrap();
     assert!(!data.time.is_empty());
     assert!(data.time[0] >= 5e-9);
     assert!(data.violations.is_empty());
@@ -285,9 +275,7 @@ fn soa_terminal_current_probes_capture_advanced_mos_charging_current() {
             rule(SoAParameter::IgPositive, 50e-6, &["X1:M1"], &[]),
             rule(SoAParameter::Is, 50e-6, &["X1:M1"], &[]),
         ]);
-        let data =
-            run_soa_analysis_with_config_and_source_path_and_abort(&deck, &cfg, None, &NoAbort)
-                .unwrap();
+        let data = run_soa_analysis_with_context(&deck, &cfg, ctx(&NoAbort)).unwrap();
         for parameter in [SoAParameter::IdNegative, SoAParameter::IgPositive] {
             let evidence = data
                 .evaluations
@@ -326,9 +314,7 @@ fn soa_bulk_current_limits_measure_signed_body_junction_charging() {
             SoAParameter::IbulkPositive
         };
         let cfg = config(vec![rule(direction, 50e-6, &["M1"], &[])]);
-        let result =
-            run_soa_analysis_with_config_and_source_path_and_abort(&deck, &cfg, None, &NoAbort)
-                .unwrap();
+        let result = run_soa_analysis_with_context(&deck, &cfg, ctx(&NoAbort)).unwrap();
         let evaluation = &result.evaluations[0];
         assert!(
             evaluation.worst_actual_value > 90e-6 && evaluation.worst_actual_value < 110e-6,
@@ -347,11 +333,10 @@ fn soa_body_rules_do_not_invent_floating_or_compact_device_pins() {
         "Floating body\nVd d 0 1\nVg g 0 1\nM1 d g 0 0 MM W=4u L=1u\n.model MM NMOS LEVEL=56 CAPMOD=2\n.end\n",
         "Compact VDMOS\nVd d 0 1\nVg g 0 1\nM1 d g 0 MM\n.model MM VDMOS NCHAN VTO=2 KP=1\n.end\n",
     ] {
-        let error = run_soa_analysis_with_config_and_source_path_and_abort(
+        let error = run_soa_analysis_with_context(
             deck,
             &config(vec![rule(SoAParameter::Ibulk, 1.0, &["M1"], &[])]),
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .unwrap_err();
         assert!(
@@ -379,9 +364,7 @@ fn soa_diode_and_substrate_current_limits_capture_junction_charging() {
             "Junction current\nV1 n 0 PWL(0 0 1n 0 6n -0.5 10n -0.5)\n{element}\n{model}\n.end\n"
         );
         let cfg = config(vec![rule(parameter, 50e-6, &[], &[])]);
-        let result =
-            run_soa_analysis_with_config_and_source_path_and_abort(&deck, &cfg, None, &NoAbort)
-                .unwrap();
+        let result = run_soa_analysis_with_context(&deck, &cfg, ctx(&NoAbort)).unwrap();
         let evaluation = &result.evaluations[0];
         assert!(
             evaluation.worst_actual_value > 90e-6 && evaluation.worst_actual_value < 110e-6,
@@ -402,11 +385,10 @@ fn soa_substrate_rules_reject_thermal_or_implicit_bjt_terminals() {
     ] {
         let deck =
             format!("BJT terminal eligibility\nV1 c 0 1\nV2 b 0 0.6\n{element}\n{model}\n.end\n");
-        let error = run_soa_analysis_with_config_and_source_path_and_abort(
+        let error = run_soa_analysis_with_context(
             &deck,
             &config(vec![rule(SoAParameter::Isub, 1.0, &["Q1"], &[])]),
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .unwrap_err();
         assert!(

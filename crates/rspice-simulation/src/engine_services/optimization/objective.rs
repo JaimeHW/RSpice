@@ -77,6 +77,7 @@ pub(super) fn evaluate_with_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_services::test_entry::ctx;
     use rspice_core::abort_signal::NoAbort;
 
     #[test]
@@ -98,25 +99,19 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            let result = run_optimization_analysis_with_config_and_source_path_and_abort(
-                deck, &config, None, &NoAbort,
-            )
-            .unwrap();
+            let result =
+                run_optimization_analysis_with_context(deck, &config, None, ctx(&NoAbort)).unwrap();
             assert!(result.best_cost < 1e-20, "{result:?}");
             assert!((result.best_objectives[0].value - target).abs() < 1e-10);
             assert_eq!(result.best_objectives[0].objective.unit, unit);
             config.objective_unit = "ns".into();
-            let error = run_optimization_analysis_with_config_and_source_path_and_abort(
-                deck, &config, None, &NoAbort,
-            )
-            .unwrap_err();
+            let error = run_optimization_analysis_with_context(deck, &config, None, ctx(&NoAbort))
+                .unwrap_err();
             assert!(error.to_string().contains("incompatible"), "{error}");
             config.objective_unit = "V".into();
             config.objective_expression = Some("X*V(out)".into());
-            let error = run_optimization_analysis_with_config_and_source_path_and_abort(
-                deck, &config, None, &NoAbort,
-            )
-            .unwrap_err();
+            let error = run_optimization_analysis_with_context(deck, &config, None, ctx(&NoAbort))
+                .unwrap_err();
             assert!(error.to_string().contains("unknown"), "{error}");
         }
     }
@@ -144,10 +139,8 @@ mod tests {
                 max_iterations: 40,
                 ..Default::default()
             };
-            let result = run_optimization_analysis_with_config_and_source_path_and_abort(
-                deck, &config, None, &NoAbort,
-            )
-            .unwrap();
+            let result =
+                run_optimization_analysis_with_context(deck, &config, None, ctx(&NoAbort)).unwrap();
             let best_x = result.best_variables["X"];
             assert!((0.5..=0.51).contains(&best_x), "{algorithm:?}: {result:?}");
             let expected = 1e40 * (1.0 + best_x);
@@ -173,10 +166,8 @@ mod tests {
                 target: Some(target),
                 ..Default::default()
             };
-            let error = run_optimization_analysis_with_config_and_source_path_and_abort(
-                deck, &config, None, &NoAbort,
-            )
-            .unwrap_err();
+            let error = run_optimization_analysis_with_context(deck, &config, None, ctx(&NoAbort))
+                .unwrap_err();
             assert!(
                 error.to_string().contains(expected),
                 "{expression}: {error}"
@@ -233,10 +224,8 @@ mod tests {
             max_iterations: 180,
             ..Default::default()
         };
-        let result = run_optimization_analysis_with_config_and_source_path_and_abort(
-            deck, &config, None, &NoAbort,
-        )
-        .unwrap();
+        let result =
+            run_optimization_analysis_with_context(deck, &config, None, ctx(&NoAbort)).unwrap();
         assert!(result.converged, "{result:?}");
         assert!(result.best_cost <= 1e-16, "{}", result.best_cost);
         assert!(

@@ -7,28 +7,9 @@ use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
 use crate::sweeps::expand_step_sweep_values_with_abort;
 use crate::sweeps::{CornerBaseMode, CornerFrequencySweep};
 use rspice_core::abort_signal::AbortSignal;
-#[cfg(test)]
-use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, StepCommand, StepSweep, StepTarget};
 use std::path::Path;
-
-/// Run parametric analysis, reporting failures as strings. Test-only; see
-/// [`run_parametric_analysis_with_source_path_and_abort`].
-#[cfg(test)]
-pub fn run_parametric_analysis(netlist_text: &str) -> Result<ParametricData, String> {
-    run_parametric_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run parametric analysis with cooperative cancellation and no source path.
-/// Test-only; see [`run_parametric_analysis`].
-#[cfg(test)]
-pub fn run_parametric_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ParametricData> {
-    run_parametric_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
 
 /// Run parametric analysis by executing the first design-parameter `.STEP`
 /// command in the netlist, with source-path resolution and cooperative
@@ -470,6 +451,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use rspice_core::abort_signal::NoAbort;
 
     struct AbortOnPoll {
         abort_on: usize,
@@ -503,7 +485,7 @@ R2 out 0 1k
 
     #[test]
     fn parametric_analysis_runs_step_data_table_rows() {
-        let data = run_parametric_analysis(
+        let data = run_parametric_analysis_with_source_path_and_abort(
             "data step\n\
              .param rload=1k\n\
              V1 in 0 1\n\
@@ -516,6 +498,8 @@ R2 out 0 1k
              .enddata\n\
              .step data=sweep\n\
              .end\n",
+            None,
+            &NoAbort,
         )
         .expect(".STEP DATA should execute through the parametric runner");
 
@@ -537,7 +521,7 @@ R2 out 0 1k
     /// as well ran the same sweep twice and never ran the parameter step.
     #[test]
     fn a_temperature_step_never_shadows_the_parameter_step_beside_it() {
-        let data = run_parametric_analysis(
+        let data = run_parametric_analysis_with_source_path_and_abort(
             "both steps\n\
              .param rload=1k\n\
              V1 in 0 1\n\
@@ -546,6 +530,8 @@ R2 out 0 1k
              .step temp list -40 27 85\n\
              .step param rload list 1k 3k\n\
              .end\n",
+            None,
+            &NoAbort,
         )
         .expect("the parameter step is the one this runner executes");
 
@@ -560,7 +546,7 @@ R2 out 0 1k
     #[test]
     fn parametric_honors_early_abort_before_invalid_input() {
         let abort = AbortOnPoll::new(1);
-        let result = run_parametric_analysis_with_abort("invalid", &abort);
+        let result = run_parametric_analysis_with_source_path_and_abort("invalid", None, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -568,7 +554,8 @@ R2 out 0 1k
     #[test]
     fn parametric_honors_abort_during_point_execution() {
         let abort = AbortOnPoll::new(8);
-        let result = run_parametric_analysis_with_abort(PARAMETRIC_DECK, &abort);
+        let result =
+            run_parametric_analysis_with_source_path_and_abort(PARAMETRIC_DECK, None, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 8);

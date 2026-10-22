@@ -10,104 +10,10 @@
 
 use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
-#[cfg(test)]
-use rspice_core::Value;
-#[cfg(test)]
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
-#[cfg(test)]
-use std::path::Path;
 
 /// Complete core stability evidence, including missing quantities and diagnostics.
 pub type StbData = rspice_core::analysis::stb::StbResult;
-
-/// Run STB analysis over a decade sweep with cooperative cancellation.
-///
-/// Test-only. The shipping path is
-/// [`run_stb_analysis_with_bias`].
-#[cfg(test)]
-pub fn run_stb_analysis_with_abort(
-    netlist_text: &str,
-    probe: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    points_per_decade: usize,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<StbData> {
-    run_stb_analysis_with_source_path_and_abort(
-        netlist_text,
-        probe,
-        start_freq,
-        stop_freq,
-        points_per_decade,
-        None,
-        abort,
-    )
-}
-
-/// Run STB analysis with source-path resolution and cancellation, fixing the
-/// sweep to per-decade.
-///
-/// Test-only; see [`run_stb_analysis_with_abort`].
-#[cfg(test)]
-pub fn run_stb_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    probe: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    points_per_decade: usize,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<StbData> {
-    run_stb_analysis_with_sweep_and_source_path_and_abort(
-        netlist_text,
-        rspice_core::analysis::stb::StbConfig::new()
-            .with_sweep(start_freq, stop_freq, points_per_decade)
-            .with_sweep_type(rspice_core::analysis::stb::StbSweepType::Decade)
-            .with_probe(probe)
-            .with_nyquist(true),
-        source_path,
-        abort,
-    )
-}
-
-/// Run STB (loop stability) analysis with an explicit sweep, source path, and
-/// cancellation.
-///
-/// Measures the loop gain and phase of a feedback system to determine phase
-/// margin and gain margin. `probe` names a 0 V voltage source placed in the
-/// feedback loop; the engine measures the true loop gain at that break via
-/// Tian's double-injection method. An unknown probe is a hard error — there is
-/// no meaningful fallback quantity.
-#[cfg(test)]
-pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
-    netlist_text: &str,
-    stb_config: rspice_core::analysis::stb::StbConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<StbData> {
-    run_stb_analysis_with_context(
-        netlist_text,
-        stb_config,
-        super::ServiceContext::with_defaults(source_path, abort),
-    )
-}
-
-/// Execute with the caller's source, cancellation, and resource policy.
-#[cfg(test)]
-pub fn run_stb_analysis_with_context(
-    netlist_text: &str,
-    stb_config: rspice_core::analysis::stb::StbConfig,
-    context: super::ServiceContext<'_>,
-) -> ServiceRunResult<StbData> {
-    run_stb_analysis_with_bias(
-        netlist_text,
-        stb_config,
-        super::Bias::OperatingPoint,
-        context,
-    )
-    .map(|(data, _)| data)
-}
 
 /// Execute around `bias`, returning the time of the transient state it
 /// linearized at, if any. Around a state the deck's `.STB` card runs there;
@@ -151,29 +57,43 @@ pub(crate) fn run_stb_analysis_with_bias(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_entry::ctx;
     use super::*;
+    use rspice_core::Value;
     use rspice_core::abort_signal::ImmediateAbort;
+    use rspice_core::analysis::stb::{StbConfig, StbSweepType};
+
+    fn decade(probe: &str, start: Value, stop: Value, points_per_decade: usize) -> StbConfig {
+        StbConfig::new()
+            .with_sweep(start, stop, points_per_decade)
+            .with_sweep_type(StbSweepType::Decade)
+            .with_probe(probe)
+            .with_nyquist(true)
+    }
 
     #[test]
     fn stb_service_preserves_typed_entry_abort() {
-        let result = run_stb_analysis_with_abort("not a netlist", "", 0.0, 0.0, 0, &ImmediateAbort);
+        let result = run_stb_analysis_with_bias(
+            "not a netlist",
+            decade("", 0.0, 0.0, 0),
+            super::super::Bias::OperatingPoint,
+            ctx(&ImmediateAbort),
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
 
     #[test]
     fn stb_service_retains_the_continuous_core_bode_phase() {
-        let result = run_stb_analysis_with_abort(
+        let (result, _) = run_stb_analysis_with_bias(
             "* three-pole loop\n\
 E1 eo 0 n3 0 -1000\nVP eo x 0\n\
 R1 x n1 1k\nC1 n1 0 159.154943091895n\n\
 E2 b1 0 n1 0 1\nR2 b1 n2 1k\nC2 n2 0 159.154943091895n\n\
 E3 b2 0 n2 0 1\nR3 b2 n3 1k\nC3 n3 0 159.154943091895n\n.end\n",
-            "VP",
-            100.0,
-            1e5,
-            20,
-            &rspice_core::NoAbort,
+            decade("VP", 100.0, 1e5, 20),
+            super::super::Bias::OperatingPoint,
+            ctx(&rspice_core::NoAbort),
         )
         .unwrap();
         assert_eq!(result.bode_points.len(), 61);

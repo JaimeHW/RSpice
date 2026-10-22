@@ -6,12 +6,8 @@
 use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
 use rspice_core::Value;
-#[cfg(test)]
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::s_param;
 use rspice_core::engine::Engine;
-#[cfg(test)]
-use std::path::Path;
 
 /// Sweep type for S-parameter analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,44 +91,6 @@ impl SParameterRunConfig {
     }
 }
 
-/// Test-only convenience wrapper without a source path.
-#[cfg(test)]
-pub fn run_sparameter_analysis_with_abort(
-    netlist_text: &str,
-    config: &SParameterRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<s_param::SParameterResult> {
-    run_sparameter_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-        .map(|run| run.scattering)
-}
-
-/// Run N-port S-parameter analysis with source-path resolution and
-/// cooperative cancellation through parsing, solving, and matrix conversion.
-#[cfg(test)]
-pub fn run_sparameter_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &SParameterRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<rspice_core::engine::SParameterRun> {
-    run_sparameter_analysis_with_context(
-        netlist_text,
-        config,
-        super::ServiceContext::with_defaults(source_path, abort),
-    )
-}
-
-/// Execute with the caller's source, cancellation, and resource policy.
-#[cfg(test)]
-pub fn run_sparameter_analysis_with_context(
-    netlist_text: &str,
-    config: &SParameterRunConfig,
-    context: super::ServiceContext<'_>,
-) -> ServiceRunResult<rspice_core::engine::SParameterRun> {
-    run_sparameter_analysis_with_bias(netlist_text, config, super::Bias::OperatingPoint, context)
-        .map(|(run, _)| run)
-}
-
 /// Execute around `bias`, returning the time of the transient state it
 /// linearized at, if any. Around a state the deck's `.SP` card runs there,
 /// over its own grid and ports, which the task's configuration states.
@@ -204,8 +162,24 @@ pub(crate) fn run_sparameter_analysis_with_bias(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_entry::ctx;
     use super::*;
-    use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+    use rspice_core::abort_signal::{AbortSignal, ImmediateAbort, NoAbort};
+
+    /// The shipping entry at the operating point.
+    fn sp(
+        deck: &str,
+        config: &SParameterRunConfig,
+        abort: &dyn AbortSignal,
+    ) -> ServiceRunResult<rspice_core::engine::SParameterRun> {
+        run_sparameter_analysis_with_bias(
+            deck,
+            config,
+            super::super::Bias::OperatingPoint,
+            ctx(abort),
+        )
+        .map(|(run, _)| run)
+    }
 
     use std::path::PathBuf;
 
@@ -257,8 +231,7 @@ mod tests {
 
     #[test]
     fn sparameter_service_preserves_typed_entry_abort() {
-        let result =
-            run_sparameter_analysis_with_abort("not a netlist", &invalid_config(), &ImmediateAbort);
+        let result = sp("not a netlist", &invalid_config(), &ImmediateAbort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -314,8 +287,7 @@ endmodule"#,
             "* Noise finish\nX1 IN OUT sp_noise_finish\n.va \"{}\" sp_noise_finish\n.end\n",
             model.display().to_string().replace('\\', "/")
         );
-        let run =
-            run_sparameter_analysis_with_source_path_and_abort(&deck, &config, None, &NoAbort);
+        let run = sp(&deck, &config, &NoAbort);
         std::fs::remove_file(model).unwrap();
         let run = run.unwrap();
         assert_eq!(run.scattering.data.len(), 1);
@@ -367,7 +339,7 @@ endmodule"#,
             if declared {
                 request.ports.clear();
             }
-            let result = run_sparameter_analysis_with_abort(&source, &request, &NoAbort).unwrap();
+            let result = sp(&source, &request, &NoAbort).unwrap().scattering;
             assert_eq!(result.data.len(), 1);
             assert_eq!(result.data[0].frequency, config.start_freq);
             assert_eq!(result.num_ports, 2);
@@ -390,12 +362,13 @@ endmodule"#,
     /// there is no reflected wave to measure.
     #[test]
     fn configured_ports_are_injected_behind_their_reference_impedance() {
-        let result = run_sparameter_analysis_with_abort(
+        let result = sp(
             "* divider\nR1 IN OUT 50\n.end\n",
             &two_port_config(),
             &NoAbort,
         )
-        .unwrap();
+        .unwrap()
+        .scattering;
         assert_eq!(result.ports.len(), 2);
         assert_eq!(result.ports[0].z0, 50.0);
         assert_eq!(result.ports[1].z0, 75.0);
@@ -416,12 +389,10 @@ endmodule"#,
         ] {
             let deck = format!("* declared single port\n{declaration}\nR1 p 0 100\n.end\n");
             // Explicit and circuit-declared ports are separate authorities.
-            assert!(
-                run_sparameter_analysis_with_abort(&deck, &two_port_config(), &NoAbort).is_err()
-            );
+            assert!(sp(&deck, &two_port_config(), &NoAbort).is_err());
             let mut config = two_port_config();
             config.ports.clear();
-            let result = run_sparameter_analysis_with_abort(&deck, &config, &NoAbort).unwrap();
+            let result = sp(&deck, &config, &NoAbort).unwrap().scattering;
             assert_eq!(result.num_ports, 1);
             assert_eq!(result.ports[0].z0, 75.0);
             for point in result.data {

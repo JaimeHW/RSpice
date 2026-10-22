@@ -8,12 +8,8 @@ use super::{ServiceRunError, ServiceRunResult, is_ground_like};
 use crate::error::ensure_not_aborted;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-#[cfg(test)]
-use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::ElementKind;
-#[cfg(test)]
-use std::path::Path;
 
 /// Post-solve normalization applied to the signed transfer derivative: the
 /// one the analysis declared, so the runner applies exactly that policy.
@@ -129,58 +125,6 @@ pub struct TfData {
     pub nominal_input: Option<Value>,
     /// Nominal output value used by relative normalization, otherwise absent.
     pub nominal_output: Option<Value>,
-}
-
-/// Run transfer-function analysis with explicit configuration, reporting
-/// failures as strings.
-///
-/// Test-only; the shipping path is
-/// [`run_tf_analysis_with_bias`], which keeps the typed error.
-#[cfg(test)]
-pub fn run_tf_analysis_with_config(
-    netlist_text: &str,
-    config: &TfRunConfig,
-) -> Result<TfData, String> {
-    run_tf_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run transfer-function analysis with explicit configuration and
-/// cooperative cancellation.
-#[cfg(test)]
-pub fn run_tf_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &TfRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<TfData> {
-    run_tf_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run transfer-function analysis with source-path resolution and
-/// cooperative cancellation through parsing, solving, and result conversion.
-#[cfg(test)]
-pub fn run_tf_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &TfRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<TfData> {
-    run_tf_analysis_with_context(
-        netlist_text,
-        config,
-        super::ServiceContext::with_defaults(source_path, abort),
-    )
-}
-
-/// Execute with the caller's source, cancellation, and resource policy.
-#[cfg(test)]
-pub fn run_tf_analysis_with_context(
-    netlist_text: &str,
-    config: &TfRunConfig,
-    context: super::ServiceContext<'_>,
-) -> ServiceRunResult<TfData> {
-    run_tf_analysis_with_bias(netlist_text, config, super::Bias::OperatingPoint, context)
-        .map(|(data, _)| data)
 }
 
 /// Execute around `bias`, returning the time of the transient state it
@@ -716,8 +660,15 @@ impl TfOutputProbe {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_entry::ctx;
     use super::*;
-    use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
+    use rspice_core::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
+
+    /// The shipping entry at the operating point.
+    fn tf(deck: &str, config: &TfRunConfig, abort: &dyn AbortSignal) -> ServiceRunResult<TfData> {
+        run_tf_analysis_with_bias(deck, config, super::super::Bias::OperatingPoint, ctx(abort))
+            .map(|(data, _)| data)
+    }
 
     const DIVIDER: &str = "\
 DC transfer divider
@@ -745,11 +696,7 @@ R2 out 0 2k
 
     #[test]
     fn tf_service_preserves_typed_entry_abort() {
-        let result = run_tf_analysis_with_config_and_abort(
-            "not a netlist",
-            &config("V(out)", "VIN"),
-            &ImmediateAbort,
-        );
+        let result = tf("not a netlist", &config("V(out)", "VIN"), &ImmediateAbort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -757,8 +704,7 @@ R2 out 0 2k
     #[test]
     fn tf_service_honors_abort_after_entry() {
         let abort = CountingAbort::new(4);
-        let result =
-            run_tf_analysis_with_config_and_abort(DIVIDER, &config("V(out)", "VIN"), &abort);
+        let result = tf(DIVIDER, &config("V(out)", "VIN"), &abort);
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.count() > 4);
     }
@@ -766,7 +712,7 @@ R2 out 0 2k
     #[test]
     fn tf_service_returns_exact_dc_gain_and_resistances() {
         let cfg = config("V(out)", "VIN");
-        let data = run_tf_analysis_with_config(DIVIDER, &cfg).expect("TF succeeds");
+        let data = tf(DIVIDER, &cfg, &NoAbort).expect("TF succeeds");
 
         assert_close(data.gain.expect("gain"), 2.0 / 3.0, "gain");
         assert_close(data.input_resistance.expect("Rin"), 3000.0, "Rin");
@@ -785,7 +731,7 @@ R2 out 0 2k
         cfg.transfer_gain = false;
         cfg.output_resistance = false;
 
-        let data = run_tf_analysis_with_config(DIVIDER, &cfg).expect("TF succeeds");
+        let data = tf(DIVIDER, &cfg, &NoAbort).expect("TF succeeds");
 
         assert_eq!(data.gain, None);
         assert!(data.input_resistance.is_some());
@@ -814,8 +760,8 @@ R2 out 0 2k
         cfg.input_resistance = false;
         cfg.output_resistance = false;
 
-        let error = run_tf_analysis_with_config(DIVIDER, &cfg).expect_err("empty result rejected");
-        assert!(error.contains("must retain"));
+        let error = tf(DIVIDER, &cfg, &NoAbort).expect_err("empty result rejected");
+        assert!(error.to_string().contains("must retain"));
     }
 
     #[test]
@@ -827,8 +773,8 @@ R1 in out 1k
 R2 out 0 2k
 .end
 ";
-        let data = run_tf_analysis_with_config(deck, &config("V(in,out)", "IIN"))
-            .expect("differential TF succeeds");
+        let data =
+            tf(deck, &config("V(in,out)", "IIN"), &NoAbort).expect("differential TF succeeds");
 
         assert_close(data.gain.expect("gain"), 1000.0, "gain");
         assert_close(data.input_resistance.expect("Rin"), 3000.0, "Rin");
@@ -848,8 +794,8 @@ VMEAS mid out 0
 R2 out 0 2k
 .end
 ";
-        let data = run_tf_analysis_with_config(deck, &config("I(VMEAS)", "VIN"))
-            .expect("branch-current TF succeeds");
+        let data =
+            tf(deck, &config("I(VMEAS)", "VIN"), &NoAbort).expect("branch-current TF succeeds");
 
         assert_close(data.gain.expect("gain"), 1.0 / 3000.0, "gain");
         assert_close(data.input_resistance.expect("Rin"), 3000.0, "Rin");
@@ -865,10 +811,10 @@ R2 out 0 2k
         assert!(TfOutputProbe::parse("I(V1,V2)").is_err());
         assert!(TfOutputProbe::parse("P(R1)").is_err());
         let mut padded = config("V(out)", " VIN");
-        assert!(run_tf_analysis_with_config(DIVIDER, &padded).is_err());
+        assert!(tf(DIVIDER, &padded, &NoAbort).is_err());
         padded.input_source = "VIN".to_owned();
         padded.output_expression = " V(out)".to_owned();
-        assert!(run_tf_analysis_with_config(DIVIDER, &padded).is_err());
+        assert!(tf(DIVIDER, &padded, &NoAbort).is_err());
     }
 
     #[test]
@@ -876,7 +822,7 @@ R2 out 0 2k
         let mut cfg = config("V(out)", "VIN");
         cfg.normalization = TfNormalization::RelativeToNominal;
 
-        let data = run_tf_analysis_with_config(DIVIDER, &cfg).expect("relative TF succeeds");
+        let data = tf(DIVIDER, &cfg, &NoAbort).expect("relative TF succeeds");
 
         assert_close(data.gain.expect("gain"), 1.0, "relative gain");
         assert_eq!(data.nominal_input, Some(1.0));
@@ -901,8 +847,12 @@ R2 out 0 2k
         let mut cfg = config("V(out)", "VIN");
         cfg.normalization = TfNormalization::RelativeToNominal;
 
-        let error = run_tf_analysis_with_config(deck, &cfg).expect_err("zero Xnom rejected");
-        assert!(error.contains("nominal input source 'VIN' is zero"));
+        let error = tf(deck, &cfg, &NoAbort).expect_err("zero Xnom rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("nominal input source 'VIN' is zero")
+        );
     }
 
     #[test]
@@ -916,7 +866,7 @@ R1 in 0 1k
         let mut cfg = config("V(in)", "IIN");
         cfg.normalization = TfNormalization::RelativeToNominal;
 
-        let data = run_tf_analysis_with_config(deck, &cfg).expect("relative TF succeeds");
+        let data = tf(deck, &cfg, &NoAbort).expect("relative TF succeeds");
 
         assert_close(data.gain.expect("gain"), 1.0, "relative gain");
         assert!((data.nominal_input.expect("Xnom") - 1.0e-3).abs() < 1e-15);
@@ -936,8 +886,12 @@ VZERO out 0 0
         let mut cfg = config("V(out)", "VIN");
         cfg.normalization = TfNormalization::RelativeToNominal;
 
-        let error = run_tf_analysis_with_config(deck, &cfg).expect_err("zero Ynom rejected");
-        assert!(error.contains("nominal output 'V(out)' is zero"));
+        let error = tf(deck, &cfg, &NoAbort).expect_err("zero Ynom rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("nominal output 'V(out)' is zero")
+        );
     }
 
     #[test]
@@ -945,7 +899,7 @@ VZERO out 0 0
         let mut cfg = config("V(0,out)", "VIN");
         cfg.normalization = TfNormalization::PerSourceUnit;
 
-        let data = run_tf_analysis_with_config(DIVIDER, &cfg).expect("per-unit TF succeeds");
+        let data = tf(DIVIDER, &cfg, &NoAbort).expect("per-unit TF succeeds");
 
         assert_close(data.gain.expect("gain"), -2.0 / 3.0, "per-unit gain");
         assert_eq!(data.gain_metadata.unit, TfGainUnit::VoltsPerVolt);

@@ -43,6 +43,8 @@ pub(crate) use sparameter::run_sparameter_analysis_with_bias;
 mod stb;
 pub(crate) use stb::run_stb_analysis_with_bias;
 mod sweeps;
+#[cfg(test)]
+pub(crate) mod test_entry;
 mod tf;
 pub(crate) use tf::run_tf_analysis_with_bias;
 mod transient;

@@ -15,8 +15,6 @@ use rspice_results::safety::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation, SoaVoltageBasis,
 };
 use std::collections::HashMap;
-#[cfg(test)]
-use std::path::Path;
 
 mod model_ratings;
 mod observation;
@@ -155,41 +153,6 @@ pub struct SoaData {
     /// A rule appears here only when it was sampled at every retained time
     /// point, so a trace can always be drawn against the full time axis.
     pub stress_history: Vec<SoaStressTrace>,
-}
-
-/// Run SOA analysis with default configuration and no source path.
-///
-/// Test-only. The shipping path is
-/// [`run_soa_analysis_with_context`], which the device
-/// spec calls with the configuration the user set.
-#[cfg(test)]
-pub fn run_soa_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<SoaData> {
-    run_soa_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        &SoaRunConfig::default(),
-        None,
-        abort,
-    )
-}
-
-/// Run explicitly configured SOA analysis with source-path resolution and
-/// cooperative cancellation through parsing, transient solving, and every
-/// device/time-point check.
-#[cfg(test)]
-pub fn run_soa_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &SoaRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<SoaData> {
-    run_soa_analysis_with_context(
-        netlist_text,
-        config,
-        super::ServiceContext::with_defaults(source_path, abort),
-    )
 }
 
 /// Execute SOA under the caller's source, cancellation, and resource policy.
@@ -715,6 +678,7 @@ fn sample_node_waveform(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::test_entry::ctx;
     use super::*;
 
     struct AbortOnPoll {
@@ -740,7 +704,8 @@ mod tests {
     #[test]
     fn soa_honors_early_abort_before_invalid_input() {
         let abort = AbortOnPoll::new(1);
-        let result = run_soa_analysis_with_abort("invalid", &abort);
+        let result =
+            run_soa_analysis_with_context("invalid", &SoaRunConfig::default(), ctx(&abort));
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -753,7 +718,7 @@ mod tests {
             step_time: 1e-7,
             ..Default::default()
         };
-        let context = super::super::ServiceContext::with_defaults(None, &NoAbort);
+        let context = ctx(&NoAbort);
         let full = run_soa_analysis_with_context(deck, &config, context).unwrap();
         assert_eq!(full.stress_history.len(), 2);
         // Two stress columns plus the count column need two scalars apiece
@@ -777,15 +742,14 @@ mod tests {
 
     #[test]
     fn convergence_soa_retains_the_underlying_transient_quality() {
-        let result = run_soa_analysis_with_config_and_source_path_and_abort(
+        let result = run_soa_analysis_with_context(
             "SOA convergence\nVg g 0 1\nVd d 0 1\nM1 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.end\n",
             &SoaRunConfig {
                 stop_time: 1e-6,
                 step_time: 1e-7,
                 ..Default::default()
             },
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .unwrap();
         let quality = result
@@ -803,15 +767,14 @@ mod tests {
     #[test]
     fn soa_evaluates_each_concrete_device_inside_nested_subcircuits() {
         let deck = "Nested SOA\nVd d 0 1.5\nVlow low 0 0.5\nVhigh high 0 2.5\nXlow d low cell\nXhigh d high cell\n.subckt cell drain gate\nXinner drain gate inner\n.ends cell\n.subckt inner d g\nM1 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.ends inner\n.end\n";
-        let result = run_soa_analysis_with_config_and_source_path_and_abort(
+        let result = run_soa_analysis_with_context(
             deck,
             &SoaRunConfig {
                 stop_time: 1e-8,
                 step_time: 1e-9,
                 ..Default::default()
             },
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .unwrap();
         assert_eq!(result.evaluations.len(), 4);
@@ -849,15 +812,13 @@ mod tests {
             step_time: 1e-7,
             ..Default::default()
         };
-        let full =
-            run_soa_analysis_with_config_and_source_path_and_abort(deck, &config, None, &NoAbort)
-                .unwrap();
+        let full = run_soa_analysis_with_context(deck, &config, ctx(&NoAbort)).unwrap();
         assert!(
             full.evaluations
                 .iter()
                 .any(|rule| rule.parameter == SoAParameter::Vgs && rule.worst_actual_value > 2.9)
         );
-        let selected = run_soa_analysis_with_config_and_source_path_and_abort(
+        let selected = run_soa_analysis_with_context(
             deck,
             &SoaRunConfig {
                 observation: SoaObservationConfig {
@@ -867,8 +828,7 @@ mod tests {
                 },
                 ..config
             },
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .unwrap();
         assert!(selected.time[0] >= 0.75e-6);
@@ -915,10 +875,7 @@ mod tests {
                 },
                 ..Default::default()
             };
-            let result = run_soa_analysis_with_config_and_source_path_and_abort(
-                deck, &config, None, &NoAbort,
-            )
-            .unwrap();
+            let result = run_soa_analysis_with_context(deck, &config, ctx(&NoAbort)).unwrap();
             assert_eq!(result.evaluations.len(), 2);
             assert!(
                 result
@@ -935,7 +892,7 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            run_soa_analysis_with_config_and_source_path_and_abort(deck, &config, None, &NoAbort)
+            run_soa_analysis_with_context(deck, &config, ctx(&NoAbort))
                 .unwrap_err()
                 .to_string()
                 .contains("M3")
@@ -955,7 +912,7 @@ mod tests {
                 },
                 ..Default::default()
             };
-            run_soa_analysis_with_config_and_source_path_and_abort(deck, &config, None, &NoAbort)
+            run_soa_analysis_with_context(deck, &config, ctx(&NoAbort))
                 .unwrap()
                 .evaluations
                 .into_iter()

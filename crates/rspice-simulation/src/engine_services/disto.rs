@@ -9,8 +9,6 @@ use rspice_core::analysis::DistortionProduct;
 use rspice_core::engine::Engine;
 use std::collections::HashSet;
 use std::fmt;
-#[cfg(test)]
-use std::path::Path;
 
 /// Sweep type for DISTO analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,39 +168,11 @@ fn poll_disto_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), 
     poll_periodically(abort, index).map_err(|_| DistoRunError::Aborted)
 }
 
-/// Run DISTO analysis with cooperative cancellation.
-///
-/// Test-only. The shipping path is
-/// [`run_disto_analysis_with_bias`], reached from
-/// `simulation::runner::spec::periodic`. Execution retains the dedicated
-/// circuit-wide Volterra solver's second- and third-order products. Excitation comes only from authored
-/// `DISTOF1`/`DISTOF2` source annotations.
-#[cfg(test)]
-pub fn run_disto_analysis_with_abort(
-    netlist_text: &str,
-    config: &DistoRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<DistoData> {
-    run_disto_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run DISTO analysis with source-path resolution and cooperative
-/// cancellation through every nonlinear solve.
-#[cfg(test)]
-pub fn run_disto_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &DistoRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<DistoData> {
-    run_disto_analysis_with_context(
-        netlist_text,
-        config,
-        super::ServiceContext::with_defaults(source_path, abort),
-    )
-}
-
 /// Execute distortion analysis under an explicit host resource policy.
+///
+/// Execution retains the dedicated circuit-wide Volterra solver's second- and
+/// third-order products. Excitation comes only from authored
+/// `DISTOF1`/`DISTOF2` source annotations.
 fn run_disto_analysis_with_context(
     netlist_text: &str,
     config: &DistoRunConfig,
@@ -652,6 +622,7 @@ fn exact_complex_ratio(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::test_entry::ctx;
     use super::*;
     use rspice_core::abort_signal::NoAbort;
 
@@ -680,7 +651,7 @@ mod tests {
             polls: AtomicUsize::new(0),
         };
 
-        let result = run_disto_analysis_with_abort("invalid", &config, &abort);
+        let result = run_disto_analysis_with_context("invalid", &config, ctx(&abort));
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -712,14 +683,14 @@ mod tests {
             sweep: DistoFrequencySweep::Linear,
             f2_over_f1: None,
         };
-        let data = run_disto_analysis_with_abort(
+        let data = run_disto_analysis_with_context(
             "linear distortion\n\
              V1 in 0 DISTOF1 1 0\n\
              R1 in out 1k\n\
              R2 out 0 1k\n\
              .end\n",
             &config,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .expect("dedicated Volterra path solves");
 
@@ -754,9 +725,9 @@ mod tests {
             sweep: DistoFrequencySweep::Linear,
             f2_over_f1: Some(0.9),
         };
-        let data = run_disto_analysis_with_abort(
+        let data = run_disto_analysis_with_context(
             "two-tone service\nV1 out 0 DC .5 DISTOF1 1m 30 DISTOF2 2m -20\nD1 out 0 DM\n.model DM D(IS=1e-12 N=1 CJO=0 TT=0)\n.options GMIN=0\n.end\n",
-            &config, &NoAbort,
+            &config, ctx(&NoAbort),
         ).unwrap();
         let trace = data
             .traces
