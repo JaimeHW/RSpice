@@ -300,8 +300,12 @@ use rspice_core::analysis::harmonic_balance::{
 // `netlist::WrealResolution` adds one: the type of the public
 // `SimulationOptions::wreal_resolution` field `.options wreal_resolution`
 // sets, which the builder hands the Verilog-A compiler for every deck source
-// (engine/builder/veriloga_sources.rs). The census is 5,753, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5753;
+// (engine/builder/veriloga_sources.rs). The census was 5,753, with no slack.
+// `io::vcd::VcdDumpOff` adds one: the element type of the public
+// `VcdDocument::dump_off`, which the `d_vcd` digital stimulus reads to refuse
+// replaying a stretch the dump did not record. The census is 5,754, with no
+// slack.
+const MAX_PUBLIC_ITEMS: usize = 5754;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

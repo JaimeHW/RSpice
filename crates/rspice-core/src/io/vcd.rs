@@ -27,9 +27,11 @@
 //! one identifier code), `$enddefinitions`, `#` time stamps, scalar / `b`
 //! vector / `r` real value changes, and the `$dumpvars`, `$dumpon`,
 //! `$dumpoff` and `$dumpall` blocks — whose contents are ordinary value
-//! changes and are read as such. A directive may be written on one line or
-//! spread over several. Unrecognised `$` directives are skipped to their
-//! `$end`.
+//! changes and are read as such. Each stretch from a `$dumpoff` to the next
+//! `$dumpon` is also recorded in [`VcdDocument::dump_off`], because the `x`
+//! a `$dumpoff` block writes means "not recorded" rather than a value. A
+//! directive may be written on one line or spread over several. Unrecognised
+//! `$` directives are skipped to their `$end`.
 //!
 //! Reading is bounded before it allocates, the way [`super::ltspice_raw`] is:
 //! [`ResourceLimits::max_external_data_bytes`] caps the input,
@@ -45,7 +47,8 @@
 //! information this document models, and inventing one back would be a claim
 //! the data does not support. Everything that is modelled — ticks, bits,
 //! reals, widths, aliases and scope paths — comes back from
-//! [`parse_vcd_reader`] exactly as it went in.
+//! [`parse_vcd_reader`] exactly as it went in. `$dumpoff` stretches are the
+//! exception: RSpice's dumps have none, and the writer does not emit them.
 //!
 //! ## Versioning
 //!
@@ -408,6 +411,20 @@ pub struct VcdSignal {
     pub changes: Vec<VcdChange>,
 }
 
+/// A stretch of ticks over which the dump was switched off.
+///
+/// IEEE 1364 writes every variable as `x` in a `$dumpoff` block, but that `x`
+/// means "not recorded", not "unknown": a reader replaying the dump as a
+/// stimulus has to know the stretch exists rather than drive the `x`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VcdDumpOff {
+    /// The tick of the `$dumpoff` block.
+    pub start: u64,
+    /// The tick of the `$dumpon` block that ends the stretch, or `None` when
+    /// the dump stays off to the end of the file.
+    pub end: Option<u64>,
+}
+
 /// A whole VCD file: its header, its variables, and their timelines.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VcdDocument {
@@ -425,6 +442,13 @@ pub struct VcdDocument {
     pub timescale: VcdTimescale,
     /// Signals, in declaration order.
     pub signals: Vec<VcdSignal>,
+    /// The `$dumpoff` stretches the file declared, in tick order.
+    ///
+    /// The values a `$dumpoff` block writes are still read as ordinary value
+    /// changes into [`Self::signals`]; this records that they are not signal
+    /// values. [`write_vcd`] does not emit it: RSpice never produces a dump
+    /// with gaps, so a document it writes reads back with this empty.
+    pub dump_off: Vec<VcdDumpOff>,
 }
 
 impl VcdDocument {
@@ -436,6 +460,7 @@ impl VcdDocument {
             comments: Vec::new(),
             timescale,
             signals: Vec::new(),
+            dump_off: Vec::new(),
         }
     }
 
@@ -725,6 +750,7 @@ fn parse_vcd_text(text: &str, limits: ResourceLimits) -> Result<VcdDocument, Vcd
     };
     let mut definitions = true;
     let mut dumping = false;
+    let mut dump_off: Vec<VcdDumpOff> = Vec::new();
     let mut tick = 0_u64;
 
     while let Some((token, line)) = tokens.advance() {
@@ -773,6 +799,25 @@ fn parse_vcd_text(text: &str, limits: ResourceLimits) -> Result<VcdDocument, Vcd
                             line,
                             format!("${keyword} appears before $enddefinitions"),
                         ));
+                    }
+                    let open = dump_off.last().is_some_and(|stretch| stretch.end.is_none());
+                    match keyword {
+                        "dumpoff" if !open => {
+                            state.charge_structural(limits)?;
+                            dump_off.try_reserve(1).map_err(|error| {
+                                reserve_failure("a VCD $dumpoff stretch", error)
+                            })?;
+                            dump_off.push(VcdDumpOff {
+                                start: tick,
+                                end: None,
+                            });
+                        }
+                        "dumpon" if open => {
+                            if let Some(stretch) = dump_off.last_mut() {
+                                stretch.end = Some(tick);
+                            }
+                        }
+                        _ => {}
                     }
                     dumping = true;
                 }
@@ -837,6 +882,7 @@ fn parse_vcd_text(text: &str, limits: ResourceLimits) -> Result<VcdDocument, Vcd
         comments,
         timescale,
         signals: state.signals,
+        dump_off,
     })
 }
 
@@ -1509,6 +1555,48 @@ mod tests {
         let real = document.signals.get(1).expect("b");
         assert_eq!(ticks(real), vec![0, 20]);
         assert_eq!(values(real), vec![VcdValue::Real(0.5), VcdValue::Real(1.5)]);
+        assert_eq!(
+            document.dump_off,
+            vec![VcdDumpOff {
+                start: 10,
+                end: Some(20)
+            }]
+        );
+    }
+
+    #[test]
+    fn dump_off_stretches_are_recorded_to_their_dump_on() {
+        let document = parse(
+            "$timescale 1 ps $end\n\
+             $var wire 1 ! a $end\n\
+             $enddefinitions $end\n\
+             #0\n$dumpvars\n0!\n$end\n\
+             #10\n$dumpon\n1!\n$end\n\
+             #20\n$dumpoff\nx!\n$end\n\
+             #25\n$dumpoff\nx!\n$end\n\
+             #30\n$dumpon\n1!\n$end\n\
+             #40\n$dumpoff\nx!\n$end\n",
+        )
+        .expect("dump stretches");
+        // A `$dumpon` while the dump is on, and a second `$dumpoff` while it is
+        // off, change nothing; the last stretch runs to the end of the file.
+        assert_eq!(
+            document.dump_off,
+            vec![
+                VcdDumpOff {
+                    start: 20,
+                    end: Some(30)
+                },
+                VcdDumpOff {
+                    start: 40,
+                    end: None
+                },
+            ]
+        );
+        let none =
+            parse("$timescale 1 ps $end\n$var wire 1 ! a $end\n$enddefinitions $end\n#0\n0!\n")
+                .expect("no stretches");
+        assert!(none.dump_off.is_empty());
     }
 
     #[test]

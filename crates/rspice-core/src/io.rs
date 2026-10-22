@@ -57,10 +57,10 @@ pub use raw_export::{
     VariableType, export_dc_sweep, export_transient, write_event_plots,
 };
 pub use vcd::{
-    VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdError, VcdMagnitude, VcdSignal,
-    VcdSignalKind, VcdTimeUnit, VcdTimescale, VcdValue, VcdVariable, parse_vcd_bytes_with_limits,
-    parse_vcd_file, parse_vcd_file_with_limits, parse_vcd_reader, parse_vcd_reader_with_limits,
-    write_vcd,
+    VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdDumpOff, VcdError, VcdMagnitude,
+    VcdSignal, VcdSignalKind, VcdTimeUnit, VcdTimescale, VcdValue, VcdVariable,
+    parse_vcd_bytes_with_limits, parse_vcd_file, parse_vcd_file_with_limits, parse_vcd_reader,
+    parse_vcd_reader_with_limits, write_vcd,
 };
 pub use waveform_stream::{StreamingWaveformWriter, WaveformStreamError};
 pub use xyce_prn::{

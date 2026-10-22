@@ -1858,6 +1858,7 @@ mod bus_tests {
                     value: VcdValue::Logic(vec![VcdBit::Zero, VcdBit::One, VcdBit::HighImpedance]),
                 }],
             }],
+            dump_off: Vec::new(),
         };
         let histories = vcd_event_histories(&document).expect("import");
         let bus = histories.digital_buses.first().expect("one bus");
@@ -1892,6 +1893,7 @@ mod bus_tests {
                 kind: VcdSignalKind::Logic,
                 changes: Vec::new(),
             }],
+            dump_off: Vec::new(),
         };
         assert_eq!(
             vcd_event_histories(&document).expect_err("2 bits are not [7:0]"),
