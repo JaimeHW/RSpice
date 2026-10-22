@@ -47,7 +47,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use rspice_core::analysis::measurements::Waveform;
 use rspice_core::constants::{RELTOL, VNTOL};
 use rspice_core::engine::TransientResult;
 use rspice_core::netlist::Netlist;
@@ -345,7 +344,19 @@ fn windowed_mean(
     // Validate the full grid before indexing either endpoint. The generic
     // threshold interpolator requires a voltage strictly between its samples;
     // a time integral must also allow an endpoint-rounded interpolated voltage.
-    Waveform::new(&result.time, values).map_err(|error| error.to_string())?;
+    if values.len() != result.time.len()
+        || values.is_empty()
+        || result
+            .time
+            .iter()
+            .chain(values)
+            .any(|sample| !sample.is_finite())
+        || result.time.windows(2).any(|pair| pair[1] <= pair[0])
+    {
+        return Err(format!(
+            "node `{node}` is not a finite waveform on a strictly increasing time grid"
+        ));
+    }
     let endpoint = |time: f64| -> Result<f64, String> {
         let upper = result.time.partition_point(|candidate| *candidate < time);
         if upper == result.time.len() {
@@ -378,9 +389,16 @@ fn windowed_mean(
     }
     times.push(end);
     clipped.push(last);
-    Waveform::new(&times, &clipped)
-        .and_then(|waveform| waveform.average())
-        .map_err(|error| error.to_string())
+    let area: f64 = times
+        .windows(2)
+        .zip(clipped.windows(2))
+        .map(|(time, value)| 0.5 * (value[0] + value[1]) * (time[1] - time[0]))
+        .sum();
+    let mean = area / (end - start);
+    if !mean.is_finite() {
+        return Err(format!("node `{node}` has an unrepresentable window mean"));
+    }
+    Ok(mean)
 }
 
 /// Times at which a node crosses `VTHRESHOLD` going up, inside a window.

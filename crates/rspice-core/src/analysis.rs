@@ -42,7 +42,6 @@ pub use measure_file::bind_error_measurement_reference;
 pub mod measure_signals;
 mod measure_units;
 pub use measure_units::{MeasurementUnit, MeasurementUnits, expression_unit, measurement_units};
-pub mod measurements;
 pub mod monte_carlo;
 pub mod noise;
 pub mod pac;
