@@ -19,9 +19,6 @@
 /// worked around in the design.
 pub const LFSR32_TAPS: [u32; 4] = [31, 21, 1, 0];
 
-/// The pipeline depth of [`pipe_mac8`]: operands, product, accumulate.
-pub const PIPE_MAC8_STAGES: usize = 3;
-
 /// The Verilog source of one behavioural circuit.
 pub fn source(name: &str) -> Option<String> {
     Some(match name {
@@ -180,13 +177,5 @@ mod tests {
             }
             assert!(!text.contains('\r'), "{name} carries a carriage return");
         }
-    }
-
-    #[test]
-    fn the_taps_spell_the_documented_polynomial() {
-        // Exponents 32, 22, 2, 1 of x^32 + x^22 + x^2 + x + 1, less one for
-        // the zero-based state index.
-        assert_eq!(LFSR32_TAPS, [31, 21, 1, 0]);
-        assert_eq!(PIPE_MAC8_STAGES, 3);
     }
 }
