@@ -108,79 +108,6 @@ fn stamp_failure(
     }
 }
 
-/// Adapter trait for integrating VerilogADevice with the simulation engine
-pub trait VerilogADeviceExt {
-    /// Stamp the device into the circuit matrix
-    ///
-    /// This adapts the Verilog-A device stamping to the rspice-core matrix format.
-    fn stamp_into_matrix(
-        &mut self,
-        circuit_voltages: &[Value],
-        matrix_add: impl FnMut(usize, usize, Value),
-        rhs_add: impl FnMut(usize, Value),
-    );
-
-    /// Checked stamping variant for solver paths that can return diagnostics.
-    fn try_stamp_into_matrix(
-        &mut self,
-        circuit_voltages: &[Value],
-        matrix_add: impl FnMut(usize, usize, Value),
-        rhs_add: impl FnMut(usize, Value),
-    ) -> Result<(), StampError>;
-
-    /// Checked stamping with an explicit named-limiter evaluation policy.
-    fn try_stamp_into_matrix_with_mode(
-        &mut self,
-        circuit_voltages: &[Value],
-        matrix_add: impl FnMut(usize, usize, Value),
-        rhs_add: impl FnMut(usize, Value),
-        mode: VerilogAEvaluationMode,
-    ) -> Result<(), StampError>;
-
-    /// Get the total number of nodes (terminals + internal)
-    fn total_nodes(&self) -> usize;
-}
-
-impl VerilogADeviceExt for VerilogADevice {
-    fn stamp_into_matrix(
-        &mut self,
-        circuit_voltages: &[Value],
-        matrix_add: impl FnMut(usize, usize, Value),
-        rhs_add: impl FnMut(usize, Value),
-    ) {
-        self.stamp(circuit_voltages, matrix_add, rhs_add);
-    }
-
-    fn try_stamp_into_matrix(
-        &mut self,
-        circuit_voltages: &[Value],
-        matrix_add: impl FnMut(usize, usize, Value),
-        rhs_add: impl FnMut(usize, Value),
-    ) -> Result<(), StampError> {
-        match self.try_stamp(circuit_voltages, matrix_add, rhs_add) {
-            Ok(()) => Ok(()),
-            Err(error) => Err(stamp_failure(self, circuit_voltages, &error)),
-        }
-    }
-
-    fn try_stamp_into_matrix_with_mode(
-        &mut self,
-        circuit_voltages: &[Value],
-        matrix_add: impl FnMut(usize, usize, Value),
-        rhs_add: impl FnMut(usize, Value),
-        mode: VerilogAEvaluationMode,
-    ) -> Result<(), StampError> {
-        match self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode) {
-            Ok(()) => Ok(()),
-            Err(error) => Err(stamp_failure(self, circuit_voltages, &error)),
-        }
-    }
-
-    fn total_nodes(&self) -> usize {
-        self.num_terminals() + self.num_internal_nodes()
-    }
-}
-
 /// Collection of Verilog-A devices in a circuit
 ///
 /// This provides efficient storage and stamping for multiple Verilog-A devices.
@@ -339,12 +266,9 @@ impl VerilogADevices {
         R: FnMut(usize, Value),
     {
         for device in &mut self.devices {
-            device.try_stamp_into_matrix_with_mode(
-                circuit_voltages,
-                &mut matrix_add,
-                &mut rhs_add,
-                mode,
-            )?;
+            device
+                .try_stamp_with_mode(circuit_voltages, &mut matrix_add, &mut rhs_add, mode)
+                .map_err(|error| stamp_failure(device, circuit_voltages, &error))?;
         }
         Ok(())
     }
@@ -359,7 +283,7 @@ impl VerilogADevices {
 
 #[cfg(all(test, feature = "veriloga", not(feature = "veriloga-native")))]
 mod checkpoint_tests {
-    use super::{Compiler, VerilogADevice, VerilogADeviceExt, VerilogADevices};
+    use super::{Compiler, VerilogADevice, VerilogADevices};
 
     /// The classification the Newton loops read has to survive the trip
     /// through `SimulationError::Circuit`, and it must carry the iterate: a
@@ -380,9 +304,10 @@ endmodule
         device.try_set_analysis_type(2).unwrap();
         device.try_set_time(0.0).unwrap();
         device.try_set_timestep(0.0).unwrap();
-        let stamp_error = device
-            .try_stamp_into_matrix(&[-1.0], |_, _, _| {}, |_, _| {})
+        let vm_error = device
+            .try_stamp(&[-1.0], |_, _, _| {}, |_, _| {})
             .expect_err("ln() leaves its domain at V(p,n) = -1 V");
+        let stamp_error = super::stamp_failure(&device, &[-1.0], &vm_error);
         // The classification is a variant now, and it survives the widening to
         // `SimulationError` without anything reading the sentence.
         assert!(matches!(

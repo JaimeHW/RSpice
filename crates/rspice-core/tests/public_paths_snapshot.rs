@@ -2565,7 +2565,6 @@ mod veriloga {
     use rspice_core::device::veriloga::StampLocation as _;
     use rspice_core::device::veriloga::VerilogADevice as _;
     use rspice_core::device::veriloga::VerilogADeviceCheckpoint as _;
-    use rspice_core::device::veriloga::VerilogADeviceExt as _;
     use rspice_core::device::veriloga::VerilogADevices as _;
     use rspice_core::device::veriloga::VerilogAEvaluationMode as _;
     use rspice_core::device::veriloga::VmContext as _;
