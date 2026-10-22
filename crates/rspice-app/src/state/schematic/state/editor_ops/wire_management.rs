@@ -50,27 +50,6 @@ impl SchematicState {
         None
     }
 
-    /// Check if a position is a draggable wire point
-    ///
-    /// Returns true if there's either:
-    /// - A wire vertex at this position
-    /// - A junction marker at this position
-    ///
-    /// This runs on every pointer-move frame, so it must not scan the
-    /// schematic; the canvas cache answers in O(1) when current.
-    pub fn is_draggable_wire_point(&self, pos: Point) -> bool {
-        if let Some(cache) = self.canvas_cache() {
-            return cache.wire_vertices.contains_key(&pos) || cache.junctions.contains(&pos);
-        }
-        self.wire_vertex_at(pos).is_some()
-            || self
-                .design
-                .document()
-                .junctions
-                .iter()
-                .any(|j| j.pos == pos)
-    }
-
     /// Start drawing a wire at position
     pub fn start_wire(&mut self, pos: Point) {
         if self.session.read_only {
@@ -253,7 +232,8 @@ mod tests {
         let retained_wire = schematic
             .add_wire(vec![Point::new(-20, -20), Point::new(-10, -20)])
             .expect("baseline wire");
-        schematic.reset_undo_history();
+        schematic.clear_undo_history();
+        schematic.init_undo_history();
         schematic.session.is_dirty = false;
 
         schematic.start_wire(Point::new(0, 0));
@@ -297,7 +277,8 @@ mod tests {
     fn a_route_drawn_over_a_wire_leaves_one_conductor_and_no_dot() {
         let mut schematic = SchematicState::default();
         schematic.add_wire(vec![Point::new(0, 0), Point::new(40, 0)]);
-        schematic.reset_undo_history();
+        schematic.clear_undo_history();
+        schematic.init_undo_history();
 
         schematic.start_wire(Point::new(20, 0));
         schematic.extend_wire(Point::new(60, 0));

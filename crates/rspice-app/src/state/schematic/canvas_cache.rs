@@ -45,13 +45,13 @@ mod tests {
         // Fallback answers (cache not built yet).
         assert!(state.canvas_cache().is_none());
         assert_eq!(state.wire_vertex_at(Point::new(40, 0)), Some((1, 1)));
-        assert!(state.is_draggable_wire_point(Point::new(40, 40)));
+        assert_eq!(state.wire_vertex_at(Point::new(40, 40)), Some((2, 1)));
 
         // Cached answers are identical.
         state.ensure_canvas_cache();
         assert_eq!(state.wire_vertex_at(Point::new(40, 0)), Some((1, 1)));
-        assert!(state.is_draggable_wire_point(Point::new(40, 40)));
-        assert!(!state.is_draggable_wire_point(Point::new(99, 99)));
+        assert_eq!(state.wire_vertex_at(Point::new(40, 40)), Some((2, 1)));
+        assert_eq!(state.wire_vertex_at(Point::new(99, 99)), None);
         let cache = state.canvas_cache().expect("cache fresh");
         assert_eq!(
             cache.wire_bounds[1],

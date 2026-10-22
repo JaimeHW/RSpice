@@ -53,29 +53,13 @@ impl SchematicState {
     }
 
     /// Move selected components, labels, buses, taps, and wires while
-    /// rubber-banding connected wires.
+    /// rubber-banding connected wires, using caller-supplied terminal geometry.
     ///
-    /// This is the multi-component version of move_component_with_wires_resolved.
-    /// Wires connected to selected components are stretched to maintain
-    /// the connection, square unless `rubber_band` asks for angles. Wires
-    /// that connect two selected components are moved entirely (not
-    /// stretched). Runs on every drag frame, laying the wires from where the
-    /// pending gesture began.
-    pub fn move_selection_with_rubber_band(
-        &mut self,
-        delta: Point,
-        rubber_band: DragRubberBand,
-        scope: &ActiveSheetTopology,
-    ) {
-        self.move_selection_with_rubber_band_resolved(
-            delta,
-            rubber_band,
-            legacy_terminal_points,
-            scope,
-        );
-    }
-
-    /// Move selected components and rubber-band wires using caller-supplied terminal geometry.
+    /// Wires connected to selected components are stretched to maintain the
+    /// connection, square unless `rubber_band` asks for angles. Wires that
+    /// connect two selected components are moved entirely (not stretched).
+    /// Runs on every drag frame, laying the wires from where the pending
+    /// gesture began.
     pub fn move_selection_with_rubber_band_resolved(
         &mut self,
         delta: Point,
@@ -95,22 +79,13 @@ impl SchematicState {
         self.apply_movement_impact(impact);
     }
 
-    /// Move the current selection under an explicit connectivity policy.
+    /// Move the current selection under an explicit connectivity policy,
+    /// using caller-resolved terminal geometry.
     ///
     /// `Ok(false)` is a clean no-op (read-only document, zero delta, or no
     /// live movable selection). Guarded modes build and validate a candidate
     /// geometry first, so every `Err` leaves the document bit-for-bit
     /// unchanged.
-    pub fn move_selection_with_mode(
-        &mut self,
-        delta: Point,
-        mode: MoveSelectionMode,
-        scope: &ActiveSheetTopology,
-    ) -> Result<bool, MoveSelectionError> {
-        self.move_selection_with_mode_resolved(delta, mode, legacy_terminal_points, scope)
-    }
-
-    /// Mode-aware selection movement using caller-resolved terminal geometry.
     pub fn move_selection_with_mode_resolved(
         &mut self,
         delta: Point,
@@ -129,15 +104,6 @@ impl SchematicState {
         )?;
         self.apply_movement_impact(impact);
         Ok(impact.changed)
-    }
-
-    /// Move all points of a wire by a delta
-    pub fn move_wire(&mut self, wire_id: u64, delta: Point) {
-        if self.session.read_only {
-            return;
-        }
-        let impact = self.design.move_wire(wire_id, delta);
-        self.apply_movement_impact(impact);
     }
 
     /// Move all selected complete objects supported by selection dragging.
@@ -160,15 +126,6 @@ impl SchematicState {
             delta,
             terminal_points_for,
         );
-        self.apply_movement_impact(impact);
-    }
-
-    /// Move all wire points at a junction to a new position
-    pub fn move_junction(&mut self, old_pos: Point, new_pos: Point, _scope: &ActiveSheetTopology) {
-        if self.session.read_only {
-            return;
-        }
-        let impact = self.design.move_junction(old_pos, new_pos);
         self.apply_movement_impact(impact);
     }
 }

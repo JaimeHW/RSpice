@@ -352,7 +352,7 @@ fn naming_collision_partial_stale_read_only_and_overflow_fail_closed() {
     );
 
     state.session.editor.selection.select_wire_segment(123, 0);
-    assert!(!state.has_live_array_selection());
+    assert!(!state.array_source().has_live_array_selection());
     state.session.editor.selection.wire_segments.clear();
     state.session.editor.selection.select_component(999_999);
     let stale_plan = plan(

@@ -102,21 +102,11 @@ impl SchematicState {
         (wires_modified, wires_removed)
     }
 
-    /// Clean up wire topology after editing operations
-    ///
-    /// This comprehensive cleanup method should be called after bulk editing:
-    /// 1. Removes degenerate (zero-length) segments
-    /// 2. Optimizes wire paths (removes collinear points)
-    /// 3. Updates junction markers
-    ///
-    /// This matches commercial EDA tool behavior for maintaining clean topology.
-    pub fn cleanup_wire_topology(&mut self, scope: &ActiveSheetTopology) {
-        self.cleanup_wire_topology_with_junction_policy(true, scope);
-    }
-
-    /// Clean topology while respecting the resolved document/user junction
-    /// policy. Manual-junction projects still receive safe geometric cleanup,
-    /// but existing explicit junction ownership is never synthesized away.
+    /// Clean up wire topology after bulk editing: remove degenerate segments,
+    /// drop collinear points, join collinear wires, then maintain junctions
+    /// under the resolved document/user junction policy. Manual-junction
+    /// projects still receive safe geometric cleanup, but existing explicit
+    /// junction ownership is never synthesized away.
     pub fn cleanup_wire_topology_with_junction_policy(
         &mut self,
         automatic_junctions: bool,

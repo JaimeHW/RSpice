@@ -324,7 +324,7 @@ mod tests {
             assert_eq!(state.session.editor.pan, (123.0, 0.0));
             assert_eq!(state.content_version(), content_version);
             assert_ne!(state.topology_version(), dragged_topology);
-            assert_eq!(state.redo_description(), Some("add capacitor"));
+            assert_eq!(state.history().redo_description(), Some("add capacitor"));
             assert!(!state.can_undo());
             let cancelled_topology = state.topology_version();
             assert!(!state.cancel_operation());

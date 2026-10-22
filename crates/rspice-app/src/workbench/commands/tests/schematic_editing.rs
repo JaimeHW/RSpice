@@ -1649,7 +1649,8 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
         .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
-    app.state.model.schematic.reset_undo_history();
+    app.state.model.schematic.clear_undo_history();
+    app.state.model.schematic.init_undo_history();
     app.state
         .model
         .schematic
@@ -1714,7 +1715,7 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
     assert_eq!(app.state.model.schematic.document().components.len(), 1);
     assert!(app.state.model.schematic.cancel_operation());
     assert_eq!(
-        app.state.model.schematic.redo_description(),
+        app.state.model.schematic.history().redo_description(),
         Some("place R2")
     );
     Command::Redo.execute(&mut app);

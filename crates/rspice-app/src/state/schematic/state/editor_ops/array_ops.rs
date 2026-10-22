@@ -73,9 +73,6 @@ impl SchematicState {
         }
     }
 
-    pub fn has_live_array_selection(&self) -> bool {
-        self.array_source().has_live_array_selection()
-    }
     pub fn validate_array_source_selection(&self) -> Result<(), SchematicArrayError> {
         self.array_source().validate_array_source_selection()
     }
@@ -85,6 +82,7 @@ impl SchematicState {
     ) -> Result<SchematicArrayNaming, SchematicArrayError> {
         self.array_source().default_array_naming(count)
     }
+    #[cfg(test)]
     pub fn preview_array_selection(
         &self,
         plan: &SchematicArrayPlan,

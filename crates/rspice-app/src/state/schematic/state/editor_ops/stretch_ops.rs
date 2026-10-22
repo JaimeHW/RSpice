@@ -9,11 +9,6 @@ use rspice_design::schematic::stretch;
 use rspice_schematic_editor::session::stretch as editor_stretch;
 
 impl SchematicState {
-    /// Whether the current selection contains at least one live stretch handle.
-    pub fn has_live_stretch_selection(&self) -> bool {
-        editor_stretch::has_live_selection(self.design.document(), &self.session.editor.selection)
-    }
-
     /// Resolve an unambiguous default handle from the current frozen selection.
     /// Pointer-driven callers may instead construct an exact target and validate
     /// it with [`Self::is_stretch_target_eligible`].
@@ -27,59 +22,6 @@ impl SchematicState {
             self.design.document(),
             &self.session.editor.selection,
             target,
-        )
-    }
-
-    /// Stretch one exact selected segment or typed shape control point.
-    ///
-    /// Every electrical edit is built and validated on a candidate first. An
-    /// error therefore leaves geometry, taps, connections, dirty state, and the
-    /// topology epoch unchanged.
-    pub fn stretch_target(
-        &mut self,
-        delta: Point,
-        target: StretchTarget,
-        policy: StretchOrthogonalPolicy,
-        scope: &ActiveSheetTopology,
-    ) -> Result<bool, StretchSelectionError> {
-        self.stretch_target_resolved(
-            delta,
-            target,
-            policy,
-            |component| {
-                component
-                    .terminal_positions()
-                    .into_iter()
-                    .map(|(_, point)| point)
-                    .collect()
-            },
-            Component::bounding_box,
-            scope,
-        )
-    }
-
-    /// Build the exact validated preview candidate using durable core terminal
-    /// geometry. `Ok(None)` is the same clean no-op contract as commit.
-    pub fn preview_stretch_target(
-        &self,
-        delta: Point,
-        target: StretchTarget,
-        policy: StretchOrthogonalPolicy,
-        hidden: impl Fn(u64) -> bool,
-    ) -> Result<Option<SchematicDocument>, StretchSelectionError> {
-        self.preview_stretch_target_resolved(
-            delta,
-            target,
-            policy,
-            |component| {
-                component
-                    .terminal_positions()
-                    .into_iter()
-                    .map(|(_, point)| point)
-                    .collect()
-            },
-            Component::bounding_box,
-            hidden,
         )
     }
 
@@ -104,7 +46,12 @@ impl SchematicState {
         ))
     }
 
-    /// Stretch using caller-resolved component geometry.
+    /// Stretch one exact selected segment or typed shape control point, using
+    /// caller-resolved component geometry.
+    ///
+    /// Every electrical edit is built and validated on a candidate first. An
+    /// error therefore leaves geometry, taps, connections, dirty state, and the
+    /// topology epoch unchanged.
     pub fn stretch_target_resolved(
         &mut self,
         delta: Point,
@@ -131,6 +78,7 @@ impl SchematicState {
     }
 
     /// Build the validated document preview without cloning editor state.
+    /// `Ok(None)` is the same clean no-op contract as commit.
     ///
     /// `hidden` names the conductors of the cell view's other sheets. The
     /// commit runs with them out of reach, so the preview leaves them out too:
@@ -184,18 +132,24 @@ mod tests {
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
         DocumentationShape, Junction, NetLabel, SchematicSnapshot, Wire, WireConnection,
     };
+    use rspice_design::schematic::component_edit::legacy_terminal_points;
 
     impl SchematicState {
-        /// Stretch in a document with one sheet, which hides nothing.
+        /// Stretch in a document with one sheet, which hides nothing, with
+        /// the components' own terminal geometry.
         fn stretch_on_one_sheet(
             &mut self,
             delta: Point,
             target: StretchTarget,
             policy: StretchOrthogonalPolicy,
         ) -> Result<bool, StretchSelectionError> {
-            self.with_single_sheet_topology(|state, scope| {
-                state.stretch_target(delta, target, policy, scope)
-            })
+            self.stretch_resolved_on_one_sheet(
+                delta,
+                target,
+                policy,
+                legacy_terminal_points,
+                Component::bounding_box,
+            )
         }
 
         fn stretch_resolved_on_one_sheet(
@@ -268,7 +222,10 @@ mod tests {
         );
 
         let state = selected_u_wire();
-        assert!(state.has_live_stretch_selection());
+        assert!(editor_stretch::has_live_selection(
+            state.design.document(),
+            &state.session.editor.selection
+        ));
         assert_eq!(state.default_stretch_target(), Some(wire_target(1, 1)));
         assert!(state.is_stretch_target_eligible(wire_target(1, 1)));
     }
@@ -462,10 +419,12 @@ mod tests {
         let mut state = selected_u_wire();
         let before = SchematicSnapshot::capture(state.design.document());
         let preview = state
-            .preview_stretch_target(
+            .preview_stretch_target_resolved(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
+                legacy_terminal_points,
+                Component::bounding_box,
                 |_| false,
             )
             .unwrap()

@@ -127,16 +127,19 @@ impl AnalysisResult {
         self
     }
     /// Add DC operating point data
+    #[cfg(test)]
     pub fn with_dc_op(mut self, dc_op: DcOpResult) -> Self {
         self.data = self.data.with_dc_op(dc_op);
         self
     }
     /// Attach the per-device operating-point report.
+    #[cfg(test)]
     pub fn with_device_op(mut self, report: rspice_core::circuit::DeviceOpReport) -> Self {
         self.data = self.data.with_device_op(report);
         self
     }
     /// Attach the ranked noise-contributor summary.
+    #[cfg(test)]
     pub fn with_noise_summary(mut self, summary: NoiseSummary) -> Self {
         self.data = self.data.with_noise_summary(summary);
         self
@@ -154,6 +157,7 @@ impl AnalysisResult {
         self
     }
     /// Attach evaluated `.MEAS` results.
+    #[cfg(test)]
     pub fn with_measurements(mut self, measurements: Vec<rspice_core::MeasureResult>) -> Self {
         self.data = self.data.with_measurements(measurements);
         self

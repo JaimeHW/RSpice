@@ -17,9 +17,11 @@ use std::collections::HashMap;
 /// The moves under test, in documents with one sheet, which hide nothing.
 impl SchematicState {
     fn rubber_band_on_one_sheet(&mut self, delta: Point) {
-        self.with_single_sheet_topology(|state, scope| {
-            state.move_selection_with_rubber_band(delta, DragRubberBand::default(), scope);
-        });
+        self.rubber_band_resolved_on_one_sheet(
+            delta,
+            DragRubberBand::default(),
+            legacy_terminal_points,
+        );
     }
 
     fn rubber_band_resolved_on_one_sheet(
@@ -43,9 +45,7 @@ impl SchematicState {
         delta: Point,
         mode: MoveSelectionMode,
     ) -> Result<bool, MoveSelectionError> {
-        self.with_single_sheet_topology(|state, scope| {
-            state.move_selection_with_mode(delta, mode, scope)
-        })
+        self.move_with_mode_resolved_on_one_sheet(delta, mode, legacy_terminal_points)
     }
 
     fn move_with_mode_resolved_on_one_sheet(
@@ -72,12 +72,6 @@ impl SchematicState {
                 terminal_points_for,
                 scope,
             );
-        });
-    }
-
-    fn move_junction_on_one_sheet(&mut self, old_pos: Point, new_pos: Point) {
-        self.with_single_sheet_topology(|state, scope| {
-            state.move_junction(old_pos, new_pos, scope);
         });
     }
 }
@@ -306,7 +300,9 @@ fn component_rubber_band_and_junction_moves_keep_scalar_tap_attached() {
         .document_mut_for_test()
         .junctions
         .push(Junction::new(5, Point::new(0, 10)));
-    junction.move_junction_on_one_sheet(Point::new(0, 10), Point::new(-2, 12));
+    junction
+        .design
+        .move_junction(Point::new(0, 10), Point::new(-2, 12));
     assert_eq!(
         junction.design.document().bus_taps[0].connection_point,
         Point::new(-2, 12)
@@ -316,13 +312,11 @@ fn component_rubber_band_and_junction_moves_keep_scalar_tap_attached() {
 #[test]
 fn move_wire_rejects_missing_and_zero_delta_without_document_side_effects() {
     let mut schematic = bus_tap_and_scalar_target();
-    schematic.session.is_dirty = false;
     let topology_before = schematic.topology_version();
 
-    schematic.move_wire(999, Point::new(10, 10));
-    schematic.move_wire(3, Point::origin());
+    assert!(!schematic.design.move_wire(999, Point::new(10, 10)).changed);
+    assert!(!schematic.design.move_wire(3, Point::origin()).changed);
 
-    assert!(!schematic.session.is_dirty);
     assert_eq!(schematic.topology_version(), topology_before);
 }
 

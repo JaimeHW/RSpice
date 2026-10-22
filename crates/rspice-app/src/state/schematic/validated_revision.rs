@@ -28,6 +28,7 @@ impl SchematicState {
         )
     }
 
+    #[cfg(test)]
     pub fn append_validated_revision(
         &mut self,
         request: ValidatedRevisionRequest,

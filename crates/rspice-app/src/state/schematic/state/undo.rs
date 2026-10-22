@@ -225,28 +225,16 @@ impl SchematicState {
     }
 
     /// Get description of the next undo operation
+    #[cfg(test)]
     pub fn undo_description(&self) -> Option<&str> {
         self.history().undo_description()
     }
 
-    /// Get description of the next redo operation
-    pub fn redo_description(&self) -> Option<&str> {
-        self.history().redo_description()
-    }
-
     /// Clear undo history
+    #[cfg(test)]
     pub fn clear_undo_history(&mut self) {
         self.design.clear_history();
         self.session.operation_cancel = None;
-    }
-
-    /// Reset undo history with current state as baseline
-    ///
-    /// Clears all undo/redo. Use after loading a file.
-    pub fn reset_undo_history(&mut self) {
-        self.design.clear_history();
-        self.session.operation_cancel = None;
-        self.init_undo_history();
     }
 
     /// Check if an operation is currently pending

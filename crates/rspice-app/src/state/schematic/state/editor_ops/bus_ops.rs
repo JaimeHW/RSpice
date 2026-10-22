@@ -68,6 +68,7 @@ impl SchematicState {
     }
 
     /// Place a validated tap as one atomic, undoable topology mutation.
+    #[cfg(test)]
     pub fn place_bus_tap(
         &mut self,
         bus_id: u64,
