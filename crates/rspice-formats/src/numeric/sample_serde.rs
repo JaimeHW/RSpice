@@ -3,7 +3,7 @@
 
 use serde::de::{Error as _, SeqAccess, Visitor};
 use serde::ser::{Error as _, SerializeSeq};
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserializer, Serializer};
 use std::sync::Arc;
 
 pub fn serialize<S: Serializer>(values: &[f64], serializer: S) -> Result<S::Ok, S::Error> {
@@ -47,18 +47,6 @@ pub fn deserialize_shared<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Arc<Vec<f64>>, D::Error> {
     deserialize(deserializer).map(Arc::new)
-}
-
-pub fn deserialize_optional<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Vec<f64>>, D::Error> {
-    struct Samples(Vec<f64>);
-    impl<'de> Deserialize<'de> for Samples {
-        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            deserialize(deserializer).map(Self)
-        }
-    }
-    Option::<Samples>::deserialize(deserializer).map(|values| values.map(|samples| samples.0))
 }
 
 #[cfg(test)]

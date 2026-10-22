@@ -323,67 +323,6 @@ const MODEL_BINDING: ProductObjectContract = ProductObjectContract {
     ],
 };
 
-/// Commercial availability and integration boundary. Only `Production` can
-/// contribute native RSpice sign-off evidence; qualified external evidence
-/// keeps its producer identity and is never relabeled as native.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[cfg(test)]
-pub enum Availability {
-    Production,
-    Preview,
-    Compatibility,
-    ExternalFirst,
-    Connector,
-    Roadmap,
-}
-
-#[cfg(test)]
-impl Availability {
-    #[must_use]
-    #[cfg(test)]
-    pub const fn can_contribute_native_signoff(self) -> bool {
-        matches!(self, Self::Production)
-    }
-}
-
-/// Evidence-backed readiness vocabulary. Ordering is intentional: a later
-/// stage may be claimed only when every earlier stage is proven for the exact
-/// capability and candidate.
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[cfg(test)]
-pub enum ReadinessStage {
-    Registered,
-    Specified,
-    Interactive,
-    Tested,
-    EngineBacked,
-    PlatformQualified,
-    SignOffEligible,
-}
-
-#[cfg(test)]
-impl ReadinessStage {
-    #[cfg(test)]
-    pub const ALL: [Self; 7] = [
-        Self::Registered,
-        Self::Specified,
-        Self::Interactive,
-        Self::Tested,
-        Self::EngineBacked,
-        Self::PlatformQualified,
-        Self::SignOffEligible,
-    ];
-
-    #[must_use]
-    #[cfg(test)]
-    pub const fn requires(self, prerequisite: Self) -> bool {
-        self as u8 >= prerequisite as u8
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -416,26 +355,5 @@ mod tests {
             }
         }
         assert_eq!(ProductObjectKind::Project.contract().parent, None);
-    }
-
-    #[test]
-    fn only_production_capabilities_are_native_signoff_eligible() {
-        assert!(Availability::Production.can_contribute_native_signoff());
-        for availability in [
-            Availability::Preview,
-            Availability::Compatibility,
-            Availability::ExternalFirst,
-            Availability::Connector,
-            Availability::Roadmap,
-        ] {
-            assert!(!availability.can_contribute_native_signoff());
-        }
-    }
-
-    #[test]
-    fn readiness_stages_preserve_the_seven_gate_order() {
-        assert_eq!(ReadinessStage::ALL.len(), 7);
-        assert!(ReadinessStage::SignOffEligible.requires(ReadinessStage::PlatformQualified));
-        assert!(!ReadinessStage::Tested.requires(ReadinessStage::EngineBacked));
     }
 }

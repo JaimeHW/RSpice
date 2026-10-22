@@ -624,13 +624,6 @@ impl ModelLibrary {
                 .any(|section| section.eq_ignore_ascii_case(keyword))
     }
 
-    /// Get the execution-active corner.
-    pub fn current_corner(&self) -> Option<&ProcessCorner> {
-        self.selected_corner
-            .as_ref()
-            .and_then(|name| self.corners.get(name))
-    }
-
     /// Get model count
     pub fn model_count(&self) -> usize {
         self.models.len()

@@ -104,31 +104,8 @@ impl DeviceModel {
         self
     }
 
-    /// Set operating voltage
-    pub fn with_vdd(mut self, vdd: f64) -> Self {
-        self.vdd = Some(vdd);
-        self
-    }
-
     /// Add a parameter
     pub fn add_parameter(&mut self, name: &str, value: f64) {
         self.parameters.insert(name.to_string(), value);
-    }
-
-    /// Check if geometry is within model limits
-    pub fn check_geometry(&self, l: f64, w: f64) -> bool {
-        let l_ok = match (self.l_min, self.l_max) {
-            (Some(min), Some(max)) => l >= min && l <= max,
-            (Some(min), None) => l >= min,
-            (None, Some(max)) => l <= max,
-            (None, None) => true,
-        };
-        let w_ok = match (self.w_min, self.w_max) {
-            (Some(min), Some(max)) => w >= min && w <= max,
-            (Some(min), None) => w >= min,
-            (None, Some(max)) => w <= max,
-            (None, None) => true,
-        };
-        l_ok && w_ok
     }
 }

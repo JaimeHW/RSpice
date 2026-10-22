@@ -180,32 +180,6 @@ impl InstancePath {
         })
     }
 
-    /// This path with the `from` prefix replaced by `to` — the operation a
-    /// re-parented or renamed instance forces on every path beneath it.
-    ///
-    /// `None` when `from` does not enclose this path, or when the result would
-    /// exceed the depth or byte limit.
-    pub fn remap_prefix(&self, from: &Self, to: &Self) -> Option<Self> {
-        let tail = self.strip_prefix(from)?;
-        to.join(&tail).ok()
-    }
-
-    /// This path with one segment renamed, which is what an instance rename
-    /// does to the paths that pass through it.
-    pub fn rename_segment(&self, index: usize, name: &str) -> Result<Self, HierarchyPathError> {
-        if index >= self.segments.len() {
-            return Err(HierarchyPathError::NoSuchSegment {
-                path: self.to_string(),
-                index,
-                depth: self.segments.len(),
-            });
-        }
-        let mut segments = self.segments.clone();
-        segments[index] = name.to_owned();
-        validate_segment(&render(&segments), name)?;
-        Self::sealed(segments)
-    }
-
     /// The case-folded rendering, and the only key a map or dedupe may use.
     pub fn fold_key(&self) -> String {
         if self.segments.is_empty() {
@@ -717,12 +691,6 @@ pub enum HierarchyPathError {
         actual: usize,
         maximum: usize,
     },
-    #[error("segment {index} does not exist in {path:?}, which is {depth} deep")]
-    NoSuchSegment {
-        path: String,
-        index: usize,
-        depth: usize,
-    },
     #[error("the design root has no engine node name")]
     RootHasNoEngineName,
     #[error("the engine cannot name {0:?}; engine node names are ASCII")]
@@ -1110,24 +1078,6 @@ mod tests {
             "/X1/X2/X3"
         );
         assert_eq!(x1.join(&root).expect("join root"), x1);
-        assert_eq!(
-            x1x2.rename_segment(0, "XA")
-                .expect("rename outer")
-                .to_string(),
-            "/XA/X2"
-        );
-        assert!(matches!(
-            x1x2.rename_segment(2, "XA"),
-            Err(HierarchyPathError::NoSuchSegment {
-                index: 2,
-                depth: 2,
-                ..
-            })
-        ));
-        assert!(matches!(
-            x1x2.rename_segment(0, "X A"),
-            Err(HierarchyPathError::InvalidSegment { .. })
-        ));
         assert!(matches!(
             x1.child("X 2"),
             Err(HierarchyPathError::InvalidSegment { .. })
@@ -1136,17 +1086,6 @@ mod tests {
             x1.child("*"),
             Err(HierarchyPathError::WildcardInPath(_))
         ));
-
-        let renamed = InstancePath::parse("/Y1/Y2").expect("new prefix");
-        assert_eq!(
-            x1x2.remap_prefix(&x1, &renamed).expect("remap").to_string(),
-            "/Y1/Y2/X2"
-        );
-        assert_eq!(x1x2.remap_prefix(&x1x2, &root), Some(root.clone()));
-        assert_eq!(
-            x1x2.remap_prefix(&InstancePath::parse("/X9").expect("other"), &renamed),
-            None
-        );
     }
 
     #[test]
@@ -1161,23 +1100,11 @@ mod tests {
             deepest.join(&deepest),
             Err(HierarchyPathError::TooDeep { .. })
         ));
-        assert_eq!(
-            deepest.remap_prefix(
-                &InstancePath::parse("/X").expect("prefix"),
-                &InstancePath::parse("/X/Y").expect("longer prefix")
-            ),
-            None,
-            "a remap that would exceed the depth limit does not produce a path"
-        );
 
         let widest = InstancePath::parse(&format!("/{}", "X".repeat(MAX_INSTANCE_PATH_BYTES - 1)))
             .expect("at the byte limit");
         assert!(matches!(
             widest.child("Y"),
-            Err(HierarchyPathError::TooLong { .. })
-        ));
-        assert!(matches!(
-            widest.rename_segment(0, &"X".repeat(MAX_INSTANCE_PATH_BYTES)),
             Err(HierarchyPathError::TooLong { .. })
         ));
     }
