@@ -22,7 +22,7 @@
 //! materially different parameter fits, so a lookup returns every match and
 //! leaves the choice to the caller rather than silently picking one.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -37,8 +37,6 @@ const CATALOG_INDEX: &str = "CATALOG.tsv";
 const SHIPPED_PACKS_INDEX: &str = "SHIPPED-PACKS.tsv";
 #[cfg(not(target_arch = "wasm32"))]
 const SHIPPED_CATALOG_INDEX: &str = "SHIPPED-CATALOG.tsv";
-const MAX_DEFINITION_PREVIEW_FILE_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_DEFINITION_PREVIEW_LINES: usize = 240;
 
 /// How a pack's licence bears on redistribution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -185,24 +183,6 @@ impl CatalogEntry {
     }
 }
 
-/// Bounded, line-attributed source preview for one indexed definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CatalogDefinitionPreview {
-    pub source_path: PathBuf,
-    pub start_line: usize,
-    pub source: String,
-    pub truncated: bool,
-}
-
-/// Exact ordered terminal contract for one addressable `.subckt`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CatalogSubcircuitInterface {
-    pub name: String,
-    pub ports: Vec<String>,
-    pub source_path: PathBuf,
-    pub start_line: usize,
-}
-
 /// The shipped model tree: its packs and its part catalog.
 #[derive(Debug, Clone)]
 pub struct SpiceLibraryIndex {
@@ -215,7 +195,6 @@ pub struct SpiceLibraryIndex {
 #[derive(Debug)]
 struct AddressableCatalog {
     entries: Vec<IndexedCatalogEntry>,
-    device_counts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug)]
@@ -362,15 +341,6 @@ impl SpiceLibraryIndex {
         self.packs.iter().filter(|pack| pack.redistributable)
     }
 
-    /// Total `.model` and `.subckt` definitions across indexed packs, including
-    /// those private to a subcircuit body.
-    pub fn definition_count(&self) -> usize {
-        self.packs
-            .iter()
-            .map(|pack| pack.models + pack.subcircuits)
-            .sum()
-    }
-
     /// Definitions a netlist can actually reference by name.
     ///
     /// Large development catalogs contain many helper cards inside macromodel
@@ -391,36 +361,13 @@ impl SpiceLibraryIndex {
     ///
     /// A part number routinely appears in several packs with different
     /// parameter fits, so this returns all of them rather than choosing.
-    /// Subcircuit-private cards are excluded; use
-    /// [`Self::find_definition_any_scope`] when tracing one to its source.
+    /// Subcircuit-private cards are excluded.
     pub fn find_part(&self, name: &str) -> io::Result<Vec<CatalogEntry>> {
         Ok(self
             .addressable_catalog()?
             .entries
             .iter()
             .filter(|entry| entry.entry.name.eq_ignore_ascii_case(name))
-            .map(|entry| entry.entry.clone())
-            .collect())
-    }
-
-    /// Every definition matching `name` at any nesting depth.
-    ///
-    /// For diagnostics: when a deck fails on a card declared inside a
-    /// macromodel, the name is not addressable but still needs locating.
-    pub fn find_definition_any_scope(&self, name: &str) -> io::Result<Vec<CatalogEntry>> {
-        self.filter_catalog(|entry| entry.name.eq_ignore_ascii_case(name))
-    }
-
-    /// Addressable definitions of `name` whose defining file may be shipped.
-    ///
-    /// Narrower than [`Self::find_part`]: a pack can be usable while individual
-    /// files inside it are not.
-    pub fn find_shippable_part(&self, name: &str) -> io::Result<Vec<CatalogEntry>> {
-        Ok(self
-            .addressable_catalog()?
-            .entries
-            .iter()
-            .filter(|entry| !entry.entry.restricted && entry.entry.name.eq_ignore_ascii_case(name))
             .map(|entry| entry.entry.clone())
             .collect())
     }
@@ -434,26 +381,6 @@ impl SpiceLibraryIndex {
             .entries
             .iter()
             .filter(|entry| entry.entry.name.to_ascii_lowercase().contains(&needle))
-            .take(limit)
-            .map(|entry| entry.entry.clone())
-            .collect())
-    }
-
-    /// Every addressable top-level `.model` whose name contains `needle`.
-    ///
-    /// This is the contract for a model-card browser. Subcircuits are omitted
-    /// because activating them requires a symbol/interface workflow rather
-    /// than a model-card selection.
-    pub fn search_model_cards(&self, needle: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
-        let needle = needle.to_ascii_lowercase();
-        Ok(self
-            .addressable_catalog()?
-            .entries
-            .iter()
-            .filter(|entry| {
-                entry.entry.kind.eq_ignore_ascii_case("model")
-                    && entry.entry.name.to_ascii_lowercase().contains(&needle)
-            })
             .take(limit)
             .map(|entry| entry.entry.clone())
             .collect())
@@ -524,236 +451,6 @@ impl SpiceLibraryIndex {
         Ok((total, page))
     }
 
-    /// Exact addressable part counts by canonical device class.
-    pub fn part_device_counts(&self) -> io::Result<BTreeMap<String, usize>> {
-        Ok(self.addressable_catalog()?.device_counts.clone())
-    }
-
-    /// Read a bounded, line-attributed preview from the indexed source file.
-    ///
-    /// Paths are accepted only when both the pack path and catalog member are
-    /// safe relative paths. The indexed line must still declare the requested
-    /// name and kind; a stale or tampered index fails rather than showing a
-    /// nearby plausible card.
-    pub fn definition_preview(&self, entry: &CatalogEntry) -> io::Result<CatalogDefinitionPreview> {
-        let source_path = self.catalog_source_path(entry).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "catalog entry has an unsafe or unknown source path",
-            )
-        })?;
-        let metadata = fs::metadata(&source_path)?;
-        if metadata.len() > MAX_DEFINITION_PREVIEW_FILE_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "definition source exceeds the {}-byte preview limit",
-                    MAX_DEFINITION_PREVIEW_FILE_BYTES
-                ),
-            ));
-        }
-        let source = fs::read_to_string(&source_path)?;
-        let lines = source.lines().collect::<Vec<_>>();
-        let start = entry.line.checked_sub(1).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "catalog definition line must be one-based",
-            )
-        })?;
-        let indexed = lines.get(start).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "catalog definition line lies beyond the source file",
-            )
-        })?;
-        if !definition_line_matches(indexed, entry) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "catalog entry {}:{} no longer declares {} '{}'",
-                    source_path.display(),
-                    entry.line,
-                    entry.kind,
-                    entry.name
-                ),
-            ));
-        }
-
-        let mut selected = Vec::new();
-        let mut truncated = false;
-        if entry.kind.eq_ignore_ascii_case("subckt") {
-            for line in lines.iter().skip(start) {
-                if selected.len() >= MAX_DEFINITION_PREVIEW_LINES {
-                    truncated = true;
-                    break;
-                }
-                selected.push(*line);
-                if selected.len() > 1
-                    && line
-                        .split_ascii_whitespace()
-                        .next()
-                        .is_some_and(|token| token.eq_ignore_ascii_case(".ends"))
-                {
-                    break;
-                }
-            }
-        } else {
-            selected.push(indexed);
-            for line in lines.iter().skip(start + 1) {
-                let trimmed = line.trim_start();
-                if !trimmed.starts_with('+') && !trimmed.starts_with('*') {
-                    break;
-                }
-                if selected.len() >= MAX_DEFINITION_PREVIEW_LINES {
-                    truncated = true;
-                    break;
-                }
-                selected.push(*line);
-            }
-        }
-        let source = selected
-            .iter()
-            .enumerate()
-            .map(|(offset, line)| format!("{:>7}  {line}", entry.line + offset))
-            .collect::<Vec<_>>()
-            .join("\n");
-        Ok(CatalogDefinitionPreview {
-            source_path,
-            start_line: entry.line,
-            source,
-            truncated,
-        })
-    }
-
-    /// Revalidate and extract the exact ordered terminal list from an indexed
-    /// top-level `.subckt` declaration.
-    pub fn subcircuit_interface(
-        &self,
-        entry: &CatalogEntry,
-    ) -> io::Result<CatalogSubcircuitInterface> {
-        if !entry.kind.eq_ignore_ascii_case("subckt") || !entry.scope.is_addressable() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "catalog entry is not an addressable subcircuit",
-            ));
-        }
-        let source_path = self.catalog_source_path(entry).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "catalog entry has an unsafe or unknown source path",
-            )
-        })?;
-        let metadata = fs::metadata(&source_path)?;
-        if metadata.len() > MAX_DEFINITION_PREVIEW_FILE_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "subcircuit source exceeds the bounded interface-inspection limit",
-            ));
-        }
-        let source = fs::read_to_string(&source_path)?;
-        let lines = source.lines().collect::<Vec<_>>();
-        let start = entry.line.checked_sub(1).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "catalog definition line must be one-based",
-            )
-        })?;
-        let indexed = lines.get(start).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "catalog definition line lies beyond the source file",
-            )
-        })?;
-        if !definition_line_matches(indexed, entry) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "indexed subcircuit declaration changed",
-            ));
-        }
-
-        let mut declaration = indexed.trim().to_owned();
-        for line in lines.iter().skip(start + 1) {
-            let Some(continuation) = line.trim_start().strip_prefix('+') else {
-                break;
-            };
-            declaration.push(' ');
-            declaration.push_str(continuation.trim());
-        }
-        let mut tokens = declaration.split_ascii_whitespace();
-        let directive = tokens.next().unwrap_or_default();
-        let name = tokens.next().unwrap_or_default();
-        if !directive.eq_ignore_ascii_case(".subckt") || !name.eq_ignore_ascii_case(&entry.name) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "indexed subcircuit declaration does not match its catalog identity",
-            ));
-        }
-        let mut ports = Vec::new();
-        let mut folded = HashSet::new();
-        for token in tokens {
-            if token.eq_ignore_ascii_case("params:")
-                || token.eq_ignore_ascii_case("param:")
-                || token.contains('=')
-            {
-                break;
-            }
-            let canonical = token.to_ascii_lowercase();
-            if token.is_empty() || !folded.insert(canonical) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "subcircuit '{}' has an invalid repeated terminal",
-                        entry.name
-                    ),
-                ));
-            }
-            ports.push(token.to_owned());
-        }
-        if ports.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("subcircuit '{}' declares no terminals", entry.name),
-            ));
-        }
-        Ok(CatalogSubcircuitInterface {
-            name: entry.name.clone(),
-            ports,
-            source_path,
-            start_line: entry.line,
-        })
-    }
-
-    /// A bounded, deterministic first page of addressable definitions.
-    ///
-    /// Catalog UIs use this when no query or class facet is active. Streaming
-    /// stops at `limit`, so opening a parts browser never materializes the
-    /// complete multi-megabyte index.
-    pub fn browse_parts(&self, limit: usize) -> io::Result<Vec<CatalogEntry>> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let mut found = Vec::new();
-        self.for_each_catalog_entry(|entry| {
-            if entry.scope.is_addressable() {
-                found.push(entry);
-            }
-            found.len() < limit
-        })?;
-        Ok(found)
-    }
-
-    /// Every addressable definition of a given canonical device class.
-    pub fn parts_by_device(&self, device: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
-        Ok(self
-            .addressable_catalog()?
-            .entries
-            .iter()
-            .filter(|entry| entry.entry.device == device)
-            .take(limit)
-            .map(|entry| entry.entry.clone())
-            .collect())
-    }
-
     /// Stream addressable definitions through a caller's predicate, applying
     /// the result limit after every filter. This avoids collecting a complete
     /// catalog or truncating candidates before a product-specific filter.
@@ -775,12 +472,6 @@ impl SpiceLibraryIndex {
         Ok(found)
     }
 
-    /// The whole selected catalog, nested definitions included. Prefer the
-    /// search methods for a full developer corpus.
-    pub fn load_catalog(&self) -> io::Result<Vec<CatalogEntry>> {
-        self.filter_catalog(|_| true)
-    }
-
     fn catalog_source_path(&self, entry: &CatalogEntry) -> Option<PathBuf> {
         if !self.source_files_available() {
             return None;
@@ -790,20 +481,6 @@ impl SpiceLibraryIndex {
             return None;
         }
         Some(self.root.join(&pack.path).join(&entry.path))
-    }
-
-    fn filter_catalog(
-        &self,
-        mut keep: impl FnMut(&CatalogEntry) -> bool,
-    ) -> io::Result<Vec<CatalogEntry>> {
-        let mut found = Vec::new();
-        self.for_each_catalog_entry(|entry| {
-            if keep(&entry) {
-                found.push(entry);
-            }
-            true
-        })?;
-        Ok(found)
     }
 
     fn addressable_catalog(&self) -> io::Result<&AddressableCatalog> {
@@ -822,12 +499,10 @@ impl SpiceLibraryIndex {
         // Manifest statistics describe the corpus; they are not allocation
         // instructions. Grow only for rows actually present in the catalog.
         let mut entries = Vec::new();
-        let mut device_counts = BTreeMap::new();
         self.for_each_catalog_entry(|entry| {
             if !entry.scope.is_addressable() {
                 return true;
             }
-            *device_counts.entry(entry.device.clone()).or_default() += 1;
             let search_text = format!(
                 "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
                 entry.name,
@@ -840,10 +515,7 @@ impl SpiceLibraryIndex {
             entries.push(IndexedCatalogEntry { entry, search_text });
             true
         })?;
-        Ok(AddressableCatalog {
-            entries,
-            device_counts,
-        })
+        Ok(AddressableCatalog { entries })
     }
 
     /// Stream the catalog, stopping early when `visit` returns `false`.
@@ -891,20 +563,6 @@ fn safe_relative_path(path: &Path) -> bool {
                 std::path::Component::Normal(_) | std::path::Component::CurDir
             )
         })
-}
-
-fn definition_line_matches(line: &str, entry: &CatalogEntry) -> bool {
-    let mut tokens = line.split_ascii_whitespace();
-    let Some(directive) = tokens.next() else {
-        return false;
-    };
-    let Some(name) = tokens.next() else {
-        return false;
-    };
-    directive
-        .strip_prefix('.')
-        .is_some_and(|directive| directive.eq_ignore_ascii_case(&entry.kind))
-        && name.eq_ignore_ascii_case(&entry.name)
 }
 
 /// Build a path from an index field.
@@ -1095,6 +753,7 @@ fn parse_packs(text: &str) -> io::Result<Vec<SpicePack>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn repo_models_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1109,10 +768,8 @@ mod tests {
     // The repository ships the foundation pack alone, so multi-pack lookup,
     // paging, per-file restriction and macromodel scope are exercised against
     // a corpus built here. The `.lib` files and the index rows that address
-    // them are generated together because `definition_preview` and
-    // `subcircuit_interface` re-read the indexed line and reject a row that no
-    // longer declares its own name: a fixture line number is exact or the test
-    // fails.
+    // them are generated together, so a row's source path and line number
+    // always name the card it indexes.
     //=========================================================================
 
     /// Top-scope `mosfet-n` cards, enough for two disjoint browse pages.
@@ -1123,12 +780,8 @@ mod tests {
     const FIXTURE_NESTED_PER_MACROMODEL: usize = 8;
     /// Top-scope `.model` cards in `fixture-open` outside the `mosfet-n` block.
     const FIXTURE_DISCRETE_CARDS: usize = 8;
-    /// `.model` and `.subckt` declarations at any depth, both packs.
-    const FIXTURE_DEFINITIONS: usize = 160;
     /// Declarations a netlist can reference by name, both packs.
     const FIXTURE_PARTS: usize = 64;
-    /// Addressable `.model` cards, both packs.
-    const FIXTURE_MODEL_CARDS: usize = 51;
     /// Addressable `DX` cards; every other `DX` is macromodel-private.
     const FIXTURE_TOP_LEVEL_DX: usize = 2;
 
@@ -1496,25 +1149,18 @@ mod tests {
                 format!("# header\n{good}\n{}\n", fields.join("\t")),
             )
             .unwrap();
-            let index = corpus.index();
-            for result in [
-                index.browse_parts(10),
-                index.find_part("GOOD"),
-                index.load_catalog(),
-            ] {
-                let error = result.unwrap_err();
-                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-                assert!(
-                    error.to_string().contains("CATALOG.tsv: catalog line 3"),
-                    "{error}"
-                );
-            }
+            let error = corpus.index().find_part("GOOD").unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(
+                error.to_string().contains("CATALOG.tsv: catalog line 3"),
+                "{error}"
+            );
         }
         fs::write(corpus.root.join(CATALOG_INDEX), "BAD\tmodel\n").unwrap();
         assert!(
             corpus
                 .index()
-                .load_catalog()
+                .find_part("BAD")
                 .unwrap_err()
                 .to_string()
                 .contains("at least 6")
@@ -1595,7 +1241,6 @@ mod tests {
         .unwrap();
         let index = corpus.index();
         assert_eq!(index.part_count(), maximum);
-        assert_eq!(index.definition_count(), maximum);
         let entries = index.find_part("ACTUAL").unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "ACTUAL");
@@ -1650,7 +1295,6 @@ mod tests {
         assert!(pack.redistributable);
         assert_eq!(index.model_count(), 16);
         assert_eq!(index.part_count(), 17);
-        assert_eq!(index.load_catalog().expect("catalog").len(), 17);
         assert!(index.find_part("1N4148").expect("lookup").is_empty());
         assert_eq!(index.find_part("RSPICE_DIODE").expect("lookup").len(), 1);
     }
@@ -1670,15 +1314,6 @@ mod tests {
     }
 
     #[test]
-    fn definition_count_spans_the_whole_tree() {
-        let corpus = fixture_corpus("definition-count");
-        let index = corpus.index();
-        // Every declaration in both packs, macromodel-private cards included.
-        assert_eq!(index.definition_count(), FIXTURE_DEFINITIONS);
-        corpus.discard();
-    }
-
-    #[test]
     fn macromodel_internals_are_not_offered_as_parts() {
         let corpus = fixture_corpus("macromodel-scope");
         let index = corpus.index();
@@ -1690,12 +1325,6 @@ mod tests {
         // `DX` does occur, so the addressable result is small rather than
         // empty — the point is that it collapses.
         let as_part = index.find_part("DX").expect("catalog readable");
-        let anywhere = index
-            .find_definition_any_scope("DX")
-            .expect("catalog readable");
-
-        let nested = FIXTURE_MACROMODELS * FIXTURE_NESTED_PER_MACROMODEL;
-        assert_eq!(anywhere.len(), nested + FIXTURE_TOP_LEVEL_DX);
         assert_eq!(as_part.len(), FIXTURE_TOP_LEVEL_DX);
         assert!(
             as_part
@@ -1703,50 +1332,7 @@ mod tests {
                 .all(|entry| entry.scope == DefinitionScope::TopLevel),
             "a part hit must be addressable"
         );
-        assert_eq!(
-            anywhere
-                .iter()
-                .filter(|entry| entry.scope == DefinitionScope::Nested)
-                .count(),
-            nested
-        );
 
-        corpus.discard();
-    }
-
-    #[test]
-    fn addressable_parts_are_a_fraction_of_all_definitions() {
-        let corpus = fixture_corpus("addressable-fraction");
-        let index = corpus.index();
-        let parts = index.part_count();
-        let all = index.definition_count();
-        assert_eq!(parts, FIXTURE_PARTS);
-        assert!(
-            parts * 2 < all,
-            "most definitions are macromodel internals: {parts} of {all}"
-        );
-        corpus.discard();
-    }
-
-    #[test]
-    fn model_card_catalog_excludes_subcircuits_and_nested_helpers() {
-        let corpus = fixture_corpus("model-cards");
-        let index = corpus.index();
-        assert_eq!(index.model_count(), FIXTURE_MODEL_CARDS);
-        let matches = index
-            .search_model_cards("FX1N", 50)
-            .expect("model-card catalog readable");
-        assert_eq!(matches.len(), 3);
-        assert!(matches.iter().all(|entry| {
-            entry.scope == DefinitionScope::TopLevel && entry.kind.eq_ignore_ascii_case("model")
-        }));
-        // A subcircuit is addressable but is not a model card.
-        assert!(
-            index
-                .search_model_cards("FIXNAND", 50)
-                .expect("model-card catalog readable")
-                .is_empty()
-        );
         corpus.discard();
     }
 
@@ -1802,20 +1388,6 @@ mod tests {
         let addressable = index.find_part("FIXLOCKED").expect("catalog readable");
         assert_eq!(addressable.len(), 1);
         assert!(addressable[0].restricted);
-        assert_eq!(
-            index
-                .find_definition_any_scope("FIXLOCKED")
-                .expect("catalog readable")
-                .len(),
-            1
-        );
-        assert!(
-            index
-                .find_shippable_part("FIXLOCKED")
-                .expect("catalog readable")
-                .is_empty(),
-            "a restricted file must never reach the shippable view"
-        );
         assert!(
             addressable[0]
                 .source_path(&index)
@@ -1824,29 +1396,10 @@ mod tests {
         );
 
         // A clean file in the same pack is unaffected by its neighbour.
-        assert_eq!(
-            index
-                .find_part("FIXSHARED")
-                .expect("catalog readable")
-                .len(),
-            index
-                .find_shippable_part("FIXSHARED")
-                .expect("catalog readable")
-                .len()
-        );
+        let shared = index.find_part("FIXSHARED").expect("catalog readable");
+        assert!(!shared.is_empty());
+        assert!(shared.iter().all(|entry| !entry.restricted));
 
-        corpus.discard();
-    }
-
-    #[test]
-    fn device_class_query_finds_foundry_devices() {
-        let corpus = fixture_corpus("device-class");
-        let index = corpus.index();
-        let jfets = index
-            .parts_by_device("jfet-n", 50)
-            .expect("catalog readable");
-        assert_eq!(jfets.len(), 1);
-        assert!(jfets.iter().all(|entry| entry.device == "jfet-n"));
         corpus.discard();
     }
 
@@ -1919,87 +1472,20 @@ mod tests {
     }
 
     #[test]
-    fn device_facets_sum_to_the_addressable_part_total() {
-        let corpus = fixture_corpus("device-facets");
+    fn unsafe_catalog_paths_never_resolve_to_a_source() {
+        let corpus = fixture_corpus("unsafe-source-path");
         let index = corpus.index();
-        let counts = index.part_device_counts().expect("catalog counts");
-        assert_eq!(counts.values().sum::<usize>(), index.part_count());
-        assert_eq!(counts.get("mosfet-n").copied(), Some(FIXTURE_MOSFET_CARDS));
-        assert_eq!(counts.get("opamp").copied(), Some(FIXTURE_MACROMODELS));
-        assert_eq!(counts.get("diode").copied(), Some(9));
-        assert_eq!(counts.get("jfet-n").copied(), Some(1));
-        corpus.discard();
-    }
-
-    #[test]
-    fn definition_preview_revalidates_the_indexed_line_and_bounds_source() {
-        let corpus = fixture_corpus("definition-preview");
-        let index = corpus.index();
-        let entry = index
+        let mut entry = index
             .find_part("FIXDIODE")
             .expect("catalog readable")
             .into_iter()
             .next()
             .expect("fixture definition exists");
-        let preview = index
-            .definition_preview(&entry)
-            .expect("indexed source preview");
-        assert_eq!(preview.start_line, entry.line);
-        assert!(preview.source_path.is_file());
-        assert!(preview.source.to_ascii_lowercase().contains("fixdiode"));
-        // The card's `+` continuation belongs to the preview.
-        assert!(preview.source.contains("RS=0.5"));
-        assert!(preview.source.lines().count() <= MAX_DEFINITION_PREVIEW_LINES);
+        assert!(entry.source_path(&index).expect("pack known").is_file());
 
-        let mut unsafe_entry = entry;
-        unsafe_entry.path = PathBuf::from("../outside.lib");
-        assert!(unsafe_entry.source_path(&index).is_none());
-        assert!(index.definition_preview(&unsafe_entry).is_err());
+        entry.path = PathBuf::from("../outside.lib");
+        assert!(entry.source_path(&index).is_none());
 
-        corpus.discard();
-    }
-
-    #[test]
-    fn subcircuit_interface_preserves_exact_terminal_order() {
-        let corpus = fixture_corpus("subcircuit-interface");
-        let index = corpus.index();
-        let entry = index
-            .find_part("FIXNAND")
-            .expect("catalog readable")
-            .into_iter()
-            .find(|entry| entry.kind == "subckt")
-            .expect("addressable FIXNAND subcircuit exists");
-        let interface = index
-            .subcircuit_interface(&entry)
-            .expect("interface revalidates");
-        assert_eq!(interface.name, "FIXNAND");
-        assert_eq!(interface.ports, ["A", "B", "Y", "VCC", "GND"]);
-        assert_eq!(interface.start_line, entry.line);
-        assert!(interface.source_path.is_file());
-
-        let model = index
-            .find_part("FIXDIODE")
-            .expect("catalog readable")
-            .into_iter()
-            .find(|entry| entry.kind == "model")
-            .expect("model entry exists");
-        assert!(index.subcircuit_interface(&model).is_err());
-
-        corpus.discard();
-    }
-
-    #[test]
-    fn browse_parts_is_bounded_and_only_returns_addressable_cards() {
-        let corpus = fixture_corpus("browse-parts");
-        let index = corpus.index();
-        let parts = index.browse_parts(25).expect("catalog readable");
-        assert_eq!(parts.len(), 25);
-        assert!(
-            parts
-                .iter()
-                .all(|entry| entry.scope == DefinitionScope::TopLevel)
-        );
-        assert!(index.browse_parts(0).expect("catalog readable").is_empty());
         corpus.discard();
     }
 

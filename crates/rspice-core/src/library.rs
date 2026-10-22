@@ -31,8 +31,5 @@ pub use manager::{LibraryManager, ModelDefinition, ModelType, SubcircuitDefiniti
 // include expander that also runs it. It keeps its published path here because
 // this is where a library consumer looks for it.
 pub use crate::netlist::spectre_adapter::{SpectreModelAdapterError, adapt_spectre_model_library};
-pub use spice_packs::{
-    CatalogDefinitionPreview, CatalogEntry, CatalogSubcircuitInterface, LicenseTier,
-    MODELS_DIR_ENV, SpiceLibraryIndex, SpicePack,
-};
+pub use spice_packs::{CatalogEntry, LicenseTier, MODELS_DIR_ENV, SpiceLibraryIndex, SpicePack};
 pub use veriloga_discovery::{VerilogAModelEntry, discover_veriloga_models};
