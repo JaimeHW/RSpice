@@ -8,11 +8,16 @@ use rspice_vocabulary::product::AnalysisInstanceId;
 /// netlist's elaborated source set.
 ///
 /// Elaborating the netlist resolves its `.veriloga` directives, which name the
-/// run's sealed runtimes by key, so `runtimes` are installed before it.
-pub fn validate_prepared_periodic_sources<'a>(
+/// run's sealed runtimes by key, so `runtimes` are installed before it, and
+/// builds its code models, which read the run's sealed `data_files`: held
+/// here, and only here, so a deck with no driven `.PSS` holds no path another
+/// running simulation holds with other bytes.
+pub(crate) fn validate_prepared_periodic_sources<'a>(
     tasks: impl Iterator<Item = (AnalysisInstanceId, &'a AnalysisSpec)> + Clone,
     executable_netlist: &str,
     runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    data_files: &crate::data_files::PreparedDataFiles,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<(), PreparationError> {
     if !tasks
         .clone()
@@ -33,6 +38,9 @@ pub fn validate_prepared_periodic_sources<'a>(
             format!("Could not install the run's sealed Verilog-A runtimes: {error}"),
         )
     })?;
+    let _data_files = data_files
+        .hold(limits)
+        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     let engine = rspice_core::Engine::new(rspice_core::SimulationConfig::default());
 
     for (instance_id, spec) in tasks {
@@ -108,6 +116,8 @@ mod tests {
             std::iter::once((AnalysisInstanceId::new(), &complete)),
             deck,
             &Default::default(),
+            &Default::default(),
+            Default::default(),
         )
         .expect("the complete commensurate source set is accepted");
 
@@ -116,6 +126,8 @@ mod tests {
             std::iter::once((AnalysisInstanceId::new(), &incomplete)),
             deck,
             &Default::default(),
+            &Default::default(),
+            Default::default(),
         )
         .expect_err("an omitted periodic source fails preflight");
         assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
@@ -130,6 +142,8 @@ mod tests {
             std::iter::once((AnalysisInstanceId::new(), &autonomous)),
             deck,
             &Default::default(),
+            &Default::default(),
+            Default::default(),
         )
         .expect("a source-free autonomous circuit has an exact empty source set");
     }

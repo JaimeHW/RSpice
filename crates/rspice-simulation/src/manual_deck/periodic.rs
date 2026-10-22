@@ -975,6 +975,16 @@ fn parse_pstb(
     Ok(config)
 }
 
+/// Whether `source` carries a `.PSS` card: the one card whose lowering
+/// elaborates the circuit, to read a driven tone list off its sources.
+pub(crate) fn has_pss_card(source: &str) -> bool {
+    logical_cards(source).iter().any(|(_, card)| {
+        card.split_whitespace()
+            .next()
+            .is_some_and(|head| head.eq_ignore_ascii_case(".pss"))
+    })
+}
+
 fn logical_cards(source: &str) -> Vec<(usize, String)> {
     let mut cards = Vec::<(usize, String)>::new();
     for (zero_line, raw) in source.lines().enumerate() {

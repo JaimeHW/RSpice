@@ -24,8 +24,12 @@ fn invalid(message: impl Into<String>) -> PreparationError {
 pub(super) fn route_resumes(
     tasks: &mut [PreparedTask],
     source: &str,
+    data_files: &crate::data_files::PreparedDataFiles,
     context: crate::engine_services::ServiceContext<'_>,
 ) -> Result<(), PreparationError> {
+    // Reading a population builds its task's deck, which reads the run's data
+    // files as its solve will: held from the first such build on.
+    let mut held_data_files = None;
     let mut selections: HashMap<AnalysisInstanceId, Arc<[PreparedMonteCarloResume]>> =
         HashMap::new();
     let mut required = HashSet::new();
@@ -81,6 +85,12 @@ pub(super) fn route_resumes(
             return Err(invalid(
                 "Monte Carlo checkpoint request has missing or ambiguous resume policy",
             ));
+        }
+        if held_data_files.is_none() {
+            held_data_files =
+                Some(data_files.hold(context.limits).map_err(|error| {
+                    PreparationError::new(PreparationStage::SourceChecks, error)
+                })?);
         }
         let population = crate::study::monte_carlo::prepared_population_identity_with_context(
             options.study_base.as_ref(),

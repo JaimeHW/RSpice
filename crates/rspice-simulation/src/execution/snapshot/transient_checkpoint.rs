@@ -56,6 +56,12 @@ pub(super) fn route_resumes(
         return Ok(());
     }
     PreparationError::check_abort(abort)?;
+    // Checking a checkpoint builds the task's deck, which reads the run's
+    // data files as its solve will; held until the checks are done.
+    let _data_files = parts
+        .data_files
+        .hold(limits)
+        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     let mut bridge_limits = limits;
     bridge_limits.max_netlist_bytes = limits.max_expanded_source_bytes;
     let bridge = EngineBridge::new()

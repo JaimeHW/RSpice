@@ -1262,7 +1262,9 @@ impl PreparedRunSnapshot {
         execution_limits.max_netlist_bytes = execution_limits.max_expanded_source_bytes;
 
         // Every deck a task solves names only data files the run sealed, and
-        // the checks below that build a deck read them as its solve will.
+        // the checks below that build a deck hold them while they build, so a
+        // run that builds nothing here holds no path another running
+        // simulation holds with other bytes.
         parts
             .data_files
             .validate(limits)
@@ -1280,14 +1282,11 @@ impl PreparedRunSnapshot {
                 }
             }
         }
-        let _data_files = parts
-            .data_files
-            .hold(execution_limits)
-            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
 
         monte_carlo::route_resumes(
             &mut parts.tasks,
             &parts.executable_netlist,
+            &parts.data_files,
             crate::engine_services::ServiceContext {
                 source_path: None,
                 limits: execution_limits,

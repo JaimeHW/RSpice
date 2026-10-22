@@ -459,23 +459,21 @@ where
         &project_veriloga_runtimes,
         &measurement_references,
     )?;
-    // The files the design's code models read, from beside its root sheet,
-    // held while preparation elaborates the deck.
+    // The files the design's code models read, from beside its root sheet.
     let data_files = crate::data_files::PreparedDataFiles::capture(
         &netlist,
         root_schematic.current_file().and_then(Path::parent),
         rspice_core::ResourceLimits::default(),
         abort,
     )?;
-    let _data_files = data_files
-        .hold(inputs.execution_limits())
-        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     validate_prepared_periodic_sources(
         tasks
             .iter()
             .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
         &netlist,
         &project_veriloga_runtimes,
+        &data_files,
+        inputs.execution_limits(),
     )?;
     PreparationError::check_abort(abort)?;
     reject_unresolved_device_models(&netlist, has_project_technology)?;
@@ -745,15 +743,16 @@ pub fn build_prepared_manual_deck<R, A>(
         &measurement_references,
     )?;
     // The files the deck's code models read, from beside the deck, held
-    // while reading its analyses elaborates it.
+    // only while reading a `.PSS` elaborates it.
     let data_files = crate::data_files::PreparedDataFiles::capture(
         &expanded,
         origin.and_then(Path::parent),
         rspice_core::ResourceLimits::default(),
         &rspice_core::NoAbort,
     )?;
-    let _data_files = data_files
-        .hold(inputs.execution_limits())
+    let _data_files = manual_deck::has_pss_card(&expanded)
+        .then(|| data_files.hold(inputs.execution_limits()))
+        .transpose()
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     let queued_tasks = manual_deck::build_manual_deck_queue_with_runtimes(
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,

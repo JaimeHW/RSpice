@@ -228,10 +228,6 @@ pub fn prepare_headless_run(
         limits,
         abort,
     )?;
-    // Held while preparation elaborates the deck, as its runner holds them.
-    let _data_files = data_files
-        .hold(input.execution_limits)
-        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     check_abort(abort)?;
 
     for request in &input.tasks {
@@ -283,6 +279,8 @@ pub fn prepare_headless_run(
             .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
         &expanded,
         &input.veriloga_runtimes,
+        &data_files,
+        input.execution_limits,
     )?;
     let source_digest = crate::sealed_source::manual_executable_source_digest(&expanded);
     let config_digests = tasks

@@ -80,6 +80,10 @@ fn prepare(
 }
 
 fn execute(snapshot: PreparedRunSnapshot) -> SimulationResult {
+    solve(snapshot).unwrap()
+}
+
+fn solve(snapshot: PreparedRunSnapshot) -> Result<SimulationResult, crate::error::SimulationError> {
     let dispatch = PreparedRunAuthorization::default()
         .authorize_campaign_member(snapshot)
         .unwrap();
@@ -96,7 +100,7 @@ fn execute(snapshot: PreparedRunSnapshot) -> SimulationResult {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if let Some(result) = runner.poll_result() {
-            return result.unwrap();
+            return result;
         }
         assert!(Instant::now() < deadline, "prepared task did not finish");
         std::thread::sleep(Duration::from_millis(1));
@@ -234,6 +238,43 @@ fn a_defaulted_data_file_is_sealed_as_well() {
     assert_eq!(
         changes(&execute(snapshot), "d"),
         [(0.0f64.to_bits(), level(true))]
+    );
+}
+
+/// Preparing a run holds its files only while a check builds a deck, and a
+/// plain transient builds none: a run whose file another running simulation
+/// holds with other bytes prepares, and only its solve is refused until that
+/// simulation lets the path go.
+#[test]
+fn a_run_solving_other_bytes_does_not_refuse_preparation() {
+    let fixture = Fixture::new();
+    let path = "contended.txt";
+    let solving = PreparedDataFiles {
+        files: vec![SealedDataFile {
+            path: path.into(),
+            contents: "0 1s\n".into(),
+            digest: file_digest("0 1s\n"),
+            read_from: None,
+        }]
+        .into(),
+    };
+    let held = solving.hold(ResourceLimits::default()).unwrap();
+    fixture.write(path, "0 0s\n1n 1s\n");
+    let task = transient(3e-9);
+    let refused = prepare(&fixture, &d_source(path), &task)
+        .expect("preparation builds no deck, so holds no file");
+    let error = solve(refused)
+        .expect_err("the solve needs the path another simulation holds")
+        .to_string();
+    assert!(
+        error.contains("held by another running simulation"),
+        "{error}"
+    );
+    drop(held);
+    let snapshot = prepare(&fixture, &d_source(path), &task).unwrap();
+    assert_eq!(
+        changes(&execute(snapshot), "d"),
+        [(0.0f64, false), (1e-9, true)].map(|(time, bit)| (time.to_bits(), level(bit)))
     );
 }
 

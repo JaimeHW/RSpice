@@ -22,6 +22,7 @@ use crate::sweeps::{
 };
 
 mod periodic;
+pub(crate) use periodic::has_pss_card;
 mod recorded_fft;
 
 /// Why a deck's analyses could not be queued.
