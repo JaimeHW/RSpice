@@ -1760,7 +1760,9 @@ mod tests {
                 }
             }
         }
-        let mut matrix = triplets.to_static().unwrap();
+        let entries: Vec<_> = triplets.entries().collect();
+        let mut matrix =
+            StaticMatrix::from_triplets(triplets.nrows(), triplets.ncols(), &entries).unwrap();
         let mut solution = Vec::new();
         matrix.solve_into(&rhs, &mut solution).unwrap();
         for &voltage in &solution[..circuit.num_nodes()] {
@@ -1816,7 +1818,10 @@ mod tests {
                         .sum();
                     assert_eq!(actual, expected, "entry ({row}, {col})");
                 }
-                let mut matrix = triplets.to_static().unwrap();
+                let entries: Vec<_> = triplets.entries().collect();
+                let mut matrix =
+                    StaticMatrix::from_triplets(triplets.nrows(), triplets.ncols(), &entries)
+                        .unwrap();
                 let mut solution = Vec::new();
                 matrix.solve_into(&rhs, &mut solution).unwrap();
                 for (name, expected) in [("a", 2.0), ("b", 2.0), ("c", -1.0)] {

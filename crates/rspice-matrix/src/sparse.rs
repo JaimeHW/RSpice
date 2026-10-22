@@ -731,8 +731,6 @@ fn canonicalize_real_homogeneous_zero_constraints(
 }
 
 /// [`canonicalize_real_homogeneous_zero_constraints`] for a complex solve.
-/// The adjoint's equations are the columns, as the transpose's are;
-/// conjugation leaves every zero alone.
 fn canonicalize_complex_homogeneous_zero_constraints(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Complex64],
@@ -1839,26 +1837,6 @@ impl StaticMatrix {
         Ok(())
     }
 
-    /// Change the backend used by subsequent solves. Existing workspaces are
-    /// retained so switching back does not repeat symbolic setup.
-    #[inline]
-    pub fn set_solver_options(&mut self, solver_options: SolverOptions) {
-        if self.solver_options != solver_options {
-            // Auto's fill rejection is a policy decision, not a structural
-            // failure. In particular it must never prevent a later explicit
-            // Circuit-LU request from being honored.
-            self.klu_auto_rejected = false;
-            self.klu_factored_values.clear();
-            if self.solver_options.circuit_lu_orientation != solver_options.circuit_lu_orientation {
-                if let Some(backend) = self.klu.as_mut() {
-                    backend.invalidate_analysis();
-                }
-                self.klu_oriented_values.clear();
-            }
-        }
-        self.solver_options = solver_options;
-    }
-
     /// Zero all values (call before each Newton iteration)
     ///
     /// Slice fill lowers to an optimized bulk clear without coupling this
@@ -2203,7 +2181,8 @@ impl StaticMatrix {
         Ok(hi + lo)
     }
 
-    /// Compute infinity norm of the scaled residual `A*x-b`.
+    /// Compute infinity norm of the scaled residual `A*x-b` with row-specific
+    /// absolute tolerances.
     ///
     /// Each row is normalized with a SPICE-like tolerance scale:
     /// `abstol + reltol * max(|A*x|, |b|)`.
@@ -2211,18 +2190,6 @@ impl StaticMatrix {
     ///
     /// The immutable row layout keeps each equation local and allocation-free;
     /// this is evaluated once or twice per Newton iteration.
-    pub fn scaled_residual_inf_norm(
-        &self,
-        solution: &[Value],
-        rhs: &[Value],
-        abstol: Value,
-        reltol: Value,
-    ) -> Result<Value, SolverError> {
-        self.scaled_residual_inf_norm_by_row(solution, rhs, reltol, |_| abstol)
-    }
-
-    /// Compute infinity norm of the scaled residual `A*x-b` with row-specific
-    /// absolute tolerances.
     pub fn scaled_residual_inf_norm_by_row<F>(
         &self,
         solution: &[Value],
@@ -4205,7 +4172,6 @@ struct ComplexLuWorkspace {
 enum ComplexSolveOp {
     Normal,
     Transpose,
-    Adjoint,
 }
 
 #[inline]
@@ -4727,8 +4693,7 @@ fn complex_componentwise_backward_error(
     )
 }
 
-/// [`zero_lu_remnants`] for a complex solve. The adjoint's equations are the
-/// columns, as the transpose's are; conjugation leaves every magnitude alone.
+/// [`zero_lu_remnants`] for a complex solve.
 fn zero_complex_lu_remnants(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Complex64],
@@ -4781,7 +4746,6 @@ fn fast_complex_componentwise_backward_error(
             let (equation, x_index, value) = match operation {
                 ComplexSolveOp::Normal => (original_row, col, entry),
                 ComplexSolveOp::Transpose => (col, original_row, entry),
-                ComplexSolveOp::Adjoint => (col, original_row, entry.conj()),
             };
             let x = solution[x_index];
             let product = value * x;
@@ -4867,7 +4831,6 @@ fn compensated_complex_componentwise_backward_error(
             let (equation, x_index, value) = match operation {
                 ComplexSolveOp::Normal => (original_row, col, values[idx]),
                 ComplexSolveOp::Transpose => (col, original_row, values[idx]),
-                ComplexSolveOp::Adjoint => (col, original_row, values[idx].conj()),
             };
             let x = solution[x_index];
             let magnitude = complex_abs1(value) * complex_abs1(x);
@@ -5507,15 +5470,6 @@ impl ComplexMatrix {
         self.solve_dense_extended_operation(rhs, ComplexSolveOp::Transpose, None)
     }
 
-    /// Solve `A^H x = b` through the extended-precision dense fallback and
-    /// certify the rounded result against the physical adjoint operator.
-    pub fn solve_dense_extended_adjoint(
-        &self,
-        rhs: &[Complex64],
-    ) -> Result<Vec<Complex64>, SolverError> {
-        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Adjoint, None)
-    }
-
     fn solve_dense_extended_operation(
         &self,
         rhs: &[Complex64],
@@ -5558,7 +5512,7 @@ impl ComplexMatrix {
         )?;
         let rhs_scale = match operation {
             ComplexSolveOp::Normal => &row_scale,
-            ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &col_scale,
+            ComplexSolveOp::Transpose => &col_scale,
         };
         let mut scaled_rhs = Vec::new();
         scale_complex_rhs(rhs, rhs_scale, &mut scaled_rhs)?;
@@ -5572,7 +5526,6 @@ impl ComplexMatrix {
                 let (equation, unknown, value) = match operation {
                     ComplexSolveOp::Normal => (original_row, col, scaled_values[index]),
                     ComplexSolveOp::Transpose => (col, original_row, scaled_values[index]),
-                    ComplexSolveOp::Adjoint => (col, original_row, scaled_values[index].conj()),
                 };
                 block[equation * block_size + unknown] = Quad::from_f64(value.re);
                 block[equation * block_size + unknown + n] = Quad::from_f64(-value.im);
@@ -5616,7 +5569,7 @@ impl ComplexMatrix {
 
         let solution_scale = match operation {
             ComplexSolveOp::Normal => &col_scale,
-            ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &row_scale,
+            ComplexSolveOp::Transpose => &row_scale,
         };
         let mut solution = Vec::with_capacity(n);
         for col in 0..n {
@@ -5739,16 +5692,6 @@ impl ComplexMatrix {
         self.solve_many_operation_into(rhs, rhs_count, solution, ComplexSolveOp::Transpose)
     }
 
-    /// Solve multiple `A^H X = B` systems in one batched triangular pass.
-    pub fn solve_many_adjoint_into(
-        &mut self,
-        rhs: &[Complex64],
-        rhs_count: usize,
-        solution: &mut Vec<Complex64>,
-    ) -> Result<(), SolverError> {
-        self.solve_many_operation_into(rhs, rhs_count, solution, ComplexSolveOp::Adjoint)
-    }
-
     fn solve_many_operation_into(
         &mut self,
         rhs: &[Complex64],
@@ -5824,9 +5767,7 @@ impl ComplexMatrix {
                     .map_err(|_| SolverError::OutOfMemory)?;
                     ws.solve_rhs_capacity = rhs_count;
                 }
-                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint
-                    if rhs_count > ws.transpose_rhs_capacity =>
-                {
+                ComplexSolveOp::Transpose if rhs_count > ws.transpose_rhs_capacity => {
                     ws.transpose_solve_mem = MemBuffer::try_new(
                         ws.symbolic
                             .solve_transpose_in_place_scratch::<Complex64>(rhs_count, par),
@@ -5838,7 +5779,7 @@ impl ComplexMatrix {
             }
             let rhs_scale = match operation {
                 ComplexSolveOp::Normal => &ws.row_scale,
-                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.col_scale,
+                ComplexSolveOp::Transpose => &ws.col_scale,
             };
             ws.rhs
                 .resize_with(n, rhs_count, |_, _| Complex64::new(0.0, 0.0));
@@ -5865,18 +5806,12 @@ impl ComplexMatrix {
                     par,
                     MemStack::new(&mut ws.transpose_solve_mem),
                 ),
-                ComplexSolveOp::Adjoint => lu_ref.solve_transpose_in_place_with_conj(
-                    Conj::Yes,
-                    ws.rhs.as_mut(),
-                    par,
-                    MemStack::new(&mut ws.transpose_solve_mem),
-                ),
             }
 
             solution.resize(required, Complex64::new(0.0, 0.0));
             let solution_scale = match operation {
                 ComplexSolveOp::Normal => &ws.col_scale,
-                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                ComplexSolveOp::Transpose => &ws.row_scale,
             };
             let mut all_accepted = true;
             for rhs_index in 0..rhs_count {
@@ -5932,15 +5867,6 @@ impl ComplexMatrix {
         solution: &mut Vec<Complex64>,
     ) -> Result<(), SolverError> {
         self.solve_operation_into(rhs, solution, ComplexSolveOp::Transpose, None)
-    }
-
-    /// Solve `A^H x = b` without rebuilding or refactorizing the matrix.
-    pub fn solve_adjoint_into(
-        &mut self,
-        rhs: &[Complex64],
-        solution: &mut Vec<Complex64>,
-    ) -> Result<(), SolverError> {
-        self.solve_operation_into(rhs, solution, ComplexSolveOp::Adjoint, None)
     }
 
     fn solve_operation_into(
@@ -6010,7 +5936,7 @@ impl ComplexMatrix {
 
         let rhs_scale = match operation {
             ComplexSolveOp::Normal => &ws.row_scale,
-            ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.col_scale,
+            ComplexSolveOp::Transpose => &ws.col_scale,
         };
         scale_complex_rhs(rhs, rhs_scale, &mut ws.scaled_rhs)?;
         if let Some(floor) = denominator_floor {
@@ -6038,12 +5964,6 @@ impl ComplexMatrix {
             ),
             ComplexSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
                 Conj::No,
-                ws.rhs.as_mut(),
-                par,
-                MemStack::new(&mut ws.transpose_solve_mem),
-            ),
-            ComplexSolveOp::Adjoint => lu_ref.solve_transpose_in_place_with_conj(
-                Conj::Yes,
                 ws.rhs.as_mut(),
                 par,
                 MemStack::new(&mut ws.transpose_solve_mem),
@@ -6079,7 +5999,7 @@ impl ComplexMatrix {
             if backward_error.accepted() {
                 let solution_scale = match operation {
                     ComplexSolveOp::Normal => &ws.col_scale,
-                    ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                    ComplexSolveOp::Transpose => &ws.row_scale,
                 };
                 for (value, &scale) in solution.iter_mut().zip(solution_scale) {
                     *value *= scale;
@@ -6100,12 +6020,6 @@ impl ComplexMatrix {
                 ),
                 ComplexSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
                     Conj::No,
-                    ws.rhs.as_mut(),
-                    par,
-                    MemStack::new(&mut ws.transpose_solve_mem),
-                ),
-                ComplexSolveOp::Adjoint => lu_ref.solve_transpose_in_place_with_conj(
-                    Conj::Yes,
                     ws.rhs.as_mut(),
                     par,
                     MemStack::new(&mut ws.transpose_solve_mem),
@@ -6133,7 +6047,7 @@ impl ComplexMatrix {
             if refined_error.accepted() {
                 let solution_scale = match operation {
                     ComplexSolveOp::Normal => &ws.col_scale,
-                    ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                    ComplexSolveOp::Transpose => &ws.row_scale,
                 };
                 for (value, &scale) in solution.iter_mut().zip(solution_scale) {
                     *value *= scale;
@@ -6169,7 +6083,7 @@ impl ComplexMatrix {
             if canonical_error.accepted() {
                 let solution_scale = match operation {
                     ComplexSolveOp::Normal => &ws.col_scale,
-                    ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                    ComplexSolveOp::Transpose => &ws.row_scale,
                 };
                 for (value, &scale) in solution.iter_mut().zip(solution_scale) {
                     *value *= scale;
@@ -6200,7 +6114,7 @@ impl ComplexMatrix {
             if projected_error.accepted() {
                 let solution_scale = match operation {
                     ComplexSolveOp::Normal => &ws.col_scale,
-                    ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                    ComplexSolveOp::Transpose => &ws.row_scale,
                 };
                 solution.clear();
                 for (&value, &scale) in projected.iter().zip(solution_scale) {
@@ -6313,13 +6227,6 @@ impl TripletMatrix {
     pub fn nnz(&self) -> usize {
         self.values.len()
     }
-
-    /// Convert to StaticMatrix (freezes structure)
-    pub fn to_static(&self) -> Result<StaticMatrix, SolverError> {
-        let triplets: Vec<_> = self.entries().collect();
-
-        StaticMatrix::from_triplets(self.nrows, self.ncols, &triplets)
-    }
 }
 
 //=============================================================================
@@ -6415,11 +6322,6 @@ impl SparseLuSolver {
                 SolverError::InvalidCircuit("sparse LU cache was not built".to_string())
             })?
             .solve(rhs)
-    }
-
-    /// Clear cached symbolic factorization (call when matrix structure changes)
-    pub fn clear_cache(&mut self) {
-        self.cached_matrix = None;
     }
 }
 
@@ -8293,43 +8195,6 @@ mod tests {
     }
 
     #[test]
-    fn changing_orientation_invalidates_and_rebuilds_symbolic_analysis() {
-        let triplets = [
-            (0, 0, 3.0),
-            (1, 0, 5.0),
-            (0, 1, 1.0),
-            (1, 1, 2.0),
-            (1, 2, 7.0),
-            (2, 2, 11.0),
-        ];
-        let rhs = [13.0, 17.0, 19.0];
-        let mut native_options = amesos_klu_options();
-        native_options.circuit_lu_orientation = CircuitLuOrientation::Native;
-        let mut switched =
-            StaticMatrix::from_triplets_with_options(3, 3, &triplets, native_options).unwrap();
-        let mut solution = Vec::new();
-        switched.solve_into(&rhs, &mut solution).unwrap();
-        assert!(switched.klu.as_ref().unwrap().is_analyzed_for(3));
-
-        switched.set_solver_options(amesos_klu_options());
-        assert!(
-            !switched.klu.as_ref().unwrap().is_analyzed_for(3),
-            "orientation changes must not reuse symbolic analysis for the prior CSC pattern"
-        );
-        switched.solve_into(&rhs, &mut solution).unwrap();
-
-        let mut direct =
-            StaticMatrix::from_triplets_with_options(3, 3, &triplets, amesos_klu_options())
-                .unwrap();
-        let mut expected = Vec::new();
-        direct.solve_into(&rhs, &mut expected).unwrap();
-        assert_eq!(
-            solution.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
-            expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
     fn backend_faithful_refactor_does_not_escalate_pivot_growth() {
         let mut backend = crate::KluSolver::new();
         backend.set_growth_retry_enabled(false);
@@ -8886,31 +8751,6 @@ mod tests {
                 "complex transpose solution[{index}] relative error {relative_error:.3e}"
             );
         }
-
-        let adjoint_expected = [
-            Complex64::new(-0.25, 0.5),
-            Complex64::new(0.625, -0.75),
-            Complex64::new(1.5, 0.25),
-        ];
-        let mut adjoint_rhs = [Complex64::new(0.0, 0.0); 3];
-        for equation in 0..3 {
-            for unknown in 0..3 {
-                adjoint_rhs[equation] +=
-                    coefficients[unknown][equation].conj() * adjoint_expected[unknown];
-            }
-        }
-        let adjoint_actual = matrix
-            .solve_dense_extended_adjoint(&adjoint_rhs)
-            .expect("extended adjoint result must pass strict A^H certification");
-        for (index, (&actual, &expected)) in
-            adjoint_actual.iter().zip(&adjoint_expected).enumerate()
-        {
-            let relative_error = (actual - expected).norm() / expected.norm();
-            assert!(
-                relative_error <= 1.0e-10,
-                "complex adjoint solution[{index}] relative error {relative_error:.3e}"
-            );
-        }
     }
 
     #[test]
@@ -8961,34 +8801,32 @@ mod tests {
             .accepted()
         );
 
-        for operation in [ComplexSolveOp::Transpose, ComplexSolveOp::Adjoint] {
-            let mut transposed = [one, tiny];
-            let transposed_rhs = [Complex64::new(2.0, 0.0), zero];
-            assert!(canonicalize_complex_homogeneous_zero_constraints(
+        let mut transposed = [one, tiny];
+        let transposed_rhs = [Complex64::new(2.0, 0.0), zero];
+        assert!(canonicalize_complex_homogeneous_zero_constraints(
+            &matrix.csc,
+            &matrix.values,
+            &transposed_rhs,
+            &mut transposed,
+            ComplexSolveOp::Transpose,
+        ));
+        assert_eq!(transposed, [one, zero]);
+        assert!(
+            complex_componentwise_backward_error(
                 &matrix.csc,
                 &matrix.values,
+                &transposed,
                 &transposed_rhs,
-                &mut transposed,
-                operation,
-            ));
-            assert_eq!(transposed, [one, zero]);
-            assert!(
-                complex_componentwise_backward_error(
-                    &matrix.csc,
-                    &matrix.values,
-                    &transposed,
-                    &transposed_rhs,
-                    None,
-                    &mut residual,
-                    &mut denominator,
-                    &mut compensation,
-                    &mut row_nnz,
-                    operation,
-                )
-                .unwrap()
-                .accepted()
-            );
-        }
+                None,
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+                ComplexSolveOp::Transpose,
+            )
+            .unwrap()
+            .accepted()
+        );
 
         let mut two_term_homogeneous = [one, tiny];
         assert!(!canonicalize_complex_homogeneous_zero_constraints(
@@ -9429,7 +9267,7 @@ mod tests {
     }
 
     #[test]
-    fn complex_transpose_and_adjoint_solves_reuse_the_factorization() {
+    fn complex_transpose_solves_reuse_the_factorization() {
         let real = StaticMatrix::from_triplets(
             3,
             3,
@@ -9475,23 +9313,15 @@ mod tests {
             Complex64::new(2.0, 0.125),
         ];
         let mut transpose_rhs = [Complex64::new(0.0, 0.0); 3];
-        let mut adjoint_rhs = [Complex64::new(0.0, 0.0); 3];
         for equation in 0..3 {
             for variable in 0..3 {
                 transpose_rhs[equation] += a[variable][equation] * expected[variable];
-                adjoint_rhs[equation] += a[variable][equation].conj() * expected[variable];
             }
         }
 
         let mut actual = Vec::new();
         matrix
             .solve_transpose_into(&transpose_rhs, &mut actual)
-            .unwrap();
-        for (&x, &want) in actual.iter().zip(&expected) {
-            assert!((x - want).norm() <= 1.0e-12);
-        }
-        matrix
-            .solve_adjoint_into(&adjoint_rhs, &mut actual)
             .unwrap();
         for (&x, &want) in actual.iter().zip(&expected) {
             assert!((x - want).norm() <= 1.0e-12);

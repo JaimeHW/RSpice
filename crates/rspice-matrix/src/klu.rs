@@ -289,9 +289,6 @@ pub struct KluSolver {
     /// Successful full numeric factorizations performed by this solver.
     #[cfg(test)]
     full_factorization_count: u64,
-    condition_rhs: Vec<Value>,
-    condition_solution: Vec<Value>,
-    condition_transpose: Vec<Value>,
     factor_workspace: FactorWorkspace,
     /// Whether L/U currently hold a valid factorization.
     factored: bool,
@@ -479,9 +476,6 @@ impl KluSolver {
         self.work.clear();
         self.batch_work.clear();
         self.diagnostics = KluDiagnostics::default();
-        self.condition_rhs.clear();
-        self.condition_solution.clear();
-        self.condition_transpose.clear();
         self.use_diag_recip = false;
         self.factored = false;
     }
@@ -513,9 +507,6 @@ impl KluSolver {
         self.a_entry_scale = Vec::new();
         self.work = Vec::new();
         self.batch_work = Vec::new();
-        self.condition_rhs = Vec::new();
-        self.condition_solution = Vec::new();
-        self.condition_transpose = Vec::new();
         self.factor_workspace = FactorWorkspace::default();
         self.diagnostics = KluDiagnostics::default();
         self.use_diag_recip = false;
@@ -541,133 +532,6 @@ impl KluSolver {
     #[cfg(test)]
     pub(crate) fn full_factorization_count(&self) -> u64 {
         self.full_factorization_count
-    }
-
-    /// Recompute reciprocal pivot growth for the current values on demand.
-    ///
-    /// This is intentionally separate from [`Self::refactor`]: production
-    /// Newton loops should not pay an additional pair of reductions over
-    /// every factor column unless diagnostics are actually requested.
-    pub fn recompute_reciprocal_pivot_growth(
-        &mut self,
-        values: &[Value],
-    ) -> Result<Value, SolverError> {
-        if !self.factored {
-            return Err(SolverError::SingularMatrix);
-        }
-        if values.len() != self.a_rows.len() {
-            return Err(SolverError::InvalidCircuit(format!(
-                "KLU pivot-growth values length {} does not match analyzed nonzero count {}",
-                values.len(),
-                self.a_rows.len()
-            )));
-        }
-        let mut growth = Value::INFINITY;
-        for j in 0..self.n {
-            let original_col = self.col_perm[j] as usize;
-            let mut input_max: Value = 0.0;
-            let span = self.a_col_ptr[original_col]..self.a_col_ptr[original_col + 1];
-            for (&value, &entry_scale) in values[span.clone()].iter().zip(&self.a_entry_scale[span])
-            {
-                let scaled = value * entry_scale;
-                if !scaled.is_finite() {
-                    return Err(SolverError::Overflow);
-                }
-                input_max = input_max.max(scaled.abs());
-            }
-            let mut factor_max: Value = 0.0;
-            for &value in &self.u_vals[self.u_col_ptr[j]..self.u_col_ptr[j + 1]] {
-                if !value.is_finite() {
-                    return Err(SolverError::Overflow);
-                }
-                factor_max = factor_max.max(value.abs());
-            }
-            if factor_max > 0.0 {
-                growth = growth.min(input_max / factor_max);
-            }
-        }
-        let growth = if growth.is_finite() { growth } else { 0.0 };
-        self.diagnostics.reciprocal_pivot_growth = growth;
-        Ok(growth)
-    }
-
-    /// Estimate `1 / cond_1(A)` with a bounded Hager iteration using the
-    /// existing normal and transpose factors. This is intentionally on demand:
-    /// running multiple triangular solves on every Newton refactor would harm
-    /// the hot path. Returns zero for a numerically singular estimate.
-    pub fn estimate_rcond(&mut self, values: &[Value]) -> Result<Value, SolverError> {
-        if !self.factored {
-            return Err(SolverError::SingularMatrix);
-        }
-        if values.len() != self.a_rows.len() {
-            return Err(SolverError::InvalidCircuit(format!(
-                "KLU condition estimate values length {} does not match analyzed nonzero count {}",
-                values.len(),
-                self.a_rows.len()
-            )));
-        }
-        if self.n == 0 {
-            return Ok(1.0);
-        }
-        let n = self.n;
-        let mut matrix_one_norm: Value = 0.0;
-        for col in 0..n {
-            let mut column_sum: Value = 0.0;
-            for &value in &values[self.a_col_ptr[col]..self.a_col_ptr[col + 1]] {
-                if !value.is_finite() {
-                    return Err(SolverError::Overflow);
-                }
-                column_sum = (column_sum + value.abs()).min(Value::MAX);
-            }
-            matrix_one_norm = matrix_one_norm.max(column_sum);
-        }
-        let mut rhs = std::mem::take(&mut self.condition_rhs);
-        let mut solution = std::mem::take(&mut self.condition_solution);
-        let mut transpose = std::mem::take(&mut self.condition_transpose);
-        if let Err(error) = resize_fallible(&mut rhs, n, 1.0 / n as Value) {
-            self.condition_rhs = rhs;
-            self.condition_solution = solution;
-            self.condition_transpose = transpose;
-            return Err(error);
-        }
-        rhs.fill(1.0 / n as Value);
-        let mut inverse_norm: Value = 0.0;
-        let mut previous_index = usize::MAX;
-        let estimate = (|| {
-            for _ in 0..5 {
-                self.solve(&rhs, &mut solution)?;
-                inverse_norm = solution
-                    .iter()
-                    .fold(0.0, |sum, value| (sum + value.abs()).min(Value::MAX));
-                for (sign, &value) in rhs.iter_mut().zip(&solution) {
-                    *sign = if value.is_sign_negative() { -1.0 } else { 1.0 };
-                }
-                self.solve_transpose(&rhs, &mut transpose)?;
-                let Some((index, &maximum)) = transpose
-                    .iter()
-                    .enumerate()
-                    .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
-                else {
-                    return Ok(0.0);
-                };
-                if index == previous_index || maximum == 0.0 {
-                    break;
-                }
-                previous_index = index;
-                rhs.fill(0.0);
-                rhs[index] = 1.0;
-            }
-            let condition = matrix_one_norm * inverse_norm;
-            Ok(if condition.is_finite() && condition > 0.0 {
-                (1.0 / condition).min(1.0)
-            } else {
-                0.0
-            })
-        })();
-        self.condition_rhs = rhs;
-        self.condition_solution = solution;
-        self.condition_transpose = transpose;
-        estimate
     }
 
     /// One-time symbolic phase for a pattern: structural matching, BTF, and
@@ -2147,19 +2011,6 @@ mod tests {
             klu.solve_transpose(&rhs[..n], &mut actual).unwrap();
             assert_close(&actual, &transpose_expected[..n]);
         }
-    }
-
-    #[test]
-    fn on_demand_condition_estimate_tracks_diagonal_conditioning() {
-        let mut klu = KluSolver::new();
-        klu.analyze(2, &[0, 1, 2], &[0, 1]).unwrap();
-        klu.factor(&[2.0, 4.0]).unwrap();
-        let rcond = klu.estimate_rcond(&[2.0, 4.0]).unwrap();
-        assert!((rcond - 0.5).abs() <= 16.0 * Value::EPSILON);
-
-        klu.refactor(&[1.0e-12, 1.0]).unwrap();
-        let ill_rcond = klu.estimate_rcond(&[1.0e-12, 1.0]).unwrap();
-        assert!((ill_rcond - 1.0e-12).abs() <= 1.0e-24);
     }
 
     #[test]

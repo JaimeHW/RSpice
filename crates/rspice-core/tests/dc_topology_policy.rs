@@ -1,5 +1,6 @@
 //! End-to-end policy for floating components at the shared DC-bias boundary.
 
+use rspice_core::StaticMatrix;
 use rspice_core::engine::{
     ContinuationAid, ContinuationStage, Engine, SimulationConfig, SimulationError,
     SimulationErrorCategory, SpiceDialect,
@@ -679,8 +680,8 @@ fn inductor_initial_current_uses_the_selected_dc_dialect() {
         let mut rhs = circuit.create_rhs();
         circuit.stamp_dc(&mut triplets, &mut rhs);
         let mut triplet_solution = Vec::new();
-        triplets
-            .to_static()
+        let entries: Vec<_> = triplets.entries().collect();
+        StaticMatrix::from_triplets(triplets.nrows(), triplets.ncols(), &entries)
             .unwrap()
             .solve_into(&rhs, &mut triplet_solution)
             .unwrap();
