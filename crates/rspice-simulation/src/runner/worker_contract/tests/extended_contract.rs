@@ -540,6 +540,7 @@ fn worker_spec_request_preserves_monte_carlo() {
     };
     let input = NetlistInput {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         netlist: "MC worker\n.param rload=1k\nV1 in 0 1\nR1 in out {rload}\nR2 out 0 1k\n.mc 10 START 37 GAUSS 0.05 CONFIDENCE 90 CI BOOTSTRAP RESAMPLES 257 BOOTSEED 18446744073709551615 PARAMS RLOAD\n.end\n"
             .to_string(),
         source_path: None,
@@ -600,6 +601,7 @@ fn worker_spec_request_preserves_structured_tf_contract() {
     };
     let input = NetlistInput {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         netlist: "Vstim in 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.tf V(out) Vstim\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -687,6 +689,7 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
     };
     let input = NetlistInput {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         netlist: "V1 in 0 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -777,6 +780,7 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
     };
     let input = NetlistInput {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         netlist: "V1 in 0 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -839,6 +843,7 @@ fn worker_spec_request_preserves_parametric_temp_execution_options() {
     };
     let input = NetlistInput {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         netlist: "V1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.step temp -40 125 55\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -921,6 +926,7 @@ fn worker_spec_request_preserves_corner_execution_options() {
     };
     let input = NetlistInput {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         netlist: "VDD vdd 0 1\nR1 vdd out 1k\nR2 out 0 1k\n.temp 25\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -952,6 +958,7 @@ fn worker_request_from_runner_parts_preserves_payload() {
     let request = SimulationRequest::Config(Box::new(AnalysisConfig::dc_op()));
     let input = NetlistInput {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         netlist: "V1 in 0 1\nR1 in 0 1k\n.op\n.end\n".to_string(),
         source_path: Some(std::path::PathBuf::from("deck.cir")),
         project_veriloga_runtimes: Default::default(),
@@ -1037,6 +1044,7 @@ fn worker_request_runs_structured_tf_spec() {
     };
     let input = NetlistInput {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         netlist: "* worker tf\nVstim in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.end\n".to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -1441,6 +1449,7 @@ fn worker_resource_policy_round_trip_is_required_and_enforced() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         measurement_references: Default::default(),
+        data_files: Default::default(),
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,

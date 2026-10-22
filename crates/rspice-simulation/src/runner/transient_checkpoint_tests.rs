@@ -76,6 +76,7 @@ fn fixture() -> (SimulationRequest, NetlistInput) {
             ])
             .unwrap(),
             measurement_references: Default::default(),
+            data_files: Default::default(),
             dependencies: Default::default(),
             environment: None,
             stream_transient_samples: false,

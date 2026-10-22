@@ -303,9 +303,15 @@ use rspice_core::analysis::harmonic_balance::{
 // (engine/builder/veriloga_sources.rs). The census was 5,753, with no slack.
 // `io::vcd::VcdDumpOff` adds one: the element type of the public
 // `VcdDocument::dump_off`, which the `d_vcd` digital stimulus reads to refuse
-// replaying a stretch the dump did not record. The census is 5,754, with no
+// replaying a stretch the dump did not record. The census was 5,754, with no
 // slack.
-const MAX_PUBLIC_ITEMS: usize = 5754;
+// `Engine::code_model_data_files_with_abort` and the `engine::CodeModelDataFile`
+// it returns add two: rspice-simulation's `data_files` seals the file every
+// code-model data-file parameter names into a prepared run, registering its
+// bytes under the path the model reads, so a prepared run, the app and the
+// browser worker replay `d_source`, `d_vcd` and the table models without a
+// file system. The census is 5,756, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5756;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

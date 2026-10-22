@@ -267,6 +267,7 @@ fn parts() -> SnapshotParts {
         task_source_policy: TaskSourcePolicy::PreparedObservations,
         execution_limits: rspice_core::ResourceLimits::default(),
         measurement_references: Default::default(),
+        data_files: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(
             TEST_NAMESPACE,
@@ -1612,7 +1613,8 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .expect("OP has no typed dependencies");
-        let (queued, source, _, _, _, _, _) = resolved.into_runner_parts();
+        let parts = resolved.into_runner_parts();
+        let (queued, source) = (parts.task, parts.executable_netlist);
         let Some(AnalysisConfig::DcOp(config)) = queued.config else {
             panic!("OP config")
         };
@@ -1880,10 +1882,11 @@ fn authorized_tasks_own_the_exact_snapshot_netlist_after_permit_consumption() {
     let resolved = authorized
         .resolve_dependency_artifacts(&HashMap::new())
         .expect("artifact-free task resolves");
-    let (_, netlist, runtimes, _, dependencies, _, _) = resolved.into_runner_parts();
-    assert_eq!(&*netlist, "deck\n.op\n.end\n");
-    assert!(runtimes.is_empty());
-    dependencies
+    let parts = resolved.into_runner_parts();
+    assert_eq!(&*parts.executable_netlist, "deck\n.op\n.end\n");
+    assert!(parts.project_veriloga_runtimes.is_empty());
+    parts
+        .dependencies
         .validate_for_config()
         .expect("OP has no typed dependencies");
     assert!(tasks.is_empty());
@@ -2547,6 +2550,6 @@ fn execution_resource_policy_is_authenticated_and_reaches_dispatch() {
         .unwrap()
         .resolve_dependency_artifacts(&HashMap::new())
         .unwrap();
-    let (_, _, _, _, _, _, actual) = task.into_runner_parts();
+    let actual = task.into_runner_parts().execution_limits;
     assert_eq!(actual, expected);
 }

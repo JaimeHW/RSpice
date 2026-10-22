@@ -55,7 +55,7 @@ pub use builder::{
     ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinCoverageGap,
     ModelBinInspection, ModelBinInstanceInspection, ModelBinSelectionKind,
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_native_xyce_memristor,
-    validate_native_xyce_ltra_model_contract,
+    data_dependencies::CodeModelDataFile, validate_native_xyce_ltra_model_contract,
 };
 
 mod config_resolver;

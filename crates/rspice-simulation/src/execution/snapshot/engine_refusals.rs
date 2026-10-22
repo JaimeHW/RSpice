@@ -184,6 +184,9 @@ impl PreparedRunSnapshot {
         progress(DeckBuildProgress { built, total });
 
         let mut verdicts: HashMap<DeckKey<'_>, Option<DeckVerdict>> = HashMap::new();
+        // The data files the run's code models read, registered as its runner
+        // registers them, for every build.
+        let data_files = self.data_files.hold(self.execution_limits);
         // The Verilog-A the deck being built names, installed as its task's
         // runner installs it, and held while it builds.
         let mut installed = None;
@@ -197,9 +200,15 @@ impl PreparedRunSnapshot {
                     .veriloga_runtimes
                     .as_ref()
                     .unwrap_or(&self.project_veriloga_runtimes);
-                let verdict = match hold_for_build(&mut installed, runtimes) {
-                    Ok(()) => self.build_verdict(deck.source, deck.temperature, abort),
-                    Err(error) => Some(DeckVerdict::Refused(vec![EngineRefusalKind::Build {
+                let verdict = match (&data_files, hold_for_build(&mut installed, runtimes)) {
+                    (Ok(_), Ok(())) => self.build_verdict(deck.source, deck.temperature, abort),
+                    (Err(error), _) => Some(DeckVerdict::Refused(vec![EngineRefusalKind::Build {
+                        message: format!(
+                            "Could not install the run's sealed code-model data files: {error}"
+                        ),
+                        instance: None,
+                    }])),
+                    (_, Err(error)) => Some(DeckVerdict::Refused(vec![EngineRefusalKind::Build {
                         message: format!(
                             "Could not install prepared project Verilog-A runtimes: {error}"
                         ),

@@ -87,6 +87,9 @@ fn execute_inner(args: &StudyRunArgs, config: &Config, quiet: bool) -> Result<Va
         destinations.protect(dependency.resolved_path())?;
         destinations.protect(dependency.owner_path())?;
     }
+    for data_file in &metadata.sealed_data_files {
+        destinations.protect(data_file)?;
+    }
     check_abort(args.study.timeout)?;
     let dispatch = PreparedRunAuthorization::default()
         .authorize_campaign_member(prepared.snapshot)

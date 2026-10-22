@@ -17,6 +17,7 @@ use super::{
     RunSourceReceipt, SavePolicy, SimulationRunIntent, SnapshotParts, TaskSourcePolicy,
     TouchstoneExportPolicy,
 };
+use crate::data_files::PreparedDataFiles;
 use crate::error::ServiceRunError;
 use crate::execution_identity::{manual_source_receipt_digest, sealed_dependency_closure_digest};
 use crate::measurement_references::PreparedMeasurementReferences;
@@ -219,6 +220,18 @@ pub fn prepare_headless_run(
         &input.veriloga_runtimes,
         &input.measurement_references,
     )?;
+    // The files the deck's code models read, from beside the root deck. A
+    // sealed bundle carries no data file, so its deck can name none.
+    let data_files = PreparedDataFiles::capture(
+        &expanded,
+        if reads_files { origin.parent() } else { None },
+        limits,
+        abort,
+    )?;
+    // Held while preparation elaborates the deck, as its runner holds them.
+    let _data_files = data_files
+        .hold(input.execution_limits)
+        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     check_abort(abort)?;
 
     for request in &input.tasks {
@@ -309,6 +322,7 @@ pub fn prepare_headless_run(
             project_veriloga_runtimes: input.veriloga_runtimes,
             corner_veriloga_runtimes: Default::default(),
             measurement_references: input.measurement_references,
+            data_files,
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
             advisories: parsed

@@ -14,6 +14,12 @@ pub fn contains_external_include_directive(source: &str) -> bool {
         .any(|line| parse_include_directive(line).is_some() || parse_lib_directive(line).is_some())
 }
 
+/// The reason a code model's data-file parameter gives. A run's own deck
+/// seals those files at preparation (`data_files`), which reads them through
+/// the engine's parameter resolution, defaults included; a source nothing
+/// seals them from, such as a corner's model cards, is refused for them.
+const CODE_MODEL_DATA_FILE: &str = "code-model data file";
+
 pub fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
     let line = executable_source_portion(line);
     if line.is_empty() {
@@ -37,13 +43,17 @@ pub fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
         .collect::<String>();
     // File/provider assignments belong to code-model declarations or instances;
     // identically named numeric parameters do not open external resources.
+    // `process_file` starts a program, which nothing seals.
     let code_model = directive == ".model" || directive.starts_with('a');
+    if code_model && contains_parameter_assignment(&lower, "process_file") {
+        return Some("file-backed element or code-model parameter");
+    }
     if code_model
-        && ["file", "input_file", "state_file", "process_file"]
+        && ["file", "input_file", "state_file"]
             .iter()
             .any(|name| contains_parameter_assignment(&lower, name))
     {
-        return Some("file-backed element or code-model parameter");
+        return Some(CODE_MODEL_DATA_FILE);
     }
     let tokens = lower
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
@@ -107,6 +117,9 @@ fn contains_parameter_assignment(line: &str, parameter: &str) -> bool {
     })
 }
 
+/// Refuse a deck line that would open something outside the prepared run.
+/// The project's sealed Verilog-A and measurement tables pass; so do code-model
+/// data files, which the prepared snapshot seals and checks deck by deck.
 pub fn reject_deferred_external_sources_with_project_runtimes(
     netlist: &str,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
@@ -131,7 +144,7 @@ pub fn reject_deferred_external_sources_with_project_runtimes(
             continue;
         }
         if let Some(reason) = deferred_external_source_reason(&logical_line) {
-            if reason == "file-backed measurement reference" {
+            if reason == "file-backed measurement reference" || reason == CODE_MODEL_DATA_FILE {
                 continue;
             }
             return Err(PreparationError::new(

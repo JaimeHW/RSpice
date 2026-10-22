@@ -75,6 +75,7 @@ pub(crate) struct NetlistInput {
     source_path: Option<PathBuf>,
     project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: crate::measurement_references::PreparedMeasurementReferences,
+    data_files: crate::data_files::PreparedDataFiles,
     dependencies: ResolvedExecutionDependencies,
     environment: Option<AnalysisExecutionEnvironment>,
     stream_transient_samples: bool,
@@ -401,15 +402,16 @@ impl SimulationRunner {
         stream_transient_samples: bool,
     ) -> Result<(), SimulationError> {
         let transient_states = dispatch.transient_state_role();
-        let (
+        let crate::execution::RunnerParts {
             task,
             executable_netlist,
             project_veriloga_runtimes,
             measurement_references,
+            data_files,
             dependencies,
             environment,
             execution_limits,
-        ) = dispatch.into_runner_parts();
+        } = dispatch.into_runner_parts();
         // A configuration-only request has no checkpoint policy. Preserve the
         // sealed options even when this transient also has a basic config.
         let request = match task.config {
@@ -428,6 +430,7 @@ impl SimulationRunner {
                 source_path: None,
                 project_veriloga_runtimes,
                 measurement_references,
+                data_files,
                 dependencies,
                 environment,
                 stream_transient_samples,
@@ -457,6 +460,7 @@ impl SimulationRunner {
             SimulationRequest::Config(Box::new(config)),
             NetlistInput {
                 measurement_references: Default::default(),
+                data_files: Default::default(),
                 netlist,
                 source_path,
                 project_veriloga_runtimes: Default::default(),
@@ -992,6 +996,15 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
             "Could not install prepared project Verilog-A runtimes: {error}"
         ))
     })?;
+    // Likewise the data files its code models read, as preparation read them.
+    let _data_files = input
+        .data_files
+        .hold(input.execution_limits)
+        .map_err(|error| {
+            SimulationError::CircuitError(format!(
+                "Could not install the run's sealed code-model data files: {error}"
+            ))
+        })?;
 
     if let SimulationRequest::Spec { spec, .. } = &request
         && let Some(reason) =
@@ -1200,6 +1213,7 @@ mod tests {
             },
             NetlistInput {
                 measurement_references: Default::default(),
+                data_files: Default::default(),
                 netlist: netlist.to_owned(),
                 source_path: None,
                 project_veriloga_runtimes: Default::default(),

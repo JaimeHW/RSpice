@@ -575,6 +575,9 @@ pub struct PreparedRunMetadata {
     /// Exact complete source files read while sealing a manual deck. Empty for
     /// schematic-generated runs and manual decks without external sources.
     pub sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+    /// The host files the run's code models read (`d_source`, `d_vcd`, the
+    /// tables), read once while preparing it.
+    pub sealed_data_files: Vec<std::path::PathBuf>,
 }
 
 /// Whole-run dispatch object that can only be created with a successfully
@@ -620,6 +623,7 @@ pub struct AuthorizedTaskDispatch {
     source_basis_digest: ContentDigest,
     project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: crate::measurement_references::PreparedMeasurementReferences,
+    data_files: crate::data_files::PreparedDataFiles,
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<rspice_results::provenance::AnalysisResultPvtPoint>,
     declared_point: Option<crate::point_family::DeclaredRunPoint>,
@@ -812,27 +816,30 @@ impl ResolvedTaskDispatch {
         )
     }
 
-    pub(crate) fn into_runner_parts(
-        self,
-    ) -> (
-        QueuedAnalysis,
-        Arc<str>,
-        crate::veriloga::PreparedVerilogARuntimeSet,
-        crate::measurement_references::PreparedMeasurementReferences,
-        ResolvedExecutionDependencies,
-        Option<crate::runner::AnalysisExecutionEnvironment>,
-        rspice_core::ResourceLimits,
-    ) {
-        (
-            self.dispatch.task,
-            self.dispatch.executable_netlist,
-            self.dispatch.project_veriloga_runtimes,
-            self.dispatch.measurement_references,
-            self.dependencies,
-            self.dispatch.execution_environment,
-            self.dispatch.execution_limits,
-        )
+    pub(crate) fn into_runner_parts(self) -> RunnerParts {
+        RunnerParts {
+            task: self.dispatch.task,
+            executable_netlist: self.dispatch.executable_netlist,
+            project_veriloga_runtimes: self.dispatch.project_veriloga_runtimes,
+            measurement_references: self.dispatch.measurement_references,
+            data_files: self.dispatch.data_files,
+            dependencies: self.dependencies,
+            environment: self.dispatch.execution_environment,
+            execution_limits: self.dispatch.execution_limits,
+        }
     }
+}
+
+/// What a resolved task hands the runner.
+pub(crate) struct RunnerParts {
+    pub(crate) task: QueuedAnalysis,
+    pub(crate) executable_netlist: Arc<str>,
+    pub(crate) project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
+    pub(crate) measurement_references: crate::measurement_references::PreparedMeasurementReferences,
+    pub(crate) data_files: crate::data_files::PreparedDataFiles,
+    pub(crate) dependencies: ResolvedExecutionDependencies,
+    pub(crate) environment: Option<crate::runner::AnalysisExecutionEnvironment>,
+    pub(crate) execution_limits: rspice_core::ResourceLimits,
 }
 
 /// Constructor input kept separate so the snapshot's authoritative fields
@@ -862,6 +869,8 @@ pub(crate) struct SnapshotParts {
     /// reference sections' model-library Verilog-A.
     pub(crate) corner_veriloga_runtimes: CornerVerilogARuntimes,
     pub(crate) measurement_references: crate::measurement_references::PreparedMeasurementReferences,
+    /// The data files the run's code models read, captured from its deck.
+    pub(crate) data_files: crate::data_files::PreparedDataFiles,
     pub(crate) target: ExecutionTargetCapabilities,
     pub(crate) receipt: RunSourceReceipt,
     pub(crate) advisories: Vec<String>,
@@ -925,6 +934,7 @@ pub struct PreparedRunSnapshot {
     specification_policy: PreparedSpecificationPolicy,
     project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: crate::measurement_references::PreparedMeasurementReferences,
+    data_files: crate::data_files::PreparedDataFiles,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
     advisories: Vec<String>,
@@ -1250,6 +1260,31 @@ impl PreparedRunSnapshot {
         // Population routing reparses an already expanded deck, as dispatch does.
         let mut execution_limits = parts.execution_limits;
         execution_limits.max_netlist_bytes = execution_limits.max_expanded_source_bytes;
+
+        // Every deck a task solves names only data files the run sealed, and
+        // the checks below that build a deck read them as its solve will.
+        parts
+            .data_files
+            .validate(limits)
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
+        {
+            let mut covered = HashSet::new();
+            for deck in std::iter::once(parts.executable_netlist.as_str()).chain(
+                parts
+                    .tasks
+                    .iter()
+                    .filter_map(|task| task.executable_netlist_override.as_deref()),
+            ) {
+                if covered.insert(deck) {
+                    parts.data_files.cover(deck, limits, abort)?;
+                }
+            }
+        }
+        let _data_files = parts
+            .data_files
+            .hold(execution_limits)
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
+
         monte_carlo::route_resumes(
             &mut parts.tasks,
             &parts.executable_netlist,
@@ -1601,6 +1636,7 @@ impl PreparedRunSnapshot {
             specification_policy: parts.specification_policy,
             project_veriloga_runtimes: parts.project_veriloga_runtimes,
             measurement_references: parts.measurement_references,
+            data_files: parts.data_files,
             target: parts.target,
             receipt: parts.receipt,
             advisories: parts.advisories,
@@ -1682,6 +1718,7 @@ impl PreparedRunSnapshot {
             model_identity_count: self.model_identities.len(),
             advisories: self.advisories.clone(),
             sealed_source_dependencies: self.sealed_source_dependencies.clone(),
+            sealed_data_files: self.data_files.host_paths(),
         }
     }
 
@@ -1704,6 +1741,7 @@ impl PreparedRunSnapshot {
         let default_touchstone_export = self.touchstone_export.clone();
         let project_veriloga_runtimes = self.project_veriloga_runtimes.clone();
         let measurement_references = self.measurement_references.clone();
+        let data_files = self.data_files.clone();
         let tasks = self
             .tasks
             .into_iter()
@@ -1742,6 +1780,7 @@ impl PreparedRunSnapshot {
                         .veriloga_runtimes
                         .unwrap_or_else(|| project_veriloga_runtimes.clone()),
                     measurement_references: measurement_references.clone(),
+                    data_files: data_files.clone(),
                     touchstone_export,
                     pvt_point: prepared.pvt_point,
                     declared_point: prepared.declared_point,
@@ -2414,6 +2453,12 @@ fn snapshot_digest(parts: &SnapshotParts, pvt_points: &[PreparedPvtPoint]) -> Co
     if !measurement_references.is_empty() {
         writer.domain("rspice.prepared-measurement-references/v1");
         writer.digest(measurement_references.digest());
+    }
+    // An edited data file is a different run. A run without one keeps the
+    // identity it had before data files were sealed.
+    if !parts.data_files.is_empty() {
+        writer.domain("rspice.prepared-code-model-data-files/v1");
+        writer.digest(parts.data_files.digest());
     }
     writer.finish()
 }

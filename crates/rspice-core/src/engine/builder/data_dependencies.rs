@@ -2,6 +2,18 @@
 use super::*;
 use std::path::PathBuf;
 
+/// One code-model parameter that names a data file, as the model will read it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CodeModelDataFile {
+    /// The flattened instance name.
+    pub instance: String,
+    /// The parameter, spelled as the model's schema spells it.
+    pub parameter: &'static str,
+    /// The path the model hands the data-file loader: the instance override
+    /// or the schema default, trimmed when the model trims it.
+    pub path: String,
+}
+
 impl Engine {
     /// Discover native input candidates for XSPICE and PEM data-file models and
     /// behavioral lookup tables in sources, resistors, and capacitors.
@@ -20,21 +32,53 @@ impl Engine {
         netlist: &Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<PathBuf>, SimulationError> {
+        let mut paths = BTreeSet::new();
+        for file in self.data_inputs_with_abort(netlist, abort, Some(&mut paths))? {
+            paths.extend(crate::xspice::data_file_input_candidates(&file.path));
+        }
+        Ok(paths.into_iter().collect())
+    }
+
+    /// Every XSPICE code-model parameter of the flattened deck that names a
+    /// data file, in hierarchy order, with the path exactly as the model asks
+    /// the data-file loader for it: a host that seals the file registers its
+    /// bytes under that path.
+    ///
+    /// The same resolution as [`Self::data_file_candidates_with_abort`]:
+    /// nothing is read, no model is initialized, and the caller's statistical
+    /// stream does not advance. An empty path names no file and is left out.
+    pub fn code_model_data_files_with_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<CodeModelDataFile>, SimulationError> {
+        self.data_inputs_with_abort(netlist, abort, None)
+    }
+
+    /// The code-model data files, and, when `other_inputs` is given, the
+    /// native candidates of the PEM tables and behavioral lookups too.
+    fn data_inputs_with_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+        mut other_inputs: Option<&mut BTreeSet<PathBuf>>,
+    ) -> Result<Vec<CodeModelDataFile>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_valid_configuration()?;
         check_build_abort(abort)?;
 
         // Avoid hierarchy work for decks with no data-consuming element kinds.
+        let other_kinds = other_inputs.is_some();
         let mut definitions: Vec<_> = netlist.subcircuits.iter().collect();
         let mut elements = netlist.elements.as_slice();
         loop {
             let mut found = false;
             for element in elements {
                 check_build_abort(abort)?;
-                if matches!(
-                    element.kind,
-                    ElementKind::Xspice { .. } | ElementKind::XyceMemristor { .. }
-                ) || behavioral_data_expression(&element.kind).is_some()
+                if matches!(element.kind, ElementKind::Xspice { .. })
+                    || other_kinds
+                        && (matches!(element.kind, ElementKind::XyceMemristor { .. })
+                            || behavioral_data_expression(&element.kind).is_some())
                 {
                     found = true;
                     break;
@@ -64,20 +108,22 @@ impl Engine {
         .map_err(|error| map_build_parse_error("data-file dependency discovery", error))?;
         isolated.models.extend(flattened.scoped_models);
         let registry = OnceLock::new();
-        let mut paths = BTreeSet::new();
+        let mut files = Vec::new();
         for element in flattened.elements {
             check_build_abort(abort)?;
-            if let ElementKind::XyceMemristor { model, .. } = &element.kind {
-                collect_pem_data_inputs(
-                    &ModelResolution::new(&isolated, abort),
-                    &element.name,
-                    model,
-                    engine.config.temperature,
-                    &mut paths,
-                )?;
-            }
-            if let Some(expression) = behavioral_data_expression(&element.kind) {
-                collect_behavioral_data_inputs(&isolated, &element, expression, abort, &mut paths)?;
+            if let Some(paths) = other_inputs.as_deref_mut() {
+                if let ElementKind::XyceMemristor { model, .. } = &element.kind {
+                    collect_pem_data_inputs(
+                        &ModelResolution::new(&isolated, abort),
+                        &element.name,
+                        model,
+                        engine.config.temperature,
+                        paths,
+                    )?;
+                }
+                if let Some(expression) = behavioral_data_expression(&element.kind) {
+                    collect_behavioral_data_inputs(&isolated, &element, expression, abort, paths)?;
+                }
             }
             let ElementKind::Xspice {
                 model,
@@ -135,12 +181,18 @@ impl Engine {
                     .or(default);
                 if let Some(path) = path {
                     let path = if input.trim { path.trim() } else { path };
-                    paths.extend(crate::xspice::data_file_input_candidates(path));
+                    if !path.is_empty() {
+                        files.push(CodeModelDataFile {
+                            instance: element.name.clone(),
+                            parameter: input.name,
+                            path: path.to_owned(),
+                        });
+                    }
                 }
             }
         }
         check_build_abort(abort)?;
-        Ok(paths.into_iter().collect())
+        Ok(files)
     }
 }
 

@@ -459,6 +459,17 @@ where
         &project_veriloga_runtimes,
         &measurement_references,
     )?;
+    // The files the design's code models read, from beside its root sheet,
+    // held while preparation elaborates the deck.
+    let data_files = crate::data_files::PreparedDataFiles::capture(
+        &netlist,
+        root_schematic.current_file().and_then(Path::parent),
+        rspice_core::ResourceLimits::default(),
+        abort,
+    )?;
+    let _data_files = data_files
+        .hold(inputs.execution_limits())
+        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     validate_prepared_periodic_sources(
         tasks
             .iter()
@@ -526,6 +537,7 @@ where
             task_source_policy: super::snapshot::TaskSourcePolicy::PreparedObservations,
             execution_limits: inputs.execution_limits(),
             measurement_references,
+            data_files,
             intent: SimulationRunIntent::SimulateRunSet,
             simulation_plan_id: Some(plan.plan_id()),
             project_revision: inputs.technology.project.revision().get(),
@@ -732,6 +744,17 @@ pub fn build_prepared_manual_deck<R, A>(
         &project_veriloga_runtimes,
         &measurement_references,
     )?;
+    // The files the deck's code models read, from beside the deck, held
+    // while reading its analyses elaborates it.
+    let data_files = crate::data_files::PreparedDataFiles::capture(
+        &expanded,
+        origin.and_then(Path::parent),
+        rspice_core::ResourceLimits::default(),
+        &rspice_core::NoAbort,
+    )?;
+    let _data_files = data_files
+        .hold(inputs.execution_limits())
+        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     let queued_tasks = manual_deck::build_manual_deck_queue_with_runtimes(
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
         &expanded,
@@ -795,6 +818,7 @@ pub fn build_prepared_manual_deck<R, A>(
         task_source_policy: super::snapshot::TaskSourcePolicy::AuthoredDeck,
         execution_limits: inputs.execution_limits(),
         measurement_references,
+        data_files,
         intent: SimulationRunIntent::ManualDeck,
         simulation_plan_id: None,
         project_revision: inputs.technology.project.revision().get(),

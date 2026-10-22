@@ -26,10 +26,8 @@ fn every_runtime_external_input_category_fails_closed() {
         ".load prior.raw",
         "Vstim in 0 PWL FILE \"wave.csv\"",
         ".measure tran fit ERROR V(out) FILE reference.prn DEPVARCOL 2",
-        ".model touchstone transfer (file = \"network.s2p\")",
-        ".model source d_source (input_file = \"stimulus.txt\")",
-        ".model state d_state (state_file = \"state.tbl\")",
         ".model process d_process (process_file = worker)",
+        "Aproc [in] [out] null process process_file = worker",
         ".model cosim d_cosim (simulation = \"payload.dll\")",
         "Aco [in] [out] null cosim simulation = provider",
     ];
@@ -67,7 +65,7 @@ fn continuation_folding_cannot_hide_external_dependencies() {
         "deck\nBlookup out 0 V=table\n+ (\"C:/curves/transfer.tbl\")\n.end\n",
         "deck\nVstim in 0 PWL(\n+ FILE = \"C:/stimulus/wave.csv\"\n+ )\n.end\n",
         "deck\n.model cosim d_cosim (simulation\n* comment between continued records\n+ = \"C:/plugins/payload.dll\")\n.end\n",
-        "deck\n.model source d_source (input_file\n+ = 'C:/stimulus/input.txt')\n.end\n",
+        "deck\n.model process d_process (process_file\n+ = 'C:/workers/stimulus.exe')\n.end\n",
     ] {
         let error = reject_deferred_external_sources(source)
             .expect_err("continued external dependency must fail closed");
@@ -147,5 +145,31 @@ fn external_input_audit_ignores_comments_and_inline_data() {
             deferred_external_source_reason(line).is_some(),
             "executable dependency must survive comment scanning: {line}"
         );
+    }
+}
+
+/// A data file a code model reads is named for what it is, and a run's own
+/// deck passes: its preparation seals the file through the engine's own
+/// parameter resolution, defaults included.
+#[test]
+fn code_model_data_files_are_left_to_preparation_to_seal() {
+    for line in [
+        ".model touchstone xfer (file = \"network.s2p\")",
+        ".model source d_source (input_file = \"stimulus.txt\")",
+        ".model state d_state (state_file = \"state.tbl\")",
+        ".model dump d_vcd (file=\"ports.vcd\" signals=\"tb.clk\")",
+        "Asrc [d] source input_file=\"other.txt\"",
+    ] {
+        assert_eq!(
+            deferred_external_source_reason(line),
+            Some(CODE_MODEL_DATA_FILE),
+            "{line}"
+        );
+        reject_deferred_external_sources_with_project_runtimes(
+            &format!("deck\n{line}\n.end\n"),
+            &Default::default(),
+            &Default::default(),
+        )
+        .unwrap_or_else(|error| panic!("{line}: {error}"));
     }
 }

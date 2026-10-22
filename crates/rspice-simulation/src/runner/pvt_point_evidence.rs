@@ -228,6 +228,7 @@ fn prepare_declaration(
         task_source_policy: crate::execution::TaskSourcePolicy::PreparedObservations,
         execution_limits: rspice_core::ResourceLimits::default(),
         measurement_references: Default::default(),
+        data_files: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(
             TEST_NAMESPACE,
@@ -323,19 +324,37 @@ pub(crate) fn run_prepared_declaration(
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .map_err(|error| error.to_string())?;
-        let (queued, netlist, runtimes, references, dependencies, environment, limits) =
-            resolved.into_runner_parts();
+        let crate::execution::RunnerParts {
+            task: queued,
+            executable_netlist: netlist,
+            project_veriloga_runtimes: runtimes,
+            measurement_references: references,
+            data_files,
+            dependencies,
+            environment,
+            execution_limits: limits,
+        } = resolved.into_runner_parts();
         let bridge = crate::engine_bridge::EngineBridge::new()
             .with_resource_limits(limits)
             .with_measurement_references(references);
 
-        // The task's deck names the Verilog-A it installs, held while it
-        // solves, as the runner holds it.
-        let installed = runtimes.install().map_err(|error| {
-            SimulationError::CircuitError(format!(
-                "Could not install prepared project Verilog-A runtimes: {error}"
-            ))
-        });
+        // The task's deck names the Verilog-A and the data files it installs,
+        // held while it solves, as the runner holds them.
+        let installed = runtimes
+            .install()
+            .map_err(|error| {
+                SimulationError::CircuitError(format!(
+                    "Could not install prepared project Verilog-A runtimes: {error}"
+                ))
+            })
+            .and_then(|runtimes| {
+                let files = data_files.hold(limits).map_err(|error| {
+                    SimulationError::CircuitError(format!(
+                        "Could not install the run's sealed code-model data files: {error}"
+                    ))
+                })?;
+                Ok((runtimes, files))
+            });
         let outcome = installed.and_then(|_installed| match queued.config {
             Some(config) => bridge.run_with_abort_and_source_path_and_environment(
                 &config,

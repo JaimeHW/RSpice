@@ -31,8 +31,8 @@ pub use snapshot::{
     TouchstoneExportPolicy, result_source_domain,
 };
 pub(crate) use snapshot::{
-    CornerVerilogARuntimes, ModelSourceIdentity, PreparedRunSet, RunSourceReceipt, SnapshotParts,
-    TaskSourcePolicy,
+    CornerVerilogARuntimes, ModelSourceIdentity, PreparedRunSet, RunSourceReceipt, RunnerParts,
+    SnapshotParts, TaskSourcePolicy,
 };
 pub use snapshot::{PreparedRunMetadata, execution_target_supports_cancellation};
 pub(crate) use task_preparation::{attach_saved_output_contracts, prepare_manual_tasks};

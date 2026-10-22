@@ -42,7 +42,7 @@ use std::sync::RwLock;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 use std::time::{Duration, Instant};
 
-mod data_dependencies;
+pub(in crate::engine) mod data_dependencies;
 mod ground_reference;
 mod model_resolution;
 mod model_safety;

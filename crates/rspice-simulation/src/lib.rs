@@ -6,6 +6,7 @@
 pub mod analysis_preparation;
 pub mod capture_ledger;
 pub mod compilation;
+pub(crate) mod data_files;
 pub mod engine_log;
 pub mod error;
 pub mod execution_artifact;

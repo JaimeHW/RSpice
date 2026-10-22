@@ -396,6 +396,7 @@ impl WorkerRequest {
                 source_path: self.source_path.map(PathBuf::from),
                 project_veriloga_runtimes: self.project_veriloga_runtimes,
                 measurement_references: self.measurement_references,
+                data_files: Default::default(),
                 dependencies: self.dependencies,
                 environment: self.environment,
                 stream_transient_samples: self.stream_transient_samples,

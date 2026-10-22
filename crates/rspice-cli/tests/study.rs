@@ -1118,3 +1118,160 @@ fn optimization_study_enforces_candidate_history_and_solver_limits() {
         );
     }
 }
+
+/// A study of `circuit` (written beside its data files in `circuits/`) with
+/// one 3 ns transient.
+fn data_file_study(root: &Path, circuit: &str) -> std::path::PathBuf {
+    std::fs::write(root.join("config.toml"), "").unwrap();
+    std::fs::create_dir_all(root.join("circuits")).unwrap();
+    std::fs::write(root.join("circuits/stimulus.cir"), circuit).unwrap();
+    save(
+        root,
+        &json!({
+            "schema_version": 1,
+            "id": "0b6f0a4e-5f3c-4a39-9a43-3f3c6f0e2c71",
+            "circuit": {"path": "circuits/stimulus.cir"},
+            "tasks": [{"id": "replay", "analysis": {"Transient": {
+                "step_time": 1e-11, "stop_time": 3e-9, "start_time": 0.0,
+                "max_timestep": 1e-11, "uic": false
+            }}}]
+        }),
+    )
+}
+
+/// Run the study and read the event history its results retain for `node`:
+/// each change's time, bit for bit, and its 12-state code.
+fn study_events(root: &Path, study: &Path, node: &str) -> Vec<(u64, u64)> {
+    fn find<'a>(value: &'a Value, node: &str) -> Option<&'a Value> {
+        match value {
+            Value::Object(fields) => {
+                if fields
+                    .get("node_name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name.eq_ignore_ascii_case(node))
+                    && fields.contains_key("points")
+                {
+                    return Some(value);
+                }
+                fields.values().find_map(|field| find(field, node))
+            }
+            Value::Array(items) => items.iter().find_map(|item| find(item, node)),
+            _ => None,
+        }
+    }
+    let destination = root.join("result.json");
+    let output = invoke(
+        root,
+        &[
+            "study",
+            "run",
+            study.to_str().unwrap(),
+            "--output",
+            destination.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let artifact: Value = serde_json::from_slice(&std::fs::read(&destination).unwrap()).unwrap();
+    find(&artifact["results"], node)
+        .unwrap_or_else(|| panic!("no event history of {node}: {artifact}"))["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|point| {
+            (
+                point["time_s"].as_f64().unwrap().to_bits(),
+                point["value_code"].as_u64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn level(bit: bool) -> u64 {
+    let value = if bit {
+        rspice_core::xspice::DigitalValue::one()
+    } else {
+        rspice_core::xspice::DigitalValue::zero()
+    };
+    u64::from(value.event_code())
+}
+
+const D_SOURCE_CIRCUIT: &str = "Stimulus file\nV1 in 0 1\nR1 in 0 1k\na_src [d] src\n\
+                                .model src d_source (input_file=\"events.txt\")\n.end\n";
+
+/// A `d_source` reads its stimulus file through the prepared run `rspice
+/// study run` executes, and the run's events are the file's rows.
+#[test]
+fn study_run_replays_a_d_source_stimulus_file() {
+    let root = common::test_dir("study-d-source");
+    let study = data_file_study(&root, D_SOURCE_CIRCUIT);
+    std::fs::write(root.join("circuits/events.txt"), "0 0s\n1n 1s\n2n 0s\n").unwrap();
+    assert_eq!(
+        study_events(&root, &study, "d"),
+        [(0.0f64, false), (1e-9, true), (2e-9, false)]
+            .map(|(time, bit)| (time.to_bits(), level(bit)))
+    );
+}
+
+/// A `d_vcd` replays its dump through the same prepared run, at exactly the
+/// times the VCD reader gives its ticks.
+#[test]
+fn study_run_replays_a_d_vcd_dump() {
+    let root = common::test_dir("study-d-vcd");
+    let study = data_file_study(
+        &root,
+        "VCD stimulus\nV1 in 0 1\nR1 in 0 1k\na_stim [clk] vstim\n\
+         .model vstim d_vcd (file=\"clk.vcd\" signals=\"tb.clk\")\n.end\n",
+    );
+    let mut vcd = String::from(
+        "$timescale 1ps $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$upscope $end\n\
+         $enddefinitions $end\n#0\n$dumpvars\n0!\n$end\n",
+    );
+    for tick in 1..=4u64 {
+        vcd.push_str(&format!("#{}\n{}!\n", tick * 500, tick % 2));
+    }
+    std::fs::write(root.join("circuits/clk.vcd"), &vcd).unwrap();
+    let document = rspice_core::io::parse_vcd_reader(vcd.as_bytes()).unwrap();
+    let expected: Vec<(u64, u64)> = document.signals[0]
+        .changes
+        .iter()
+        .enumerate()
+        .map(|(index, change)| {
+            let time = document.timescale.seconds_at_tick(change.tick).unwrap();
+            (time.to_bits(), level(index % 2 == 1))
+        })
+        .collect();
+    assert_eq!(study_events(&root, &study, "clk"), expected);
+}
+
+/// The stimulus file's bytes are part of the prepared run's identity, and a
+/// file the circuit names that cannot be read is refused before anything
+/// runs, naming the instance, the parameter and the path.
+#[test]
+fn study_plans_bind_the_stimulus_file_and_refuse_a_missing_one() {
+    let root = common::test_dir("study-data-identity");
+    let study = data_file_study(&root, D_SOURCE_CIRCUIT);
+    let events = root.join("circuits/events.txt");
+    let plan = || {
+        let output = invoke(&root, &["study", "plan", study.to_str().unwrap(), "--json"]);
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["snapshot_digest"].clone()
+    };
+    std::fs::write(&events, "0 0s\n1n 1s\n").unwrap();
+    let first = plan();
+    assert_eq!(first, plan());
+    std::fs::write(&events, "0 0s\n1n 0s\n").unwrap();
+    assert_ne!(first, plan());
+
+    std::fs::remove_file(&events).unwrap();
+    let output = invoke(
+        &root,
+        &["study", "check", study.to_str().unwrap(), "--json"],
+    );
+    assert_eq!(output.status.code(), Some(65), "{output:?}");
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    let message = error["error"]["message"].as_str().unwrap();
+    for named in ["'A_SRC'", "input_file=\"events.txt\"", "cannot be read"] {
+        assert!(message.contains(named), "{named}: {message}");
+    }
+}
