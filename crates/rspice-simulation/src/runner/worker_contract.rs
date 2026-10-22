@@ -72,8 +72,11 @@ pub(crate) use rspice_simulation_contract::worker_spec::{
 pub(crate) use rspice_simulation_contract::worker_waveform::WorkerWaveform;
 
 use std::collections::HashMap;
+#[cfg(any(feature = "browser-worker", test))]
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, atomic::AtomicBool};
+use std::sync::Arc;
+#[cfg(any(feature = "browser-worker", test))]
+use std::sync::{Mutex, atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 
@@ -394,6 +397,7 @@ impl WorkerRequest {
         })
     }
 
+    #[cfg(any(feature = "browser-worker", test))]
     pub(crate) fn into_runner_parts(self) -> (SimulationRequest, NetlistInput) {
         (
             SimulationRequest::from(self.request),
@@ -429,6 +433,7 @@ pub(crate) struct WorkerResponse {
 }
 
 impl WorkerResponse {
+    #[cfg(any(feature = "browser-worker", test))]
     pub(crate) fn from_result_for_transfer(
         id: u64,
         result: Result<SimulationResult, SimulationError>,
@@ -501,6 +506,7 @@ pub(crate) enum WorkerOutcome {
     Failure(WorkerSimulationError),
 }
 
+#[cfg(any(feature = "browser-worker", test))]
 fn worker_transfer_outcome_from_result(
     result: Result<SimulationResult, SimulationError>,
 ) -> WorkerOutcome {
