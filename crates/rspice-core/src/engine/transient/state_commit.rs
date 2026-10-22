@@ -5,10 +5,6 @@ use rspice_veriloga_runtime::transport_delay::{
     DelayAcceptanceError, DelayBuffer, DelayEvent, DelayEventOrder,
 };
 
-// The main stepper still needs physical event classification and incoming-side
-// orchestration; this acceptance participant can already validate/commit a
-// prepared point without routing its impulse through a finite companion.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) mod physical_event;
 pub(super) use physical_event::PreparedPhysicalEvent;
 

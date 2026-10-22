@@ -164,7 +164,6 @@ pub(super) struct ChargeEventState {
     /// Rates resolved by the event operator. The finite-voltage kernel leaves
     /// ideal-source and capacitor branch-current derivatives unresolved.
     pub coordinate_rates: Vec<Option<Value>>,
-    pub iterations: usize,
 }
 
 /// Structural coupling of a prescribed, charge-free nodal current to the

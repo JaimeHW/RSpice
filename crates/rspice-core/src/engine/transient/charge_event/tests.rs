@@ -89,7 +89,6 @@ fn charge_event_recovers_divider_voltage_rate_finite_current_and_source_impulse(
     close(state.solution[2], -4.0 / 3.0 * 1e-3, 1e-13);
     assert_eq!(state.coordinate_rates[2], None);
     assert_eq!(incoming, vec![0.0; 3]);
-    assert!(state.iterations <= 3);
 }
 
 #[test]

@@ -34,7 +34,6 @@ pub(in crate::engine::transient) struct PhysicalEventStep<'a> {
 pub(in crate::engine::transient) struct PreparedPhysicalEvent {
     state: charge_event::ChargeEventState,
     source_branches: Vec<usize>,
-    phase_current_couplings: Vec<Option<charge_event::CurrentJumpCoupling>>,
     time: Value,
     dt: Value,
     pub(super) bjt: PreparedBjtHistory,
@@ -247,16 +246,6 @@ fn rate(rates: &[Option<Value>], node: usize) -> Result<Value, SimulationError> 
 }
 
 impl PreparedPhysicalEvent {
-    /// Per-device delayed-current incidence in the successfully solved event
-    /// topology. None denotes a device without GP delay. This is a structural
-    /// input for propagation classification, not the order of this event;
-    /// simultaneous source changes and model regularity still matter.
-    pub(in crate::engine::transient) fn phase_current_couplings(
-        &self,
-    ) -> &[Option<charge_event::CurrentJumpCoupling>] {
-        &self.phase_current_couplings
-    }
-
     pub(in crate::engine::transient) fn state(&self) -> &charge_event::ChargeEventState {
         &self.state
     }
@@ -563,23 +552,21 @@ impl Engine {
                 break state;
             }
         };
-        let mut phase_current_couplings = Vec::with_capacity(sampler.models().len());
+        // Every GP-delayed device must expose its delayed-current port inside
+        // the solved event topology.
         for model in sampler.models() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let coupling = if model.legacy_excess_phase_delay() == 0.0 {
-                None
-            } else {
+            if model.legacy_excess_phase_delay() != 0.0 {
                 let (p, n) = model.legacy_forward_transport_nodes().ok_or_else(|| {
                     failure(format!(
                         "BJT '{}' has no prepared GP current port",
                         model.name
                     ))
                 })?;
-                Some(topology.current_jump_coupling(p, n)?)
-            };
-            phase_current_couplings.push(coupling);
+                topology.current_jump_coupling(p, n)?;
+            }
         }
         let lines = lines::prepare(
             circuit,
@@ -803,7 +790,6 @@ impl Engine {
         Ok(PreparedPhysicalEvent {
             state,
             source_branches: topology.source_branches().collect(),
-            phase_current_couplings,
             time: step.time,
             dt: step.dt,
             bjt,

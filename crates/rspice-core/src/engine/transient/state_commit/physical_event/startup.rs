@@ -323,8 +323,10 @@ pub(super) fn seed(
 }
 
 /// Finite outgoing rates and integrated source currents remain separate
-/// observables. Neither represents an elapsed integration interval.
+/// observables. Neither represents an elapsed integration interval. Only
+/// tests read the rates, to check the startup event operator.
 pub(in crate::engine::transient) struct PhysicalStartupReport {
+    #[cfg(test)]
     pub coordinate_rates: Vec<Option<Value>>,
     pub impulses: Vec<(usize, Value)>,
 }
@@ -485,6 +487,7 @@ impl Engine {
         *solution = point.state.solution;
         Ok((
             PhysicalStartupReport {
+                #[cfg(test)]
                 coordinate_rates: point.state.coordinate_rates,
                 impulses,
             },

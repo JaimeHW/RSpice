@@ -913,15 +913,11 @@ pub use checkpoint_stream::{
     TransientCheckpointObserver, TransientCheckpointStart, TransientCheckpointStream,
 };
 mod companion_stamps;
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) mod source_events;
 use companion_stamps::{
     BreakpointLanding, CompactTwoTerminalStampSlots, LandingClock, TwoTerminalStampSlots,
 };
 mod charge_stamper;
-// The physical event operator is qualified independently before the main
-// acceptance owner routes incoming/outgoing solves through it.
-#[cfg_attr(not(test), allow(dead_code))]
 mod charge_event;
 mod periodic_endpoint;
 pub(in crate::engine) use charge_stamper::StaticMatrixChargeStamper;
@@ -943,9 +939,6 @@ use state::{
     AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
 };
 mod state_advanced_mos;
-// Small-signal analysis at a transient state is the production caller; until
-// it lands the entry point is reached only by its own tests.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(in crate::engine) mod state_capture;
 mod state_commit;
 mod state_recovery;

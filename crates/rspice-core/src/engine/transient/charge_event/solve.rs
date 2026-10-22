@@ -187,7 +187,7 @@ impl ChargeEventTopology {
                 initial_sample = Some(seeded);
             }
         }
-        for iteration in 0..options.iterations {
+        for _ in 0..options.iterations {
             check_abort(abort)?;
             let seeded = initial_sample.is_some();
             let mut physical = match initial_sample.take() {
@@ -231,7 +231,6 @@ impl ChargeEventTopology {
                 return self.finish(
                     trial,
                     physical,
-                    iteration + 1,
                     options,
                     abort,
                     match policy {
@@ -328,7 +327,6 @@ impl ChargeEventTopology {
         &self,
         mut trial: Vec<Value>,
         physical: EventSample,
-        iterations: usize,
         options: &EventOptions,
         abort: &dyn AbortSignal,
         reference: Option<RateReference<'_>>,
@@ -484,7 +482,6 @@ impl ChargeEventTopology {
             solution: trial,
             source_impulses,
             coordinate_rates,
-            iterations,
         })
     }
 }

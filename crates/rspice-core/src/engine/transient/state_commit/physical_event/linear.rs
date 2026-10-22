@@ -87,7 +87,6 @@ pub(super) fn prepare(
             .map(|&column| transition.impulse(0).map_or(0.0, |values| values[column]))
             .collect(),
         coordinate_rates: transition.rates().iter().copied().map(Some).collect(),
-        iterations: 0,
     };
     let mut device_impulses =
         PhysicalDeviceImpulses::prepare(false, circuit.capacitors.len(), 0, 0)?;
@@ -108,7 +107,6 @@ pub(super) fn prepare(
     Ok(PreparedPhysicalEvent {
         state,
         source_branches: descriptor.source_branches().to_vec(),
-        phase_current_couplings: Vec::new(),
         time: step.time,
         dt: step.dt,
         bjt: PreparedBjtHistory {

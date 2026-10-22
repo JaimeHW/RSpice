@@ -23,19 +23,6 @@
 //! A family whose exact periodic residual only covers LEVEL=1 instances says
 //! so, and the corresponding gap query reports the missing capability by name
 //! instead of naming the device family alone.
-//!
-//! # Extension point
-//!
-//! Verilog-A capability metadata is owned by a separate effort. This module
-//! must not depend on it, so it exposes a registry
-//! ([`register_external_capability_provider`]) of
-//! [`ExternalPeriodicCapabilityProvider`] trait objects keyed by family. When
-//! a provider declares a contract complete for a family, the gap queries below
-//! stop reporting it. Nothing in this crate registers one yet: the hook exists
-//! so that Verilog-A capability metadata never has to reopen this table.
-
-use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
 
 use crate::circuit::CircuitData;
 
@@ -884,83 +871,15 @@ fn normalize(mut gaps: Vec<CapabilityGap>) -> Vec<CapabilityGap> {
     gaps
 }
 
-// ---------------------------------------------------------------------------
-// Verilog-A extension point
-// ---------------------------------------------------------------------------
-
-/// Capability metadata supplied by a device effort this module does not own.
-///
-/// The Verilog-A/AMS program owns what its compiled and runtime modules can
-/// contribute to a periodic analysis. Registering a provider for a family lets
-/// those declarations replace the conservative defaults above without this
-/// module depending on any `rspice-veriloga*` crate.
-pub(crate) trait ExternalPeriodicCapabilityProvider: Send + Sync + std::fmt::Debug {
-    /// What the provider declares for one contract.
-    fn support(&self, capability: PeriodicCapability) -> CapabilitySupport;
-}
-
-/// Refusal to register a second provider for a family.
-// The extension point has no in-crate registrant yet: the Verilog-A capability
-// effort is its first caller, and the hook must exist before that effort lands.
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DuplicateCapabilityProvider {
-    pub(crate) family: PeriodicDeviceFamily,
-}
-
-impl std::fmt::Display for DuplicateCapabilityProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "a periodic capability provider is already registered for {}",
-            self.family.label()
-        )
-    }
-}
-
-type ProviderMap = BTreeMap<PeriodicDeviceFamily, Arc<dyn ExternalPeriodicCapabilityProvider>>;
-
-fn providers() -> &'static RwLock<ProviderMap> {
-    static PROVIDERS: std::sync::OnceLock<RwLock<ProviderMap>> = std::sync::OnceLock::new();
-    PROVIDERS.get_or_init(|| RwLock::new(BTreeMap::new()))
-}
-
-/// Register capability metadata for one family.
-///
-/// Fails closed on a second registration for the same family: silently
-/// replacing one would make the effective declaration depend on link order.
-// The extension point has no in-crate registrant yet: the Verilog-A capability
-// effort is its first caller, and the hook must exist before that effort lands.
-#[allow(dead_code)]
-pub(crate) fn register_external_capability_provider(
-    family: PeriodicDeviceFamily,
-    provider: Arc<dyn ExternalPeriodicCapabilityProvider>,
-) -> Result<(), DuplicateCapabilityProvider> {
-    let mut registry = providers()
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if registry.contains_key(&family) {
-        return Err(DuplicateCapabilityProvider { family });
-    }
-    registry.insert(family, provider);
-    Ok(())
-}
-
-/// Effective declaration for a family and contract: the registered provider's
-/// if there is one, otherwise the native table's.
+/// Effective declaration for a family and contract.
 pub(crate) fn capability_support(
     family: PeriodicDeviceFamily,
     capability: PeriodicCapability,
 ) -> CapabilitySupport {
-    let registered = providers()
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(&family)
-        .map(|provider| provider.support(capability));
-    registered.unwrap_or_else(|| periodic_capability_descriptor(family).support(capability))
+    periodic_capability_descriptor(family).support(capability)
 }
 
-/// The text a family's `Absent` declaration reports, after the registry.
+/// The text a family's `Absent` declaration reports.
 fn absent_detail(
     family: PeriodicDeviceFamily,
     capability: PeriodicCapability,
@@ -2030,55 +1949,6 @@ endmodule
         assert!(
             !has_exact_periodic_nonlinear_devices(&circuit),
             "a mixed host must not be mistaken for a device with an exact periodic residual"
-        );
-    }
-
-    #[derive(Debug)]
-    struct StubProvider(CapabilitySupport);
-
-    impl ExternalPeriodicCapabilityProvider for StubProvider {
-        fn support(&self, _capability: PeriodicCapability) -> CapabilitySupport {
-            self.0
-        }
-    }
-
-    /// The extension point the Verilog-A capability effort will use.
-    ///
-    /// It is a registry of trait objects keyed by family: this module names no
-    /// `rspice-veriloga*` type, and a registrant replaces the conservative
-    /// native declaration without editing the table. A second registration for
-    /// the same family is refused rather than silently overwriting, because
-    /// the effective declaration must not depend on registration order.
-    #[test]
-    fn an_external_provider_replaces_a_declaration_and_refuses_a_duplicate() {
-        // The generated Verilog-A family is chosen because no other test in
-        // this binary builds a circuit containing one.
-        let family = PeriodicDeviceFamily::GeneratedVerilogA;
-        let capability = PeriodicCapability::PeriodicSmallSignalDescriptor;
-        assert!(
-            matches!(
-                periodic_capability_descriptor(family).support(capability),
-                Absent(_)
-            ),
-            "the native table must refuse this contract before a provider registers"
-        );
-
-        register_external_capability_provider(family, Arc::new(StubProvider(Complete)))
-            .expect("the first registration for a family is accepted");
-        assert_eq!(capability_support(family, capability), Complete);
-
-        let duplicate =
-            register_external_capability_provider(family, Arc::new(StubProvider(Inapplicable)))
-                .expect_err("a second provider for the same family must be refused");
-        assert_eq!(duplicate.family, family);
-        assert!(
-            duplicate.to_string().contains(family.label()),
-            "the refusal must name the family it protects: {duplicate}"
-        );
-        assert_eq!(
-            capability_support(family, capability),
-            Complete,
-            "a refused registration must not disturb the accepted one"
         );
     }
 }
