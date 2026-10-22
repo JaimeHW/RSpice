@@ -433,17 +433,10 @@ impl HdlRunConfig {
     }
 
     /// The refusal for the first option set away from its default whose
-    /// behaviour has not landed. Delay selection, path delays and timing
-    /// checks are P2 lane L6's. The token says which; the text names the
-    /// feature.
+    /// behaviour has not landed: path delays and timing checks. The token
+    /// says which; the text names the feature.
     fn unlanded_option(&self) -> Option<crate::UnsupportedCapabilityError> {
-        let (capability, option, reason) = if self.delay_select != HdlDelaySelect::Typ {
-            (
-                "hdl.option.delay_select",
-                "min:typ:max delay selection (`--hdl-delay-select`, `.options hdl_delay_select`)",
-                "every HDL delay uses its typical value",
-            )
-        } else if !self.path_delays {
+        let (capability, option, reason) = if !self.path_delays {
             (
                 "hdl.option.path_delays",
                 "`.options hdl_path_delays=0`",
@@ -1567,15 +1560,14 @@ mod timeint_config_tests {
         }
         .validate()
         .expect("a library map is valid");
+        // And min:typ:max selection.
+        HdlRunConfig {
+            delay_select: HdlDelaySelect::Min,
+            ..HdlRunConfig::default()
+        }
+        .validate()
+        .expect("a delay selection is valid");
         for (config, token, feature) in [
-            (
-                HdlRunConfig {
-                    delay_select: HdlDelaySelect::Min,
-                    ..HdlRunConfig::default()
-                },
-                "hdl.option.delay_select",
-                "min:typ:max delay selection",
-            ),
             (
                 HdlRunConfig {
                     path_delays: false,

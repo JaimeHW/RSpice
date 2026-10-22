@@ -14,8 +14,8 @@ always3.1.1A	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `alwa
 always3.1.1B	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
 always3.1.1C	vlg	passed	L1	pass	PASSED
 always3.1.1D	vlg	passed	L1	pass	PASSED
-always3.1.1E	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
-always3.1.1F	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.1E	vlg	passed	L6	pass	PASSED
+always3.1.1F	vlg	passed	L6	pass	PASSED
 always3.1.1G	vlg	passed	L3	pass	PASSED
 always3.1.1H	vlg	passed	L3	pass	PASSED
 always3.1.1I	vlg	passed	L1	pass	PASSED
@@ -25,8 +25,8 @@ always3.1.2A	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `alwa
 always3.1.2B	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
 always3.1.2C	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
 always3.1.2D	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
-always3.1.2E	vlg	ce	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
-always3.1.2F	vlg	ce	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.2E	vlg	ce	L6	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
+always3.1.2F	vlg	ce	L6	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
 always3.1.2G	vlg	ce	L3	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
 always3.1.2H	vlg	ce	L3	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
 always3.1.2I	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
@@ -46,8 +46,8 @@ always3.1.3J	vlg	ce	L4	refused:always	Semantic error: Unsupported feature: `alwa
 always3.1.4A	vlg	passed	L1	pass	PASSED
 always3.1.4B	vlg	passed	L1	pass	PASSED
 always3.1.4C	vlg	passed	L1	pass	PASSED
-always3.1.4D	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
-always3.1.4E	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.4D	vlg	passed	L6	pass	PASSED
+always3.1.4E	vlg	passed	L6	pass	PASSED
 always3.1.4F	vlg	passed	L1	pass	PASSED
 always3.1.4G	vlg	passed	L1	pass	PASSED
 always3.1.4H	vlg	passed	L1	pass	PASSED
@@ -891,7 +891,7 @@ pr1787423	vlg	gold	L7	pass	matches the gold file
 pr1787423b	vlg	passed	L7	racy	passes in reverse order only; no PASSED line (4 output lines)
 pr1787423c	vlg	passed	L4	pass	PASSED
 pr1792108	vlg	gold	-	excluded:systemverilog:int	
-pr1792152	vlg	gold	L6	fail	compile error: Parse error: Expected RParen, found Colon
+pr1792152	vlg	gold	L6	pass	matches the gold file
 pr1792734	vlg	gold	L1	pass	matches the gold file
 pr1793157	vlg	gold	L3	pass	matches the gold file
 pr1794362	vlg	passed	L1	pass	PASSED

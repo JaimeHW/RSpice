@@ -110,6 +110,7 @@ pub(super) fn prepare<'a>(
     entry: &'a CachedVerilogAModel,
     specializations: &mut InstanceSpecializations,
     temperature: f64,
+    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<PreparedInstance<'a>, SimulationError> {
     let crate::netlist::ElementKind::Subcircuit {
@@ -234,9 +235,9 @@ pub(super) fn prepare<'a>(
         let specialized = if let Some(specialized) = specializations.get(&key) {
             specialized.clone()
         } else {
-            // The artifact was compiled under the deck's `wreal` resolution
-            // and with its cells, and its specialization reads its
-            // declarations and leaves the same way.
+            // The artifact was compiled under the deck's `wreal` resolution,
+            // with its cells and under its min:typ:max selection, and its
+            // specialization reads its declarations and leaves the same way.
             let compiler = rspice_veriloga::VerilogACompiler::new(
                 super::veriloga_cache::deck_include_compiler_options(
                     &super::veriloga_cache::DeckHdl {
@@ -246,6 +247,7 @@ pub(super) fn prepare<'a>(
                         external_cells: Some(Arc::new(
                             super::hdl_spice_leaves::hdl_external_cells(netlist),
                         )),
+                        delay_select,
                     },
                 ),
             );

@@ -802,6 +802,10 @@ pub(crate) fn compiler_contract_identity(
             }
         }
     }
+    if options.delay_select != crate::canonical_ir::digital::DigitalDelaySelect::Typ {
+        hasher.field(b"delay-select");
+        hasher.field(options.delay_select.keyword().as_bytes());
+    }
     hasher.byte(match options.integration_order {
         IntegrationOrder::First => 1,
         IntegrationOrder::Second => 2,

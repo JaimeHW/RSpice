@@ -738,7 +738,7 @@ pub struct HdlTestbenchOptions {
     pub plusargs: Vec<String>,
     /// `hdlseed`.
     pub seed: u32,
-    /// min:typ:max selection (P2 lane L6).
+    /// Which value of each min:typ:max expression elaboration keeps.
     pub delay_select: crate::config::HdlDelaySelect,
     /// Honour `specify` blocks (P2 lane L6).
     pub specify: bool,
@@ -748,6 +748,19 @@ pub struct HdlTestbenchOptions {
     /// The run ends at the first tick past this one. `None` is the exact tick
     /// range's limit.
     pub tick_ceiling: Option<u64>,
+}
+
+/// The compiler's spelling of a run's min:typ:max selection.
+pub(crate) fn compiler_delay_select(
+    select: crate::config::HdlDelaySelect,
+) -> rspice_veriloga::canonical_ir::digital::DigitalDelaySelect {
+    use crate::config::HdlDelaySelect;
+    use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
+    match select {
+        HdlDelaySelect::Min => DigitalDelaySelect::Min,
+        HdlDelaySelect::Typ => DigitalDelaySelect::Typ,
+        HdlDelaySelect::Max => DigitalDelaySelect::Max,
+    }
 }
 
 /// How a testbench run ended.
@@ -831,8 +844,8 @@ pub fn run_digital_testbench(
     sources: &[(std::path::PathBuf, String)],
     options: &HdlTestbenchOptions,
 ) -> Result<HdlTestbenchReport, DigitalRunError> {
-    // Delay selection and `specify` are refused until they are implemented.
-    // The token says which; the text names the feature.
+    // `specify` is refused until it is implemented. The token says which;
+    // the text names the feature.
     let unavailable = |capability: &'static str, option: &str, reason: &str| {
         Err(DigitalRunError::Unsupported(Box::new(
             crate::UnsupportedCapabilityError::new(
@@ -841,13 +854,6 @@ pub fn run_digital_testbench(
             ),
         )))
     };
-    if options.delay_select != crate::config::HdlDelaySelect::Typ {
-        return unavailable(
-            "hdl.option.delay_select",
-            "min:typ:max delay selection",
-            "every HDL delay uses its typical value",
-        );
-    }
     if options.specify {
         return unavailable(
             "hdl.option.specify",
@@ -868,6 +874,7 @@ pub fn run_digital_testbench(
     }
     let compiler = VerilogACompiler::new(CompilerOptions {
         include_paths: options.include_dirs.clone(),
+        delay_select: compiler_delay_select(options.delay_select),
         ..CompilerOptions::default()
     });
     // A process and a system call are placed in the file they were written

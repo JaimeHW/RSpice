@@ -382,6 +382,11 @@ pub struct CompilerOptions {
     /// lists with the nets it connects (`HirModel::external_leaves`) for the
     /// host to build.
     pub external_cells: Option<Vec<ExternalCell>>,
+    /// Which value of each `min : typ : max` expression the parser keeps
+    /// (IEEE 1364-2005 section 5.3), and so which delays and parameter
+    /// values the design elaborates with. RSpice's `.options
+    /// hdl_delay_select` and `--hdl-delay-select` name it.
+    pub delay_select: canonical_ir::digital::DigitalDelaySelect,
 }
 
 /// Read every plain `wreal` declaration as the resolution `resolution`
@@ -1457,7 +1462,9 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Parse)?;
         trace_compiler_phase(trace, &target, "parse", None, None);
         let phase_started = web_time::Instant::now();
-        let mut source_file = Parser::new(&tokens).parse()?;
+        let mut source_file = Parser::new(&tokens)
+            .selecting_delays(self.options.delay_select)
+            .parse()?;
         // Library maps and configurations (IEEE 1364-2005 clause 13) leave an
         // ordinary module set, which a configuration's name selects from.
         semantic::library_binding::bind(&mut source_file)?;

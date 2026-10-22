@@ -564,6 +564,9 @@ pub(super) struct DesignConnectRules {
     /// The deck's `.options wreal_resolution`, which an authored body's plain
     /// `wreal` ports take as the deck's own modules do.
     wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+    /// The run's min:typ:max selection, which an authored body's
+    /// expressions take as the deck's own modules do.
+    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
 }
 
 impl DesignConnectRules {
@@ -596,12 +599,16 @@ impl DesignConnectRules {
         Ok(())
     }
 
-    pub(super) fn for_netlist(netlist: &crate::Netlist) -> Result<Self, SimulationError> {
+    pub(super) fn for_netlist(
+        netlist: &crate::Netlist,
+        delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    ) -> Result<Self, SimulationError> {
         let mut selected = Self {
             requested: netlist.options.connect_rules.clone(),
             wreal_resolution: super::veriloga_sources::wreal_resolution(
                 netlist.options.wreal_resolution,
             ),
+            delay_select,
             ..Default::default()
         };
         if let Some(alias) = netlist.options.connect_rules_source.as_deref() {
@@ -941,6 +948,7 @@ impl DesignConnectRules {
                             rule.discrete.name.to_string(),
                             rule.span,
                             self.wreal_resolution,
+                            self.delay_select,
                         ),
                     )
                 },

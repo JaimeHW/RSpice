@@ -274,3 +274,79 @@ fn a_delay_that_is_not_a_constant_is_refused() {
         .to_string();
     assert!(error.contains("not a constant expression"), "{error}");
 }
+
+/// Section 5.3: elaboration keeps the selected value of every `min : typ :
+/// max` expression, in a parameter, a procedural delay, a continuous
+/// assignment's delays and a gate's. Each run matches Icarus Verilog's
+/// `-Tmin`, `-Ttyp` or `-Tmax`; under `min`, the 5 ns pulse of `a` is shorter
+/// than the buffer's 7 ns delay and never reaches `g`.
+#[test]
+fn min_typ_max_expressions_take_the_selected_value() {
+    use crate::config::HdlDelaySelect;
+    let source = r#"`timescale 1ns/1ns
+module t10;
+  parameter P = (10:20:30);
+  reg a;
+  wire y, g;
+  assign #(1:2:3, 4:5:6) y = a;
+  buf #(7:8:9) b1 (g, a);
+  initial begin
+    $monitor("%0t a=%b y=%b g=%b", $time, a, y, g);
+    a = 0;
+    #(P) a = 1;
+    #(5:15:25) a = 0;
+    #40 $finish;
+  end
+endmodule
+"#;
+    for (delay_select, end_tick, expected) in [
+        (
+            HdlDelaySelect::Min,
+            55,
+            "0 a=0 y=x g=x\n\
+             4 a=0 y=0 g=x\n\
+             7 a=0 y=0 g=0\n\
+             10 a=1 y=0 g=0\n\
+             11 a=1 y=1 g=0\n\
+             15 a=0 y=1 g=0\n\
+             19 a=0 y=0 g=0\n",
+        ),
+        (
+            HdlDelaySelect::Typ,
+            75,
+            "0 a=0 y=x g=x\n\
+             5 a=0 y=0 g=x\n\
+             8 a=0 y=0 g=0\n\
+             20 a=1 y=0 g=0\n\
+             22 a=1 y=1 g=0\n\
+             28 a=1 y=1 g=1\n\
+             35 a=0 y=1 g=1\n\
+             40 a=0 y=0 g=1\n\
+             43 a=0 y=0 g=0\n",
+        ),
+        (
+            HdlDelaySelect::Max,
+            95,
+            "0 a=0 y=x g=x\n\
+             6 a=0 y=0 g=x\n\
+             9 a=0 y=0 g=0\n\
+             30 a=1 y=0 g=0\n\
+             33 a=1 y=1 g=0\n\
+             39 a=1 y=1 g=1\n\
+             55 a=0 y=1 g=1\n\
+             61 a=0 y=0 g=1\n\
+             64 a=0 y=0 g=0\n",
+        ),
+    ] {
+        let report = testbench(
+            &[("t10.v", source)],
+            &HdlTestbenchOptions {
+                delay_select,
+                ..HdlTestbenchOptions::default()
+            },
+        );
+        assert_eq!(stdout(&report), expected, "{delay_select:?}");
+        assert_eq!(report.end, HdlTestbenchEnd::Finished, "{delay_select:?}");
+        assert_eq!(report.end_tick, end_tick, "{delay_select:?}");
+    }
+}

@@ -3089,6 +3089,36 @@ fn a_nets_strength_is_part_of_the_plan_identity() {
         .expect("the plans differ only in strength");
 }
 
+/// Section 5.3: elaboration keeps the selected value of each `min : typ :
+/// max` expression, whether it is one of a list of delays or a parameter's
+/// value.
+#[test]
+fn a_min_typ_max_expression_keeps_the_selected_value() {
+    use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
+    for (delay_select, expected) in [
+        (DigitalDelaySelect::Min, (4, 7, 1)),
+        (DigitalDelaySelect::Typ, (5, 8, 2)),
+        (DigitalDelaySelect::Max, (6, 9, 3)),
+    ] {
+        let plan = VerilogACompiler::new(CompilerOptions {
+            delay_select,
+            ..CompilerOptions::default()
+        })
+        .compile_canonical_ir(
+            "`timescale 1ns/1ns\nmodule g;\n  parameter p = 1:2:3;\n  reg a;\n  wire y;\n\
+             \x20 assign #(4:5:6, 7:8:9, p) y = a;\nendmodule\n",
+        )
+        .unwrap()
+        .digital;
+        let delay = plan.delays.drivers[0].delay;
+        assert_eq!(
+            (delay.rise, delay.fall, delay.turn_off),
+            expected,
+            "{delay_select:?}"
+        );
+    }
+}
+
 /// An array of gate instances (section 7.1.5) becomes one driver per element,
 /// each taking its bit of a terminal as wide as the array and the whole of a
 /// one-bit terminal (section 7.1.6).

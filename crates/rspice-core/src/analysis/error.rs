@@ -1636,13 +1636,9 @@ mod tests {
     /// refusal when it widens to the engine's error.
     #[test]
     fn unlanded_hdl_option_refusals_stay_typed_when_widened() {
-        use crate::config::{HdlDelaySelect, HdlRunConfig, SimulationConfig};
+        use crate::config::{HdlRunConfig, SimulationConfig};
 
         for config in [
-            HdlRunConfig {
-                delay_select: HdlDelaySelect::Min,
-                ..HdlRunConfig::default()
-            },
             HdlRunConfig {
                 path_delays: false,
                 ..HdlRunConfig::default()

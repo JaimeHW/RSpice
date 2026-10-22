@@ -36,10 +36,13 @@ pub(super) struct AuthoredConnectBody {
     statement: rspice_veriloga::source::Span,
     /// The deck's `.options wreal_resolution`, for the body's plain `wreal`s.
     wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+    /// The run's min:typ:max selection, for the body's expressions.
+    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
     compiled: OnceLock<CompiledConnectBody>,
 }
 
 impl AuthoredConnectBody {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         configuration: Arc<rspice_veriloga::ConnectionConfiguration>,
         source: Arc<str>,
@@ -48,6 +51,7 @@ impl AuthoredConnectBody {
         discrete: String,
         statement: rspice_veriloga::source::Span,
         wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+        delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
     ) -> Self {
         Self {
             configuration,
@@ -57,6 +61,7 @@ impl AuthoredConnectBody {
             discrete,
             statement,
             wreal_resolution,
+            delay_select,
             compiled: OnceLock::new(),
         }
     }
@@ -122,9 +127,10 @@ pub(super) fn materialize(
         // The body compiles with the deck's options, so its plain `wreal`
         // ports resolve as the deck's own modules' do.
         let runtime = rspice_veriloga::VerilogACompiler::new(
-            super::veriloga_cache::deck_include_compiler_options(
-                &super::veriloga_cache::DeckHdl::resolving_wreal(body.wreal_resolution),
-            ),
+            super::veriloga_cache::deck_include_compiler_options(&super::veriloga_cache::DeckHdl {
+                delay_select: body.delay_select,
+                ..super::veriloga_cache::DeckHdl::resolving_wreal(body.wreal_resolution)
+            }),
         )
         .compile_connect_runtime_with_configuration(
             &body.source_package,

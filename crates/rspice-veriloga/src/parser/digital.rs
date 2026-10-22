@@ -1912,22 +1912,12 @@ impl Parser<'_> {
         })
     }
 
-    /// A delay value or a parenthesized delay expression. A min:typ:max tuple
-    /// still requires explicit corner-selection support.
+    /// A delay value or a parenthesized delay expression, which may be a
+    /// `min : typ : max` expression (IEEE 1364-2005 section 5.3).
     pub(super) fn parse_delay_value(&mut self) -> Result<Expression, ParseError> {
         if self.check(TokenKind::LParen) {
             self.advance();
-            let expression = self.parse_expression()?;
-            if self.check(TokenKind::Colon) {
-                return Err(ParseError::new(
-                    ParseErrorKind::UnsupportedConstruct {
-                        context: "delay control".to_string(),
-                        found: "a min:typ:max delay; write a single delay expression instead"
-                            .to_string(),
-                    },
-                    self.current_span(),
-                ));
-            }
+            let expression = self.parse_mintypmax_expression()?;
             if self.check(TokenKind::Comma) {
                 return Err(ParseError::new(
                     ParseErrorKind::UnsupportedConstruct {
@@ -1953,17 +1943,7 @@ impl Parser<'_> {
         let mut values = Vec::new();
         if self.match_token(TokenKind::LParen) {
             loop {
-                values.push(self.parse_expression()?);
-                if self.check(TokenKind::Colon) {
-                    return Err(ParseError::new(
-                        ParseErrorKind::UnsupportedConstruct {
-                            context: "delay".to_string(),
-                            found: "a min:typ:max delay; write a single delay expression instead"
-                                .to_string(),
-                        },
-                        self.current_span(),
-                    ));
-                }
+                values.push(self.parse_mintypmax_expression()?);
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }

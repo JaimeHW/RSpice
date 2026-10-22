@@ -341,11 +341,6 @@ fn unsupported_hdl_options_are_refused_as_not_supported_yet() {
         assert!(message.contains(feature), "{message}");
         assert!(!message.contains("lane"), "no plan identifier: {message}");
     };
-    refused(
-        &["--hdl-delay-select", "max"],
-        "hdl.option.delay_select",
-        "min:typ:max delay selection",
-    );
     hdl_console_deck(&directory, ".options hdl_path_delays=0\n");
     refused(
         &[],
@@ -354,6 +349,57 @@ fn unsupported_hdl_options_are_refused_as_not_supported_yet() {
     );
     let output = rspice_in(&directory, &["--quiet", "run", "talker.cir", "N=4"]);
     assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
+/// IEEE 1364-2005 section 5.3: `--hdl-delay-select` and `.options
+/// hdl_delay_select` choose which value of each min:typ:max expression a
+/// deck's HDL module elaborates with, the command line over the deck; each
+/// selection compiles the same file anew rather than reusing another's.
+#[test]
+fn hdl_delay_select_chooses_the_min_typ_or_max_value() {
+    let directory = common::test_dir("hdl_delay_select");
+    std::fs::write(
+        directory.join("stamp.va"),
+        "`timescale 1ns/1ns\n\
+         module stamp(p, n);\n\
+         \x20 inout p, n;\n\
+         \x20 electrical p, n;\n\
+         \x20 initial #(1:2:3) $display(\"t=%0t\", $time);\n\
+         \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+         endmodule\n",
+    )
+    .unwrap();
+    let deck = |options: &str| {
+        std::fs::write(
+            directory.join("stamp.cir"),
+            format!(
+                "* min:typ:max\nx1 p 0 stamp\nrp p 0 1k\n.va \"stamp.va\" stamp\n{options}.tran 1n 5n\n.end\n"
+            ),
+        )
+        .unwrap();
+    };
+    for (options, args, expected) in [
+        ("", &[][..], "t=2\n"),
+        ("", &["--hdl-delay-select", "max"][..], "t=3\n"),
+        (".options hdl_delay_select=min\n", &[][..], "t=1\n"),
+        (
+            ".options hdl_delay_select=min\n",
+            &["--hdl-delay-select", "max"][..],
+            "t=3\n",
+        ),
+    ] {
+        deck(options);
+        let mut command = vec!["--quiet", "run", "stamp.cir"];
+        command.extend(args);
+        let output = rspice_in(&directory, &command);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{options}{args:?}: {output:?}"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(expected), "{options}{args:?}: {stdout}");
+    }
 }
 
 /// Design P2 section 4.3: a design's relative file names resolve against the

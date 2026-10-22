@@ -6374,7 +6374,10 @@ impl Engine {
         // Device connection rules come from the compiled active source closure;
         // a standalone connect library contributes its discovered specification.
         #[cfg(feature = "veriloga")]
-        let mut design_connect_rules = connect_modules::DesignConnectRules::for_netlist(netlist)?;
+        let mut design_connect_rules = connect_modules::DesignConnectRules::for_netlist(
+            netlist,
+            crate::xspice::verilog::compiler_delay_select(self.config.hdl.delay_select),
+        )?;
         #[cfg(not(feature = "veriloga"))]
         if netlist.options.connect_rules.is_some() || netlist.options.connect_rules_source.is_some()
         {
@@ -6409,6 +6412,9 @@ impl Engine {
                 external_cells: Some(std::sync::Arc::new(hdl_spice_leaves::hdl_external_cells(
                     deck_netlist,
                 ))),
+                delay_select: crate::xspice::verilog::compiler_delay_select(
+                    self.config.hdl.delay_select,
+                ),
             };
             let resolved = veriloga_sources::resolve_includes(
                 &netlist.veriloga_includes,
@@ -9275,6 +9281,9 @@ impl Engine {
                                 entry,
                                 &mut instance_specializations,
                                 self.config.temperature,
+                                crate::xspice::verilog::compiler_delay_select(
+                                    self.config.hdl.delay_select,
+                                ),
                                 abort,
                             )?;
                             if let Some(artifact) = prepared.canonical_ir.as_deref() {

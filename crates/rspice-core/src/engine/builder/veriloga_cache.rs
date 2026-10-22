@@ -487,7 +487,9 @@ use super::*;
 // Version 168 follows the canonical IR's schema to 178, whose digital plan
 // identity covers the strength table. A version-167 record carries an
 // identity that left it out. The plan also carries driver and net delays,
-// which a version-167 record refused.
+// which a version-167 record refused, and a record is keyed by the deck's
+// min:typ:max selection (`.options hdl_delay_select`), which the parser
+// applies.
 pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 168;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
@@ -713,6 +715,8 @@ pub(super) struct VerilogADiskCacheRecord {
     pub(super) wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     #[serde(default)]
     pub(super) external_cells: Option<[u8; 32]>,
+    #[serde(default)]
+    pub(super) delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: rspice_veriloga::CompiledModel,
     pub(super) canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -800,6 +804,9 @@ pub(super) struct VerilogASourceKey {
     wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     /// The SPICE cells the deck offers a design as leaves, by identity.
     external_cells: Option<[u8; 32]>,
+    /// The value the deck keeps of each min:typ:max expression, which the
+    /// parser applies (`.options hdl_delay_select`).
+    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
 }
 
 #[cfg(feature = "veriloga")]
@@ -812,6 +819,7 @@ impl VerilogASourceKey {
             unit: None,
             wreal_resolution: Default::default(),
             external_cells: None,
+            delay_select: Default::default(),
         }
     }
 
@@ -819,6 +827,7 @@ impl VerilogASourceKey {
     fn under(mut self, deck: &DeckHdl) -> Self {
         self.wreal_resolution = deck.wreal_resolution;
         self.external_cells = deck.cells_identity();
+        self.delay_select = deck.delay_select;
         self
     }
 
@@ -844,6 +853,7 @@ struct BorrowedVerilogACacheRecord<'a> {
     unit: Option<[u8; 32]>,
     wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     external_cells: Option<[u8; 32]>,
+    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
     dependencies: &'a [VerilogADependencyFingerprint],
     model: &'a rspice_veriloga::CompiledModel,
     canonical_ir: Option<&'a rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -861,6 +871,7 @@ impl<'a> BorrowedVerilogACacheRecord<'a> {
             unit: source.unit,
             wreal_resolution: source.wreal_resolution,
             external_cells: source.external_cells,
+            delay_select: source.delay_select,
             dependencies: &entry.dependencies,
             model: entry.model.as_ref(),
             canonical_ir: entry.canonical_ir.as_deref(),
@@ -1301,6 +1312,10 @@ pub(super) fn cache_record_path_with_root(
     if let Some(cells) = source.external_cells {
         hasher.update(b"\0external-cells\0");
         hasher.update(&cells);
+    }
+    if source.delay_select != Default::default() {
+        hasher.update(b"\0delay-select\0");
+        hasher.update(source.delay_select.keyword().as_bytes());
     }
     let key = hasher.finalize().to_hex().to_string();
     cache_root.join(format!("{key}.json"))
@@ -1854,6 +1869,7 @@ fn load_model_from_disk_locked_with_limits(
         || source_path.unit != record.unit
         || source_path.wreal_resolution != record.wreal_resolution
         || source_path.external_cells != record.external_cells
+        || source_path.delay_select != record.delay_select
         || record.configuration.is_some_and(|identity| {
             record.canonical_ir.as_ref().and_then(|artifact| {
                 artifact.connections.configuration().map(|configuration| {
@@ -2092,30 +2108,36 @@ pub(super) fn deck_include_compiler_options(deck: &DeckHdl) -> rspice_veriloga::
         enable_ams: true,
         wreal_resolution: deck.wreal_resolution,
         external_cells: deck.external_cells.as_deref().cloned(),
+        delay_select: deck.delay_select,
         ..rspice_veriloga::CompilerOptions::default()
     }
 }
 
 /// What a deck gives every HDL compile beyond its sources: the resolution of
-/// a plain `wreal` (`.options wreal_resolution`), and the SPICE cells a design
-/// may instantiate as leaves (its `.subckt`s and model cards).
+/// a plain `wreal` (`.options wreal_resolution`), the SPICE cells a design
+/// may instantiate as leaves (its `.subckt`s and model cards), and the value
+/// each min:typ:max expression keeps (`.options hdl_delay_select` or
+/// `--hdl-delay-select`).
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, Default)]
 pub(super) struct DeckHdl {
     pub(super) wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     /// `None` compiles no leaf, as a host that builds none does.
     pub(super) external_cells: Option<std::sync::Arc<Vec<rspice_veriloga::ExternalCell>>>,
+    pub(super) delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
 }
 
 #[cfg(feature = "veriloga")]
 impl DeckHdl {
-    /// The deck defaults: a plain `wreal` is the LRM's, and no leaves.
+    /// The deck defaults but for `wreal_resolution`: no leaves, and each
+    /// min:typ:max expression keeps its typical value.
     pub(super) fn resolving_wreal(
         wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     ) -> Self {
         Self {
             wreal_resolution,
             external_cells: None,
+            delay_select: Default::default(),
         }
     }
 
@@ -2295,19 +2317,26 @@ fn lookup_veriloga_key_with_limits_and_abort(
 /// the one the deck's resolution would compile, and it runs. One that has a
 /// plain `wreal` net would run with a resolution the deck did not ask for,
 /// so it is refused, naming the net and both resolutions.
+///
+/// A deck's min:typ:max selection other than `typ` is refused the same way
+/// for any such runtime: the parser applied the typical values, and which
+/// expressions it chose between is not recorded.
 #[cfg(feature = "veriloga")]
 fn registered_at_default_resolution(
     canonical: &VerilogASourceKey,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
-    use rspice_veriloga::canonical_ir::digital::{DigitalRealResolution, DigitalSignalKind};
+    use rspice_veriloga::canonical_ir::digital::{
+        DigitalDelaySelect, DigitalRealResolution, DigitalSignalKind,
+    };
     let path = canonical.source_path.as_path();
     let sealed = is_sealed_veriloga_virtual_path(path);
     // A runtime registered without the deck's cell table compiled no leaf: it
     // is the one the table would compile, or it never compiled at all.
     if (canonical.wreal_resolution == DigitalRealResolution::Single
-        && canonical.external_cells.is_none())
+        && canonical.external_cells.is_none()
+        && canonical.delay_select == DigitalDelaySelect::Typ)
         || !(sealed || cfg!(target_arch = "wasm32"))
     {
         return Ok(None);
@@ -2322,6 +2351,19 @@ fn registered_at_default_resolution(
     };
     if !dependencies_are_fresh_with_limits_and_abort(&entry.dependencies, limits, abort)? {
         return Ok(None);
+    }
+    if canonical.delay_select != DigitalDelaySelect::Typ {
+        let option = canonical.delay_select.keyword();
+        return Err(cache_refusal(
+            path,
+            crate::ElaborationErrorKind::MissingSource,
+            format!(
+                "this {} Verilog-A runtime was compiled under `hdl_delay_select=typ`, and the \
+                 deck's `hdl_delay_select={option}` keeps other min:typ:max values; register \
+                 it compiled under `{option}`",
+                if sealed { "sealed" } else { "registered" },
+            ),
+        ));
     }
     let plain = entry.canonical_ir.as_deref().and_then(|artifact| {
         artifact.digital.signals.iter().find(|signal| {

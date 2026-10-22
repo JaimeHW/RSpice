@@ -1743,18 +1743,18 @@ fn unlanded_options_are_refused_as_not_supported_yet() {
             "module f; initial $display; endmodule\n".into(),
         )],
         &HdlTestbenchOptions {
-            delay_select: crate::config::HdlDelaySelect::Max,
+            specify: true,
             ..HdlTestbenchOptions::default()
         },
     )
-    .expect_err("delay selection is not supported yet");
+    .expect_err("`specify` is not supported yet");
     let DigitalRunError::Unsupported(refusal) = &error else {
         panic!("expected a typed capability refusal, got {error:?}");
     };
-    assert_eq!(refusal.capability, "hdl.option.delay_select");
+    assert_eq!(refusal.capability, "hdl.option.specify");
     let text = error.to_string();
     assert!(
-        text.contains("min:typ:max delay selection is not supported yet"),
+        text.contains("`specify` timing is not supported yet"),
         "{text}"
     );
     assert!(!text.contains("lane"), "{text}");

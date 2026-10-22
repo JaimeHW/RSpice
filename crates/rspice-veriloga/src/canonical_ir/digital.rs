@@ -308,6 +308,28 @@ impl DigitalRealResolution {
     }
 }
 
+/// Which value of each `min : typ : max` expression elaboration keeps (IEEE
+/// 1364-2005 section 5.3): a delay's, a parameter's or any other's. The
+/// default is the typical value, as Icarus Verilog's `-Ttyp` is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum DigitalDelaySelect {
+    Min,
+    #[default]
+    Typ,
+    Max,
+}
+
+impl DigitalDelaySelect {
+    /// The spelling `.options hdl_delay_select` gives this selection.
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Min => "min",
+            Self::Typ => "typ",
+            Self::Max => "max",
+        }
+    }
+}
+
 /// What kind of value a signal carries.
 ///
 /// A separate axis from `width` and from

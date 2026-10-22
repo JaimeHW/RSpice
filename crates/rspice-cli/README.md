@@ -258,7 +258,7 @@ For a deck that instantiates Verilog designs:
 | `+PLUSARG …` | Plusargs after the netlist (`rspice run tb.cir +VERBOSE +N=4`) for `$test$plusargs` and `$value$plusargs`; they precede the deck's `.options hdl_plusargs`, and the first match wins |
 | `--hdl-run-dir DIR` | Directory that relative HDL file paths resolve against (default: the deck's directory) |
 | `--hdl-unrestricted-io` | Let HDL file writes leave the run directory |
-| `--hdl-delay-select WHICH` | `typ` (default); `min` and `max` are refused with capability `hdl.option.delay_select`, because every HDL delay uses its typical value |
+| `--hdl-delay-select WHICH` | Which value of each HDL `min:typ:max` expression the design elaborates with: `typ` (default), `min` or `max`; it takes precedence over the deck's `.options hdl_delay_select` |
 
 A positional argument after the netlist that does not begin with `+` is a usage
 error. An HDL `$error` or `$fatal` fails the run with exit 3. So does an

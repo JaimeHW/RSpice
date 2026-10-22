@@ -4438,6 +4438,54 @@ fn sealed_runtimes_serve_a_wreal_resolution_that_changes_none_of_their_nets() {
     assert!(!error.contains("not installed"), "{error}");
 }
 
+/// A sealed runtime was compiled keeping each min:typ:max expression's
+/// typical value (IEEE 1364-2005 section 5.3), and which expressions it
+/// chose between is not recorded, so a deck selecting another value refuses
+/// it by naming both selections rather than running the typical values.
+#[test]
+fn sealed_runtimes_refuse_a_min_typ_max_selection_they_were_not_compiled_under() {
+    use rspice_core::{
+        ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration, ResourceLimits,
+        hold_project_veriloga_sources_for_session,
+    };
+    let runtime = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    })
+    .compile_runtime(
+        "module held(y); output y; wreal y; real r; assign y = r;\n\
+         initial begin r = 1.0; #(1:2:3) r = 2.0; end endmodule",
+        None,
+    )
+    .unwrap();
+    let key = format!(
+        "__rspice_project__/sealed-delay-select-{}/held.vams",
+        std::process::id()
+    );
+    let _installed = hold_project_veriloga_sources_for_session(
+        vec![ProjectVerilogASourceRegistration::Runtime(
+            ProjectVerilogARuntimeRegistration {
+                source_key: PathBuf::from(&key),
+                aliases: vec!["HELD".into()],
+                model: runtime.model,
+                canonical_ir: runtime.canonical_ir,
+            },
+        )],
+        ResourceLimits::default(),
+    )
+    .unwrap();
+    let deck = |options: &str| {
+        format!("* sealed delay\nxa out HELD\nrload out 0 1k\n{options}.va \"{key}\" HELD\n.end\n")
+    };
+    operating_point_at(&deck(""), "out").expect("the typical values run");
+    let error = operating_point_at(&deck(".options hdl_delay_select=max\n"), "out")
+        .expect_err("a sealed runtime cannot be compiled again under `max`");
+    for expected in ["sealed", "`hdl_delay_select=typ`", "`hdl_delay_select=max`"] {
+        assert!(error.contains(expected), "{expected}: {error}");
+    }
+    assert!(!error.contains("not installed"), "{error}");
+}
+
 #[test]
 fn typed_event_boundaries_resolve_bidirectional_contention_and_release() {
     let model = ModelFile::new(

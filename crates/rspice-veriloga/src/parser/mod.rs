@@ -110,6 +110,8 @@ pub struct Parser<'a> {
     ignored_directives: Vec<(SmolStr, Span)>,
     /// The `` `unconnected_drive `` in force; see [`Module::unconnected_drive`].
     unconnected_drive: Option<bool>,
+    /// Which value of a `min : typ : max` expression to keep.
+    delay_select: crate::canonical_ir::digital::DigitalDelaySelect,
 }
 
 impl<'a> Parser<'a> {
@@ -145,7 +147,37 @@ impl<'a> Parser<'a> {
             nesting: [0; 2],
             ignored_directives: Vec::new(),
             unconnected_drive: None,
+            delay_select: Default::default(),
         }
+    }
+
+    /// Keep `select`'s value of each `min : typ : max` expression (IEEE
+    /// 1364-2005 section 5.3) instead of the typical one.
+    pub(crate) fn selecting_delays(
+        mut self,
+        select: crate::canonical_ir::digital::DigitalDelaySelect,
+    ) -> Self {
+        self.delay_select = select;
+        self
+    }
+
+    /// An expression, or a `min : typ : max` expression (IEEE 1364-2005
+    /// section 5.3) of which the selection keeps one value. The others are
+    /// parsed and dropped.
+    pub(crate) fn parse_mintypmax_expression(&mut self) -> Result<Expression, ParseError> {
+        use crate::canonical_ir::digital::DigitalDelaySelect;
+        let min = self.parse_expression()?;
+        if !self.match_token(TokenKind::Colon) {
+            return Ok(min);
+        }
+        let typ = self.parse_expression()?;
+        self.expect(TokenKind::Colon)?;
+        let max = self.parse_expression()?;
+        Ok(match self.delay_select {
+            DigitalDelaySelect::Min => min,
+            DigitalDelaySelect::Typ => typ,
+            DigitalDelaySelect::Max => max,
+        })
     }
 
     /// Parse one nesting level of `nesting`'s kind, refusing it at the token
@@ -1291,11 +1323,14 @@ impl<'a> Parser<'a> {
                     self.expect(TokenKind::Dot)?;
                     let name: SmolStr = self.expect_identifier("parameter override name")?.into();
                     self.expect(TokenKind::LParen)?;
-                    let value = self.parse_expression()?;
+                    let value = self.parse_mintypmax_expression()?;
                     self.expect(TokenKind::RParen)?;
                     (Some(name), value)
                 } else {
-                    (None, self.parse_expression()?)
+                    // An ordered value is an expression (IEEE 1364-2005
+                    // A.4.1.1), but a primitive instance's delays are read
+                    // here too, and they may be `min : typ : max`.
+                    (None, self.parse_mintypmax_expression()?)
                 };
                 parameters.push(ParameterOverride {
                     name,
@@ -1857,9 +1892,10 @@ impl<'a> Parser<'a> {
                 });
             }
 
-            // Optional default value
+            // Optional default value, a constant mintypmax expression (IEEE
+            // 1364-2005 A.2.4).
             let default = if self.match_token(TokenKind::Assign_) {
-                Some(self.parse_expression()?)
+                Some(self.parse_mintypmax_expression()?)
             } else {
                 None
             };
@@ -3690,9 +3726,10 @@ impl<'a> Parser<'a> {
                     span: start.extend(self.previous_span()),
                 }))
             }
+            // `( mintypmax_expression )` (IEEE 1364-2005 A.8.4).
             TokenKind::LParen => {
                 self.advance();
-                let expr = self.parse_expression()?;
+                let expr = self.parse_mintypmax_expression()?;
                 self.expect(TokenKind::RParen)?;
                 Ok(expr)
             }
