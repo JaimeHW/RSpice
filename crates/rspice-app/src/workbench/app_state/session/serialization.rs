@@ -197,7 +197,10 @@ impl AppState {
         };
         state.serialize_field("project_workspace", workspace)?;
         state.serialize_field("library_manager", &self.model.library_manager)?;
-        state.serialize_field("ui_session", &UiSessionWire::from(&*self.ui))?;
+        state.serialize_field(
+            "ui_session",
+            &UiSessionWire::capture(&self.ui, &self.model.preferences),
+        )?;
         state.serialize_field("workbench", &WorkbenchWireRef::capture(&self.workbench))?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
@@ -220,7 +223,7 @@ impl AppState {
 
 impl AppState {
     fn state_safe_mode_session_snapshot(&self) -> Option<&str> {
-        self.workbench.safe_mode.preserved_session()
+        self.model.safe_mode.preserved_session()
     }
 }
 
@@ -363,8 +366,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
             de.browser_project_binding_receipt,
             "browser project binding receipt",
         );
+        let (ui, preferences) = de.ui.restore();
         let mut state = Self {
-            ui: Box::new((*de.ui).into()),
+            ui: Box::new(ui),
             recent_files: de.recent_files,
             license_key: de.license_key,
             license,
@@ -375,6 +379,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         state.model.schematic = schematic;
         state.model.workspace = project_workspace;
         state.model.library_manager = library_manager;
+        state.model.preferences = Box::new(preferences);
         de.workbench.scatter(&mut state.workbench);
         if de.no_project_open {
             state
@@ -1555,7 +1560,7 @@ mod tests {
             .project
             .rename("Isolated session")
             .unwrap();
-        state.workbench.safe_mode.activate(
+        state.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions::default(),
             before.clone(),
         );

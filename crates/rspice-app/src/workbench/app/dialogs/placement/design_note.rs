@@ -308,7 +308,7 @@ mod tests {
                     state.model.schematic.init_undo_history();
                 }
                 "read-only" => state.model.schematic.session.read_only = true,
-                "safe-mode" => state.workbench.safe_mode.activate(
+                "safe-mode" => state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()

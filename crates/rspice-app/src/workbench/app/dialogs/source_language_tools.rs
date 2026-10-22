@@ -963,8 +963,8 @@ mod tests {
             "a writable project compiles the Verilog-A cell view in front"
         );
 
-        app.state.workbench.safe_mode.active = true;
-        app.state.workbench.safe_mode.applied.open_project_read_only = true;
+        app.state.model.safe_mode.active = true;
+        app.state.model.safe_mode.applied.open_project_read_only = true;
         assert!(
             !Command::CompileVerilogA.is_enabled(&app),
             "a read-only project cannot compile; it was enabled before as {enabled_before}"

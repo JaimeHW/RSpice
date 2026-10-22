@@ -40,7 +40,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
         model,
         Some((0.25, 0.75)),
         8,
-        state.ui.preferences.quantity_presentation_policy(),
+        state.model.preferences.quantity_presentation_policy(),
     );
     for ((label, actual), (suffix, expected)) in
         rows.iter()
@@ -53,7 +53,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
                 trace,
                 expected,
                 8,
-                state.ui.preferences.quantity_presentation_policy()
+                state.model.preferences.quantity_presentation_policy()
             )
         );
     }
@@ -121,7 +121,7 @@ fn measurement_readout_identifies_each_sweep_branch() {
         &models[0],
         Some((0.25, 0.75)),
         8,
-        state.ui.preferences.quantity_presentation_policy(),
+        state.model.preferences.quantity_presentation_policy(),
     );
     assert_eq!(rows.len(), 6);
     assert!(rows[0].0.ends_with("fwd min"));
@@ -157,7 +157,7 @@ fn measurement_readout_explains_missing_coverage_instead_of_hiding_it() {
         &models[0],
         None,
         8,
-        state.ui.preferences.quantity_presentation_policy(),
+        state.model.preferences.quantity_presentation_policy(),
     );
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].0, "V(out)");
@@ -168,7 +168,7 @@ fn measurement_readout_explains_missing_coverage_instead_of_hiding_it() {
 #[test]
 fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
     let mut state = transient(vec![0.0, 0.5e-12], vec![0.0, 0.1]);
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -183,7 +183,7 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
                 b: Some(b),
             },
             presentation.readout(),
-            state.ui.preferences.quantity_presentation_policy(),
+            state.model.preferences.quantity_presentation_policy(),
         );
         assert_eq!(
             rows[0].slope,
@@ -201,7 +201,7 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
             b: Some(0.0),
         },
         presentation.readout(),
-        state.ui.preferences.quantity_presentation_policy(),
+        state.model.preferences.quantity_presentation_policy(),
     );
     assert_eq!(coincident[0].slope, READOUT_ABSENT);
 }

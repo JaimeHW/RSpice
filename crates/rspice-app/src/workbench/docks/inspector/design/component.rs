@@ -1246,7 +1246,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
             ),
         );
     }
-    let policy = app.state.ui.preferences.quantity_presentation_policy();
+    let policy = app.state.model.preferences.quantity_presentation_policy();
     for (label, value) in operating_point_rows(entry, policy) {
         property_row(ui, &label, &value);
     }

@@ -209,7 +209,7 @@ impl SelectionBulkEditAuthority {
 
     fn validate_commit(&self, state: &AppState) -> Result<(), String> {
         self.active.validate(state, TITLE)?;
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             return Err("Safe mode has opened the project read-only.".to_owned());
         }
         if let Some(reason) = self.stale_reason(state) {
@@ -333,7 +333,7 @@ impl RSpiceApp {
             .as_ref()
             .and_then(|authority| authority.stale_reason(&self.state));
         let write_allowed = !self.state.schematic_edit_read_only()
-            && !self.state.workbench.safe_mode.project_read_only();
+            && !self.state.model.safe_mode.project_read_only();
         let primary_enabled =
             write_allowed && stale.is_none() && impact.error.is_none() && impact.changed > 0;
         let mut body_scroll_offset = self.state.dialogs.selection_bulk_edit.body_scroll_offset;

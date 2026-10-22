@@ -48,7 +48,7 @@ impl AppState {
     /// Leaving one with an edit still settling checks it on the way out.
     pub(in crate::workbench) fn refresh_live_checks(&mut self, now: Instant) -> Option<Duration> {
         if !self
-            .ui
+            .model
             .preferences
             .toggle(TogglePreference::IncrementalConnectivityChecks)
         {

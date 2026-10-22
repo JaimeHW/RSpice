@@ -169,7 +169,7 @@ fn parameter_source_value(
             return rspice_design::properties::value::parse_expression_source(
                 definition,
                 candidate,
-                state.ui.preferences.quantity_presentation_policy(),
+                state.model.preferences.quantity_presentation_policy(),
                 state.ui.number_locale,
             )
             .map(Some);

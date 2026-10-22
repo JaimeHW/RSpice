@@ -89,7 +89,7 @@ pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
 /// view active there is nothing to compile.
 #[must_use]
 pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandContext> {
-    if app.state.workbench.safe_mode.project_read_only()
+    if app.state.model.safe_mode.project_read_only()
         || !app.state.project_lifecycle.is_open()
         || app.state.model.workspace.content.active_view_type() != crate::state::ViewType::VerilogA
         || app.state.ui.code_workspace.veriloga.pending.is_some()
@@ -113,7 +113,7 @@ pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandCon
 /// own order, so a grey Compile row names the reason the compile would have
 /// been refused.
 pub(crate) fn veriloga_compile_refusal(app: &RSpiceApp) -> &'static str {
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         "the project is open read-only"
     } else if !app.state.project_lifecycle.is_open() {
         "no project is open"
@@ -295,7 +295,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                     .netlist_artifacts
                     .current_generation_input_digest);
     let editable = ownership == CodeDocumentOwnership::ProjectOwned
-        && !state.workbench.safe_mode.project_read_only();
+        && !state.model.safe_mode.project_read_only();
     Some(CodeCommandContext {
         project_id,
         document_kind,
@@ -384,7 +384,7 @@ fn resolve_project_source(
                 || automation.execution.is_active()
         }
     };
-    let project_writable = !state.workbench.safe_mode.project_read_only();
+    let project_writable = !state.model.safe_mode.project_read_only();
     Some(CodeCommandContext {
         project_id: state.model.workspace.content.project.id(),
         document_kind: match language {

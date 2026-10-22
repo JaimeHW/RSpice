@@ -608,7 +608,7 @@ impl LiveSessionEngine {
         self.cursor_sent_at = None;
         self.last_cursor_sent = None;
         self.incompatible_peer = false;
-        state.workbench.live_write_locks = LiveWriteLocks::default();
+        state.model.live_write_locks = LiveWriteLocks::default();
         // The read-only flag is this engine's to own; clearing it never
         // unlocks library or safe-mode gates, which are separate.
         state.model.schematic.session.read_only = false;
@@ -1664,7 +1664,7 @@ impl LiveSessionEngine {
         let active_locked = locks
             .schematic_views
             .contains_key(&state.model.workspace.content.active_key());
-        state.workbench.live_write_locks = locks;
+        state.model.live_write_locks = locks;
         state.model.schematic.session.read_only = active_locked;
     }
 }

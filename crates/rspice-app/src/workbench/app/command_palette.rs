@@ -792,7 +792,7 @@ impl RSpiceApp {
             };
             Some(PaletteRow {
                 shortcut: entry.shortcut_label(
-                    self.state.ui.preferences.shortcuts(),
+                    self.state.model.preferences.shortcuts(),
                     platform,
                     operating_system,
                 ),
@@ -837,7 +837,7 @@ impl RSpiceApp {
                     let entry_scope = entry.scope();
                     let has_shortcut = !entry
                         .shortcut_label(
-                            self.state.ui.preferences.shortcuts(),
+                            self.state.model.preferences.shortcuts(),
                             platform,
                             operating_system,
                         )

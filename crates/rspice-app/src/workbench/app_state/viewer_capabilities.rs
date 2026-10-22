@@ -92,7 +92,7 @@ impl AppState {
     /// wrapped or unwrapped phase, and the minor grid. Its own toggles change
     /// both afterwards.
     pub(crate) fn start_waveform_viewer_session(&mut self) {
-        self.ui.results.session.phase_continuous = self.ui.preferences.unwrapped_phase();
+        self.ui.results.session.phase_continuous = self.model.preferences.unwrapped_phase();
         self.start_waveform_view_from_preferences();
     }
 
@@ -100,7 +100,7 @@ impl AppState {
     /// defaults asks for; clearing alone would always start it without.
     pub(crate) fn start_waveform_view_from_preferences(&mut self) {
         self.ui.results.session.show_minor_grid = self
-            .ui
+            .model
             .preferences
             .toggle(crate::workbench::TogglePreference::WaveMinorGrid);
     }
@@ -138,8 +138,8 @@ impl AppState {
         self.ui.results.clear_design_scoped_state();
         self.start_waveform_view_from_preferences();
         self.workbench.specification_editor_route_pending = false;
-        self.dialogs.drc_results = None;
-        self.dialogs.drc_checked_version = 0;
+        self.model.design_checks.drc_results = None;
+        self.model.design_checks.drc_checked_version = 0;
         self.clear_all_design_checks();
         // Problems and debugger evidence are project-scoped under the
         // source-workspace contract. Clear them in the same transaction as
@@ -851,7 +851,7 @@ mod tests {
 
         state.clear_design_execution_context();
 
-        assert!(state.dialogs.drc_results.is_none());
+        assert!(state.model.design_checks.drc_results.is_none());
         assert!(state.model.diagnostics.current_finding().is_none());
         assert!(state.current_blocking_drc_result().is_none());
         assert_eq!(

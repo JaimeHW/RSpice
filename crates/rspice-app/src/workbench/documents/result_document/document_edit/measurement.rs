@@ -46,7 +46,6 @@ pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> Measurement
     let expression = draft.expression.trim();
     let digits = usize::from(
         state
-            .ui
             .result_presentation_policy()
             .displayed_significant_digits()
             .get(),

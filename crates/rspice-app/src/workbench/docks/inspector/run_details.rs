@@ -88,7 +88,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         });
     let digits = usize::from(
         app.state
-            .ui
+            .model
             .preferences
             .result_presentation_policy()
             .displayed_significant_digits()

@@ -672,7 +672,7 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
         .model
         .log_buffer
         .warning(LogSource::Run, "visible console warning");
-    state.dialogs.drc_results = Some(DrcResult::new());
+    state.model.design_checks.drc_results = Some(DrcResult::new());
 
     let measurement = rspice_core::MeasureResult::success("gain", 42.0);
     let analysis =
@@ -684,7 +684,7 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
     state.clear_primary_log();
 
     assert!(state.model.log_buffer.is_empty());
-    assert!(state.dialogs.drc_results.is_some());
+    assert!(state.model.design_checks.drc_results.is_some());
     assert_eq!(state.model.simulation.retained.runs.len(), 1);
     assert_eq!(
         state.model.simulation.retained.runs[0].analyses[0]

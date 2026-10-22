@@ -558,7 +558,7 @@ fn initial_focus_keeps_inspection_only_configuration_fields_read_only() {
                 app.handle_configuration_body_action(BodyAction::Binding)
             }
         }
-        app.state.workbench.safe_mode.activate(
+        app.state.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()

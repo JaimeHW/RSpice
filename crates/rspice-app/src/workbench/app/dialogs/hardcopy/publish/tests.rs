@@ -389,7 +389,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
         edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
         governed_sheet: None,
     };
-    app.state.workbench.safe_mode.activate(
+    app.state.model.safe_mode.activate(
         LocalSafeModeOptions {
             open_project_read_only: true,
             ..LocalSafeModeOptions::default()

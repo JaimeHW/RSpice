@@ -18,7 +18,7 @@ fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
     let mut state = AppState::default();
     state.model.simulation.start_run().add_analysis(result);
     state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -44,7 +44,7 @@ fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
     let mut state = AppState::default();
     state.model.simulation.start_run().add_analysis(result);
     state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -90,7 +90,7 @@ fn swept_current_source() -> AppState {
 }
 
 fn model_axis(state: &mut AppState) -> (String, String) {
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -314,7 +314,7 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
         .push(earlier);
 
     let tokens = Tokens::default();
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -340,7 +340,7 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
         .results
         .add_expression_trace(&state.model.simulation, analysis, "V(out)*2".to_owned())
         .expect("the strip accepts an expression");
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -385,8 +385,8 @@ fn an_overlay_row_names_the_run_it_came_from() {
         .push(earlier);
     state.ui.results.session.cursor_strip = Some(0);
 
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -490,7 +490,7 @@ fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units()
         &state,
         state.ui.results.session.viewer
     ));
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,

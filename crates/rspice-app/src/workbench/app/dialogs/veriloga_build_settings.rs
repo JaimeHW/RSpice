@@ -315,7 +315,7 @@ pub(crate) fn open_veriloga_build_settings(app: &mut RSpiceApp) -> Result<(), St
 /// refuses, and for a source that moved since the form opened.
 pub(crate) fn save_veriloga_build_settings(app: &mut RSpiceApp) -> Result<bool, String> {
     let messages = app.state.ui.messages();
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Err(messages.text(MessageId::VerilogABuildSettingsReadOnly));
     }
     let draft = app
@@ -473,7 +473,7 @@ impl RSpiceApp {
             return;
         }
         let messages = self.state.ui.messages();
-        let read_only = self.state.workbench.safe_mode.project_read_only();
+        let read_only = self.state.model.safe_mode.project_read_only();
         let refusals = FieldRefusals::of(&draft, &messages);
         let can_save = !read_only && !refusals.any();
         let status = if read_only {

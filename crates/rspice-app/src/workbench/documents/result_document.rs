@@ -682,7 +682,7 @@ pub(super) struct SheetContext<'a> {
 impl<'a> SheetContext<'a> {
     fn of(state: &'a mut AppState) -> Self {
         Self {
-            policy: state.ui.preferences.quantity_presentation_policy(),
+            policy: state.model.preferences.quantity_presentation_policy(),
             simulation: &state.model.simulation,
             workspace: &state.model.workspace,
             results: &mut state.ui.results,
@@ -1681,7 +1681,7 @@ fn consume_command_key(
 ) -> bool {
     let platform = crate::workbench::app_state::runtime_command_platform(ctx);
     state
-        .ui
+        .model
         .preferences
         .shortcuts()
         .effective_bindings(
@@ -2122,7 +2122,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     if viewer_requires_retained_results(viewer)
         && !app.state.model.simulation.retained.has_results()
     {
-        let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+        let shortcut = app.state.model.preferences.shortcuts().resolved_label(
             &crate::workbench::commands::vocabulary::CommandRegistry,
             crate::workbench::commands::vocabulary::Command::RunSimulation.key(),
             crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -2757,7 +2757,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         && let Some(crate::state::AnalysisResultPayload::Qpnoise { response }) =
             &analysis.result_payload
     {
-        let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+        let quantity_policy = state.model.preferences.quantity_presentation_policy();
         rspice_results_ui::qpnoise::summary(ui, response, &quantity_policy);
         if view.viewer == ResultViewer::NoiseContrib {
             waves::right_panel(ui, state);

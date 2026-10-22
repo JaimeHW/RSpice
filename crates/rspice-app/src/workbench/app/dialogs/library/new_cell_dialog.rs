@@ -346,12 +346,12 @@ mod tests {
             .library_manager
             .add_library(Library::new("policy_test"));
         app.state
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::SchematicGrid, 2)
             .unwrap();
         app.state
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::NetNamingPolicy, 1)
             .unwrap();

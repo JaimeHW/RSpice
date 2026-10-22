@@ -1657,7 +1657,7 @@ fn resolve_entry(
     let shortcut = command
         .shortcut_command
         .map_or_else(String::new, |product_command| {
-            state.ui.preferences.shortcuts().resolved_label(
+            state.model.preferences.shortcuts().resolved_label(
                 &crate::workbench::commands::vocabulary::CommandRegistry,
                 product_command.key(),
                 crate::workbench::app_state::runtime_command_platform(ctx),

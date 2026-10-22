@@ -918,12 +918,6 @@ pub struct WorkbenchState {
     pub(crate) project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog,
     /// The Examples dialog, while it is open: the example chosen in it.
     pub(crate) examples_selection: Option<usize>,
-    /// Safe mode applies only to this process. The prior session remains the
-    /// persisted source of truth for the next ordinary launch.
-    pub safe_mode: crate::state::write_policy::LocalSafeModeState,
-    /// Live-session write leases held by other participants, projected by
-    /// the live-session engine every frame it is attached.
-    pub live_write_locks: crate::state::write_policy::LiveWriteLocks,
     /// Destination owned by an in-flight close-project review. It survives an
     /// asynchronous canonical-save continuation but is never persisted.
     pub(crate) project_close_destination: ProjectCloseDestination,
@@ -1212,8 +1206,6 @@ impl Default for WorkbenchState {
             project_launcher_page: ProjectLauncherPage::Projects,
             project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog::default(),
             examples_selection: None,
-            safe_mode: crate::state::write_policy::LocalSafeModeState::default(),
-            live_write_locks: crate::state::write_policy::LiveWriteLocks::default(),
             project_close_destination: ProjectCloseDestination::EmptyWorkbench,
             live_mirror_entry_pending: false,
             focus_project_launcher_search: false,

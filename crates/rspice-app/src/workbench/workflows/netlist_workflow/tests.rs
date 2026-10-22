@@ -552,7 +552,7 @@ fn a_deck_naming_no_dialect_starts_from_the_preferred_one() {
     ] {
         let mut state = AppState::default();
         state
-            .ui
+            .model
             .preferences
             .set_choice(
                 crate::workbench::ChoicePreference::ImportedNetlistDialect,
@@ -1514,8 +1514,8 @@ fn a_netlist_project_that_cannot_open_states_why() {
 #[test]
 fn importing_a_deck_refuses_read_only_projects_without_mutation() {
     let mut state = AppState::default();
-    state.workbench.safe_mode.active = true;
-    state.workbench.safe_mode.applied = crate::state::write_policy::LocalSafeModeOptions {
+    state.model.safe_mode.active = true;
+    state.model.safe_mode.applied = crate::state::write_policy::LocalSafeModeOptions {
         open_project_read_only: true,
         ..Default::default()
     };

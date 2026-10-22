@@ -289,7 +289,7 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
     assert!(viewer_availability(&state, ResultViewer::DcSweep).available);
 
     state.ui.results.session.viewer = ResultViewer::Waves;
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let waves = waves::cached_models(
         &state.model.simulation,
         &mut state.ui.results,

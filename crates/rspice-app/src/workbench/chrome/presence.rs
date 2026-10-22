@@ -311,19 +311,19 @@ fn render_presence_popover(
     ui.add_space(6.0);
 
     // Write-lease affordance for the document in front of a mirroring guest.
-    if !facts.hosting && app.state.workbench.live_write_locks.mirror {
+    if !facts.hosting && app.state.model.live_write_locks.mirror {
         let (doc, held_by_other) =
             if app.state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
                 (
                     "netlist".to_owned(),
-                    app.state.workbench.live_write_locks.netlist.clone(),
+                    app.state.model.live_write_locks.netlist.clone(),
                 )
             } else {
                 let key = app.state.model.workspace.content.active_key();
                 (
                     format!("schematic/{key}"),
                     app.state
-                        .workbench
+                        .model
                         .live_write_locks
                         .schematic_views
                         .get(&key)

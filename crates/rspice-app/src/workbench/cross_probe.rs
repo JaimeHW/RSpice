@@ -80,7 +80,7 @@ pub(crate) struct SchematicCrossProbeRuntime {
 /// behavior among the three surfaces.
 pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
     if !state
-        .ui
+        .model
         .preferences
         .toggle(TogglePreference::CrossProbeBehavior)
     {
@@ -814,7 +814,7 @@ mod tests {
     fn disabled_preference_never_projects_the_schematic_selection() {
         let mut state = AppState::default();
         state
-            .ui
+            .model
             .preferences
             .set_toggle(TogglePreference::CrossProbeBehavior, false);
         state

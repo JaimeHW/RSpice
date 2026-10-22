@@ -184,17 +184,21 @@ fn populate_ui_session(state: &mut AppState) {
         .expect("valid personal view");
     ui.autosave_minutes = 10;
     let wheel = crate::workbench::preferences::TogglePreference::InvertWheelZoom;
-    let inverted = !ui.preferences.toggle(wheel);
-    ui.preferences.set_toggle(wheel, inverted);
+    let inverted = !state.model.preferences.toggle(wheel);
+    state.model.preferences.set_toggle(wheel, inverted);
     // Read through an untagged storage enum, which keeps a domain it cannot
     // read as an untyped value.
-    ui.preferences
+    state
+        .model
+        .preferences
         .workspace_mut()
         .expect("the shipped workspace preferences are current")
         .set_background_task_attention(
             crate::workbench::preferences::BackgroundTaskAttention::Silent,
         );
-    ui.preferences
+    state
+        .model
+        .preferences
         .shortcut_profiles_mut()
         .replace_active(customized_shortcuts())
         .expect("the shipped shortcut library is compatible");
@@ -429,7 +433,7 @@ fn a_populated_session_restores_and_saves_again_unchanged() {
         restored.workbench.model_editor.draft.is_some(),
         "the unsaved model edit reopens"
     );
-    let shortcuts = restored.ui.preferences.shortcuts();
+    let shortcuts = restored.model.preferences.shortcuts();
     assert!(
         shortcuts
             .audit(&crate::workbench::commands::vocabulary::CommandRegistry)

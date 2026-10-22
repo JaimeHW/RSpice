@@ -192,7 +192,7 @@ fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityVie
         keyboard_focus: state.dialogs.interaction.schematic_keyboard_focus,
         filter: state.ui.schematic_selection_filter,
         traversal_enabled: state
-            .ui
+            .model
             .preferences
             .toggle(crate::workbench::TogglePreference::CanvasKeyboardNavigation),
     }
@@ -205,7 +205,7 @@ fn schematic_accessibility_shortcuts(
 ) -> String {
     use crate::workbench::commands::vocabulary::Command;
     crate::workbench::app_state::accessibility_shortcut_summary(
-        state.ui.preferences.shortcuts(),
+        state.model.preferences.shortcuts(),
         platform,
         operating_system,
         &[
@@ -345,7 +345,7 @@ fn set_canvas_cursor(
     let any_down = ui.input(|input| input.pointer.any_down());
     let pan_modifier = navigation::primary_pan_modifier_down(ui);
     let button_pan = state
-        .ui
+        .model
         .preferences
         .canvas_navigation()
         .button_pan_active(ui, response);
@@ -372,11 +372,11 @@ fn full_crosshair_at(
     state: &AppState,
     viewport: &viewport::Viewport,
 ) -> Option<egui::Pos2> {
-    if !state.ui.preferences.schematic_full_crosshair()
+    if !state.model.preferences.schematic_full_crosshair()
         || !response.hovered()
         || rspice_schematic_editor::view::pointer_target::canvas_touch_mode(ui.ctx())
         || state
-            .ui
+            .model
             .preferences
             .canvas_navigation()
             .button_pan_active(ui, response)
@@ -459,7 +459,7 @@ pub fn render_schematic_view(
     // the camera is built and the scene is painted — the old order drew
     // last frame's state, so the canvas trailed the cursor by a full
     // frame during pans and drags.
-    let canvas_navigation = state.ui.preferences.canvas_navigation();
+    let canvas_navigation = state.model.preferences.canvas_navigation();
     handle_viewport_navigation(
         ui,
         &response,
@@ -1201,7 +1201,10 @@ mod tests {
         assert_eq!(cursor, egui::CursorIcon::Default);
         assert!(rows.is_empty() && columns.is_empty(), "off by default");
 
-        state.ui.preferences.choose_schematic_full_crosshair(true);
+        state
+            .model
+            .preferences
+            .choose_schematic_full_crosshair(true);
         let (cursor, rows, columns) = rest_mouse(&ctx, &mut state, at, &[]);
         assert_eq!(cursor, egui::CursorIcon::None);
         assert_eq!(
@@ -1274,7 +1277,7 @@ mod tests {
         assert_eq!(shipped.model.schematic.session.editor.pan, (0.0, 0.0));
 
         let mut right = AppState::default();
-        right.ui.preferences.choose_right_button_pan();
+        right.model.preferences.choose_right_button_pan();
         right_drag(&mut right, from, to);
         assert_eq!(right.model.schematic.session.editor.pan, (40.0, 0.0));
         assert!(right.dialogs.interaction.context_target.is_none());

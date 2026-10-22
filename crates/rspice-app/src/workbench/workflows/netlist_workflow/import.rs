@@ -107,7 +107,7 @@ fn install_imported_netlist(
             "SPICE deck import needs an open project.",
         ));
     }
-    if state.workbench.safe_mode.project_read_only() && !initializing_netlist_project {
+    if state.model.safe_mode.project_read_only() && !initializing_netlist_project {
         return Err(ImportFailure::Refused(
             "SPICE deck import is unavailable: the project is open read-only.",
         ));
@@ -211,8 +211,7 @@ pub(super) fn netlist_import_start_block_reason(
     if mode == NetlistImportMode::ImportIntoProject && !state.project_lifecycle.is_open() {
         return Some("no project is open");
     }
-    if mode == NetlistImportMode::ImportIntoProject && state.workbench.safe_mode.project_read_only()
-    {
+    if mode == NetlistImportMode::ImportIntoProject && state.model.safe_mode.project_read_only() {
         return Some("the project is open read-only");
     }
     None

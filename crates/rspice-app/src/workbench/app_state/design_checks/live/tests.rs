@@ -169,20 +169,21 @@ fn a_live_finding_and_the_cellview_check_of_it_are_one_row() {
 type Marker = (String, String, String);
 
 fn marked(state: &AppState) -> Option<Vec<Marker>> {
-    let result = state.dialogs.drc_results.as_ref()?;
-    (state.dialogs.drc_checked_version == state.model.schematic.topology_version()).then(|| {
-        result
-            .violations()
-            .iter()
-            .map(|violation| {
-                (
-                    violation.violation_type.rule_code().to_owned(),
-                    violation.location.display(),
-                    format!("{:?}", violation.location),
-                )
-            })
-            .collect()
-    })
+    let result = state.model.design_checks.drc_results.as_ref()?;
+    (state.model.design_checks.drc_checked_version == state.model.schematic.topology_version())
+        .then(|| {
+            result
+                .violations()
+                .iter()
+                .map(|violation| {
+                    (
+                        violation.violation_type.rule_code().to_owned(),
+                        violation.location.display(),
+                        format!("{:?}", violation.location),
+                    )
+                })
+                .collect()
+        })
 }
 
 /// The markers about the component named `name`.
@@ -356,7 +357,7 @@ fn turning_live_checking_off_withdraws_its_findings() {
     assert!(explicit >= live_only);
 
     state
-        .ui
+        .model
         .preferences
         .set_toggle(TogglePreference::IncrementalConnectivityChecks, false);
     assert_eq!(state.refresh_live_checks(start), None);
@@ -375,7 +376,7 @@ fn turning_live_checking_off_withdraws_its_findings() {
     let mut state = open_state();
     place_open_resistor(&mut state, start, 400);
     state
-        .ui
+        .model
         .preferences
         .set_toggle(TogglePreference::IncrementalConnectivityChecks, false);
     assert_eq!(state.refresh_live_checks(start), None);

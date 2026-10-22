@@ -415,7 +415,7 @@ fn preflight_mutation(app: &RSpiceApp) -> Result<(), String> {
     if !app.state.project_lifecycle.is_open() {
         return Err("Measurement correlation requires an open project".to_owned());
     }
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Err(
             "Measurement correlation cannot be changed while safe mode keeps the project read-only"
                 .to_owned(),

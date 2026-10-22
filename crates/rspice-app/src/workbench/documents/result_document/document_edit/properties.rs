@@ -28,7 +28,7 @@ pub(crate) fn open_properties(state: &mut AppState) {
         }
         None => PropertiesDraft {
             significant_digits: state
-                .ui
+                .model
                 .preferences
                 .result_presentation_policy()
                 .displayed_significant_digits()
@@ -74,7 +74,7 @@ pub(super) fn commit(
         )?;
     } else {
         state
-            .ui
+            .model
             .preferences
             .set_scalar(
                 ScalarPreference::DisplayedSignificantDigits,

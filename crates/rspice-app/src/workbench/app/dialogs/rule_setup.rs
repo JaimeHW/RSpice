@@ -66,7 +66,7 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
     if !state.dialogs.rule_setup.open {
         return false;
     }
-    let read_only = state.workbench.safe_mode.project_read_only();
+    let read_only = state.model.safe_mode.project_read_only();
     let unread = unread_issue(&state.dialogs.rule_setup.draft);
     let editable = !read_only && unread.is_none();
     let changed = state.dialogs.rule_setup.draft != *state.model.workspace.content.design_rules;

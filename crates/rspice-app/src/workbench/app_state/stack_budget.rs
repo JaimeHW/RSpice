@@ -25,9 +25,9 @@ use std::mem::size_of;
 const APP_STATE_INLINE_BUDGET: usize = 32 * 1024;
 
 /// The model is held inline in the state, so its size is spent from the
-/// state's budget. The headroom is for ordinary field growth: a model that
-/// needs more boxes the field that grew rather than taking the rest of the
-/// state's headroom.
+/// state's budget. It sits near 21 KiB today; the headroom is for ordinary
+/// field growth: a model that needs more boxes the field that grew rather
+/// than taking the rest of the state's headroom.
 const MODEL_INLINE_BUDGET: usize = 24 * 1024;
 
 /// The inline fields only. The boxed sub-states (`dialogs`, `ui`,
@@ -73,8 +73,8 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
     ]
 }
 
-/// The model's inline fields, listed the same way: its one boxed field
-/// (`netlist_artifacts`) is pointer size by construction.
+/// The model's inline fields, listed the same way: its boxed fields
+/// (`netlist_artifacts`, `preferences`) are pointer size by construction.
 fn model_field_sizes() -> Vec<(&'static str, usize)> {
     use crate::workbench::app_state as a;
     vec![
@@ -100,6 +100,14 @@ fn model_field_sizes() -> Vec<(&'static str, usize)> {
         (
             "model_library_manager",
             size_of::<crate::state::model_library::ModelLibraryManager>(),
+        ),
+        (
+            "safe_mode",
+            size_of::<crate::state::write_policy::LocalSafeModeState>(),
+        ),
+        (
+            "live_write_locks",
+            size_of::<crate::state::write_policy::LiveWriteLocks>(),
         ),
     ]
 }

@@ -249,7 +249,7 @@ fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'st
     if library.source_authority.is_project_owned() {
         return Err("the selected model is already an editable project copy");
     }
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Err("the project is open read-only");
     }
     if app
@@ -957,7 +957,7 @@ impl Command {
             Self::WorkspaceLayouts => {
                 let preset = app
                     .state
-                    .ui
+                    .model
                     .preferences
                     .workspace()
                     .map(|workspace| workspace.preset())
@@ -1273,8 +1273,8 @@ impl Command {
                 } else {
                     app.state.clear_active_design_check();
                 }
-                app.state.dialogs.drc_results = None;
-                app.state.dialogs.drc_checked_version = 0;
+                app.state.model.design_checks.drc_results = None;
+                app.state.model.design_checks.drc_checked_version = 0;
             }
             Self::NextViolation => {
                 crate::schematic::view::violations::cycle_violation(&mut app.state, 1);

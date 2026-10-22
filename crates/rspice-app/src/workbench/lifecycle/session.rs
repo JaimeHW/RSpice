@@ -247,9 +247,6 @@ pub struct UiSessionState {
     /// Autosave checkpoint interval in minutes; 0 = off. Checkpoints write
     /// next to the project file and never touch it.
     pub autosave_minutes: u8,
-    /// Canonical user/device preference overrides not already owned by the
-    /// theme or autosave runtime.
-    pub preferences: crate::workbench::preferences::UserPreferences,
     /// Decimal-mark information supplied by the native/web platform edge.
     /// `None` is deliberate: engineering code must not guess the host locale.
     pub number_locale: crate::quantity::UiNumberLocale,
@@ -397,21 +394,6 @@ impl UiSessionState {
     #[must_use]
     pub(crate) const fn messages(&self) -> crate::workbench::MessageCatalog {
         crate::workbench::MessageCatalog::new(self.text_locale)
-    }
-
-    /// The reader's result presentation, with the significant digits of the
-    /// project result document the Results workspace is showing, if any.
-    #[must_use]
-    pub(crate) fn result_presentation_policy(
-        &self,
-    ) -> crate::workbench::preferences::ResultPresentationPolicy {
-        let policy = self.preferences.result_presentation_policy();
-        self.results
-            .session
-            .document_presentation
-            .map_or(policy, |document| {
-                policy.with_significant_digits(document.significant_digits)
-            })
     }
 
     pub(crate) fn set_grid_style(&mut self, style: GridStyle) {

@@ -168,7 +168,7 @@ fn push_menu_rows(
                     MenuLabel::Fixed(label) => label,
                 },
                 shortcut: shortcut_for_occurrence(
-                    app.state.ui.preferences.shortcuts(),
+                    app.state.model.preferences.shortcuts(),
                     platform,
                     os,
                     item.command,

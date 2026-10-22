@@ -405,7 +405,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
                     regions.header.height(),
                     large_targets,
                     layout,
-                    app.state.workbench.safe_mode.active,
+                    app.state.model.safe_mode.active,
                 );
                 close_control_id = Some(header.id);
                 if header.clicked() {
@@ -2183,7 +2183,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.open_project_launcher();
         app.state.workbench.project_launcher_page = page;
-        app.state.workbench.safe_mode.active = safe_mode;
+        app.state.model.safe_mode.active = safe_mode;
         let mut output = None;
         for _ in 0..3 {
             output = Some(ctx.run_ui(

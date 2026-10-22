@@ -217,7 +217,7 @@ fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
 #[test]
 fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
     let mut state = AppState::default();
-    state.workbench.safe_mode.activate(
+    state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..crate::state::write_policy::LocalSafeModeOptions::default()

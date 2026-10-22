@@ -155,7 +155,7 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
     assert!(!Command::CheckAndSave.is_enabled(&app));
 
     app.state.model.schematic.session.read_only = false;
-    app.state.workbench.safe_mode.activate(
+    app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..crate::state::write_policy::LocalSafeModeOptions::default()

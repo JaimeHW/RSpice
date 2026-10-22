@@ -442,7 +442,7 @@ mod tests {
             app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
             app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
             if read_only {
-                app.state.workbench.safe_mode.activate(
+                app.state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()

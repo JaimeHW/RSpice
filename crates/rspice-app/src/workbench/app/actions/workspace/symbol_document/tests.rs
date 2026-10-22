@@ -233,8 +233,8 @@ fn safe_mode_locks_the_symbol_editor_and_the_banner_names_it() {
     assert!(!state.active_view_read_only());
     assert!(state.symbol_editor_copy_available());
 
-    state.workbench.safe_mode.active = true;
-    state.workbench.safe_mode.applied.open_project_read_only = true;
+    state.model.safe_mode.active = true;
+    state.model.safe_mode.applied.open_project_read_only = true;
 
     assert!(
         state.active_view_read_only(),

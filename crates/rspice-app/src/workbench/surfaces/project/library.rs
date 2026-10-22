@@ -573,7 +573,7 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let governance_write_allowed = state.project_lifecycle.is_open()
-                        && !state.workbench.safe_mode.project_read_only()
+                        && !state.model.safe_mode.project_read_only()
                         && !state.model.simulation.execution.has_active_execution();
                     let rollback = Button::new("Rollback\u{2026}")
                         .enabled(
@@ -583,7 +583,7 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                         .show(ui)
                         .on_disabled_hover_text(if state.model.simulation.execution.has_active_execution() {
                             "Library rollback is unavailable while a simulation is running."
-                        } else if state.workbench.safe_mode.project_read_only() {
+                        } else if state.model.safe_mode.project_read_only() {
                             "Library rollback is unavailable while the project is read-only."
                         } else {
                             "No retained library publication is available to roll back."

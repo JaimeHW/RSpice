@@ -1158,8 +1158,8 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
         "the declared port gained a placed pin"
     );
 
-    app.state.workbench.safe_mode.active = true;
-    app.state.workbench.safe_mode.applied.open_project_read_only = true;
+    app.state.model.safe_mode.active = true;
+    app.state.model.safe_mode.applied.open_project_read_only = true;
     assert!(
         !Command::SymbolUpdatePinsFromContract
             .availability(&app)

@@ -1763,7 +1763,7 @@ fn handle_probe_click(
             }
             if net_name != "0"
                 && state
-                    .ui
+                    .model
                     .preferences
                     .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
             {

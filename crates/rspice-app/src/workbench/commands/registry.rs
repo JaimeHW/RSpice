@@ -1252,7 +1252,7 @@ impl Command {
             {
                 "an active simulation execution still owns the project"
             }
-            Self::ImportNetlist if app.state.workbench.safe_mode.project_read_only() => {
+            Self::ImportNetlist if app.state.model.safe_mode.project_read_only() => {
                 "the project is open read-only"
             }
             Self::NewVerilogADevice => "no library can be written",
@@ -1279,7 +1279,7 @@ impl Command {
             {
                 "an active simulation execution still owns result history"
             }
-            Self::ImportResultDataset if app.state.workbench.safe_mode.project_read_only() => {
+            Self::ImportResultDataset if app.state.model.safe_mode.project_read_only() => {
                 "the project is open read-only"
             }
             Self::ExportWaveformsCsv if app.state.model.simulation.retained.has_results() => {
@@ -1351,7 +1351,7 @@ impl Command {
                 "no result dataset is available"
             }
             Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),
-            Self::ModelSaveRevision if app.state.workbench.safe_mode.project_read_only() => {
+            Self::ModelSaveRevision if app.state.model.safe_mode.project_read_only() => {
                 "the project is open read-only"
             }
             Self::ModelSaveRevision
@@ -1369,9 +1369,7 @@ impl Command {
             }
             Self::ModelSaveRevision => "the open model candidate has no changes to save",
             Self::ModelValidate => "no project-owned model candidate is open",
-            Self::ModelRunQualificationTests
-                if app.state.workbench.safe_mode.project_read_only() =>
-            {
+            Self::ModelRunQualificationTests if app.state.model.safe_mode.project_read_only() => {
                 "qualification cannot run while the project is read-only"
             }
             Self::ModelRunQualificationTests

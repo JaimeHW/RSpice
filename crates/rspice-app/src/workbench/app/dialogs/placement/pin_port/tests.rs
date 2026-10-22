@@ -394,7 +394,7 @@ fn a_blocked_form_never_arms_on_enter() {
             }
             "missing" => app.state.dialogs.pin_port.authority = None,
             "read-only" => app.state.model.schematic.session.read_only = true,
-            "safe-mode" => app.state.workbench.safe_mode.activate(
+            "safe-mode" => app.state.model.safe_mode.activate(
                 crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()

@@ -241,7 +241,7 @@ fn prepare_pdk_configuration(
     ),
     Vec<String>,
 > {
-    if state.project_lifecycle.is_open() && state.workbench.safe_mode.project_read_only() {
+    if state.project_lifecycle.is_open() && state.model.safe_mode.project_read_only() {
         return Err(vec![
             "PDK settings cannot change while the project is read-only.".to_owned(),
         ]);
@@ -638,8 +638,7 @@ impl RSpiceApp {
         ctx: &Context,
         config: crate::state::pdk_config::PdkConfig,
     ) {
-        if self.state.project_lifecycle.is_open()
-            && self.state.workbench.safe_mode.project_read_only()
+        if self.state.project_lifecycle.is_open() && self.state.model.safe_mode.project_read_only()
         {
             emit_pdk_apply_messages(
                 &mut self.state,

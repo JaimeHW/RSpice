@@ -210,6 +210,11 @@ pub(crate) struct DesignCheckRuntime {
     drawing: live::DrawingState,
     /// The sequence the next receipt is stored under.
     published: u64,
+    /// DRC results (cached from last run; surfaced by the schematic view)
+    pub drc_results: Option<rspice_design::drc::DrcResult>,
+    /// `topology_version` when the last check ran — canvas markers hide and
+    /// the ERC pill reads "stale" once the design changes underneath them.
+    pub drc_checked_version: u64,
 }
 
 impl DesignCheckRuntime {
@@ -501,7 +506,7 @@ impl AppState {
     /// canvas holds them. They may be two passes' findings composed, so they
     /// are named from that set rather than from either pass's receipt.
     pub(crate) fn canvas_finding_identities(&self) -> Vec<uuid::Uuid> {
-        let Some(result) = &self.dialogs.drc_results else {
+        let Some(result) = &self.model.design_checks.drc_results else {
             return Vec::new();
         };
         finding_identities(
@@ -716,16 +721,16 @@ impl AppState {
             self.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
-            self.dialogs.drc_checked_version = 0;
-            self.dialogs.drc_results = None;
+            self.model.design_checks.drc_checked_version = 0;
+            self.model.design_checks.drc_results = None;
             return;
         }
         let current = self
             .current_drawing_findings(&self.model.workspace.content.active_schematic_reference());
-        self.dialogs.drc_checked_version = current
+        self.model.design_checks.drc_checked_version = current
             .as_ref()
             .map_or(0, |_| self.model.schematic.topology_version());
-        self.dialogs.drc_results = current;
+        self.model.design_checks.drc_results = current;
     }
 
     /// The findings that stand in `subject`'s drawing: those of every pass of
@@ -1522,7 +1527,7 @@ mod tests {
             ),
             "a refused publication leaves no receipt behind"
         );
-        assert!(state.dialogs.drc_results.is_none());
+        assert!(state.model.design_checks.drc_results.is_none());
     }
 
     #[test]
@@ -1550,8 +1555,8 @@ mod tests {
             state.active_design_check_status(),
             DesignCheckStatus::NotRun
         ));
-        assert!(state.dialogs.drc_results.is_none());
-        assert_eq!(state.dialogs.drc_checked_version, 0);
+        assert!(state.model.design_checks.drc_results.is_none());
+        assert_eq!(state.model.design_checks.drc_checked_version, 0);
         assert!(matches!(
             state.design_check_status(&root),
             DesignCheckStatus::Current(_)
@@ -1569,13 +1574,14 @@ mod tests {
 
         assert!(
             state
-                .dialogs
+                .model
+                .design_checks
                 .drc_results
                 .as_ref()
                 .is_some_and(|projected| projected.completed)
         );
         assert_eq!(
-            state.dialogs.drc_checked_version,
+            state.model.design_checks.drc_checked_version,
             state.model.schematic.topology_version()
         );
     }
@@ -1618,7 +1624,7 @@ mod tests {
             state.active_design_check_status(),
             DesignCheckStatus::NotRun
         ));
-        assert!(state.dialogs.drc_results.is_none());
+        assert!(state.model.design_checks.drc_results.is_none());
     }
 
     #[test]
@@ -1676,7 +1682,7 @@ mod tests {
             state.active_design_check_status(),
             DesignCheckStatus::NotRun
         ));
-        assert!(state.dialogs.drc_results.is_none());
+        assert!(state.model.design_checks.drc_results.is_none());
         assert!(
             state
                 .publish_active_design_check_result(completed_result())

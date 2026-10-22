@@ -518,7 +518,7 @@ pub(crate) fn save_schematic_to_path_with_io(
     io: &(impl FileWorkflowIo + ?Sized),
 ) -> bool {
     let keep_backup = state
-        .ui
+        .model
         .preferences
         .toggle(crate::workbench::TogglePreference::KeepSaveBackup);
     match io.save_schematic(&state.model.schematic, path, keep_backup) {
@@ -1066,7 +1066,7 @@ mod tests {
             let path = folder.join(format!("design-{keep}.rsch"));
             let mut state = AppState::default();
             state
-                .ui
+                .model
                 .preferences
                 .set_toggle(crate::workbench::TogglePreference::KeepSaveBackup, keep);
             for _ in 0..2 {

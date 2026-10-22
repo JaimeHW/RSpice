@@ -874,7 +874,7 @@ pub(super) fn qualification_action_block_reason(
         QualificationPageAction::ReviewVectors
         | QualificationPageAction::ReviewReleaseBinding
         | QualificationPageAction::OpenCorrelation => None,
-        QualificationPageAction::RunSuite if app.state.workbench.safe_mode.project_read_only() => {
+        QualificationPageAction::RunSuite if app.state.model.safe_mode.project_read_only() => {
             Some("Qualification cannot run while the project is read-only".to_owned())
         }
         QualificationPageAction::RunSuite if selected.suites == 0 => {

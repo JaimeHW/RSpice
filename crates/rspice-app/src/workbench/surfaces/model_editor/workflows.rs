@@ -47,7 +47,7 @@ pub(super) fn save_revision_workflow(
     request: &super::super::super::commands::ModelEditorWorkflowRequest,
 ) {
     let writable = app.state.project_lifecycle.is_open()
-        && !app.state.workbench.safe_mode.project_read_only()
+        && !app.state.model.safe_mode.project_read_only()
         && app
             .state
             .workbench
@@ -82,7 +82,7 @@ pub(super) fn save_revision_workflow(
         } else if !writable {
             blocker_note(
                 ui,
-                if app.state.workbench.safe_mode.project_read_only() {
+                if app.state.model.safe_mode.project_read_only() {
                     "The project is open read-only. Inspection remains available, but this revision cannot be saved."
                 } else {
                     "Finish or cancel the active qualification run before saving this revision."

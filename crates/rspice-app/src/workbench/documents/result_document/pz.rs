@@ -47,8 +47,8 @@ fn active_data(state: &AppState) -> Option<PoleZeroData> {
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let data = active_data(state);
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let presentation = state.ui.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let results = &mut state.ui.results;
     let viewer = super::ResultViewer::PoleZero;
@@ -85,8 +85,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let data = active_data(state);
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let presentation = state.ui.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
     view::right_panel(ui, data.as_ref(), &quantity_policy, digits);
 }

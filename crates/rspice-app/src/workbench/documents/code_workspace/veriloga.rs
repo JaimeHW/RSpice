@@ -597,7 +597,7 @@ pub(crate) fn import_dropped_veriloga_source(
     file_name: String,
     contents: String,
 ) -> Result<(), String> {
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Err("The active project is read-only.".to_owned());
     }
     if app.state.ui.code_workspace.veriloga.import_requested

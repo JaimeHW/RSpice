@@ -191,12 +191,6 @@ pub struct DialogState {
     pub(crate) pending_autosave_restore:
         Option<crate::workbench::lifecycle::recovery_checkpoint::AutosaveRestoreCandidate>,
 
-    /// DRC results (cached from last run; surfaced by the schematic view)
-    pub drc_results: Option<rspice_design::drc::DrcResult>,
-    /// `topology_version` when the last check ran — canvas markers hide and
-    /// the ERC pill reads "stale" once the design changes underneath them.
-    pub drc_checked_version: u64,
-
     /// Waveform calculator dialog open
     pub waveform_calculator_dialog: bool,
     /// The expression and unit diagnostics tool.

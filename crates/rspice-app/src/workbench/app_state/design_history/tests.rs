@@ -256,7 +256,7 @@ fn hierarchy_history_refuses_read_only_library_without_mutation() {
 #[test]
 fn hierarchy_history_refuses_project_read_only_safe_mode() {
     let (mut state, _, target) = state_with_hierarchy_record();
-    state.workbench.safe_mode.activate(
+    state.model.safe_mode.activate(
         LocalSafeModeOptions {
             open_project_read_only: true,
             ..LocalSafeModeOptions::default()
@@ -713,7 +713,7 @@ fn design_management_history_fails_closed_after_external_project_revision_change
 #[test]
 fn design_management_history_refuses_read_only_project_without_mutation() {
     let (mut state, _before, after) = state_with_design_management_record();
-    state.workbench.safe_mode.activate(
+    state.model.safe_mode.activate(
         LocalSafeModeOptions {
             open_project_read_only: true,
             ..LocalSafeModeOptions::default()
@@ -1098,7 +1098,7 @@ fn project_model_publication_rejects_closed_or_read_only_projects_without_mutati
     );
 
     state.open_project_session();
-    state.workbench.safe_mode.activate(
+    state.model.safe_mode.activate(
         LocalSafeModeOptions {
             open_project_read_only: true,
             ..LocalSafeModeOptions::default()

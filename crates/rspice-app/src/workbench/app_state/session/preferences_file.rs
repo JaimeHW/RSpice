@@ -112,12 +112,12 @@ struct Values<'a> {
 }
 
 impl<'a> Values<'a> {
-    fn of(ui: &'a UiSessionState) -> Self {
+    fn of(ui: &'a UiSessionState, preferences: &'a UserPreferences) -> Self {
         Self {
             theme: ui.theme,
             autosave_minutes: ui.autosave_minutes,
             browser_spoken_feedback: ui.browser_spoken_feedback,
-            preferences: &ui.preferences,
+            preferences,
         }
     }
 
@@ -325,7 +325,7 @@ fn input_can_change_a_setting(events: &[egui::Event]) -> bool {
 /// have changed one. The shortcut library rides inside the preferences but is
 /// not in the file, and its own store owns its durability, so it is swapped
 /// out for the duration rather than serialized every time.
-fn fingerprint(ui: &mut UiSessionState) -> u64 {
+fn fingerprint(ui: &UiSessionState, preferences: &mut UserPreferences) -> u64 {
     struct HashWriter(std::hash::DefaultHasher);
 
     impl std::io::Write for HashWriter {
@@ -339,12 +339,12 @@ fn fingerprint(ui: &mut UiSessionState) -> u64 {
         }
     }
 
-    let shortcuts = std::mem::take(ui.preferences.shortcut_profiles_mut());
+    let shortcuts = std::mem::take(preferences.shortcut_profiles_mut());
     let mut writer = HashWriter(std::hash::DefaultHasher::new());
     // A value that will not serialize cannot be written either, so whatever
     // was hashed before the failure is as good an observation as any.
-    let _ = serde_json::to_writer(&mut writer, &Values::of(ui));
-    *ui.preferences.shortcut_profiles_mut() = shortcuts;
+    let _ = serde_json::to_writer(&mut writer, &Values::of(ui, preferences));
+    *preferences.shortcut_profiles_mut() = shortcuts;
     writer.0.finish()
 }
 
@@ -541,16 +541,19 @@ impl AppState {
         self.preferences_file.store = Some(store.clone());
         match read {
             Ok(None) => self.write_preferences_file(),
-            Ok(Some(bytes)) => match parse(&bytes, MAX_FILE_BYTES)
-                .and_then(|value| decode(value, false))
-            {
-                Ok(settings) => {
-                    self.apply_personal_settings(settings);
-                    self.preferences_file.written =
-                        encode_bytes(&Values::of(&self.ui), &self.preferences_file.envelope).ok();
+            Ok(Some(bytes)) => {
+                match parse(&bytes, MAX_FILE_BYTES).and_then(|value| decode(value, false)) {
+                    Ok(settings) => {
+                        self.apply_personal_settings(settings);
+                        self.preferences_file.written = encode_bytes(
+                            &Values::of(&self.ui, &self.model.preferences),
+                            &self.preferences_file.envelope,
+                        )
+                        .ok();
+                    }
+                    Err(reason) => self.set_aside_preferences_file(&store, &bytes, &reason),
                 }
-                Err(reason) => self.set_aside_preferences_file(&store, &bytes, &reason),
-            },
+            }
             Err(error) => {
                 self.preferences_file.write_withheld = true;
                 self.record(
@@ -564,7 +567,7 @@ impl AppState {
                 );
             }
         }
-        self.preferences_file.observed = fingerprint(&mut self.ui);
+        self.preferences_file.observed = fingerprint(&self.ui, &mut self.model.preferences);
     }
 
     fn set_aside_preferences_file(&mut self, store: &PreferencesStore, bytes: &[u8], reason: &str) {
@@ -606,12 +609,12 @@ impl AppState {
     /// Put decoded settings in force. The shortcut library in use stays: it
     /// is not part of the preferences file.
     fn apply_personal_settings(&mut self, settings: PersonalSettings) {
-        let shortcuts = std::mem::take(self.ui.preferences.shortcut_profiles_mut());
+        let shortcuts = std::mem::take(self.model.preferences.shortcut_profiles_mut());
         self.ui.theme = settings.theme;
         self.ui.autosave_minutes = settings.autosave_minutes;
         self.ui.browser_spoken_feedback = settings.browser_spoken_feedback;
-        self.ui.preferences = settings.preferences;
-        *self.ui.preferences.shortcut_profiles_mut() = shortcuts;
+        *self.model.preferences = settings.preferences;
+        *self.model.preferences.shortcut_profiles_mut() = shortcuts;
         self.preferences_file.envelope = settings.envelope;
     }
 
@@ -645,7 +648,7 @@ impl AppState {
             {
                 runtime.looks += 1;
             }
-            let observed = fingerprint(&mut self.ui);
+            let observed = fingerprint(&self.ui, &mut self.model.preferences);
             if observed != runtime.observed {
                 runtime.observed = observed;
                 runtime.write_due = Some(now + WRITE_DELAY);
@@ -663,7 +666,7 @@ impl AppState {
     /// Write any change not yet in the file now, rather than when it settles.
     pub(in crate::workbench) fn flush_preferences_file(&mut self) {
         self.preferences_file.write_due = None;
-        self.preferences_file.observed = fingerprint(&mut self.ui);
+        self.preferences_file.observed = fingerprint(&self.ui, &mut self.model.preferences);
         self.write_preferences_file();
     }
 
@@ -675,7 +678,11 @@ impl AppState {
         if runtime.write_withheld {
             return;
         }
-        let outcome = encode_bytes(&Values::of(&self.ui), &runtime.envelope).and_then(|bytes| {
+        let outcome = encode_bytes(
+            &Values::of(&self.ui, &self.model.preferences),
+            &runtime.envelope,
+        )
+        .and_then(|bytes| {
             if runtime.written.as_deref() == Some(bytes.as_slice()) {
                 return Ok(());
             }
@@ -705,8 +712,11 @@ impl AppState {
     /// The settings file Export… writes: the preferences file's contents and
     /// the shortcut library in use, together.
     pub(in crate::workbench) fn settings_file_bytes(&self) -> Result<Vec<u8>, String> {
-        let preferences = encode(&Values::of(&self.ui), &self.preferences_file.envelope)?;
-        let shortcuts = serde_json::to_value(self.ui.preferences.shortcut_profiles())
+        let preferences = encode(
+            &Values::of(&self.ui, &self.model.preferences),
+            &self.preferences_file.envelope,
+        )?;
+        let shortcuts = serde_json::to_value(self.model.preferences.shortcut_profiles())
             .map_err(|error| format!("the keyboard shortcuts could not be encoded: {error}"))?;
         crate::workbench::shortcuts::artifacts::canonical_json_bytes(serde_json::json!({
             "format": SETTINGS_FORMAT,
@@ -752,7 +762,7 @@ impl AppState {
         .map_err(|error| format!("its keyboard shortcuts could not be read: {error}"))?;
         crate::workbench::shortcuts::library_persistence::validate_library(&imported)
             .map_err(|reason| format!("its keyboard shortcuts are not usable: {reason}"))?;
-        let mut shortcuts = self.ui.preferences.shortcut_profiles().clone();
+        let mut shortcuts = self.model.preferences.shortcut_profiles().clone();
         shortcuts
             .replace_content_from(&imported)
             .map_err(|error| format!("the shortcuts in use cannot be replaced: {error}"))?;
@@ -781,7 +791,7 @@ impl AppState {
         }
         self.apply_personal_settings(staged.settings);
         let preset = self
-            .ui
+            .model
             .preferences
             .workspace()
             .map(crate::workbench::WorkspacePreferences::preset)

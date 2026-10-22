@@ -847,7 +847,7 @@ pub(crate) fn start_local_safe_mode(
     app: &mut RSpiceApp,
     options: LocalSafeModeOptions,
 ) -> Result<(), String> {
-    if app.state.workbench.safe_mode.active {
+    if app.state.model.safe_mode.active {
         return Err("Safe mode is already active for this launch".to_owned());
     }
     if !options.has_effect() {
@@ -878,7 +878,7 @@ pub(crate) fn start_local_safe_mode(
         app.state.workbench.reset_layout();
     }
     app.state
-        .workbench
+        .model
         .safe_mode
         .activate(options, preserved_session);
     if options.open_project_read_only {
@@ -1000,7 +1000,7 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
             std::env::consts::ARCH
         )
         .expect("String writes cannot fail");
-        writeln!(snapshot, "safe_mode={}", state.workbench.safe_mode.active)
+        writeln!(snapshot, "safe_mode={}", state.model.safe_mode.active)
             .expect("String writes cannot fail");
         writeln!(
             snapshot,

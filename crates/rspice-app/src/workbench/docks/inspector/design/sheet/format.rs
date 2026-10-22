@@ -263,7 +263,7 @@ fn saved_sizes(ui: &Ui, state: &AppState) -> Vec<DrawingSheetPreset> {
     if egui::Popup::is_any_open(ui.ctx()) {
         saved.extend(
             state
-                .ui
+                .model
                 .preferences
                 .drawing_sheet_personal_preferences()
                 .presets,

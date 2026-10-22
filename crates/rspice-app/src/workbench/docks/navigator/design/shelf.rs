@@ -801,7 +801,7 @@ impl ShelfEntry {
 /// profile that has never pinned anything.
 pub(super) fn pinned_keys(state: &AppState) -> Vec<String> {
     state
-        .ui
+        .model
         .preferences
         .component_shelf()
         .pinned
@@ -834,19 +834,19 @@ pub(super) fn toggle_pin(state: &mut AppState, entry: &ShelfEntry) {
     } else {
         keys.push(key);
     }
-    let mut shelf = state.ui.preferences.component_shelf();
+    let mut shelf = state.model.preferences.component_shelf();
     shelf.pinned = Some(keys);
-    state.ui.preferences.set_component_shelf(shelf);
+    state.model.preferences.set_component_shelf(shelf);
 }
 
 /// Record one placement at the front of the history, deduplicated.
 pub(super) fn record_placement(state: &mut AppState, entry: &ShelfEntry) {
     let key = entry.storage_key();
-    let mut shelf = state.ui.preferences.component_shelf();
+    let mut shelf = state.model.preferences.component_shelf();
     shelf.recent.retain(|held| *held != key);
     shelf.recent.insert(0, key);
     shelf.recent.truncate(RECENT_STORED);
-    state.ui.preferences.set_component_shelf(shelf);
+    state.model.preferences.set_component_shelf(shelf);
 }
 
 /// What the shelf last offered the canvas, and how much of the design was
@@ -1141,7 +1141,7 @@ fn pinned_band(
     if rows.is_empty() {
         return None;
     }
-    let shortcut = state.ui.preferences.shortcuts().resolved_label(
+    let shortcut = state.model.preferences.shortcuts().resolved_label(
         &crate::workbench::commands::vocabulary::CommandRegistry,
         crate::workbench::commands::vocabulary::Command::PlaceInstance.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -1171,7 +1171,7 @@ fn recent_band(
     }
     let pinned = pinned_keys(state);
     let rows = state
-        .ui
+        .model
         .preferences
         .component_shelf()
         .recent

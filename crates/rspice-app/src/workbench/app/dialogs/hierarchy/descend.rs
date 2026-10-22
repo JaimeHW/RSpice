@@ -563,7 +563,7 @@ mod tests {
     fn disabled_edit_in_place_opens_direct_gestures_as_isolated_views() {
         let (mut state, _, child) = hierarchy_state();
         state
-            .ui
+            .model
             .preferences
             .set_toggle(TogglePreference::HierarchicalEditInPlace, false);
 
@@ -582,7 +582,7 @@ mod tests {
     fn preference_sets_the_workflow_default_without_removing_explicit_choices() {
         let (mut state, _, child) = hierarchy_state();
         state
-            .ui
+            .model
             .preferences
             .set_toggle(TogglePreference::HierarchicalEditInPlace, false);
         assert!(open_descend_hierarchy_dialog(&mut state));

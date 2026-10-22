@@ -584,7 +584,7 @@ fn a_size_chosen_in_the_panel_lands_on_the_sheet() {
 #[test]
 fn a_read_only_sheet_states_its_properties_without_controls() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.safe_mode.activate(
+    app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()

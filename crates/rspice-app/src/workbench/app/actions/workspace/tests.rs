@@ -67,7 +67,7 @@ fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
 fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() {
     let mut state = AppState::default();
     state
-        .ui
+        .model
         .preferences
         .set_choice(ChoicePreference::NetNamingPolicy, 1)
         .unwrap();
@@ -124,7 +124,7 @@ fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
     state.ui.schematic_snap.snap_to_wire_segments = false;
     state.ui.schematic_snap.grid_size = 777;
     state
-        .ui
+        .model
         .preferences
         .set_choice(ChoicePreference::SchematicGrid, 1)
         .unwrap();
@@ -146,7 +146,7 @@ fn schematic_edit_authority_includes_late_safe_mode_project_read_only() {
     let mut state = AppState::default();
     assert!(!state.schematic_edit_read_only());
 
-    state.workbench.safe_mode.activate(
+    state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()

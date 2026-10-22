@@ -45,7 +45,7 @@ pub(super) fn page(ui: &mut Ui, state: &mut AppState) {
         |ui| {
             value_column(ui, |ui| {
                 let mut selected = state
-                    .ui
+                    .model
                     .preferences
                     .choice(ChoicePreference::CanvasPanButton);
                 if segmented(
@@ -55,7 +55,7 @@ pub(super) fn page(ui: &mut Ui, state: &mut AppState) {
                     &mut selected,
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_choice(ChoicePreference::CanvasPanButton, selected)
                         .expect("the pan button segments are the complete domain");
@@ -79,7 +79,7 @@ fn zoom_speed_row(ui: &mut Ui, state: &mut AppState) {
     preference_row(ui, "Zoom speed", "How far one wheel notch zooms.", |ui| {
         value_column(ui, |ui| {
             let stored = state
-                .ui
+                .model
                 .preferences
                 .choice(ChoicePreference::CanvasZoomSpeed);
             let mut selected = ZOOM_SPEEDS
@@ -93,7 +93,7 @@ fn zoom_speed_row(ui: &mut Ui, state: &mut AppState) {
                 &mut selected,
             ) {
                 state
-                    .ui
+                    .model
                     .preferences
                     .set_choice(ChoicePreference::CanvasZoomSpeed, ZOOM_SPEEDS[selected].1)
                     .expect("the zoom speeds are the complete domain");

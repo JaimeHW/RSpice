@@ -638,7 +638,8 @@ fn current_findings(
         return Vec::new();
     }
     state
-        .dialogs
+        .model
+        .design_checks
         .drc_results
         .as_ref()
         .map(|result| {
@@ -706,15 +707,15 @@ fn findings_problem(findings: &[&DrcViolation]) -> Problem {
 
 /// `true` when schematic checks were run against the drawing as it stands.
 fn checks_current(state: &AppState) -> bool {
-    state.dialogs.drc_results.is_some()
-        && state.dialogs.drc_checked_version == state.model.schematic.topology_version()
+    state.model.design_checks.drc_results.is_some()
+        && state.model.design_checks.drc_checked_version == state.model.schematic.topology_version()
 }
 
 /// What the Checks header says, only when the check is not current and clean:
 /// "not run" before any check, "stale" once the drawing has changed under
 /// one, and the error count of a current check that found errors.
 fn checks_status(state: &AppState) -> Option<String> {
-    let Some(result) = state.dialogs.drc_results.as_ref() else {
+    let Some(result) = state.model.design_checks.drc_results.as_ref() else {
         return Some("not run".to_owned());
     };
     if !checks_current(state) {

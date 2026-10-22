@@ -78,7 +78,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
                             != app.state.model.simulation.view.data_version,
                 );
                 let command = Command::OpenWorkspace(workspace);
-                let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+                let shortcut = app.state.model.preferences.shortcuts().resolved_label(
                     &crate::workbench::commands::vocabulary::CommandRegistry,
                     command.key(),
                     crate::workbench::app_state::runtime_command_platform(ui.ctx()),

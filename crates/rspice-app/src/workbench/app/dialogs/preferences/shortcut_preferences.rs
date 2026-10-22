@@ -165,14 +165,14 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
         .dialogs
         .shortcut_policy_candidate
         .as_ref()
-        .unwrap_or_else(|| state.ui.preferences.shortcuts())
+        .unwrap_or_else(|| state.model.preferences.shortcuts())
         .clone();
     ui.add_enabled_ui(!policy_pending, |ui| {
         render_policy_rows(ui, &mut policy_draft);
     });
     queue_policy_candidate(
         actions,
-        state.ui.preferences.shortcuts(),
+        state.model.preferences.shortcuts(),
         policy_draft,
         policy_pending,
     );
@@ -1231,7 +1231,7 @@ fn commit_editor(ctx: &Context, state: &mut AppState) {
         .as_ref()
         .cloned()
         .expect("editor draft");
-    let mut candidate = state.ui.preferences.shortcut_profiles().clone();
+    let mut candidate = state.model.preferences.shortcut_profiles().clone();
     if let Err(error) = candidate.replace_active(draft) {
         // The editor stays open and states the refusal in place.
         state.dialogs.shortcut_editor.error_summary =
@@ -1607,7 +1607,7 @@ mod tests {
     fn valid_save_atomically_replaces_the_live_profile() {
         let mut state = AppState::default();
         state.enable_volatile_test_shortcut_persistence();
-        let live = state.ui.preferences.shortcuts().clone();
+        let live = state.model.preferences.shortcuts().clone();
         state.dialogs.shortcut_editor.open(&live);
         state
             .dialogs
@@ -1635,7 +1635,7 @@ mod tests {
         assert!(!state.dialogs.shortcut_editor.open);
         assert_eq!(
             binding_for_slot(
-                state.ui.preferences.shortcuts(),
+                state.model.preferences.shortcuts(),
                 Command::Save,
                 ShortcutBindingSlot::Primary,
                 egui::os::OperatingSystem::Windows,
@@ -1648,7 +1648,7 @@ mod tests {
     #[test]
     fn invalid_save_keeps_the_draft_open_and_focuses_the_first_issue() {
         let mut state = AppState::default();
-        let live = state.ui.preferences.shortcuts().clone();
+        let live = state.model.preferences.shortcuts().clone();
         state.dialogs.shortcut_editor.open(&live);
         state
             .dialogs
@@ -1683,7 +1683,7 @@ mod tests {
             state.dialogs.shortcut_editor.context,
             ShortcutEditorContext::Global
         );
-        assert_eq!(state.ui.preferences.shortcuts(), &live);
+        assert_eq!(state.model.preferences.shortcuts(), &live);
     }
 
     #[test]
@@ -1812,7 +1812,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut state = AppState::default();
-        let profile = state.ui.preferences.shortcuts().clone();
+        let profile = state.model.preferences.shortcuts().clone();
         state.dialogs.shortcut_editor.open(&profile);
         let output = ctx.run_ui(input(390.0, 844.0), |ctx| render_editor(ctx, &mut state));
         let nodes = output
@@ -1873,7 +1873,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut state = AppState::default();
-        let profile = state.ui.preferences.shortcuts().clone();
+        let profile = state.model.preferences.shortcuts().clone();
         state.dialogs.shortcut_editor.open(&profile);
         state.dialogs.shortcut_editor.query = "save".to_owned();
         state.dialogs.shortcut_editor.selected_command = Some(Command::Save);

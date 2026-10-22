@@ -74,9 +74,9 @@ fn toggle_row(
 ) {
     preference_row(ui, title, detail, |ui| {
         value_column(ui, |ui| {
-            let mut value = state.ui.preferences.toggle(key);
+            let mut value = state.model.preferences.toggle(key);
             if preference_switch(ui, key.stable_id(), accessible_label, &mut value) {
-                state.ui.preferences.set_toggle(key, value);
+                state.model.preferences.set_toggle(key, value);
             }
         });
     });
@@ -92,7 +92,7 @@ fn scalar_row(
 ) {
     preference_row(ui, title, detail, |ui| {
         value_column(ui, |ui| {
-            let mut value = state.ui.preferences.scalar(key);
+            let mut value = state.model.preferences.scalar(key);
             // A field holding at most two digits, at the width two digits
             // need. Stretched to the column a select uses, it reads as an
             // empty text box with a stray number floating in the middle.
@@ -108,7 +108,7 @@ fn scalar_row(
             });
             if response.changed() {
                 state
-                    .ui
+                    .model
                     .preferences
                     .set_scalar(key, value)
                     .expect("numeric control constrains the complete preference domain");
@@ -134,7 +134,7 @@ fn solver_threads_row(ui: &mut Ui, state: &mut AppState) {
     searchable_row(ui, "Solver threads", &help, &["cpu", "workers"], |ui| {
         value_column(ui, |ui| {
             let mut value = state
-                .ui
+                .model
                 .preferences
                 .scalar(ScalarPreference::LocalParallelSlots);
             let response = ui.add_sized(
@@ -158,7 +158,7 @@ fn solver_threads_row(ui: &mut Ui, state: &mut AppState) {
             });
             if response.changed() {
                 state
-                    .ui
+                    .model
                     .preferences
                     .set_scalar(ScalarPreference::LocalParallelSlots, value)
                     .expect("the detected core count is inside the preference domain");
@@ -192,7 +192,7 @@ fn keyword_choice_row(
     let terms = options.iter().chain(keywords).copied().collect::<Vec<_>>();
     searchable_row(ui, title, detail, &terms, |ui| {
         value_column(ui, |ui| {
-            let active = state.ui.preferences.choice(key);
+            let active = state.model.preferences.choice(key);
             let labels = options
                 .iter()
                 .map(|label| (*label).to_owned())
@@ -202,7 +202,7 @@ fn keyword_choice_row(
                 select(ui, &id, title, options[active], &labels, control_width(ui))
             {
                 state
-                    .ui
+                    .model
                     .preferences
                     .set_choice(key, selected)
                     .expect("page descriptors constrain every preference choice");
@@ -345,7 +345,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
     // An "Engineering profile" row used to open this page. It narrowed one
     // specialist tool list and nothing else, so it told a reader the
     // workbench was tailored to their domain when it was not.
-    if state.ui.preferences.workspace().is_none() {
+    if state.model.preferences.workspace().is_none() {
         return;
     }
 
@@ -357,7 +357,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
         |ui| {
             value_column(ui, |ui| {
                 let mut selected = state
-                    .ui
+                    .model
                     .preferences
                     .workspace()
                     .map(WorkspacePreferences::preset)
@@ -372,7 +372,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
                     let preset = WorkspacePreset::from_index(selected)
                         .expect("workspace preset segments define the complete domain");
                     state
-                        .ui
+                        .model
                         .preferences
                         .workspace_mut()
                         .expect("the compatible Workspace domain was checked above")
@@ -390,7 +390,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
         |ui| {
             value_column(ui, |ui| {
                 let mut selected = state
-                    .ui
+                    .model
                     .preferences
                     .workspace()
                     .map(WorkspacePreferences::console_on_launch)
@@ -405,7 +405,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
                     let behavior = ConsoleLaunchBehavior::from_index(selected)
                         .expect("console launch segments define the complete domain");
                     state
-                        .ui
+                        .model
                         .preferences
                         .workspace_mut()
                         .expect("the compatible Workspace domain was checked above")
@@ -437,7 +437,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
                 ];
                 let option_labels = options.map(str::to_owned);
                 let active = state
-                    .ui
+                    .model
                     .preferences
                     .workspace()
                     .map(WorkspacePreferences::background_task_attention)
@@ -452,7 +452,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState) {
                     control_width(ui),
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .workspace_mut()
                         .expect("the compatible Workspace domain was checked above")
@@ -561,13 +561,13 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         preference_row(ui, title, help, |ui| {
             value_column(ui, |ui| {
                 let stored = state
-                    .ui
+                    .model
                     .preferences
                     .choice(ChoicePreference::WireJunctionBehavior);
                 let mut selected = usize::from(stored & bit != 0);
                 if segmented(ui, id, &options, &mut selected) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_choice(
                             ChoicePreference::WireJunctionBehavior,
@@ -586,7 +586,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         |ui| {
             value_column(ui, |ui| {
                 let mut selected = state
-                    .ui
+                    .model
                     .preferences
                     .choice(ChoicePreference::SchematicCursor);
                 if segmented(
@@ -596,7 +596,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
                     &mut selected,
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_choice(ChoicePreference::SchematicCursor, selected)
                         .expect("schematic-cursor segments define the complete domain");
@@ -662,7 +662,10 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         "For schematics created from now on. The Inspector sets the open one's.",
         |ui| {
             value_column(ui, |ui| {
-                let mut selected = state.ui.preferences.choice(ChoicePreference::SchematicGrid);
+                let mut selected = state
+                    .model
+                    .preferences
+                    .choice(ChoicePreference::SchematicGrid);
                 let labels = crate::state::SchematicGridPitch::ALL
                     .map(crate::schematic::view::drawing_sheet::grid_pitch_label);
                 if segmented(
@@ -672,7 +675,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
                     &mut selected,
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_choice(ChoicePreference::SchematicGrid, selected)
                         .expect("schematic-grid segments define the complete domain");
@@ -808,7 +811,10 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
         "Disables non-essential transitions and animated progress.",
         |ui| {
             value_column(ui, |ui| {
-                let mut value = state.ui.preferences.toggle(TogglePreference::ReducedMotion);
+                let mut value = state
+                    .model
+                    .preferences
+                    .toggle(TogglePreference::ReducedMotion);
                 if preference_switch(
                     ui,
                     "preferences.accessibility.reduced-motion",
@@ -816,7 +822,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
                     &mut value,
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_toggle(TogglePreference::ReducedMotion, value);
                 }
@@ -830,7 +836,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
         |ui| {
             value_column(ui, |ui| {
                 let mut value = state
-                    .ui
+                    .model
                     .preferences
                     .toggle(TogglePreference::CanvasKeyboardNavigation);
                 if preference_switch(
@@ -840,7 +846,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
                     &mut value,
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_toggle(TogglePreference::CanvasKeyboardNavigation, value);
                 }
@@ -900,7 +906,7 @@ pub(super) fn restore_defaults(
     state: &mut AppState,
     actions: &mut PreferencePageActions,
 ) {
-    let preferences = &mut state.ui.preferences;
+    let preferences = &mut state.model.preferences;
     match category {
         PreferenceCategory::Appearance => {
             state.ui.theme = crate::ui::Theme::default();
@@ -1280,7 +1286,7 @@ mod tests {
                 continue;
             }
             assert_ne!(
-                serde_json::to_value(&app.state.ui.preferences).expect("preferences serialize"),
+                serde_json::to_value(&app.state.model.preferences).expect("preferences serialize"),
                 shipped,
                 "{} set no stored override to restore",
                 category.label()
@@ -1291,7 +1297,7 @@ mod tests {
                 &mut PreferencePageActions::default(),
             );
             assert_eq!(
-                serde_json::to_value(&app.state.ui.preferences).expect("preferences serialize"),
+                serde_json::to_value(&app.state.model.preferences).expect("preferences serialize"),
                 shipped,
                 "{} left a stored override behind",
                 category.label()
@@ -1404,7 +1410,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = RSpiceApp::test_instance();
         app.state.enable_volatile_test_shortcut_persistence();
-        let mut edited = app.state.ui.preferences.shortcuts().clone();
+        let mut edited = app.state.model.preferences.shortcuts().clone();
         edited
             .policies_mut()
             .set_chord_timeout(ChordTimeoutPolicy::ThreeSeconds);
@@ -1429,19 +1435,19 @@ mod tests {
                 ..PreferencePageActions::default()
             },
         );
-        assert_eq!(app.state.ui.preferences.shortcuts(), &edited);
+        assert_eq!(app.state.model.preferences.shortcuts(), &edited);
 
         let mut actions = PreferencePageActions::default();
         restore_defaults(PreferenceCategory::Shortcuts, &mut app.state, &mut actions);
         assert_eq!(
-            app.state.ui.preferences.shortcuts(),
+            app.state.model.preferences.shortcuts(),
             &edited,
             "the reset must not write the live profile directly"
         );
         app.execute_preference_page_actions(&ctx, actions);
 
         let shipped = ShortcutPreferences::default();
-        assert_eq!(app.state.ui.preferences.shortcuts(), &shipped);
+        assert_eq!(app.state.model.preferences.shortcuts(), &shipped);
         assert_eq!(
             app.state
                 .shortcut_library_persistence
@@ -1469,7 +1475,7 @@ mod tests {
                 continue;
             }
             state
-                .ui
+                .model
                 .preferences
                 .set_choice(key, 1)
                 .expect("every exposed choice has a second option");
@@ -1479,8 +1485,8 @@ mod tests {
             if !keys.contains(&format!("TogglePreference::{key:?}")) {
                 continue;
             }
-            let flipped = !state.ui.preferences.toggle(key);
-            state.ui.preferences.set_toggle(key, flipped);
+            let flipped = !state.model.preferences.toggle(key);
+            state.model.preferences.set_toggle(key, flipped);
             stored = true;
         }
         for (key, value) in [
@@ -1491,7 +1497,7 @@ mod tests {
         ] {
             if keys.contains(&format!("ScalarPreference::{key:?}")) {
                 state
-                    .ui
+                    .model
                     .preferences
                     .set_scalar(key, value)
                     .expect("each override is inside its preference domain");
@@ -1501,7 +1507,7 @@ mod tests {
         for key in FolderListPreference::ALL {
             if keys.contains(&format!("FolderListPreference::{key:?}")) {
                 state
-                    .ui
+                    .model
                     .preferences
                     .set_folders(key, vec![std::env::temp_dir()])
                     .expect("the temporary folder is a full path");
@@ -1519,7 +1525,7 @@ mod tests {
             state.ui.browser_spoken_feedback = true;
         }
         if category == PreferenceCategory::Workspace
-            && let Ok(workspace) = state.ui.preferences.workspace_mut()
+            && let Ok(workspace) = state.model.preferences.workspace_mut()
         {
             workspace.set_console_on_launch(
                 ConsoleLaunchBehavior::from_index(1).expect("the console may launch open"),
@@ -1559,12 +1565,12 @@ mod tests {
     fn waveform_defaults_reach_the_viewer() {
         let mut app = RSpiceApp::test_instance();
         app.state
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::AcPhase, 1)
             .expect("phase may start unwrapped");
         app.state
-            .ui
+            .model
             .preferences
             .set_toggle(TogglePreference::WaveMinorGrid, true);
         app.state

@@ -206,7 +206,7 @@ fn replace_with_new_project(
     state.bump_active_schematic_epoch();
     state.replace_project_execution_context(announcement);
     state.model.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
-        &state.ui.preferences,
+        &state.model.preferences,
     );
     // The new plan owns its variables, outputs and specifications, as the
     // session's first plan does. Without the payload every Run plan in a new
@@ -242,7 +242,7 @@ fn seed_new_project_drawing_sheet_default(
     state: &AppState,
     workspace: &mut crate::state::ProjectWorkspace,
 ) {
-    let personal = state.ui.preferences.drawing_sheet_personal_preferences();
+    let personal = state.model.preferences.drawing_sheet_personal_preferences();
     let project_default = personal
         .default_format
         .try_update(|draft| {
@@ -347,7 +347,7 @@ pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestO
 /// Policy may authorize an explicit independent copy through Save As; it
 /// never authorizes ordinary Save/Save All to retain or overwrite the mirror.
 fn live_mirror_save_block(state: &AppState, project_copy: bool) -> Option<&'static str> {
-    let locks = &state.workbench.live_write_locks;
+    let locks = &state.model.live_write_locks;
     if !locks.mirror {
         None
     } else if !locks.mirror_save_copy_allowed {
@@ -1038,7 +1038,7 @@ pub(crate) fn open_session_project(state: &mut AppState) {
 /// storage answers, so there is nothing settled to close here.
 #[cfg(not(target_arch = "wasm32"))]
 fn apply_startup_project_choice(state: &mut AppState) {
-    if state.ui.preferences.reopen_last_project() || !state.project_lifecycle.is_open() {
+    if state.model.preferences.reopen_last_project() || !state.project_lifecycle.is_open() {
         return;
     }
     if closing_loses_nothing(state) {
@@ -1077,7 +1077,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.ui.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
     state.bump_active_schematic_epoch();
     state.model.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
-        &state.ui.preferences,
+        &state.model.preferences,
     );
     let restored_model_catalog = crate::workbench::app_state::restore_session_model_library_manager(
         &mut state.model.pdk_config,
@@ -1228,7 +1228,7 @@ fn apply_loaded_project_authorized(
             }
             (
                 crate::workbench::app_state::SimSetupState::new_with_user_preferences(
-                    &state.ui.preferences,
+                    &state.model.preferences,
                 ),
                 manager,
                 warnings,

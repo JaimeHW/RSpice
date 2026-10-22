@@ -264,7 +264,7 @@ pub(super) fn plan_manager_dialog(
             ctx,
             &mut draft,
             &records,
-            app.state.ui.preferences.quantity_presentation_policy(),
+            app.state.model.preferences.quantity_presentation_policy(),
         ),
         SimulationPlanManagerMode::Create => create::dialog(ctx, &mut draft, &records),
         SimulationPlanManagerMode::Rename | SimulationPlanManagerMode::ConfirmArchive => {

@@ -1468,7 +1468,7 @@ fn stage_print_mapping_persistence(
         rspice_hardcopy_contract::PrintMappingSaveScope::PortablePersonalPreset(_) => {
             let mut catalog = app
                 .state
-                .ui
+                .model
                 .preferences
                 .personal_print_mapping_presets()
                 .cloned()
@@ -1500,7 +1500,7 @@ fn commit_print_mapping_persistence(
         }
         StagedPrintMappingPersistence::Personal(catalog) => app
             .state
-            .ui
+            .model
             .preferences
             .replace_personal_print_mapping_presets(catalog)
             .map_err(|error| error.to_string()),

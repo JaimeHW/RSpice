@@ -368,7 +368,7 @@ fn opening_input_respects_custom_palette_bindings() {
             vec![ShortcutStroke::new(Key::K, false, false, false)]
         };
         app.state
-            .ui
+            .model
             .preferences
             .shortcuts_mut()
             .unwrap()

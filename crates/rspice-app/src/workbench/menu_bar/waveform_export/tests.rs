@@ -1514,7 +1514,7 @@ fn engineering_export_preference_dispatches_compatible_touchstone() {
     state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Smith);
     state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 1)
         .unwrap();
@@ -1545,7 +1545,7 @@ fn engineering_export_preference_dispatches_exact_tsv() {
         ]);
     let mut state = state_with_typed_result(transient);
     state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 2)
         .expect("TSV preference");
@@ -1590,7 +1590,7 @@ fn incompatible_touchstone_result_is_rejected_before_save_picker() {
     state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 1)
         .unwrap();
@@ -1617,7 +1617,7 @@ fn displayed_digits_never_reduce_csv_source_precision() {
     state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     state
-        .ui
+        .model
         .preferences
         .set_scalar(
             crate::workbench::ScalarPreference::DisplayedSignificantDigits,
@@ -1752,7 +1752,7 @@ fn stacked_export_state(preference: usize) -> AppState {
     state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     state
-        .ui
+        .model
         .preferences
         .set_choice(
             crate::workbench::ChoicePreference::EngineeringExport,

@@ -263,7 +263,7 @@ fn replace_owned_sources_atomically_impl(
     replacements: Vec<OwnedNetlistReplacement>,
     record_edit: bool,
 ) -> Result<usize, String> {
-    if let Some(holder) = state.workbench.live_write_locks.netlist.as_deref() {
+    if let Some(holder) = state.model.live_write_locks.netlist.as_deref() {
         return Err(format!(
             "{holder} holds the netlist write lease; no source was changed."
         ));
@@ -638,7 +638,7 @@ pub(crate) fn redo_netlist_edit(state: &mut AppState) -> Result<Option<String>, 
 /// Atomically replace the exact project-owned source across the canonical
 /// document, persisted project projection, and visible editor buffer.
 pub fn replace_owned_source(state: &mut AppState, source: String) -> bool {
-    if let Some(holder) = state.workbench.live_write_locks.netlist.clone() {
+    if let Some(holder) = state.model.live_write_locks.netlist.clone() {
         state.prompt(format!(
             "{holder} holds the netlist write lease; no source was changed."
         ));
@@ -1901,8 +1901,8 @@ pub(crate) fn install_active_top_deck(
         // design authority. Retaining its DRC receipt would leak stale
         // schematic findings into a project now owned by an authored deck.
         state.clear_all_design_checks();
-        state.dialogs.drc_results = None;
-        state.dialogs.drc_checked_version = 0;
+        state.model.design_checks.drc_results = None;
+        state.model.design_checks.drc_checked_version = 0;
     }
 }
 

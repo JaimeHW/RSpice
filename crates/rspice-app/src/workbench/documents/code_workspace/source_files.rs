@@ -32,7 +32,7 @@ pub(crate) fn source_file_mutation_block_reason(
     if !app.state.project_lifecycle.is_open() {
         return Some("Open a project before changing project source files.");
     }
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Some("The project is open read-only.");
     }
     match language {
@@ -1493,7 +1493,7 @@ mod tests {
         ));
 
         app.state.open_project_session();
-        app.state.workbench.safe_mode.activate(
+        app.state.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()
@@ -1991,7 +1991,7 @@ mod tests {
 
         request_automation_source_import(&mut app, &importer).unwrap();
         let request = app.state.ui.code_workspace.source_import.take().unwrap();
-        app.state.workbench.safe_mode.activate(
+        app.state.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()

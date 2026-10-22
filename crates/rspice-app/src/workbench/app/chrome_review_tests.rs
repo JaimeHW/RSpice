@@ -43,7 +43,7 @@ fn seeded_app() -> RSpiceApp {
     // A headless pass has no clock for an opening fade to run against, so a
     // dialog would be rasterized part-transparent over the workbench.
     app.state
-        .ui
+        .model
         .preferences
         .set_toggle(TogglePreference::ReducedMotion, true);
     app.state.open_project_session();
@@ -115,7 +115,7 @@ fn render_the_chrome_console_jobs_and_launcher_for_review() {
 
     let mut chrome = seeded_app();
     assert!(
-        chrome.state.dialogs.drc_results.is_some(),
+        chrome.state.model.design_checks.drc_results.is_some(),
         "the checks ran and their result is the status bar's"
     );
     write("chrome-status-console-1440x900", &mut chrome);

@@ -62,8 +62,8 @@ fn inverter_bound_to_the_family(label: &str, length: &str) -> (AppState, std::pa
     pull_down.params = format!("w=1u l={length} model_library={library}");
     let mut drc = DrcResult::new();
     drc.completed = true;
-    state.dialogs.drc_results = Some(drc);
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_results = Some(drc);
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
     (state, directory)
 }
 

@@ -72,7 +72,7 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
     if row_count == 0 {
         return false;
     }
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     viewer::show_operating_point_table(ui, &analysis.data, row_count, &quantity_policy);
     true
 }
@@ -114,8 +114,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
     let t = Tokens::get(ui.ctx());
-    let presentation = state.ui.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let models = cached_models(
         &state.model.simulation,
@@ -187,7 +187,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         viewer::operating_point_controls(ui);
         return;
     }
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,

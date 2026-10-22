@@ -174,7 +174,7 @@ fn document_for<'a>(state: &'a AppState, reference: &CellViewRef) -> Option<&'a 
 }
 
 fn read_only(state: &AppState, reference: &CellViewRef) -> bool {
-    state.workbench.safe_mode.project_read_only()
+    state.model.safe_mode.project_read_only()
         || state
             .model
             .library_manager

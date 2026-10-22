@@ -56,7 +56,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     state.ui.schematic_snap.snap_to_grid = false;
     state.ui.schematic_snap.grid_size = 555;
     state
-        .ui
+        .model
         .preferences
         .set_choice(ChoicePreference::SchematicGrid, 1)
         .unwrap();
@@ -80,7 +80,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     );
 
     state
-        .ui
+        .model
         .preferences
         .set_choice(ChoicePreference::SchematicGrid, 2)
         .unwrap();
@@ -215,7 +215,7 @@ fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
         )
         .expect("save the project");
         state
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::StartupProject, choice)
             .expect("the startup choice has two options");
@@ -264,7 +264,7 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
     for choice in [0, 1] {
         let mut restored = ron::from_str::<Box<AppState>>(&session).expect("the session restores");
         restored
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::StartupProject, choice)
             .expect("the startup choice has two options");
@@ -324,7 +324,7 @@ fn a_saved_project_comes_back_through_its_session() {
     let restart = |session: &str, choice: usize| {
         let mut state = ron::from_str::<Box<AppState>>(session).expect("the session restores");
         state
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::StartupProject, choice)
             .expect("the startup choice has two options");
@@ -467,8 +467,8 @@ fn live_project_snapshot_waits_out_a_local_run_and_rejects_garbage() {
 #[test]
 fn mirror_save_copy_policy_gates_every_project_persistence_path() {
     let mut state = AppState::default();
-    state.workbench.live_write_locks.mirror = true;
-    state.workbench.live_write_locks.mirror_save_copy_allowed = false;
+    state.model.live_write_locks.mirror = true;
+    state.model.live_write_locks.mirror_save_copy_allowed = false;
 
     assert!(!save_project(&mut state));
     assert!(!save_all(&mut state));
@@ -482,8 +482,8 @@ fn mirror_save_copy_policy_gates_every_project_persistence_path() {
 #[test]
 fn save_copy_permission_never_turns_a_live_mirror_into_a_canonical_project() {
     let mut state = AppState::default();
-    state.workbench.live_write_locks.mirror = true;
-    state.workbench.live_write_locks.mirror_save_copy_allowed = true;
+    state.model.live_write_locks.mirror = true;
+    state.model.live_write_locks.mirror_save_copy_allowed = true;
 
     assert_eq!(
         live_mirror_save_block(&state, false),
@@ -896,7 +896,7 @@ fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
 
     let mut state = AppState::default();
     state
-        .ui
+        .model
         .preferences
         .set_choice(ChoicePreference::DefaultSolverPreset, 3)
         .expect("Robust is a valid solver preset");
@@ -921,7 +921,7 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
     };
 
     let mut state = AppState::default();
-    let mut personal = state.ui.preferences.drawing_sheet_personal_preferences();
+    let mut personal = state.model.preferences.drawing_sheet_personal_preferences();
     personal.default_format = SchematicSheetFormat::from_standard(
         DrawingSheetStandard::AnsiC,
         SchematicPageOrientation::Portrait,
@@ -931,7 +931,7 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
     })
     .expect("the personal default is valid");
     state
-        .ui
+        .model
         .preferences
         .set_drawing_sheet_personal_preferences(personal)
         .expect("the personal default persists");
@@ -980,7 +980,7 @@ fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
     };
 
     let mut state = AppState::default();
-    let mut personal = state.ui.preferences.drawing_sheet_personal_preferences();
+    let mut personal = state.model.preferences.drawing_sheet_personal_preferences();
     personal.default_format = SchematicSheetFormat::try_custom(
         "Personal lab panel",
         250_001,
@@ -997,11 +997,11 @@ fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
     })
     .unwrap();
     state
-        .ui
+        .model
         .preferences
         .set_drawing_sheet_personal_preferences(personal.clone())
         .unwrap();
-    let retained_personal = state.ui.preferences.drawing_sheet_personal_preferences();
+    let retained_personal = state.model.preferences.drawing_sheet_personal_preferences();
 
     create_new_project(&mut state);
 
@@ -1024,7 +1024,7 @@ fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
     assert!(!snapshot.source_preset_unavailable);
     assert!(project_settings.presets.is_empty());
     assert_eq!(
-        state.ui.preferences.drawing_sheet_personal_preferences(),
+        state.model.preferences.drawing_sheet_personal_preferences(),
         retained_personal,
         "seeding a project must not mutate personal preferences"
     );

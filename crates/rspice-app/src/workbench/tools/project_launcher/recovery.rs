@@ -505,7 +505,7 @@ pub(super) fn safe_mode_page(
         layout,
         None,
     );
-    let active = app.state.workbench.safe_mode.active;
+    let active = app.state.model.safe_mode.active;
     // Starting is refused while safe mode is already on, so the disabled
     // control says what is true rather than offering the start again.
     let start_label = if active {
@@ -534,7 +534,7 @@ pub(super) fn safe_mode_page(
                             ui,
                             &mut app
                                 .state
-                                .workbench
+                                .model
                                 .safe_mode
                                 .draft
                                 .disable_third_party_extensions,
@@ -546,7 +546,7 @@ pub(super) fn safe_mode_page(
                             ui,
                             &mut app
                                 .state
-                                .workbench
+                                .model
                                 .safe_mode
                                 .draft
                                 .disable_gpu_acceleration,
@@ -560,7 +560,7 @@ pub(super) fn safe_mode_page(
                             ui,
                             &mut app
                                 .state
-                                .workbench
+                                .model
                                 .safe_mode
                                 .draft
                                 .isolate_prior_documents,
@@ -570,7 +570,7 @@ pub(super) fn safe_mode_page(
                         );
                         safe_mode_option(
                             ui,
-                            &mut app.state.workbench.safe_mode.draft.reset_layout,
+                            &mut app.state.model.safe_mode.draft.reset_layout,
                             "Reset dock and monitor geometry",
                             "Recover panels and windows to the primary display.",
                             None,
@@ -579,7 +579,7 @@ pub(super) fn safe_mode_page(
                             ui,
                             &mut app
                                 .state
-                                .workbench
+                                .model
                                 .safe_mode
                                 .draft
                                 .open_project_read_only,
@@ -591,7 +591,7 @@ pub(super) fn safe_mode_page(
 
         });
 
-    let options = app.state.workbench.safe_mode.draft;
+    let options = app.state.model.safe_mode.draft;
     launcher_page_footer(ui, layout, regions.footer, |ui| {
         let diagnostics = Button::new("Open diagnostic folder")
             .enabled(diagnostics_folder_supported())

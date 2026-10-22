@@ -263,7 +263,7 @@ mod tests {
     fn authority_revalidates_safe_mode_at_commit_time() {
         let mut state = AppState::default();
         let authority = SchematicEditAuthority::capture(&state);
-        state.workbench.safe_mode.activate(
+        state.model.safe_mode.activate(
             LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()

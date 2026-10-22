@@ -27,7 +27,7 @@ pub(super) fn handle_keyboard_object_navigation(
             modal_open: state.application_modal_open(),
             can_edit: !state.model.schematic.session.read_only && !state.active_view_read_only(),
             traversal_enabled: state
-                .ui
+                .model
                 .preferences
                 .toggle(TogglePreference::CanvasKeyboardNavigation),
         },
@@ -340,7 +340,7 @@ mod tests {
             .selection
             .select_only_component(11);
         state
-            .ui
+            .model
             .preferences
             .set_toggle(TogglePreference::CanvasKeyboardNavigation, false);
         let (handled, key_still_available) =

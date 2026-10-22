@@ -42,7 +42,7 @@ fn read_from(file: &Path, folder: &Path) -> bool {
 
 fn set_library_folders(state: &mut AppState, folders: Vec<PathBuf>) {
     state
-        .ui
+        .model
         .preferences
         .set_folders(FolderListPreference::LibraryFolders, folders)
         .expect("full library folder paths");

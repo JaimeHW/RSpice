@@ -47,7 +47,7 @@ pub(crate) fn open_dataset_export_picker(state: &mut AppState) {
         };
     let several_analyses = displayed.analysis_indices.len() > 1;
     let last = state
-        .ui
+        .model
         .preferences
         .choice(ChoicePreference::EngineeringExport)
         .min(FORMATS.len() - 1);
@@ -117,7 +117,7 @@ pub(crate) fn show_dataset_export_picker(ctx: &Context, state: &mut AppState) ->
         DialogChoice::Primary => {
             state.dialogs.dataset_export = None;
             state
-                .ui
+                .model
                 .preferences
                 .set_choice(ChoicePreference::EngineeringExport, picker.format)
                 .expect("the picker offers only formats the export writes");
@@ -147,12 +147,12 @@ mod tests {
         let mut state = AppState::default();
         for (index, (_, one_analysis)) in FORMATS.iter().enumerate() {
             state
-                .ui
+                .model
                 .preferences
                 .set_choice(ChoicePreference::EngineeringExport, index)
                 .expect("every listed format is a stored choice");
             let format = state
-                .ui
+                .model
                 .preferences
                 .result_presentation_policy()
                 .engineering_export();
@@ -166,7 +166,7 @@ mod tests {
         }
         assert!(
             state
-                .ui
+                .model
                 .preferences
                 .set_choice(ChoicePreference::EngineeringExport, FORMATS.len())
                 .is_err(),
@@ -209,7 +209,7 @@ mod tests {
         assert!(state.dialogs.dataset_export.is_none());
         assert_eq!(
             state
-                .ui
+                .model
                 .preferences
                 .choice(ChoicePreference::EngineeringExport),
             0,

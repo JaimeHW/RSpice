@@ -258,7 +258,7 @@ impl RSpiceApp {
                 BINDING_DESCRIPTION,
             ),
         };
-        let write_allowed = !self.state.workbench.safe_mode.project_read_only();
+        let write_allowed = !self.state.model.safe_mode.project_read_only();
         let initial_focus = match page {
             ConfigurationDialogPage::Manager => Some(field_id("filter")),
             ConfigurationDialogPage::New | ConfigurationDialogPage::Clone if write_allowed => {
@@ -376,7 +376,7 @@ impl RSpiceApp {
                 &self.state.model.library_manager,
                 &self.state.model.model_library_manager,
                 self.state
-                    .ui
+                    .model
                     .preferences
                     .folders(crate::workbench::FolderListPreference::LibraryFolders),
                 &self.state.model.schematic,

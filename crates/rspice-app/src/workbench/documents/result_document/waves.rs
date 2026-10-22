@@ -111,7 +111,7 @@ pub(super) fn source_waveform_anchor(
     state: &mut AppState,
     source_name: &str,
 ) -> Option<(AnalysisPresentationKey, WaveformPresentationKey)> {
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -135,7 +135,7 @@ pub(super) fn source_waveform_anchor(
 /// transient pane ordinals, so hiding or reordering a strip cannot redirect an
 /// action to unrelated data.
 pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -249,7 +249,7 @@ fn matching_spec_limits(
 }
 
 pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -261,7 +261,7 @@ pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
 }
 
 pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> bool {
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -348,7 +348,7 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
         cursor_x,
         cursor_interpolation(
             state
-                .ui
+                .model
                 .preferences
                 .result_presentation_policy()
                 .cursor_interpolation(),
@@ -366,7 +366,7 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
 }
 
 pub(super) fn marker_at_cursor_a_available(state: &mut AppState, t: &Tokens) -> bool {
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -377,7 +377,7 @@ pub(super) fn marker_at_cursor_a_available(state: &mut AppState, t: &Tokens) -> 
 }
 
 pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -436,7 +436,7 @@ pub fn show_noise(ui: &mut Ui, state: &mut AppState) {
 
 fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     let t = Tokens::get(ui.ctx());
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -445,7 +445,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     );
     if models.is_empty() {
         let hint = if state.model.simulation.active_run().is_none() {
-            let shortcut = state.ui.preferences.shortcuts().resolved_label(
+            let shortcut = state.model.preferences.shortcuts().resolved_label(
                 &crate::workbench::commands::vocabulary::CommandRegistry,
                 crate::workbench::commands::vocabulary::Command::RunSimulation.key(),
                 crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -464,8 +464,8 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
         return;
     }
 
-    let quantity = state.ui.preferences.quantity_presentation_policy();
-    let trace_width = state.ui.preferences.wave_trace_width();
+    let quantity = state.model.preferences.quantity_presentation_policy();
+    let trace_width = state.model.preferences.wave_trace_width();
     rspice_results_ui::waves::stack::show(
         ui,
         &mut stack_host::WaveStackHost(state),
@@ -554,8 +554,8 @@ pub(crate) fn active_shared_x_status(
     tokens: &Tokens,
     state: &mut AppState,
 ) -> Option<SharedXStatus> {
-    let presentation = state.ui.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let active = state
         .ui
         .results
@@ -607,7 +607,7 @@ fn x_range_text(
 /// run's analysis selector is not the authority here: the pane is.
 fn active_pane_analysis(tokens: &Tokens, state: &mut AppState) -> Option<String> {
     let key = state.ui.results.session.active_wave_pane.clone()?;
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -638,7 +638,7 @@ fn active_pane_extents(
     let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
         return (None, None);
     };
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -704,7 +704,7 @@ pub(crate) fn set_active_pane_axis_range(
     let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
         return false;
     };
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -745,7 +745,7 @@ pub(crate) fn set_active_pane_axis_range(
 /// The unit the active pane's shared X axis is measured in.
 fn active_pane_x_unit(tokens: &Tokens, state: &mut AppState) -> Option<String> {
     let key = state.ui.results.session.active_wave_pane.clone()?;
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,

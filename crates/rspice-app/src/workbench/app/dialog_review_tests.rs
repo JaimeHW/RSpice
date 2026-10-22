@@ -242,7 +242,7 @@ fn seeded(seed: Seed) -> (Reader, Observation) {
     // A headless pass has no clock for an opening fade to run against, so a
     // dialog would be rasterized part-transparent over the workbench.
     app.state
-        .ui
+        .model
         .preferences
         .set_toggle(TogglePreference::ReducedMotion, true);
     app.state.ui.theme.mode = crate::ui::Mode::Light;

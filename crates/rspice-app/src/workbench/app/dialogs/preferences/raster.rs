@@ -56,7 +56,7 @@ fn render_every_preferences_category_for_review() {
             // reviewed holding a folder this machine has and one it lacks.
             if category == PreferenceCategory::Projects {
                 app.state
-                    .ui
+                    .model
                     .preferences
                     .set_folders(
                         crate::workbench::FolderListPreference::LibraryFolders,

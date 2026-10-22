@@ -254,7 +254,7 @@ pub(crate) fn action_export_csv_with_io(
         return;
     }
     let export_format = state
-        .ui
+        .model
         .preferences
         .result_presentation_policy()
         .engineering_export();

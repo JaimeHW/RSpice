@@ -16,7 +16,7 @@ pub(super) fn parameter_schema_dialog(
     if !app.state.workbench.model_editor.parameter_schema_open {
         return;
     }
-    let writable = !app.state.workbench.safe_mode.project_read_only();
+    let writable = !app.state.model.safe_mode.project_read_only();
     let choice = Dialog::new("Parameter schema", "Close")
     .description("Edit parameter declarations and process-section overrides. Nothing is saved until Save model revision succeeds.")
     .size(DialogSize::Transaction)
@@ -389,7 +389,7 @@ pub(super) fn new_section_dialog(
     if !app.state.workbench.model_editor.new_section_open {
         return;
     }
-    let writable = !app.state.workbench.safe_mode.project_read_only();
+    let writable = !app.state.model.safe_mode.project_read_only();
     let primary_enabled = writable && !app.state.workbench.model_editor.new_section_name.is_empty();
     let choice = Dialog::new("New process section", "Add section")
     .description(
@@ -546,7 +546,7 @@ pub(super) fn correlation_matrix_dialog(
     if !app.state.workbench.model_editor.correlation_matrix_open {
         return;
     }
-    let writable = !app.state.workbench.safe_mode.project_read_only();
+    let writable = !app.state.model.safe_mode.project_read_only();
     let choice = Dialog::new("Correlation matrix", "Apply matrix")
     .description("Edit the candidate's ordered correlation coefficients. Symmetric entries are kept synchronized and the complete positive-semidefinite matrix is validated atomically.")
     .size(DialogSize::Transaction)

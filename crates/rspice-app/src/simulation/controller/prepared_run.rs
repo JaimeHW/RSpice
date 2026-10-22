@@ -107,7 +107,7 @@ fn run_preparation_inputs_reading<'a>(
             .retained
             .imported_transient_checkpoints,
         display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-        max_parallel_workers: state.ui.preferences.solver_worker_limit(),
+        max_parallel_workers: state.model.preferences.solver_worker_limit(),
         library_folders: state.library_folders(),
         compilation: state
             .ui
@@ -250,7 +250,7 @@ impl FrozenRunPreparation {
                     .retained
                     .imported_transient_checkpoints
                     .clone(),
-                max_parallel_workers: state.ui.preferences.solver_worker_limit(),
+                max_parallel_workers: state.model.preferences.solver_worker_limit(),
                 library_folders: state.library_folders().to_vec(),
                 compilation: state
                     .ui

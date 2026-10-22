@@ -64,7 +64,7 @@ impl RSpiceApp {
             DesignManagementPage::NewSheet => {
                 let personal = self
                     .state
-                    .ui
+                    .model
                     .preferences
                     .drawing_sheet_personal_preferences();
                 let draft = self

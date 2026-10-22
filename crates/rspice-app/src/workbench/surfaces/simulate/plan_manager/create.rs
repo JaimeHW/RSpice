@@ -445,11 +445,11 @@ pub(super) fn commit_create_plan(
         save_policy: setup.save_policy,
     };
     let preferred_options = crate::workbench::app_state::SimSetupState::preferred_solver_options(
-        &app.state.ui.preferences,
+        &app.state.model.preferences,
     );
     let id = setup.create_plan(name).map_err(|error| error.to_string())?;
     // Kept unless the retention policy is inherited, which replaces it below.
-    setup.save_policy.retained_dataset_limit = app.state.ui.preferences.runs_kept();
+    setup.save_policy.retained_dataset_limit = app.state.model.preferences.runs_kept();
     apply_new_plan_configuration(&mut setup, new_plan, inherited, preferred_options)?;
     workspace.content.migrate_inactive_plan_data(id);
     workspace.content.sync_legacy_specs_projection(id);
@@ -826,7 +826,7 @@ mod tests {
     fn a_new_plan_starts_from_the_default_solver_preset() {
         let mut app = app_with_a_distinctive_active_plan();
         app.state
-            .ui
+            .model
             .preferences
             .set_choice(crate::workbench::ChoicePreference::DefaultSolverPreset, 2)
             .expect("accurate is a solver preset");

@@ -47,7 +47,7 @@ fn runs_kept_row(ui: &mut Ui, state: &mut AppState) {
                 // of the offered ones is not misreported as its neighbour.
                 let current = format!(
                     "{} runs",
-                    state.ui.preferences.scalar(ScalarPreference::RunsKept)
+                    state.model.preferences.scalar(ScalarPreference::RunsKept)
                 );
                 if let Some(selected) = select(
                     ui,
@@ -58,7 +58,7 @@ fn runs_kept_row(ui: &mut Ui, state: &mut AppState) {
                     control_width(ui),
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_scalar(ScalarPreference::RunsKept, RUNS_KEPT[selected])
                         .expect("every offered count is inside the preference domain");
@@ -83,7 +83,7 @@ fn imported_dialect_row(ui: &mut Ui, state: &mut AppState) {
         |ui| {
             value_column(ui, |ui| {
                 let active = state
-                    .ui
+                    .model
                     .preferences
                     .choice(ChoicePreference::ImportedNetlistDialect);
                 if let Some(selected) = select(
@@ -95,7 +95,7 @@ fn imported_dialect_row(ui: &mut Ui, state: &mut AppState) {
                     control_width(ui),
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_choice(ChoicePreference::ImportedNetlistDialect, selected)
                         .expect("the offered dialects are the complete preference domain");

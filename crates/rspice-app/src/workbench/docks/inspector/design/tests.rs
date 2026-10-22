@@ -628,12 +628,13 @@ fn checks_header_speaks_only_when_the_check_is_not_current_and_clean() {
     assert!(!checks_current(&state));
     assert_eq!(checks_status(&state).as_deref(), Some("not run"));
 
-    state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version().wrapping_add(1);
+    state.model.design_checks.drc_results = Some(rspice_design::drc::DrcResult::new());
+    state.model.design_checks.drc_checked_version =
+        state.model.schematic.topology_version().wrapping_add(1);
     assert!(!checks_current(&state));
     assert_eq!(checks_status(&state).as_deref(), Some("stale"));
 
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
     assert!(checks_current(&state));
     assert_eq!(checks_status(&state), None);
 }
@@ -696,14 +697,14 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
             ));
         }
     }
-    state.dialogs.drc_results = Some(result);
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_results = Some(result);
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
 
     assert_eq!(sheet_open_pin_findings(&state).len(), 1);
     assert_eq!(sheet_floating_net_findings(&state).len(), 1);
 
     // A check of an earlier drawing reports nothing about this one.
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version() + 1;
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version() + 1;
     assert!(sheet_open_pin_findings(&state).is_empty());
 }
 
@@ -828,8 +829,9 @@ fn an_instance_has_a_checks_section_only_for_its_own_findings() {
     assert!(painted.is_empty(), "unchecked: {painted}");
 
     let mut result = rspice_design::drc::DrcResult::new();
-    app.state.dialogs.drc_results = Some(result.clone());
-    app.state.dialogs.drc_checked_version = app.state.model.schematic.topology_version();
+    app.state.model.design_checks.drc_results = Some(result.clone());
+    app.state.model.design_checks.drc_checked_version =
+        app.state.model.schematic.topology_version();
     let painted = painted_panel(|ui| component_checks(ui, &app, &component));
     assert!(painted.is_empty(), "clean: {painted}");
 
@@ -844,7 +846,7 @@ fn an_instance_has_a_checks_section_only_for_its_own_findings() {
             point: crate::state::Point::new(10, 20),
         },
     ));
-    app.state.dialogs.drc_results = Some(result);
+    app.state.model.design_checks.drc_results = Some(result);
     let painted = painted_panel(|ui| component_checks(ui, &app, &component));
     assert_eq!(painted, "Checks\nConnectivity\n1 finding\n");
 }

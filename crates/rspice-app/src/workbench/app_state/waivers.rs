@@ -425,7 +425,7 @@ impl AppState {
         &self,
         cell_view: &CellViewRef,
     ) -> Option<String> {
-        if self.workbench.safe_mode.project_read_only() {
+        if self.model.safe_mode.project_read_only() {
             return Some("The project is read-only".to_owned());
         }
         let borrowed =

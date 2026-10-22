@@ -1068,7 +1068,7 @@ mod tests {
         library.add_cell(Cell::new("filter"));
         app.state.model.library_manager.add_library(library);
         app.state
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::NetNamingPolicy, 1)
             .unwrap();

@@ -161,7 +161,7 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
     // Check and save is greyed on a read-only project or schematic.
     if state.model.schematic.session.read_only
         || state.active_view_read_only()
-        || state.workbench.safe_mode.project_read_only()
+        || state.model.safe_mode.project_read_only()
     {
         return;
     }
@@ -1298,7 +1298,7 @@ mod tests {
         std::fs::create_dir_all(&directory).expect("raster output directory");
         for size in [egui::vec2(1440.0, 900.0), egui::vec2(560.0, 900.0)] {
             let mut app = RSpiceApp::test_instance();
-            app.state.ui.preferences.set_toggle(
+            app.state.model.preferences.set_toggle(
                 crate::workbench::preferences::TogglePreference::ReducedMotion,
                 true,
             );

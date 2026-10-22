@@ -23,8 +23,9 @@ pub(super) fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     let mut drc = DrcResult::new();
     drc.completed = true;
-    app.state.dialogs.drc_results = Some(drc);
-    app.state.dialogs.drc_checked_version = app.state.model.schematic.topology_version();
+    app.state.model.design_checks.drc_results = Some(drc);
+    app.state.model.design_checks.drc_checked_version =
+        app.state.model.schematic.topology_version();
     app.state.provision_test_project_technology_contract();
     app.state.sync_active_schematic_to_workspace();
 

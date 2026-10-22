@@ -650,7 +650,7 @@ fn validate_library_deletion_target(
     state: &AppState,
     target: &LibraryDeletionTarget,
 ) -> Result<(), String> {
-    if state.workbench.safe_mode.project_read_only() {
+    if state.model.safe_mode.project_read_only() {
         return Err("The project is open read-only; library objects cannot be deleted.".to_owned());
     }
     let library = state

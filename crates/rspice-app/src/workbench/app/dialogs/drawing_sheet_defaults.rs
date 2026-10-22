@@ -71,7 +71,7 @@ pub(crate) fn open_drawing_sheet_defaults(state: &mut AppState) -> bool {
         .design_management
         .drawing_sheet_settings()
         .clone();
-    let personal = state.ui.preferences.drawing_sheet_personal_preferences();
+    let personal = state.model.preferences.drawing_sheet_personal_preferences();
     state.dialogs.drawing_sheet_defaults = DrawingSheetDefaultsDialogState {
         open: true,
         edit: Some(SchematicEditAuthority::capture(state)),
@@ -113,7 +113,7 @@ fn refresh_untouched_baselines(state: &mut AppState) {
         dialog.catalog_revision = catalog_revision;
         dialog.edit = Some(authority);
     }
-    let personal_now = state.ui.preferences.drawing_sheet_personal_preferences();
+    let personal_now = state.model.preferences.drawing_sheet_personal_preferences();
     let dialog = &mut state.dialogs.drawing_sheet_defaults;
     if dialog.draft_personal == dialog.baseline_personal && personal_now != dialog.baseline_personal
     {
@@ -1708,7 +1708,7 @@ fn apply_drawing_sheet_defaults(app: &mut RSpiceApp) -> Result<String, String> {
     transaction.draft_personal.validate()?;
     if app
         .state
-        .ui
+        .model
         .preferences
         .drawing_sheet_personal_preferences()
         != transaction.baseline_personal
@@ -1723,7 +1723,7 @@ fn apply_drawing_sheet_defaults(app: &mut RSpiceApp) -> Result<String, String> {
         return Ok("Drawing-sheet defaults already matched the saved values.".to_owned());
     }
 
-    let mut personal_candidate = app.state.ui.preferences.clone();
+    let mut personal_candidate = app.state.model.preferences.clone();
     personal_candidate
         .set_drawing_sheet_personal_preferences(transaction.draft_personal.clone())?;
 
@@ -1736,7 +1736,7 @@ fn apply_drawing_sheet_defaults(app: &mut RSpiceApp) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
         commit_project_candidate(app, "Drawing-sheet defaults", before, candidate)?;
     }
-    app.state.ui.preferences = personal_candidate;
+    app.state.model.preferences = personal_candidate;
 
     Ok(match (project_changed, personal_changed) {
         (true, true) => {
@@ -2011,7 +2011,7 @@ mod tests {
         assert!(app.state.can_undo_project_design());
         assert_eq!(
             app.state
-                .ui
+                .model
                 .preferences
                 .drawing_sheet_personal_preferences()
                 .default_format

@@ -185,7 +185,7 @@ fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, token
     // to add to it. The other two say what the reader cannot do here.
     let access = if !app.state.project_lifecycle.is_open() {
         Some(("closed", None))
-    } else if app.state.workbench.safe_mode.project_read_only() {
+    } else if app.state.model.safe_mode.project_read_only() {
         Some(("safe-mode read only", Some(Problem::Warning)))
     } else {
         None
@@ -639,7 +639,7 @@ fn action_buttons(
 fn project_write_block_reason(app: &RSpiceApp) -> Option<&'static str> {
     if !app.state.project_lifecycle.is_open() {
         Some("Open a project before authoring symbols.")
-    } else if app.state.workbench.safe_mode.project_read_only() {
+    } else if app.state.model.safe_mode.project_read_only() {
         Some("The project is read-only in local safe mode.")
     } else if !app
         .state
@@ -1340,7 +1340,7 @@ mod tests {
     #[test]
     fn safe_mode_disables_every_symbol_mutation_but_keeps_editor_handoff() {
         let mut app = app_with_typed_symbol();
-        app.state.workbench.safe_mode.activate(
+        app.state.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..crate::state::write_policy::LocalSafeModeOptions::default()

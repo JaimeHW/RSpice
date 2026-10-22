@@ -48,7 +48,10 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
     ) {
         apply_to_viewer(state);
     }
-    let grid = state.ui.preferences.toggle(TogglePreference::WaveMinorGrid);
+    let grid = state
+        .model
+        .preferences
+        .toggle(TogglePreference::WaveMinorGrid);
     toggle_row(
         ui,
         state,
@@ -57,14 +60,19 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
         "Whether a waveform view starts with minor grid lines.",
         "Minor grid in new waveform views",
     );
-    if grid != state.ui.preferences.toggle(TogglePreference::WaveMinorGrid) {
+    if grid
+        != state
+            .model
+            .preferences
+            .toggle(TogglePreference::WaveMinorGrid)
+    {
         apply_to_viewer(state);
     }
 }
 
 /// Start the open viewer from these defaults, as a new one would start.
 pub(super) fn apply_to_viewer(state: &mut AppState) {
-    state.ui.results.session.phase_continuous = state.ui.preferences.unwrapped_phase();
+    state.ui.results.session.phase_continuous = state.model.preferences.unwrapped_phase();
     state.start_waveform_view_from_preferences();
 }
 
@@ -82,14 +90,14 @@ fn segment_row(
     let mut changed = false;
     searchable_row(ui, title, help, &labels, |ui| {
         value_column(ui, |ui| {
-            let stored = state.ui.preferences.choice(key);
+            let stored = state.model.preferences.choice(key);
             let mut selected = segments
                 .iter()
                 .position(|(_, index)| *index == stored)
                 .unwrap_or_default();
             if segmented(ui, key.stable_id(), &labels, &mut selected) {
                 state
-                    .ui
+                    .model
                     .preferences
                     .set_choice(key, segments[selected].1)
                     .expect("the segments are the complete preference domain");

@@ -162,7 +162,7 @@ fn bus_tap_click_cannot_commit_after_its_context_or_permission_changes() {
                 catalog.set_active(second).unwrap();
             }
             "read-only" => state.model.schematic.session.read_only = true,
-            "safe-mode" => state.workbench.safe_mode.activate(
+            "safe-mode" => state.model.safe_mode.activate(
                 crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()

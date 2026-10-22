@@ -29,7 +29,7 @@ fn symbol_canvas_accessibility_label(
 ) -> String {
     use crate::workbench::commands::vocabulary::Command;
     let shortcuts = crate::workbench::app_state::accessibility_shortcut_summary(
-        state.ui.preferences.shortcuts(),
+        state.model.preferences.shortcuts(),
         platform,
         operating_system,
         &[
@@ -117,7 +117,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         ui.spacing_mut().item_spacing.x = 0.0;
         let canvas_size = vec2(ui.available_width().max(180.0), height);
         let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
-        let navigation = state.ui.preferences.canvas_navigation();
+        let navigation = state.model.preferences.canvas_navigation();
         // Edited in place, the canvas frames the parent sheet and the symbol
         // stands where its instance does.
         let in_place = in_place::frame(ui, state, rect, &response);

@@ -249,7 +249,7 @@ impl RSpiceApp {
         let stale = history_authority_error(&self.state);
         let write_allowed = !self.state.model.schematic.session.read_only
             && !self.state.active_view_read_only()
-            && !self.state.workbench.safe_mode.project_read_only();
+            && !self.state.model.safe_mode.project_read_only();
         let mut body_scroll_offset = self
             .state
             .dialogs
@@ -400,7 +400,7 @@ impl RSpiceApp {
     fn restore_selected_revision(&mut self, rows: &[ProjectAuditRow]) {
         let result = (|| {
             history_authority_error(&self.state).map_or(Ok(()), Err)?;
-            if self.state.workbench.safe_mode.project_read_only()
+            if self.state.model.safe_mode.project_read_only()
                 || self.state.model.schematic.session.read_only
                 || self.state.active_view_read_only()
             {

@@ -39,10 +39,10 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
         state.cycle_active_symbol_pin_finding(step);
         return;
     }
-    let Some(result) = &state.dialogs.drc_results else {
+    let Some(result) = &state.model.design_checks.drc_results else {
         return;
     };
-    if state.dialogs.drc_checked_version != state.model.schematic.topology_version() {
+    if state.model.design_checks.drc_checked_version != state.model.schematic.topology_version() {
         return;
     }
 
@@ -242,11 +242,11 @@ pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, sta
     if let Some((severity, points)) = related_marks(state) {
         markers::draw_related_marks(painter, viewport, &points, severity);
     }
-    let Some(result) = &state.dialogs.drc_results else {
+    let Some(result) = &state.model.design_checks.drc_results else {
         return;
     };
     // Stale results stay in the dialog/console but vanish from the canvas.
-    if state.dialogs.drc_checked_version != state.model.schematic.topology_version() {
+    if state.model.design_checks.drc_checked_version != state.model.schematic.topology_version() {
         return;
     }
 

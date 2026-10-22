@@ -740,7 +740,7 @@ fn ellipsize(value: &str, maximum_characters: usize) -> String {
 
 fn search_button(ui: &mut Ui, app: &RSpiceApp, viewport_width: f32, large_target: bool) -> bool {
     let t = Tokens::get(ui.ctx());
-    let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+    let shortcut = app.state.model.preferences.shortcuts().resolved_label(
         &crate::workbench::commands::vocabulary::CommandRegistry,
         Command::CommandPalette.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),

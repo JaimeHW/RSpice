@@ -24,7 +24,7 @@ pub(super) fn active_study(state: &AppState) -> ActiveStudy<'_> {
     ActiveStudy::Ready(StudyView {
         analysis_label: analysis.label.as_str(),
         evidence: evidence.as_ref(),
-        quantity_policy: state.ui.preferences.quantity_presentation_policy(),
+        quantity_policy: state.model.preferences.quantity_presentation_policy(),
     })
 }
 pub(super) fn serves_active_analysis(state: &AppState) -> bool {

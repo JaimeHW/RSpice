@@ -579,7 +579,7 @@ fn engineering_context_summary(
                                 || format!("x {x:.0} · y {y:.0} DBU unavailable"),
                                 |dbu| {
                                     let policy =
-                                        app.state.ui.preferences.quantity_presentation_policy();
+                                        app.state.model.preferences.quantity_presentation_policy();
                                     format!(
                                         "x {} · y {}",
                                         policy.format_layout_coordinate(x, dbu),

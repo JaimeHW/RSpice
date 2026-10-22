@@ -1021,8 +1021,8 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
 #[test]
 fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
     let mut state = AppState::default();
-    state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_results = Some(rspice_design::drc::DrcResult::new());
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
     assert!(state.model.workspace.content.netlist_descriptor.is_none());
     assert!(state.model.workspace.content.netlist_document.is_none());
 
@@ -1039,8 +1039,8 @@ fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
     commit_netlist_lifecycle_action(&mut state).unwrap();
 
     assert!(state.is_netlist_first_without_schematic());
-    assert!(state.dialogs.drc_results.is_none());
-    assert_eq!(state.dialogs.drc_checked_version, 0);
+    assert!(state.model.design_checks.drc_results.is_none());
+    assert_eq!(state.model.design_checks.drc_checked_version, 0);
 
     let document = state
         .model

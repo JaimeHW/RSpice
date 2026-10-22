@@ -650,7 +650,7 @@ fn selected_receipt(
 fn publication_lifecycle_error(state: &AppState, stale: bool) -> Option<&'static str> {
     if !state.project_lifecycle.is_open() {
         Some("Open a project before publishing its library.")
-    } else if state.workbench.safe_mode.project_read_only() {
+    } else if state.model.safe_mode.project_read_only() {
         Some("Publication is unavailable while the project is open read-only.")
     } else if state.model.simulation.execution.has_active_execution() {
         Some("Publication is unavailable while a simulation is running.")
@@ -664,7 +664,7 @@ fn publication_lifecycle_error(state: &AppState, stale: bool) -> Option<&'static
 fn rollback_lifecycle_error(state: &AppState) -> Option<&'static str> {
     if !state.project_lifecycle.is_open() {
         Some("Open the publication's project before rollback.")
-    } else if state.workbench.safe_mode.project_read_only() {
+    } else if state.model.safe_mode.project_read_only() {
         Some("Rollback is unavailable while the project is open read-only.")
     } else if state.model.simulation.execution.has_active_execution() {
         Some("Rollback is unavailable while a simulation is running.")

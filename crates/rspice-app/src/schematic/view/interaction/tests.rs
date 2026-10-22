@@ -158,7 +158,7 @@ fn library_cell_placement_rejects_changed_context_or_permission_without_an_edit(
                 catalog.set_active(second).unwrap();
             }
             "read-only" => state.model.schematic.session.read_only = true,
-            "safe-mode" => state.workbench.safe_mode.activate(
+            "safe-mode" => state.model.safe_mode.activate(
                 crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
@@ -909,7 +909,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
                     state.model.schematic.init_undo_history();
                 }
                 "read-only" => state.model.schematic.session.read_only = true,
-                "safe-mode" => state.workbench.safe_mode.activate(
+                "safe-mode" => state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()
@@ -1314,7 +1314,7 @@ fn stale_design_note_authority_is_consumed_without_document_mutation() {
                 state.model.schematic.init_undo_history();
             }
             "read-only" => state.model.schematic.session.read_only = true,
-            "safe-mode" => state.workbench.safe_mode.activate(
+            "safe-mode" => state.model.safe_mode.activate(
                 crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
@@ -1478,7 +1478,7 @@ fn a_changed_document_ends_the_sequence_without_placing() {
                     .authority = None
             }
             "read-only" => state.model.schematic.session.read_only = true,
-            "safe-mode" => state.workbench.safe_mode.activate(
+            "safe-mode" => state.model.safe_mode.activate(
                 crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()

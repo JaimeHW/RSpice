@@ -256,7 +256,7 @@ pub(crate) fn publish_model_definition_candidate(
     if !state.model.project_open.is_open() {
         return Err("Model definitions require an open project.".to_owned());
     }
-    if state.workbench.safe_mode.project_read_only() {
+    if state.model.safe_mode.project_read_only() {
         return Err("Model definitions cannot change while the project is read-only.".to_owned());
     }
     let observed = state
@@ -361,7 +361,7 @@ pub(crate) fn publish_model_library_candidate(
     if !state.model.project_open.is_open() {
         return Err("Model libraries require an open project.".to_owned());
     }
-    if state.workbench.safe_mode.project_read_only() {
+    if state.model.safe_mode.project_read_only() {
         return Err("Model libraries cannot change while the project is read-only.".to_owned());
     }
     let before = state
@@ -432,7 +432,7 @@ pub(crate) fn publish_model_library_set_candidate(
     if !state.model.project_open.is_open() {
         return Err("Model libraries require an open project.".to_owned());
     }
-    if state.workbench.safe_mode.project_read_only() {
+    if state.model.safe_mode.project_read_only() {
         return Err("Model libraries cannot change while the project is read-only.".to_owned());
     }
     let before = state.model.model_library_manager.library_snapshot();
@@ -481,7 +481,7 @@ pub(crate) fn publish_model_resolution_candidate(
     if !state.model.project_open.is_open() {
         return Err("Model provider decisions require an open project.".to_owned());
     }
-    if state.workbench.safe_mode.project_read_only() {
+    if state.model.safe_mode.project_read_only() {
         return Err(
             "Model provider decisions cannot change while the project is read-only.".to_owned(),
         );
@@ -560,7 +560,7 @@ pub(crate) fn publish_symbol_definition_candidate_with_fixture(
     if !state.model.project_open.is_open() {
         return Err("Symbol definitions require an open project.".to_owned());
     }
-    if state.workbench.safe_mode.project_read_only() {
+    if state.model.safe_mode.project_read_only() {
         return Err("Symbol definitions cannot change while the project is read-only.".to_owned());
     }
     let source_library = state
@@ -1356,7 +1356,7 @@ impl ModelLibrariesRecord {
                 "Model libraries cannot be {operation} without an open project."
             ));
         }
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             return Err(format!(
                 "Model libraries cannot be {operation} while the project is read-only."
             ));
@@ -1416,7 +1416,7 @@ impl ModelResolutionRecordsRecord {
                 "Model provider decisions cannot be {operation} without an open project."
             ));
         }
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             return Err(format!(
                 "Model provider decisions cannot be {operation} while the project is read-only."
             ));
@@ -1472,7 +1472,7 @@ impl ModelDefinitionRecord {
                 "Model definition cannot be {operation} without an open project."
             ));
         }
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             return Err(format!(
                 "Model definition cannot be {operation} while the project is read-only."
             ));
@@ -1728,7 +1728,7 @@ impl SymbolDefinitionRecord {
                 "Symbol definition cannot be {operation} without an open project."
             ));
         }
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             return Err(format!(
                 "Symbol definition cannot be {operation} while the project is read-only."
             ));
@@ -2251,7 +2251,7 @@ fn schematic_read_only(state: &AppState, reference: &CellViewRef) -> bool {
 /// one in front of the operator. A record must fail closed on its own
 /// document, and must not fail on someone else's.
 fn document_read_only(state: &AppState, reference: &CellViewRef) -> bool {
-    state.workbench.safe_mode.project_read_only()
+    state.model.safe_mode.project_read_only()
         || state
             .model
             .workspace

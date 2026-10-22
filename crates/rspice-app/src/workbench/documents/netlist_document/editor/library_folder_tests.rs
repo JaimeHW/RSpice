@@ -50,7 +50,7 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
     // Nothing is edited: the folders changing is reason enough to parse the
     // deck again, once the edit debounce has long passed.
     state
-        .ui
+        .model
         .preferences
         .set_folders(FolderListPreference::LibraryFolders, vec![shared])
         .expect("a full path");

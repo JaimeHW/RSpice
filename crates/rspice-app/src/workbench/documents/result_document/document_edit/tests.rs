@@ -887,7 +887,6 @@ fn apply_properties(app: &mut RSpiceApp, digits: u8, phase_continuous: bool) {
 
 fn shown_digits(app: &RSpiceApp) -> u8 {
     app.state
-        .ui
         .result_presentation_policy()
         .displayed_significant_digits()
         .get()

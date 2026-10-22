@@ -62,7 +62,7 @@ impl RSpiceApp {
             ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, non_canvas_focus));
         let injected_now =
             ctx.input(|input| std::time::Duration::from_secs_f64(input.time.max(0.0)));
-        let profile = self.state.ui.preferences.shortcuts().clone();
+        let profile = self.state.model.preferences.shortcuts().clone();
         let platform = runtime_command_platform(ctx);
         // The editor the page drew last frame, as the menus also see it.
         let source_editor_focus = self
@@ -814,7 +814,7 @@ mod shortcut_ownership_tests {
             }],
             false,
         );
-        let profile = app.state.ui.preferences.shortcuts().clone();
+        let profile = app.state.model.preferences.shortcuts().clone();
         let environment = ShortcutEnvironment {
             workspace: app.state.workbench.workspace,
             active_view: app.state.model.workspace.content.active_view_type(),

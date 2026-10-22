@@ -189,7 +189,7 @@ impl RSpiceApp {
         let stale = review_authority_error(&self.state);
         let write_allowed = !self.state.model.schematic.session.read_only
             && !self.state.active_view_read_only()
-            && !self.state.workbench.safe_mode.project_read_only();
+            && !self.state.model.safe_mode.project_read_only();
         let selected = selected_review_note(&self.state).cloned();
         let reply_focus =
             (write_allowed && stale.is_none() && selected.is_some()).then_some(reply_id());
@@ -356,7 +356,7 @@ impl RSpiceApp {
     fn apply_review_mutation(&mut self, mutation: DesignReviewMutation) {
         let result = (|| {
             review_authority_error(&self.state).map_or(Ok(()), Err)?;
-            if self.state.workbench.safe_mode.project_read_only() {
+            if self.state.model.safe_mode.project_read_only() {
                 return Err("The project is open read-only.".to_owned());
             }
             let id = self
@@ -1181,7 +1181,7 @@ mod tests {
             }
             open_design_review_comments(&mut app.state);
             if case == "read-only" {
-                app.state.workbench.safe_mode.activate(
+                app.state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()

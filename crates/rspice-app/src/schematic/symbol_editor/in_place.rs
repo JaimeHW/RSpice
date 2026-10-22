@@ -61,7 +61,7 @@ pub(super) fn frame(
         state.ui.symbol.in_place = None;
         return None;
     };
-    let navigation = state.ui.preferences.canvas_navigation();
+    let navigation = state.model.preferences.canvas_navigation();
     let session = state.symbol_in_place_mut()?;
     match session.zoom_request.take() {
         Some(ZoomRequest::Frame(bounds)) => {

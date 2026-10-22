@@ -1690,7 +1690,7 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
         release_checks,
         slots: app
             .state
-            .ui
+            .model
             .preferences
             .solver_worker_limit()
             .unwrap_or_else(|| rspice_core::ResourceLimits::default().max_parallel_workers)

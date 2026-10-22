@@ -53,21 +53,21 @@ fn customize(state: &mut AppState) {
     state.ui.autosave_minutes = 10;
     state.ui.browser_spoken_feedback = true;
     state
-        .ui
+        .model
         .preferences
         .set_choice(ChoicePreference::InterfaceScale, 2)
         .expect("interface scale");
     state
-        .ui
+        .model
         .preferences
         .set_toggle(TogglePreference::ReducedMotion, true);
     state
-        .ui
+        .model
         .preferences
         .set_scalar(ScalarPreference::DisplayedSignificantDigits, 12)
         .expect("significant digits");
     state
-        .ui
+        .model
         .preferences
         .set_folders(
             FolderListPreference::LibraryFolders,
@@ -81,7 +81,7 @@ fn customize(state: &mut AppState) {
 
 /// The four settings the file holds, comparable across states.
 fn settings_of(state: &AppState) -> Value {
-    let mut preferences = serde_json::to_value(&state.ui.preferences).expect("preferences");
+    let mut preferences = serde_json::to_value(&state.model.preferences).expect("preferences");
     preferences
         .as_object_mut()
         .expect("preferences object")
@@ -135,7 +135,7 @@ fn settings_round_trip_with_unknown_keys_and_domains_kept() {
     assert!(second.ui.browser_spoken_feedback);
     assert_eq!(
         second
-            .ui
+            .model
             .preferences
             .choice(ChoicePreference::InterfaceScale),
         2
@@ -181,10 +181,15 @@ fn a_setting_a_newer_build_wrote_is_kept_until_it_is_changed_here() {
     let mut state = bound(&store);
     assert_eq!(state.ui.theme, Theme::default(), "the theme falls back");
     assert_eq!(state.ui.autosave_minutes, 10, "the rest still loads");
-    assert!(state.ui.preferences.toggle(TogglePreference::ReducedMotion));
+    assert!(
+        state
+            .model
+            .preferences
+            .toggle(TogglePreference::ReducedMotion)
+    );
 
     state
-        .ui
+        .model
         .preferences
         .set_toggle(TogglePreference::ReducedMotion, false);
     state.flush_preferences_file();
@@ -213,7 +218,7 @@ fn library_folders_decode_from_files_that_predate_or_garble_them() {
     let mut first = AppState::default();
     customize(&mut first);
     first
-        .ui
+        .model
         .preferences
         .restore_folder_defaults(&[FolderListPreference::LibraryFolders]);
     first.bind_preferences_file(store.clone());
@@ -226,7 +231,7 @@ fn library_folders_decode_from_files_that_predate_or_garble_them() {
     let mut state = bound(&store);
     assert!(
         state
-            .ui
+            .model
             .preferences
             .folders(FolderListPreference::LibraryFolders)
             .is_empty()
@@ -240,14 +245,14 @@ fn library_folders_decode_from_files_that_predate_or_garble_them() {
     let mut state = bound(&store);
     assert!(
         state
-            .ui
+            .model
             .preferences
             .folders(FolderListPreference::LibraryFolders)
             .is_empty()
     );
     assert_eq!(
         state
-            .ui
+            .model
             .preferences
             .choice(ChoicePreference::InterfaceScale),
         2,
@@ -355,7 +360,7 @@ fn a_change_is_written_once_after_it_settles_not_every_frame() {
     for frame in 0..30_u64 {
         let digits = 6 + u32::try_from(frame % 6).unwrap();
         state
-            .ui
+            .model
             .preferences
             .set_scalar(ScalarPreference::DisplayedSignificantDigits, digits)
             .unwrap();
@@ -430,18 +435,18 @@ fn pointer_movement_alone_never_hashes_the_settings() {
 
     // The shortcut library is not in the file, so it is not in the hash, and
     // it comes back from the hash exactly as it went in.
-    let before = fingerprint(&mut state.ui);
+    let before = fingerprint(&state.ui, &mut state.model.preferences);
     state
-        .ui
+        .model
         .preferences
         .shortcut_profiles_mut()
         .active_mut()
         .unwrap()
         .policies_mut()
         .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
-    let edited = state.ui.preferences.shortcut_profiles().clone();
-    assert_eq!(fingerprint(&mut state.ui), before);
-    assert_eq!(state.ui.preferences.shortcut_profiles(), &edited);
+    let edited = state.model.preferences.shortcut_profiles().clone();
+    assert_eq!(fingerprint(&state.ui, &mut state.model.preferences), before);
+    assert_eq!(state.model.preferences.shortcut_profiles(), &edited);
 }
 
 #[test]
@@ -494,13 +499,13 @@ fn exported(label: &str) -> (AppState, Vec<u8>) {
     let mut source = AppState::default();
     customize(&mut source);
     source.enable_volatile_test_shortcut_persistence();
-    let mut shortcuts = source.ui.preferences.shortcut_profiles().clone();
+    let mut shortcuts = source.model.preferences.shortcut_profiles().clone();
     shortcuts
         .active_mut()
         .unwrap()
         .policies_mut()
         .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
-    *source.ui.preferences.shortcut_profiles_mut() = shortcuts;
+    *source.model.preferences.shortcut_profiles_mut() = shortcuts;
     source.bind_preferences_file(store);
     let bytes = source.settings_file_bytes().expect("export");
     (source, bytes)
@@ -521,8 +526,8 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
         settings_of(&AppState::default()),
         "staging changes nothing"
     );
-    assert_eq!(shortcuts.active(), source.ui.preferences.shortcuts());
-    assert!(shortcuts.revision() > target.ui.preferences.shortcut_profiles().revision());
+    assert_eq!(shortcuts.active(), source.model.preferences.shortcuts());
+    assert!(shortcuts.revision() > target.model.preferences.shortcut_profiles().revision());
 
     let ctx = egui::Context::default();
     assert!(matches!(
@@ -533,8 +538,8 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
 
     assert_eq!(settings_of(&target), settings_of(&source));
     assert_eq!(
-        target.ui.preferences.shortcuts(),
-        source.ui.preferences.shortcuts()
+        target.model.preferences.shortcuts(),
+        source.model.preferences.shortcuts()
     );
     assert_eq!(
         target.prompt_text(),
@@ -553,7 +558,7 @@ fn a_malformed_settings_file_changes_nothing() {
     state.bind_preferences_file(store);
     state.enable_volatile_test_shortcut_persistence();
     let before = settings_of(&state);
-    let shortcuts_before = state.ui.preferences.shortcut_profiles().clone();
+    let shortcuts_before = state.model.preferences.shortcut_profiles().clone();
     let file_before = std::fs::read(&path).unwrap();
 
     let mut wrong_theme: Value = serde_json::from_slice(&good).unwrap();
@@ -594,7 +599,10 @@ fn a_malformed_settings_file_changes_nothing() {
         assert!(refusal.contains(reason), "{case}: {refusal}");
     }
     assert_eq!(settings_of(&state), before);
-    assert_eq!(state.ui.preferences.shortcut_profiles(), &shortcuts_before);
+    assert_eq!(
+        state.model.preferences.shortcut_profiles(),
+        &shortcuts_before
+    );
     assert_eq!(std::fs::read(&path).unwrap(), file_before);
 }
 

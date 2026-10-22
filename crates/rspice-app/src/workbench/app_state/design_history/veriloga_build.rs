@@ -124,7 +124,7 @@ impl VerilogABuildSettingsRecord {
                 "Build settings cannot be {operation} without an open project."
             ));
         }
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             return Err(format!(
                 "Build settings cannot be {operation} while the project is read-only."
             ));

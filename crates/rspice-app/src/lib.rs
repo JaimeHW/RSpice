@@ -241,7 +241,7 @@ impl RSpiceApp {
     ) -> Result<ProjectLibraryPublicationCandidate, String> {
         use sha2::Digest as _;
 
-        if self.state.workbench.safe_mode.project_read_only() {
+        if self.state.model.safe_mode.project_read_only() {
             return Err(
                 "project library publication is unavailable because the project is open read-only"
                     .to_owned(),
@@ -299,7 +299,7 @@ impl RSpiceApp {
     ) -> Result<ProjectLibraryPublicationReceipt, String> {
         use sha2::Digest as _;
 
-        if self.state.workbench.safe_mode.project_read_only() {
+        if self.state.model.safe_mode.project_read_only() {
             return Err(
                 "project library publication is unavailable because the project is open read-only"
                     .to_owned(),
@@ -371,7 +371,7 @@ impl RSpiceApp {
     ) -> Result<(), String> {
         use sha2::Digest as _;
 
-        if self.state.workbench.safe_mode.project_read_only() {
+        if self.state.model.safe_mode.project_read_only() {
             return Err(
                 "project library rollback is unavailable because the project is open read-only"
                     .to_owned(),
@@ -469,7 +469,7 @@ impl RSpiceApp {
                 })?,
                 None => (
                     crate::workbench::app_state::SimSetupState::new_with_user_preferences(
-                        &self.state.ui.preferences,
+                        &self.state.model.preferences,
                     ),
                     crate::workbench::app_state::default_model_library_manager(),
                     vec![

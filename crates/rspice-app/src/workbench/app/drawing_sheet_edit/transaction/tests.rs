@@ -83,7 +83,7 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
     let mut app = RSpiceApp::test_instance();
     assert!(drawing_sheet_editable(&app.state));
 
-    app.state.workbench.safe_mode.activate(
+    app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
@@ -115,7 +115,7 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
 fn an_edit_is_one_exact_undoable_presentation_transaction() {
     let (mut app, key, ids) = governed_app_with_sheets(1);
     let topology = app.state.model.schematic.topology_version();
-    let drc_version = app.state.dialogs.drc_checked_version;
+    let drc_version = app.state.model.design_checks.drc_checked_version;
     let retained_runs = app.state.model.simulation.retained.runs.len();
     let before = saved_format(&app, &key, ids[0]);
 
@@ -129,7 +129,10 @@ fn an_edit_is_one_exact_undoable_presentation_transaction() {
     assert!(app.state.can_undo_project_design());
     assert!(app.state.model.workspace.content.project_metadata_dirty);
     assert_eq!(app.state.model.schematic.topology_version(), topology);
-    assert_eq!(app.state.dialogs.drc_checked_version, drc_version);
+    assert_eq!(
+        app.state.model.design_checks.drc_checked_version,
+        drc_version
+    );
     assert_eq!(
         app.state.model.simulation.retained.runs.len(),
         retained_runs
@@ -488,12 +491,12 @@ fn a_personal_size_taken_by_a_sheet_is_copied_into_the_project() {
     };
     let mut personal_settings = app
         .state
-        .ui
+        .model
         .preferences
         .drawing_sheet_personal_preferences();
     personal_settings.presets.push(personal.clone());
     app.state
-        .ui
+        .model
         .preferences
         .set_drawing_sheet_personal_preferences(personal_settings)
         .unwrap();

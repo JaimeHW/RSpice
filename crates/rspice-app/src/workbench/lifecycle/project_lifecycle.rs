@@ -1208,7 +1208,7 @@ fn adopt_successful_save(
 /// a finding restated in the log stands on the page a second time.
 fn report_design_checks_after_save(state: &mut AppState) {
     if !state
-        .ui
+        .model
         .preferences
         .toggle(crate::workbench::TogglePreference::RunDesignChecksOnSave)
     {
@@ -1618,7 +1618,7 @@ fn require_open_project(state: &AppState) -> Result<(), ProjectLifecycleError> {
 }
 
 fn require_project_writable(state: &AppState) -> Result<(), ProjectLifecycleError> {
-    (!state.workbench.safe_mode.project_read_only())
+    (!state.model.safe_mode.project_read_only())
         .then_some(())
         .ok_or(ProjectLifecycleError::SafeModeReadOnly)
 }

@@ -766,7 +766,7 @@ fn remove_project_artifacts(path: &Path) {
 fn safe_mode_read_only_policy_blocks_native_project_writes_before_publication() {
     let path = unique_path("safe-mode-read-only");
     let mut state = AppState::default();
-    state.workbench.safe_mode.activate(
+    state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             disable_third_party_extensions: false,
             disable_gpu_acceleration: false,
@@ -942,7 +942,7 @@ fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
         .add_component(ComponentType::Resistor, Point::new(10, 10));
     assert!(
         !state
-            .ui
+            .model
             .preferences
             .toggle(TogglePreference::RunDesignChecksOnSave),
         "the preference is off until the author turns it on"
@@ -956,12 +956,12 @@ fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
     )
     .expect("the first canonical save publishes");
     assert!(
-        state.dialogs.drc_results.is_none(),
+        state.model.design_checks.drc_results.is_none(),
         "a save nobody asked to check ran no checks"
     );
 
     state
-        .ui
+        .model
         .preferences
         .set_toggle(TogglePreference::RunDesignChecksOnSave, true);
     state
@@ -977,7 +977,8 @@ fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
     .expect("findings are advisory: the save still publishes");
 
     let checked = state
-        .dialogs
+        .model
+        .design_checks
         .drc_results
         .as_ref()
         .expect("the save ran the checks the preference asked for");

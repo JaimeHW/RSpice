@@ -89,7 +89,7 @@ impl CheckAndSaveValidationReport {
                 "No project is open.",
             );
         }
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,

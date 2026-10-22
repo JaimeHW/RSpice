@@ -50,7 +50,7 @@ fn derived(state: &mut AppState) -> Option<NyquistDerived> {
 
 /// Present the active retained loop gain and apply local viewer outcomes.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     // Component arrays for the plot engine, cached per data version.
     //
     // The cache and the locus live in disjoint halves of the session, so the
@@ -120,7 +120,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
 /// Read the cached stability of the selected source into the inspector.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     view::right_panel(
         ui,
         derived(state).map(|cached| cached.stability),

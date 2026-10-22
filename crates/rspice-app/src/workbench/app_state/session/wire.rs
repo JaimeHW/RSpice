@@ -26,6 +26,7 @@ use crate::workbench::lifecycle::session::{
     SelectionBulkFilterSession, normalize_autosave_minutes,
 };
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
+use crate::workbench::preferences::UserPreferences;
 use crate::workbench::state::{
     ConsolePage, DesignPanel, LibraryCellviewPage, ModelsWorkbenchViewState,
     PdkTechnologyAuthoringRecovery, ProjectPage, SimulationPage, SpecialistToolBrowserState,
@@ -104,12 +105,36 @@ fn default_true() -> bool {
 
 impl Default for UiSessionWire {
     fn default() -> Self {
-        Self::from(&UiSessionState::new())
+        Self::capture(&UiSessionState::new(), &UserPreferences::default())
     }
 }
 
+/// A test that round-trips only the session's own fields writes default
+/// preferences beside them.
+#[cfg(test)]
 impl From<&UiSessionState> for UiSessionWire {
     fn from(session: &UiSessionState) -> Self {
+        Self::capture(session, &UserPreferences::default())
+    }
+}
+
+/// A test that round-trips only the session's own fields leaves the
+/// preferences the wire carries unread.
+#[cfg(test)]
+impl From<UiSessionWire> for UiSessionState {
+    fn from(ser: UiSessionWire) -> Self {
+        ser.restore().0
+    }
+}
+
+impl UiSessionWire {
+    /// The kept part of the document engines' session, with the reader's
+    /// preferences in the place sessions have always written them, though the
+    /// model holds them now.
+    pub(in crate::workbench) fn capture(
+        session: &UiSessionState,
+        preferences: &UserPreferences,
+    ) -> Self {
         Self {
             theme: session.theme,
             show_grid: session.grid.visible(),
@@ -130,7 +155,7 @@ impl From<&UiSessionState> for UiSessionWire {
             duplicate_external_nets: session.duplicate_external_nets,
             engineering_table_views: session.engineering_table_views.clone(),
             autosave_minutes: normalize_autosave_minutes(session.autosave_minutes),
-            preferences: session.preferences.clone(),
+            preferences: preferences.clone(),
             browser_spoken_feedback: session.browser_spoken_feedback,
             text_locale: session.text_locale,
             result_viewer: session.results.session.viewer,
@@ -144,10 +169,11 @@ impl From<&UiSessionState> for UiSessionWire {
                 .collect(),
         }
     }
-}
 
-impl From<UiSessionWire> for UiSessionState {
-    fn from(ser: UiSessionWire) -> Self {
+    /// The document engines' session this wire restores, and the preferences
+    /// it carries for the model.
+    pub(in crate::workbench) fn restore(self) -> (UiSessionState, UserPreferences) {
+        let ser = self;
         let grid = ser.grid_style.unwrap_or(if ser.show_grid {
             GridStyle::Dots
         } else {
@@ -174,7 +200,7 @@ impl From<UiSessionWire> for UiSessionState {
                     }
                     SchematicWireRoutingStyle::FreeAngle => crate::state::WireRoutingMode::Diagonal,
                 });
-        let mut session = Self {
+        let mut session = UiSessionState {
             theme: ser.theme,
             grid,
             grid_restore_style,
@@ -187,10 +213,9 @@ impl From<UiSessionWire> for UiSessionState {
             duplicate_external_nets: ser.duplicate_external_nets,
             engineering_table_views: ser.engineering_table_views,
             autosave_minutes: normalize_autosave_minutes(ser.autosave_minutes),
-            preferences,
             browser_spoken_feedback: ser.browser_spoken_feedback,
             text_locale: ser.text_locale,
-            ..Self::new()
+            ..UiSessionState::new()
         };
         session.results.session.viewer = ser.result_viewer;
         session.results.session.eye_timebase = ser
@@ -198,7 +223,7 @@ impl From<UiSessionWire> for UiSessionState {
             .into_iter()
             .filter(|(key, _)| key.is_persistable())
             .collect();
-        session
+        (session, preferences)
     }
 }
 
@@ -440,8 +465,6 @@ impl<'a> WorkbenchWireRef<'a> {
             project_launcher_page: _,
             project_launcher_recovery: _,
             examples_selection: _,
-            safe_mode: _,
-            live_write_locks: _,
             project_close_destination: _,
             live_mirror_entry_pending: _,
             focus_project_launcher_search: _,
@@ -719,8 +742,6 @@ impl WorkbenchWire {
             project_launcher_page: _,
             project_launcher_recovery: _,
             examples_selection: _,
-            safe_mode: _,
-            live_write_locks: _,
             project_close_destination: _,
             live_mirror_entry_pending: _,
             focus_project_launcher_search: _,

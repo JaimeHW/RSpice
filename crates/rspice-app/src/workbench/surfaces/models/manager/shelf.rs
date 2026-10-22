@@ -1620,7 +1620,7 @@ mod tests {
                 .is_none(),
             "a placeable part on an open sheet offers Place"
         );
-        state.workbench.safe_mode.activate(
+        state.model.safe_mode.activate(
             crate::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..Default::default()
@@ -1649,7 +1649,7 @@ mod tests {
             crate::ui::Theme::default().apply(&ctx);
             let mut state = AppState::default();
             if read_only {
-                state.workbench.safe_mode.activate(
+                state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()

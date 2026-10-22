@@ -194,8 +194,8 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
 
 /// Present the qualified traces and apply local viewer outcomes.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let presentation = state.ui.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
+    let presentation = state.result_presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
     // Γ-plane component arrays per trace, cached per data version.
     //
@@ -278,7 +278,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
 /// Present the selected source's trace summary and marker.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     view::right_panel(
         ui,
         &state.analysis.smith_chart_state,
@@ -289,7 +289,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             .rf_pin
             .get(&super::ResultViewer::Smith)
             .copied(),
-        &state.ui.preferences.quantity_presentation_policy(),
+        &state.model.preferences.quantity_presentation_policy(),
         usize::from(presentation.displayed_significant_digits().get()),
     );
 }

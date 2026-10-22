@@ -68,7 +68,7 @@ pub fn create_editable_project_copy_and_open(
     if !app.state.project_lifecycle.is_open() {
         return Err("Open a project before creating an editable model copy".to_owned());
     }
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Err(
             "An editable model copy cannot be created while the project is read-only".to_owned(),
         );
@@ -302,7 +302,7 @@ pub(super) fn start_qualification_execution_for(
     if !app.state.project_lifecycle.is_open() {
         return Err("Qualification requires an open project".to_owned());
     }
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Err("Qualification cannot run while the project is read-only".to_owned());
     }
     if !validate_open_candidate(app) {
@@ -572,7 +572,7 @@ pub fn promote_open_candidate(app: &mut RSpiceApp, candidate_id: &str) -> bool {
             Some("Model promotion requires an open project".to_owned());
         return false;
     }
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         app.state.workbench.model_editor.promotion_error =
             Some("Model promotion is unavailable while the project is read-only".to_owned());
         return false;
@@ -646,7 +646,7 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
     if !app.state.project_lifecycle.is_open() {
         return Err("Model revision cannot be saved without an open project".to_owned());
     }
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Err("Model revision cannot be saved while the project is read-only".to_owned());
     }
     if app

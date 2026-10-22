@@ -141,7 +141,7 @@ impl AppState {
                 Refusal::NoSymbolView
             });
         };
-        if self.workbench.safe_mode.project_read_only() {
+        if self.model.safe_mode.project_read_only() {
             return Err(Refusal::SafeMode);
         }
         if library.read_only {

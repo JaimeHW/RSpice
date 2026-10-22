@@ -348,7 +348,7 @@ pub(super) fn stage_netlist_import(
     // A deck that names no dialect starts from the one Preferences sets; a
     // deck whose markers name one is read as that.
     let selected_dialect = if detected_dialect == crate::state::NetlistSourceDialect::RSpice {
-        state.ui.preferences.imported_netlist_dialect()
+        state.model.preferences.imported_netlist_dialect()
     } else {
         detected_dialect
     };
@@ -756,7 +756,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
         if !state.project_lifecycle.is_open() {
             return Err("Open the project before reviewing its netlist profile.".to_owned());
         }
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             return Err("The project is read-only in the current safe mode.".to_owned());
         }
         let descriptor = state

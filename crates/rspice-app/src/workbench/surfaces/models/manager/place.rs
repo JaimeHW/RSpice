@@ -99,7 +99,7 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
             "The view in front is not a schematic, so a placed part would have nowhere to land. Open a schematic first.",
         );
     }
-    if state.workbench.safe_mode.project_read_only() {
+    if state.model.safe_mode.project_read_only() {
         return Some(
             "This project is open read-only in safe mode, so it cannot receive an instance.",
         );

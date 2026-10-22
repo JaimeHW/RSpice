@@ -69,7 +69,7 @@ impl HierarchyExtractionRecord {
         state: &AppState,
         operation: &str,
     ) -> Result<(), String> {
-        if state.workbench.safe_mode.project_read_only() {
+        if state.model.safe_mode.project_read_only() {
             return Err(format!(
                 "Create hierarchy cannot be {operation} while the project is open read-only."
             ));

@@ -70,7 +70,7 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     temperature_validity_findings(
         ui,
         &rows,
-        app.state.ui.preferences.quantity_presentation_policy(),
+        app.state.model.preferences.quantity_presentation_policy(),
     );
     // Four bands share the body, so each is budgeted against the room actually
     // left rather than against a constant: the page carries no scroll of its
@@ -167,7 +167,7 @@ fn corner_matrix(
     let mut select = None;
     let mut bind = None;
     // The temperature column is headed with the unit its cells are read in.
-    let policy = app.state.ui.preferences.quantity_presentation_policy();
+    let policy = app.state.model.preferences.quantity_presentation_policy();
     let temperature_heading = format!("Temp {}", policy.celsius_display_transform().2);
     let mut columns = MATRIX_COLUMNS;
     columns[7].0 = &temperature_heading;
@@ -965,7 +965,7 @@ fn validate_current_model_execution_plan(
             "Corner validation found {unresolved} bindings without a matching source section."
         ));
     }
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Err(
             "A durable model-validation receipt cannot be published while the project is read-only."
                 .to_owned(),
@@ -1238,7 +1238,7 @@ fn stated_temperatures(
 }
 
 fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
-    let policy = app.state.ui.preferences.quantity_presentation_policy();
+    let policy = app.state.model.preferences.quantity_presentation_policy();
     let mut open_editor = false;
     let mut duplicate = false;
     let mut make_default = false;

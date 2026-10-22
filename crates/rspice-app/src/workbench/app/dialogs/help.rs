@@ -297,7 +297,7 @@ impl RSpiceApp {
 
         // Count against the filter as entered last frame — immediate mode
         // corrects the hint one frame after each keystroke.
-        let shortcuts = self.state.ui.preferences.shortcuts().clone();
+        let shortcuts = self.state.model.preferences.shortcuts().clone();
         let platform = crate::workbench::app_state::runtime_command_platform(ctx);
         let operating_system = ctx.os();
         let filter = self.state.dialogs.shortcuts_filter.trim().to_lowercase();

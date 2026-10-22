@@ -291,7 +291,7 @@ fn apply_layout(state: &mut AppState, template: LayoutTemplate, scope: LayoutSco
             LayoutScope::AllWorkspaces => state.workbench.apply_preset_to_all_workspaces(preset),
         }
         state
-            .ui
+            .model
             .preferences
             .workspace_mut()
             .expect("the manager opens only for a compatible Workspace preference domain")

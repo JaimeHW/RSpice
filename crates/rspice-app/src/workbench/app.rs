@@ -436,7 +436,7 @@ impl RSpiceApp {
         let mut state = AppState::restore_with_preferences_file(cc.storage);
 
         let console_open = state
-            .ui
+            .model
             .preferences
             .workspace()
             .map(crate::workbench::WorkspacePreferences::console_on_launch)
@@ -447,7 +447,7 @@ impl RSpiceApp {
         // visited. Every other one opens from the preset, so the workbench
         // needs it before the first navigation resolves a layout.
         let workspace_preset = state
-            .ui
+            .model
             .preferences
             .workspace()
             .map(crate::workbench::WorkspacePreferences::preset)
@@ -593,7 +593,7 @@ impl RSpiceApp {
         self.state.drain_notices(ctx);
         self.state.reconcile_schematic_drag(ctx, false);
         let initializing_frame = self.first_frame;
-        let desired_zoom = self.state.ui.preferences.interface_scale();
+        let desired_zoom = self.state.model.preferences.interface_scale();
         if (ctx.zoom_factor() - desired_zoom).abs() > f32::EPSILON {
             ctx.set_zoom_factor(desired_zoom);
         }
@@ -734,7 +734,7 @@ impl RSpiceApp {
         let should_warn_before_unload = should_warn_before_browser_unload(
             project_has_unsaved_changes,
             authoring_has_unsaved_changes,
-            self.state.workbench.live_write_locks.mirror,
+            self.state.model.live_write_locks.mirror,
         );
         #[cfg(target_arch = "wasm32")]
         update_browser_before_unload_guard(should_warn_before_unload);
@@ -1235,7 +1235,7 @@ fn should_warn_before_browser_unload(
 }
 
 fn should_persist_application_state(state: &AppState) -> bool {
-    !state.workbench.live_write_locks.mirror
+    !state.model.live_write_locks.mirror
 }
 
 fn configured_autosave_interval(minutes: u8) -> std::time::Duration {
@@ -1732,8 +1732,9 @@ mod tests {
     #[test]
     fn legacy_drc_projection_is_never_execution_authority() {
         let mut state = runnable_state();
-        state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
-        state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+        state.model.design_checks.drc_results =
+            Some(drc_result(DrcViolationType::MissingGround, None));
+        state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
 
         assert!(
             schematic_readiness(&state).is_none(),
@@ -2007,11 +2008,11 @@ mod tests {
         let mut state = AppState::default();
         assert!(should_persist_application_state(&state));
 
-        state.workbench.live_write_locks.mirror = true;
-        state.workbench.live_write_locks.mirror_save_copy_allowed = true;
+        state.model.live_write_locks.mirror = true;
+        state.model.live_write_locks.mirror_save_copy_allowed = true;
         assert!(!should_persist_application_state(&state));
 
-        state.workbench.live_write_locks.mirror_save_copy_allowed = false;
+        state.model.live_write_locks.mirror_save_copy_allowed = false;
         assert!(!should_persist_application_state(&state));
     }
 

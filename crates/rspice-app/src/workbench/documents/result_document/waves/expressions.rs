@@ -363,8 +363,8 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
         .ui
         .results
         .synchronize_wave_caches(&state.model.simulation);
-    let presentation = state.ui.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let sample_selection = state.ui.results.session.sample_selection.clone();
     let hidden_family_traces = state.ui.results.session.hidden_family_traces.clone();
@@ -431,7 +431,7 @@ mod tests {
             .active_run()
             .unwrap()
             .dataset_content_digest();
-        let policy = state.ui.result_presentation_policy();
+        let policy = state.result_presentation_policy();
         let models = cached_models(
             &state.model.simulation,
             &mut state.ui.results,

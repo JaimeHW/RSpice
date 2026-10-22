@@ -1253,7 +1253,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
             let non_canvas_focus = ctx.memory(|memory| memory.focused().is_some());
             let snapshot =
                 ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, non_canvas_focus));
-            let profile = state.ui.preferences.shortcuts().clone();
+            let profile = state.model.preferences.shortcuts().clone();
             command = state
                 .shortcut_resolver
                 .resolve(

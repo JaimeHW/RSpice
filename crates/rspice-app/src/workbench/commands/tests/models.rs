@@ -242,7 +242,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         .select_library("external command source")
         .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some("external_nch".to_owned());
-    app.state.workbench.safe_mode.activate(
+    app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..crate::state::write_policy::LocalSafeModeOptions::default()
@@ -294,7 +294,7 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
     );
     assert!(Command::ModelEditor.is_enabled(&app));
 
-    app.state.workbench.safe_mode.activate(
+    app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..crate::state::write_policy::LocalSafeModeOptions::default()

@@ -182,7 +182,7 @@ fn result_import_block_reason(state: &AppState) -> Option<String> {
     if !state.project_lifecycle.is_open() {
         return Some("Open a project before importing a result dataset.".to_owned());
     }
-    if state.workbench.safe_mode.project_read_only() {
+    if state.model.safe_mode.project_read_only() {
         return Some("The project is read-only; result history cannot be changed.".to_owned());
     }
     if state.model.simulation.execution.has_active_execution() {

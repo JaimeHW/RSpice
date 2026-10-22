@@ -937,7 +937,7 @@ fn section_header(
         return;
     };
     let (mut enabled, mut blocker, value) = section_action_state(spec.section, records);
-    if app.state.workbench.safe_mode.project_read_only()
+    if app.state.model.safe_mode.project_read_only()
         && matches!(
             spec.section,
             ModelEditorSection::Parameters
@@ -1043,7 +1043,7 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
         })
         .unwrap_or_default();
     let selected = app.state.workbench.model_editor.selected_parameter;
-    let read_only = app.state.workbench.safe_mode.project_read_only();
+    let read_only = app.state.model.safe_mode.project_read_only();
     let mut changed_value = false;
     let mut selected_parameter = selected;
 

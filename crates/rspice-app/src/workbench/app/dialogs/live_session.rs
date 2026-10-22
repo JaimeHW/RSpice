@@ -91,7 +91,7 @@ impl RSpiceApp {
         }
 
         let session = self.cloud_account.snapshot().live_session.clone();
-        let mirroring = self.state.workbench.live_write_locks.mirror;
+        let mirroring = self.state.model.live_write_locks.mirror;
         let circuit_id = self
             .state
             .model

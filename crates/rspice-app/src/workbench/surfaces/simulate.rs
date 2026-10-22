@@ -2353,7 +2353,7 @@ fn analysis_form_body(
                 analysis_form::form(
                     ui,
                     draft,
-                    app.state.ui.preferences.quantity_presentation_policy(),
+                    app.state.model.preferences.quantity_presentation_policy(),
                     app.state.ui.number_locale,
                     envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
                     &placed_loop_probes,

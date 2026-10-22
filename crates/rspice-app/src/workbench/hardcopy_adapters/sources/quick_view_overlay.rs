@@ -59,7 +59,7 @@ fn capture_quick_view_overlay(
         results.session.cursors.b,
         markers,
         match state
-            .ui
+            .model
             .preferences
             .result_presentation_policy()
             .cursor_interpolation()

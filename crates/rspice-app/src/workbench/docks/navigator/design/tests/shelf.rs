@@ -834,7 +834,7 @@ fn paints_line(text: &str, line: &str) -> bool {
 /// The stored history, as the durable domain holds it.
 #[cfg(not(target_arch = "wasm32"))]
 fn stored_recent(state: &AppState) -> Vec<String> {
-    state.ui.preferences.component_shelf().recent
+    state.model.preferences.component_shelf().recent
 }
 
 /// Arm one primitive and put it on the sheet, the way a click-to-arm placement
@@ -908,7 +908,12 @@ fn a_fresh_profile_takes_the_shipped_pins_until_the_reader_moves_one() {
         "a profile that has never pinned anything sees the shipped set"
     );
     assert!(
-        app.state.ui.preferences.component_shelf().pinned.is_none(),
+        app.state
+            .model
+            .preferences
+            .component_shelf()
+            .pinned
+            .is_none(),
         "and the shipped set is not yet written as the reader's own"
     );
 
@@ -949,7 +954,7 @@ fn a_fresh_profile_takes_the_shipped_pins_until_the_reader_moves_one() {
     }
     assert_eq!(pinned_keys(&app.state), Vec::<String>::new());
     assert_eq!(
-        app.state.ui.preferences.component_shelf().pinned,
+        app.state.model.preferences.component_shelf().pinned,
         Some(Vec::new()),
         "an emptied set is the reader's answer, not an absent one"
     );
@@ -1287,7 +1292,7 @@ fn the_shelf_set_survives_the_restart_boundary_the_workbench_actually_crosses() 
             view: "schematic".to_owned(),
         },
     );
-    let saved = app.state.ui.preferences.component_shelf();
+    let saved = app.state.model.preferences.component_shelf();
 
     let mut storage = MemoryStorage::default();
     eframe::set_value(&mut storage, eframe::APP_KEY, &app.state);
@@ -1296,12 +1301,12 @@ fn the_shelf_set_survives_the_restart_boundary_the_workbench_actually_crosses() 
             .expect("RSpice must be able to restore a session it just saved");
 
     assert_eq!(
-        restored.ui.preferences.component_shelf(),
+        restored.model.preferences.component_shelf(),
         saved,
         "the shelf's personal set must cross the restart boundary intact"
     );
     assert_eq!(
-        restored.ui.preferences.component_shelf().pinned,
+        restored.model.preferences.component_shelf().pinned,
         Some(vec![
             ShelfEntry::Primitive(ComponentType::Capacitor).storage_key(),
             ShelfEntry::Primitive(ComponentType::Ground).storage_key(),
@@ -1486,7 +1491,7 @@ fn the_history_outlasts_the_band_and_stops_at_its_own_cap() {
         record_placement(&mut app.state, &part(index));
     }
 
-    let recent = app.state.ui.preferences.component_shelf().recent;
+    let recent = app.state.model.preferences.component_shelf().recent;
     assert_eq!(recent.len(), RECENT_STORED, "the history stops at its cap");
     assert_eq!(
         recent.first(),

@@ -274,7 +274,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 /// it remains reachable even when a dense engineering toolbar overflows.
 fn global_document_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state);
-    let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+    let shortcut = app.state.model.preferences.shortcuts().resolved_label(
         &CommandRegistry,
         Command::Save.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -398,7 +398,7 @@ fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec
 
 fn reserved_pvt_selector_width(ui: &egui::Ui, app: &RSpiceApp) -> f32 {
     let reference = app.state.model.sim_setup.reference_pvt;
-    let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
+    let quantity_policy = app.state.model.preferences.quantity_presentation_policy();
     let label = format!(
         "{} · {}",
         reference.process.short_name(),
@@ -1584,7 +1584,7 @@ fn toolbar_command(
             (icon, label, layout.toolbar_labels, false)
         }
     };
-    let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+    let shortcut = app.state.model.preferences.shortcuts().resolved_label(
         &CommandRegistry,
         command.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -1714,14 +1714,14 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 "Stop active simulation".to_owned()
             } else {
                 let reference = app.state.model.sim_setup.reference_pvt;
-                let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
+                let quantity_policy = app.state.model.preferences.quantity_presentation_policy();
                 format!(
                     "Run active simulation plan at {} · {}",
                     reference.process.short_name(),
                     pvt_temperature_label(reference.temperature_celsius, quantity_policy)
                 )
             };
-            let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+            let shortcut = app.state.model.preferences.shortcuts().resolved_label(
                 &CommandRegistry,
                 command.key(),
                 crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -1888,7 +1888,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
     let enabled = command.is_enabled(app);
-    let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
+    let shortcut = app.state.model.preferences.shortcuts().resolved_label(
         &CommandRegistry,
         command.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -1920,7 +1920,7 @@ const PVT_CHIP_CHEVRON_SPAN: f32 = 21.0;
 fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
     let t = Tokens::get(ui.ctx());
     let reference = app.state.model.sim_setup.reference_pvt;
-    let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
+    let quantity_policy = app.state.model.preferences.quantity_presentation_policy();
     let label = format!(
         "{} · {}",
         reference.process.short_name(),

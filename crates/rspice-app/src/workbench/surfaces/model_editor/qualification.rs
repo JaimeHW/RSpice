@@ -60,7 +60,7 @@ pub(super) fn qualification_plan_dialog(
                 .draft
                 .as_ref()
                 .is_none_or(|draft| draft.definition_is_dirty());
-            let authoring_blocker = if app.state.workbench.safe_mode.project_read_only() {
+            let authoring_blocker = if app.state.model.safe_mode.project_read_only() {
                 Some("The project is open read-only; qualification contracts cannot be changed.")
             } else if execution_active {
                 Some("Cancel or finish the active qualification run before changing its plan.")
@@ -313,7 +313,7 @@ fn qualification_plan_actions(
     plan: &mut QualificationPlanUiState,
 ) {
     dialog_subheading(ui, "Contract actions");
-    let read_only = app.state.workbench.safe_mode.project_read_only();
+    let read_only = app.state.model.safe_mode.project_read_only();
     let execution_active = app
         .state
         .workbench
@@ -688,7 +688,7 @@ fn qualification_vector_edit_dialog(
         .ok()
         .cloned();
     let writable = vector.is_some()
-        && !app.state.workbench.safe_mode.project_read_only()
+        && !app.state.model.safe_mode.project_read_only()
         && app
             .state
             .workbench
@@ -877,7 +877,7 @@ fn qualification_disposition_dialog(
     } else {
         "Record disposition"
     };
-    let writable = !app.state.workbench.safe_mode.project_read_only()
+    let writable = !app.state.model.safe_mode.project_read_only()
         && app
             .state
             .workbench
@@ -1298,7 +1298,7 @@ fn qualification_authoring_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     {
         return;
     }
-    let write_allowed = !app.state.workbench.safe_mode.project_read_only();
+    let write_allowed = !app.state.model.safe_mode.project_read_only();
     let choice = Dialog::new("New qualification suite", "Add suite")
     .description("Author one suite and its vector for this source. The candidate changes only after the whole suite validates.")
     .size(DialogSize::Transaction)

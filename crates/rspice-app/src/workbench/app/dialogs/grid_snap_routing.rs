@@ -697,7 +697,7 @@ mod tests {
         state.dialogs.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state.dialogs.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
 
-        state.workbench.safe_mode.activate(
+        state.model.safe_mode.activate(
             LocalSafeModeOptions {
                 open_project_read_only: true,
                 ..LocalSafeModeOptions::default()

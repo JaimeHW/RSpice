@@ -108,7 +108,7 @@ pub(crate) enum ShortcutLibraryPublicationContinuation {
 
 impl AppState {
     pub(crate) fn initialize_shortcut_library_persistence(&mut self, ctx: &egui::Context) {
-        let session_library = self.ui.preferences.shortcut_profiles().clone();
+        let session_library = self.model.preferences.shortcut_profiles().clone();
 
         #[cfg(not(target_arch = "wasm32"))]
         let _ = ctx;
@@ -144,7 +144,7 @@ impl AppState {
         persisted: PersistedShortcutProfileLibrary,
         publication_completion: Option<Result<(), String>>,
     ) {
-        *self.ui.preferences.shortcut_profiles_mut() = persisted.library().clone();
+        *self.model.preferences.shortcut_profiles_mut() = persisted.library().clone();
         self.shortcut_resolver.reset();
         self.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(persisted),
@@ -174,7 +174,7 @@ impl AppState {
                     .blocked_reason()
                     .unwrap_or_else(|| "shortcut library storage is unavailable".to_owned())
             })?;
-        if predecessor.library() != self.ui.preferences.shortcut_profiles() {
+        if predecessor.library() != self.model.preferences.shortcut_profiles() {
             return Err("the shortcut profile in use no longer matches the saved copy".to_owned());
         }
         if predecessor.library() == candidate {
@@ -192,7 +192,7 @@ impl AppState {
             let generation = predecessor.token().generation().saturating_add(1);
             let persisted =
                 PersistedShortcutProfileLibrary::test_snapshot(candidate.clone(), generation);
-            *self.ui.preferences.shortcut_profiles_mut() = candidate.clone();
+            *self.model.preferences.shortcut_profiles_mut() = candidate.clone();
             self.shortcut_resolver.reset();
             self.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
                 persisted: Box::new(persisted),
@@ -423,7 +423,7 @@ impl AppState {
         if let Some(persisted) = self.shortcut_library_persistence.persisted() {
             debug_assert_eq!(
                 persisted.library(),
-                self.ui.preferences.shortcut_profiles(),
+                self.model.preferences.shortcut_profiles(),
                 "live shortcuts must be the exact accepted canonical snapshot"
             );
             return;
@@ -446,7 +446,7 @@ impl AppState {
 
     #[cfg(test)]
     pub(crate) fn enable_volatile_test_shortcut_persistence(&mut self) {
-        let library = self.ui.preferences.shortcut_profiles().clone();
+        let library = self.model.preferences.shortcut_profiles().clone();
         self.shortcut_library_persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(PersistedShortcutProfileLibrary::test_snapshot(library, 1)),
             publication_completion: None,
@@ -487,7 +487,7 @@ mod tests {
             publication_completion: Some(Ok(())),
             volatile_test: true,
         };
-        let before = state.ui.preferences.shortcut_profiles().clone();
+        let before = state.model.preferences.shortcut_profiles().clone();
         let mut candidate = before.clone();
         candidate
             .insert_named_preset(
@@ -502,7 +502,7 @@ mod tests {
             .unwrap_err();
 
         assert!(error.contains("awaiting acknowledgement"));
-        assert_eq!(state.ui.preferences.shortcut_profiles(), &before);
+        assert_eq!(state.model.preferences.shortcut_profiles(), &before);
         assert!(state.shortcut_library_publication_completion_pending());
     }
 }

@@ -149,8 +149,8 @@ fn technology_free_runnable_state() -> AppState {
     load_example("Voltage Divider", &mut state.model.schematic);
     let mut drc = DrcResult::new();
     drc.completed = true;
-    state.dialogs.drc_results = Some(drc);
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_results = Some(drc);
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
     state
 }
 
@@ -2096,7 +2096,7 @@ fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
         .model
         .schematic
         .add_library_cell_component(Point::new(400, 400), binding);
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
 
     let projection = state
         .model
@@ -2213,7 +2213,7 @@ fn author_two_occurrences_of_one_cell(state: &mut AppState) {
         .model
         .schematic
         .add_library_cell_component(Point::new(600, 400), binding);
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
 }
 
 #[test]

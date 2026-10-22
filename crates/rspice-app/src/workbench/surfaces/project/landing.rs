@@ -1027,7 +1027,7 @@ mod tests {
     fn opening_schematics_never_pushes_a_project_off_the_start_page() {
         let mut app = RSpiceApp::test_instance();
         app.state.recent_files.clear();
-        let listed = app.state.ui.preferences.recent_files_listed();
+        let listed = app.state.model.preferences.recent_files_listed();
         let project =
             |index: usize| std::path::PathBuf::from(format!("C:/Work/p{index}.rspiceproj"));
         let schematic = |index: usize| std::path::PathBuf::from(format!("C:/Work/s{index}.rsch"));

@@ -95,7 +95,7 @@ pub(crate) fn open_custom_sheet_size_library(state: &mut AppState) -> bool {
     if state.dialogs.drawing_sheet_presets.any_open() {
         return false;
     }
-    let personal = state.ui.preferences.drawing_sheet_personal_preferences();
+    let personal = state.model.preferences.drawing_sheet_personal_preferences();
     state.dialogs.drawing_sheet_presets = DrawingSheetPresetDialogsState {
         library_open: true,
         search: String::new(),
@@ -131,7 +131,7 @@ impl RSpiceApp {
     fn render_drawing_sheet_preset_library(&mut self, ctx: &Context) {
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let presets = sorted_visible_presets(
@@ -253,7 +253,7 @@ impl RSpiceApp {
         }
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let visible = all_visible_presets(
@@ -308,7 +308,7 @@ impl RSpiceApp {
     fn render_drawing_sheet_preset_editor(&mut self, ctx: &Context) {
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let visible = all_visible_presets(
@@ -413,7 +413,7 @@ impl RSpiceApp {
             .ok_or_else(|| "The custom-size editor is not open.".to_owned())?;
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let visible = all_visible_presets(
@@ -480,7 +480,7 @@ impl RSpiceApp {
             .map_or("Unavailable preset", |preset| preset.name.as_str());
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let used_by = usage_count(
@@ -548,7 +548,7 @@ impl RSpiceApp {
             }
             DrawingSheetPresetScope::User => {
                 self.ensure_personal_fresh()?;
-                let mut preferences = self.state.ui.preferences.clone();
+                let mut preferences = self.state.model.preferences.clone();
                 let mut personal = preferences.drawing_sheet_personal_preferences();
                 if personal_default_references_preset(&personal, &key.id) {
                     return Err(
@@ -565,7 +565,7 @@ impl RSpiceApp {
                     return Err("That personal custom size is no longer available.".to_owned());
                 }
                 preferences.set_drawing_sheet_personal_preferences(personal)?;
-                self.state.ui.preferences = preferences;
+                self.state.model.preferences = preferences;
             }
             DrawingSheetPresetScope::Organization => {
                 return Err(
@@ -580,7 +580,7 @@ impl RSpiceApp {
     fn open_preset_transfer(&mut self, mode: TransferMode) {
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let visible = all_visible_presets(
@@ -617,7 +617,7 @@ impl RSpiceApp {
     fn render_drawing_sheet_preset_transfer(&mut self, ctx: &Context) {
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let visible = sorted_visible_presets(
@@ -760,7 +760,7 @@ impl RSpiceApp {
         }
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let mut visible = all_visible_presets(
@@ -971,7 +971,7 @@ impl RSpiceApp {
             Ok(Some(package)) => {
                 let personal = self
                     .state
-                    .ui
+                    .model
                     .preferences
                     .drawing_sheet_personal_preferences();
                 let visible = all_visible_presets(
@@ -1037,7 +1037,7 @@ impl RSpiceApp {
     fn find_visible_preset(&self, key: &PresetKey) -> Option<DrawingSheetPreset> {
         let personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         all_visible_presets(
@@ -1090,7 +1090,7 @@ impl RSpiceApp {
     fn publish_personal_preset(&mut self, mut preset: DrawingSheetPreset) -> Result<(), String> {
         self.ensure_personal_fresh()?;
         preset.format = preset.format.as_reusable_drawing_sheet_preset();
-        let mut preferences = self.state.ui.preferences.clone();
+        let mut preferences = self.state.model.preferences.clone();
         let mut personal = preferences.drawing_sheet_personal_preferences();
         if let Some(existing) = personal
             .presets
@@ -1102,7 +1102,7 @@ impl RSpiceApp {
             personal.presets.push(preset);
         }
         preferences.set_drawing_sheet_personal_preferences(personal)?;
-        self.state.ui.preferences = preferences;
+        self.state.model.preferences = preferences;
         self.refresh_preset_authorities();
         Ok(())
     }
@@ -1110,7 +1110,7 @@ impl RSpiceApp {
     fn ensure_personal_fresh(&self) -> Result<(), String> {
         if self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences()
             != self.state.dialogs.drawing_sheet_presets.baseline_personal
@@ -1128,7 +1128,7 @@ impl RSpiceApp {
         let refreshed = DrawingSheetPresetDialogsState {
             edit: Some(SchematicEditAuthority::capture(state)),
             catalog_revision: state.model.workspace.content.design_management.revision(),
-            baseline_personal: state.ui.preferences.drawing_sheet_personal_preferences(),
+            baseline_personal: state.model.preferences.drawing_sheet_personal_preferences(),
             ..self.state.dialogs.drawing_sheet_presets.clone()
         };
         self.state.dialogs.drawing_sheet_presets = refreshed;
@@ -1431,7 +1431,7 @@ mod tests {
                     let mut app = RSpiceApp::test_instance();
                     // A headless pass has no clock for an opening fade, so a
                     // dialog would otherwise rasterize part-transparent.
-                    app.state.ui.preferences.set_toggle(
+                    app.state.model.preferences.set_toggle(
                         crate::workbench::preferences::TogglePreference::ReducedMotion,
                         true,
                     );
@@ -1680,7 +1680,7 @@ mod tests {
         assert!(open_custom_sheet_size_library(&mut app.state));
         let personal = app
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         let visible = all_visible_presets(

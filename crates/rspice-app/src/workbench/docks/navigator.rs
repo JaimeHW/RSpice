@@ -5633,7 +5633,7 @@ fn result_signal_context_menu(
             match exact_result_signal_last_sample(
                 &key,
                 &app.state.model.simulation.retained.runs,
-                app.state.ui.preferences.quantity_presentation_policy(),
+                app.state.model.preferences.quantity_presentation_policy(),
             ) {
                 Ok(value) => ui.ctx().copy_text(value),
                 Err(error) => app.state.prompt(error),

@@ -26,7 +26,7 @@ pub fn render_property_dialog(
         state.tabbed_property_dialog.session_error = component_property_session_error(state);
         refresh_source_contract_advisories(state);
     }
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let number_locale = state.ui.number_locale;
     let editor_context = component_editor_context(state);
     let result = render_tabbed_property_dialog(
@@ -955,7 +955,7 @@ mod tests {
                         .insert("work/other/schematic".to_owned(), Default::default());
                 }
                 "read-only" => state.model.schematic.session.read_only = true,
-                "safe-mode" => state.workbench.safe_mode.activate(
+                "safe-mode" => state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
                         ..Default::default()

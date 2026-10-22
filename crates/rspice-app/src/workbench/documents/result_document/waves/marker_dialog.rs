@@ -12,8 +12,8 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
     let Some(dialog) = marker_dialog::prepare(&mut state.ui.results.session) else {
         return;
     };
-    let presentation = state.ui.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,

@@ -669,14 +669,14 @@ impl AppState {
     /// which of the four owners holds the lock.
     pub(crate) fn symbol_editor_lock_message(&self) -> String {
         if let Some(holder) = self
-            .workbench
+            .model
             .live_write_locks
             .schematic_views
             .get(&self.model.workspace.content.active_key())
         {
             return format!("{holder} holds the write lease on this symbol");
         }
-        if self.workbench.live_write_locks.mirror {
+        if self.model.live_write_locks.mirror {
             return "This is the host's working copy; request the write lease from the live session to edit."
                 .to_owned();
         }
@@ -686,8 +686,8 @@ impl AppState {
     /// Whether copying the cell into an editable library is a route out of
     /// the lock. It is not one when the whole project refuses writes.
     pub(crate) fn symbol_editor_copy_available(&self) -> bool {
-        !self.workbench.safe_mode.project_read_only()
-            && !self.workbench.live_write_locks.mirror
+        !self.model.safe_mode.project_read_only()
+            && !self.model.live_write_locks.mirror
             && !self.model.workspace.content.active_read_only_reference()
     }
 

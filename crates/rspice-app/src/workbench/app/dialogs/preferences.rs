@@ -129,7 +129,7 @@ impl RSpiceApp {
                 .application_modal_open()
             || self.state.dialogs.workspace_layout_manager.open
             || pending_restore(ctx).is_some();
-        let touch_target = self.state.ui.preferences.minimum_touch_target();
+        let touch_target = self.state.model.preferences.minimum_touch_target();
         let shell_response = {
             let state = &mut self.state;
             preferences_shell::show(
@@ -167,7 +167,7 @@ impl RSpiceApp {
 
     fn execute_preference_page_actions(&mut self, ctx: &Context, actions: PreferencePageActions) {
         if actions.open_shortcut_editor {
-            let profile = self.state.ui.preferences.shortcuts().clone();
+            let profile = self.state.model.preferences.shortcuts().clone();
             self.state.dialogs.shortcut_editor.open(&profile);
         }
         if actions.open_shortcut_import {
@@ -240,7 +240,7 @@ impl RSpiceApp {
         ctx: &Context,
         profile: crate::state::shortcuts::ShortcutPreferences,
     ) {
-        let mut candidate = self.state.ui.preferences.shortcut_profiles().clone();
+        let mut candidate = self.state.model.preferences.shortcut_profiles().clone();
         if let Err(error) = candidate.replace_active(profile.clone()) {
             self.state
                 .prompt(format!("Shortcut settings were not saved: {error}"));
@@ -255,7 +255,7 @@ impl RSpiceApp {
     }
 
     fn render_shortcut_portability_dialogs(&mut self, ctx: &Context) {
-        let library = self.state.ui.preferences.shortcut_profiles().clone();
+        let library = self.state.model.preferences.shortcut_profiles().clone();
         let current_contexts = ShortcutContext::ALL
             .into_iter()
             .filter(|context| context.matches(self))
@@ -284,7 +284,7 @@ impl RSpiceApp {
                 #[cfg(not(target_arch = "wasm32"))]
                 match crate::workbench::shortcuts::artifacts::import_shortcut_artifact_source() {
                     Ok(ShortcutArtifactImportOutcome::Ready(source)) => {
-                        let library = self.state.ui.preferences.shortcut_profiles().clone();
+                        let library = self.state.model.preferences.shortcut_profiles().clone();
                         self.state
                             .dialogs
                             .shortcut_portability
@@ -335,7 +335,8 @@ impl RSpiceApp {
                 }
             }
             ShortcutPortabilityAction::CommitImport(plan) => {
-                match stage_shortcut_import(self.state.ui.preferences.shortcut_profiles(), &plan) {
+                match stage_shortcut_import(self.state.model.preferences.shortcut_profiles(), &plan)
+                {
                     Ok((candidate, receipt)) => self.publish_shortcut_candidate(
                         ctx,
                         &candidate,
@@ -440,7 +441,7 @@ impl RSpiceApp {
         {
             match result {
                 Ok(ShortcutArtifactImportOutcome::Ready(source)) => {
-                    let library = self.state.ui.preferences.shortcut_profiles().clone();
+                    let library = self.state.model.preferences.shortcut_profiles().clone();
                     self.state
                         .dialogs
                         .shortcut_portability
@@ -838,30 +839,30 @@ mod tests {
     fn complete_preference_model_round_trips_through_the_app_session() {
         let mut state = AppState::default();
         state
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::InterfaceScale, 2)
             .unwrap();
         state
-            .ui
+            .model
             .preferences
             .set_toggle(TogglePreference::ReducedMotion, true);
         let json = serde_json::to_string(&state).unwrap();
         let restored: AppState = serde_json::from_str(&json).unwrap();
         assert_eq!(
             restored
-                .ui
+                .model
                 .preferences
                 .choice(ChoicePreference::InterfaceScale),
             2
         );
         assert!(
             restored
-                .ui
+                .model
                 .preferences
                 .toggle(TogglePreference::ReducedMotion)
         );
-        assert_eq!(restored.ui.preferences.interface_scale(), 1.25);
+        assert_eq!(restored.model.preferences.interface_scale(), 1.25);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -888,7 +889,7 @@ mod tests {
         assert!(app.state.dialogs.shortcut_editor.open);
         assert_eq!(
             app.state.dialogs.shortcut_editor.draft.as_ref(),
-            Some(app.state.ui.preferences.shortcuts())
+            Some(app.state.model.preferences.shortcuts())
         );
     }
 
@@ -1037,7 +1038,7 @@ mod tests {
         let ctx = Context::default();
         let mut app = test_app();
         app.state.enable_volatile_test_shortcut_persistence();
-        let before = app.state.ui.preferences.shortcuts().clone();
+        let before = app.state.model.preferences.shortcuts().clone();
         let mut candidate = before.clone();
         candidate
             .policies_mut()
@@ -1052,7 +1053,7 @@ mod tests {
         );
 
         assert_ne!(before, candidate);
-        assert_eq!(app.state.ui.preferences.shortcuts(), &candidate);
+        assert_eq!(app.state.model.preferences.shortcuts(), &candidate);
         assert_eq!(
             app.state
                 .shortcut_library_persistence
@@ -1070,7 +1071,7 @@ mod tests {
     fn shortcut_policy_persistence_failure_keeps_live_state_unchanged_and_recovers_controls() {
         let ctx = Context::default();
         let mut app = test_app();
-        let before = app.state.ui.preferences.shortcuts().clone();
+        let before = app.state.model.preferences.shortcuts().clone();
         let mut candidate = before.clone();
         candidate
             .policies_mut()
@@ -1088,7 +1089,7 @@ mod tests {
             },
         );
 
-        assert_eq!(app.state.ui.preferences.shortcuts(), &before);
+        assert_eq!(app.state.model.preferences.shortcuts(), &before);
         assert!(app.state.dialogs.shortcut_policy_candidate.is_none());
         assert!(
             app.state

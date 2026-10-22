@@ -262,7 +262,7 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let digits = significant_digits(state);
     if let Some(analysis) = state.model.simulation.active_analysis() {
         let specialized = match analysis.analysis_type {
@@ -299,14 +299,14 @@ pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
     inspector::noise_spectrum_right_panel(
         ui,
         model.as_ref(),
-        &state.ui.preferences.quantity_presentation_policy(),
+        &state.model.preferences.quantity_presentation_policy(),
         significant_digits(state),
     );
 }
 
 /// Results ▸ Displayed significant digits, or the open result document's own.
 fn significant_digits(state: &AppState) -> usize {
-    let presentation = state.ui.result_presentation_policy();
+    let presentation = state.result_presentation_policy();
     usize::from(presentation.displayed_significant_digits().get())
 }
 

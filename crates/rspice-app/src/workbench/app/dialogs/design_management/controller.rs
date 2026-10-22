@@ -21,7 +21,7 @@ impl RSpiceApp {
             (draft.inputs.clone(), draft.draft.clone())
         });
         let validation = validate_design_management_page(&self.state, page);
-        let write_allowed = !self.state.workbench.safe_mode.project_read_only();
+        let write_allowed = !self.state.model.safe_mode.project_read_only();
         let primary_enabled = write_allowed
             && validation.is_ok()
             && if page == DesignManagementPage::Manager {
@@ -65,7 +65,7 @@ impl RSpiceApp {
             .body_scroll_offset(&mut body_scroll_offset);
         let drawing_sheet_personal = self
             .state
-            .ui
+            .model
             .preferences
             .drawing_sheet_personal_preferences();
         if discard {

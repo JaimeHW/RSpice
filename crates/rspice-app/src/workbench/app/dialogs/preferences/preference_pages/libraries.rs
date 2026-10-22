@@ -46,7 +46,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
         &["include", "lib", "models", "search path", "spice"],
         |ui| {
             value_column(ui, |ui| {
-                let folders = state.ui.preferences.folders(KEY).to_vec();
+                let folders = state.model.preferences.folders(KEY).to_vec();
                 let Some(edit) = folder_list(ui, &folders) else {
                     return;
                 };
@@ -80,7 +80,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
                         next
                     }
                 };
-                match state.ui.preferences.set_folders(KEY, next) {
+                match state.model.preferences.set_folders(KEY, next) {
                     // A validated deck was validated through the folders
                     // that were, the way a change to a project's own search
                     // paths leaves its validation behind.
@@ -379,7 +379,7 @@ mod tests {
         let first = std::env::temp_dir().join("rspice-library-first");
         let second = std::env::temp_dir().join("rspice-library-second");
         state
-            .ui
+            .model
             .preferences
             .set_folders(KEY, vec![first.clone(), second.clone()])
             .expect("two full paths");
@@ -387,13 +387,13 @@ mod tests {
         click(&ctx, &mut state, &format!("2. {}", second.display()));
         click(&ctx, &mut state, "Move up");
         assert_eq!(
-            state.ui.preferences.folders(KEY),
+            state.model.preferences.folders(KEY),
             [second.clone(), first.clone()]
         );
 
         click(&ctx, &mut state, &format!("2. {}", first.display()));
         click(&ctx, &mut state, "Remove");
-        assert_eq!(state.ui.preferences.folders(KEY), [second]);
+        assert_eq!(state.model.preferences.folders(KEY), [second]);
     }
 
     /// With nothing listed, adding is the one thing the row offers.
@@ -421,7 +421,7 @@ mod tests {
         let gone =
             std::env::temp_dir().join(format!("rspice-library-gone-{}", uuid::Uuid::new_v4()));
         state
-            .ui
+            .model
             .preferences
             .set_folders(KEY, vec![std::env::temp_dir(), gone])
             .expect("full paths");

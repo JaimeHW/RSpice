@@ -1076,14 +1076,14 @@ fn overview_header(
                         .iter()
                         .any(|library| !library.read_only);
                     let new_cell_allowed = new_cell_command_enabled
-                        && !app.state.workbench.safe_mode.project_read_only()
+                        && !app.state.model.safe_mode.project_read_only()
                         && has_writable_library;
                     let new_cell = Button::new("New cell…")
                         .enabled(new_cell_allowed)
                         .show(ui)
                         .on_disabled_hover_text(if let Some(reason) = new_cell_command_reason {
                             reason
-                        } else if app.state.workbench.safe_mode.project_read_only() {
+                        } else if app.state.model.safe_mode.project_read_only() {
                             "Safe mode opened this project read-only."
                         } else if !has_writable_library {
                             "Attach or create a writable design library first."

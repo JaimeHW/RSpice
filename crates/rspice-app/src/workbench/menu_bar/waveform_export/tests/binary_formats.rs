@@ -16,7 +16,7 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
         ]);
     let mut result_state = state_with_typed_result(transient);
     result_state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 3)
         .expect("result bundle preference");
@@ -51,7 +51,7 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
     )]);
     let mut dataset_state = state_with_typed_result(ac);
     dataset_state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 4)
         .expect("dataset bundle preference");
@@ -116,7 +116,7 @@ fn native_bundle_preserves_saved_output_alias_units_in_real_and_complex_samples(
                 .with_waveforms(vec![waveform.clone()]);
             let mut state = state_with_typed_result(analysis);
             state
-                .ui
+                .model
                 .preferences
                 .set_choice(
                     crate::workbench::ChoicePreference::EngineeringExport,
@@ -168,7 +168,7 @@ fn binary_waveform_exports_enforce_reimport_budget_before_destination_selection(
     for preference in [6, 7, 8, 9] {
         let mut state = state_with_typed_result(analysis.clone());
         state
-            .ui
+            .model
             .preferences
             .set_choice(
                 crate::workbench::ChoicePreference::EngineeringExport,
@@ -212,7 +212,7 @@ fn binary_waveform_exports_count_container_bytes_at_the_sample_budget_boundary()
     for preference in [6, 7, 8, 9] {
         let mut state = state_with_typed_result(analysis.clone());
         state
-            .ui
+            .model
             .preferences
             .set_choice(
                 crate::workbench::ChoicePreference::EngineeringExport,
@@ -267,7 +267,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
         });
     let mut vcd_state = state_with_typed_result(events);
     vcd_state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 5)
         .expect("VCD preference");
@@ -292,7 +292,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
         ]);
     let mut npy_state = state_with_typed_result(transient.clone());
     npy_state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 6)
         .expect("NumPy array preference");
@@ -315,7 +315,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
 
     let mut npz_state = state_with_typed_result(transient);
     npz_state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 7)
         .expect("NumPy archive preference");
@@ -347,7 +347,7 @@ fn engineering_export_preference_dispatches_an_hdf5_dataset() {
         ]);
     let mut state = state_with_typed_result(transient);
     state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
         .expect("HDF5 preference");
@@ -416,7 +416,7 @@ fn hdf5_export_ui_retains_imported_coordinate_names_and_units() {
         });
         let mut state = state_with_typed_result(analysis);
         state
-            .ui
+            .model
             .preferences
             .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
             .unwrap();
@@ -456,7 +456,7 @@ fn a_domain_the_hdf5_layout_has_no_section_for_refuses_and_writes_nothing() {
         ]);
     let mut state = state_with_typed_result(noise);
     state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
         .expect("HDF5 preference");
@@ -503,7 +503,7 @@ fn binary_export_workflows_preserve_mixed_real_and_complex_traces_in_all_domains
             });
             let mut state = state_with_typed_result(analysis);
             state
-                .ui
+                .model
                 .preferences
                 .set_choice(
                     crate::workbench::ChoicePreference::EngineeringExport,
@@ -544,7 +544,7 @@ fn a_transient_without_event_evidence_refuses_the_dump_and_writes_nothing() {
         ]);
     let mut state = state_with_typed_result(transient);
     state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 5)
         .expect("VCD preference");
@@ -567,7 +567,7 @@ fn engineering_export_preference_dispatches_a_matlab_v5_file() {
         ]);
     let mut state = state_with_typed_result(transient);
     state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 9)
         .expect("MATLAB preference");
@@ -609,7 +609,7 @@ fn a_domain_the_matlab_layout_has_no_coordinate_for_refuses_and_writes_nothing()
         ]);
     let mut state = state_with_typed_result(noise);
     state
-        .ui
+        .model
         .preferences
         .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 9)
         .expect("MATLAB preference");

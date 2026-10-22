@@ -527,7 +527,7 @@ fn right_click_opens_the_source_menu_and_toggle_line_comment_acts_on_the_clicked
 #[test]
 fn on_a_read_only_source_the_menu_disables_cut_and_paste() {
     let (ctx, mut app, _) = veriloga_with_focused_editor();
-    app.state.workbench.safe_mode.activate(
+    app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..crate::state::write_policy::LocalSafeModeOptions::default()

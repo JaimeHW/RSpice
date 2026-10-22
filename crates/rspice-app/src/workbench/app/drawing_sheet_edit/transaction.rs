@@ -477,7 +477,7 @@ fn apply_governed_sheet_edit(
         .map(|sheet| sheet.page_format().clone())
         .ok_or_else(|| "The governed active sheet is unavailable.".to_owned())?;
     let mut candidate = before.clone();
-    let personal_before = state.ui.preferences.drawing_sheet_personal_preferences();
+    let personal_before = state.model.preferences.drawing_sheet_personal_preferences();
     let mut personal = personal_before.clone();
     let sheet_format = edited_sheet_format(
         &mut candidate,
@@ -531,7 +531,7 @@ fn apply_first_sheet_edit(
 ) -> Result<String, String> {
     let before = (*state.model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
-    let personal_before = state.ui.preferences.drawing_sheet_personal_preferences();
+    let personal_before = state.model.preferences.drawing_sheet_personal_preferences();
     let mut personal = personal_before.clone();
     let owner_key = state.model.workspace.content.active_key();
     let sheet_id = candidate
@@ -614,7 +614,7 @@ fn commit_sheet_candidate(
     personal_before: crate::workbench::DrawingSheetPersonalPreferences,
     personal: crate::workbench::DrawingSheetPersonalPreferences,
 ) -> Result<(), String> {
-    let mut preferences = state.ui.preferences.clone();
+    let mut preferences = state.model.preferences.clone();
     if personal != personal_before {
         preferences.set_drawing_sheet_personal_preferences(personal)?;
     }
@@ -639,7 +639,7 @@ fn commit_sheet_candidate(
         references: schematic_tx.references,
         committed_revision,
     });
-    state.ui.preferences = preferences;
+    state.model.preferences = preferences;
     Ok(())
 }
 

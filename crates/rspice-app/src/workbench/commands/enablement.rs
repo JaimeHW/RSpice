@@ -51,7 +51,7 @@ impl Command {
             }
             Self::ImportNetlist => {
                 state.project_lifecycle.is_open()
-                    && !state.workbench.safe_mode.project_read_only()
+                    && !state.model.safe_mode.project_read_only()
                     && !state.model.simulation.execution.has_active_execution()
             }
             Self::PublishToWeb => {
@@ -105,7 +105,7 @@ impl Command {
                     )
             }
             Self::Undo => {
-                if state.workbench.safe_mode.project_read_only()
+                if state.model.safe_mode.project_read_only()
                     || state.schematic_edit_in_progress()
                 {
                     false
@@ -123,7 +123,7 @@ impl Command {
                 }
             }
             Self::Redo => {
-                if state.workbench.safe_mode.project_read_only()
+                if state.model.safe_mode.project_read_only()
                     || state.schematic_edit_in_progress()
                 {
                     false
@@ -474,7 +474,7 @@ impl Command {
                 state.active_symbol_pin_finding_count().is_some()
             }
             Self::ClearChecks => {
-                state.dialogs.drc_results.is_some()
+                state.model.design_checks.drc_results.is_some()
                     || state.active_design_check_status().last_receipt().is_some()
             }
             Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => {
@@ -576,7 +576,7 @@ impl Command {
                     && !state.model.simulation.execution.has_active_execution()
             }
             Self::ImportResultDataset => {
-                !state.workbench.safe_mode.project_read_only()
+                !state.model.safe_mode.project_read_only()
                     && !state.model.simulation.execution.has_active_execution()
             }
             // Waves is the workspace's default sheet, and its empty state is
@@ -612,7 +612,7 @@ impl Command {
                     .as_ref()
                     .is_some_and(|draft| {
                         draft.is_dirty()
-                            && !state.workbench.safe_mode.project_read_only()
+                            && !state.model.safe_mode.project_read_only()
                             && state.project_lifecycle.is_open()
                             && state
                                 .workbench
@@ -657,7 +657,7 @@ impl Command {
                 .as_ref()
                 .is_some_and(|draft| {
                     state.project_lifecycle.is_open()
-                        && !state.workbench.safe_mode.project_read_only()
+                        && !state.model.safe_mode.project_read_only()
                         && !draft.definition_is_dirty()
                         && draft
                             .qualification

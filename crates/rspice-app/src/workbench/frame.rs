@@ -68,15 +68,15 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let large_targets = app.state.workbench.coarse_pointer;
     // How AC traces are drawn has no control but Preferences, so the viewer
     // takes it from there on every frame and never drifts from the page.
-    app.state.ui.results.session.ac_display = app.state.ui.preferences.ac_display();
-    let requested_target = app.state.ui.preferences.minimum_touch_target();
+    app.state.ui.results.session.ac_display = app.state.model.preferences.ac_display();
+    let requested_target = app.state.model.preferences.minimum_touch_target();
     app.state
         .ui
         .theme
         .apply_responsive_metrics_with_target(ctx, large_targets.then_some(requested_target));
     let reduced_motion = app
         .state
-        .ui
+        .model
         .preferences
         .toggle(TogglePreference::ReducedMotion);
     // Custom widgets read this same policy instead of hard-coding their own
@@ -263,7 +263,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     // them. Every outcome is kept in the bell whatever it says.
     let attention = app
         .state
-        .ui
+        .model
         .preferences
         .workspace()
         .map(WorkspacePreferences::background_task_attention)
@@ -1796,7 +1796,7 @@ mod tests {
             ctx.enable_accesskit();
             let mut app = RSpiceApp::test_instance();
             app.state
-                .ui
+                .model
                 .preferences
                 .workspace_mut()
                 .unwrap()

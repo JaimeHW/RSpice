@@ -62,7 +62,7 @@ fn recent_files_row(ui: &mut Ui, state: &mut AppState) {
                 let current = format!(
                     "{} projects",
                     state
-                        .ui
+                        .model
                         .preferences
                         .scalar(ScalarPreference::RecentFilesListed)
                 );
@@ -75,7 +75,7 @@ fn recent_files_row(ui: &mut Ui, state: &mut AppState) {
                     control_width(ui),
                 ) {
                     state
-                        .ui
+                        .model
                         .preferences
                         .set_scalar(
                             ScalarPreference::RecentFilesListed,

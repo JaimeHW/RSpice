@@ -196,8 +196,8 @@ fn state_with_current_drc_error() -> AppState {
         DrcLocation::Global,
     ));
     result.completed = true;
-    state.dialogs.drc_results = Some(result);
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_results = Some(result);
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
     state
 }
 
@@ -207,8 +207,8 @@ fn state_with_current_clean_drc() -> AppState {
     crate::workbench::examples::load_example("Voltage Divider", &mut state.model.schematic);
     let mut result = DrcResult::new();
     result.completed = true;
-    state.dialogs.drc_results = Some(result);
-    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    state.model.design_checks.drc_results = Some(result);
+    state.model.design_checks.drc_checked_version = state.model.schematic.topology_version();
     state
 }
 

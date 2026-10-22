@@ -167,7 +167,7 @@ fn the_instrument_survives_a_degenerate_run() {
 
     // The domain is what every screen coordinate on the sheet derives from:
     // one NaN admitted here maps the entire run to nowhere.
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,

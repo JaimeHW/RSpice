@@ -74,8 +74,9 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
     state.ui.schematic_snap.grid_size = schematic.document().grid_size;
-    schematic.session.editor.automatic_junctions = state.ui.preferences.automatic_junction_dots();
-    schematic.session.editor.selection_crossing = state.ui.preferences.selection_crossing();
+    schematic.session.editor.automatic_junctions =
+        state.model.preferences.automatic_junction_dots();
+    schematic.session.editor.selection_crossing = state.model.preferences.selection_crossing();
     if created {
         // A new schematic starts from the routing preference, and the
         // session's routing control follows it.
@@ -89,7 +90,7 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     }
     // Views from read-only libraries open for inspection, never for edit —
     // the docbar banner explains and every edit path checks this flag.
-    schematic.session.read_only = state.workbench.safe_mode.project_read_only()
+    schematic.session.read_only = state.model.safe_mode.project_read_only()
         || state
             .model
             .library_manager
@@ -180,7 +181,7 @@ impl AppState {
         // document inherits those exact choices, while its pitch is resolved
         // below into project-portable policy and then projected back into the
         // runtime engine.
-        let preferences = &self.ui.preferences;
+        let preferences = &self.model.preferences;
         document.document_policy.grid_pitch = SchematicGridPitch::ALL
             .get(preferences.choice(ChoicePreference::SchematicGrid))
             .copied()
@@ -225,7 +226,7 @@ impl AppState {
     /// document class — symbol, layout, hierarchy reference, review comment —
     /// writes into the same project that safe mode opened read-only.
     pub(crate) fn active_view_read_only(&self) -> bool {
-        self.workbench.safe_mode.project_read_only()
+        self.model.safe_mode.project_read_only()
             || self.model.workspace.content.active_read_only_reference()
             || self
                 .model
@@ -245,7 +246,7 @@ impl AppState {
     /// Names the owner of the refusal, in the order
     /// [`Self::active_view_read_only`] consults them.
     pub(crate) fn read_only_master_message(&self) -> String {
-        if self.workbench.safe_mode.project_read_only() {
+        if self.model.safe_mode.project_read_only() {
             return "Safe mode opened this project read-only - restart without safe mode to edit"
                 .to_owned();
         }
@@ -1784,18 +1785,18 @@ impl AppState {
             return false;
         }
         let live_lock_holder = self
-            .workbench
+            .model
             .live_write_locks
             .schematic_views
             .get(&self.model.workspace.content.active_key())
             .cloned();
-        let message = if self.workbench.safe_mode.project_read_only() {
+        let message = if self.model.safe_mode.project_read_only() {
             "Safe mode is read-only; no design data was changed.".to_owned()
         } else if self.active_view_read_only() {
             self.read_only_master_message()
         } else if let Some(holder) = live_lock_holder {
             format!("{holder} holds the write lease on this schematic; no design data was changed.")
-        } else if self.workbench.live_write_locks.mirror {
+        } else if self.model.live_write_locks.mirror {
             "This is the host's working copy; request the write lease from the live session \
              to edit."
                 .to_owned()
@@ -1980,7 +1981,7 @@ impl AppState {
     }
 
     pub(crate) fn hierarchical_edit_in_place_enabled(&self) -> bool {
-        self.ui
+        self.model
             .preferences
             .toggle(crate::workbench::TogglePreference::HierarchicalEditInPlace)
     }

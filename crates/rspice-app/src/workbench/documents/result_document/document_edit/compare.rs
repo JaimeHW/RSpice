@@ -242,7 +242,6 @@ fn outcome(
 ) -> CompareOutcome {
     let digits = usize::from(
         state
-            .ui
             .result_presentation_policy()
             .displayed_significant_digits()
             .get(),

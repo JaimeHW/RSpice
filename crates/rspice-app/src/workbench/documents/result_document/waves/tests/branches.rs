@@ -32,8 +32,8 @@ pub(super) fn hysteresis_run() -> AppState {
 }
 
 fn rows_of(state: &mut AppState, a: Option<f64>, b: Option<f64>) -> Vec<ReadoutRow> {
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -71,8 +71,8 @@ fn a_hysteresis_sweep_reports_one_row_per_branch() {
         names(&rows)
     );
 
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -146,8 +146,8 @@ fn a_descending_sweep_keeps_one_untagged_row() {
     );
     assert_eq!(rows[0].name, "V(out)", "no branch tag on a single branch");
 
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -202,7 +202,7 @@ fn a_sweep_past_the_branch_budget_reports_the_nearest_retained_sample() {
     assert_eq!(rows[0].delta, READOUT_ABSENT);
     assert_eq!(rows[0].slope, READOUT_ABSENT);
 
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -315,7 +315,7 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
     );
     state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     let analysis = {
-        let presentation = state.ui.preferences.result_presentation_policy();
+        let presentation = state.model.preferences.result_presentation_policy();
         let models = cached_models(
             &state.model.simulation,
             &mut state.ui.results,
@@ -353,8 +353,8 @@ fn loop_readings(
     String,
     String,
 ) {
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let models = cached_models(
         &state.model.simulation,
@@ -408,7 +408,7 @@ fn a_marker_row_states_a_value_the_marked_branch_takes() {
 fn the_copied_cursor_value_stays_on_a_branch_of_the_loop() {
     let mut state = hysteresis_run();
     state.ui.results.session.cursors.place(0.25);
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let forward = quantity_policy.copy_si_value(0.5, "V");
     let artifact = quantity_policy.copy_si_value(4.0, "V");
 

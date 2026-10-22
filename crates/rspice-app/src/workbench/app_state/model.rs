@@ -3,7 +3,8 @@
 //! [`Model`] is the part of [`AppState`](super::AppState) that the project or
 //! session persists and that two or more features read, plus the policy and
 //! evidence they act on: the design and its libraries, the simulation and its
-//! setup, the checks and diagnostics, and the notices not yet raised. The
+//! setup, the checks and diagnostics, the notices not yet raised, the
+//! reader's preferences, and the safe-mode and live-session write policy. The
 //! application holds it inline, so moving a state carries what it carried
 //! before these fields were gathered here.
 
@@ -63,4 +64,14 @@ pub(crate) struct Model {
     pub(crate) pdk_config: crate::state::pdk_config::PdkConfig,
     /// Model library manager (PDK models, device libraries)
     pub(crate) model_library_manager: crate::state::model_library::ModelLibraryManager,
+    /// Canonical user/device preference overrides not already owned by the
+    /// theme or autosave runtime. Boxed, as they were inside the UI session
+    /// state, so a moved state stays the same size.
+    pub preferences: Box<crate::workbench::preferences::UserPreferences>,
+    /// Safe mode applies only to this process. The prior session remains the
+    /// persisted source of truth for the next ordinary launch.
+    pub safe_mode: crate::state::write_policy::LocalSafeModeState,
+    /// Live-session write leases held by other participants, projected by
+    /// the live-session engine every frame it is attached.
+    pub live_write_locks: crate::state::write_policy::LiveWriteLocks,
 }

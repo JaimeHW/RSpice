@@ -34,7 +34,7 @@ fn bode_strip() -> AppState {
 }
 
 fn strip_key(state: &mut AppState) -> AnalysisPresentationKey {
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -45,7 +45,7 @@ fn strip_key(state: &mut AppState) -> AnalysisPresentationKey {
 }
 
 fn pane_units(state: &mut AppState) -> Vec<String> {
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -128,7 +128,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
         analysis,
         unit: units[0].clone(),
     });
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -236,7 +236,7 @@ fn the_nearest_trace_is_measured_where_the_pane_draws_it() {
             RetainedTrace::new("V(b)", vec![0.0, 1.0], vec![100.0, 100.0], "#0af"),
         ]),
     );
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -299,8 +299,8 @@ fn a_deeply_zoomed_shared_axis_states_the_value_its_ticks_are_offsets_from() {
             ),
         ]),
     );
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,

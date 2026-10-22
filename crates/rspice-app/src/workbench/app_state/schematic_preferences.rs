@@ -93,8 +93,8 @@ impl AppState {
     /// schematic before its next edit.
     pub(crate) fn apply_schematic_editing_preferences(&mut self) {
         let editor = &mut self.model.schematic.session.editor;
-        editor.automatic_junctions = self.ui.preferences.automatic_junction_dots();
-        editor.selection_crossing = self.ui.preferences.selection_crossing();
+        editor.automatic_junctions = self.model.preferences.automatic_junction_dots();
+        editor.selection_crossing = self.model.preferences.selection_crossing();
     }
 }
 
@@ -110,7 +110,7 @@ mod tests {
         for (stored, dots) in [(0, 1), (MANUAL_JUNCTION_DOTS, 0)] {
             let mut state = AppState::default();
             state
-                .ui
+                .model
                 .preferences
                 .set_choice(ChoicePreference::WireJunctionBehavior, stored)
                 .expect("a stored junction choice");
@@ -167,7 +167,7 @@ mod tests {
         );
 
         state
-            .ui
+            .model
             .preferences
             .set_choice(ChoicePreference::WireJunctionBehavior, ANY_ANGLE_ROUTING)
             .expect("a stored routing choice");
@@ -192,7 +192,7 @@ mod tests {
         let mut state = AppState::default();
         for (stored, policy) in SELECTION_CROSSING.into_iter().enumerate() {
             state
-                .ui
+                .model
                 .preferences
                 .set_choice(ChoicePreference::SelectionCrossingPolicy, stored)
                 .expect("a stored selection choice");

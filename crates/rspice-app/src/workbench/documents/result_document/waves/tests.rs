@@ -213,8 +213,8 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
             RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
         ]),
     );
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -252,8 +252,8 @@ fn a_readout_states_the_value_while_a_table_column_pads_it() {
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.5], "#fff"),
         ]),
     );
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -307,8 +307,8 @@ fn a_slope_is_named_by_its_own_unit_not_the_strips() {
             RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
         ]),
     );
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -396,7 +396,7 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
 fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
     let mut state = marker_fixture();
     state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible = false;
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -438,7 +438,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
         live_default,
         "quick-view presentation must not rewrite the legacy live projection"
     );
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -468,7 +468,7 @@ fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
     state.ui.results.session.cursor_strip = Some(0);
     state.ui.results.session.cursors.a = Some(0.25);
     state.ui.results.session.cursors.b = Some(0.75);
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -510,8 +510,8 @@ fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
 #[test]
 fn each_cursor_trace_reports_its_own_linear_slope() {
     let mut state = marker_fixture();
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let complex_display = presentation.complex_number_display();
     let models = cached_models(
         &state.model.simulation,
@@ -1568,7 +1568,7 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
     state.ui.results.session.cursor_strip = Some(0);
     state.ui.results.session.cursors.a = Some(10.0);
     state
-        .ui
+        .model
         .preferences
         .set_choice(ChoicePreference::CopiedValueFormat, 1)
         .unwrap();
@@ -1748,7 +1748,7 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
     );
 
     state.ui.results.session.viewer = super::super::ResultViewer::Bode;
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -1796,7 +1796,7 @@ fn waves_models_include_pss_and_envelope_complex_data() {
     );
 
     state.ui.results.session.viewer = super::super::ResultViewer::Waves;
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,
@@ -1832,7 +1832,7 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
         ]),
     );
     state.ui.results.session.viewer = super::super::ResultViewer::Bode;
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
         &mut state.ui.results,

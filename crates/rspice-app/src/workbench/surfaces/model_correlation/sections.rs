@@ -1279,7 +1279,7 @@ pub(super) fn correlation_action_blocker(
     require_datasets: bool,
     require_evaluation: bool,
 ) -> Option<String> {
-    if app.state.workbench.safe_mode.project_read_only() {
+    if app.state.model.safe_mode.project_read_only() {
         return Some("Correlation records cannot change while the project is read-only".to_owned());
     }
     if let Some(error) = projection.source_error.as_deref() {

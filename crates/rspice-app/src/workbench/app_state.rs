@@ -165,6 +165,22 @@ impl AppState {
         );
     }
 
+    /// The reader's result presentation, with the significant digits of the
+    /// project result document the Results workspace is showing, if any.
+    #[must_use]
+    pub(crate) fn result_presentation_policy(
+        &self,
+    ) -> crate::workbench::preferences::ResultPresentationPolicy {
+        let policy = self.model.preferences.result_presentation_policy();
+        self.ui
+            .results
+            .session
+            .document_presentation
+            .map_or(policy, |document| {
+                policy.with_significant_digits(document.significant_digits)
+            })
+    }
+
     /// Reserve the next project revision before a library membership
     /// transaction publishes any live state.
     pub(crate) fn preflight_project_library_mutation(
@@ -172,7 +188,7 @@ impl AppState {
         mutation: crate::state::ProjectLibraryMutation,
     ) -> Result<crate::state::PreparedProjectLibraryMutation, String> {
         let operation = mutation.operation_label();
-        if self.workbench.safe_mode.project_read_only() {
+        if self.model.safe_mode.project_read_only() {
             return Err(format!(
                 "{operation} is unavailable because the project is open read-only."
             ));
@@ -243,7 +259,7 @@ impl AppState {
 
     /// The folders searched for includes after every project's own paths.
     pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
-        self.ui
+        self.model
             .preferences
             .folders(crate::workbench::FolderListPreference::LibraryFolders)
     }
@@ -356,7 +372,7 @@ impl AppState {
         &mut self,
         owner: crate::state::CellViewRef,
     ) -> Result<crate::product::ObjectRevision, String> {
-        if self.workbench.safe_mode.project_read_only() {
+        if self.model.safe_mode.project_read_only() {
             return Err(
                 "The project is open read-only; physical layout cannot be created".to_owned(),
             );
@@ -433,7 +449,7 @@ impl AppState {
         expected_revision: crate::product::ObjectRevision,
         edits: &[crate::state::LayoutEdit],
     ) -> Result<crate::product::ObjectRevision, String> {
-        if self.workbench.safe_mode.project_read_only() {
+        if self.model.safe_mode.project_read_only() {
             return Err(
                 "The project is open read-only; physical layout cannot be edited".to_owned(),
             );
@@ -1187,7 +1203,7 @@ impl AppState {
     /// schematics are capped at the same count on their own, so opening them
     /// never pushes a project off the page.
     pub(crate) fn trim_recent_files(&mut self) {
-        let listed = self.ui.preferences.recent_files_listed();
+        let listed = self.model.preferences.recent_files_listed();
         let (mut projects, mut schematics) = (0, 0);
         self.recent_files.retain(|recent| {
             let kept = match recent.kind {
@@ -1306,7 +1322,7 @@ mod tests {
         assert_eq!(state.recent_files.len(), 8, "the shipped count is 8");
 
         state
-            .ui
+            .model
             .preferences
             .set_scalar(crate::workbench::ScalarPreference::RecentFilesListed, 12)
             .expect("12 is an offered count");
@@ -1316,7 +1332,7 @@ mod tests {
         assert_eq!(state.recent_files.len(), 12);
 
         state
-            .ui
+            .model
             .preferences
             .set_scalar(crate::workbench::ScalarPreference::RecentFilesListed, 5)
             .expect("5 is an offered count");

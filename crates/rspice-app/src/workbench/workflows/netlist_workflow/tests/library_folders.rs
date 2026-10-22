@@ -32,7 +32,7 @@ fn validation_resolves_an_include_only_a_library_folder_holds() {
     );
 
     app.state
-        .ui
+        .model
         .preferences
         .set_folders(FolderListPreference::LibraryFolders, vec![shared.clone()])
         .expect("a full path");
