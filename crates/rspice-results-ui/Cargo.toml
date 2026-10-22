@@ -25,3 +25,6 @@ rspice-results = { workspace = true, features = ["engine-evidence"] }
 num-complex.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+rspice-ui-kit = { workspace = true, features = ["plot", "test-support"] }

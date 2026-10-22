@@ -263,3 +263,36 @@ fn a_dense_column_between_sparse_edges_is_one_block_and_the_held_value_resumes()
         ]
     );
 }
+
+/// A real net stepping to 0.25 at 5 ns and to 0.75 at 9 ns: each step adds
+/// `(t_k, v_{k-1})` then `(t_k, v_k)`, so every segment is horizontal or
+/// vertical and none is sloped.
+#[test]
+fn the_real_step_holds_then_steps_and_never_slopes() {
+    let lane = RealLane::from_events("w", [(0.0, 0.0), (5.0 * NS, 0.25), (9.0 * NS, 0.75)]);
+    let (x, y) = lane.step_polyline(13.0 * NS);
+    assert_eq!(x, [0.0, 5.0 * NS, 5.0 * NS, 9.0 * NS, 9.0 * NS, 13.0 * NS]);
+    assert_eq!(y, [0.0, 0.0, 0.25, 0.25, 0.75, 0.75]);
+    for k in 1..lane.times().len() {
+        let (t, before, after) = (lane.times()[k], lane.values()[k - 1], lane.values()[k]);
+        let vertex = x
+            .iter()
+            .zip(&y)
+            .position(|vertex| vertex == (&t, &before))
+            .expect("the held value reaches the instant");
+        assert_eq!((x[vertex + 1], y[vertex + 1]), (t, after));
+    }
+    for segment in 0..x.len() - 1 {
+        assert!(
+            x[segment] == x[segment + 1] || y[segment] == y[segment + 1],
+            "segment {segment} is sloped"
+        );
+    }
+
+    let trace = real_step_trace(&lane, 13.0 * NS, Color32::WHITE, 9);
+    assert_eq!(trace.label, "E(w)");
+    assert_eq!(trace.y_extremes, Some((0.0, 0.75)));
+    assert_eq!(*trace.x, x);
+    assert_eq!(lane.value_at(9.0 * NS), Some(0.75), "right-continuous");
+    assert_eq!(lane.value_at(8.999 * NS), Some(0.25));
+}

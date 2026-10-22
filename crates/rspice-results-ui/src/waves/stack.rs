@@ -72,6 +72,16 @@ pub trait StackHost {
     /// Draw the strip's logic and bus lanes ([`super::logic::show_lanes`])
     /// on the panes' own time axis.
     fn show_event_lanes(&mut self, _ui: &mut Ui, _model: &StripModel, _frame: EventLaneFrame) {}
+    /// The real event lanes (`E()`) placed in `pane`, as step traces
+    /// ([`super::logic::real_step_trace`]) that share its unit axis.
+    fn real_step_traces(
+        &mut self,
+        _model: &StripModel,
+        _pane: &UnitPane,
+        _tokens: &Tokens,
+    ) -> Vec<ResolvedExpr> {
+        Vec::new()
+    }
 }
 
 /// The time axis an event-lane host draws its lanes on, aligned with the
@@ -586,7 +596,7 @@ fn show_strip_plot(
     }
 
     // Expression traces participate in the first pane's automatic fit.
-    let exprs = host.resolve_expressions(model, &t);
+    let mut exprs = Some(host.resolve_expressions(model, &t));
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
     let lane_height = event_lane_band(ui, host, model, x_domain, count, wanted_lanes, &t);
@@ -608,22 +618,22 @@ fn show_strip_plot(
             ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
         }
         let pane_height = geometry.pane_height(ordinal, count);
+        // Only the first pane carries the strip's expressions: an expression
+        // has no declared unit, so it cannot be routed to a unit-owning pane
+        // on the evidence available. A real event lane is placed in a pane,
+        // and joins that pane's traces on its unit axis.
+        let mut pane_exprs = if ordinal == 0 {
+            exprs.take().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        pane_exprs.extend(host.real_step_traces(model, pane, &t));
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), pane_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.set_height(pane_height);
-                show_unit_pane(
-                    ui,
-                    host,
-                    pane,
-                    ordinal,
-                    // Only the first pane carries the strip's expressions:
-                    // an expression has no declared unit, so it cannot be
-                    // routed to a unit-owning pane on the evidence available.
-                    if ordinal == 0 { &exprs } else { &[] },
-                    frame,
-                );
+                show_unit_pane(ui, host, pane, ordinal, &pane_exprs, frame);
             },
         );
     }

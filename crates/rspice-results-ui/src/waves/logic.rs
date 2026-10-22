@@ -13,10 +13,12 @@
 pub mod model;
 pub mod paint;
 pub mod plan;
+pub mod real;
 
 pub use model::{BusLane, BusOrigin, EventLanes, LogicLane, LogicLevel, RealLane};
 pub use paint::{LaneLevels, LaneStyle, paint_bus_lane, paint_logic_lane};
 pub use plan::{LaneStroke, TimeMapping, plan_lane};
+pub use real::real_step_trace;
 pub use rspice_results::events::projection::BusRadix;
 
 use super::header::elide;
@@ -349,5 +351,7 @@ fn lane_menu(
     }
 }
 
+#[cfg(test)]
+mod render_tests;
 #[cfg(test)]
 mod tests;
