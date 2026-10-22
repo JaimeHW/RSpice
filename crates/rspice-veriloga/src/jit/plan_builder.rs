@@ -928,7 +928,7 @@ fn canonical_extract_reactive_charge(
                     model: model.name.clone(),
                     detail: format!(
                         "canonical equation with reactive Jacobian contains ddt in unsupported expression {}",
-                        canonical_expr_kind_name(&expression.kind)
+                        expression.kind.label()
                     )
                     .into(),
                 });
@@ -1035,29 +1035,9 @@ fn canonical_expr_ref(
     let expression = canonical_expression(model, mir, expr_id)?;
     Ok(HirExprRef {
         id: expr_id,
-        kind: canonical_expr_ref_kind(&expression.kind).into(),
+        kind: expression.kind.label().into(),
         span: expression.span,
     })
-}
-
-fn canonical_expr_ref_kind(kind: &HirExprKind) -> &'static str {
-    match kind {
-        HirExprKind::NullArgument => "null_argument",
-        HirExprKind::Number { .. } => "number",
-        HirExprKind::StringLiteral { .. } => "string",
-        HirExprKind::Identifier { .. } => "identifier",
-        HirExprKind::SystemFunction { .. } => "system_function",
-        HirExprKind::Binary { .. } => "binary",
-        HirExprKind::Unary { .. } => "unary",
-        HirExprKind::ArrayIndex { .. } => "array-index",
-        HirExprKind::Conditional { .. } => "conditional",
-        HirExprKind::Call { .. } => "call",
-        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
-        HirExprKind::ArrayAccess { .. } => "array_access",
-        HirExprKind::ArrayLiteral { .. } => "array_literal",
-        HirExprKind::AnalogOperator { .. } => "analog_operator",
-        HirExprKind::NoiseSource { .. } => "noise_source",
-    }
 }
 
 fn canonical_derivative_axis_for_column(
@@ -1813,7 +1793,7 @@ fn canonical_table_points_from_expr(
             model: model.name.clone(),
             detail: format!(
                 "canonical equation {equation_index} table noise data is {}, expected array literal",
-                canonical_expr_kind_name(other)
+                other.label()
             )
             .into(),
         }),
@@ -1831,7 +1811,7 @@ fn canonical_number_value(
             model: model.name.clone(),
             detail: format!(
                 "canonical table noise point expression {expr_id} is {}, expected number",
-                canonical_expr_kind_name(other)
+                other.label()
             )
             .into(),
         }),
@@ -1869,7 +1849,7 @@ fn canonical_optional_noise_name(
             detail: format!(
                 "canonical equation {equation_index} {} noise name argument is {}, expected string",
                 kind.as_str(),
-                canonical_expr_kind_name(other)
+                other.label()
             )
             .into(),
         }),
@@ -2172,26 +2152,6 @@ fn append_canonical_expr(mir: &mut MirModel, kind: HirExprKind, span: SourceSpan
     let id = ExprId::from(mir.expressions.len());
     mir.expressions.push(HirExpression { id, kind, span });
     id
-}
-
-fn canonical_expr_kind_name(kind: &HirExprKind) -> &'static str {
-    match kind {
-        HirExprKind::NullArgument => "null_argument",
-        HirExprKind::Number { .. } => "number",
-        HirExprKind::StringLiteral { .. } => "string",
-        HirExprKind::Identifier { .. } => "identifier",
-        HirExprKind::SystemFunction { .. } => "system_function",
-        HirExprKind::Binary { .. } => "binary",
-        HirExprKind::Unary { .. } => "unary",
-        HirExprKind::ArrayIndex { .. } => "array-index",
-        HirExprKind::Conditional { .. } => "conditional",
-        HirExprKind::Call { .. } => "call",
-        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
-        HirExprKind::ArrayAccess { .. } => "array_access",
-        HirExprKind::ArrayLiteral { .. } => "array_literal",
-        HirExprKind::AnalogOperator { .. } => "analog_operator",
-        HirExprKind::NoiseSource { .. } => "noise_source",
-    }
 }
 
 fn validate_canonical_artifact_for_model(

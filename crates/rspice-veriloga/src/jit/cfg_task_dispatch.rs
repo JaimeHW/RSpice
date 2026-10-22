@@ -191,7 +191,7 @@ fn guard_unobserved_loops(
             .blocks
             .iter()
             .filter(|block| body.contains(&block.id))
-            .flat_map(|block| edges(&block.terminator))
+            .flat_map(|block| block.terminator.edges())
             .filter(|(target, _)| !body.contains(target))
             .map(|(target, args)| (target, args.to_vec()))
             .collect();
@@ -301,26 +301,12 @@ fn guard_unobserved_loops(
     bypasses
 }
 
-fn edges(terminator: &CfgTerminator) -> Vec<(BlockId, &[ValueId])> {
-    match terminator {
-        CfgTerminator::Jump { target, args } => vec![(*target, args)],
-        CfgTerminator::Branch {
-            then_target,
-            then_args,
-            else_target,
-            else_args,
-            ..
-        } => vec![(*then_target, then_args), (*else_target, else_args)],
-        _ => Vec::new(),
-    }
-}
-
 /// Value dependence through loop merges, without making loop conditions roots.
 /// Bounds checks retain the ordinary CFG's mandatory-check policy.
 fn data_dependencies(function: &CfgFunction, roots: &[ValueId]) -> Vec<bool> {
     let mut incoming = vec![Vec::new(); function.values.len()];
     for block in &function.blocks {
-        for (target, args) in edges(&block.terminator) {
+        for (target, args) in block.terminator.edges() {
             for (&param, &arg) in function.block(target).params.iter().zip(args) {
                 incoming[usize::from(param)].push(arg);
             }

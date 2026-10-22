@@ -1069,26 +1069,6 @@ fn node_name(nodes: &[MirNode], id: NodeId) -> Option<&str> {
     nodes.get(usize::from(id)).map(|node| node.name.as_str())
 }
 
-fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
-    match kind {
-        HirExprKind::NullArgument => "null_argument",
-        HirExprKind::Number { .. } => "number",
-        HirExprKind::StringLiteral { .. } => "string",
-        HirExprKind::Identifier { .. } => "identifier",
-        HirExprKind::SystemFunction { .. } => "system_function",
-        HirExprKind::Binary { .. } => "binary",
-        HirExprKind::Unary { .. } => "unary",
-        HirExprKind::ArrayIndex { .. } => "array-index",
-        HirExprKind::Conditional { .. } => "conditional",
-        HirExprKind::Call { .. } => "call",
-        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
-        HirExprKind::ArrayAccess { .. } => "array_access",
-        HirExprKind::ArrayLiteral { .. } => "array_literal",
-        HirExprKind::AnalogOperator { .. } => "analog_operator",
-        HirExprKind::NoiseSource { .. } => "noise_source",
-    }
-}
-
 fn validate_expressions(
     diagnostics: &mut Vec<IrDiagnostic>,
     expressions: &[HirExpression],
@@ -1731,7 +1711,7 @@ fn validate_expr_ref(
         return;
     };
 
-    let actual_kind = hir_expr_kind_label(&expression.kind);
+    let actual_kind = expression.kind.label();
     if expr_ref.kind.as_str() != actual_kind {
         diagnostics.push(IrDiagnostic::error(
             CompilerPhase::MirValidation,

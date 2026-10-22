@@ -14,10 +14,11 @@ use std::fmt::Write;
 
 use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control};
 use crate::canonical_ir::frequency::{self, DynamicPower};
+use crate::canonical_ir::noise::push_analog_children;
 use crate::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CanonicalNoiseSourceKind, CfgBinaryOp, CfgFunction, CfgTerminator,
-    CfgUnaryOp, CfgValueKind, ExprId, HirAnalogOperator, HirAssignment, HirExprKind, HirLoop,
-    HirStatement, MirEquationKind, NodeId, ValueId,
+    CfgUnaryOp, CfgValueKind, ExprId, HirAssignment, HirExprKind, HirLoop, HirStatement,
+    MirEquationKind, NodeId, ValueId,
 };
 use crate::metrics::PipelineControl;
 
@@ -1680,21 +1681,6 @@ fn collect_expr_variable_ids(
             | HirExprKind::BranchAccess { .. }
             | HirExprKind::NamedBranchAccess { .. } => {}
         }
-    }
-}
-
-fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
-    match op {
-        HirAnalogOperator::Limit {
-            proposed,
-            candidate,
-            type_metadata,
-            ..
-        } => {
-            stack.extend([*proposed, *candidate]);
-            stack.extend(type_metadata.iter().copied());
-        }
-        HirAnalogOperator::LimiterArgument { .. } => {}
     }
 }
 

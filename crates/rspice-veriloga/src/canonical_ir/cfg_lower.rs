@@ -4318,7 +4318,7 @@ impl<'a> CfgLowerer<'a> {
     }
 
     fn binary(&mut self, op: CfgBinaryOp, left: ValueId, right: ValueId) -> ValueId {
-        let value_type = if is_predicate(op) {
+        let value_type = if op.is_predicate() {
             CfgValueType::Boolean
         } else {
             CfgValueType::Real
@@ -4353,20 +4353,6 @@ fn is_noise_name(name: &str) -> bool {
     matches!(
         name.trim_start_matches('$'),
         "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log"
-    )
-}
-
-fn is_predicate(op: CfgBinaryOp) -> bool {
-    matches!(
-        op,
-        CfgBinaryOp::Eq
-            | CfgBinaryOp::Ne
-            | CfgBinaryOp::Lt
-            | CfgBinaryOp::Le
-            | CfgBinaryOp::Gt
-            | CfgBinaryOp::Ge
-            | CfgBinaryOp::And
-            | CfgBinaryOp::Or
     )
 }
 

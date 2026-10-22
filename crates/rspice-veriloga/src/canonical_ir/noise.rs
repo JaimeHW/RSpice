@@ -803,7 +803,7 @@ pub(super) fn string_literal(hir: &HirModel, id: ExprId) -> Option<SmolStr> {
     }
 }
 
-fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
+pub(crate) fn push_analog_children(op: &HirAnalogOperator, stack: &mut Vec<ExprId>) {
     match op {
         HirAnalogOperator::Limit {
             proposed,

@@ -2788,7 +2788,7 @@ impl HirModel {
             return;
         };
 
-        let actual_kind = hir_expr_kind_label(&expression.kind);
+        let actual_kind = expression.kind.label();
         if expr_ref.kind.as_str() != actual_kind {
             diagnostics.push(IrDiagnostic::error(
                 CompilerPhase::HirValidation,
@@ -3281,7 +3281,7 @@ fn lower_region(
                     let expression = &lowerer.expressions[usize::from(id)];
                     HirExprRef {
                         id,
-                        kind: hir_expr_kind_label(&expression.kind).into(),
+                        kind: expression.kind.label().into(),
                         span: expression.span,
                     }
                 }),
@@ -3909,23 +3909,26 @@ pub(super) fn is_parameter_expression(
     true
 }
 
-fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
-    match kind {
-        HirExprKind::NullArgument => "null_argument",
-        HirExprKind::Number { .. } => "number",
-        HirExprKind::StringLiteral { .. } => "string",
-        HirExprKind::Identifier { .. } => "identifier",
-        HirExprKind::SystemFunction { .. } => "system_function",
-        HirExprKind::Binary { .. } => "binary",
-        HirExprKind::Unary { .. } => "unary",
-        HirExprKind::ArrayIndex { .. } => "array-index",
-        HirExprKind::Conditional { .. } => "conditional",
-        HirExprKind::Call { .. } => "call",
-        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
-        HirExprKind::ArrayAccess { .. } => "array_access",
-        HirExprKind::ArrayLiteral { .. } => "array_literal",
-        HirExprKind::AnalogOperator { .. } => "analog_operator",
-        HirExprKind::NoiseSource { .. } => "noise_source",
+impl HirExprKind {
+    /// The kind's name in diagnostics and artifact references.
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::NullArgument => "null_argument",
+            Self::Number { .. } => "number",
+            Self::StringLiteral { .. } => "string",
+            Self::Identifier { .. } => "identifier",
+            Self::SystemFunction { .. } => "system_function",
+            Self::Binary { .. } => "binary",
+            Self::Unary { .. } => "unary",
+            Self::ArrayIndex { .. } => "array-index",
+            Self::Conditional { .. } => "conditional",
+            Self::Call { .. } => "call",
+            Self::BranchAccess { .. } | Self::NamedBranchAccess { .. } => "branch_access",
+            Self::ArrayAccess { .. } => "array_access",
+            Self::ArrayLiteral { .. } => "array_literal",
+            Self::AnalogOperator { .. } => "analog_operator",
+            Self::NoiseSource { .. } => "noise_source",
+        }
     }
 }
 

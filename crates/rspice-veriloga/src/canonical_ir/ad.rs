@@ -525,7 +525,7 @@ fn differentiable(kind: &CfgValueKind) -> bool {
                 | CfgUnaryOp::Ceil
                 | CfgUnaryOp::LimitedExpDerivative
         ),
-        CfgValueKind::Binary { op, .. } => !is_predicate(*op),
+        CfgValueKind::Binary { op, .. } => !op.is_predicate(),
         CfgValueKind::SumProductsDiv { .. } => true,
         // `$limit` is differentiable, but [`lane_liveness`] answers it ahead of
         // this rather than through it: its lanes are `proposed`'s plus the
@@ -568,20 +568,6 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         CfgValueKind::Ddx { .. } => false,
         _ => false,
     }
-}
-
-fn is_predicate(op: CfgBinaryOp) -> bool {
-    matches!(
-        op,
-        CfgBinaryOp::Eq
-            | CfgBinaryOp::Ne
-            | CfgBinaryOp::Lt
-            | CfgBinaryOp::Le
-            | CfgBinaryOp::Gt
-            | CfgBinaryOp::Ge
-            | CfgBinaryOp::And
-            | CfgBinaryOp::Or
-    )
 }
 
 /// Which lane, if any, the caller reserved for the limiter correction.
@@ -937,7 +923,7 @@ fn ddx_direction_liveness(
                         changed |= needed.union_from(operand, value.id);
                     }
                 }
-                CfgValueKind::Binary { left, right, op } if !is_predicate(*op) => {
+                CfgValueKind::Binary { left, right, op } if !op.is_predicate() => {
                     changed |= needed.union_from(*left, value.id);
                     changed |= needed.union_from(*right, value.id);
                 }

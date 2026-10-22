@@ -7,7 +7,7 @@ use crate::canonical_ir::cfg::{
     CfgBinaryOp, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp, CfgValue, CfgValueKind,
     CfgValueType,
 };
-use crate::canonical_ir::{BlockId, ShapeId, ValueId};
+use crate::canonical_ir::{ShapeId, ValueId};
 use crate::metrics::{PipelineCancelled, PipelineControl, PipelinePhase};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,7 +62,7 @@ pub(crate) fn expand(
         }
     }
     for block in &source.blocks {
-        for (target, args) in edges(&block.terminator) {
+        for (target, args) in block.terminator.edges() {
             for (&param, &arg) in source.block(target).params.iter().zip(args) {
                 if usize::from(param) >= primal_count
                     && source.value(param).value_type != CfgValueType::Boolean
@@ -498,7 +498,7 @@ fn append_activity(
             }
         }
         let mut additions = Vec::new();
-        for (target, args) in edges(&block.terminator) {
+        for (target, args) in block.terminator.edges() {
             let mut extra = Vec::new();
             for (&param, &arg) in source.block(target).params.iter().zip(args) {
                 if tracked[usize::from(param)] {
@@ -577,20 +577,6 @@ impl Activity<'_> {
             _ if left == right => left,
             _ => self.push(CfgValueKind::Binary { op, left, right }),
         }
-    }
-}
-
-fn edges(terminator: &CfgTerminator) -> Vec<(BlockId, &[ValueId])> {
-    match terminator {
-        CfgTerminator::Jump { target, args } => vec![(*target, args)],
-        CfgTerminator::Branch {
-            then_target,
-            then_args,
-            else_target,
-            else_args,
-            ..
-        } => vec![(*then_target, then_args), (*else_target, else_args)],
-        _ => Vec::new(),
     }
 }
 

@@ -184,6 +184,16 @@ pub enum CfgBinaryOp {
     DiscreteValue,
 }
 
+impl CfgBinaryOp {
+    /// Comparisons and logical connectives, whose result is a boolean.
+    pub(crate) fn is_predicate(self) -> bool {
+        matches!(
+            self,
+            Self::Eq | Self::Ne | Self::Lt | Self::Le | Self::Gt | Self::Ge | Self::And | Self::Or
+        )
+    }
+}
+
 /// Independent solver quantity named by a `ddx` probe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CfgDdxAxis {
@@ -3029,6 +3039,24 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::FourStateConstant(_)
             | CfgValueKind::IntegerConstant(_)
     )
+}
+
+impl CfgTerminator {
+    /// The jump and branch edges with the block arguments each passes. A
+    /// suspension passes none.
+    pub(crate) fn edges(&self) -> Vec<(BlockId, &[ValueId])> {
+        match self {
+            Self::Jump { target, args } => vec![(*target, args)],
+            Self::Branch {
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+                ..
+            } => vec![(*then_target, then_args), (*else_target, else_args)],
+            _ => Vec::new(),
+        }
+    }
 }
 
 impl CfgBlock {
