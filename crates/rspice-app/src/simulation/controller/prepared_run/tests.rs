@@ -906,7 +906,9 @@ fn a_manual_deck_that_would_open_a_touchstone_table_is_refused_when_prepared() {
             .expect_err("a Touchstone table with nowhere to be read from cannot reach dispatch");
     assert_eq!(error.stage(), PreparationStage::SourceChecks, "{error}");
     assert!(
-        error.message().contains("instance 'A1' reads file=\"dut.s2p\"")
+        error
+            .message()
+            .contains("instance 'A1' reads file=\"dut.s2p\"")
             && error.message().contains("no directory of its own"),
         "{error}"
     );
