@@ -1,0 +1,10 @@
+* C4 variant vcd (RSpice-authored; corpus design C4): the SAR register
+* (net/sar8.v) clocked and started by a d_vcd stimulus replaying
+* net/sar_ports.vcd, the edges the ports variant's pulse sources make through
+* the 0.9 V A/D threshold. clk and start are the register's own event nets, so
+* no converter stands between the dump and the HDL inputs. A code model's data
+* file is read from the root deck's directory, so the path is spelled from
+* deck/, as the .include lines are.
+astim [clk start] vstim
+.model vstim d_vcd (file="../net/sar_ports.vcd" signals="tb.clk tb.start")
+xsar clk start cmp samp eoc b7 b6 b5 b4 b3 b2 b1 b0 sar8

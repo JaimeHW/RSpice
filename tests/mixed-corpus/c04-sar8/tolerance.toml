@@ -7,7 +7,7 @@ time_precision = 1e-12
 [[q]]
 id = "codes"
 analysis = "tran"
-variants = ["full", "ports", "split"]
+variants = ["full", "ports", "split", "vcd"]
 kind = "codes"
 nets = ["b7", "b6", "b5", "b4", "b3", "b2", "b1", "b0"]
 strobe = "eoc"
@@ -19,7 +19,7 @@ why = "the register's own bits at each eoc rise, read on the design's nets: a bi
 [[q]]
 id = "tconv"
 analysis = "tran"
-variants = ["ports"]
+variants = ["ports", "vcd"]
 kind = "meas"
 signal = "tconv"
 oracle = "O6"
@@ -30,7 +30,7 @@ why = "the deck's .MEASURE from samp's fall to eoc's rise, on the register's own
 [[q]]
 id = "code"
 analysis = "tran"
-variants = ["full", "ports", "split"]
+variants = ["full", "ports", "split", "vcd"]
 kind = "held_at"
 signal = "v(code)"
 times = { start = 9.7e-7, step = 1e-6, count = 32 }

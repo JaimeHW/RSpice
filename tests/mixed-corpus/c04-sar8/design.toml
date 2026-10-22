@@ -26,11 +26,18 @@ name = "split"
 families = ["spice", "va-runtime", "vams-digital"]
 today = "runs"
 
+# vcd: ports with clk and start replayed from a VCD file (net/sar_ports.vcd)
+# by a d_vcd stimulus, onto the register's event nets.
+[[variant]]
+name = "vcd"
+families = ["spice", "xspice", "va-runtime", "vams-digital"]
+today = "runs"
+
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
 [[analysis]]
 id = "tran"
-variants = ["full", "ports", "split"]
+variants = ["full", "ports", "split", "vcd"]
 oracles = ["O6", "O2", "O5"]
 timeout_s = 520
 phase = "P2"
