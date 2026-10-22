@@ -100,8 +100,7 @@ impl fmt::Display for BenchError {
             ),
             Self::NoDecks { dir } => write!(
                 f,
-                "no benchmark decks (*.cir) found in `{}`; run `rspice-bench gen` and check the \
-                 directory path",
+                "no benchmark decks (*.cir) found in `{}`; check the directory path",
                 dir.display()
             ),
             Self::Json { context, .. } => write!(f, "{context}"),

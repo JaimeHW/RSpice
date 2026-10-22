@@ -10,6 +10,7 @@
 //! Cold OS file-cache effects are not controlled.
 
 use crate::error::BenchError;
+use crate::generate::{self, GENERATED_DECKS_DIR};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,6 +22,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 use wait_timeout::ChildExt;
+
+/// Directory of the hand-written decks in the shipped set.
+const SHIPPED_CIRCUITS_DIR: &str = "tools/rspice-bench/circuits";
 
 /// Environment variable overriding the RSpice executable location.
 const RSPICE_ENV: &str = "RSPICE_BENCH_RSPICE";
@@ -62,13 +66,11 @@ pub struct RunArgs {
     )]
     pub out: PathBuf,
 
-    /// Directory scanned (non-recursively) for benchmark decks (*.cir).
-    #[arg(
-        long,
-        default_value = "tools/rspice-bench/circuits",
-        value_name = "DIR"
-    )]
-    pub circuits: PathBuf,
+    /// Directory scanned (non-recursively) for benchmark decks (*.cir). Without
+    /// it the run takes the shipped set: the hand-written decks in
+    /// tools/rspice-bench/circuits plus freshly generated parametric decks.
+    #[arg(long, value_name = "DIR")]
+    pub circuits: Option<PathBuf>,
 
     /// Per-run wall-clock cap in seconds; a run that exceeds it is killed
     /// and counted as failed. Keeps a pathological deck from wedging the
@@ -222,7 +224,13 @@ pub fn run(args: &RunArgs) -> Result<ExitCode, BenchError> {
     let baseline = args.baseline.as_deref().map(load_baseline).transpose()?;
     let rspice = locate_rspice()?;
     let ngspice = locate_ngspice()?;
-    let decks = discover_decks(&args.circuits)?;
+    let (decks, source) = match &args.circuits {
+        Some(dir) => (discover_decks(dir)?, format!("`{}`", dir.display())),
+        None => (
+            shipped_decks()?,
+            format!("`{SHIPPED_CIRCUITS_DIR}` and `{GENERATED_DECKS_DIR}`"),
+        ),
+    };
 
     println!("rspice : {}", rspice.display());
     match &ngspice {
@@ -230,9 +238,8 @@ pub fn run(args: &RunArgs) -> Result<ExitCode, BenchError> {
         None => println!("ngspice: skipped ({NGSPICE_ENV} not set)"),
     }
     println!(
-        "decks  : {} from `{}`; repeats: {} (+1 warmup)\n",
+        "decks  : {} from {source}; repeats: {} (+1 warmup)\n",
         decks.len(),
-        args.circuits.display(),
         args.repeats
     );
 
@@ -500,6 +507,23 @@ fn locate_ngspice() -> Result<Option<PathBuf>, BenchError> {
             }
         }
     }
+}
+
+/// The shipped deck set: the hand-written decks plus the generated ones,
+/// written fresh so a run always measures the current generator. A generated
+/// deck that also has a checked-in copy (a test includes it at compile time)
+/// is taken from the generator. Sorted by file name like [`discover_decks`].
+fn shipped_decks() -> Result<Vec<PathBuf>, BenchError> {
+    let generated = generate::write_decks(Path::new(GENERATED_DECKS_DIR))?;
+    let mut decks = discover_decks(Path::new(SHIPPED_CIRCUITS_DIR))?;
+    decks.retain(|deck| {
+        generated
+            .iter()
+            .all(|path| path.file_name() != deck.file_name())
+    });
+    decks.extend(generated);
+    decks.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    Ok(decks)
 }
 
 /// Collects `*.cir` decks from `dir` (non-recursive), sorted by file name

@@ -1,8 +1,8 @@
 //! `rspice-bench` — developer benchmarks and performance qualification.
 //!
 //! This binary times *whole simulator processes* (RSpice vs. a locally
-//! installed ngspice) over the shared benchmark deck set in
-//! `tools/rspice-bench/circuits/` and emits a JSON scoreboard plus a human-readable
+//! installed ngspice) over the shared benchmark deck set (`tools/rspice-bench/circuits/`
+//! plus the generated decks) and emits a JSON scoreboard plus a human-readable
 //! table. Its headline `run` measurement is deliberately a macro-benchmark: it
 //! times end-to-end wall-clock of `rspice run <deck> -q` and `ngspice -b
 //! <deck>`, including parsing and output. The in-process subcommands alongside
@@ -10,9 +10,9 @@
 //!
 //! Subcommands:
 //!
-//! * `gen` — deterministically regenerate the generated benchmark decks
-//!   (the RC ladders). The emitted text is byte-stable so the checked-in
-//!   decks can be reproduced exactly.
+//! * `gen` — write the generated benchmark decks (RC ladders, MOS array) into
+//!   a directory. The emitted text is byte-stable, so checked-in copies can be
+//!   reproduced exactly.
 //! * `generated-rust` — authenticate and gate generated Verilog-A Rust
 //!   source resources.
 //! * `generated-compile` — measure generated-catalog Rust compile time with
@@ -61,7 +61,7 @@ enum BenchCommand {
     /// Measure native GP transient execution, cancellation, and transport storage.
     #[cfg(feature = "core-transient")]
     GpTransient(gp_transient::GpTransientArgs),
-    /// Regenerate the deterministic, generated benchmark decks (RC ladders).
+    /// Write the deterministic, generated benchmark decks into a directory.
     Gen(generate::GenArgs),
     /// Authenticate and gate generated Verilog-A Rust source resources.
     GeneratedRust(generated_rust::GeneratedRustArgs),

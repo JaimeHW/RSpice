@@ -1,26 +1,25 @@
 //! Deterministic generation of the synthetic benchmark decks.
 //!
-//! The parametric RC-ladder and MOS-array decks are generated; the remaining
-//! decks in `tools/rspice-bench/circuits/` are hand-written and checked in directly.
-//! The generator is byte-deterministic (fixed formatting, `\n` newlines, no
-//! timestamps) so `rspice-bench gen` always reproduces the checked-in files
-//! exactly, and reviewers can diff regenerated output against the repo.
+//! The parametric RC-ladder and MOS-array decks are generated each time the
+//! shipped deck set runs; the remaining decks in `tools/rspice-bench/circuits/`
+//! are hand-written. The generator is byte-deterministic (fixed formatting,
+//! `\n` newlines, no timestamps), so the copies of generated decks that tests
+//! include from `tools/rspice-bench/circuits/` match what the run measures.
 
 use crate::error::BenchError;
 use clap::Args;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Where the shipped run writes the generated decks before timing them.
+pub const GENERATED_DECKS_DIR: &str = "target/benchmarks/decks";
 
 /// Arguments for the `gen` subcommand.
 #[derive(Args, Debug)]
 pub struct GenArgs {
     /// Directory the generated decks are written into.
-    #[arg(
-        long,
-        default_value = "tools/rspice-bench/circuits",
-        value_name = "DIR"
-    )]
+    #[arg(long, default_value = GENERATED_DECKS_DIR, value_name = "DIR")]
     pub dir: PathBuf,
 }
 
@@ -182,33 +181,39 @@ fn ladder_deck(spec: &LadderSpec) -> String {
 /// Entry point of the `gen` subcommand: writes every generated deck into
 /// `args.dir`, creating the directory if needed.
 pub fn generate(args: &GenArgs) -> Result<(), BenchError> {
-    fs::create_dir_all(&args.dir).map_err(|err| {
-        BenchError::io(
-            format!("failed to create deck directory `{}`", args.dir.display()),
-            err,
-        )
-    })?;
-    for spec in LADDERS {
-        let path = args.dir.join(spec.file_name);
-        let deck = ladder_deck(spec);
-        fs::write(&path, deck).map_err(|err| {
-            BenchError::io(
-                format!("failed to write generated deck `{}`", path.display()),
-                err,
-            )
-        })?;
-        println!("wrote {}", path.display());
-    }
-    for spec in MOS_ARRAYS {
-        let path = args.dir.join(spec.file_name);
-        let deck = mos_array_deck(spec);
-        fs::write(&path, deck).map_err(|err| {
-            BenchError::io(
-                format!("failed to write generated deck `{}`", path.display()),
-                err,
-            )
-        })?;
+    for path in write_decks(&args.dir)? {
         println!("wrote {}", path.display());
     }
     Ok(())
+}
+
+/// Writes every generated deck into `dir`, creating it if needed, and
+/// returns the written paths.
+pub fn write_decks(dir: &Path) -> Result<Vec<PathBuf>, BenchError> {
+    fs::create_dir_all(dir).map_err(|err| {
+        BenchError::io(
+            format!("failed to create deck directory `{}`", dir.display()),
+            err,
+        )
+    })?;
+    let decks = LADDERS
+        .iter()
+        .map(|spec| (spec.file_name, ladder_deck(spec)))
+        .chain(
+            MOS_ARRAYS
+                .iter()
+                .map(|spec| (spec.file_name, mos_array_deck(spec))),
+        );
+    let mut written = Vec::new();
+    for (file_name, deck) in decks {
+        let path = dir.join(file_name);
+        fs::write(&path, deck).map_err(|err| {
+            BenchError::io(
+                format!("failed to write generated deck `{}`", path.display()),
+                err,
+            )
+        })?;
+        written.push(path);
+    }
+    Ok(written)
 }
