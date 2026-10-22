@@ -6795,6 +6795,14 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             *result = replacement;
         }
     }
+    // An expression reads sampled points, where an event net has no column.
+    if let Some(current) = current_result {
+        for (statement, result) in statements.iter().zip(&mut results) {
+            if let Some(refusal) = super::measure::events::expression_refusal(statement, current) {
+                *result = MeasureResult::failed_for_statement(statement, &refusal);
+            }
+        }
+    }
     super::measure_units::annotate_native(netlist, "TRAN", &mut results, signals.keys(), None);
     if abort.is_aborted() {
         Err(SimulationError::Aborted)

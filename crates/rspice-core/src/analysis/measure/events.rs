@@ -21,8 +21,9 @@ use std::sync::Arc;
 
 use super::{
     EdgeType, MeasureData, MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement,
-    MeasureType, TrigSpec, TriggerEvent, WhenCondition, delay_at_is_reached,
-    delay_td_accepts_modern_event, lookup_signal, measure_condition_crossing,
+    MeasureType, MeasureWindow, TrigSpec, TriggerEvent, WhenCondition, delay_at_is_reached,
+    delay_clause_event, delay_td_accepts_modern_event, find_at_accepted_points,
+    first_measure_condition_event, lookup_signal, measure_condition_crossing,
     point_event_axis_in_window, select_measure_condition_occurrence,
 };
 use crate::Value;
@@ -442,6 +443,81 @@ pub(crate) fn private_endpoint_refusal(name: &str, result: &TransientResult) -> 
     ))
 }
 
+/// The refusal for a transient `EQN` or `PARAM` statement whose expression
+/// reads an event net of `result` through `D()` or `E()`.
+///
+/// An expression is evaluated on the sampled points of the analysis, and an
+/// event net has no sampled column there; the step function belongs on a card
+/// of its own, whose result the expression may then name.
+pub(crate) fn expression_refusal(
+    statement: &MeasureStatement,
+    result: &TransientResult,
+) -> Option<String> {
+    let (measure, expression) = match &statement.measure_type {
+        MeasureType::Equation { expression, .. } => ("EQN", expression),
+        MeasureType::Param { expression } => ("PARAM", expression),
+        _ => return None,
+    };
+    if !is_transient(statement) {
+        return None;
+    }
+    let text = expression.text.trim();
+    let body = text
+        .strip_prefix('{')
+        .and_then(|body| body.strip_suffix('}'))
+        .or_else(|| {
+            text.strip_prefix('\'')
+                .and_then(|body| body.strip_suffix('\''))
+        })
+        .unwrap_or(text);
+    let parsed = crate::netlist::expr::parse_expression(body).ok()?;
+    let operand = expression_event_operand(&parsed, result)?;
+    Some(format!(
+        "{measure} cannot read {operand}, an event step function: an expression is evaluated \
+         on the sampled points of the analysis, where an event net has no column. Measure \
+         {operand} with a card of its own and name that result in the expression."
+    ))
+}
+
+/// The first `D(name)` or `E(name)` call in `expression` that names an event
+/// net or bus of `result`.
+fn expression_event_operand(
+    expression: &crate::netlist::expr::Expr,
+    result: &TransientResult,
+) -> Option<String> {
+    use crate::netlist::expr::Expr;
+    match expression {
+        Expr::FnCall { name, args } => {
+            if let [Expr::Param(net) | Expr::StringLiteral(net)] = args.as_slice() {
+                let wanted = canonical_symbol(net);
+                let digital = name.eq_ignore_ascii_case("D")
+                    && (result
+                        .digital_traces
+                        .iter()
+                        .any(|trace| canonical_symbol(&trace.node_name) == wanted)
+                        || result
+                            .digital_buses
+                            .iter()
+                            .any(|bus| canonical_symbol(&bus.name) == wanted));
+                let real = name.eq_ignore_ascii_case("E")
+                    && result
+                        .real_traces
+                        .iter()
+                        .any(|trace| canonical_symbol(&trace.node_name) == wanted);
+                if digital || real {
+                    return Some(format!("{name}({net})"));
+                }
+            }
+            args.iter()
+                .find_map(|argument| expression_event_operand(argument, result))
+        }
+        Expr::UnaryOp { operand, .. } => expression_event_operand(operand, result),
+        Expr::BinOp { left, right, .. } => expression_event_operand(left, result)
+            .or_else(|| expression_event_operand(right, result)),
+        Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) | Expr::Param(_) => None,
+    }
+}
+
 /// The refusal for an event operand on a solved-point analysis.
 fn solved_point_refusal(operand: &str, analysis: &str) -> String {
     format!(
@@ -464,6 +540,10 @@ fn solved_point_refusal(operand: &str, analysis: &str) -> String {
 /// event values. A statement whose operands are all sampled waveforms, or
 /// that has no event table to read (a remeasured file), stays with the
 /// sampled evaluator, which reads an exported `D(n)` column like any other.
+///
+/// A statement may mix the two domains: each `TRIG`/`TARG` clause, and a
+/// `FIND` operand and its `WHEN` condition, resolve in their own domain, the
+/// event side exactly and the sampled side interpolated as it always is.
 pub(super) fn evaluate(
     statement: &MeasureStatement,
     data: MeasureData<'_, '_>,
@@ -492,7 +572,7 @@ pub(super) fn evaluate(
                 return Some(MeasureResult::failed(&statement.name, refusal));
             }
             // A sampled waveform.
-            _ => return None,
+            _ => {}
         }
     }
     if !any_event {
@@ -506,7 +586,7 @@ pub(super) fn evaluate(
     evaluation.evaluate(legacy)
 }
 
-/// One statement whose operands are all event operands.
+/// One statement with at least one event operand.
 struct Evaluation<'a, 'd, 'b> {
     statement: &'a MeasureStatement,
     data: MeasureData<'d, 'b>,
@@ -549,11 +629,53 @@ impl Evaluation<'_, '_, '_> {
         }
     }
 
+    /// Whether `text` reads an event trace rather than a sampled waveform.
+    fn is_event(&self, text: &str) -> bool {
+        matches!(self.events.get(text), Some(Ok(_)))
+    }
+
+    /// The first event operand the statement names.
+    fn first_event_operand(&self) -> &str {
+        waveform_operands(self.statement)
+            .into_iter()
+            .find(|text| self.is_event(text))
+            .map_or("", str::trim)
+    }
+
+    /// The refusal for a measure type that has no meaning on a step function.
+    fn shapeless(&self, measure: &str, reason: &str) -> MeasureResult {
+        self.failed(&format!(
+            "{measure} cannot read {}, an event step function: {reason}",
+            self.first_event_operand()
+        ))
+    }
+
+    /// The refusal for a condition that compares a sampled waveform with an
+    /// event step function, or `None` when both sides are in one domain.
+    fn mixed_condition(&self, condition: &WhenCondition) -> Option<String> {
+        let MeasureOperand::Waveform(right) = &condition.right else {
+            return None;
+        };
+        (self.is_event(&condition.left) != self.is_event(right)).then(|| {
+            format!(
+                "{} = {} compares a sampled waveform with an event step function, and no rule \
+                 dates a crossing between a slope and a step. Compare each with a constant \
+                 value, and take the delay between the two crossings with TRIG/TARG.",
+                condition.left.trim(),
+                right.trim()
+            )
+        })
+    }
+
     fn evaluate(&self, legacy: bool) -> Option<MeasureResult> {
         Some(match &self.statement.measure_type {
             MeasureType::Delay {
-                trig, targ, minval, ..
-            } => self.delay(trig, targ, *minval, legacy),
+                trig,
+                targ,
+                from,
+                to,
+                minval,
+            } => self.delay(trig, targ, (*from, *to, *minval), legacy),
             MeasureType::When {
                 condition,
                 from,
@@ -601,7 +723,19 @@ impl Evaluation<'_, '_, '_> {
                 output,
             } => self.extremum(signal, *from, *to, *output, true),
             MeasureType::PeakToPeak { signal, from, to } => self.peak_to_peak(signal, *from, *to),
-            _ => return None,
+            MeasureType::Derivative { .. } => self.shapeless("DERIV", "a step has no derivative"),
+            MeasureType::RiseTime { .. } => {
+                self.shapeless("RISE_TIME", "a step has no edge to time between two levels")
+            }
+            MeasureType::FallTime { .. } => {
+                self.shapeless("FALL_TIME", "a step has no edge to time between two levels")
+            }
+            MeasureType::ErrorFunction { .. } | MeasureType::FileError { .. } => self.shapeless(
+                "ERR",
+                "the error compares sampled values point by point, and a step function has no \
+                 samples",
+            ),
+            MeasureType::Param { .. } | MeasureType::Equation { .. } => return None,
         })
     }
 
@@ -669,7 +803,8 @@ impl Evaluation<'_, '_, '_> {
     }
 
     /// The instant of a `WHEN` condition's requested occurrence inside
-    /// `[lower, upper]`, counted as the sampled evaluator counts it.
+    /// `[lower, upper]`, counted as the sampled evaluator counts it: exact on
+    /// an event condition, interpolated on a sampled one.
     fn when_instant(
         &self,
         condition: &WhenCondition,
@@ -677,6 +812,20 @@ impl Evaluation<'_, '_, '_> {
         upper: Value,
         minval: Value,
     ) -> Result<Option<Value>, String> {
+        if let Some(refusal) = self.mixed_condition(condition) {
+            return Err(refusal);
+        }
+        if !self.is_event(&condition.left) {
+            return Ok(first_measure_condition_event(
+                condition,
+                minval,
+                self.data,
+                lower,
+                upper,
+                self.data.segment_starts,
+            )?
+            .map(|(_, _, instant, _)| instant));
+        }
         let changes = self.changes(condition)?;
         let candidates = changes.iter().filter_map(|change| {
             let crossing = measure_condition_crossing(
@@ -703,12 +852,14 @@ impl Evaluation<'_, '_, '_> {
     }
 
     /// The instant one `TRIG` or `TARG` clause resolves to, counted as the
-    /// sampled TrigTarg reading counts it, each clause from its own `TD`.
+    /// sampled TrigTarg reading counts it, each clause from its own `TD`: an
+    /// event clause at the step that crosses, a sampled clause interpolated
+    /// as it always is.
     fn clause_instant(
         &self,
         clause: &TrigSpec,
         td: Option<Value>,
-        minval: Value,
+        (from, to, minval): (Option<Value>, Option<Value>, Value),
     ) -> Result<Option<Value>, String> {
         let condition = match &clause.event {
             TriggerEvent::At(target) => {
@@ -723,6 +874,18 @@ impl Evaluation<'_, '_, '_> {
             }
             TriggerEvent::When(condition) => condition,
         };
+        if let Some(refusal) = self.mixed_condition(condition) {
+            return Err(refusal);
+        }
+        if !self.is_event(&condition.left) {
+            let window = MeasureWindow {
+                from,
+                to,
+                td,
+                minval,
+            };
+            return delay_clause_event(clause, window, self.data, false, None);
+        }
         let crossings = self.changes(condition)?;
         let mut crossings = crossings.iter().filter_map(|change| {
             let previous = change.left_previous - change.right_previous;
@@ -754,7 +917,7 @@ impl Evaluation<'_, '_, '_> {
         &self,
         trig: &TrigSpec,
         targ: &TrigSpec,
-        minval: Value,
+        window: (Option<Value>, Option<Value>, Value),
         legacy: bool,
     ) -> MeasureResult {
         if legacy || trig.frac_max.is_some() || targ.frac_max.is_some() {
@@ -763,12 +926,12 @@ impl Evaluation<'_, '_, '_> {
                  sampled waveforms only; an event operand is measured by the standard reading",
             );
         }
-        let trigger = match self.clause_instant(trig, trig.td, minval) {
+        let trigger = match self.clause_instant(trig, trig.td, window) {
             Ok(Some(instant)) => instant,
             Ok(None) => return self.failed("Trigger condition not found"),
             Err(error) => return self.failed(&error),
         };
-        let target = match self.clause_instant(targ, targ.td.or(trig.td), minval) {
+        let target = match self.clause_instant(targ, targ.td.or(trig.td), window) {
             Ok(Some(instant)) => instant,
             Ok(None) => return self.failed("Target condition not found"),
             Err(error) => return self.failed(&error),
@@ -812,11 +975,31 @@ impl Evaluation<'_, '_, '_> {
         } else {
             return self.failed("FIND requires AT= or WHEN condition");
         };
-        let result = match self.value_at(signal, instant) {
+        let value = if self.is_event(signal) {
+            self.value_at(signal, instant)
+        } else {
+            self.sampled_value_at(signal, instant, minval)
+        };
+        let result = match value {
             Ok(value) => MeasureResult::success(self.name(), value),
             Err(error) => self.failed(&error),
         };
         result.with_event_axis(instant)
+    }
+
+    /// A sampled waveform's value at `time`, interpolated between the
+    /// accepted points around it as `FIND … AT` interpolates it.
+    fn sampled_value_at(&self, signal: &str, time: Value, minval: Value) -> Result<Value, String> {
+        let values = lookup_signal(self.data.signals, signal)
+            .ok_or_else(|| format!("Signal '{signal}' not found"))?;
+        find_at_accepted_points(
+            self.data.axis,
+            values,
+            time,
+            minval,
+            self.data.segment_starts,
+        )?
+        .ok_or_else(|| "Time point not in simulation range".to_string())
     }
 
     /// The part of the analysis inside `FROM`/`TO`, or `None` when the two

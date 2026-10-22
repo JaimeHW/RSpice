@@ -14,6 +14,7 @@ use rspice_core::analysis::measure_signals::{
 };
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
+use rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -391,4 +392,125 @@ fn an_event_operand_off_a_transient_and_a_private_endpoint_are_refused() {
             "{name}: {refusal}"
         );
     }
+}
+
+//=============================================================================
+// Across domains
+//=============================================================================
+
+/// Connect rules for a 1 V supply: a D/A that ramps linearly over 1 ns, and an
+/// A/D with one threshold at half the supply and no band.
+const RULES: &str = "connectrules deck;\n\
+    connect a2d #(.vsup(1), .vthi(0.5), .vtlo(0.5));\n\
+    connect d2a #(.vsup(1), .trise(1n), .tfall(1n));\n\
+endconnectrules\n";
+
+/// `module` and the built-in connect modules under [`RULES`], as one source.
+fn with_rules(module: &str) -> String {
+    let mut source = module.to_string();
+    for (_, connect) in BUILTIN_CONNECT_MODULES {
+        source.push_str(connect);
+    }
+    source.push_str(RULES);
+    source
+}
+
+/// `q` rises at 10 ns and its D/A ramps from 0 to 1 V over 1 ns through
+/// `rhi` = 20 Ω into 1 MΩ, so V(q) = 1e6/(1e6 + 20) of the ramp and crosses
+/// 0.5 V 0.5·(1 + 20/10⁶) ns after the digital edge. The ramp is linear, so
+/// the interpolated crossing is exact.
+#[test]
+fn a_digital_edge_to_an_analog_crossing_is_one_delay() {
+    let scratch = Scratch::new("d_to_a");
+    let module = scratch.write("counter.vams", &with_rules(COUNTER));
+    let netlist = parse(&format!(
+        "* digital edge to analog crossing\n.hdl \"{module}\" module=counter\n\
+         .options connectrules=deck\nx1 q p b3 b2 b1 b0 counter\nr1 q 0 1meg\n.tran 0.01n 30n\n\
+         .measure tran delay TRIG D(q) VAL=0.5 RISE=1 TARG V(q) VAL=0.5 RISE=1\n\
+         .measure tran back TRIG V(q) VAL=0.5 RISE=1 TARG D(q) VAL=0.5 FALL=1\n.end\n"
+    ));
+    let result = run(&netlist);
+    let results = evaluate_tran_measurements(&netlist, &result);
+    let expected = 0.5e-9 * (1.0 + 20.0 / 1.0e6);
+    let delay = value(&results, "delay");
+    assert!(
+        (delay - expected).abs() <= 1e-15,
+        "D(q) rises at 10 ns, V(q) crosses 0.5 V {expected:e} s later: {delay:e}"
+    );
+    // Back from the analog crossing to the next digital fall, at 20 ns.
+    let back = value(&results, "back");
+    assert!((back - (10.0e-9 - expected)).abs() <= 1e-15, "{back:e}");
+}
+
+/// An HDL input that only reads its net.
+const SENSE: &str = "`include \"disciplines.vams\"\n\
+`timescale 1ns/1ps\n\
+module sense(a, y);\n\
+  input a; wire a;\n\
+  output y; reg y;\n\
+  initial y = 1'b0;\n\
+  always @(a) y = a;\n\
+endmodule\n";
+
+/// A ramp from 0 to 1 V over 1 µs crosses the A/D's 0.5 V threshold at
+/// 500 ns, and the HDL input sees the edge there: the delay is 0 within the
+/// declared time precision (1 ps) and the solver's root tolerance.
+#[test]
+fn an_analog_crossing_to_a_digital_edge_is_one_delay() {
+    let scratch = Scratch::new("a_to_d");
+    let module = scratch.write("sense.vams", &with_rules(SENSE));
+    let netlist = parse(&format!(
+        "* analog crossing to digital edge\n.hdl \"{module}\" module=sense\n\
+         .options connectrules=deck\nvin a 0 pwl(0 0 1u 1)\nx1 a y sense\n.tran 1n 1u\n\
+         .measure tran delay TRIG V(a) VAL=0.5 RISE=1 TARG D(a) VAL=0.5 RISE=1\n.end\n"
+    ));
+    let result = run(&netlist);
+    let results = evaluate_tran_measurements(&netlist, &result);
+    let delay = value(&results, "delay");
+    assert!(
+        delay.abs() <= 1e-12,
+        "the edge follows the crossing: {delay:e}"
+    );
+}
+
+/// `p` first rises at 7 ns, while `q` is low: the analog value read at the
+/// exact digital edge is 0 V. And `q`, high half of every 20 ns, has a duty
+/// of one half on its converted net too.
+#[test]
+fn an_analog_value_reads_at_a_digital_edge() {
+    let results = counter_measures(
+        ".measure tran low FIND V(q) WHEN D(p)=0.5 RISE=1\n\
+         .measure tran level FIND D(q) WHEN V(q)=0.5 RISE=1\n\
+         .measure tran duty AVG D(q) FROM=10n TO=90n",
+    );
+    let low = measure(&results, "low");
+    assert!(low.error.is_none(), "{low:?}");
+    assert!(low.value.expect("value").abs() <= 1e-9, "{low:?}");
+    assert_instant(low.event_axis.expect("instant"), 7.0e-9, "p rises");
+    // V(q) crosses 0.5 V on its way up, after the step, where D(q) reads 1.
+    assert_eq!(value(&results, "level"), 1.0);
+    assert!((value(&results, "duty") - 0.5).abs() <= 1e-15);
+}
+
+/// A step has no derivative; a sampled waveform and a step cannot be compared
+/// in one condition; an expression reads sampled points.
+#[test]
+fn shapeless_and_cross_domain_readings_are_refused() {
+    let results = counter_measures(
+        ".measure tran slope DERIV D(q) AT=15n\n\
+         .measure tran mixed WHEN V(q)=D(p)\n\
+         .measure tran clause TRIG V(q)=D(p) TARG D(q) VAL=0.5 RISE=2\n\
+         .measure tran twice PARAM='D(q)*2'",
+    );
+    let slope = error(&results, "slope");
+    assert!(slope.contains("deriv") && slope.contains("d(q)"), "{slope}");
+    for name in ["mixed", "clause"] {
+        let mixed = error(&results, name);
+        assert!(
+            mixed.contains("v(q)") && mixed.contains("d(p)"),
+            "{name}: {mixed}"
+        );
+    }
+    let twice = error(&results, "twice");
+    assert!(twice.contains("param") && twice.contains("d(q)"), "{twice}");
 }
