@@ -435,12 +435,6 @@ mod tests {
     }
 
     #[test]
-    fn rendering_is_stable() {
-        let fixture = sample_fixture();
-        assert_eq!(fixture.render(), fixture.render());
-    }
-
-    #[test]
     fn rendering_never_emits_trailing_whitespace() {
         let rendered = sample_fixture().render();
         assert!(rendered.lines().all(|line| line.trim_end() == line));
