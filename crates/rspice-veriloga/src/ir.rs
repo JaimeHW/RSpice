@@ -2159,10 +2159,6 @@ pub mod autodiff {
             }
         }
 
-        pub fn is_shadowed(&self, name: &str) -> bool {
-            self.shadowed.get(name).is_some_and(|mask| *mask != 0)
-        }
-
         /// Whether `name` carries a shadow along the given axis
         pub fn is_shadowed_on(&self, name: &str, wrt: &DerivativeWrt) -> bool {
             if matches!(

@@ -88,22 +88,6 @@ impl LookupTable {
         }
     }
 
-    /// Create a lookup table with a name for debugging
-    pub fn from_data_named(x_data: Vec<f64>, y_data: Vec<f64>, name: impl Into<SmolStr>) -> Self {
-        assert_eq!(
-            x_data.len(),
-            y_data.len(),
-            "LookupTable: x_data and y_data must have the same length"
-        );
-        Self {
-            x_data,
-            y_data,
-            name: Some(name.into()),
-            control: TableControl::default(),
-            knots: Vec::new(),
-        }
-    }
-
     /// Check if the table is empty
     #[inline]
     pub fn is_empty(&self) -> bool {

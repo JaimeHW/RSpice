@@ -550,14 +550,6 @@ impl StateSpaceFilter {
         Self::from_transfer_function(&[omega_c], &[1.0, omega_c])
     }
 
-    /// Create a second-order lowpass filter (Butterworth)
-    /// H(s) = omega_n^2 / (s^2 + 2*zeta*omega_n*s + omega_n^2)
-    pub fn lowpass_second_order(cutoff_hz: f64, damping: f64) -> Result<Self, LaplaceError> {
-        let omega_n = 2.0 * PI * cutoff_hz;
-        let omega_n2 = omega_n * omega_n;
-        Self::from_transfer_function(&[omega_n2], &[1.0, 2.0 * damping * omega_n, omega_n2])
-    }
-
     /// Create a differentiator with time constant tau
     /// H(s) = tau*s / (tau*s + 1)
     pub fn differentiator(tau: f64) -> Result<Self, LaplaceError> {

@@ -575,11 +575,6 @@ impl VerilogACompiler {
         self.compile_module(source, None)
     }
 
-    /// Compile a single-module source and retain structured measurements.
-    pub fn compile_measured(&self, source: &str) -> CompileResult<Measured<CompiledModel>> {
-        self.compile_module_measured(source, None)
-    }
-
     /// Compile one module of a (possibly multi-module) Verilog-A source
     ///
     /// Foundry releases ship several modules per file; `module_name`
@@ -1270,14 +1265,6 @@ impl VerilogACompiler {
         source: &str,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
         self.compile_canonical_ir_module(source, None)
-    }
-
-    /// Compile a single-module source to canonical IR and retain measurements.
-    pub fn compile_canonical_ir_measured(
-        &self,
-        source: &str,
-    ) -> CompileResult<Measured<canonical_ir::CanonicalIrArtifact>> {
-        self.compile_canonical_ir_module_measured(source, None)
     }
 
     /// Compile one module of a Verilog-A source to canonical HIR/MIR.

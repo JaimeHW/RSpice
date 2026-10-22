@@ -214,19 +214,6 @@ impl CodeGenerator {
         self.generate_module(analyzed, None)
     }
 
-    /// Generate compiled model from analyzed file with a stable source digest.
-    ///
-    /// Use this when the resulting model may be paired with a canonical IR
-    /// artifact for native JIT compilation. The digest must identify the same
-    /// preprocessed source text used to produce the canonical artifact.
-    pub fn generate_with_source_digest(
-        &self,
-        analyzed: &AnalyzedFile,
-        source_digest: impl Into<SmolStr>,
-    ) -> CompileResult<CompiledModel> {
-        self.generate_module_with_source_digest(analyzed, None, source_digest)
-    }
-
     /// Generate compiled model for one module of an analyzed file
     ///
     /// `module_name` selects the module to compile (foundry releases ship
@@ -239,20 +226,6 @@ impl CodeGenerator {
         module_name: Option<&str>,
     ) -> CompileResult<CompiledModel> {
         self.generate_module_inner(analyzed, module_name, SmolStr::default())
-    }
-
-    /// Generate compiled model for one module with a stable source digest.
-    ///
-    /// Use this when the resulting model may be paired with a canonical IR
-    /// artifact for native JIT compilation. The digest must identify the same
-    /// preprocessed source text used to produce the canonical artifact.
-    pub fn generate_module_with_source_digest(
-        &self,
-        analyzed: &AnalyzedFile,
-        module_name: Option<&str>,
-        source_digest: impl Into<SmolStr>,
-    ) -> CompileResult<CompiledModel> {
-        self.generate_module_inner(analyzed, module_name, source_digest.into())
     }
 
     fn generate_module_inner(

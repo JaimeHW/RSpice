@@ -221,23 +221,6 @@ impl ParameterRange {
         }
     }
 
-    /// Create a range (min, max] left-exclusive
-    pub fn left_open(min: f64, max: f64) -> Self {
-        Self {
-            min: Some(min),
-            max: Some(max),
-            min_parameter: None,
-            max_parameter: None,
-            min_expression: None,
-            max_expression: None,
-            min_exclusive: true,
-            max_exclusive: false,
-            exclude: Vec::new(),
-            exclude_parameters: Vec::new(),
-            exclude_expressions: Vec::new(),
-        }
-    }
-
     /// Check if a value is within this range
     pub fn contains(&self, value: f64) -> bool {
         // NaN is never a valid parameter value (commercial simulator behavior)
@@ -273,16 +256,6 @@ impl ParameterRange {
         }
 
         true
-    }
-
-    /// Check if a value is positive infinity indicator
-    pub fn is_inf(v: f64) -> bool {
-        v == f64::INFINITY
-    }
-
-    /// Check if a value is negative infinity indicator
-    pub fn is_neg_inf(v: f64) -> bool {
-        v == f64::NEG_INFINITY
     }
 }
 

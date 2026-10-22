@@ -2302,12 +2302,6 @@ impl VmContext {
         Ok(self.try_node_potential(pos)? - self.try_node_potential(neg)?)
     }
 
-    /// Potential of a unified node index against the global reference.
-    #[inline]
-    pub fn node_potential(&self, node: usize) -> f64 {
-        self.try_node_potential(node).unwrap_or(0.0)
-    }
-
     /// Checked potential of a unified node index against the global reference.
     #[inline]
     pub fn try_node_potential(&self, node: usize) -> Result<f64, VmError> {
@@ -2323,12 +2317,6 @@ impl VmContext {
                 .copied()
                 .ok_or(VmError::InvalidInstruction("missing node voltage slot"))
         }
-    }
-
-    /// Get internal node voltage.
-    #[inline]
-    pub fn internal_voltage(&self, idx: usize) -> f64 {
-        self.internal_voltages.get(idx).copied().unwrap_or(0.0)
     }
 
     /// Get current between terminals.
@@ -2462,25 +2450,6 @@ impl VmContext {
         self.variables[index] = value;
         self.numerical_evaluation_valid = false;
         Ok(())
-    }
-
-    /// Set a variable value.
-    pub fn set_variable(&mut self, index: usize, value: f64) {
-        if self
-            .variables
-            .get(index)
-            .is_none_or(|previous| *previous != value)
-        {
-            self.analysis_initialized = false;
-        }
-        self.numerical_evaluation_valid = false;
-        if index >= self.variables.len() {
-            self.variables.resize(index + 1, 0.0);
-        }
-        self.variables[index] = value;
-        if let Ok(position) = self.event_state_indices.binary_search(&index) {
-            self.accepted_event_variables[position] = value;
-        }
     }
 }
 

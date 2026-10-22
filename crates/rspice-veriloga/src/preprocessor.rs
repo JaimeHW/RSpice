@@ -1789,11 +1789,6 @@ impl Preprocessor {
         Ok(())
     }
 
-    /// Expand macros in text (with recursive expansion for nested macros)
-    pub fn expand_macros(&self, line: &str) -> Result<String, PreprocessorError> {
-        self.expand_macros_at(line, 0, usize::MAX)
-    }
-
     /// Expand macros in text, reporting errors at the given line number
     fn expand_macros_at(
         &self,

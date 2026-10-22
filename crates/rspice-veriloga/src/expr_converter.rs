@@ -18,7 +18,7 @@ use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
 use crate::ir::arena::{
     ExprArena, Heavy, IndexedRead, IrUnaryOp, Node, TableData, ZiPolynomial, pack_index,
 };
-use crate::ir::{BranchRef, DdxAxis, IrFunction, NodeId};
+use crate::ir::{DdxAxis, IrFunction, NodeId};
 use crate::semantic::AnalyzedModule;
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -2564,64 +2564,6 @@ impl<'a> ExprConverter<'a> {
                     log_interp: *log_interp,
                     name: name.as_ref().map(ToString::to_string),
                 }))
-            }
-        }
-    }
-
-    /// Convert a branch access to a BranchRef
-    pub fn convert_branch_ref(&self, access: &BranchAccess) -> CompileResult<BranchRef> {
-        match access {
-            BranchAccess::Nodes { pos, neg, .. } => {
-                if neg.is_none()
-                    && let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(pos)
-                {
-                    return Ok(BranchRef {
-                        pos_terminal: pos_idx,
-                        neg_terminal: neg_idx,
-                    });
-                }
-
-                let pos_idx = self.ctx.node_index(pos).ok_or_else(|| {
-                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "Unknown node: {}",
-                        pos
-                    )))
-                })?;
-
-                let neg_idx = neg
-                    .as_ref()
-                    .map(|n| {
-                        self.ctx.node_index(n).ok_or_else(|| {
-                            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                                "Unknown node: {}",
-                                n
-                            )))
-                        })
-                    })
-                    .transpose()?
-                    .unwrap_or(self.ctx.ground());
-
-                Ok(BranchRef {
-                    pos_terminal: pos_idx,
-                    neg_terminal: neg_idx,
-                })
-            }
-            BranchAccess::Branch { name, .. } => {
-                let (pos_idx, neg_idx) = if let Some(nodes) = self.ctx.branch_nodes(name) {
-                    nodes
-                } else {
-                    let pos_idx = self.ctx.node_index(name).ok_or_else(|| {
-                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                            "Unknown branch or node: {}",
-                            name
-                        )))
-                    })?;
-                    (pos_idx, self.ctx.ground())
-                };
-                Ok(BranchRef {
-                    pos_terminal: pos_idx,
-                    neg_terminal: neg_idx,
-                })
             }
         }
     }

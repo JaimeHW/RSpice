@@ -140,15 +140,6 @@ impl RuntimeQualificationOptions {
     /// This architecture-neutral name is preferred for new callers.
     pub const NATIVE_REQUIRED: Self = Self::NATIVE_X64_REQUIRED;
 
-    /// Require a verified browser WebAssembly JIT artifact; never silently
-    /// accept the portable interpreter.
-    pub const WASM_JIT_REQUIRED: Self = Self {
-        generated_rust: false,
-        native_x64_jit: false,
-        wasm_jit: true,
-        interpreter_fallback: InterpreterFallbackPolicy::Reject,
-    };
-
     /// Require every requested backend to qualify.
     pub const fn rejecting_interpreter_fallback(mut self) -> Self {
         self.interpreter_fallback = InterpreterFallbackPolicy::Reject;

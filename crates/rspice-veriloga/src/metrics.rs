@@ -271,10 +271,6 @@ pub struct PipelineMetrics {
 }
 
 impl PipelineMetrics {
-    pub fn total_elapsed(&self) -> Duration {
-        Duration::from_nanos(self.total_elapsed_nanos)
-    }
-
     pub fn phase_elapsed_nanos(&self, phase: PipelinePhase) -> u64 {
         self.phases
             .iter()
