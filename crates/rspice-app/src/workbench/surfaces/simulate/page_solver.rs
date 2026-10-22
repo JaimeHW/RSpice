@@ -46,7 +46,7 @@ use crate::simulation::dialog::{
 use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, OptionsDialogState};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, mono_input, select};
+use crate::ui::widgets::{Button, mono_input, select, select_mono_with_response};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::SimSetupState;
 
@@ -108,6 +108,9 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 .to_owned();
             let mut picked = None;
             let mut connect_rules_response = None;
+            let mut connect_rules_picked = None;
+            let rule_choices =
+                connect_rule_choices(&app.state.sim_setup.session.options_draft.connect_rules);
             field_pair(
                 ui,
                 (
@@ -126,12 +129,36 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 Some((
                     SimulationOptions::CONNECT_RULES_LABEL,
                     &mut |ui: &mut Ui, width: f32| {
-                        connect_rules_response = Some(mono_input(
-                            ui,
-                            SimulationOptions::CONNECT_RULES_LABEL,
-                            &mut app.state.sim_setup.session.options_draft.connect_rules,
-                            width,
-                        ));
+                        // The name stays typed text, so a block the design
+                        // declares is entered as written; the list beside it
+                        // offers the design default and the shipped sets.
+                        let gap = 6.0;
+                        let text_width = ((width - gap) * 0.5).max(1.0);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            let rules =
+                                &mut app.state.sim_setup.session.options_draft.connect_rules;
+                            connect_rules_response = Some(mono_input(
+                                ui,
+                                SimulationOptions::CONNECT_RULES_LABEL,
+                                rules,
+                                text_width,
+                            ));
+                            let shown = if rules.trim().is_empty() {
+                                DESIGN_DEFAULT_RULES
+                            } else {
+                                rules.trim()
+                            };
+                            connect_rules_picked = select_mono_with_response(
+                                ui,
+                                "simulation.solver.connect_rules",
+                                "Connect rule set",
+                                shown,
+                                &rule_choices,
+                                (width - gap - text_width).max(1.0),
+                            )
+                            .picked;
+                        });
                     },
                 )),
             );
@@ -143,15 +170,49 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
             if let Some(response) = connect_rules_response {
                 commit_on_release(app, &response);
             }
+            if let Some(choice) = connect_rules_picked.and_then(|index| rule_choices.get(index)) {
+                app.state.sim_setup.session.options_draft.connect_rules =
+                    if choice == DESIGN_DEFAULT_RULES {
+                        String::new()
+                    } else {
+                        choice.clone()
+                    };
+                commit_draft(app);
+            }
         });
         card_note(
             ui,
             "Xyce-specific Newton controls require Xyce compatibility. This policy also selects \
                  available device-model variants; source syntax is unchanged. CONNECTRULES names \
-                 the connectrules block that converts at every analog/digital boundary; empty \
-                 takes the design's only block.",
+                 the connectrules block that converts at every analog/digital boundary: the \
+                 design default takes the design's only block, a shipped set is RSpice's own, \
+                 and any other name is a block the design declares.",
         );
     });
+}
+
+/// The CONNECTRULES list's entry for an empty value.
+const DESIGN_DEFAULT_RULES: &str = "(design default)";
+
+/// What the CONNECTRULES list offers: the design default, every shipped rule
+/// set, and the current value when it is neither, so a name the design
+/// declares stays shown.
+fn connect_rule_choices(current: &str) -> Vec<String> {
+    static SHIPPED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let shipped = SHIPPED.get_or_init(|| {
+        rspice_veriloga::connect::library::shipped_rule_sets()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    });
+    let current = current.trim();
+    let mut choices = Vec::with_capacity(shipped.len() + 2);
+    choices.push(DESIGN_DEFAULT_RULES.to_owned());
+    choices.extend(shipped.iter().cloned());
+    if !current.is_empty() && !shipped.iter().any(|name| name == current) {
+        choices.push(current.to_owned());
+    }
+    choices
 }
 
 /// The chooser, what the active policy means, and the apply/revert pair.
@@ -1885,5 +1946,30 @@ mod transaction_tests {
                 .revision(),
             revision
         );
+    }
+}
+
+#[cfg(test)]
+mod connect_rule_choice_tests {
+    use super::{DESIGN_DEFAULT_RULES, connect_rule_choices};
+
+    /// The list opens on the design default, offers every shipped set once,
+    /// and keeps a name the design declares as its last entry.
+    #[test]
+    fn the_list_offers_the_shipped_sets_and_keeps_a_declared_name() {
+        let shipped = connect_rule_choices("");
+        assert_eq!(shipped[0], DESIGN_DEFAULT_RULES);
+        assert_eq!(shipped.len(), 16, "{shipped:?}");
+        for name in ["rspice_builtin", "rspice_3v3_fast", "rspice_track_slow"] {
+            assert_eq!(
+                shipped.iter().filter(|choice| *choice == name).count(),
+                1,
+                "{name}"
+            );
+        }
+        assert_eq!(connect_rule_choices("rspice_1v8_slow"), shipped);
+        let declared = connect_rule_choices(" gate_rules ");
+        assert_eq!(declared.len(), 17);
+        assert_eq!(declared.last().map(String::as_str), Some("gate_rules"));
     }
 }
