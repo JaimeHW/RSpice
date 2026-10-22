@@ -6,14 +6,12 @@ use super::{
 };
 use crate::engine_services::ServiceContext;
 use crate::error::{SimulationError, ensure_not_aborted};
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::{MonteCarloStudyConfig, MonteCarloVariationSource};
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
 use rspice_simulation_contract::mc_draft::McVariationSource;
 use rspice_simulation_contract::study_measurement::validate_measurements;
 use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
-use std::path::Path;
 
 mod voltages;
 pub(crate) use voltages::prepare_voltages_with_context;
@@ -39,27 +37,6 @@ impl PreparedStudy {
     ) {
         (self.analysis, self.circuit, self.study, self.engine)
     }
-}
-
-pub fn prepare_study(
-    base: &StudyRunConfig,
-    variation_source: McVariationSource,
-    source: &str,
-    source_path: Option<&Path>,
-    environment: Option<AnalysisExecutionEnvironment>,
-    abort: &dyn AbortSignal,
-) -> Result<PreparedStudy, SimulationError> {
-    prepare_study_with_context(
-        base,
-        variation_source,
-        source,
-        environment,
-        ServiceContext {
-            source_path,
-            limits: rspice_core::ResourceLimits::default(),
-            abort,
-        },
-    )
 }
 
 pub(crate) fn prepare_study_with_context(
@@ -146,30 +123,6 @@ pub(crate) fn prepare_study_with_context(
 }
 
 /// The same population contract the runner checks, without executing a trial.
-/// Prepared decks already seal include contents and therefore have no source path.
-pub fn prepared_population_identity(
-    base: Option<&StudyRunConfig>,
-    histogram_bins: usize,
-    variation_source: McVariationSource,
-    statistics: Option<&rspice_simulation_contract::mc_statistics::McStatisticsConfig>,
-    source: &str,
-    environment: Option<AnalysisExecutionEnvironment>,
-) -> Result<[u8; 32], SimulationError> {
-    prepared_population_identity_with_context(
-        base,
-        histogram_bins,
-        variation_source,
-        statistics,
-        source,
-        environment,
-        ServiceContext {
-            source_path: None,
-            limits: rspice_core::ResourceLimits::default(),
-            abort: &rspice_core::NoAbort,
-        },
-    )
-}
-
 pub(crate) fn prepared_population_identity_with_context(
     base: Option<&StudyRunConfig>,
     histogram_bins: usize,

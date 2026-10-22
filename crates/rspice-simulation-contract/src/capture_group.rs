@@ -324,11 +324,6 @@ impl CaptureGroup {
         }
     }
 
-    #[must_use]
-    pub fn is_ungrouped(&self) -> bool {
-        self.id == Self::ungrouped_id()
-    }
-
     pub fn validate(&self) -> Result<(), String> {
         normalize_name(&self.name)?;
         for rule in &self.rules {

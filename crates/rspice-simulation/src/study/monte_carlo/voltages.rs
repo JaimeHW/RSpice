@@ -1,9 +1,11 @@
 //! Default OP study preparation and frozen voltage observation semantics.
 use super::*;
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::MonteCarloEnvironment;
 use rspice_results::family_measurements::FamilyMeasurementEvidence;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashSet;
+use std::path::Path;
 
 /// Frozen analog observation roster used by preparation and trial conversion.
 pub struct VoltageBasis {

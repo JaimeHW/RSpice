@@ -1,33 +1,29 @@
 //! Engine-facing adapter for portable SOA duration qualification.
 use rspice_core::{SimulationError, abort_signal::AbortSignal};
-use rspice_results::safety::{SoAManager, SoaDurationMode, SoaLimitTrace};
+use rspice_results::safety::SoAManager;
 #[cfg(test)]
-use rspice_results::safety::{SoARuleVerdict, SoaThresholds};
-use rspice_results::safety::{SoaDurationScan, scan_soa_duration_with_mode};
+use rspice_results::safety::{
+    SoARuleVerdict, SoaDurationMode, SoaDurationScan, SoaLimitTrace, SoaThresholds,
+    scan_soa_duration_with_mode,
+};
 
-/// Qualifications are retrospective: the complete excursion's width decides
-/// whether its above-limit samples are violations. Observation-window edges
-/// clip the width; no duration outside that window is inferred.
-#[cfg(test)]
-fn qualify_soa_duration(
+/// Finish retained rule histories with the engine's cancellation and error types.
+pub fn finalize_soa_durations(
+    manager: &mut SoAManager,
     time: &[f64],
-    stress: &[f64],
-    limits: SoaLimitTrace<'_>,
-    minimum_duration_s: f64,
     abort: &dyn AbortSignal,
-) -> Result<SoaDurationScan, SimulationError> {
-    qualify_soa_duration_with_mode(
-        time,
-        stress,
-        limits,
-        minimum_duration_s,
-        SoaDurationMode::PerExcursion,
-        abort,
-    )
+) -> Result<bool, SimulationError> {
+    manager
+        .finalize_durations_with(time, || abort.is_aborted())
+        .map_err(SimulationError::from)
 }
 
-/// Preserve engine cancellation and error semantics at the execution boundary.
-pub fn qualify_soa_duration_with_mode(
+/// The portable scan with the engine's cancellation and error types, as the
+/// tests below exercise it. Qualifications are retrospective: the complete
+/// excursion's width decides whether its above-limit samples are violations,
+/// and observation-window edges clip the width.
+#[cfg(test)]
+fn qualify_soa_duration_with_mode(
     time: &[f64],
     stress: &[f64],
     limits: SoaLimitTrace<'_>,
@@ -39,17 +35,6 @@ pub fn qualify_soa_duration_with_mode(
         abort.is_aborted()
     })
     .map_err(SimulationError::from)
-}
-
-/// Finish retained rule histories with the engine's cancellation and error types.
-pub fn finalize_soa_durations(
-    manager: &mut SoAManager,
-    time: &[f64],
-    abort: &dyn AbortSignal,
-) -> Result<bool, SimulationError> {
-    manager
-        .finalize_durations_with(time, || abort.is_aborted())
-        .map_err(SimulationError::from)
 }
 
 #[cfg(test)]
@@ -185,8 +170,15 @@ fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point()
     use rspice_results::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter};
     let time = [0., 1., 2., 3., 4., 5., 6.];
     let stress = [0., 4., 0., 2., 2., 2., 0.];
-    let scan =
-        qualify_soa_duration(&time, &stress, SoaLimitTrace::Constant(1.), 2., &NoAbort).unwrap();
+    let scan = qualify_soa_duration_with_mode(
+        &time,
+        &stress,
+        SoaLimitTrace::Constant(1.),
+        2.,
+        SoaDurationMode::PerExcursion,
+        &NoAbort,
+    )
+    .unwrap();
     assert_eq!(scan.evidence.total_exceedance_s, 4.5);
     assert_eq!(scan.evidence.longest_excursion_s, 3.0);
     assert_eq!(scan.evidence.qualified_excursions, 1);
@@ -252,21 +244,23 @@ fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point()
             if warning.is_some() { 4 } else { 3 }
         );
     }
-    let varying = qualify_soa_duration(
+    let varying = qualify_soa_duration_with_mode(
         &[0., 1., 2., 3.],
         &[0.5; 4],
         SoaLimitTrace::Samples(&[1., 0., 0., 1.]),
         2.,
+        SoaDurationMode::PerExcursion,
         &NoAbort,
     )
     .unwrap();
     assert_eq!(varying.evidence.longest_excursion_s, 2.);
     assert_eq!(varying.qualified_samples, vec![false, true, true, false]);
-    let extreme = qualify_soa_duration(
+    let extreme = qualify_soa_duration_with_mode(
         &[0., 1., 2.],
         &[0., f64::MAX, 0.],
         SoaLimitTrace::Samples(&[f64::MAX, 0., f64::MAX]),
         1.,
+        SoaDurationMode::PerExcursion,
         &NoAbort,
     )
     .unwrap();
@@ -274,11 +268,12 @@ fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point()
         (extreme.excursions[0].start_s, extreme.excursions[0].end_s),
         (0.5, 1.5)
     );
-    let clipped = qualify_soa_duration(
+    let clipped = qualify_soa_duration_with_mode(
         &[0., 1., 2.],
         &[2., 1., 2.],
         SoaLimitTrace::Constant(1.),
         1.5,
+        SoaDurationMode::PerExcursion,
         &NoAbort,
     )
     .unwrap();
@@ -293,7 +288,14 @@ fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point()
         }
     }
     assert!(matches!(
-        qualify_soa_duration(&time, &stress, SoaLimitTrace::Constant(1.), 2., &Abort),
+        qualify_soa_duration_with_mode(
+            &time,
+            &stress,
+            SoaLimitTrace::Constant(1.),
+            2.,
+            SoaDurationMode::PerExcursion,
+            &Abort,
+        ),
         Err(SimulationError::Aborted)
     ));
 }

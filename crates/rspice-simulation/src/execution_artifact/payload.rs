@@ -812,22 +812,6 @@ impl PeriodicStateArtifact {
         &self.operating_point
     }
 
-    pub fn materialize_consumer(
-        &self,
-        source: &str,
-        source_path: Option<&std::path::Path>,
-        dependencies: &ResolvedExecutionDependencies,
-        abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
-        self.materialize_consumer_with_resource_limits(
-            source,
-            source_path,
-            dependencies,
-            Default::default(),
-            abort,
-        )
-    }
-
     pub fn materialize_consumer_with_resource_limits(
         &self,
         source: &str,
@@ -1249,22 +1233,6 @@ pub struct HbStateArtifact {
 
 impl HbStateArtifact {
     const MAX_NUMERIC_VALUES: usize = 16_777_216;
-
-    pub fn materialize_consumer(
-        &self,
-        source: &str,
-        source_path: Option<&std::path::Path>,
-        dependencies: &ResolvedExecutionDependencies,
-        abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
-        self.materialize_consumer_with_resource_limits(
-            source,
-            source_path,
-            dependencies,
-            Default::default(),
-            abort,
-        )
-    }
 
     pub fn materialize_consumer_with_resource_limits(
         &self,

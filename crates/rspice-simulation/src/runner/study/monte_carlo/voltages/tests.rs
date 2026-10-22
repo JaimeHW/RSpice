@@ -92,13 +92,14 @@ fn all_node_monte_carlo_checkpoint_matches_legacy_and_resumes_with_new_histogram
             "START=2 CONFIDENCE=80 CI=BOOTSTRAP RESAMPLES=32 BOOTSEED=77",
         );
         assert_eq!(
-            crate::study::monte_carlo::prepared_population_identity(
+            crate::study::monte_carlo::prepared_population_identity_with_context(
                 None,
                 7,
                 variation_source,
                 None,
                 &source,
-                Some(environment.clone())
+                Some(environment.clone()),
+                crate::engine_services::ServiceContext::with_defaults(None, &NoAbort),
             )
             .unwrap(),
             checkpoint.population_identity()

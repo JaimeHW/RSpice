@@ -131,15 +131,9 @@ pub(crate) struct WorkerNamedValue {
     pub value: f64,
 }
 
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+/// Run one worker request on this thread, as the worker would.
+#[cfg(test)]
 pub(crate) fn worker_response_from_request(request: WorkerRequest) -> WorkerResponse {
-    worker_response_from_request_with_progress(request, None)
-}
-
-pub(super) fn worker_response_from_request_with_progress(
-    request: WorkerRequest,
-    progress_observer: Option<super::super::ProgressObserver>,
-) -> WorkerResponse {
     let id = request.id;
     let (request, input) = request.into_runner_parts();
     let progress = Arc::new(Mutex::new(SimulationProgress::default()));
@@ -152,10 +146,7 @@ pub(super) fn worker_response_from_request_with_progress(
             input,
             progress,
             abort_flag,
-            super::super::RunStreams {
-                progress_observer,
-                ..Default::default()
-            },
+            super::super::RunStreams::default(),
         ),
     )
 }
