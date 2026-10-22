@@ -7,12 +7,6 @@ target/
 # runs. They contain only rebuildable Cargo artifacts.
 /target-codex-*/
 
-# Standalone benchmark probes are throwaway harnesses rebuilt on demand, so
-# their lockfiles are not part of the reproducible build. The probes live in
-# tools/perf-probes/archive/, which owns their README and is the path cited by
-# crates/rspice-veriloga/src/canonical_ir/schedule.rs.
-tools/perf-probes/*/*/Cargo.lock
-
 # Benchmark measurements and local timing baselines belong under
 # target/benchmarks/ (covered by target/ above) or in CI artifact storage.
 
