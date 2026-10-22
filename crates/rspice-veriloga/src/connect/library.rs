@@ -468,6 +468,27 @@ pub fn shipped_connect_library_source() -> String {
     source
 }
 
+/// The shipped declaration of the connect module `name`, for a source whose
+/// `connectrules` names it without declaring it.
+pub(crate) fn shipped_module(name: &str) -> Option<crate::ast::Module> {
+    let (_, text) = BUILTIN_CONNECT_MODULES
+        .iter()
+        .chain(&BUILTIN_REAL_CONNECT_MODULES)
+        .find(|(shipped, _)| *shipped == name)?;
+    let tokens = crate::lexer::Lexer::new(text, crate::source::SourceId::new(0))
+        .collect_tokens()
+        .ok()?;
+    crate::parser::Parser::new(&tokens)
+        .parse()
+        .ok()?
+        .items
+        .into_iter()
+        .find_map(|item| match item {
+            crate::ast::Item::ConnectModule(module) => Some(module),
+            _ => None,
+        })
+}
+
 /// The first-shipped full signatures, which still delegate.
 const ABSOLUTE_BUILTIN_CONNECT_MODULES: [(&str, &str); 2] =
     [("a2d", ABSOLUTE_A2D), ("bidir", ABSOLUTE_BIDIR)];
@@ -475,10 +496,12 @@ const ABSOLUTE_BUILTIN_CONNECT_MODULES: [(&str, &str); 2] =
 /// Conservative delegation proof: comments and whitespace may differ, but
 /// every declaration token, parameter default and body token must match a
 /// shipped signature, current or legacy. A familiar module name alone grants
-/// no delegation.
+/// no delegation. A shipped module `rules` names without the source declaring
+/// it is the shipped declaration itself.
 pub(crate) fn equivalent_declarations(
     source: &str,
     file: &crate::ast::SourceFile,
+    rules: &super::ConnectRuleTable,
 ) -> std::collections::BTreeMap<String, BuiltinSignature> {
     let tokens = |source: &str| {
         crate::lexer::Lexer::new(source, crate::source::SourceId::new(0))
@@ -513,6 +536,11 @@ pub(crate) fn equivalent_declarations(
                 (tokens(reference)? == declaration).then(|| (module.name.to_string(), signature))
             })
         })
+        .chain(
+            rules
+                .implicit_modules()
+                .map(|name| (name.to_string(), BuiltinSignature::Full)),
+        )
         .collect()
 }
 

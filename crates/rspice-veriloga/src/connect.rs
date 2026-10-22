@@ -340,6 +340,9 @@ pub struct ConnectRuleBlock {
 #[derive(Debug, Clone, Default)]
 pub struct ConnectRuleTable {
     modules: BTreeMap<SmolStr, ConnectModuleDecl>,
+    /// The shipped modules a block names without the source declaring them;
+    /// they take the shipped declarations.
+    implicit: BTreeSet<SmolStr>,
     insertions: Vec<InsertionRule>,
     resolutions: Vec<ResolutionRule>,
     blocks: Vec<ConnectRuleBlock>,
@@ -353,6 +356,11 @@ impl ConnectRuleTable {
     /// Whether the source declares a `connectmodule` of this name.
     pub fn declares_connect_module(&self, name: &str) -> bool {
         self.modules.contains_key(name)
+    }
+
+    /// The shipped modules a block names without the source declaring them.
+    pub(crate) fn implicit_modules(&self) -> impl Iterator<Item = &SmolStr> {
+        self.implicit.iter()
     }
 
     pub fn blocks(&self) -> &[ConnectRuleBlock] {
@@ -375,6 +383,7 @@ impl ConnectRuleTable {
         let resolutions = self.resolutions[block.resolutions.clone()].to_vec();
         Ok(Self {
             modules: self.modules.clone(),
+            implicit: self.implicit.clone(),
             blocks: vec![ConnectRuleBlock {
                 name: block.name.clone(),
                 span: block.span,
@@ -1133,8 +1142,37 @@ pub fn build_connect_rule_table(
         }
     }
 
+    // A block may name a shipped module (`connect d2a #(.vsup(1.8));`)
+    // without declaring it: the shipped library is visible to every source,
+    // and the module the source does not declare takes the shipped
+    // declaration. A module the source declares, under any name, is its own.
+    let mut implicit = BTreeSet::new();
+    for item in &source.items {
+        let Item::ConnectRules(block) = item else {
+            continue;
+        };
+        for item in &block.items {
+            let ConnectRulesItem::Insertion(insertion) = item else {
+                continue;
+            };
+            if modules.contains_key(&insertion.connect_module) {
+                continue;
+            }
+            let Some(module) = library::shipped_module(&insertion.connect_module) else {
+                continue;
+            };
+            let mut decl = connect_module_decl(&module, db)?;
+            // The statement that names it is the only place in this source
+            // it can be found.
+            decl.span = insertion.span;
+            implicit.insert(decl.name.clone());
+            modules.insert(decl.name.clone(), decl);
+        }
+    }
+
     let mut table = ConnectRuleTable {
         modules,
+        implicit,
         ..Default::default()
     };
     for item in &source.items {

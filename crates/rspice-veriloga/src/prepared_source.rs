@@ -414,6 +414,7 @@ impl PreparedRuntimeSource {
             builtin_delegations: crate::connect::library::equivalent_declarations(
                 &self.source,
                 &self.analyzed.source,
+                &self.analyzed.connect_rules,
             ),
             rules: self.analyzed.connect_rules.clone(),
             disciplines: self.analyzed.disciplines.clone(),

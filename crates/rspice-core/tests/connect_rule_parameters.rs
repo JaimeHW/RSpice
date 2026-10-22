@@ -1749,6 +1749,56 @@ fn the_tracking_shipped_set_switches_at_its_fraction_of_a_live_supply() {
     );
 }
 
+/// A deck's own block names the shipped modules without declaring them and
+/// sets them as a shipped set does, here at 0.4 and 0.6 of 1.8 V with 1 ns
+/// edges and a 1 ns X timeout. The triangle 0 -> 1.8 -> 0 V over 2 us reaches
+/// 0.6*1.8 V at 0.6 us and falls to 0.4*1.8 V at 1.6 us; the output leaves
+/// the X level (0.9 V) over 1 ns, so it passes 0.75*1.8 V at 0.6 us + 0.5 ns
+/// and 0.25*1.8 V at 1.6 us + 0.5 ns.
+#[test]
+fn a_deck_block_names_the_shipped_modules_without_declaring_them() {
+    let directory = TempDirectory::new("shipped-undeclared");
+    let buffer = shipped_buffer(&directory, "");
+    let rules = directory.write(
+        "rules.va",
+        "connectrules mine;\n    connect a2d #(.vsup(1.8), .ftlo(0.4), .fthi(0.6), \
+         .txdel(1n));\n    connect d2a #(.vsup(1.8), .trise(1n), .tfall(1n));\nendconnectrules\n",
+    );
+    let deck = format!(
+        "* undeclared shipped modules\n.options connectrules=mine\n.veriloga \"{rules}\"\nvin a \
+         0 pwl(0 0 1u 1.8 2u 0)\nxb a y buf1\n.hdl \"{buffer}\"\n.end\n"
+    );
+    let result = run(&deck, 2.0e-6, 10.0e-9);
+    let rise = crossing(&result, "y", 0.75 * 1.8, 0.5e-6);
+    let fall = crossing(&result, "y", 0.25 * 1.8, 1.5e-6);
+    for (label, edge_at, expected) in [
+        ("rise", rise, 0.6e-6 + 0.5e-9),
+        ("fall", fall, 1.6e-6 + 0.5e-9),
+    ] {
+        assert!(
+            (edge_at - expected).abs() <= 1.0e-12,
+            "{label}: {edge_at:e}, expected {expected:e}"
+        );
+    }
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let records = insertions(&netlist);
+    let d2a = records
+        .iter()
+        .find(|record| record.module == "d2a")
+        .unwrap_or_else(|| panic!("a d2a converter is inserted: {records:?}"));
+    assert_ne!(
+        d2a.kind,
+        ConverterKind::Authored,
+        "the built-in executes it"
+    );
+    let supply = d2a.supply.as_ref().expect("the statement's supply");
+    assert_eq!(
+        (supply.level, &supply.source),
+        (1.8, &ConverterSource::ConnectStatement)
+    );
+    assert_eq!(parameter(d2a, "trise").value, 1.0e-9);
+}
+
 /// A shipped set is selected by name, and the ways of selecting one wrongly
 /// are refused by name: an unknown name lists the declared and the shipped
 /// sets, a deck block may not take the shipped prefix, a shipped name does

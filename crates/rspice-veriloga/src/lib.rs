@@ -1960,7 +1960,11 @@ impl VerilogACompiler {
         Ok(ConnectSpecification {
             source_identity: canonical_ir::source_identity(source),
             source: Some(std::sync::Arc::from(source)),
-            builtin_delegations: connect::library::equivalent_declarations(source, &source_file),
+            builtin_delegations: connect::library::equivalent_declarations(
+                source,
+                &source_file,
+                &rules,
+            ),
             declares_module: source_file
                 .items
                 .iter()

@@ -361,7 +361,8 @@ fn the_delegated_parameters_are_named_and_defaulted_as_the_engine_reads_them() {
 /// that changes one default delegates as neither.
 #[test]
 fn both_signatures_delegate_and_an_edited_copy_neither() {
-    let delegations = |source: &str| equivalent_declarations(source, &parse(source));
+    let delegations =
+        |source: &str| equivalent_declarations(source, &parse(source), &Default::default());
     for (index, (name, full)) in BUILTIN_CONNECT_MODULES.iter().enumerate() {
         let legacy = LEGACY_BUILTIN_CONNECT_MODULES[index].1;
         assert_eq!(
@@ -441,6 +442,56 @@ fn every_shipped_rule_set_selects_the_shipped_modules() {
             .map(|(_, value)| *value);
         assert_eq!(given, Some(value), "rspice_1v8_fast a2d {parameter}");
     }
+}
+
+/// A block may name the shipped modules without declaring them: each takes
+/// the shipped declaration and delegates as the full signature, its overrides
+/// stay the statement's, and a module the source declares stays its own.
+#[test]
+fn a_block_names_the_shipped_modules_without_declaring_them() {
+    let db = DisciplineDb::with_standard();
+    let source = "connectrules mine;\n    connect d2a #(.vsup(1.8));\n    connect a2d \
+                  #(.vsup(1.8), .fthi(0.6));\n    connect r2e;\nendconnectrules\n";
+    let file = parse(source);
+    let table = build_connect_rule_table(&file, &db)
+        .unwrap_or_else(|error| panic!("the undeclared shipped modules resolve: {error:?}"));
+    let delegations = equivalent_declarations(source, &file, &table);
+    for name in ["d2a", "a2d", "r2e"] {
+        assert_eq!(
+            delegations.get(name),
+            Some(&BuiltinSignature::Full),
+            "{name}"
+        );
+    }
+    assert!(!delegations.contains_key("bidir"), "only the named modules");
+    let block = table.select_block("mine").expect("mine");
+    let rules = block.insertions();
+    assert_eq!(rules[0].direction, ConnectDirection::DiscreteToAnalog);
+    assert_eq!(rules[0].continuous.name, "a");
+    assert_eq!(rules[0].discrete.name, "d");
+    assert_eq!(rules[1].direction, ConnectDirection::AnalogToDiscrete);
+    assert_eq!(
+        rules[1].numeric_parameters().expect("the overrides fold"),
+        vec![("vsup".into(), 1.8), ("fthi".into(), 0.6)]
+    );
+
+    // A module the source declares is the source's, shipped name or not.
+    let declared = format!("{D2A}connectrules mine;\n    connect d2a;\nendconnectrules\n")
+        .replace("vsup = 3.3", "vsup = 2.5");
+    let file = parse(&declared);
+    let table = build_connect_rule_table(&file, &db).expect("a declared d2a builds");
+    assert!(equivalent_declarations(&declared, &file, &table).is_empty());
+
+    // A name the library does not ship is still unknown.
+    let error = build_connect_rule_table(
+        &parse("connectrules mine;\n    connect d2b;\nendconnectrules\n"),
+        &db,
+    )
+    .expect_err("d2b is not shipped");
+    assert!(
+        matches!(error, ConnectError::UnknownConnectModule { ref name, .. } if name == "d2b"),
+        "{error:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -672,7 +723,8 @@ endmodule
 /// discrete port.
 #[test]
 fn the_real_modules_delegate_and_select_by_direction() {
-    let delegations = |source: &str| equivalent_declarations(source, &parse(source));
+    let delegations =
+        |source: &str| equivalent_declarations(source, &parse(source), &Default::default());
     let mut source = String::new();
     for (name, module) in BUILTIN_REAL_CONNECT_MODULES {
         let file = parse(&as_plain_module(module));
