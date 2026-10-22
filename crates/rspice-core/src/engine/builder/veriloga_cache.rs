@@ -671,22 +671,6 @@ pub fn veriloga_cache_telemetry() -> VerilogACacheTelemetry {
     }
 }
 
-/// A single Verilog-A cache entry from disk.
-#[cfg(feature = "veriloga")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerilogACacheEntry {
-    /// Serialized cache file location.
-    pub cache_path: PathBuf,
-    /// Canonical source file path.
-    pub source_path: PathBuf,
-    /// Canonical dependency list used for freshness checks.
-    pub dependencies: Vec<PathBuf>,
-    /// Serialized file size.
-    pub size_bytes: u64,
-    /// Record modification timestamp.
-    pub modified_ns: Option<u128>,
-}
-
 /// Result of a cache prune/clear operation.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1044,13 +1028,6 @@ fn validate_runtime_artifact_pair(
 pub(super) fn veriloga_source_cache() -> &'static RwLock<VerilogASourceCache> {
     static CACHE: OnceLock<RwLock<VerilogASourceCache>> = OnceLock::new();
     CACHE.get_or_init(|| RwLock::new(VerilogASourceCache::default()))
-}
-
-#[cfg(feature = "veriloga")]
-pub(super) fn clear_in_memory_veriloga_cache() {
-    if let Ok(mut cache) = veriloga_source_cache().write() {
-        cache.clear();
-    }
 }
 
 #[cfg(feature = "veriloga")]
@@ -1509,24 +1486,6 @@ pub(super) fn list_cache_files(cache_root: &Path) -> Result<Vec<VerilogACacheFil
 }
 
 #[cfg(feature = "veriloga")]
-pub(super) fn cache_stats_from_files(
-    cache_root: &Path,
-    files: &[VerilogACacheFileInfo],
-) -> VerilogACacheStats {
-    let (max_entries, max_bytes) = veriloga_cache_limits();
-    VerilogACacheStats {
-        root: cache_root.to_path_buf(),
-        entry_count: files.len(),
-        total_bytes: files
-            .iter()
-            .map(|file| file.size_bytes)
-            .fold(0_u64, u64::saturating_add),
-        max_entries,
-        max_bytes,
-    }
-}
-
-#[cfg(feature = "veriloga")]
 enum VerilogACacheRecordReadError {
     Invalid(String),
     ResourceLimit(ResourceLimitError),
@@ -1536,14 +1495,6 @@ enum VerilogACacheRecordReadError {
 /// The message an interrupted or oversized cache-record read carries.
 #[cfg(feature = "veriloga")]
 const CACHE_RECORD_READ: &str = "Verilog-A cache record";
-
-#[cfg(feature = "veriloga")]
-fn read_cache_record_with_limits(
-    path: &Path,
-    limits: ResourceLimits,
-) -> Result<VerilogADiskCacheRecord, VerilogACacheRecordReadError> {
-    read_cache_record_with_limits_and_abort(path, limits, &NoAbort)
-}
 
 #[cfg(feature = "veriloga")]
 fn read_cache_record_with_limits_and_abort(
@@ -1960,116 +1911,6 @@ pub(super) fn load_model_from_disk_locked(
         &NoAbort,
     )
     .map_err(|error| error.to_string())
-}
-
-/// Query on-disk Verilog-A cache statistics.
-#[cfg(feature = "veriloga")]
-pub fn veriloga_cache_stats() -> Result<VerilogACacheStats, String> {
-    with_veriloga_cache_disk_lock("inspect Verilog-A cache", |cache_root| {
-        let files = list_cache_files(cache_root)?;
-        Ok(cache_stats_from_files(cache_root, &files))
-    })
-}
-
-/// List persisted Verilog-A cache entries including dependency paths.
-#[cfg(feature = "veriloga")]
-pub fn veriloga_cache_entries() -> Result<Vec<VerilogACacheEntry>, String> {
-    with_veriloga_cache_disk_lock("list Verilog-A cache entries", |cache_root| {
-        let mut files = list_cache_files(cache_root)?;
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-
-        let mut entries = Vec::with_capacity(files.len());
-        for file in files {
-            let record = match read_cache_record_with_limits(&file.path, ResourceLimits::default())
-            {
-                Ok(record) => record,
-                Err(VerilogACacheRecordReadError::Invalid(error)) => {
-                    log::debug!(
-                        "discarding invalid Verilog-A cache record '{}': {}",
-                        file.path.display(),
-                        error
-                    );
-                    remove_cache_file(&file.path);
-                    continue;
-                }
-                Err(VerilogACacheRecordReadError::ResourceLimit(error)) => {
-                    log::warn!(
-                        "skipping oversized Verilog-A cache record '{}': {}",
-                        file.path.display(),
-                        error
-                    );
-                    continue;
-                }
-                Err(VerilogACacheRecordReadError::Cancelled) => {
-                    unreachable!("the no-op abort signal cannot cancel")
-                }
-            };
-            if record.version != VERILOGA_CACHE_RECORD_VERSION {
-                remove_cache_file(&file.path);
-                continue;
-            }
-            if validate_runtime_artifact_pair(&record.model, record.canonical_ir.as_ref()).is_err()
-            {
-                remove_cache_file(&file.path);
-                continue;
-            }
-            entries.push(VerilogACacheEntry {
-                cache_path: file.path,
-                source_path: canonicalize_for_cache(&record.source_path),
-                dependencies: record
-                    .dependencies
-                    .into_iter()
-                    .map(|dep| dep.canonical_path)
-                    .collect(),
-                size_bytes: file.size_bytes,
-                modified_ns: file.modified_ns,
-            });
-        }
-
-        entries.sort_by(|a, b| a.source_path.cmp(&b.source_path));
-        Ok(entries)
-    })
-}
-
-/// Prune on-disk Verilog-A cache to configured limits.
-#[cfg(feature = "veriloga")]
-pub fn prune_veriloga_cache() -> Result<VerilogACachePruneReport, String> {
-    with_veriloga_cache_disk_lock("prune Verilog-A cache", |cache_root| {
-        prune_veriloga_cache_locked(cache_root)
-    })
-}
-
-/// Clear all on-disk and in-memory Verilog-A cache entries.
-#[cfg(feature = "veriloga")]
-pub fn clear_veriloga_cache() -> Result<VerilogACachePruneReport, String> {
-    with_veriloga_cache_disk_lock("clear Verilog-A cache", |cache_root| {
-        let files = list_cache_files(cache_root)?;
-        let mut removed_entries = 0_usize;
-        let mut reclaimed_bytes = 0_u64;
-        for file in files {
-            match std::fs::remove_file(&file.path) {
-                Ok(()) => {
-                    removed_entries += 1;
-                    reclaimed_bytes = reclaimed_bytes.saturating_add(file.size_bytes);
-                }
-                Err(err) => {
-                    log::warn!(
-                        "failed to remove Verilog-A cache entry '{}': {}",
-                        file.path.display(),
-                        err
-                    );
-                }
-            }
-        }
-        clear_in_memory_veriloga_cache();
-        let empty_files = list_cache_files(cache_root)?;
-        let stats = cache_stats_from_files(cache_root, &empty_files);
-        Ok(VerilogACachePruneReport {
-            removed_entries,
-            reclaimed_bytes,
-            stats,
-        })
-    })
 }
 
 #[cfg(all(test, feature = "veriloga"))]
