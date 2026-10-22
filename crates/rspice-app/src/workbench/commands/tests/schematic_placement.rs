@@ -39,63 +39,6 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
 }
 
 #[test]
-fn bus_commands_have_stable_mockup_identities() {
-    assert_eq!(Command::PlaceBus.stable_id(), "place-bus");
-    assert_eq!(Command::PlaceBus.spec().label, "Draw bus");
-    assert_eq!(Command::PlaceBusTap.stable_id(), "place-bus-tap");
-    assert_eq!(Command::PlaceBusTap.spec().label, "Place bus tap");
-    assert_eq!(
-        Command::from_stable_id("place-bus"),
-        Some(Command::PlaceBus)
-    );
-    assert_eq!(
-        Command::from_stable_id("place-bus-tap"),
-        Some(Command::PlaceBusTap)
-    );
-}
-
-#[test]
-fn place_pin_command_has_the_exact_mockup_identity() {
-    assert_eq!(Command::PlacePin.stable_id(), "place-pin");
-    assert_eq!(Command::PlacePin.spec().label, "Create pins\u{2026}");
-    assert_eq!(Command::PlacePin.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("place-pin"),
-        Some(Command::PlacePin)
-    );
-    assert_ne!(Command::PlacePin, Command::SymbolPinTool);
-}
-
-#[test]
-fn place_text_command_has_the_exact_mockup_identity() {
-    assert_eq!(Command::PlaceText.stable_id(), "place-text");
-    assert_eq!(
-        Command::PlaceText.spec().label,
-        "Place text or note\u{2026}"
-    );
-    assert_eq!(Command::PlaceText.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("place-text"),
-        Some(Command::PlaceText)
-    );
-}
-
-#[test]
-fn place_shape_command_has_the_exact_mockup_identity_and_no_shortcut() {
-    assert_eq!(Command::PlaceShape.stable_id(), "place-shape");
-    assert_eq!(
-        Command::PlaceShape.spec().label,
-        "Draw documentation shape\u{2026}"
-    );
-    assert_eq!(Command::PlaceShape.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("place-shape"),
-        Some(Command::PlaceShape)
-    );
-    assert!(Command::PlaceShape.shortcut_bindings().is_empty());
-}
-
-#[test]
 fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;

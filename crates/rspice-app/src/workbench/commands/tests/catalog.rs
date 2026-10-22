@@ -140,6 +140,35 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         "console-maximize"
     );
     assert_eq!(Command::ClearConsole.spec().id, "console-clear");
+    // A shortcut profile names its commands by these ids.
+    assert_eq!(Command::MoveSelection.spec().id, "move-selection");
+    assert_eq!(Command::StretchSelection.spec().id, "stretch-selection");
+    assert_eq!(Command::ArraySelection.spec().id, "array-selection");
+    assert_eq!(Command::ReplaceInstance.spec().id, "replace-instance");
+    assert_eq!(Command::RenameSelection.spec().id, "rename-selection");
+    assert_eq!(Command::PlaceBus.spec().id, "place-bus");
+    assert_eq!(Command::PlaceBusTap.spec().id, "place-bus-tap");
+    assert_eq!(Command::PlacePin.spec().id, "place-pin");
+    assert_eq!(Command::PlaceText.spec().id, "place-text");
+    assert_eq!(Command::PlaceShape.spec().id, "place-shape");
+    assert_eq!(
+        Command::DesignSpecialistWorkspaces.spec().id,
+        "specialist-tools-design"
+    );
+    assert_eq!(Command::ConfigurationSets.spec().id, "configuration-sets");
+    assert_eq!(Command::DesignManagement.spec().id, "design-management");
+    assert_eq!(
+        Command::ConnectivityManager.spec().id,
+        "design-connectivity-tools"
+    );
+    assert_eq!(Command::SelectionBulkEdit.spec().id, "design-bulk-tools");
+    assert_eq!(Command::NextSheet.spec().id, "next-sheet");
+    assert_eq!(Command::PreviousSheet.spec().id, "previous-sheet");
+    assert_eq!(Command::NewSheet.spec().id, "new-sheet");
+    assert_eq!(Command::DeleteSheet.spec().id, "delete-sheet");
+    assert_eq!(Command::ShowInNetlist.spec().id, "show-in-netlist");
+    assert_eq!(Command::ModelEditor.spec().id, "model-editor");
+    assert_eq!(Command::ImportResultDataset.spec().id, "import-dataset");
     // The capability and interoperability matrices were deleted. A shortcut
     // profile that still names them keeps the entry but resolves nothing.
     assert_eq!(Command::from_stable_id("feature-availability"), None);

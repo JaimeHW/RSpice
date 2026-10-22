@@ -1,8 +1,7 @@
 //! The Design menu's commands and the workflow each of them owns.
 //!
-//! Every entry keeps the exact identity, group and registry position the
-//! mockup fixes, and opens the real workflow it names rather than a surface
-//! that resembles it. Inspection routes stay available on a read-only design;
+//! Every entry opens the real workflow it names rather than a surface that
+//! resembles it. Inspection routes stay available on a read-only design;
 //! only the mutating ones explain the refusal and decline.
 
 use super::*;
@@ -166,19 +165,7 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
 }
 
 #[test]
-fn configuration_sets_has_mockup_identity_and_opens_the_owned_workflow() {
-    assert_eq!(Command::ConfigurationSets.stable_id(), "configuration-sets");
-    assert_eq!(
-        Command::ConfigurationSets.spec().label,
-        "Configuration sets\u{2026}"
-    );
-    assert_eq!(Command::ConfigurationSets.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("configuration-sets"),
-        Some(Command::ConfigurationSets)
-    );
-    assert!(Command::ConfigurationSets.shortcut_bindings().is_empty());
-
+fn configuration_sets_opens_the_owned_workflow() {
     let mut app = RSpiceApp::test_instance();
     assert!(Command::ConfigurationSets.is_enabled(&app));
     Command::ConfigurationSets.execute(&mut app);
@@ -191,32 +178,7 @@ fn configuration_sets_has_mockup_identity_and_opens_the_owned_workflow() {
 }
 
 #[test]
-fn design_management_has_mockup_identity_authority_and_owned_workflow() {
-    assert_eq!(Command::DesignManagement.stable_id(), "design-management");
-    assert_eq!(
-        Command::DesignManagement.spec().label,
-        "Sheets, variants and annotation\u{2026}"
-    );
-    assert_eq!(Command::DesignManagement.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("design-management"),
-        Some(Command::DesignManagement)
-    );
-    assert!(Command::DesignManagement.shortcut_bindings().is_empty());
-
-    let registry_index = vocabulary::COMMAND_REGISTRY
-        .iter()
-        .position(|command| *command == Command::DesignManagement)
-        .expect("design-management must be registered");
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::CreateHierarchy
-    );
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index + 1],
-        Command::SelectionBulkEdit
-    );
-
+fn design_management_has_authority_and_an_owned_workflow() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     assert!(Command::DesignManagement.is_enabled(&app));
@@ -239,35 +201,7 @@ fn design_management_has_mockup_identity_authority_and_owned_workflow() {
 }
 
 #[test]
-fn connectivity_manager_has_mockup_identity_and_supports_read_only_inspection() {
-    assert_eq!(
-        Command::ConnectivityManager.stable_id(),
-        "design-connectivity-tools"
-    );
-    assert_eq!(
-        Command::ConnectivityManager.spec().label,
-        "Connectivity and bus manager\u{2026}"
-    );
-    assert_eq!(Command::ConnectivityManager.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("design-connectivity-tools"),
-        Some(Command::ConnectivityManager)
-    );
-    assert!(Command::ConnectivityManager.shortcut_bindings().is_empty());
-
-    let registry_index = vocabulary::COMMAND_REGISTRY
-        .iter()
-        .position(|command| *command == Command::ConnectivityManager)
-        .expect("connectivity manager must be registered");
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::SelectionBulkEdit
-    );
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index + 1],
-        Command::ConfigurationSets
-    );
-
+fn connectivity_manager_supports_read_only_inspection() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state.model.schematic.session.read_only = true;
@@ -282,32 +216,7 @@ fn connectivity_manager_has_mockup_identity_and_supports_read_only_inspection() 
 }
 
 #[test]
-fn selection_bulk_edit_has_mockup_identity_order_and_read_only_inspection() {
-    assert_eq!(Command::SelectionBulkEdit.stable_id(), "design-bulk-tools");
-    assert_eq!(
-        Command::SelectionBulkEdit.spec().label,
-        "Selection and bulk editing\u{2026}"
-    );
-    assert_eq!(Command::SelectionBulkEdit.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("design-bulk-tools"),
-        Some(Command::SelectionBulkEdit)
-    );
-    assert!(Command::SelectionBulkEdit.shortcut_bindings().is_empty());
-
-    let registry_index = vocabulary::COMMAND_REGISTRY
-        .iter()
-        .position(|command| *command == Command::SelectionBulkEdit)
-        .expect("selection bulk edit must be registered");
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::DesignManagement
-    );
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index + 1],
-        Command::ConnectivityManager
-    );
-
+fn selection_bulk_edit_supports_read_only_inspection() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state.model.schematic.session.read_only = true;

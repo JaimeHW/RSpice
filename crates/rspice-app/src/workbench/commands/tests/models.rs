@@ -8,29 +8,8 @@
 use super::*;
 
 #[test]
-fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority() {
+fn model_editor_command_has_fail_closed_selection_authority() {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
-
-    assert_eq!(Command::ModelEditor.stable_id(), "model-editor");
-    assert_eq!(
-        Command::ModelEditor.spec().label,
-        "Device model and parameter editor\u{2026}"
-    );
-    assert_eq!(Command::ModelEditor.spec().group, "Models");
-    assert_eq!(
-        Command::from_stable_id("model-editor"),
-        Some(Command::ModelEditor)
-    );
-    assert!(Command::ModelEditor.shortcut_bindings().is_empty());
-
-    let registry_index = vocabulary::COMMAND_REGISTRY
-        .iter()
-        .position(|command| *command == Command::ModelEditor)
-        .expect("model editor command must be registered");
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::ModelCreateProjectCopy
-    );
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();

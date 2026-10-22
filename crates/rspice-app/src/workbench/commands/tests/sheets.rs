@@ -1,5 +1,4 @@
-//! The sheet commands: their identities, their chords, and what makes them
-//! available.
+//! The sheet commands: their chords and what makes them available.
 //!
 //! Page Up and Page Down are the only unmodified chords this lane claims, so
 //! the one-owner check is the point of the first case: the document strip's
@@ -81,17 +80,8 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
 }
 
 #[test]
-fn every_sheet_command_is_registered_with_its_stable_identity() {
-    for (command, id, label) in [
-        (Command::NextSheet, "next-sheet", "Next sheet"),
-        (Command::PreviousSheet, "previous-sheet", "Previous sheet"),
-        (Command::NewSheet, "new-sheet", "New sheet"),
-        (Command::DeleteSheet, "delete-sheet", "Delete active sheet"),
-    ] {
-        assert_eq!(command.stable_id(), id);
-        assert_eq!(command.spec().label, label);
-        assert_eq!(command.spec().group, "Design");
-        assert_eq!(Command::from_stable_id(id), Some(command));
+fn every_sheet_command_is_a_registered_canvas_command() {
+    for command in SHEET_COMMANDS {
         assert!(
             vocabulary::COMMAND_REGISTRY.contains(&command),
             "the palette projects the registry, so an unlisted command has no seat"

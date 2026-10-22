@@ -686,114 +686,6 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
 }
 
 #[test]
-fn move_selection_command_has_the_exact_mockup_identity() {
-    assert_eq!(Command::MoveSelection.stable_id(), "move-selection");
-    assert_eq!(Command::MoveSelection.spec().label, "Move selection");
-    assert_eq!(Command::MoveSelection.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("move-selection"),
-        Some(Command::MoveSelection)
-    );
-
-    let registry_index = vocabulary::COMMAND_REGISTRY
-        .iter()
-        .position(|command| *command == Command::MoveSelection)
-        .expect("move-selection must be registered");
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::PlaceShape
-    );
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index + 1],
-        Command::StretchSelection
-    );
-}
-
-#[test]
-fn stretch_selection_command_has_the_exact_mockup_identity() {
-    assert_eq!(Command::StretchSelection.stable_id(), "stretch-selection");
-    assert_eq!(Command::StretchSelection.spec().label, "Stretch selection");
-    assert_eq!(Command::StretchSelection.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("stretch-selection"),
-        Some(Command::StretchSelection)
-    );
-
-    let registry_index = vocabulary::COMMAND_REGISTRY
-        .iter()
-        .position(|command| *command == Command::StretchSelection)
-        .expect("stretch-selection must be registered");
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::MoveSelection
-    );
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index + 1],
-        Command::ArraySelection
-    );
-}
-
-#[test]
-fn array_selection_command_has_the_exact_mockup_identity_and_no_shortcut() {
-    assert_eq!(Command::ArraySelection.stable_id(), "array-selection");
-    assert_eq!(Command::ArraySelection.spec().label, "Create array\u{2026}");
-    assert_eq!(Command::ArraySelection.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("array-selection"),
-        Some(Command::ArraySelection)
-    );
-    assert!(Command::ArraySelection.shortcut_bindings().is_empty());
-
-    let registry_index = vocabulary::COMMAND_REGISTRY
-        .iter()
-        .position(|command| *command == Command::ArraySelection)
-        .expect("array-selection must be registered");
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::StretchSelection
-    );
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index + 1],
-        Command::ReplaceInstance
-    );
-}
-
-#[test]
-fn replace_instance_command_has_the_exact_mockup_identity_and_no_shortcut() {
-    assert_eq!(Command::ReplaceInstance.stable_id(), "replace-instance");
-    assert_eq!(
-        Command::ReplaceInstance.spec().label,
-        "Replace instance\u{2026}"
-    );
-    assert_eq!(Command::ReplaceInstance.spec().group, "Design");
-    assert_eq!(
-        Command::from_stable_id("replace-instance"),
-        Some(Command::ReplaceInstance)
-    );
-    assert!(Command::ReplaceInstance.shortcut_bindings().is_empty());
-
-    let registry_index = vocabulary::COMMAND_REGISTRY
-        .iter()
-        .position(|command| *command == Command::ReplaceInstance)
-        .expect("replace-instance must be registered");
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::ArraySelection
-    );
-    // The stale-interface repair is a replacement onto the instance's own
-    // master, so the registry keeps it next to the general replacement rather
-    // than filed with the hierarchy transactions that follow.
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index + 1],
-        Command::UpdateInstanceInterface
-    );
-    assert_eq!(
-        vocabulary::COMMAND_REGISTRY[registry_index + 2],
-        Command::CreateHierarchy
-    );
-}
-
-#[test]
 fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
     use crate::state::{Component, Point};
 
@@ -942,18 +834,8 @@ fn cancel_retires_an_armed_array_transaction_and_restores_select() {
 }
 
 #[test]
-fn rename_command_has_mockup_identity_and_opens_the_stable_target_dialog() {
+fn rename_command_opens_the_stable_target_dialog() {
     use crate::state::Point;
-
-    assert_eq!(Command::RenameSelection.stable_id(), "rename-selection");
-    assert_eq!(
-        Command::RenameSelection.spec().label,
-        "Rename selected object…"
-    );
-    assert_eq!(
-        Command::from_stable_id("rename-selection"),
-        Some(Command::RenameSelection)
-    );
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;

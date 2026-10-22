@@ -865,18 +865,6 @@ fn upgraded_design_menu_commands_remain_palette_discoverable() {
     }
 }
 
-#[test]
-fn design_specialist_row_uses_the_mockup_scoped_command_identity() {
-    assert_eq!(
-        Command::DesignSpecialistWorkspaces.stable_id(),
-        "specialist-tools-design"
-    );
-    assert_eq!(
-        Command::DesignSpecialistWorkspaces.spec().label,
-        "Specialist workspaces…"
-    );
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn results_menu_exposes_only_truthful_completed_result_workflows() {

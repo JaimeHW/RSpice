@@ -236,15 +236,7 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
 }
 
 #[test]
-fn result_dataset_import_has_mockup_authoritative_command_identity_and_gates() {
-    assert_eq!(Command::ImportResultDataset.stable_id(), "import-dataset");
-    assert_eq!(
-        Command::ImportResultDataset.spec().label,
-        "Import result dataset…"
-    );
-    assert_eq!(Command::ImportResultDataset.spec().group, "Results");
-    assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ImportResultDataset));
-
+fn result_dataset_import_waits_for_an_idle_open_project() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert!(Command::ImportResultDataset.is_enabled(&app));

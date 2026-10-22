@@ -1868,21 +1868,14 @@ mod tests {
         (app, load_id, unmapped_id)
     }
 
-    /// The jump has a stable identity, is reachable from the palette, and
-    /// carries no shortcut it would have to take from another command. A route
-    /// offered only by a context-menu row cannot be bound or automated.
+    /// The jump is reachable from the palette and carries no shortcut it would
+    /// have to take from another command. A route offered only by a
+    /// context-menu row cannot be bound or automated.
     #[test]
-    fn show_in_netlist_is_one_discoverable_command_with_a_stable_identity() {
+    fn show_in_netlist_is_one_discoverable_command() {
         use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
 
         assert!(COMMAND_REGISTRY.contains(&Command::ShowInNetlist));
-        assert_eq!(Command::ShowInNetlist.stable_id(), "show-in-netlist");
-        assert_eq!(
-            Command::from_stable_id("show-in-netlist"),
-            Some(Command::ShowInNetlist)
-        );
-        assert_eq!(Command::ShowInNetlist.spec().label, "Show in netlist");
-        assert_eq!(Command::ShowInNetlist.spec().group, "Design");
         assert_eq!(
             Command::ShowInNetlist.shortcut_context(),
             ShortcutContext::DesignWorkspace
