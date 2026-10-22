@@ -99,7 +99,7 @@ pub struct SimulationOptions {
 /// - `itl2` was a DC-transfer-curve iteration budget, but the sweep and the
 ///   operating point share one Newton budget.
 /// - `timestep_factor` claimed to set the transient step growth ratio, which
-///   is the compile-time `constants::TIMESTEP_GROWTH_MAX`, not a setting.
+///   is not a setting.
 /// - `verbose` fed `ConvergenceConfig::verbose`, which no solver path reads.
 /// - `save_internals` had no engine field at all; internal device nodes are
 ///   requested per signal on a `.SAVE` card.
