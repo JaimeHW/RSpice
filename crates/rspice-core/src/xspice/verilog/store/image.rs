@@ -43,12 +43,14 @@ impl Clone for DigitalSignalStore {
             passed,
             bridged,
             charge,
+            delays,
         } = self;
         Self {
             strengths: Arc::clone(strengths),
             passed: passed.clone(),
             bridged: bridged.clone(),
             charge: charge.clone(),
+            delays: delays.clone(),
             plan: Arc::clone(plan),
             connected: connected.clone(),
             external_reals: external_reals.clone(),
@@ -124,6 +126,7 @@ impl Clone for DigitalSignalStore {
             passed,
             bridged,
             charge,
+            delays,
         } = self;
         let Self {
             plan: source_plan,
@@ -161,7 +164,9 @@ impl Clone for DigitalSignalStore {
             passed: source_passed,
             bridged: source_bridged,
             charge: source_charge,
+            delays: source_delays,
         } = source;
+        delays.clone_from(source_delays);
         *strengths = Arc::clone(source_strengths);
         passed.clone_from(source_passed);
         bridged.clone_from(source_bridged);

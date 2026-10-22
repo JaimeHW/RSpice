@@ -178,8 +178,13 @@ pub(super) fn hierarchy_branches(module: &AnalyzedModule) -> HierarchyBranches {
             .flat_map(|frame| &frame.continuous_assigns),
     ) {
         inspect(&assign.assignment.value);
-        if let Some(delay) = &assign.assignment.delay {
-            inspect(delay);
+        for value in assign
+            .assignment
+            .delay
+            .iter()
+            .flat_map(|delay| &delay.values)
+        {
+            inspect(value);
         }
     }
     for contribution in &module.contributions {
@@ -259,8 +264,13 @@ pub(super) fn rewrite_module_expressions(
             .flat_map(|frame| &mut frame.continuous_assigns),
     ) {
         rewrite(&mut assign.assignment.value);
-        if let Some(delay) = &mut assign.assignment.delay {
-            rewrite(delay);
+        for value in assign
+            .assignment
+            .delay
+            .iter_mut()
+            .flat_map(|delay| &mut delay.values)
+        {
+            rewrite(value);
         }
     }
     rewrite_regions(&mut module.body, rewrite, &BTreeMap::new(), &HashMap::new());
@@ -383,8 +393,13 @@ pub(crate) fn lower<'a>(
             .flat_map(|frame| &frame.continuous_assigns),
     ) {
         inspect(&assign.assignment.value);
-        if let Some(delay) = &assign.assignment.delay {
-            inspect(delay);
+        for value in assign
+            .assignment
+            .delay
+            .iter()
+            .flat_map(|delay| &delay.values)
+        {
+            inspect(value);
         }
     }
     let mut existing_unknowns = HashSet::new();
@@ -571,8 +586,13 @@ pub(crate) fn lower<'a>(
             .flat_map(|frame| &mut frame.continuous_assigns),
     ) {
         rewrite(&mut assign.assignment.value);
-        if let Some(delay) = &mut assign.assignment.delay {
-            rewrite(delay);
+        for value in assign
+            .assignment
+            .delay
+            .iter_mut()
+            .flat_map(|delay| &mut delay.values)
+        {
+            rewrite(value);
         }
     }
     rewrite_regions(&mut target.body, &rewrite, &branches, &rewrites);

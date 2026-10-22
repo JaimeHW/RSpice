@@ -305,7 +305,9 @@ impl DigitalSignalStore {
                 if driven && expected.to_bits() != self.reals[index].to_bits() {
                     return Err("real net value differs from its driver resolution".into());
                 }
-            } else if self.spans[index].count != 0 {
+            } else if self.spans[index].count != 0 && !self.delays_net(signal.id) {
+                // A net delay's stage holds what the net shows apart from
+                // what its drivers resolve to (`store/delays.rs`).
                 let expected = self.overlay_forced(signal.id, self.resolve(signal.id));
                 for bit in 0..signal.width {
                     if !connected.contains(&DigitalBitConnection {

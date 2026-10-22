@@ -65,7 +65,22 @@ pub(crate) struct HostCheckpoint {
     /// absent when none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     strength: Option<StrengthSection>,
+    /// The pending updates of delayed drivers and nets (IEEE 1364-2005
+    /// sections 6.1.3 and 7.14); absent when none is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_drives: Option<PendingDrivesSection>,
 }
+
+/// The pending drives section, tagged with its own version: each pending
+/// update's due tick, owner and value, in due order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PendingDrivesSection {
+    version: u32,
+    updates: Vec<super::delays::PendingDriveImage>,
+}
+
+const PENDING_DRIVES_SECTION_VERSION: u32 = 1;
 
 /// The strength section, tagged with its own version: each pending charge
 /// decay's due tick and the `trireg` bits that decay then, in tick order.
@@ -250,6 +265,9 @@ impl DigitalHost {
         if self.store.has_charge_changes() {
             return Err("host has unscheduled charge decays".into());
         }
+        if self.store.has_delay_requests() {
+            return Err("host has unscheduled delayed drives".into());
+        }
         check_size(
             self.slots.len(),
             self.delayed_updates
@@ -322,6 +340,15 @@ impl DigitalHost {
                 .map(|decays| StrengthSection {
                     version: STRENGTH_SECTION_VERSION,
                     decays,
+                }),
+            pending_drives: self
+                .pending
+                .as_ref()
+                .map(super::delays::PendingDrives::image)
+                .filter(|updates| !updates.is_empty())
+                .map(|updates| PendingDrivesSection {
+                    version: PENDING_DRIVES_SECTION_VERSION,
+                    updates,
                 }),
             delayed: self
                 .delayed_updates
@@ -458,6 +485,7 @@ impl DigitalHost {
             .iter()
             .chain([&self.nba_target])
             .chain(self.charge.as_ref().map(|timers| &timers.target))
+            .chain(self.pending.as_ref().map(|pending| &pending.target))
             .chain(&self.external_targets)
             .chain(&self.external_real_targets)
             .map(|target| usize::from(*target) + 1)
@@ -498,6 +526,13 @@ impl DigitalHost {
                 return Err("host strength section version differs".into());
             }
             Some(section) => restored.restore_charge_timers(&section.decays)?,
+            None => {}
+        }
+        match &image.pending_drives {
+            Some(section) if section.version != PENDING_DRIVES_SECTION_VERSION => {
+                return Err("host pending_drives section version differs".into());
+            }
+            Some(section) => restored.restore_pending_drives(&section.updates)?,
             None => {}
         }
         restored.elaboration_closed = true;
@@ -762,11 +797,13 @@ impl DigitalHost {
             .map(|(index, target)| (target, index))
             .collect();
         let charge_target = self.charge.as_ref().map(|timers| timers.target);
+        let pending_target = self.pending.as_ref().map(|pending| pending.target);
         let known: BTreeSet<_> = self
             .targets
             .iter()
             .chain([&self.nba_target])
             .chain(charge_target.as_ref())
+            .chain(pending_target.as_ref())
             .chain(&self.external_targets)
             .chain(&self.external_real_targets)
             .copied()
@@ -775,11 +812,18 @@ impl DigitalHost {
             || processes.len() != self.slots.len()
             || processes.contains_key(&self.nba_target)
             || charge_target.is_some_and(|target| processes.contains_key(&target))
+            || pending_target.is_some_and(|target| processes.contains_key(&target))
         {
             return Err("scheduler target registration differs from the host".into());
         }
-        // The decay wakeup sits at the earliest pending decay, once.
+        // The decay wakeup sits at the earliest pending decay, once, and the
+        // delayed drives' at the earliest pending update.
         let next_decay = self.charge.as_ref().and_then(charge::ChargeTimers::next);
+        let next_drive = self
+            .pending
+            .as_ref()
+            .and_then(super::delays::PendingDrives::next);
+        let mut drive_wakeups = 0usize;
         let mut decay_wakeups = 0usize;
         let mut activations = vec![0usize; self.slots.len()];
         let mut buckets = BTreeSet::new();
@@ -802,6 +846,11 @@ impl DigitalHost {
                 if decay_wakeups != 1 || next_decay != Some(tick) {
                     return Err("charge decay wakeup differs from the pending decays".into());
                 }
+            } else if Some(target) == pending_target {
+                drive_wakeups += 1;
+                if drive_wakeups != 1 || next_drive != Some(tick) {
+                    return Err("delayed drive wakeup differs from the pending drives".into());
+                }
             } else if let Some(index) = processes.get(&target) {
                 activations[*index] += 1;
                 if activations[*index] != 1 {
@@ -816,6 +865,9 @@ impl DigitalHost {
         }
         if next_decay.is_some() && decay_wakeups == 0 {
             return Err("pending charge decay has no wakeup".into());
+        }
+        if next_drive.is_some() && drive_wakeups == 0 {
+            return Err("pending delayed drive has no wakeup".into());
         }
         for (slot, count) in self.slots.iter().zip(activations) {
             if count != usize::from(matches!(slot.status, ProcessStatus::Queued)) {
@@ -1057,6 +1109,92 @@ endmodule
                 .unwrap_err();
             assert!(error.contains("charge decay"), "{error}");
         }
+    }
+
+    /// IEEE 1364-2005 sections 6.1.3 and 7.14: an image taken while a
+    /// delayed driver and a delayed net have updates pending carries them in
+    /// its `pending_drives` section, and the restored host applies each at the
+    /// tick the original does. An image whose section disagrees with its
+    /// scheduler is refused whole.
+    #[test]
+    fn host_checkpoint_resumes_pending_delayed_drives() {
+        const DELAYED: &str = "`timescale 1ns/1ns\nmodule del;\n  reg a;\n  wire y;\n  \
+             wire #3 n;\n  assign #(4, 6) y = a;\n  assign n = a;\n  \
+             initial begin a = 0; #10 a = 1; end\nendmodule\n";
+        let mut original = host(DELAYED);
+        original.start().unwrap();
+        original.advance_to(11).unwrap();
+        let saved = transport(&image(&original));
+        let section = serde_json::to_value(&saved).unwrap()["pending_drives"].clone();
+        assert_eq!(section["version"], json!(1), "{section}");
+        let due: Vec<_> = section["updates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|update| update["due"].as_u64().unwrap())
+            .collect();
+        assert_eq!(due, [13, 14]);
+        let mut restored = host(DELAYED);
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            let read = |host: &DigitalHost| {
+                ["y", "n"]
+                    .map(|name| host.read(signal(host, name)).unwrap().spelling())
+                    .concat()
+            };
+            assert_eq!(host.next_tick(), Some(13));
+            host.advance_to(12).unwrap();
+            assert_eq!(read(host), "00");
+            host.advance_to(13).unwrap();
+            assert_eq!(read(host), "01");
+            assert_eq!(host.next_tick(), Some(14));
+            host.advance_to(14).unwrap();
+            assert_eq!(read(host), "11");
+            assert_eq!(host.next_tick(), None);
+        }
+        let base = serde_json::to_value(&saved).unwrap();
+        for edit in [
+            |value: &mut Value| value["pending_drives"] = Value::Null,
+            |value: &mut Value| value["pending_drives"]["updates"][0]["due"] = json!(15),
+        ] {
+            let mut value = base.clone();
+            edit(&mut value);
+            let bad: HostCheckpoint = serde_json::from_value(value).unwrap();
+            let error = host(DELAYED)
+                .restore_checkpoint(&bad, HostCheckpointLimits::default())
+                .unwrap_err();
+            assert!(error.contains("drive"), "{error}");
+        }
+    }
+
+    /// Design P2 section 5.3: a rejected trial takes back the pending updates
+    /// with the rest of the host. A trial in which a pulse shorter than the
+    /// delay cancels a pending update, so that it stops being the next tick,
+    /// rolls back to the update pending at its original tick.
+    #[test]
+    fn a_rolled_back_trial_restores_a_cancelled_delayed_drive() {
+        const PULSE: &str = "`timescale 1ns/1ns\nmodule del;\n  reg a;\n  wire y;\n  \
+             assign #5 y = a;\nendmodule\n";
+        let mut host = host(PULSE);
+        host.start().unwrap();
+        force(&mut host, "a", 1, 0, 1);
+        host.advance_to(6).unwrap();
+        force(&mut host, "a", 1, 1, 7);
+        assert_eq!(host.next_tick(), Some(12));
+        let accepted = host.clone();
+        force(&mut host, "a", 1, 0, 8);
+        assert_eq!(host.next_tick(), None, "the pulse cancelled the update");
+        host.advance_to(20).unwrap();
+        assert_eq!(host.read(signal(&host, "y")).unwrap().spelling(), "0");
+        let mut host = accepted;
+        assert_eq!(host.next_tick(), Some(12));
+        host.advance_to(11).unwrap();
+        assert_eq!(host.read(signal(&host, "y")).unwrap().spelling(), "0");
+        host.advance_to(12).unwrap();
+        assert_eq!(host.read(signal(&host, "y")).unwrap().spelling(), "1");
     }
 
     /// Design P2 section 5.4: a version 1 image (per-process slots, no

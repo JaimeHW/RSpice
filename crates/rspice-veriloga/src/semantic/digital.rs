@@ -471,6 +471,9 @@ pub struct AnalyzedDigitalSignal {
     /// Context-free variable declaration assignment, evaluated in this instance's
     /// parameter scope and installed in discrete storage before process startup.
     pub initializer: Option<Expression>,
+    /// A net's delay (`wire #5 w;`, IEEE 1364-2005 section 6.1.3), evaluated
+    /// in this instance's parameter scope.
+    pub delay: Option<crate::ast::Delay3>,
     pub name: SmolStr,
     pub class: DigitalSignalClass,
     pub signedness: Signedness,
@@ -496,6 +499,16 @@ pub struct AnalyzedDigitalSignal {
     /// re-types the port instead of colliding with it.
     pub redeclares_port: bool,
     pub span: Span,
+}
+
+impl AnalyzedDigitalSignal {
+    /// The expressions elaboration evaluates for this declaration: its
+    /// initializer and its delay's values.
+    pub(crate) fn elaboration_expressions(&self) -> impl Iterator<Item = &Expression> {
+        self.initializer
+            .iter()
+            .chain(self.delay.iter().flat_map(|delay| &delay.values))
+    }
 }
 
 /// A process with its static sensitivity resolved.
@@ -738,7 +751,15 @@ impl SemanticAnalyzer {
         }
         self.digital_selector_constants = self.digital_constants(module);
 
-        let signals = self.collect_digital_signals(module);
+        let mut signals = self.collect_digital_signals(module);
+        // IEEE 1364-2005 section 6.1.3: a net delay is the net's own.
+        for net_delay in &module.net_delays {
+            if let Some(signal) = signals.iter_mut().find(|signal| {
+                signal.name == net_delay.name && matches!(signal.class, DigitalSignalClass::Net(_))
+            }) {
+                signal.delay = Some(net_delay.delay.clone());
+            }
+        }
         let index: HashMap<SmolStr, usize> = signals
             .iter()
             .enumerate()
@@ -799,8 +820,13 @@ impl SemanticAnalyzer {
         }
         for assign in &mut continuous_assigns {
             self.resolve_digital_accesses(&mut assign.assignment.value);
-            if let Some(delay) = &mut assign.assignment.delay {
-                self.resolve_digital_accesses(delay);
+            for value in assign
+                .assignment
+                .delay
+                .iter_mut()
+                .flat_map(|delay| &mut delay.values)
+            {
+                self.resolve_digital_accesses(value);
             }
         }
         analyzed.digital = AnalyzedDigital {
@@ -1556,6 +1582,7 @@ impl SemanticAnalyzer {
                 seen.insert(item.name.clone(), item.span);
                 signals.push(AnalyzedDigitalSignal {
                     element_alias: None,
+                    delay: None,
                     initializer: item.init.clone(),
                     unpacked,
                     dimensions,
@@ -1731,6 +1758,7 @@ impl SemanticAnalyzer {
                 seen.insert(name.clone(), declaration.span);
                 signals.push(AnalyzedDigitalSignal {
                     element_alias: None,
+                    delay: None,
                     initializer: None,
                     unpacked: None,
                     dimensions: Vec::new(),
@@ -1855,6 +1883,7 @@ impl SemanticAnalyzer {
         seen.insert(item.name.clone(), item.span);
         signals.push(AnalyzedDigitalSignal {
             element_alias: None,
+            delay: None,
             // VAMS-2023 8.2 initializes module variables before process
             // execution. Net declaration assignments remain ordinary drivers.
             initializer: matches!(class, DigitalSignalClass::Variable(_))
@@ -3015,8 +3044,8 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
     ) -> Option<AnalyzedContinuousAssign> {
         self.check_digital_lvalue(&assignment.target, signals, index, false);
-        if let Some(delay) = &assignment.delay {
-            self.check_digital_expression(delay, signals, index);
+        for value in assignment.delay.iter().flat_map(|delay| &delay.values) {
+            self.check_digital_expression(value, signals, index);
         }
         self.check_digital_expression(&assignment.value, signals, index);
 

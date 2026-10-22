@@ -523,6 +523,20 @@ pub fn link_digital_plans(
             }
             plan.strength.gates.push(linked);
         }
+        for delayed in &source.delays.drivers {
+            plan.delays
+                .drivers
+                .push(super::digital::DigitalDriverDelay {
+                    driver: drivers[&delayed.driver],
+                    delay: delayed.delay,
+                });
+        }
+        for delayed in &source.delays.nets {
+            plan.delays.nets.push(super::digital::DigitalNetDelay {
+                signal: layout.map.signals[usize::from(delayed.signal)],
+                delay: delayed.delay,
+            });
+        }
         for process in &source.processes {
             check_cancel(control)?;
             let mut process = process.clone();

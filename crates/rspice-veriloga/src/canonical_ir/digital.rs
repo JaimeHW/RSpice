@@ -982,6 +982,68 @@ impl DigitalStrengthPlan {
     }
 }
 
+/// The delays of a driver or a net, one per transition (IEEE 1364-2005
+/// section 7.14): ticks of `10^exponent` seconds, the precision of the design
+/// it was lowered in, carried with its exponent so a linked design, whose
+/// precision may be finer, reads them exactly.
+///
+/// A change to 1 takes `rise`, to 0 `fall`, to `z` `turn_off`, and to `x` the
+/// least of the three. For a controlled bidirectional switch the change is
+/// its control's: `rise` turns it on and `fall` off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DigitalTransitionDelay {
+    pub rise: u64,
+    pub fall: u64,
+    pub turn_off: u64,
+    pub exponent: i8,
+}
+
+impl DigitalTransitionDelay {
+    /// The rise, fall and turn-off delays in ticks of `10^precision` seconds,
+    /// or `None` when one is not a whole number of them or does not fit.
+    pub fn ticks_at(self, precision: i8) -> Option<[u64; 3]> {
+        let finer = u32::try_from(i32::from(self.exponent) - i32::from(precision)).ok()?;
+        let scale = 10_u64.checked_pow(finer)?;
+        Some([
+            self.rise.checked_mul(scale)?,
+            self.fall.checked_mul(scale)?,
+            self.turn_off.checked_mul(scale)?,
+        ])
+    }
+}
+
+/// A continuous assignment's or a gate's delay on its driver (sections 6.1.3
+/// and 7.14): an inertial delay, which drops a pulse shorter than itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalDriverDelay {
+    pub driver: DigitalDriverId,
+    pub delay: DigitalTransitionDelay,
+}
+
+/// A net delay (section 6.1.3): a second inertial stage, on the value the
+/// net's drivers resolve to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalNetDelay {
+    pub signal: DigitalSignalId,
+    pub delay: DigitalTransitionDelay,
+}
+
+/// Every delayed driver and net. Empty for a design with no delay on a
+/// driver or a net, which is every design that existed before this table did.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DigitalDelayPlan {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drivers: Vec<DigitalDriverDelay>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nets: Vec<DigitalNetDelay>,
+}
+
+impl DigitalDelayPlan {
+    pub fn is_empty(&self) -> bool {
+        self.drivers.is_empty() && self.nets.is_empty()
+    }
+}
+
 /// A `%v` operand that names a whole net, so its strengths can be printed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigitalOperandNet {
@@ -1097,6 +1159,9 @@ pub struct CanonicalDigitalPlan {
     /// Net types and drive strengths (IEEE 1364-2005 sections 4.6 and 7.9).
     #[serde(default, skip_serializing_if = "DigitalStrengthPlan::is_empty")]
     pub strength: DigitalStrengthPlan,
+    /// Delays on drivers and nets (IEEE 1364-2005 sections 6.1.3 and 7.14).
+    #[serde(default, skip_serializing_if = "DigitalDelayPlan::is_empty")]
+    pub delays: DigitalDelayPlan,
 }
 
 /// Dense identity of one procedural continuous assignment statement.

@@ -81,6 +81,8 @@
 
 mod charge;
 pub(crate) mod checkpoint;
+mod delays;
+pub(crate) use delays::DelayRequest;
 mod image;
 mod islands;
 mod overrides;
@@ -423,6 +425,9 @@ pub(crate) struct DigitalSignalStore {
     /// Which `trireg` bits hold charge, and what has changed about that for
     /// the host's decay timers (`store/charge.rs`).
     charge: charge::ChargeState,
+    /// Driver and net delays, and the values held back for the host's
+    /// pending slots (`store/delays.rs`).
+    delays: delays::StoreDelays,
 }
 
 /// The plan's net types and drive strengths, indexed as the store is.
@@ -786,7 +791,9 @@ impl DigitalSignalStore {
         let charge = charge::ChargeState::new(&strengths, &widths, &mut values);
         let connected_reals =
             (!plan.real_aliases.is_empty()).then(|| Arc::new(RealConnections::new(&plan)));
+        let delays = delays::StoreDelays::new(&plan, &spans);
         let mut store = Self {
+            delays,
             strengths,
             passed,
             bridged,
@@ -831,6 +838,7 @@ impl DigitalSignalStore {
                 .connect_bits(&[])
                 .expect("validated HDL wire-bit aliases");
         }
+        store.initialize_delays();
         store
     }
 
@@ -1441,12 +1449,21 @@ impl DigitalSignalStore {
 
     /// Re-resolve and publish `signal` after one of its contributions changed,
     /// with every switch island it belongs to, and pass the strengths it now
-    /// has on through the MOS switches reading it.
+    /// has on through the MOS switches reading it. A net with a net delay
+    /// holds the resolved value back for the host instead.
     fn settle(&mut self, signal: DigitalSignalId, depth: u32) {
         if self.settle_islands(signal, depth) {
             return;
         }
         let resolved = self.resolve(signal);
+        if self.hold_net(signal, &resolved) {
+            return;
+        }
+        self.publish_settled(signal, resolved, depth);
+    }
+
+    /// Publish a net's resolved value and carry its consequences on.
+    fn publish_settled(&mut self, signal: DigitalSignalId, resolved: FourStateValue, depth: u32) {
         self.publish_connected(signal, resolved);
         self.note_holding(signal);
         self.pass_strengths(signal, depth);
@@ -1546,6 +1563,20 @@ impl DigitalSignalStore {
         let offset = driver.index as usize;
         (offset < span.count).then_some(span.start + offset)
     }
+
+    /// Store a driver's value as its contribution and settle its net.
+    fn apply_slot_drive(&mut self, slot: usize, signal: DigitalSignalId, value: FourStateValue) {
+        self.contributions[slot].value = ContributionValue::FourState(Some(value));
+        // A MOS switch reads the strength of the net it passes when it runs.
+        if let Some(strength::SlotGate::Mos {
+            switch: Some(switch),
+            ..
+        }) = self.slot_gate(slot)
+        {
+            self.passed[switch] = self.switch_source(switch);
+        }
+        self.settle(signal, 0);
+    }
 }
 
 /// The plan's name for a signal, or a positional stand-in.
@@ -1621,16 +1652,11 @@ impl DigitalEnvironment for DigitalSignalStore {
             debug_assert!(false, "drive from a driver the plan does not declare");
             return;
         };
-        self.contributions[slot].value = ContributionValue::FourState(Some(drive.value));
-        // A MOS switch reads the strength of the net it passes when it runs.
-        if let Some(strength::SlotGate::Mos {
-            switch: Some(switch),
-            ..
-        }) = self.slot_gate(slot)
-        {
-            self.passed[switch] = self.switch_source(switch);
+        // A delayed driver's value waits for the host (`store/delays.rs`).
+        if self.hold_drive(slot, &drive) {
+            return;
         }
-        self.settle(drive.driver.signal, 0);
+        self.apply_slot_drive(slot, drive.driver.signal, drive.value);
     }
 
     fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {

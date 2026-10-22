@@ -483,6 +483,7 @@ fn module_constants(module: &Module) -> crate::semantic::DigitalConstants {
 /// between generated and directly authored statements.
 fn absorb(module: &mut Module, expanded: Module) {
     module.digital_nets.extend(expanded.digital_nets);
+    module.net_delays.extend(expanded.net_delays);
     module.digital_variables.extend(expanded.digital_variables);
     module.variables.extend(expanded.variables);
     module.localparams.extend(expanded.localparams);
@@ -802,6 +803,14 @@ impl Unroller<'_> {
             }
             out.digital_nets.push(copy);
         }
+        for net_delay in &items.net_delays {
+            let mut copy = net_delay.clone();
+            self.rename(&mut copy.name);
+            for value in &mut copy.delay.values {
+                self.substitute(value);
+            }
+            out.net_delays.push(copy);
+        }
         for declaration in &items.nets {
             let mut copy = declaration.clone();
             for name in &mut copy.names {
@@ -847,8 +856,8 @@ impl Unroller<'_> {
             let mut copy = assignment.clone();
             self.substitute_lvalue(&mut copy.target);
             self.substitute(&mut copy.value);
-            if let Some(delay) = &mut copy.delay {
-                self.substitute(delay);
+            for value in copy.delay.iter_mut().flat_map(|delay| &mut delay.values) {
+                self.substitute(value);
             }
             out.continuous_assigns.push(copy);
         }
@@ -859,7 +868,7 @@ impl Unroller<'_> {
                 .terminals
                 .iter_mut()
                 .chain([&mut copy.left, &mut copy.right])
-                .chain(copy.delay.as_mut())
+                .chain(copy.delay.iter_mut().flat_map(|delay| &mut delay.values))
             {
                 self.substitute(expression);
             }

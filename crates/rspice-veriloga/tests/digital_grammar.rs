@@ -1586,24 +1586,71 @@ mod canonical_ir_boundary {
         assert_eq!(driver.process, artifact.digital.processes[0].id);
     }
 
-    /// A delay on a driver is an inertial delay (IEEE 1364-2005 sections
-    /// 6.1.3 and 7.14), which this compiler does not model. It refuses by
-    /// name, and does not call it a transport delay, which it is not.
+    /// A delay on a driver (IEEE 1364-2005 sections 6.1.3 and 7.14) lowers to
+    /// the plan's delay table, one delay per transition in design ticks: one
+    /// value is every transition's, and with two, turning off takes the
+    /// lesser. A net's own delay lowers beside it. A delay that reads a
+    /// variable is refused, naming section 6.1.3.
     #[test]
-    fn canonical_ir_construction_refuses_a_delayed_continuous_assignment() {
+    fn canonical_ir_construction_lowers_delayed_drivers_and_nets() {
+        use rspice_veriloga::canonical_ir::digital::DigitalTransitionDelay;
         let source = digital_module(
             "    wire a;\n\
+             \x20   wire y, z;\n\
+             \x20   wire #(1, 2, 3) w;\n\
+             \x20   assign #5 y = a;\n\
+             \x20   assign #(4, 2) z = a;\n\
+             \x20   assign w = a;",
+        );
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&source)
+            .expect("delayed drivers and nets lower");
+        let plan = &artifact.digital;
+        let delay = |rise, fall, turn_off| DigitalTransitionDelay {
+            rise,
+            fall,
+            turn_off,
+            exponent: plan.timing.precision_exponent,
+        };
+        let delays: Vec<_> = plan
+            .delays
+            .drivers
+            .iter()
+            .map(|delayed| {
+                (
+                    plan.signals[usize::from(delayed.driver.signal)]
+                        .name
+                        .as_str(),
+                    delayed.delay,
+                )
+            })
+            .collect();
+        assert_eq!(delays, [("y", delay(5, 5, 5)), ("z", delay(4, 2, 2))]);
+        let nets: Vec<_> = plan
+            .delays
+            .nets
+            .iter()
+            .map(|delayed| {
+                (
+                    plan.signals[usize::from(delayed.signal)].name.as_str(),
+                    delayed.delay,
+                )
+            })
+            .collect();
+        assert_eq!(nets, [("w", delay(1, 2, 3))]);
+
+        let source = digital_module(
+            "    wire a;\n\
+             \x20   reg [3:0] d;\n\
              \x20   wire y;\n\
-             \x20   assign #5 y = a;",
+             \x20   assign #(d) y = a;",
         );
         let error = VerilogACompiler::new(CompilerOptions::default())
             .compile_canonical_ir(&source)
-            .expect_err("a delayed driver must be refused")
+            .expect_err("a delay read from a variable is refused")
             .to_string();
         assert!(
-            error.contains("delay on a continuous assignment")
-                && error.contains("inertial")
-                && !error.contains("transport"),
+            error.contains("not a constant expression") && error.contains("6.1.3"),
             "{error}"
         );
     }
@@ -2854,22 +2901,46 @@ fn a_gate_declaration_may_be_unnamed_and_may_carry_several_instances() {
     assert_eq!(plan.drivers.len(), 2);
 }
 
-/// A gate delay is an inertial delay on the driver, which is what an
-/// `assign #2` is, and it is refused with the same words rather than dropped.
+/// A gate delay is a delay on the gate's driver, as an `assign #2`'s is
+/// (IEEE 1364-2005 section 7.14), and a gate takes no more delays than A.3.1
+/// gives it.
 #[cfg(feature = "native")]
 #[test]
-fn a_gate_delay_is_refused_by_name() {
-    let error = VerilogACompiler::new(CompilerOptions::default())
-        .compile_canonical_ir_module(
-            "module g(a, b, y);\n\
-             \x20   input a, b;\n     output y;\n\
-             \x20   nand #2 u (y, a, b);\n\
-             endmodule\n",
-            Some("g"),
-        )
-        .expect_err("a gate delay has no lowered form")
-        .to_string();
-    assert!(error.contains("delay"), "{error}");
+fn a_gate_delay_is_its_drivers() {
+    let plan = plan(
+        "module g(a, b, y, z);\n\
+         \x20   input a, b;\n     output y, z;\n\
+         \x20   nand #(2, 3) u (y, a, b);\n\
+         \x20   bufif1 #(1, 2, 3) v (z, a, b);\n\
+         endmodule\n",
+        "g",
+    );
+    let delays: Vec<_> = plan
+        .delays
+        .drivers
+        .iter()
+        .map(|delayed| {
+            let delay = delayed.delay;
+            (delay.rise, delay.fall, delay.turn_off)
+        })
+        .collect();
+    assert_eq!(delays, [(2, 3, 2), (1, 2, 3)]);
+    for (gate, found) in [
+        ("nand #(1, 2, 3) u (y, a, b);", "at most 2"),
+        ("pullup #1 (y);", "gives this primitive none"),
+        ("tran #1 (y, z);", "gives this primitive none"),
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir_module(
+                &format!(
+                    "module g(a, b, y, z);\n    input a, b;\n    output y, z;\n    {gate}\nendmodule\n"
+                ),
+                Some("g"),
+            )
+            .expect_err("too many delays")
+            .to_string();
+        assert!(error.contains(found), "{gate}: {error}");
+    }
 }
 
 /// A drive strength (IEEE 1364-2005 sections 6.1.4 and 7.8) on a gate, a
@@ -2919,8 +2990,7 @@ fn an_illegal_drive_strength_pair_is_refused_by_name() {
 
 /// `trireg` (IEEE 1364-2005 sections 4.4.1, 4.6.3 and 7.14.2): a charge
 /// strength, `medium` by default, and the charge decay time as the third
-/// delay. A rise or fall delay other than 0, and a decay time that is not a
-/// positive number, are refused by name.
+/// delay. A decay time that is not a positive number is refused by name.
 #[test]
 fn trireg_declarations_parse_their_charge_strength_and_decay_time() {
     use rspice_veriloga::canonical_ir::digital::DigitalStrengthLevel::{Large, Medium, Small};
@@ -2948,12 +3018,19 @@ fn trireg_declarations_parse_their_charge_strength_and_decay_time() {
             trireg(Medium, Some(2.5)),
         ]
     );
+    // The rise and fall delays are the net's delay (section 6.1.3), kept
+    // unless both are zero.
+    let file = parse("module g;\n    trireg #(1, 0, 5) t;\n    trireg #(0, 0, 5) u;\nendmodule\n");
+    let delayed: Vec<_> = parsed_module(&file)
+        .net_delays
+        .iter()
+        .map(|delay| (delay.name.as_str(), delay.delay.values.len()))
+        .collect();
+    assert_eq!(delayed, [("t", 2)]);
     for (declaration, found) in [
-        ("trireg #5 t;", "a rise or fall delay other than 0"),
-        ("trireg #(1, 0, 5) t;", "a rise or fall delay other than 0"),
         ("trireg #(0, 0, 0) t;", "not a positive decimal number"),
         ("trireg #(0, 0, d) t;", "not a positive decimal number"),
-        ("trireg #(0, 0, 5, 1) t;", "more than three delays"),
+        ("trireg #(0, 0, 5, 1) t;", "at most 3"),
     ] {
         let error = parse_error(&format!(
             "module g;\n    parameter d = 5;\n    {declaration}\nendmodule\n"

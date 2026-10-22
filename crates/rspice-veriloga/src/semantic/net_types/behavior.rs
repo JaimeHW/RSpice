@@ -30,8 +30,8 @@ pub(super) fn used(module: &SpecializedModule) -> HashSet<SmolStr> {
     for assignment in &module.analyzed.digital.continuous_assigns {
         let assignment = &assignment.assignment;
         reads(&assignment.value, &empty, &mut used);
-        if let Some(delay) = &assignment.delay {
-            reads(delay, &empty, &mut used);
+        for value in assignment.delay.iter().flat_map(|delay| &delay.values) {
+            reads(value, &empty, &mut used);
         }
         let mut targets = vec![&assignment.target];
         while let Some(target) = targets.pop() {

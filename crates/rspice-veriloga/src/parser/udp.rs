@@ -788,14 +788,21 @@ fn instantiate(
             span,
         ));
     }
+    // Section 8.6: a rise and a fall delay at most, on the output's driver
+    // with a gate's rules (section 7.14).
     let delay = match instance.parameters.as_slice() {
         [] => None,
-        [delay] if delay.name.is_none() => Some(delay.value.clone()),
+        delays if delays.len() <= 2 && delays.iter().all(|delay| delay.name.is_none()) => {
+            Some(Delay3 {
+                values: delays.iter().map(|delay| delay.value.clone()).collect(),
+                span,
+            })
+        }
         _ => {
             return Err(refusal(
                 &context,
-                "separate rise and fall delays on a primitive instance (IEEE 1364-2005 \
-                 section 8.6); write a single delay instead",
+                "a named delay, or more than a rise and a fall delay, on a primitive \
+                 instance (IEEE 1364-2005 section 8.6)",
                 span,
             ));
         }

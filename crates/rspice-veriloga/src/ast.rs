@@ -281,6 +281,10 @@ pub struct Module {
     pub functions: Vec<FunctionDef>,
     /// Discrete-domain net declarations (`wire`), in declaration order
     pub digital_nets: Vec<DigitalNetDecl>,
+    /// The net delays those declarations give (`wire #5 w;`, IEEE 1364-2005
+    /// section 6.1.3), by net name. A declaration assignment's delay is its
+    /// driver's, on the continuous assignment it becomes, and not here.
+    pub net_delays: Vec<NetDelay>,
     /// Discrete-domain variable declarations (`reg`), in declaration order
     pub digital_variables: Vec<DigitalVariableDecl>,
     /// Continuous assignments (`assign`), in declaration order
@@ -422,6 +426,7 @@ impl Module {
             defparams: Vec::new(),
             functions: Vec::new(),
             digital_nets: Vec::new(),
+            net_delays: Vec::new(),
             digital_variables: Vec::new(),
             continuous_assigns: Vec::new(),
             gate_arrays: Vec::new(),
@@ -2449,8 +2454,8 @@ pub struct DigitalVariableDecl {
 pub struct ContinuousAssign {
     pub target: DigitalLValue,
     pub value: Expression,
-    /// Delay written between `assign` and the target.
-    pub delay: Option<Expression>,
+    /// Delay written between `assign` and the target, or the gate's.
+    pub delay: Option<Delay3>,
     /// Drive strength (IEEE 1364-2005 section 6.1.4); `None` drives strong.
     pub strength: Option<crate::canonical_ir::digital::DigitalDriveStrength>,
     /// A three-state gate or MOS switch (sections 7.5 and 7.6). Its `value`
@@ -2473,9 +2478,26 @@ pub struct GateInstanceArray {
     pub left: Expression,
     pub right: Expression,
     pub terminals: Vec<Expression>,
-    pub delay: Option<Expression>,
+    pub delay: Option<Delay3>,
     pub strength: Option<crate::canonical_ir::digital::DigitalDriveStrength>,
     pub span: Span,
+}
+
+/// The delay of a gate, a continuous assignment or a net (IEEE 1364-2005
+/// A.2.2.3 `delay3` and `delay2`): `#d`, or `#(rise, fall, turn_off)` with
+/// one to three values. Section 7.14 says which value a transition takes.
+#[derive(Debug, Clone)]
+pub struct Delay3 {
+    /// One to three values, in the order written.
+    pub values: Vec<Expression>,
+    pub span: Span,
+}
+
+/// A net delay (`wire #5 w;`, IEEE 1364-2005 section 6.1.3) on one net.
+#[derive(Debug, Clone)]
+pub struct NetDelay {
+    pub name: SmolStr,
+    pub delay: Delay3,
 }
 
 /// Stable identity of a process within its module.

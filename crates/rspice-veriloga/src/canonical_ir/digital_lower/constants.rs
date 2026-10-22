@@ -203,8 +203,13 @@ fn required_parameters<'a>(
     for assignment in assignments {
         collect_expression_reads(&assignment.assignment.value, &mut required);
         collect_lvalue_index_reads(&assignment.assignment.target, &mut required);
-        if let Some(delay) = &assignment.assignment.delay {
-            collect_expression_reads(delay, &mut required);
+        for value in assignment
+            .assignment
+            .delay
+            .iter()
+            .flat_map(|delay| &delay.values)
+        {
+            collect_expression_reads(value, &mut required);
         }
     }
     required
@@ -228,7 +233,7 @@ pub(super) fn digital_dependencies<'a>(
         digital
             .signals
             .iter()
-            .filter_map(|signal| signal.initializer.as_ref()),
+            .flat_map(AnalyzedDigitalSignal::elaboration_expressions),
     );
     let mut given = HashSet::new();
     for expression in shapes {

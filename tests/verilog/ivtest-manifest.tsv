@@ -99,7 +99,7 @@ assign3.2D	vlg	passed	L4	pass	PASSED
 assign3.2E	vlg	passed	L4	refused:assign	Semantic error: Unsupported feature: a `assign` names a bit- or part-select of the variable `value`; IEEE 1364-2005 section 9.3 allows a select of a net only
 assign_add	vlg	passed	L1	pass	PASSED
 assign_deassign_pv	vlg	passed	L4	refused:assign	Semantic error: Unsupported feature: a `assign` names a bit- or part-select of the variable `bus`; IEEE 1364-2005 section 9.3 allows a select of a net only
-assign_delay	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+assign_delay	vlg	passed	L6	pass	PASSED
 assign_deq	vlg	passed	L1	pass	PASSED
 assign_ge	vlg	passed	L1	pass	PASSED
 assign_le	vlg	passed	L1	pass	PASSED
@@ -168,7 +168,7 @@ br931	vlg	passed	L3	pass	PASSED
 br935	vlg	passed	L3	pass	PASSED
 br937	vlg	passed	L4	pass	PASSED
 br946	vlg	passed	L1	pass	PASSED
-br947	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+br947	vlg	gold	L6	racy	passes in source order only; differs from the gold file at line 2 (5 lines against 6)
 br948	vlg	passed	L3	pass	PASSED
 br955	vlg	passed	L4	pass	PASSED
 br960a	vlg	gold	-	excluded:sdf-annotate	
@@ -283,7 +283,7 @@ br_gh782e	vlg	passed	L4	pass	PASSED
 br_gh782f	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 3: unsupported `default_nettype `; supported net defaults are wire, tri and none
 br_gh788	vlg	gold	-	excluded:flag-gno-io-range-error	
 br_gh79	vlg	ce	L1	pass	language error: Lexer error: Invalid number literal: 4'b_: '4'b_' is missing digits after its base
-br_gh793	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+br_gh793	vlg	passed	L6	pass	PASSED
 br_gh8	vlg	passed	L1	pass	PASSED
 br_gh827	vlg	gold	L1	pass	matches the gold file
 br_gh889	vlg	gold	-	excluded:sdf-annotate	
@@ -300,7 +300,7 @@ br_gh99i	vlg	passed	L7	pass	PASSED
 br_gh99j	vlg	passed	L7	pass	PASSED
 br_gh99k	vlg	passed	L7	pass	PASSED
 br_gh99l	vlg	passed	L1	pass	PASSED
-br_gh99m	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+br_gh99m	vlg	passed	L6	pass	PASSED
 br_gh99o	vlg	passed	L1	pass	PASSED
 br_gh99p	vlg	passed	L1	pass	PASSED
 br_gh99q	vlg	passed	L1	pass	PASSED
@@ -320,7 +320,7 @@ ca_force	vlg	passed	L4	racy	passes in reverse order only; no PASSED line (1 outp
 ca_func	vlg	passed	-	excluded:flag-gstrict-ca-eval	
 ca_mult	vlg	gold	L1	pass	matches the gold file
 ca_pow_synth	vlg	passed	L1	pass	PASSED
-ca_pow_unsigned	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+ca_pow_unsigned	vlg	passed	L6	pass	PASSED
 ca_real_logical	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: parameter 'pargi' requires an exact finite numeric elaboration value
 ca_time	vlg	gold	L1	pass	matches the gold file
 case3.8A	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
@@ -422,14 +422,14 @@ defparam3	vlg	gold	L4	refused:defparam	Parse error: Unsupported defparam target:
 defparam3.5	vlg	passed	L4	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'NameB.out0' is declared with no net or variable of its own, in a module that declares no disc...
 defparam4	vlg	gold	L4	refused:if	Parse error: Unsupported module item: if
 delay	vlg	gold	L1	pass	matches the gold file
-delay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
-delay3	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
-delay4	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
-delay5	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
+delay2	vlg	passed	L6	pass	PASSED
+delay3	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+delay4	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+delay5	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
 delay_assign_nb	vlg	passed	L1	pass	PASSED
 delay_assign_nb2	vlg	passed	L1	pass	PASSED
 delay_var	vlg	gold	-	excluded:systemverilog:int	
-delayed_comp_reduct	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+delayed_comp_reduct	vlg	passed	L6	pass	PASSED
 dff1	vlg	passed	L1	pass	PASSED
 disable3.6A	vlg	passed	L3	pass	PASSED
 disable3.6B	vlg	passed	L3	pass	PASSED
@@ -570,10 +570,10 @@ land3	vlg	passed	L1	pass	PASSED
 land4	vlg	gold	L1	pass	matches the gold file
 landor1	vlg	passed	L1	pass	PASSED
 ldelay1	vlg	passed	L6	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `ok` is not declared in this module or its generated ancestors or enclosing instances
-ldelay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+ldelay2	vlg	passed	L6	pass	PASSED
 ldelay3	vlg	passed	L6	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `ok` is not declared in this module or its generated ancestors or enclosing instances
-ldelay4	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
-ldelay5	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+ldelay4	vlg	passed	L7	pass	PASSED
+ldelay5	vlg	passed	L7	pass	PASSED
 lh_catadd	vlg	passed	L1	pass	PASSED
 lh_memcat	vlg	gold	L1	pass	matches the gold file
 lh_memcat2	vlg	passed	L1	pass	PASSED
@@ -652,7 +652,7 @@ mult1	vlg	passed	L1	pass	PASSED
 mult16	vlg	passed	L3	pass	testbench gap: no root selection (-s mul16); PASSED
 mult2	vlg	passed	L1	pass	PASSED
 multi_bit_strength	vlg	gold	L7	pass	matches the gold file
-multi_driver_delay	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+multi_driver_delay	vlg	passed	L6	pass	PASSED
 multiply_large	vlg	passed	L1	pass	PASSED
 muxtest	vlg	passed	L1	pass	PASSED
 named_event_no_edges	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: `my_event` is a named event, which has no edges; write `@my_event`
@@ -756,7 +756,7 @@ pr1403406a	vlg	gold	-	excluded:flag-fivltests/pr1403406-1.cf
 pr1403406b	vlg	gold	-	excluded:flag-fivltests/pr1403406-1.cf	
 pr142	vlg	passed	L3	pass	PASSED
 pr1421777	vlg	passed	L4	pass	PASSED
-pr1444055	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr1444055	vlg	passed	L6	pass	PASSED
 pr1449749a	vlg	passed	L1	pass	PASSED
 pr1455873	vlg	passed	L1	pass	PASSED
 pr1465769	vlg	passed	L4	pass	PASSED
@@ -803,7 +803,7 @@ pr1628300	vlg	gold	L3	pass	matches the gold file
 pr1629683	vlg	gold	L3	pass	matches the gold file
 pr1632861	vlg	gold	L1	pass	matches the gold file
 pr1634526	vlg	gold	L3	pass	matches the gold file
-pr1636409	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr1636409	vlg	gold	L6	pass	matches the gold file
 pr1637208	vlg	passed	L1	pass	PASSED
 pr1638985	vlg	gold	L1	pass	matches the gold file
 pr1639060	vlg	gold	L3	pass	matches the gold file
@@ -812,7 +812,7 @@ pr1639064b	vlg	gold	L1	pass	matches the gold file
 pr1639968	vlg	gold	L1	pass	matches the gold file
 pr1639971	vlg	gold	L1	pass	matches the gold file
 pr1645277	vlg	gold	L3	pass	matches the gold file
-pr1645518	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr1645518	vlg	gold	L6	pass	matches the gold file
 pr1648365	vlg	gold	L1	pass	matches the gold file
 pr1650842	vlg	passed	-	excluded:nonstandard-systf:$ID241	
 pr1657307	vlg	passed	L3	pass	PASSED
@@ -939,8 +939,8 @@ pr1877740	vlg	passed	L1	pass	PASSED
 pr1877743	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 pr1878909	vlg	passed	L4	refused:instance-array-connection	Semantic error: Unsupported feature: instance array connection: port 'in_0' of an array of instances is connected to an expression; IEEE 1364-2005 section 12.1....
 pr1879226	vlg	passed	L1	pass	PASSED
-pr1883052	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
-pr1883052b	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr1883052	vlg	passed	L6	pass	PASSED
+pr1883052b	vlg	passed	L6	pass	PASSED
 pr1885847	vlg	gold	L1	pass	matches the gold file
 pr1887168	vlg	gold	L1	pass	matches the gold file
 pr1892959	vlg	passed	L3	pass	PASSED
@@ -1143,14 +1143,14 @@ pr2723712	vlg	passed	L1	pass	PASSED
 pr2725700a	vlg	passed	L7	pass	PASSED
 pr2725700b	vlg	passed	L7	pass	PASSED
 pr2725700c	vlg	passed	L7	pass	PASSED
-pr2728032	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
+pr2728032	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
 pr2728547	vlg	passed	L5	pass	PASSED
 pr2728812a	vlg	passed	L1	pass	PASSED
 pr2728812b	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in digital module hierarchy at instance 'sum.genblk1.s0.genblk1.s0.genblk1.s1': specialization repeats ancestor 'sum.genblk1...
 pr2728812c	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in digital module hierarchy at instance 'sum.s0.s0.s1': specialization repeats ancestor 'sum.s0.s0'
 pr273	vlg	passed	L1	pass	PASSED
 pr2745281	vlg	passed	L1	pass	PASSED
-pr2781595	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+pr2781595	vlg	passed	L6	pass	PASSED
 pr2785294	vlg	gold	L1	fail	differs from the gold file at line 2 (25 lines against 5)
 pr2788686	vlg	passed	L3	pass	PASSED
 pr2790236	vlg	passed	L1	pass	PASSED
@@ -1159,7 +1159,7 @@ pr2792897	vlg	passed	L5	pass	PASSED
 pr2794144	vlg	ce	L1	fail	compiled without error; ran to quiescence
 pr2800985a	vlg	passed	-	excluded:nonstandard-systf:$fputc	
 pr2801134	vlg	passed	L1	pass	PASSED
-pr2801662	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr2801662	vlg	passed	L6	pass	PASSED
 pr2809288	vlg	ce	L1	refused:genvar	Parse error: Unsupported generate for: a loop over `i`, which is not declared `genvar`; IEEE 1364-2005 section 12.1.3.2 makes the index of a generate loop a gen...
 pr2815398a	vlg	gold	L3	deviation	IEEE 1364-2005 §19.4: nothing predefines `__ICARUS__`, so the test takes its m<=6 branch and leaves res[7] unwritten; Icarus run without the macro prints the same 16 lines
 pr2815398a_std	vlg	passed	L3	deviation	IEEE 1364-2005 §19.4: nothing predefines `__ICARUS__`, so the test takes its m<=6 branch and leaves res[7] unwritten; Icarus run without the macro prints the same 16 lines
@@ -1168,11 +1168,11 @@ pr2818823	vlg	passed	L1	pass	PASSED
 pr2823414	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'fail_at_line_10'
 pr2823711	vlg	passed	L1	pass	PASSED
 pr2824189	vlg	passed	-	excluded:systemverilog:var	
-pr2829776	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+pr2829776	vlg	passed	L6	pass	PASSED
 pr2829776b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 pr2832234	vlg	passed	L7	pass	PASSED
-pr2834340	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
-pr2834340b	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
+pr2834340	vlg	passed	L6	pass	PASSED
+pr2834340b	vlg	passed	L6	pass	PASSED
 pr2835632a	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr2835632b	vlg	passed	L4	pass	PASSED
 pr2837451	vlg	passed	L1	pass	PASSED
@@ -1183,10 +1183,10 @@ pr2848986	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: `ev
 pr2849783	vlg	passed	L4	pass	PASSED
 pr2865563	vlg	passed	L1	pass	PASSED
 pr2877564	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'ASDF'
-pr2883958	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr2883958	vlg	passed	L6	pass	PASSED
 pr2885048	vlg	passed	L3	pass	PASSED
 pr2890322	vlg	passed	L3	pass	PASSED
-pr2901556	vlg	passed	L6	refused:net-declaration	Parse error: Unsupported net declaration: a net delay (IEEE 1364-2005 section 6.1.3)
+pr2901556	vlg	passed	L6	pass	PASSED
 pr2909386a	vlg	passed	L1	pass	PASSED
 pr2909386b	vlg	passed	L1	pass	PASSED
 pr2909414	vlg	passed	L4	pass	PASSED
@@ -1206,7 +1206,7 @@ pr2930506	vlg	passed	-	excluded:systemverilog:string
 pr2937417	vlg	passed	L7	pass	PASSED
 pr2937417b	vlg	passed	L7	pass	PASSED
 pr2937417c	vlg	passed	L7	pass	PASSED
-pr2941939	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+pr2941939	vlg	passed	L6	pass	PASSED
 pr2943394	vlg	passed	L4	refused:release	Semantic error: Unsupported feature: a `release` names a bit- or part-select of the variable `pv_val`; IEEE 1364-2005 section 9.3 allows a select of a net only
 pr2951657	vlg	passed	L1	pass	PASSED
 pr2969724	vlg	passed	L1	pass	PASSED
@@ -1281,9 +1281,9 @@ pr3437290c	vlg	passed	L7	pass	PASSED
 pr3441576	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: `@*` names no signal: the statement it guards reads none, so the process could never resume
 pr3445452	vlg	passed	L3	pass	PASSED
 pr3452808	vlg	passed	L6	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'u_d1.pp' is declared with no net or variable of its own, in a module that declares no discret...
-pr3465541	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+pr3465541	vlg	passed	L6	pass	PASSED
 pr3477107	vlg	passed	L5	pass	PASSED
-pr3499807	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+pr3499807	vlg	gold	L6	pass	matches the gold file
 pr3522653	vlg	gold	L1	pass	matches the gold file
 pr3527022	vlg	passed	L1	pass	PASSED
 pr3527694	vlg	gold	L5	racy	passes in source order only; differs from the gold file at line 1 (9 lines against 9)
@@ -1313,8 +1313,8 @@ pr513	vlg	passed	L5	pass	PASSED
 pr522	vlg	gold	L3	pass	matches the gold file
 pr524	vlg	gold	L3	pass	matches the gold file
 pr527	vlg	gold	L4	pass	matches the gold file
-pr528	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
-pr528b	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr528	vlg	gold	L6	pass	matches the gold file
+pr528b	vlg	gold	L6	pass	matches the gold file
 pr529	vlg	passed	-	excluded:systemverilog:bit	
 pr530a	vlg	gold	L1	pass	matches the gold file
 pr530b	vlg	gold	L1	pass	matches the gold file
@@ -1438,7 +1438,7 @@ readmemh4	vlg	passed	L5	pass	PASSED
 readmemh5	vlg	ce	L5	refused:feature	Semantic error: Unsupported feature: slice of unpacked array `array` requires whole-array value lowering
 real	vlg	passed	L3	pass	PASSED
 real10	vlg	passed	L1	pass	PASSED
-real11	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+real11	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
 real2	vlg	passed	L3	pass	PASSED
 real3	vlg	passed	L1	pass	PASSED
 real5	vlg	gold	L3	pass	matches the gold file
@@ -1467,11 +1467,11 @@ repl_zero_wid_pass	vlg	passed	L1	pass	PASSED
 resetall	vlg	gold	-	excluded:flag-Wtimescale	
 resetall2	vlg	gold	-	excluded:flag-Wtimescale	
 resolv1	vlg	passed	L7	pass	PASSED
-rise_fall_decay1	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
-rise_fall_decay2	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
-rise_fall_delay1	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
-rise_fall_delay2	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
-rise_fall_delay3	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
+rise_fall_decay1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+rise_fall_decay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+rise_fall_delay1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+rise_fall_delay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+rise_fall_delay3	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
 rl_pow	vlg	passed	L1	pass	PASSED
 rnpmos	vlg	passed	L7	pass	PASSED
 rnpmos2	vlg	passed	L7	pass	PASSED
@@ -1484,7 +1484,7 @@ scanf	vlg	passed	L5	pass	PASSED
 scanf2	vlg	passed	L5	pass	PASSED
 scanf3	vlg	passed	L5	pass	PASSED
 scanf4	vlg	passed	L5	pass	PASSED
-sched1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+sched1	vlg	passed	L6	pass	PASSED
 sched2	vlg	passed	L1	pass	PASSED
 schedule	vlg	passed	L3	pass	PASSED
 scope1	vlg	passed	L4	pass	PASSED
@@ -1685,15 +1685,15 @@ triand	vlg	passed	L7	pass	PASSED
 trior	vlg	passed	L7	pass	PASSED
 types1	vlg	passed	L1	pass	PASSED
 udp_bufg	vlg	passed	L7	pass	PASSED
-udp_bufg2	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+udp_bufg2	vlg	passed	L7	pass	PASSED
 udp_bx	vlg	gold	L7	pass	matches the gold file
-udp_delay_fail	vlg	ce	L7	refused:instance-of-primitive	Parse error: Unsupported instance `q1` of primitive `mux2`: separate rise and fall delays on a primitive instance (IEEE 1364-2005 section 8.6); write a single d...
+udp_delay_fail	vlg	ce	L7	refused:instance-of-primitive	Parse error: Unsupported instance `q1` of primitive `mux2`: a named delay, or more than a rise and a fall delay, on a primitive instance (IEEE 1364-2005 section...
 udp_dff	vlg	passed	L7	pass	PASSED
 udp_dff_std	vlg	passed	L7	pass	PASSED
 udp_eval_arg	vlg	passed	L7	pass	PASSED
 udp_jkff	vlg	passed	L7	pass	PASSED
 udp_output_reg	vlg	passed	L7	pass	PASSED
-udp_real_delay	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment or a gate has no lowered form yet: IEEE 1364-2005 sections 6.1.3 and 7.14 make it an ine...
+udp_real_delay	vlg	passed	L7	pass	PASSED
 udp_sched	vlg	passed	L7	pass	PASSED
 udp_x	vlg	passed	L7	pass	PASSED
 unary_and	vlg	passed	L1	pass	PASSED
@@ -1743,7 +1743,7 @@ varrshft1	vlg	passed	L1	pass	PASSED
 varrshft2	vlg	passed	L3	pass	PASSED
 vcd-dup	vlg	gold	L5	refused:$dumpvars	Semantic error: Unsupported feature: `$dumpvars` of a hierarchically named signal is not supported yet
 vector	vlg	gold	L1	pass	matches the gold file
-verify_two_var_delays	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
+verify_two_var_delays	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
 vvp_scalar_value	vlg	passed	L7	pass	PASSED
 wait1	vlg	passed	L3	pass	PASSED
 wait2	vlg	passed	L3	pass	PASSED

@@ -164,3 +164,80 @@ fn module_timescales_drive_exact_mixed_breakpoints_from_file_and_sealed_sources(
         }
     }
 }
+
+/// IEEE 1364-2005 sections 6.1.3 and 7.14: a delayed drive is an exact
+/// breakpoint of the analog solution, and one the inertial rule cancels is
+/// not: the stepper reads the next tick the digital half has pending, and a
+/// cancelled update stops being it, so no analog step is forced onto it.
+#[test]
+fn a_delayed_drive_is_a_breakpoint_and_a_cancelled_one_is_not() {
+    let source = r#"
+`timescale 1ns/1ps
+module delayed(p,n);
+    inout p,n; electrical p,n;
+    reg a, s; wire y;
+    assign #0.2537 y = a;
+    initial begin s=0; a=0; #0.4 a=1; #0.1 a=0; #0.5 a=1; end
+    always @(y) s = (y === 1'b1);
+    analog I(p,n) <+ (1 + s) * V(p,n) / 1000;
+endmodule
+"#;
+    let runtime = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    })
+    .compile_runtime(source, Some("delayed"))
+    .unwrap();
+    let key = PathBuf::from(format!(
+        "__rspice_project__/module-delayed-drive-{}/delayed.va",
+        std::process::id()
+    ));
+    let _installed = hold_project_veriloga_sources_for_session(
+        [ProjectVerilogASourceRegistration::Runtime(
+            ProjectVerilogARuntimeRegistration {
+                source_key: key.clone(),
+                aliases: vec!["delayed_drive".into()],
+                model: runtime.model,
+                canonical_ir: runtime.canonical_ir,
+            },
+        )],
+        ResourceLimits::default(),
+    )
+    .unwrap();
+    let deck = Netlist::parse(&format!("* a delayed drive\nV1 in 0 1\nR1 in p 1000\nX1 p 0 delayed_drive\n.va \"{}\" delayed_drive\n.end\n", key.display())).unwrap();
+    let result = Engine::default().run_tran(&deck, 2e-9, 0.2e-9).unwrap();
+    let p = result
+        .node_names
+        .iter()
+        .position(|node| node.eq_ignore_ascii_case("p"))
+        .unwrap();
+    // The delay rounds to 0.254 ns at the 1 ps precision. The pulse of `a`
+    // from 0.4 ns to 0.5 ns is shorter than that, so `y` first rises at
+    // 1.0 + 0.254 ns, and `s` with it.
+    let rise = 1.254e-9;
+    let mut phases = [0; 2];
+    for (&time, &voltage) in result.time.iter().zip(&result.voltages[p]) {
+        let phase = usize::from(time > rise + 1e-18);
+        phases[phase] += 1;
+        let expected = if phase == 0 { 0.5 } else { 1.0 / 3.0 };
+        assert!(
+            (voltage - expected).abs() < 1e-9,
+            "t={time:e}: {voltage}, expected {expected}"
+        );
+    }
+    assert!(phases.into_iter().all(|count| count > 0));
+    for event in [0.254e-9, 0.4e-9, 0.5e-9, 1.0e-9, rise] {
+        assert!(
+            result.time.iter().any(|time| (time - event).abs() < 1e-18),
+            "missing breakpoint {event:e}"
+        );
+    }
+    // The update the pulse scheduled, due at 0.654 ns, was cancelled.
+    assert!(
+        !result
+            .time
+            .iter()
+            .any(|time| (time - 0.654e-9).abs() < 1e-18),
+        "a cancelled update forced a step"
+    );
+}

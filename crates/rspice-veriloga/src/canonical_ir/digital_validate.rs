@@ -199,6 +199,7 @@ impl CanonicalDigitalPlan {
     /// The runtime may then compare the stored identity at constant cost.
     pub fn validate(&self) -> IrValidationResult {
         self.validate_structure()?;
+        self.validate_delays()?;
         if self.content_identity != self.compute_identity()? {
             return Err(error("digital plan content identity is stale"));
         }
@@ -242,7 +243,7 @@ impl CanonicalDigitalPlan {
                 &self.system_calls,
                 &self.observers,
                 &self.routines,
-                (&self.overrides, &self.strength),
+                (&self.overrides, &self.strength, &self.delays),
             ),
         )
         .map_err(|detail| error(format!("cannot hash digital plan: {detail}")))?;
@@ -1796,6 +1797,45 @@ impl CanonicalDigitalPlan {
             }
         }
         self.validate_overrides()
+    }
+
+    /// Each delay names a declared four-state driver or net once, on a grid
+    /// this design's precision divides.
+    fn validate_delays(&self) -> IrValidationResult {
+        let precision = self.timing.precision_exponent;
+        let mut drivers = HashSet::new();
+        for delayed in &self.delays.drivers {
+            let declared = self
+                .drivers
+                .iter()
+                .any(|driver| driver.id == delayed.driver);
+            let four_state = self
+                .signal(delayed.driver.signal)
+                .is_some_and(|signal| !signal.kind.is_real());
+            if !declared || !four_state || !drivers.insert(delayed.driver) {
+                return Err(error(
+                    "digital driver delay names an undeclared, real or twice-delayed driver",
+                ));
+            }
+            if delayed.delay.ticks_at(precision).is_none() {
+                return Err(error("digital driver delay is off the design's time grid"));
+            }
+        }
+        let mut nets = HashSet::new();
+        for delayed in &self.delays.nets {
+            let net = self
+                .signal(delayed.signal)
+                .is_some_and(|signal| !signal.kind.is_real() && !signal.procedurally_assignable);
+            if !net || !nets.insert(delayed.signal) {
+                return Err(error(
+                    "digital net delay names an undeclared, real or twice-delayed net",
+                ));
+            }
+            if delayed.delay.ticks_at(precision).is_none() {
+                return Err(error("digital net delay is off the design's time grid"));
+            }
+        }
+        Ok(())
     }
 
     /// The override table is dense; each target is a variable or net the

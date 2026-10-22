@@ -16,7 +16,10 @@ use smol_str::SmolStr;
 ///
 /// Version 178's digital plan identity covers the net types and drive
 /// strengths (`CanonicalDigitalPlan::strength`). Earlier identities left them
-/// out, so two plans differing only there shared one identity.
+/// out, so two plans differing only there shared one identity. Version 178
+/// also lowers delays on continuous assignments, gates and nets
+/// (`CanonicalDigitalPlan::delays`), which the identity covers too. Earlier
+/// artifacts refused those sources.
 ///
 /// Version 177 carries the SPICE leaves a design instantiates
 /// (`HirModel::external_leaves`) and the discrete ports it links on circuit

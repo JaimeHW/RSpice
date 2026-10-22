@@ -1298,8 +1298,13 @@ impl<'a> HierarchyElaborator<'a> {
             }
             for assign in &mut frame.continuous_assigns {
                 rewrite(&mut assign.assignment.value);
-                if let Some(delay) = &mut assign.assignment.delay {
-                    rewrite(delay);
+                for value in assign
+                    .assignment
+                    .delay
+                    .iter_mut()
+                    .flat_map(|delay| &mut delay.values)
+                {
+                    rewrite(value);
                 }
             }
             result?;

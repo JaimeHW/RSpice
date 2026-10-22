@@ -486,7 +486,8 @@ use super::*;
 //
 // Version 168 follows the canonical IR's schema to 178, whose digital plan
 // identity covers the strength table. A version-167 record carries an
-// identity that left it out.
+// identity that left it out. The plan also carries driver and net delays,
+// which a version-167 record refused.
 pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 168;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";

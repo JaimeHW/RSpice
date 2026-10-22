@@ -465,17 +465,24 @@ impl Parser<'_> {
                  section 4.3.2)"
             ))));
         }
-        if trireg {
-            let decay = if self.check(TokenKind::Hash) {
+        // `wire #5 w;` (section 6.1.3): a net delay, or for a declaration
+        // assignment, the delay of its driver.
+        let delay = if trireg {
+            let (delay, decay) = if self.check(TokenKind::Hash) {
                 self.parse_trireg_delay()?
             } else {
-                None
+                (None, None)
             };
             kind = DigitalNetKind::Trireg {
                 charge: charge.unwrap_or(DigitalStrengthLevel::Medium),
                 decay,
             };
-        }
+            delay
+        } else if self.match_token(TokenKind::Hash) {
+            Some(self.parse_delay3(3, "net declaration")?)
+        } else {
+            None
+        };
         let mut items = self.parse_digital_decl_items()?;
         Self::retain_discrete_discipline(
             module,
@@ -484,12 +491,18 @@ impl Parser<'_> {
             &items,
             start.extend(self.previous_span()),
         );
-        // A strength belongs to the declaration assignment, which section
-        // 6.1.2 makes a continuous assignment; it becomes one here so that it
-        // carries the strength.
-        if strength.is_some() {
+        // A strength or a delay belongs to the declaration assignment, which
+        // section 6.1.2 makes a continuous assignment; it becomes one here so
+        // that it carries them. A net declared without one has a net delay.
+        if strength.is_some() || delay.is_some() {
             for item in &mut items {
                 let Some(value) = item.init.take() else {
+                    if let Some(delay) = &delay {
+                        module.net_delays.push(NetDelay {
+                            name: item.name.clone(),
+                            delay: delay.clone(),
+                        });
+                    }
                     continue;
                 };
                 module.continuous_assigns.push(ContinuousAssign {
@@ -498,7 +511,7 @@ impl Parser<'_> {
                         span: item.span,
                     },
                     value,
-                    delay: None,
+                    delay: delay.clone(),
                     strength,
                     gate: None,
                     span: item.span,
@@ -686,7 +699,7 @@ impl Parser<'_> {
             None
         };
         let delay = if self.match_token(TokenKind::Hash) {
-            Some(self.parse_delay_value()?)
+            Some(self.parse_delay3(3, "continuous assignment")?)
         } else {
             None
         };
@@ -812,9 +825,8 @@ impl Parser<'_> {
     /// — which is exactly the disagreement a front end with two paths has two
     /// chances to produce.
     ///
-    /// The gate's own delay is carried onto the assignment rather than dropped;
-    /// the lowering refuses it there, by name, for the reason it refuses one on
-    /// an `assign`.
+    /// The gate's own delay is carried onto the assignment, where it is a
+    /// delay on that driver like an `assign`'s (section 7.14).
     pub(super) fn parse_gate_instantiation(
         &mut self,
         gate: GatePrimitive,
@@ -849,8 +861,19 @@ impl Parser<'_> {
             None
         };
 
+        // A.3.1: three delays for a three-state gate and a MOS or CMOS
+        // switch, two for a logic gate and a controlled bidirectional switch
+        // (turn-on and turn-off), none for a pull gate or a `tran`.
         let delay = if self.match_token(TokenKind::Hash) {
-            Some(self.parse_delay_value()?)
+            let most = match gate.family() {
+                GateFamily::Tristate { .. } | GateFamily::Mos { .. } | GateFamily::Cmos { .. } => 3,
+                GateFamily::Logic
+                | GateFamily::Bidirectional {
+                    control: Some(_), ..
+                } => 2,
+                GateFamily::Pull { .. } | GateFamily::Bidirectional { control: None, .. } => 0,
+            };
+            Some(self.parse_delay3(most, &context)?)
         } else {
             None
         };
@@ -1001,26 +1024,14 @@ impl Parser<'_> {
     /// A `trireg`'s `#delay`, `#(rise, fall)` or `#(rise, fall, decay)`
     /// (IEEE 1364-2005 sections 7.14 and 7.14.2).
     ///
-    /// The third delay is the charge decay time. The rise and fall delays of
-    /// a net have no lowered form, so they are accepted only as zero, and the
-    /// decay time only as a positive number, which is what a scheduled decay
-    /// needs.
-    fn parse_trireg_delay(&mut self) -> Result<Option<ChargeDecay>, ParseError> {
-        let start = self.current_span();
+    /// The third delay is the charge decay time, accepted only as a positive
+    /// number, which is what a scheduled decay needs. The rise and fall
+    /// delays are the net's delay (section 6.1.3), returned unless both are
+    /// zero.
+    fn parse_trireg_delay(&mut self) -> Result<(Option<Delay3>, Option<ChargeDecay>), ParseError> {
         self.expect(TokenKind::Hash)?;
-        let mut delays = Vec::new();
-        if self.match_token(TokenKind::LParen) {
-            loop {
-                delays.push(self.parse_expression()?);
-                if !self.match_token(TokenKind::Comma) {
-                    break;
-                }
-            }
-            self.expect(TokenKind::RParen)?;
-        } else {
-            delays.push(self.parse_primary()?);
-        }
-        let span = start.extend(self.previous_span());
+        let mut delay = self.parse_delay3(3, "`trireg` declaration")?;
+        let span = delay.span;
         let refuse = |found: &str| {
             Err(ParseError::new(
                 ParseErrorKind::UnsupportedConstruct {
@@ -1041,40 +1052,32 @@ impl Parser<'_> {
             }
             _ => None,
         };
-        if delays.len() > 3 {
-            return refuse(
-                "more than three delays; a `trireg` takes a rise, a fall and a charge \
-                           decay time (IEEE 1364-2005 section 7.14.2)",
-            );
-        }
-        if delays
-            .iter()
-            .take(2)
-            .any(|delay| number(delay) != Some(0.0))
-        {
-            return refuse(
-                "a rise or fall delay other than 0; a net's transition delays (IEEE \
-                           1364-2005 section 7.14) have no lowered form, and only the charge \
-                           decay time, the third delay, does",
-            );
-        }
-        match delays.get(2) {
-            None => Ok(None),
-            Some(delay) => match number(delay).and_then(ChargeDecay::new) {
-                Some(decay) => Ok(Some(decay)),
-                None => refuse(
-                    "a charge decay time that is not a positive decimal number \
-                                (IEEE 1364-2005 section 7.14.2)",
-                ),
+        let decay = match delay.values.get(2) {
+            None => None,
+            Some(value) => match number(value).and_then(ChargeDecay::new) {
+                Some(decay) => Some(decay),
+                None => {
+                    return refuse(
+                        "a charge decay time that is not a positive decimal number \
+                         (IEEE 1364-2005 section 7.14.2)",
+                    );
+                }
             },
-        }
+        };
+        delay.values.truncate(2);
+        let transitions = delay
+            .values
+            .iter()
+            .any(|value| number(value) != Some(0.0))
+            .then_some(delay);
+        Ok((transitions, decay))
     }
 
     /// Turn one gate instance's terminal list into its driving assignments.
     pub(super) fn gate_assignments(
         gate: GatePrimitive,
         terminals: Vec<Expression>,
-        delay: Option<Expression>,
+        delay: Option<Delay3>,
         span: crate::source::Span,
     ) -> Result<Vec<ContinuousAssign>, ParseError> {
         let (minimum, maximum) = gate.terminal_counts();
@@ -1940,6 +1943,53 @@ impl Parser<'_> {
             return Ok(expression);
         }
         self.parse_primary()
+    }
+
+    /// The delay after a gate's, a continuous assignment's or a net's `#`:
+    /// a value, or a parenthesized list of at most `most` of them (IEEE
+    /// 1364-2005 A.2.2.3). `what` names the construct for a refusal.
+    pub(super) fn parse_delay3(&mut self, most: usize, what: &str) -> Result<Delay3, ParseError> {
+        let start = self.current_span();
+        let mut values = Vec::new();
+        if self.match_token(TokenKind::LParen) {
+            loop {
+                values.push(self.parse_expression()?);
+                if self.check(TokenKind::Colon) {
+                    return Err(ParseError::new(
+                        ParseErrorKind::UnsupportedConstruct {
+                            context: "delay".to_string(),
+                            found: "a min:typ:max delay; write a single delay expression instead"
+                                .to_string(),
+                        },
+                        self.current_span(),
+                    ));
+                }
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+        } else {
+            values.push(self.parse_primary()?);
+        }
+        let span = start.extend(self.previous_span());
+        if values.len() > most {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: what.to_string(),
+                    found: match most {
+                        0 => "a delay; IEEE 1364-2005 section 7.14 gives this primitive none"
+                            .to_string(),
+                        _ => format!(
+                            "{} delays; IEEE 1364-2005 section 7.14 gives it at most {most}",
+                            values.len()
+                        ),
+                    },
+                },
+                span,
+            ));
+        }
+        Ok(Delay3 { values, span })
     }
 
     // ------------------------------------------------------------------

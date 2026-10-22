@@ -460,7 +460,7 @@ fn lower_with_analog_variables(
         digital
             .signals
             .iter()
-            .filter_map(|signal| signal.initializer.as_ref()),
+            .flat_map(AnalyzedDigitalSignal::elaboration_expressions),
     )?;
     let instance_constants = digital
         .instances
@@ -475,7 +475,7 @@ fn lower_with_analog_variables(
                 instance
                     .signals
                     .iter()
-                    .filter_map(|signal| signal.declared.initializer.as_ref()),
+                    .flat_map(|signal| signal.declared.elaboration_expressions()),
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -681,6 +681,7 @@ fn lower_with_analog_variables(
         });
     }
 
+    let mut net_delays = Vec::new();
     for (declared, id) in digital.signals.iter().zip(&root_signal_ids) {
         if references::is_reference(root_references, &declared.name) {
             continue;
@@ -692,6 +693,14 @@ fn lower_with_analog_variables(
             digital.time_scale,
             &mut signals,
         )?;
+        net_delay(
+            declared,
+            *id,
+            (&module_constants, digital.time_scale),
+            timing.precision_exponent,
+            &mut net_delays,
+        )
+        .map_err(|diagnostic| vec![diagnostic])?;
     }
     for ((instance, ids), constants) in digital
         .instances
@@ -708,6 +717,16 @@ fn lower_with_analog_variables(
                     instance.time_scale,
                     &mut signals,
                 )?;
+            }
+            if declared.declared.element_alias.is_none() {
+                net_delay(
+                    &declared.declared,
+                    *id,
+                    (constants, instance.time_scale),
+                    timing.precision_exponent,
+                    &mut net_delays,
+                )
+                .map_err(|diagnostic| vec![diagnostic])?;
             }
         }
     }
@@ -791,6 +810,10 @@ fn lower_with_analog_variables(
     let mut drivers = Vec::new();
     // Drive strengths and gated drivers; the net types join them below.
     let mut driver_strengths = super::digital::DigitalStrengthPlan::default();
+    let mut driver_delays = DriverDelays {
+        precision: timing.precision_exponent,
+        delays: Vec::new(),
+    };
     // One probe table for the whole plan, in first-appearance order over the
     // same fixed traversal the process and driver numbering follows, so a
     // probe keeps its id across a recompilation for the reason a driver keeps
@@ -914,7 +937,7 @@ fn lower_with_analog_variables(
             &module_constants,
             analog_variables,
             allocate(),
-            (&mut drivers, &mut driver_strengths),
+            (&mut drivers, &mut driver_strengths, &mut driver_delays),
             &mut probes,
             digital.time_scale,
             &root_routines,
@@ -1007,7 +1030,7 @@ fn lower_with_analog_variables(
                 constants,
                 &frame_variables,
                 allocate(),
-                (&mut drivers, &mut driver_strengths),
+                (&mut drivers, &mut driver_strengths, &mut driver_delays),
                 &mut probes,
                 instance.time_scale,
                 frame_routines,
@@ -1026,7 +1049,7 @@ fn lower_with_analog_variables(
                 &no_constants,
                 &no_analog_variables,
                 allocate(),
-                (&mut drivers, &mut driver_strengths),
+                (&mut drivers, &mut driver_strengths, &mut driver_delays),
                 &mut probes,
                 instance.time_scale,
                 &routines::NO_ROUTINES,
@@ -1262,6 +1285,45 @@ fn lower_with_analog_variables(
         }
     }
 
+    // A net delay is a stage on the value the net's own drivers resolve to
+    // (IEEE 1364-2005 section 6.1.3). A net joined to another through a port
+    // or a bidirectional switch resolves with that net, so it has no stage of
+    // its own and is refused rather than run undelayed.
+    for delayed in &net_delays {
+        let joined = bit_aliases
+            .iter()
+            .find(|alias| {
+                alias.left.signal == delayed.signal || alias.right.signal == delayed.signal
+            })
+            .map(|alias| alias.span)
+            .or_else(|| {
+                driver_strengths
+                    .gates
+                    .iter()
+                    .filter(|gate| {
+                        matches!(gate.kind, super::digital::DigitalGateKind::Tran { .. })
+                            && (gate.driver.signal == delayed.signal
+                                || gate
+                                    .source
+                                    .as_ref()
+                                    .is_some_and(|source| source.signal == delayed.signal))
+                    })
+                    .find_map(|gate| drivers.iter().find(|driver| driver.id == gate.driver))
+                    .map(|driver| driver.span)
+            });
+        if let Some(span) = joined {
+            diagnostics.push(DigitalLoweringDiagnostic::refusal(
+                format!(
+                    "`{}` has a net delay and is joined to another net through a port or a \
+                     bidirectional switch; a net delay on a joined net has no lowered form, \
+                     so delay its drivers instead",
+                    signals[usize::from(delayed.signal)].name
+                ),
+                span,
+            ));
+        }
+    }
+
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
@@ -1314,6 +1376,10 @@ fn lower_with_analog_variables(
         strength: super::digital::DigitalStrengthPlan {
             nets: typed_nets,
             ..driver_strengths
+        },
+        delays: super::digital::DigitalDelayPlan {
+            drivers: driver_delays.delays,
+            nets: net_delays,
         },
     }
     .seal()
@@ -1386,6 +1452,99 @@ fn reject_overdriven_real_nets(
     diagnostics
 }
 
+/// A net's own delay (IEEE 1364-2005 section 6.1.3), as the plan's entry for
+/// the signal the net lowered to.
+fn net_delay(
+    declared: &AnalyzedDigitalSignal,
+    signal: DigitalSignalId,
+    (constants, time_scale): (&ResolvedConstants, crate::time_scale::ModuleTimeScale),
+    precision: i8,
+    delays: &mut Vec<super::digital::DigitalNetDelay>,
+) -> Result<(), DigitalLoweringDiagnostic> {
+    let Some(delay) = &declared.delay else {
+        return Ok(());
+    };
+    if declared.class.is_real() || declared.unpacked.is_some() {
+        return Err(DigitalLoweringDiagnostic::refusal(
+            format!(
+                "`{}` is a real net or an array of nets with a net delay; IEEE 1364-2005 \
+                 section 7.14 gives transition delays to four-state values, and a net \
+                 delay here belongs to a single net",
+                declared.name
+            ),
+            delay.span.into(),
+        ));
+    }
+    if let Some(delay) = transition_delay(delay, constants, time_scale, precision)? {
+        delays.push(super::digital::DigitalNetDelay { signal, delay });
+    }
+    Ok(())
+}
+
+/// The driver delays lowered so far, in ticks of the design's precision.
+struct DriverDelays {
+    precision: i8,
+    delays: Vec<super::digital::DigitalDriverDelay>,
+}
+
+/// A gate's, a continuous assignment's or a net's delay as one delay per
+/// transition (IEEE 1364-2005 sections 6.1.3 and 7.14), or `None` for one
+/// that is zero for every transition, which delays nothing.
+///
+/// Each value is an elaboration constant in its module's time units, rounded
+/// to the module's precision like any delay. One value is every transition's;
+/// with two, turning off takes the lesser.
+fn transition_delay(
+    delay: &crate::ast::Delay3,
+    constants: &ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    precision: i8,
+) -> Result<Option<super::digital::DigitalTransitionDelay>, DigitalLoweringDiagnostic> {
+    use crate::numeric_literal::NumericLiteralValue::{Integer, Real};
+    let mut ticks = Vec::with_capacity(delay.values.len());
+    for value in &delay.values {
+        let refuse = |what: &str| {
+            DigitalLoweringDiagnostic::refusal(
+                format!("{what} (IEEE 1364-2005 section 6.1.3)"),
+                value.span().into(),
+            )
+        };
+        let converted = match constants::scalar(value, constants, time_scale) {
+            Some(Integer(units)) if units >= 0 => {
+                time_scale.integer_delay_ticks(units as u64, precision)
+            }
+            Some(Real(units)) if units >= 0.0 => time_scale.delay_ticks(units, precision),
+            Some(_) => return Err(refuse("a negative delay")),
+            None => {
+                return Err(refuse(
+                    "a delay that is not a constant expression; a driver's or a net's delay \
+                     is fixed at elaboration",
+                ));
+            }
+        };
+        match converted {
+            Ok(value) if value != crate::time_scale::DELAY_BEYOND_HORIZON => {
+                ticks.push(value as u64)
+            }
+            _ => return Err(refuse("a delay too long for the design's time")),
+        }
+    }
+    let (rise, fall) = match ticks.as_slice() {
+        [delay] => (*delay, *delay),
+        [rise, fall, ..] => (*rise, *fall),
+        [] => return Ok(None),
+    };
+    let turn_off = ticks.get(2).copied().unwrap_or(rise.min(fall));
+    Ok(
+        ((rise, fall, turn_off) != (0, 0, 0)).then_some(super::digital::DigitalTransitionDelay {
+            rise,
+            fall,
+            turn_off,
+            exponent: precision,
+        }),
+    )
+}
+
 /// Lower one continuous assignment into a driver process.
 ///
 /// The shape is the design of a driver, so it is worth reading as one. The
@@ -1402,6 +1561,10 @@ fn reject_overdriven_real_nets(
 /// A driver with no operands — `assign y = 1'b0;` — has no list to wait on and
 /// returns instead of looping. Its value cannot change, so a process that woke
 /// for it would have nothing to do.
+///
+/// A delay (sections 6.1.3 and 7.14) is not part of the process: the process
+/// computes the driver's value, and the delay stands between that value and
+/// the net, where the runtime applies it to every driver the assignment has.
 fn lower_continuous_assign(
     assignment: &crate::semantic::AnalyzedContinuousAssign,
     signals: &mut Vec<DigitalSignal>,
@@ -1411,9 +1574,10 @@ fn lower_continuous_assign(
     constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
     id: DigitalProcessId,
-    (drivers, strengths): (
+    (drivers, strengths, delays): (
         &mut Vec<DigitalDriver>,
         &mut super::digital::DigitalStrengthPlan,
+        &mut DriverDelays,
     ),
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
@@ -1442,15 +1606,24 @@ fn lower_continuous_assign(
         static_local_count: 0,
     };
 
-    if let Some(delay) = &assignment.assignment.delay {
-        lowerer.error(
-            "a delay on a continuous assignment or a gate has no lowered form yet: \
-             IEEE 1364-2005 sections 6.1.3 and 7.14 make it an inertial delay on the \
-             driver, which drops a pulse shorter than the delay, and this compiler \
-             does not model one",
-            delay.span(),
-        );
-    }
+    let delay = match &assignment.assignment.delay {
+        Some(delay) if lowerer.lvalue_is_real(&assignment.assignment.target) => {
+            lowerer.error(
+                "a delay on a driver of a real net; IEEE 1364-2005 section 7.14 gives \
+                 transition delays to four-state values only",
+                delay.span,
+            );
+            None
+        }
+        Some(delay) => match transition_delay(delay, constants, time_scale, delays.precision) {
+            Ok(delay) => delay,
+            Err(diagnostic) => {
+                lowerer.diagnostics.push(diagnostic);
+                None
+            }
+        },
+        None => None,
+    };
 
     let entry = lowerer.builder.create_block();
     // The driven net is the assignment's left-hand side, and section 5.4.1
@@ -1505,6 +1678,17 @@ fn lower_continuous_assign(
                         strength,
                     }),
             );
+    }
+    if let Some(delay) = delay {
+        delays.delays.extend(
+            drivers
+                .iter()
+                .filter(|driver| driver.process == id)
+                .map(|driver| super::digital::DigitalDriverDelay {
+                    driver: driver.id,
+                    delay,
+                }),
+        );
     }
     let bidirectional = matches!(
         gated,
