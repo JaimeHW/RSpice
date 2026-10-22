@@ -123,11 +123,6 @@ fn sided_history_replays_prunes_and_rejects_invalid_state_atomically() {
     for index in 1..200 {
         let time = f64::from(index) * 0.125;
         let current = f64::from(index % 7);
-        let before = history.clone();
-        history
-            .validate_discontinuity(time, current - 0.5, current, 0.5, None)
-            .unwrap();
-        assert_eq!(history, before);
         history
             .accept_discontinuity(time, current - 0.5, current, 0.5, None)
             .unwrap();
@@ -219,12 +214,6 @@ fn jump_sides_share_the_existing_history_resource_ceiling() {
         ),
         (1, history.validate_commit(time).unwrap_err()),
         (1, history.commit().unwrap_err()),
-        (
-            2,
-            history
-                .validate_discontinuity(time, 0.0, 1.0, delay, None)
-                .unwrap_err(),
-        ),
         (
             2,
             history

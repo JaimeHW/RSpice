@@ -180,7 +180,7 @@ fn initialization_dc_and_enable_transitions_sample_once() {
     );
     assert_eq!(events[0].reason, AbsDeltaReason::Enabled);
     assert_eq!(
-        on.last_event().unwrap(),
+        on.event.unwrap(),
         AbsDeltaSample {
             time: 2.0,
             value: 20.0
@@ -221,7 +221,7 @@ fn one_analog_interval_produces_multiple_unquantized_events() {
         1.0
     );
     assert_eq!(
-        initial.last_event().unwrap().time,
+        initial.event.unwrap().time,
         0.0,
         "candidate enumeration cannot mutate accepted history"
     );

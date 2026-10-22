@@ -51,8 +51,9 @@ The callers are generated code and the engine-side adapter in `rspice-core`.
 - `GeneratedParameterAssignment` and `GeneratedParameterOrigin`: a value with
   its model-card or instance provenance; a value written through the wrong
   storage class is rejected, because `$param_given` depends on it.
-- `validate_generated_parameter`: a declared parameter's finiteness, integer
-  type, inclusive or exclusive bounds, and excluded values.
+- `validate_generated_finite_parameter`, `validate_generated_parameter_bounds`
+  and `validate_generated_parameter_bound_indices`: a declared parameter's
+  finiteness, inclusive or exclusive bounds, and excluded values.
 - `GeneratedEvalContext`, `GeneratedStamper` and `GeneratedReactiveStamper`:
   what one evaluation reads, and where its contributions go.
 - `rspice_eval_ddt` and `rspice_eval_idt`: the analog operators over accepted

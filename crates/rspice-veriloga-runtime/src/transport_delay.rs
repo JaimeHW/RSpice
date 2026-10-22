@@ -988,21 +988,6 @@ impl DelayBuffer {
         )
     }
 
-    /// Preflight both sides of an event without changing accepted or staged
-    /// state. The owning solver must supply the actual left and settled right
-    /// limits; this buffer does not infer a jump from sample differences.
-    pub fn validate_discontinuity(
-        &self,
-        time: f64,
-        left: f64,
-        right: f64,
-        delay: f64,
-        max_delay: Option<f64>,
-    ) -> Result<(), DelayAcceptanceError> {
-        self.discontinuity_sample(time, left, right, delay, max_delay)
-            .map(|_| ())
-    }
-
     /// Atomically append a declared event with left and right limits. Equal
     /// values retain a continuous corner as an explicit event. The left
     /// value closes the incoming interval; the right value starts the outgoing

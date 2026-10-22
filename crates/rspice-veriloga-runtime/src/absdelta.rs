@@ -131,10 +131,6 @@ impl AbsDeltaState {
     pub fn last_sample(self) -> Option<AbsDeltaSample> {
         self.sample
     }
-
-    pub fn last_event(self) -> Option<AbsDeltaSample> {
-        self.event
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -148,12 +148,6 @@ impl UnpackedArrayLayout {
         self.locate(indices.len(), base, |axis| Ok(indices[axis]))
     }
 
-    pub fn real_slot(&self, indices: &[f64], base: usize) -> Result<usize, ArrayCoordinateError> {
-        self.locate(indices.len(), base, |axis| {
-            checked_rounded_i64(indices[axis])
-        })
-    }
-
     fn locate(
         &self,
         rank: usize,
@@ -398,14 +392,6 @@ mod tests {
                 actual: 3
             })
         );
-        assert_eq!(shape.real_slot(&[0.49, 1.5], 0), Ok(2));
-        assert!(matches!(
-            shape.real_slot(&[0.0, f64::NAN], 0),
-            Err(ArrayCoordinateError::Axis {
-                axis: 1,
-                error: ArrayIndexError::NonFinite { .. }
-            })
-        ));
         assert_eq!(
             shape.slot(&[1, 0], usize::MAX),
             Err(ArrayCoordinateError::SlotOverflow)

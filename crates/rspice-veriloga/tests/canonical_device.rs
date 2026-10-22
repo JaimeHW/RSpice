@@ -8303,44 +8303,6 @@ pub mod runtime {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn validate_generated_parameter(
-        name: &str,
-        value: f64,
-        integer: bool,
-        min: Option<(f64, &str)>,
-        min_exclusive: bool,
-        max: Option<(f64, &str)>,
-        max_exclusive: bool,
-        excluded: &[(f64, &str)],
-    ) -> Result<(), String> {
-        validate_generated_finite_parameter(name, value)?;
-        if integer && value.fract() != 0.0 {
-            return Err(format!("parameter '{}' must be an integer, got {}", name, value));
-        }
-        if integer && (value < i32::MIN as f64 || value > i32::MAX as f64) {
-            return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
-        }
-        if let Some((min, label)) = min {
-            if (min_exclusive && value <= min) || (!min_exclusive && value < min) {
-                let operator = if min_exclusive { ">" } else { ">=" };
-                return Err(format!("parameter '{}' must be {} {}, got {}", name, operator, label, value));
-            }
-        }
-        if let Some((max, label)) = max {
-            if (max_exclusive && value >= max) || (!max_exclusive && value > max) {
-                let operator = if max_exclusive { "<" } else { "<=" };
-                return Err(format!("parameter '{}' must be {} {}, got {}", name, operator, label, value));
-            }
-        }
-        for (excluded, label) in excluded {
-            if value == *excluded {
-                return Err(format!("parameter '{}' must not equal {}, got {}", name, label, value));
-            }
-        }
-        Ok(())
-    }
-
     pub fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
         let mut boxed = Box::<[f64; N]>::new_uninit();
         unsafe {
