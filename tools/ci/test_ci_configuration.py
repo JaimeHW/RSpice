@@ -1230,6 +1230,18 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertEqual(step.count("--test verilog_rnm_agreement"), 1)
         self.assertEqual(step.count("--test verilog_mixed_benchmarks"), 1)
 
+    def test_dcmatch_analytic_oracles_run_on_every_push(self) -> None:
+        """The `.DCMATCH` closed-form oracles are named in the fast tier.
+
+        The conformance step selects its test targets by name, so a target it
+        does not name runs in no workflow at all.
+        """
+        workflow = read_text(".github/workflows/ci.yml")
+        step = workflow.split("- name: Conformance suite unit tests", 1)[1].split(
+            "- name:", 1
+        )[0]
+        self.assertEqual(step.count("--test dcmatch_analytic"), 1)
+
     def test_rnm_performance_is_a_nightly_release_measurement_only(self) -> None:
         """The wall-clock leg runs in nightly, in release, and never on push.
 

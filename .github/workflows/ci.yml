@@ -174,7 +174,7 @@ jobs:
       - name: Conformance suite unit tests
         run: >-
           cargo test --locked -p rspice-conformance --lib
-          --test ngspice_oracle_audit --test y_device_policy
+          --test ngspice_oracle_audit --test y_device_policy --test dcmatch_analytic
           --test verilog_oracles --test verilog_scale --test verilog_ams
           --test verilog_ams_semantics
           --test verilog_rnm_agreement --test verilog_mixed_benchmarks
