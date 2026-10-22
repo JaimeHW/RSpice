@@ -40,7 +40,7 @@ fn execute(
 }
 
 #[test]
-fn all_node_monte_carlo_checkpoint_matches_legacy_and_resumes_with_new_histograms() {
+fn all_node_monte_carlo_checkpoint_resumes_with_new_histograms() {
     let deck = "Voltage continuation\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\nV2 2 0 2\nR3 2 0 1k\na_adc [out] [digital] adc\n.model adc adc_bridge(in_low=0.4 in_high=0.6)\n.mc 4 uniform 0.2 seed 37 START=2\n.end\n";
     let environment = AnalysisExecutionEnvironment {
         temperature_celsius: 75.0,
@@ -135,33 +135,7 @@ fn all_node_monte_carlo_checkpoint_matches_legacy_and_resumes_with_new_histogram
             panic!("MC results")
         };
         assert_eq!(member_measurements, fresh_members);
-        let legacy = match variation_source {
-            McVariationSource::ParameterTolerance => {
-                services::run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
-                    &source,
-                    None,
-                    Some(75.0),
-                    Some(1.8),
-                    Some(1.0),
-                    &["V1".into()],
-                    &NoAbort,
-                )
-            }
-            McVariationSource::DeckStatistics => {
-                services::run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
-                    &source,
-                    None,
-                    Some(75.0),
-                    Some(1.8),
-                    Some(1.0),
-                    &["V1".into()],
-                    &NoAbort,
-                )
-            }
-        }
-        .unwrap();
-        assert_eq!(member_measurements, legacy.trial_measurements);
-        assert_eq!(variables.len(), legacy.variables.len());
+        assert_eq!(variables.len(), expected.len());
         assert!(!variables.iter().any(|value| value.name == "V(DIGITAL)"));
         assert_eq!(
             variables
@@ -171,16 +145,14 @@ fn all_node_monte_carlo_checkpoint_matches_legacy_and_resumes_with_new_histogram
                 .samples,
             vec![2.0; 4]
         );
-        for ((actual, fresh), legacy) in variables.iter().zip(&expected).zip(&legacy.variables) {
-            assert_eq!(actual.name, legacy.name);
-            assert_eq!(actual.samples, legacy.samples);
+        for (actual, fresh) in variables.iter().zip(&expected) {
+            assert_eq!(actual.name, fresh.name);
             assert_eq!(actual.samples, fresh.samples);
             assert_eq!(actual.histogram, fresh.histogram);
             if actual.name == "V(OUT)" {
                 assert_eq!(actual.histogram.len(), 7);
             }
             assert_eq!(actual.mean_confidence, fresh.mean_confidence);
-            assert_eq!(actual.mean_confidence, legacy.mean_confidence);
         }
     }
 }

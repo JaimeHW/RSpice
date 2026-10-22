@@ -89,11 +89,6 @@ use helpers::{
     normalize_voltage_signal_name,
 };
 pub(crate) use monte_carlo::{MonteCarloData, finish_monte_carlo_result};
-#[cfg(test)]
-pub(crate) use monte_carlo::{
-    run_monte_carlo_analysis_with_environment_and_source_path_and_abort,
-    run_statistical_monte_carlo_with_environment_and_source_path_and_abort,
-};
 pub use optimization::{OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig};
 pub(crate) use optimization::{
     OptimizationData, OptimizationEvaluation, materialize_optimization_candidate,
@@ -143,9 +138,6 @@ pub use sweeps::{
 };
 pub use tf::{TfAccuracy, TfQuantity, TfRunConfig, infer_tf_run_config};
 pub use transient::TransientData;
-
-#[allow(dead_code, reason = "retained by Monte Carlo compatibility runners")]
-const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 
 pub(crate) use crate::netlist_preparation::build_engine_config;
 

@@ -173,9 +173,20 @@ fn studio_deck_statistics_executes_native_process_and_expression_variations() {
     let path = fixture.0.join("study.cir");
     let deck = "Studio statistics\n.param rtop=1k rbottom={agauss(1k,50,1)}\n.include \"process.scs\"\nV1 in 0 1\nR1 in top {rtop}\nR2 top 0 1k\nR3 in bottom {rbottom}\nR4 bottom 0 1k\n.mc 4 seed 73\n.end\n";
     let run = || {
-        crate::engine_services::run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
-        deck, Some(&path), Some(75.0), Some(1.8), Some(1.0), &["V1".into()], &NoAbort,
-    ).unwrap()
+        crate::runner::study::monte_carlo::voltages::run(
+            deck,
+            rspice_simulation_contract::mc_draft::McVariationSource::DeckStatistics,
+            20,
+            Some(crate::runner::AnalysisExecutionEnvironment {
+                temperature_celsius: 75.0,
+                supply_voltage: Some(1.8),
+                nominal_supply_voltage: Some(1.0),
+                supply_source_names: vec!["V1".into()],
+            }),
+            crate::engine_services::ServiceContext::with_defaults(Some(&path), &NoAbort),
+            None,
+        )
+        .unwrap()
     };
     let first = run();
     let second = run();

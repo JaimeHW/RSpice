@@ -2,6 +2,7 @@
 
 use super::*;
 use rspice_core::analysis::monte_carlo::{MonteCarloResult, MonteCarloSampling};
+use rspice_core::engine::monte_carlo_deck_trial_seed as trial_seed;
 use rspice_results::family_measurements::FamilyMeasurementEvidence;
 use rspice_results::family_measurements::FamilyMemberId;
 use rspice_results::family_measurements::FamilyMemberMeasurements;
@@ -134,6 +135,7 @@ fn check_size(rows: usize, columns: usize, limit: usize) -> ServiceRunResult<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_core::abort_signal::NoAbort;
     #[test]
     fn monte_carlo_trial_evidence_checks_budget_before_allocation() {
         assert!(matches!(

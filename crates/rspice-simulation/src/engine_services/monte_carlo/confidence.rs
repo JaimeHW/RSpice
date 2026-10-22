@@ -41,17 +41,24 @@ mod tests {
 
     #[test]
     fn both_monte_carlo_sources_apply_confidence_without_changing_trials() {
-        type Run = fn(&str) -> ServiceRunResult<MonteCarloData>;
-        fn parameters(deck: &str) -> ServiceRunResult<MonteCarloData> {
-            run_monte_carlo_analysis_with_abort(deck, &NoAbort)
-        }
-        fn statistics(deck: &str) -> ServiceRunResult<MonteCarloData> {
-            run_statistical_monte_carlo_with_source_path_and_abort(deck, None, &NoAbort)
-        }
-        for (run, parameter) in [
-            (parameters as Run, "1000"),
-            (statistics as Run, "agauss(1000,100,1)"),
+        use rspice_simulation_contract::mc_draft::McVariationSource;
+        for (variation_source, parameter) in [
+            (McVariationSource::ParameterTolerance, "1000"),
+            (McVariationSource::DeckStatistics, "agauss(1000,100,1)"),
         ] {
+            let run = |deck: &str| {
+                crate::runner::study::monte_carlo::voltages::run(
+                    deck,
+                    variation_source,
+                    20,
+                    None,
+                    crate::engine_services::ServiceContext::with_defaults(
+                        None,
+                        &rspice_core::NoAbort,
+                    ),
+                    None,
+                )
+            };
             let deck = |options: &str| {
                 format!(
                     "MC confidence\n.param rload={parameter}\nV1 in 0 1\nR1 in out {{rload}}\nR2 out 0 1k\n.mc 16 uniform 0.1 seed 17 {options}\n.end\n"

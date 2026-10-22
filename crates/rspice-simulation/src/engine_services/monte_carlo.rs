@@ -1,18 +1,8 @@
-//! Monte Carlo analysis runner.
+//! Monte Carlo population results.
 
-#[cfg(test)]
-use super::parse_runner_netlist_with_statistical_sampling_and_abort;
-use super::{DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist_with_abort};
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-#[cfg(test)]
-use rspice_core::abort_signal::NoAbort;
-use rspice_core::analysis::monte_carlo::Distribution;
-use rspice_core::engine::Engine;
-use rspice_core::engine::monte_carlo_deck_trial_seed as trial_seed;
-use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
-use std::path::Path;
 
 mod confidence;
 mod trial_evidence;
@@ -49,163 +39,6 @@ pub struct MonteCarloData {
     /// Includes failed trials as explicit missing observations. Independent
     /// deck draws and shared parameter streams retain distinct replay identities.
     pub trial_measurements: Vec<rspice_results::family_measurements::FamilyMemberMeasurements>,
-}
-
-/// Run Monte Carlo analysis by executing the first `.MC` command in the
-/// netlist.
-///
-/// Test-only. Shipping dispatch uses the environment-aware entry point below.
-#[cfg(test)]
-pub fn run_monte_carlo_analysis(netlist_text: &str) -> Result<MonteCarloData, String> {
-    run_monte_carlo_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run Monte Carlo analysis with cooperative cancellation. Test-only; see
-/// [`run_monte_carlo_analysis`].
-#[cfg(test)]
-pub fn run_monte_carlo_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<MonteCarloData> {
-    run_monte_carlo_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run Monte Carlo analysis with source-path resolution and cooperative
-/// cancellation through parsing, trial execution, and result conversion.
-#[cfg(test)]
-pub fn run_monte_carlo_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<MonteCarloData> {
-    run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
-        netlist_text,
-        source_path,
-        None,
-        None,
-        None,
-        &[],
-        abort,
-    )
-}
-
-/// Run parameter-tolerance Monte Carlo under one exact Run Set environment.
-#[allow(
-    dead_code,
-    reason = "retained Monte Carlo adapter for callers and tests"
-)]
-pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    temperature_celsius: Option<Value>,
-    supply_voltage: Option<Value>,
-    nominal_supply_voltage: Option<Value>,
-    supply_source_names: &[String],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<MonteCarloData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    if temperature_celsius.is_none()
-        && (supply_voltage.is_some() || nominal_supply_voltage.is_some())
-    {
-        return Err(ServiceRunError::Failure(
-            "Run Set supply overrides require a temperature-scoped environment".to_owned(),
-        ));
-    }
-    ensure_not_aborted(abort)?;
-
-    let mc_cmd = netlist
-        .analyses
-        .iter()
-        .find_map(|analysis| match analysis {
-            AnalysisCommand::MonteCarlo(cmd) => Some(cmd),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            ServiceRunError::Failure(
-                "Monte Carlo analysis requires a .MC command in the netlist".to_string(),
-            )
-        })?;
-
-    let distribution = match mc_cmd.distribution {
-        MonteCarloDistribution::Gaussian => Distribution::Gaussian {
-            sigma: mc_cmd.relative_spread,
-        },
-        MonteCarloDistribution::Uniform => Distribution::Uniform {
-            tolerance: mc_cmd.relative_spread,
-        },
-        MonteCarloDistribution::WorstCase => Distribution::WorstCase {
-            tolerance: mc_cmd.relative_spread,
-        },
-    };
-
-    let seed = mc_cmd.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED);
-    let parameter_filter = (!mc_cmd.params.is_empty()).then_some(mc_cmd.params.as_slice());
-
-    let mut engine_config = build_engine_config(&netlist, None);
-    if let Some(temperature_celsius) = temperature_celsius {
-        engine_config.temperature = rspice_core::constants::celsius_to_kelvin(temperature_celsius);
-    }
-    let engine = Engine::new(engine_config);
-    let environment =
-        temperature_celsius.map(
-            |temperature_celsius| rspice_core::engine::MonteCarloEnvironment {
-                temperature_celsius,
-                supply_voltage,
-                nominal_supply_voltage,
-                supply_source_names: supply_source_names.to_vec(),
-            },
-        );
-    let mut result = engine
-        .run_monte_carlo_voltages_with_abort(
-            &netlist,
-            &rspice_core::engine::MonteCarloRunConfig {
-                first_trial: mc_cmd.first_trial,
-                num_runs: mc_cmd.runs,
-                seed,
-                distribution,
-                variation_source:
-                    rspice_core::engine::MonteCarloVariationSource::ParameterTolerance,
-                parameter_filter,
-                environment: environment.as_ref(),
-            },
-            abort,
-        )
-        .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
-
-    result
-        .compute_mean_confidence(
-            mc_cmd.confidence_pct,
-            mc_cmd.confidence_method.into(),
-            engine.config().resource_limits,
-            abort,
-        )
-        .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
-
-    finish_voltage_population(
-        result,
-        engine.config().resource_limits.max_result_values,
-        abort,
-    )
-}
-
-/// The all-node OP service knows every sampled column is a voltage. Generic
-/// configured studies attach their own observations after numeric aggregation.
-#[allow(dead_code, reason = "retained Monte Carlo population adapter")]
-fn finish_voltage_population(
-    result: rspice_core::analysis::monte_carlo::MonteCarloResult,
-    result_value_limit: usize,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<MonteCarloData> {
-    let mut data = finish_monte_carlo_result(result, result_value_limit, abort)?;
-    for (index, member) in data.trial_measurements.iter_mut().enumerate() {
-        poll_periodically(abort, index)?;
-        for observation in &mut member.measurements {
-            if observation.value.is_some() {
-                observation.unit = Some(rspice_core::analysis::MeasurementUnit::Known("V".into()));
-            }
-        }
-    }
-    Ok(data)
 }
 
 pub(crate) fn finish_monte_carlo_result(
@@ -256,112 +89,6 @@ pub(crate) fn finish_monte_carlo_result(
     };
     validate_monte_carlo_data(&data)?;
     Ok(data)
-}
-
-/// Run Monte Carlo from the deck's own statistical expressions.
-///
-/// The parameter-tolerance driver above perturbs eligible `.param` values
-/// numerically and leaves model cards untouched, so a PDK whose variation is
-/// authored as `agauss`/`gauss` inside `.model` cards varied nothing at all
-/// under it. This driver instead re-materializes the deck once per trial with
-/// a fresh statistical seed, so every statistical expression in the deck — in
-/// `.param` cards, in element values, and in model cards alike — redraws.
-///
-/// The `.MC` command's seed is the base seed. Per-trial seeds are expanded
-/// from it, so the whole analysis is reproducible from one number and no two
-/// trials share a stream.
-#[cfg(test)]
-pub fn run_statistical_monte_carlo_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<MonteCarloData> {
-    run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
-        netlist_text,
-        source_path,
-        None,
-        None,
-        None,
-        &[],
-        abort,
-    )
-}
-
-/// Run deck-statistical Monte Carlo under one exact Run Set environment.
-/// Every trial is reparsed to redraw statistical expressions, so the
-/// environment is applied to every reparsed deck before its operating point.
-#[allow(dead_code, reason = "retained statistical Monte Carlo adapter")]
-pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    temperature_celsius: Option<Value>,
-    supply_voltage: Option<Value>,
-    nominal_supply_voltage: Option<Value>,
-    supply_source_names: &[String],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<MonteCarloData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    if temperature_celsius.is_none()
-        && (supply_voltage.is_some() || nominal_supply_voltage.is_some())
-    {
-        return Err(ServiceRunError::Failure(
-            "Run Set supply overrides require a temperature-scoped environment".into(),
-        ));
-    }
-    let command = netlist
-        .analyses
-        .iter()
-        .find_map(|analysis| match analysis {
-            AnalysisCommand::MonteCarlo(command) => Some(command),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            ServiceRunError::Failure(
-                "Monte Carlo analysis requires a .MC command in the netlist".into(),
-            )
-        })?;
-    let environment =
-        temperature_celsius.map(
-            |temperature_celsius| rspice_core::engine::MonteCarloEnvironment {
-                temperature_celsius,
-                supply_voltage,
-                nominal_supply_voltage,
-                supply_source_names: supply_source_names.to_vec(),
-            },
-        );
-    let mut config = build_engine_config(&netlist, None);
-    if let Some(temperature) = temperature_celsius {
-        config.temperature = rspice_core::constants::celsius_to_kelvin(temperature);
-    }
-    let engine = Engine::new(config);
-    let mut result = engine
-        .run_monte_carlo_voltages_with_abort(
-            &netlist,
-            &rspice_core::engine::MonteCarloRunConfig {
-                first_trial: command.first_trial,
-                num_runs: command.runs,
-                seed: command.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED),
-                distribution: Distribution::Uniform { tolerance: 0.0 },
-                variation_source: rspice_core::engine::MonteCarloVariationSource::DeckStatistics,
-                parameter_filter: None,
-                environment: environment.as_ref(),
-            },
-            abort,
-        )
-        .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
-    result
-        .compute_mean_confidence(
-            command.confidence_pct,
-            command.confidence_method.into(),
-            engine.config().resource_limits,
-            abort,
-        )
-        .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
-    finish_voltage_population(
-        result,
-        engine.config().resource_limits.max_result_values,
-        abort,
-    )
 }
 
 fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
@@ -418,13 +145,24 @@ fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
     Ok(())
 }
 
-/// Expand one base seed into a well-separated per-trial seed.
-///
+// These tests drive the shipping all-node study, whose population ends in
+// `finish_monte_carlo_result`.
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::{
+        ServiceContext, build_engine_config,
+        parse_runner_netlist_with_statistical_sampling_and_abort,
+    };
     use super::*;
+    use crate::error::SimulationError;
+    use crate::runner::study::monte_carlo::voltages;
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::engine::Engine;
+    use rspice_core::engine::monte_carlo_deck_trial_seed as trial_seed;
+    use rspice_simulation_contract::mc_draft::McVariationSource;
+    use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
 
     struct AbortOnPoll {
         abort_on: usize,
@@ -520,8 +258,41 @@ R2 out 0 1k
         }
     }
 
-    fn run_statistical(deck: &str) -> ServiceRunResult<MonteCarloData> {
-        run_statistical_monte_carlo_with_source_path_and_abort(deck, None, &NoAbort)
+    /// `.MC` without a configured study base: every non-ground node voltage at
+    /// each trial's operating point, as the spec runner dispatches it.
+    fn run_all_node(
+        deck: &str,
+        variation_source: McVariationSource,
+        environment: Option<AnalysisExecutionEnvironment>,
+        abort: &dyn AbortSignal,
+    ) -> Result<MonteCarloData, SimulationError> {
+        voltages::run(
+            deck,
+            variation_source,
+            20,
+            environment,
+            ServiceContext::with_defaults(None, abort),
+            None,
+        )
+    }
+
+    fn run_parameter(deck: &str) -> Result<MonteCarloData, SimulationError> {
+        run_all_node(deck, McVariationSource::ParameterTolerance, None, &NoAbort)
+    }
+
+    fn run_statistical(deck: &str) -> Result<MonteCarloData, SimulationError> {
+        run_all_node(deck, McVariationSource::DeckStatistics, None, &NoAbort)
+    }
+
+    /// A Run Set point at `temperature_celsius`, optionally binding `V1` to
+    /// `supply` against a 1 V nominal.
+    fn pvt(temperature_celsius: Value, supply: Option<Value>) -> AnalysisExecutionEnvironment {
+        AnalysisExecutionEnvironment {
+            temperature_celsius,
+            supply_voltage: supply,
+            nominal_supply_voltage: supply.map(|_| 1.0),
+            supply_source_names: supply.map(|_| vec!["V1".to_owned()]).unwrap_or_default(),
+        }
     }
 
     #[test]
@@ -560,52 +331,32 @@ R2 out 0 1k
 
     #[test]
     fn parameter_tolerance_monte_carlo_applies_the_run_set_environment() {
-        let reference = run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
-            RETENTION_DECK,
-            None,
-            Some(25.0),
-            None,
-            None,
-            &[],
-            &NoAbort,
-        )
-        .expect("reference Monte Carlo executes");
-        let doubled = run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
-            RETENTION_DECK,
-            None,
-            Some(125.0),
-            Some(2.0),
-            Some(1.0),
-            &["V1".to_owned()],
-            &NoAbort,
-        )
-        .expect("PVT Monte Carlo executes");
+        let run = |environment| {
+            run_all_node(
+                RETENTION_DECK,
+                McVariationSource::ParameterTolerance,
+                Some(environment),
+                &NoAbort,
+            )
+        };
+        let reference = run(pvt(25.0, None)).expect("reference Monte Carlo executes");
+        let doubled = run(pvt(125.0, Some(2.0))).expect("PVT Monte Carlo executes");
 
         assert_supply_doubles_samples(&reference, &doubled);
     }
 
     #[test]
     fn deck_statistical_monte_carlo_applies_the_environment_to_every_trial() {
-        let reference = run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
-            STATISTICAL_PARAMETER_DECK,
-            None,
-            Some(25.0),
-            None,
-            None,
-            &[],
-            &NoAbort,
-        )
-        .expect("reference statistical Monte Carlo executes");
-        let doubled = run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
-            STATISTICAL_PARAMETER_DECK,
-            None,
-            Some(125.0),
-            Some(2.0),
-            Some(1.0),
-            &["V1".to_owned()],
-            &NoAbort,
-        )
-        .expect("PVT statistical Monte Carlo executes");
+        let run = |environment| {
+            run_all_node(
+                STATISTICAL_PARAMETER_DECK,
+                McVariationSource::DeckStatistics,
+                Some(environment),
+                &NoAbort,
+            )
+        };
+        let reference = run(pvt(25.0, None)).expect("reference statistical Monte Carlo executes");
+        let doubled = run(pvt(125.0, Some(2.0))).expect("PVT statistical Monte Carlo executes");
 
         assert_supply_doubles_samples(&reference, &doubled);
     }
@@ -636,10 +387,7 @@ R2 out 0 1k
             .iter()
             .position(|name| name.eq_ignore_ascii_case("later"))
             .unwrap();
-        for data in [
-            run_monte_carlo_analysis(deck).unwrap(),
-            run_statistical(deck).unwrap(),
-        ] {
+        for data in [run_parameter(deck).unwrap(), run_statistical(deck).unwrap()] {
             assert_eq!(data.runs_completed, 4);
             assert!(
                 !data
@@ -734,17 +482,27 @@ R2 out 0 1k
     #[test]
     fn monte_carlo_honors_early_abort_before_invalid_input() {
         let abort = AbortOnPoll::new(1);
-        let result = run_monte_carlo_analysis_with_abort("invalid", &abort);
+        let result = run_all_node(
+            "invalid",
+            McVariationSource::ParameterTolerance,
+            None,
+            &abort,
+        );
 
-        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(matches!(result, Err(SimulationError::Aborted)));
     }
 
     #[test]
     fn monte_carlo_honors_abort_during_trial_execution() {
         let abort = AbortOnPoll::new(8);
-        let result = run_monte_carlo_analysis_with_abort(MONTE_CARLO_DECK, &abort);
+        let result = run_all_node(
+            MONTE_CARLO_DECK,
+            McVariationSource::ParameterTolerance,
+            None,
+            &abort,
+        );
 
-        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        assert!(matches!(result, Err(SimulationError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 8);
     }
 
@@ -757,7 +515,7 @@ R2 out 0 1k
             let data = if statistical {
                 run_statistical(&deck)
             } else {
-                run_monte_carlo_analysis_with_abort(&deck, &NoAbort)
+                run_parameter(&deck)
             }
             .unwrap();
             assert!(data.num_failures > 0);
@@ -788,7 +546,7 @@ R2 out 0 1k
 
     #[test]
     fn monte_carlo_retains_effective_seed_and_exact_samples() {
-        let result = run_monte_carlo_analysis(RETENTION_DECK).expect("analysis succeeds");
+        let result = run_parameter(RETENTION_DECK).expect("analysis succeeds");
 
         assert_eq!(result.seed, 19);
         assert_eq!(result.runs_requested, 6);
@@ -920,13 +678,8 @@ R2 out 0 1k
 
     #[test]
     fn both_monte_carlo_drivers_retain_the_mean_interval() {
-        let parameter = run_monte_carlo_analysis(RETENTION_DECK).unwrap();
-        let deck = run_statistical_monte_carlo_with_source_path_and_abort(
-            STATISTICAL_PARAMETER_DECK,
-            None,
-            &NoAbort,
-        )
-        .unwrap();
+        let parameter = run_parameter(RETENTION_DECK).unwrap();
+        let deck = run_statistical(STATISTICAL_PARAMETER_DECK).unwrap();
         for (data, critical) in [(parameter, 2.570581835636314), (deck, 2.364624251010299)] {
             let variable = data
                 .variables
@@ -960,7 +713,7 @@ R2 out 0 1k
         // The uniform samples straddle that boundary, so this checks a real
         // mixture of successful solves and convergence failures.
         let deck = "MC partial failures\n.param offset=0.2\nB1 out 0 V=V(out)^2+{offset}\nR1 out 0 1k\n.mc 16 uniform 1 seed 7 params offset\n.end\n";
-        let data = run_monte_carlo_analysis(deck).unwrap();
+        let data = run_parameter(deck).unwrap();
         assert!(data.num_failures > 0);
         assert!(data.runs_completed > 0);
         assert_eq!(data.runs_completed + data.num_failures, 16);
@@ -981,7 +734,7 @@ R2 out 0 1k
 
     #[test]
     fn the_parameter_tolerance_driver_retains_authored_trial_identity() {
-        let data = run_monte_carlo_analysis(RETENTION_DECK).unwrap();
+        let data = run_parameter(RETENTION_DECK).unwrap();
         assert_eq!(data.trial_measurements.len(), data.runs_requested);
         for (index, trial) in data.trial_measurements.iter().enumerate() {
             assert!(
@@ -1015,8 +768,7 @@ R4 nb 0 1k
 ";
 
     fn subset_run(subset: &str) -> MonteCarloData {
-        run_monte_carlo_analysis(&SUBSET_DECK.replace("{subset}", subset))
-            .expect("the subset deck runs")
+        run_parameter(&SUBSET_DECK.replace("{subset}", subset)).expect("the subset deck runs")
     }
 
     fn is_constant(values: &[Value]) -> bool {
@@ -1046,11 +798,11 @@ R4 nb 0 1k
 
     #[test]
     fn a_monte_carlo_subset_naming_nothing_eligible_is_refused() {
-        let error = run_monte_carlo_analysis(&SUBSET_DECK.replace("{subset}", " params rz"))
+        let error = run_parameter(&SUBSET_DECK.replace("{subset}", " params rz"))
             .expect_err("a parameter the deck does not define cannot be varied");
 
         assert!(
-            error.contains("not defined or not eligible"),
+            error.to_string().contains("not defined or not eligible"),
             "the engine's own refusal must reach the caller: {error}"
         );
     }
