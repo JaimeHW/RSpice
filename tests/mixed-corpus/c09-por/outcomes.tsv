@@ -1,25 +1,25 @@
 # variant	analysis	route	outcome	detail
 base	tran	interp	pass	trst (O6) [0] |a−e|=5.000e-13 allowed 1.000e-6 (a=9.850000e-5, e=9.850000e-5)
 base	tran	native	pass	trst (O6) [0] |a−e|=5.000e-13 allowed 1.000e-6 (a=9.850000e-5, e=9.850000e-5)
-p3	tran	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
-p3	tran	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
+p3	tran	interp	pass	trst (O6) [0] |a−e|=5.076e-13 allowed 1.000e-6 (a=9.850000e-5, e=9.850000e-5)
+p3	tran	native	pass	trst (O6) [0] |a−e|=5.076e-13 allowed 1.000e-6 (a=9.850000e-5, e=9.850000e-5)
 live	tran	interp	pass	trst (O6) [0] |a−e|=5.076e-13 allowed 1.000e-6 (a=9.850000e-5, e=9.850000e-5)
 live	tran	native	pass	trst (O6) [0] |a−e|=5.076e-13 allowed 1.000e-6 (a=9.850000e-5, e=9.850000e-5)
 base	dc	interp	pass	porn_up.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
 base	dc	native	pass	porn_up.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
-p3	dc	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
-p3	dc	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
+p3	dc	interp	pass	porn_up.hi (O6) [89] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.600000e0, e=3.600000e0)
+p3	dc	native	pass	porn_up.hi (O6) [89] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.600000e0, e=3.600000e0)
 live	dc	interp	pass	porn_up.hi (O6) [88] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.590000e0, e=3.590000e0)
 live	dc	native	pass	porn_up.hi (O6) [88] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.590000e0, e=3.590000e0)
 base	dc-down	interp	pass	porn_down.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
 base	dc-down	native	pass	porn_down.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
-p3	dc-down	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
-p3	dc-down	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
+p3	dc-down	interp	pass	porn_down.hi (O6) [0] |a−e|=7.239e-14 allowed 1.000e-3 (a=3.600000e0, e=3.600000e0)
+p3	dc-down	native	pass	porn_down.hi (O6) [0] |a−e|=7.239e-14 allowed 1.000e-3 (a=3.600000e0, e=3.600000e0)
 live	dc-down	interp	pass	porn_down.hi (O6) [0] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.600000e0, e=3.600000e0)
 live	dc-down	native	pass	porn_down.hi (O6) [0] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.600000e0, e=3.600000e0)
 base	dc-restart	interp	pass	porn_restart.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
 base	dc-restart	native	pass	porn_restart.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
-p3	dc-restart	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
-p3	dc-restart	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
+p3	dc-restart	interp	pass	porn_restart.hi (O6) [89] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.600000e0, e=3.600000e0)
+p3	dc-restart	native	pass	porn_restart.hi (O6) [89] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.600000e0, e=3.600000e0)
 live	dc-restart	interp	pass	porn_restart.hi (O6) [88] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.590000e0, e=3.590000e0)
 live	dc-restart	native	pass	porn_restart.hi (O6) [88] |a−e|=7.194e-14 allowed 1.000e-3 (a=3.590000e0, e=3.590000e0)
